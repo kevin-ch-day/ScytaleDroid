@@ -5,6 +5,10 @@ Active code should prefer importing from ``permission_console_rendering`` or
 ``permission_manifest_extract`` directly. This module currently has no in-repo
 callers and remains only as a compatibility surface until the wrapper-removal
 batch is approved.
+
+Deprecated:
+    Compatibility-only wrapper. Do not add new imports here; use the canonical
+    permission modules directly.
 """
 
 from __future__ import annotations

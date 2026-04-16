@@ -216,28 +216,30 @@ def render_snapshot_block(
 
     # Compact header with deterministic field ordering.
     print(text_blocks.headline("Refresh Inventory", width=70))
-    title = f"Device: {device_text}  |  mode={mode_text}"
-    if prev_id is not None:
-        title += f"  |  prev_snapshot={prev_id}"
     if colors.colors_enabled():
         palette = colors.get_palette()
-        title = colors.apply(title, palette.header, bold=True)
-    print(title)
+        def _style(line: str) -> str:
+            return colors.apply(line, palette.header, bold=True)
+    else:
+        def _style(line: str) -> str:
+            return line
 
-    meta_line = f"Status: {status_text}  |  last_sync={age_text}  |  packages={pkg_text}"
-    print(meta_line)
+    print(_style(f"Device       : {device_text}"))
+    if prev_id is not None:
+        print(_style(f"Previous snap: {prev_id}"))
+    print(_style(f"Inventory    : {status_text}"))
+    print(_style(f"Last sync    : {age_text} ago"))
+    print(_style(f"Packages     : {pkg_text}"))
+    print(_style(f"Mode         : {mode_text}"))
 
     if allow_fallbacks is True:
         warn_key = f"{device_text}|{mode_text}"
         if warn_key in _FALLBACK_WARNED_KEYS:
             return
         _FALLBACK_WARNED_KEYS.add(warn_key)
-        print(
-            status_messages.status(
-                "Non-root collection active: some system partition APK metadata and paths are unavailable; harvest scope will be policy-filtered to readable user paths.",
-                level="warn",
-            )
-        )
+        print(status_messages.status("Non-root collection active", level="warn"))
+        print("Readable user-space APK paths only.")
+        print("Harvest will be policy-filtered.")
 
 
 __all__ = ["make_cli_progress_printer", "render_snapshot_block"]

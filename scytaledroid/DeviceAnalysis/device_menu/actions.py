@@ -25,11 +25,10 @@ from .inventory_guard import ensure_recent_inventory
 
 # Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
-    "3": ("inventory", "run_device_summary", True, "Collect detailed device summary"),
     "4": ("logcat", "stream_logcat", True, "Stream logcat output"),
     "5": ("shell", "open_shell", True, "Open interactive adb shell"),
-    "6": ("report", "generate_device_report", True, "Export the device dossier"),
-    "7": ("watchlist_manager", "manage_watchlists", False, "Manage harvest watchlists"),
+    "7": ("report", "generate_device_report", True, "Export the device summary"),
+    "9": ("watchlist_manager", "manage_watchlists", False, "Manage harvest scope/watchlists"),
 }
 
 
@@ -69,7 +68,7 @@ def handle_choice(
     active_device: dict[str, str | None | None],
     active_details: dict[str, str | None | None],
 ) -> bool:
-    if choice == "9":
+    if choice == "6":
         # Jump to the full devices hub for consistent list/switch UX.
         from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
 
@@ -78,7 +77,9 @@ def handle_choice(
         _run_inventory_sync(active_device)
     elif choice == "2":
         _run_apk_pull(active_device, auto_scope=False)
-    elif choice in {"3", "4", "5", "6", "7"}:
+    elif choice == "3":
+        _show_inventory_harvest_details(active_details)
+    elif choice in {"4", "5", "7", "9"}:
         _forward_to_helper(choice, active_device)
     elif choice == "8":
         _open_apk_library_filtered(active_device)
@@ -117,42 +118,60 @@ def build_main_menu_options(
     options: list[menu_utils.MenuOption] = [
         menu_utils.MenuOption(
             "1",
-            "Refresh Inventory",
+            "Refresh inventory",
+            description="Refresh the current device inventory and snapshot state.",
             badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
             "2",
-            "Execute Harvest",
+            "Execute harvest",
+            description="Harvest APK artifacts using the current inventory scope.",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "3",
-            "View device details",
+            "View inventory and harvest details",
+            description="Open the full device, pipeline, and evidence detail view.",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "4",
             "Open device logcat",
+            description="Stream logcat from the active device.",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "5",
             "Open ADB shell",
+            description="Open an interactive adb shell on the active device.",
             disabled=not has_device,
             badge=needs_active,
         ),
         menu_utils.MenuOption(
             "6",
-            "Export device dossier",
+            "Switch device",
+            description="Select or switch the active device.",
+        ),
+        menu_utils.MenuOption(
+            "7",
+            "Export device summary",
+            description="Generate the current device summary report.",
             disabled=not has_device,
             badge=needs_active,
         ),
-        menu_utils.MenuOption("7", "Manage harvest watchlists"),
-        menu_utils.MenuOption("8", "Browse APK library"),
-        menu_utils.MenuOption("9", "Switch device"),
+        menu_utils.MenuOption(
+            "8",
+            "Browse harvested APKs",
+            description="Browse harvested APK artifacts for the active device.",
+        ),
+        menu_utils.MenuOption(
+            "9",
+            "Manage harvest scope/watchlists",
+            description="Manage watchlists and scope filters.",
+        ),
     ]
 
     return options
@@ -233,6 +252,29 @@ def _show_device_info(
 
     print("\nDevice information:")
     table_utils.render_table(["Field", "Value"], [[field, value] for field, value in info_rows.items()])
+    prompt_utils.press_enter_to_continue()
+
+
+def _show_inventory_harvest_details(
+    active_details: dict[str, str | None | None],
+) -> None:
+    if not active_details or not active_details.get("serial"):
+        error_panels.print_error_panel(
+            "Inventory and harvest details",
+            "No active device. Use option 9 to select a device first.",
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    from .dashboard import print_device_details
+
+    inventory_metadata = device_service.fetch_inventory_metadata(
+        active_details.get("serial"),
+        with_current_state=True,
+    )
+    print()
+    menu_utils.print_header("Inventory and harvest details")
+    print_device_details(active_details, inventory_metadata)
     prompt_utils.press_enter_to_continue()
 
 
@@ -487,8 +529,16 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
             # Full sync is the slow path; if the inventory is already fresh, ask once.
             if status and status.status_label.upper() == "FRESH" and not status.is_stale:
                 print()
+                print(f"Inventory is already FRESH for {serial}.")
+                print("Re-run full inventory anyway?")
+                print()
+                print("Use this when:")
+                print("- package state may have changed on device")
+                print("- you want a new canonical snapshot")
+                print("- you are validating inventory drift")
+                print()
                 if not prompt_utils.prompt_yes_no(
-                    f"Inventory is already FRESH. Re-sync full inventory for {serial}?",
+                    "Proceed?",
                     default=False,
                 ):
                     return

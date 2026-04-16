@@ -230,6 +230,48 @@ class HarvestRunMetrics:
         )
 
 
+@dataclass
+class HarvestRuntimeNoteSummary:
+    """Structured summary of non-fatal runtime note interpretation."""
+
+    total: int
+    top_reasons: list[tuple[str, int]]
+    affected_package_count: int
+    packages_by_reason: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass
+class HarvestRunReport:
+    """Authoritative interpreted run summary for harvest rendering."""
+
+    harvest_result: HarvestResult
+    metrics: HarvestRunMetrics
+    pull_errors: int
+    files_written: int
+    status: str
+    status_level: str
+    metadata: dict[str, object]
+    scope_hash_changed: bool
+    policy_filtered: dict[str, int]
+    policy_details: str | None
+    excluded_counts: dict[str, int]
+    excluded_samples: dict[str, object]
+    denied_packages: list[str]
+    top_package_limit: int
+    summary_card_lines: list[str]
+    highlights: list[tuple[str, str]]
+    artifacts_root: str | None
+    receipts_root: str | None
+    runtime_note_summary: HarvestRuntimeNoteSummary | None
+    no_new: list[tuple[PackageHarvestResult, str | None]]
+    delta_summary: dict[str, object] | None
+    copy_line: str
+    delta_line: str | None
+    skip_counts_line: str | None
+    package_rollup_line: str
+    artifact_rollup_line: str
+
+
 def render_plan_summary(
     selection: ScopeSelection,
     plan: HarvestPlan,
@@ -271,6 +313,91 @@ def render_plan_summary(
         plan=plan,
         is_rooted=is_rooted,
         include_system_partitions=include_system_partitions,
+    )
+
+
+def build_harvest_run_report(
+    plan: HarvestPlan,
+    results: Sequence[PullResult],
+    *,
+    selection: ScopeSelection,
+    pull_mode: str = "inventory",
+    serial: str | None = None,
+    run_timestamp: str | None = None,
+    guard_brief: str | None = None,
+) -> HarvestRunReport:
+    """Build the authoritative interpreted harvest run report."""
+
+    harvest_result = _build_harvest_result(
+        plan,
+        results,
+        selection,
+        serial=serial,
+        run_timestamp=run_timestamp,
+        guard_brief=guard_brief,
+    )
+    metrics = HarvestRunMetrics.from_run(plan, harvest_result, results)
+    pull_errors = metrics.artifacts_failed
+    metadata = selection.metadata or {}
+    status, status_level = _derive_harvest_status(metrics)
+    runtime_note_summary = _build_runtime_note_summary(metrics)
+    artifacts_root = _run_artifacts_root(serial=serial, result=harvest_result)
+    receipts_root = _run_receipts_root(harvest_result)
+    delta_summary = metadata.get("package_delta_summary")
+
+    return HarvestRunReport(
+        harvest_result=harvest_result,
+        metrics=metrics,
+        pull_errors=pull_errors,
+        files_written=metrics.artifacts_written,
+        status=status,
+        status_level=status_level,
+        metadata=metadata,
+        scope_hash_changed=bool(metadata.get("inventory_scope_hash_changed")),
+        policy_filtered=dict(plan.policy_filtered),
+        policy_details=_format_policy_details(plan.policy_filtered) if plan.policy_filtered else None,
+        excluded_counts=dict(metadata.get("excluded_counts") or {}),
+        excluded_samples=dict(metadata.get("excluded_samples") or {}),
+        denied_packages=_collect_denied_packages(results),
+        top_package_limit=10 if _should_compact_view(selection, metrics, plan) else 5,
+        summary_card_lines=_build_summary_card_lines(
+            selection_label=selection.label,
+            pull_mode=pull_mode,
+            metadata=metadata,
+            guard_brief=guard_brief,
+            metrics=metrics,
+            pull_errors=pull_errors,
+        ),
+        highlights=_harvest_highlights(metrics, pull_errors),
+        artifacts_root=artifacts_root,
+        receipts_root=receipts_root,
+        runtime_note_summary=runtime_note_summary,
+        no_new=_packages_without_writes(harvest_result),
+        delta_summary=delta_summary if isinstance(delta_summary, dict) else None,
+        copy_line=_build_copy_line(
+            selection_label=selection.label,
+            metadata=metadata,
+            status=status,
+            metrics=metrics,
+            runtime_note_summary=runtime_note_summary,
+        ),
+        delta_line=_build_delta_line(metadata),
+        skip_counts_line=_build_skip_counts_line(metrics),
+        package_rollup_line=(
+            "packages: "
+            f"total={metrics.total_packages} "
+            f"executed={metrics.executed_packages} "
+            f"blocked={metrics.blocked_packages} "
+            f"(clean={metrics.packages_successful} "
+            f"partial={metrics.packages_with_partial_errors} "
+            f"failed={metrics.packages_failed})"
+        ),
+        artifact_rollup_line=(
+            "artifacts: "
+            f"{metrics.planned_artifacts} planned / "
+            f"{metrics.artifacts_written} written / "
+            f"{metrics.artifacts_failed} failed"
+        ),
     )
 
 
@@ -359,146 +486,70 @@ def render_harvest_summary(
     log_summary: bool = True,
 ) -> None:
     """Render the end-of-run summary with diagnostics."""
-
-    harvest_result = _build_harvest_result(
+    report = build_harvest_run_report(
         plan,
         results,
-        selection,
+        selection=selection,
+        pull_mode=pull_mode,
         serial=serial,
         run_timestamp=run_timestamp,
         guard_brief=guard_brief,
     )
-
-    metrics = HarvestRunMetrics.from_run(plan, harvest_result, results)
-    files_written = metrics.artifacts_written
-    pull_errors = metrics.artifacts_failed
+    harvest_result = report.harvest_result
+    metrics = report.metrics
 
     simple_mode = _harvest_simple_mode()
     if not simple_mode:
         print()
         print(text_blocks.headline("APK Harvest Summary", width=70))
-
-    metadata = selection.metadata or {}
-    summary_lines = _build_summary_card_lines(
-        selection_label=selection.label,
-        pull_mode=pull_mode,
-        metadata=metadata,
-        guard_brief=guard_brief,
-        metrics=metrics,
-        pull_errors=pull_errors,
-    )
-    scope_hash_changed = metadata.get("inventory_scope_hash_changed")
+    metadata = report.metadata
 
     quiet_mode = _harvest_quiet_mode()
 
     if simple_mode:
         print()
-        status = "success"
-        if metrics.packages_with_mirror_failures and metrics.executed_packages and (
-            metrics.packages_with_mirror_failures >= metrics.executed_packages
-        ):
-            status = "degraded_db_mirror_total_loss"
-        elif metrics.packages_with_mirror_failures:
-            status = "degraded"
-        elif metrics.packages_drifted or metrics.packages_failed or metrics.packages_with_partial_errors:
-            status = "partial"
-        level = "success" if status == "success" else "warn"
-        if status == "degraded_db_mirror_total_loss":
-            level = "error"
-        print(status_messages.status(f"status: {status}", level=level))
-
-        # Copy/paste friendly one-liner for tickets/PM updates.
-        harvest_mode = metadata.get("harvest_mode") or ""
-        delta_applied = bool(metadata.get("delta_filter_applied"))
-        note_pkg_count = 0
-        try:
-            affected = set()
-            for pkgs in (metrics.runtime_note_packages or {}).values():
-                affected.update(pkgs)
-            note_pkg_count = len(affected)
-        except Exception:
-            note_pkg_count = 0
-        print(
-            status_messages.status(
-                "[COPY] harvest "
-                f"scope={selection.label!r} "
-                f"status={status} "
-                f"packages_total={metrics.total_packages} "
-                f"packages_executed={metrics.executed_packages} "
-                f"packages_blocked={metrics.blocked_packages} "
-                f"clean={metrics.packages_successful} "
-                f"partial={metrics.packages_with_partial_errors} "
-                f"failed={metrics.packages_failed} "
-                f"drifted={metrics.packages_drifted} "
-                f"mirror_failed={metrics.packages_with_mirror_failures} "
-                f"artifacts_planned={metrics.planned_artifacts} "
-                f"artifacts_written={metrics.artifacts_written} "
-                f"artifacts_failed={metrics.artifacts_failed} "
-                f"harvest_mode={harvest_mode!s} "
-                f"delta_applied={'true' if delta_applied else 'false'} "
-                f"runtime_notes={metrics.runtime_note_total} "
-                f"runtime_note_pkgs={note_pkg_count} "
-                f"runtime_skips={sum(metrics.runtime_skips.values())}",
-                level="info",
-            )
-        )
-        artifacts_root = _run_artifacts_root(serial=serial, result=harvest_result)
-        receipts_root = _run_receipts_root(harvest_result)
-        if artifacts_root:
-            print(status_messages.status(f"artifacts: {artifacts_root}", level="info"))
-        if receipts_root:
-            print(status_messages.status(f"receipts: {receipts_root}", level="info"))
-        if metadata.get("delta_filter_applied"):
-            delta_total = metadata.get("delta_filter_total")
-            delta_matched = metadata.get("delta_filter_matched")
-            parts: list[str] = []
-            if delta_total is not None:
-                parts.append(f"changed={delta_total}")
-            if delta_matched is not None:
-                parts.append(f"matched_in_scope={delta_matched}")
-            detail = f" ({', '.join(parts)})" if parts else ""
-            print(status_messages.status(f"delta: applied{detail}", level="info"))
-        if metrics.runtime_notes:
-            top = metrics.runtime_notes.most_common(2)
+        print(status_messages.status(f"status: {report.status}", level=report.status_level))
+        print(status_messages.status(report.copy_line, level="info"))
+        if report.artifacts_root:
+            print(status_messages.status(f"artifacts: {report.artifacts_root}", level="info"))
+        if report.receipts_root:
+            print(status_messages.status(f"receipts: {report.receipts_root}", level="info"))
+        if report.delta_line:
+            print(status_messages.status(report.delta_line, level="info"))
+        if report.runtime_note_summary:
+            top = report.runtime_note_summary.top_reasons[:2]
             note_text = ", ".join(f"{reason}={count}" for reason, count in top)
-            if metrics.runtime_note_total > sum(c for _r, c in top):
+            if report.runtime_note_summary.total > sum(c for _r, c in top):
                 note_text = f"{note_text}, ..."
-            affected = set()
-            for pkgs in (metrics.runtime_note_packages or {}).values():
-                affected.update(pkgs)
             note_line = (
-                f"notes: db_mirror={metrics.runtime_note_total} ({note_text})"
-                + (f" affected_pkgs={len(affected)}" if affected else "")
+                f"notes: db_mirror={report.runtime_note_summary.total} ({note_text})"
+                + (
+                    f" affected_pkgs={report.runtime_note_summary.affected_package_count}"
+                    if report.runtime_note_summary.affected_package_count
+                    else ""
+                )
             )
             print(status_messages.status(note_line, level="info"))
-            if metrics.runtime_note_packages:
+            if report.runtime_note_summary.packages_by_reason:
                 # Default: if only a few packages are affected, print them inline to avoid forcing
                 # operators to re-run with verbose flags just to answer "which packages?".
                 # Verbose mode prints full per-reason detail regardless of count.
                 if _harvest_verbose_mode():
-                    for reason, pkgs in sorted(metrics.runtime_note_packages.items()):
+                    for reason, pkgs in sorted(report.runtime_note_summary.packages_by_reason.items()):
                         if not pkgs:
                             continue
                         joined = ", ".join(pkgs)
                         print(status_messages.status(f"notes detail: {reason}: {joined}", level="info"))
                 else:
-                    for reason, pkgs in sorted(metrics.runtime_note_packages.items()):
+                    for reason, pkgs in sorted(report.runtime_note_summary.packages_by_reason.items()):
                         if not pkgs:
                             continue
                         if len(pkgs) <= 10:
                             joined = ", ".join(pkgs)
                             print(status_messages.status(f"notes pkgs: {reason}: {joined}", level="info"))
 
-        if metrics.preflight_skips or metrics.runtime_skips:
-            skip_parts: list[str] = []
-            if metrics.preflight_skips:
-                total = sum(metrics.preflight_skips.values())
-                skip_parts.append(f"preflight={total}")
-            if metrics.runtime_skips:
-                total = sum(metrics.runtime_skips.values())
-                skip_parts.append(f"runtime={total}")
-            if skip_parts:
-                print(status_messages.status(f"skips: {', '.join(skip_parts)}", level="info"))
+        if report.skip_counts_line:
+            print(status_messages.status(report.skip_counts_line, level="info"))
 
         # Compact mode: avoid duplicating information already captured by the [COPY] line above.
         # Leave the evidence path + notes/skips lines intact.
@@ -506,56 +557,31 @@ def render_harvest_summary(
             return
 
         # Non-compact: print the human-readable rollups as well.
-        print(
-            status_messages.status(
-                (
-                    "packages: "
-                    f"total={metrics.total_packages} "
-                    f"executed={metrics.executed_packages} "
-                    f"blocked={metrics.blocked_packages} "
-                    f"(clean={metrics.packages_successful} "
-                    f"partial={metrics.packages_with_partial_errors} "
-                    f"failed={metrics.packages_failed})"
-                ),
-                level="info",
-            )
-        )
-        print(
-            status_messages.status(
-                (
-                    "artifacts: "
-                    f"{metrics.planned_artifacts} planned / "
-                    f"{metrics.artifacts_written} written / "
-                    f"{metrics.artifacts_failed} failed"
-                ),
-                level="info",
-            )
-        )
+        print(status_messages.status(report.package_rollup_line, level="info"))
+        print(status_messages.status(report.artifact_rollup_line, level="info"))
         return
 
     if not simple_mode:
-        print(text_blocks.boxed(summary_lines, width=70))
+        print(text_blocks.boxed(report.summary_card_lines, width=70))
 
-    highlights = _harvest_highlights(metrics, pull_errors)
-    if highlights and not quiet_mode:
+    if report.highlights and not quiet_mode:
         print()
         print(text_blocks.headline("Highlights", width=70))
-        for level, message in highlights:
+        for level, message in report.highlights:
             print(status_messages.status(message, level=level))
 
-    if scope_hash_changed:
+    if report.scope_hash_changed:
         print(
             status_messages.status(
                 "Selected scope differs from the last recorded inventory.",
                 level="warn",
             )
         )
-    if pull_errors:
+    if report.pull_errors:
         print(status_messages.status("Review package errors above before re-running.", level="warn"))
 
-    if plan.policy_filtered and not quiet_mode:
-        policy_details = _format_policy_details(plan.policy_filtered)
-        print(status_messages.status(f"Filtered before pull (policy): {policy_details}", level="warn"))
+    if report.policy_details and not quiet_mode:
+        print(status_messages.status(f"Filtered before pull (policy): {report.policy_details}", level="warn"))
     if (metrics.preflight_skips or metrics.runtime_skips) and not quiet_mode:
         print()
         print(text_blocks.headline("Skipped packages", width=70))
@@ -570,38 +596,28 @@ def render_harvest_summary(
                 label = _describe_reason(reason, _SKIP_LABELS)
                 print(status_messages.status(f"- {label}: {count}", level="warn"))
 
-    denied = sorted(
-        {
-            result.plan.inventory.package_name
-            for result in results
-            for error in result.errors
-            if "permission" in error.reason.lower()
-        }
-    )
-    if denied:
+    if report.denied_packages:
         print(status_messages.status("Permission denied (requires root):", level="warn"))
         if not quiet_mode:
-            for package in denied:
+            for package in report.denied_packages:
                 print(status_messages.status(f"  - {package}", level="warn"))
 
     if not quiet_mode:
-        _print_exclusions(metadata.get("excluded_counts"))
-        _print_exclusion_samples(metadata.get("excluded_samples"))
+        _print_exclusions(report.excluded_counts)
+        _print_exclusion_samples(report.excluded_samples)
         _print_top_packages(
             results,
-            limit=10 if _should_compact_view(selection, metrics, plan) else 5,
+            limit=report.top_package_limit,
         )
         _print_sample_focus(selection)
 
-    artifacts_root = _run_artifacts_root(serial=serial, result=harvest_result)
-    receipts_root = _run_receipts_root(harvest_result)
-    if artifacts_root and not simple_mode:
+    if report.artifacts_root and not simple_mode:
         print()
         print(status_messages.status("Artifacts saved under:", level="info"))
-        print(status_messages.status(f"  {artifacts_root}", level="info"))
-        if receipts_root:
+        print(status_messages.status(f"  {report.artifacts_root}", level="info"))
+        if report.receipts_root:
             print(status_messages.status("Receipts saved under:", level="info"))
-            print(status_messages.status(f"  {receipts_root}", level="info"))
+            print(status_messages.status(f"  {report.receipts_root}", level="info"))
         if not quiet_mode:
             shown = 0
             for package in harvest_result.packages:
@@ -614,19 +630,17 @@ def render_harvest_summary(
                 if shown >= 5:
                     break
 
-    no_new = _packages_without_writes(harvest_result)
-    if no_new and not quiet_mode:
-        _print_no_new_summary(no_new)
+    if report.no_new and not quiet_mode:
+        _print_no_new_summary(report.no_new)
 
-    delta_summary = metadata.get("package_delta_summary")
-    if delta_summary and not quiet_mode:
+    if report.delta_summary and not quiet_mode:
         print()
         print(
             text_blocks.headline(
                 "Package changes since last snapshot", width=70
             )
         )
-        _print_package_delta_summary(delta_summary)
+        _print_package_delta_summary(report.delta_summary)
 
     # Structured forensic-style summary (non-boxed) for transcripts/screenshots.
     if not quiet_mode:
@@ -634,16 +648,16 @@ def render_harvest_summary(
             selection_label=selection.label,
             metrics=metrics,
             pull_mode=pull_mode,
-            output_root=normalise_local_path(Path(artifacts_root)) if artifacts_root else None,
-            receipts_root=normalise_local_path(Path(receipts_root)) if receipts_root else None,
+            output_root=normalise_local_path(Path(report.artifacts_root)) if report.artifacts_root else None,
+            receipts_root=normalise_local_path(Path(report.receipts_root)) if report.receipts_root else None,
             preflight_skips=metrics.preflight_skips,
             runtime_skips=metrics.runtime_skips,
-            policy_filtered=plan.policy_filtered,
+            policy_filtered=report.policy_filtered,
             session_stamp=run_timestamp,
         )
 
     # Emit policy.filter details for scope shrinking
-    if plan.policy_filtered:
+    if report.policy_filtered:
         try:
             from scytaledroid.Utils.LoggingUtils import logging_events as log_events
             from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
@@ -664,7 +678,7 @@ def render_harvest_summary(
                     "scope": selection.label,
                     "candidates": int(metadata.get("candidate_count") or 0),
                     "kept": int(metadata.get("selected_count") or metrics.total_packages),
-                    "filtered_counts": plan.policy_filtered,
+                    "filtered_counts": report.policy_filtered,
                 },
             )
         except Exception:
@@ -683,12 +697,12 @@ def render_harvest_summary(
     if log_summary:
         _log_harvest_summary(
             harvest_result,
-            no_new,
-            artifacts_root,
+            report.no_new,
+            report.artifacts_root,
             metadata,
             pull_mode,
             metrics.total_packages,
-            files_written,
+            report.files_written,
             harvest_logger=harvest_logger,
             run_id=run_id,
         )
@@ -715,9 +729,9 @@ def render_harvest_summary(
                 "artifacts_failed": metrics.artifacts_failed,
                 "preflight_skips": dict(metrics.preflight_skips),
                 "runtime_skips": dict(metrics.runtime_skips),
-                "policy_filtered": plan.policy_filtered,
+                "policy_filtered": report.policy_filtered,
                 "session_stamp": run_timestamp,
-                "output_root": normalise_local_path(Path(artifacts_root)) if artifacts_root else None,
+                "output_root": normalise_local_path(Path(report.artifacts_root)) if report.artifacts_root else None,
             }
             log_adapter.info("Harvest RUN_END", extra=payload)
         except Exception:
@@ -923,6 +937,9 @@ def _print_top_packages(results: Sequence[PullResult], limit: int = 5) -> None:
 
 __all__ = [
     "HarvestRunMetrics",
+    "HarvestRunReport",
+    "HarvestRuntimeNoteSummary",
+    "build_harvest_run_report",
     "preview_plan",
     "print_package_result",
     "render_harvest_summary",
@@ -986,6 +1003,99 @@ def _describe_reason(code: str, mapping: dict[str, str]) -> str:
     return mapping.get(code, code)
 
 
+def _derive_harvest_status(metrics: HarvestRunMetrics) -> tuple[str, str]:
+    status = "success"
+    if metrics.packages_with_mirror_failures and metrics.executed_packages and (
+        metrics.packages_with_mirror_failures >= metrics.executed_packages
+    ):
+        status = "degraded_db_mirror_total_loss"
+    elif metrics.packages_with_mirror_failures:
+        status = "degraded"
+    elif metrics.packages_drifted or metrics.packages_failed or metrics.packages_with_partial_errors:
+        status = "partial"
+
+    level = "success" if status == "success" else "warn"
+    if status == "degraded_db_mirror_total_loss":
+        level = "error"
+    return status, level
+
+
+def _build_runtime_note_summary(metrics: HarvestRunMetrics) -> HarvestRuntimeNoteSummary | None:
+    if not metrics.runtime_notes:
+        return None
+
+    affected = set()
+    for pkgs in (metrics.runtime_note_packages or {}).values():
+        affected.update(pkgs)
+    return HarvestRuntimeNoteSummary(
+        total=metrics.runtime_note_total,
+        top_reasons=metrics.runtime_notes.most_common(),
+        affected_package_count=len(affected),
+        packages_by_reason=dict(metrics.runtime_note_packages or {}),
+    )
+
+
+def _build_copy_line(
+    *,
+    selection_label: str,
+    metadata: dict[str, object],
+    status: str,
+    metrics: HarvestRunMetrics,
+    runtime_note_summary: HarvestRuntimeNoteSummary | None,
+) -> str:
+    harvest_mode = metadata.get("harvest_mode") or ""
+    delta_applied = bool(metadata.get("delta_filter_applied"))
+    note_pkg_count = runtime_note_summary.affected_package_count if runtime_note_summary else 0
+    return (
+        "[COPY] harvest "
+        f"scope={selection_label!r} "
+        f"status={status} "
+        f"packages_total={metrics.total_packages} "
+        f"packages_executed={metrics.executed_packages} "
+        f"packages_blocked={metrics.blocked_packages} "
+        f"clean={metrics.packages_successful} "
+        f"partial={metrics.packages_with_partial_errors} "
+        f"failed={metrics.packages_failed} "
+        f"drifted={metrics.packages_drifted} "
+        f"mirror_failed={metrics.packages_with_mirror_failures} "
+        f"artifacts_planned={metrics.planned_artifacts} "
+        f"artifacts_written={metrics.artifacts_written} "
+        f"artifacts_failed={metrics.artifacts_failed} "
+        f"harvest_mode={harvest_mode!s} "
+        f"delta_applied={'true' if delta_applied else 'false'} "
+        f"runtime_notes={metrics.runtime_note_total} "
+        f"runtime_note_pkgs={note_pkg_count} "
+        f"runtime_skips={sum(metrics.runtime_skips.values())}"
+    )
+
+
+def _build_delta_line(metadata: dict[str, object]) -> str | None:
+    if not metadata.get("delta_filter_applied"):
+        return None
+    delta_total = metadata.get("delta_filter_total")
+    delta_matched = metadata.get("delta_filter_matched")
+    parts: list[str] = []
+    if delta_total is not None:
+        parts.append(f"changed={delta_total}")
+    if delta_matched is not None:
+        parts.append(f"matched_in_scope={delta_matched}")
+    detail = f" ({', '.join(parts)})" if parts else ""
+    return f"delta: applied{detail}"
+
+
+def _build_skip_counts_line(metrics: HarvestRunMetrics) -> str | None:
+    if not (metrics.preflight_skips or metrics.runtime_skips):
+        return None
+    skip_parts: list[str] = []
+    if metrics.preflight_skips:
+        skip_parts.append(f"preflight={sum(metrics.preflight_skips.values())}")
+    if metrics.runtime_skips:
+        skip_parts.append(f"runtime={sum(metrics.runtime_skips.values())}")
+    if not skip_parts:
+        return None
+    return f"skips: {', '.join(skip_parts)}"
+
+
 def _compact_label(label: str) -> str:
     if not label:
         return label
@@ -1028,6 +1138,17 @@ def _format_policy_details(policy_counts: dict[str, int]) -> str:
         total = sum(policy_counts.values())
         return str(total)
     return ", ".join(parts)
+
+
+def _collect_denied_packages(results: Sequence[PullResult]) -> list[str]:
+    return sorted(
+        {
+            result.plan.inventory.package_name
+            for result in results
+            for error in result.errors
+            if "permission" in error.reason.lower()
+        }
+    )
 
 
 def _print_sample_focus(selection: ScopeSelection) -> None:

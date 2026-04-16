@@ -112,8 +112,50 @@ def test_build_main_menu_options_uses_pipeline_language(monkeypatch) -> None:
     labels = [option.label for option in options]
 
     assert labels[:4] == [
-        "Refresh Inventory",
-        "Execute Harvest",
-        "View device details",
+        "Refresh inventory",
+        "Execute harvest",
+        "View inventory and harvest details",
         "Open device logcat",
     ]
+    assert labels[5] == "Switch device"
+    assert "Browse harvested APKs" in labels
+    assert "Export device summary" in labels
+    assert "Manage harvest scope/watchlists" in labels
+
+
+def test_run_inventory_sync_explains_why_full_resync_might_still_be_useful(monkeypatch, capsys) -> None:
+    from scytaledroid.DeviceAnalysis import runtime_flags
+    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
+
+    monkeypatch.setattr(
+        actions.device_service,
+        "fetch_inventory_metadata",
+        lambda _serial: SimpleNamespace(status_label="FRESH", is_stale=False),
+    )
+    monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
+    monkeypatch.setattr(actions.menu_utils, "print_header", lambda *args, **kwargs: None)
+    monkeypatch.setattr(actions.menu_utils, "render_menu", lambda _spec: None)
+    monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
+    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+
+    prompted: dict[str, object] = {}
+
+    def _prompt_yes_no(prompt: str, *, default: bool = False) -> bool:
+        prompted["prompt"] = prompt
+        prompted["default"] = default
+        return False
+
+    monkeypatch.setattr(actions.prompt_utils, "prompt_yes_no", _prompt_yes_no)
+    monkeypatch.setattr(inventory_workflow, "run_inventory_sync", lambda *args, **kwargs: None)
+
+    actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
+
+    out = capsys.readouterr().out
+    assert "Inventory is already FRESH for SERIAL123." in out
+    assert "Re-run full inventory anyway?" in out
+    assert "Use this when:" in out
+    assert "- package state may have changed on device" in out
+    assert "- you want a new canonical snapshot" in out
+    assert "- you are validating inventory drift" in out
+    assert prompted["prompt"] == "Proceed?"
+    assert prompted["default"] is False

@@ -225,14 +225,9 @@ def _render_active_device_summary(details: dict[str, str | None]) -> None:
         prettify_manufacturer(details.get("manufacturer") or details.get("brand")),
         format_android_release(details),
         details.get("device_type") or "Unknown",
+        colors.strip(_root_badge(details.get("is_rooted"))),
     ]
     print(" | ".join(bit for bit in summary_bits if bit))
-    print()
-    print("Device Capability")
-    print("-----------------")
-    print(f"{'Wi-Fi':<12} : {format_wifi_state(details.get('wifi_state'))}")
-    print(f"{'Battery':<12} : {format_battery(details)}")
-    print(f"{'Root access':<12} : {_root_badge(details.get('is_rooted'))}")
 
 
 def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
@@ -470,6 +465,196 @@ def _render_inventory_status(metadata: object) -> None:
         print(line)
 
 
+def _format_summary_value(value: object, *, fallback: str = "—") -> str:
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    return text or fallback
+
+
+def _compact_age_display(age_display: object) -> str:
+    text = _format_summary_value(age_display, fallback="unknown").strip()
+    replacements = {
+        " Hrs ": "h ",
+        " Hr ": "h ",
+        " Mins": "m",
+        " Min": "m",
+        " Secs": "s",
+        " Sec": "s",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
+
+
+def _evidence_alignment_text(
+    *,
+    latest_harvest: dict[str, object] | None,
+    inventory_snapshot_id: object,
+) -> str:
+    if not latest_harvest:
+        return "not harvested yet"
+
+    harvest_snapshot_id = latest_harvest.get("snapshot_id")
+    if harvest_snapshot_id is None:
+        return "present (snapshot unknown)"
+    if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
+        return f"aligned with snapshot {harvest_snapshot_id}"
+    if inventory_snapshot_id is not None:
+        return f"snapshot {harvest_snapshot_id} vs inventory {inventory_snapshot_id}"
+    return f"linked to snapshot {harvest_snapshot_id}"
+
+
+def _summary_next_step(
+    *,
+    inventory_status: str,
+    inventory_snapshot_id: object,
+    harvest_snapshot_id: object,
+    has_harvest: bool,
+) -> str:
+    if inventory_status == "NONE":
+        return "Run Refresh Inventory to establish current device scope."
+    if inventory_status == "STALE":
+        return "Inventory is stale; refresh recommended before harvest."
+    if not has_harvest:
+        return "Inventory is current. Execute harvest when you are ready."
+    if harvest_snapshot_id is not None and inventory_snapshot_id is not None and harvest_snapshot_id != inventory_snapshot_id:
+        return "Harvest is based on an older inventory snapshot. Refresh inventory before harvesting again."
+    return "Inventory and harvest are aligned. Static analysis can proceed."
+
+
+def _render_compact_status(
+    details: dict[str, str | None],
+    inventory_metadata: object,
+    pipeline: dict[str, object],
+) -> None:
+    status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
+    age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
+    pkg_count = getattr(inventory_metadata, "package_count", None)
+    persisted_count = pipeline.get("persisted")
+    blocked_policy = pipeline.get("blocked_policy")
+    blocked_scope = pipeline.get("blocked_scope")
+    latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
+    inventory_snapshot_id = pipeline.get("inventory_snapshot_id")
+    harvest_snapshot_id = latest_harvest.get("snapshot_id") if isinstance(latest_harvest, dict) else None
+    evidence_alignment = _evidence_alignment_text(
+        latest_harvest=latest_harvest,
+        inventory_snapshot_id=inventory_snapshot_id,
+    )
+
+    print()
+    print("Summary")
+    print("-------")
+    print(
+        f"{'Inventory':<12} : {status_label} | "
+        f"{_format_summary_value(pkg_count)} packages | "
+        f"{age_display} ago"
+    )
+    print(
+        f"{'Harvest':<12} : {_format_summary_value(persisted_count, fallback='0')} persisted | "
+        f"{_format_summary_value(blocked_policy, fallback='0')} policy blocked | "
+        f"{_format_summary_value(blocked_scope, fallback='0')} scope blocked"
+    )
+    print(f"{'Evidence':<12} : {evidence_alignment}")
+
+    print()
+    print("Next Step")
+    print("---------")
+    print(
+        _summary_next_step(
+            inventory_status=status_label,
+            inventory_snapshot_id=inventory_snapshot_id,
+            harvest_snapshot_id=harvest_snapshot_id,
+            has_harvest=bool(latest_harvest),
+        )
+    )
+
+
+def _render_grouped_actions(options: list[menu_utils.MenuOption]) -> None:
+    print()
+    print("Actions")
+    print("-------")
+    ordered = sorted(options, key=lambda option: int(option.key) if option.key.isdigit() else 999)
+    menu_utils.print_menu(
+        ordered,
+        show_exit=True,
+        exit_label="Back",
+        show_descriptions=False,
+        compact=True,
+    )
+
+
+def print_device_details(
+    active_details: dict[str, str | None | None],
+    inventory_metadata: object | None = None,
+) -> None:
+    if not active_details:
+        return
+
+    _render_active_device_summary(active_details)
+    print()
+    print("Device Capability")
+    print("-----------------")
+    print(f"{'Wi-Fi':<12} : {format_wifi_state(active_details.get('wifi_state'))}")
+    print(f"{'Battery':<12} : {format_battery(active_details)}")
+    print(f"{'Root access':<12} : {_root_badge(active_details.get('is_rooted'))}")
+
+    if not inventory_metadata:
+        return
+
+    status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
+    age_display = getattr(inventory_metadata, "age_display", None) or "unknown"
+    pkg_count = getattr(inventory_metadata, "package_count", None)
+    serial = active_details.get("serial") if isinstance(active_details, dict) else None
+    pipeline = _compute_pipeline_state(serial)
+    latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
+
+    print()
+    print("Inventory and Harvest")
+    print("---------------------")
+    print(
+        f"{'Status':<12} : {status_label} | "
+        f"Last sync : {age_display} ago | "
+        f"Packages : {pkg_count if isinstance(pkg_count, int) else '—'}"
+    )
+    print(
+        f"{'Inventory':<12} : inventoried {_format_summary_value(pipeline.get('inventoried'))} | "
+        f"in scope {_format_summary_value(pipeline.get('in_scope'))} | "
+        f"eligible {_format_summary_value(pipeline.get('policy_eligible'))}"
+    )
+    print(
+        f"{'Harvest':<12} : scheduled {_format_summary_value(pipeline.get('scheduled'))} | "
+        f"harvested {_format_summary_value(pipeline.get('harvested'))} | "
+        f"persisted {_format_summary_value(pipeline.get('persisted'))}"
+    )
+    print(
+        f"{'Blocked':<12} : {_format_summary_value(pipeline.get('blocked_policy'), fallback='0')} policy | "
+        f"{_format_summary_value(pipeline.get('blocked_scope'), fallback='0')} scope"
+    )
+
+    if isinstance(latest_harvest, dict):
+        session_label = latest_harvest.get("session_label") or "unknown"
+        print()
+        print("Evidence and Paths")
+        print("------------------")
+        print(f"{'Latest harvest':<15} : {session_label}")
+        harvest_snapshot_id = latest_harvest.get("snapshot_id")
+        inventory_snapshot_id = pipeline.get("inventory_snapshot_id")
+        if harvest_snapshot_id is not None:
+            if harvest_snapshot_id == inventory_snapshot_id:
+                print(f"{'Snapshot link':<15} : inventory snapshot {harvest_snapshot_id}")
+                print(f"{'Alignment':<15} : current")
+            else:
+                print(f"{'Snapshot link':<15} : harvest snapshot {harvest_snapshot_id}")
+                print(f"{'Alignment':<15} : stale vs latest inventory")
+        artifacts_root = latest_harvest.get("artifacts_root")
+        receipts_root = latest_harvest.get("receipts_root")
+        if artifacts_root:
+            print(f"{'Artifacts root':<15} : {artifacts_root}")
+        if receipts_root:
+            print(f"{'Receipts root':<15} : {receipts_root}")
+
+
 def build_device_summaries(
     devices: list[dict[str, str | None]],
     summary_cache: dict[str, dict[str, str | None]],
@@ -526,73 +711,14 @@ def print_dashboard(
 
     # Inventory status (inline)
     if active_details and inventory_metadata:
-        status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
-        age_display = getattr(inventory_metadata, "age_display", None) or "unknown"
-        pkg_count = getattr(inventory_metadata, "package_count", None)
-        pkg_text = f"{pkg_count}" if isinstance(pkg_count, int) else "—"
-        print()
-        print("Status")
-        print("------")
-        print(f"{'State':<12} : {status_label}")
-        print(f"{'Last sync':<12} : {age_display} ago")
-        print(f"{'Packages':<12} : {pkg_text}")
         serial = active_details.get("serial") if isinstance(active_details, dict) else None
         pipeline = _compute_pipeline_state(serial)
-        latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
-        print()
-        print("Pipeline State")
-        print("--------------")
-        print("Inventory")
-        print(f"  {'Inventoried':<16} : {pipeline.get('inventoried') if pipeline.get('inventoried') is not None else '—'}")
-        print("Planning")
-        print(f"  {'In scope':<16} : {pipeline.get('in_scope') if pipeline.get('in_scope') is not None else '—'}")
-        print(
-            f"  {'Policy eligible':<16} : {pipeline.get('policy_eligible') if pipeline.get('policy_eligible') is not None else '—'}"
-        )
-        print(f"  {'Scheduled':<16} : {pipeline.get('scheduled') if pipeline.get('scheduled') is not None else '—'}")
-        print("Execution")
-        print(f"  {'Harvested':<16} : {pipeline.get('harvested') if pipeline.get('harvested') is not None else '—'}")
-        print(f"  {'Persisted':<16} : {pipeline.get('persisted') if pipeline.get('persisted') is not None else '—'}")
-        print(
-            f"  {'Blocked policy':<16} : {pipeline.get('blocked_policy') if pipeline.get('blocked_policy') is not None else '—'}"
-        )
-        print(
-            f"  {'Blocked scope':<16} : {pipeline.get('blocked_scope') if pipeline.get('blocked_scope') is not None else '—'}"
-        )
-        if isinstance(latest_harvest, dict):
-            session_label = latest_harvest.get("session_label") or "unknown"
-            print()
-            print("Evidence")
-            print("--------")
-            print(f"Latest harvest: {session_label}")
-            harvest_snapshot_id = latest_harvest.get("snapshot_id")
-            inventory_snapshot_id = pipeline.get("inventory_snapshot_id")
-            if harvest_snapshot_id is not None:
-                if harvest_snapshot_id == inventory_snapshot_id:
-                    print(f"Snapshot linkage: inventory snapshot {harvest_snapshot_id}")
-                    print("Alignment: current")
-                else:
-                    print(f"Snapshot linkage: harvest snapshot {harvest_snapshot_id}")
-                    print("Alignment: stale vs latest inventory")
-            artifacts_root = latest_harvest.get("artifacts_root")
-            receipts_root = latest_harvest.get("receipts_root")
-            if artifacts_root:
-                print(f"Artifacts root: {artifacts_root}")
-            if receipts_root:
-                print(f"Receipts root: {receipts_root}")
+        _render_compact_status(active_details, inventory_metadata, pipeline)
 
     # Device Analysis menu (sequential, no gaps)
-    print()
-    menu_utils.print_header("Device Actions")
     from .actions import build_main_menu_options
     options = build_main_menu_options(active_details)
-    spec = menu_utils.MenuSpec(
-        items=options,
-        exit_label="Back",
-        show_exit=True,
-        show_descriptions=True,
-    )
-    menu_utils.render_menu(spec)
+    _render_grouped_actions(options)
 
     # ADB warnings
     if warnings:
@@ -618,6 +744,7 @@ def resolve_active_device(
 
 __all__ = [
     "build_device_summaries",
+    "print_device_details",
     "print_dashboard",
     "resolve_active_device",
     # Exposed for tests
