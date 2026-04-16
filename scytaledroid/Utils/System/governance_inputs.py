@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils
+from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages
 
 
 def _ensure_workspace() -> Path:
@@ -56,18 +56,19 @@ def _latest_governance_status() -> tuple[str, str | None, str | None, int, str |
 
 def render_dataset_readiness_line() -> None:
     status, _, _, rows, _ = _latest_governance_status()
-    status_label = (
-        "✅ present" if status == "present" else
-        "❌ missing" if status == "missing" else
-        "unknown"
-    )
-    print(f"• Governance snapshot: {status_label}")
-    print(f"• Data workspace: {Path('data').resolve()}")
+    if status == "present":
+        status_label = "present"
+    elif status == "missing":
+        status_label = "missing"
+    else:
+        status_label = "unknown"
+    print(status_messages.status(f"Governance snapshot: {status_label}", level="info"))
+    print(status_messages.status(f"Data workspace: {Path('data').resolve()}", level="info"))
 
 
 def _render_header(base: Path, palette) -> None:
     print()
-    menu_utils.print_header("Governance Inputs & Readiness")
+    menu_utils.print_header("Governance & Readiness")
     print(f"Workspace: {colors.apply(str(base.resolve()), palette.text)}")
     print(f"Snapshot drop path: {colors.apply(str((base / 'governance').resolve()), palette.muted)}")
     print("Governance snapshot (v1)")
@@ -98,7 +99,7 @@ def _render_status(palette) -> None:
         sha_display = sha
         if sha and len(sha) > 12:
             sha_display = f"{sha[:12]}…"
-        status_text = colors.apply("✅ present", palette.success)
+        status_text = colors.apply("present", palette.success)
         print(f"  Status  : {status_text}")
         print(f"  Version : {colors.apply(str(version), palette.text)}")
         print(f"  SHA-256 : {colors.apply(sha_display or '<unknown>', palette.muted)}")
@@ -106,7 +107,7 @@ def _render_status(palette) -> None:
         if loaded_at:
             print(f"  Last imported : {colors.apply(loaded_at, palette.muted)}")
     elif status == "missing":
-        status_text = colors.apply("❌ missing", palette.error)
+        status_text = colors.apply("missing", palette.warning)
         print(f"  Status  : {status_text}")
         print(f"  Rows    : {colors.apply('0', palette.muted)}")
         print("  Version : —")
@@ -116,12 +117,12 @@ def _render_status(palette) -> None:
         print("  Status  : unknown (database query failed)")
     print()
     if status == "present":
-        print(colors.apply("Research-grade runs: ENABLED", palette.success))
+        print(status_messages.status("Research-grade runs: enabled", level="success"))
     elif status == "missing":
-        print(colors.apply("Research-grade runs: BLOCKED (missing governance snapshot)", palette.error))
-        print(colors.apply("Next step: import a snapshot CSV into governance tables.", palette.muted))
+        print(status_messages.status("Research-grade runs: blocked (missing governance snapshot)", level="blocked"))
+        print(status_messages.status("Next step: import a snapshot CSV into governance tables.", level="info"))
     else:
-        print("Research-grade runs: UNKNOWN (governance status unavailable)")
+        print(status_messages.status("Research-grade runs: unknown (governance status unavailable)", level="info"))
     print()
 
 
@@ -138,8 +139,13 @@ def _scan_governance_folder(base: Path) -> None:
         return
     for bundle in sorted(bundles):
         csv_path = bundle / "permission_governance_snapshot.csv"
-        marker = "✅" if csv_path.exists() else "❌"
-        print(f"  {marker} {bundle.name} ({'csv present' if csv_path.exists() else 'missing csv'})")
+        status_line = f"{bundle.name} ({'csv present' if csv_path.exists() else 'missing csv'})"
+        print(
+            status_messages.status(
+                status_line,
+                level="success" if csv_path.exists() else "warn",
+            )
+        )
 
 
 def _show_latest_bundle(base: Path) -> None:
@@ -250,8 +256,12 @@ def _verify_checksums(base: Path) -> None:
             if _sha256_file(target) != expected:
                 ok = False
                 break
-        marker = "✅" if ok else "❌"
-        print(f"  {marker} {bundle.name}: checksum {'OK' if ok else 'FAIL'}")
+        print(
+            status_messages.status(
+                f"{bundle.name}: checksum {'OK' if ok else 'FAIL'}",
+                level="success" if ok else "error",
+            )
+        )
 
 
 def _show_active_vs_latest(base: Path) -> None:

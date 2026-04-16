@@ -179,7 +179,7 @@ def test_render_db_masvs_summary_aggregates_all_static_ids(monkeypatch, capsys):
     db_verification._render_db_masvs_summary()
 
     out = capsys.readouterr().out
-    assert "DB MASVS Summary (run_id=41)" in out
+    assert "DB MASVS Summary (static_run_id=41)" in out
     assert calls["many"] == 1
     assert calls["fallback"] == 0
 

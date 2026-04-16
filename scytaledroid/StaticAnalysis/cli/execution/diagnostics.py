@@ -288,8 +288,8 @@ def _render_diagnostic_app_summary(
 
         def _icon(ok: bool, *, warn: bool = False) -> str:
             if ok:
-                return "✅"
-            return "⚠️" if warn else "❌"
+                return "✔"
+            return "⚠" if warn else "✖"
 
         print("\nDiagnostic — Summary")
         print(
@@ -307,7 +307,7 @@ def _render_diagnostic_app_summary(
         if warn_count:
             print(f"Warnings: {_icon(False, warn=True)} {warn_count}")
         else:
-            print("Warnings: ✅ 0")
+            print("Warnings: ✔ 0")
 
         print("\nDiagnostic — Per-app summary")
         table_utils.render_table(headers, rows)

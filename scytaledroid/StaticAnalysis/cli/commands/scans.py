@@ -7,7 +7,7 @@ from .models import Command, SelectionMode
 SCAN_COMMANDS: tuple[Command, ...] = (
     Command(
         id="1",
-        title="Full analysis",
+        title="Run Static Pipeline (Full)",
         description="Run complete static analysis with full detector coverage",
         kind="scan",
         profile="full",
@@ -17,7 +17,7 @@ SCAN_COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         id="2",
-        title="Lightweight scan",
+        title="Run Static Pipeline (Fast)",
         description="Run core detectors for quick MASVS/risk coverage",
         kind="scan",
         profile="lightweight",

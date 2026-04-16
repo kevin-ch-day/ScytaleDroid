@@ -26,7 +26,7 @@ from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
-from ..persistence.run_summary import finalize_open_static_runs
+from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .scan_identity_helpers import (
@@ -316,6 +316,41 @@ def execute_scan(
             failures.append(message)
             log.warning(message, category="static")
             continue
+        if not params.dry_run and persistence_ready and not app_result.static_run_id:
+            try:
+                app_result.static_run_id = create_static_run_ledger(
+                    package_name=group.package_name,
+                    session_stamp=params.session_stamp or "",
+                    session_label=params.session_label or params.session_stamp or "",
+                    canonical_action=params.canonical_action,
+                    scope_label=params.scope_label or selection.label,
+                    category=app_result.category,
+                    profile=params.profile_label,
+                    display_name=app_result.app_label,
+                    version_name=app_result.version_name,
+                    version_code=app_result.version_code,
+                    min_sdk=app_result.min_sdk,
+                    target_sdk=app_result.target_sdk,
+                    sha256=app_result.base_apk_sha256,
+                    base_apk_sha256=app_result.base_apk_sha256,
+                    artifact_set_hash=app_result.artifact_set_hash,
+                    run_signature=app_result.run_signature,
+                    run_signature_version=app_result.run_signature_version,
+                    identity_valid=app_result.identity_valid,
+                    identity_error_reason=app_result.identity_error_reason,
+                    config_hash=getattr(params, "config_hash", None),
+                    pipeline_version=getattr(params, "analysis_version", None),
+                    analysis_version=getattr(params, "analysis_version", None),
+                    catalog_versions=getattr(params, "catalog_versions", None),
+                    study_tag=getattr(params, "study_tag", None),
+                    run_started_utc=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    dry_run=False,
+                )
+            except Exception:
+                log.warning(
+                    f"Failed to create STARTED static_run ledger for {group.package_name}",
+                    category="static",
+                )
         last_report_for_app: StaticAnalysisReport | None = None
         if display_name or group.package_name:
             progress.flush_line()

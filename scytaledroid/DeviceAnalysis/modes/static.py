@@ -11,8 +11,8 @@ class StaticProfile(StrEnum):
     @property
     def label(self) -> str:
         return {
-            StaticProfile.FULL: "Full analysis",
-            StaticProfile.LIGHTWEIGHT: "Accelerated analysis",
+            StaticProfile.FULL: "Run Static Pipeline (Full)",
+            StaticProfile.LIGHTWEIGHT: "Run Static Pipeline (Fast)",
         }[self]
 
     @property

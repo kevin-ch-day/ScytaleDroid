@@ -47,6 +47,7 @@ def _make_group(tmp_path: Path, *, package_name: str, harvest_manifest: dict[str
 def _configure_scan_flow(monkeypatch, *, calls: list[str]) -> None:
     monkeypatch.setattr(scan_flow, "load_display_name_map", lambda _groups: {})
     monkeypatch.setattr(scan_flow, "finalize_open_static_runs", lambda *_a, **_k: 0)
+    monkeypatch.setattr(scan_flow, "create_static_run_ledger", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_app_start", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_app_completion", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_resource_warnings", lambda *_a, **_k: None)
@@ -179,3 +180,51 @@ def test_classify_static_contract_uses_harvest_authority() -> None:
     assert "HARVEST_MANIFEST_MISSING" in reasons
     assert "HARVEST_CAPTURE_PARTIAL" in reasons
     assert "HARVEST_RESEARCH_INELIGIBLE" in reasons
+
+
+def test_execute_scan_creates_started_static_run_ledger_before_scan(monkeypatch, tmp_path: Path) -> None:
+    calls: list[str] = []
+    ledger_calls: list[dict[str, object]] = []
+    _configure_scan_flow(monkeypatch, calls=calls)
+    monkeypatch.setattr(
+        scan_flow,
+        "create_static_run_ledger",
+        lambda **kwargs: ledger_calls.append(kwargs) or 321,
+    )
+    group = _make_group(
+        tmp_path,
+        package_name="com.example.started",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-visible",
+        paper_grade_requested=False,
+        dry_run=False,
+        persistence_ready=True,
+    )
+
+    outcome = scan_flow.execute_scan(
+        ScopeSelection(scope="app", label="Example", groups=(group,)),
+        params,
+        tmp_path,
+    )
+
+    assert len(ledger_calls) == 1
+    assert ledger_calls[0]["package_name"] == "com.example.started"
+    assert ledger_calls[0]["session_stamp"] == "sess-visible"
+    assert ledger_calls[0]["scope_label"] == "Example"
+    assert outcome.results[0].static_run_id == 321

@@ -8,12 +8,15 @@ cards are discoverable via menu actions rather than always-on panels.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.Utils.DisplayUtils import (
     colors,
@@ -47,6 +50,7 @@ def _status_badge(label: str, tone: str = "info") -> str:
         "success": palette.success,
         "warning": palette.warning,
         "error": palette.error,
+        "blocked": palette.blocked,
         "info": palette.info,
     }
     style = style_map.get(tone, palette.info)
@@ -99,7 +103,7 @@ def _root_badge(root_state: str | None) -> str:
     if normalised == "YES":
         tone = "success"
     elif normalised == "NO":
-        tone = "warning"
+        tone = "info"
     else:
         tone = "info"
     return _status_badge(normalised, tone)
@@ -266,6 +270,102 @@ def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
     return messages
 
 
+def _safe_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
+    if not serial:
+        return {}
+    root = artifact_store.legacy_harvest_root() / serial
+    if not root.exists():
+        return {}
+    session_dirs = sorted((path for path in root.iterdir() if path.is_dir()), key=lambda path: path.name)
+    if not session_dirs:
+        return {}
+    session_dir = session_dirs[-1]
+    manifests = list(session_dir.rglob("harvest_package_manifest.json"))
+    blocked_policy = 0
+    blocked_scope = 0
+    executed = 0
+    for manifest_path in manifests:
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        planning = payload.get("planning") if isinstance(payload, dict) else {}
+        reason = str(planning.get("preflight_reason") or "").strip()
+        if reason == "policy_non_root":
+            blocked_policy += 1
+        elif reason:
+            blocked_scope += 1
+        else:
+            executed += 1
+    receipts_root = artifact_store.harvest_receipts_root() / session_dir.name
+    receipt_count = len(list(receipts_root.glob("*.json"))) if receipts_root.exists() else 0
+    return {
+        "session_label": session_dir.name,
+        "executed": executed,
+        "blocked_policy": blocked_policy,
+        "blocked_scope": blocked_scope,
+        "manifest_count": len(manifests),
+        "receipt_count": receipt_count,
+        "artifacts_root": artifact_store.repo_relative_path(session_dir),
+        "receipts_root": artifact_store.repo_relative_path(receipts_root) if receipts_root.exists() else None,
+    }
+
+
+def _compute_pipeline_state(serial: str | None) -> dict[str, object]:
+    state = {
+        "inventoried": None,
+        "in_scope": None,
+        "policy_eligible": None,
+        "scheduled": None,
+        "harvested": None,
+        "persisted": None,
+        "blocked_policy": None,
+        "blocked_scope": None,
+    }
+    if not serial:
+        return state
+    try:
+        from scytaledroid.DeviceAnalysis import harvest
+        from scytaledroid.DeviceAnalysis.inventory.snapshot_io import load_latest_inventory
+
+        snapshot = load_latest_inventory(serial)
+        packages = snapshot.get("packages") if isinstance(snapshot, dict) else None
+        if isinstance(packages, list):
+            rows = harvest.build_inventory_rows(packages)
+            plan = harvest.build_harvest_plan(rows, include_system_partitions=False)
+            scheduled = sum(1 for pkg in plan.packages if not pkg.skip_reason)
+            blocked_policy = sum(1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root")
+            blocked_scope = sum(1 for pkg in plan.packages if pkg.skip_reason and pkg.skip_reason != "policy_non_root")
+            state.update(
+                {
+                    "inventoried": len(rows),
+                    "in_scope": len(plan.packages),
+                    "policy_eligible": scheduled,
+                    "scheduled": scheduled,
+                    "blocked_policy": blocked_policy,
+                    "blocked_scope": blocked_scope,
+                }
+            )
+    except Exception:
+        pass
+
+    harvest_overview = _load_latest_harvest_overview(serial)
+    if harvest_overview:
+        state["harvested"] = _safe_int(harvest_overview.get("executed"))
+        state["persisted"] = _safe_int(harvest_overview.get("receipt_count"))
+        state["latest_harvest"] = harvest_overview
+    return state
+
+
 def _render_inventory_status(metadata: object) -> None:
     """Render a compact inventory status block with delta hints."""
 
@@ -398,6 +498,34 @@ def print_dashboard(
         print(f"Inventory: {status_label}")
         print(f"Last sync: {age_display} ago")
         print(f"Device Packages: {pkg_text}")
+        serial = active_details.get("serial") if isinstance(active_details, dict) else None
+        pipeline = _compute_pipeline_state(serial)
+        latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
+        print()
+        print("Pipeline State")
+        print("--------------")
+        print(f"Inventoried: {pipeline.get('inventoried') if pipeline.get('inventoried') is not None else '—'}")
+        print(f"In scope: {pipeline.get('in_scope') if pipeline.get('in_scope') is not None else '—'}")
+        print(
+            f"Policy eligible: {pipeline.get('policy_eligible') if pipeline.get('policy_eligible') is not None else '—'}"
+        )
+        print(f"Scheduled: {pipeline.get('scheduled') if pipeline.get('scheduled') is not None else '—'}")
+        print(f"Harvested: {pipeline.get('harvested') if pipeline.get('harvested') is not None else '—'}")
+        print(f"Persisted: {pipeline.get('persisted') if pipeline.get('persisted') is not None else '—'}")
+        print(f"Blocked (Policy): {pipeline.get('blocked_policy') if pipeline.get('blocked_policy') is not None else '—'}")
+        print(f"Blocked (Scope): {pipeline.get('blocked_scope') if pipeline.get('blocked_scope') is not None else '—'}")
+        if isinstance(latest_harvest, dict):
+            session_label = latest_harvest.get("session_label") or "unknown"
+            print()
+            print("Evidence")
+            print("--------")
+            print(f"Latest harvest: {session_label}")
+            artifacts_root = latest_harvest.get("artifacts_root")
+            receipts_root = latest_harvest.get("receipts_root")
+            if artifacts_root:
+                print(f"Artifacts root: {artifacts_root}")
+            if receipts_root:
+                print(f"Receipts root: {receipts_root}")
 
     # Device Analysis menu (sequential, no gaps)
     print()

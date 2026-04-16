@@ -424,6 +424,8 @@ def render_harvest_summary(
                 f"scope={selection.label!r} "
                 f"status={status} "
                 f"packages_total={metrics.total_packages} "
+                f"packages_executed={metrics.executed_packages} "
+                f"packages_blocked={metrics.blocked_packages} "
                 f"clean={metrics.packages_successful} "
                 f"partial={metrics.packages_with_partial_errors} "
                 f"failed={metrics.packages_failed} "
@@ -505,7 +507,9 @@ def render_harvest_summary(
             status_messages.status(
                 (
                     "packages: "
-                    f"{metrics.total_packages} "
+                    f"total={metrics.total_packages} "
+                    f"executed={metrics.executed_packages} "
+                    f"blocked={metrics.blocked_packages} "
                     f"(clean={metrics.packages_successful} "
                     f"partial={metrics.packages_with_partial_errors} "
                     f"failed={metrics.packages_failed})"
@@ -586,11 +590,15 @@ def render_harvest_summary(
         )
         _print_sample_focus(selection)
 
-    output_root = _run_output_root(harvest_result)
-    if output_root and not simple_mode:
+    artifacts_root = _run_artifacts_root(serial=serial, result=harvest_result)
+    receipts_root = _run_receipts_root(harvest_result)
+    if artifacts_root and not simple_mode:
         print()
         print(status_messages.status("Artifacts saved under:", level="info"))
-        print(status_messages.status(f"  {output_root}", level="info"))
+        print(status_messages.status(f"  {artifacts_root}", level="info"))
+        if receipts_root:
+            print(status_messages.status("Receipts saved under:", level="info"))
+            print(status_messages.status(f"  {receipts_root}", level="info"))
         if not quiet_mode:
             shown = 0
             for package in harvest_result.packages:
@@ -623,7 +631,8 @@ def render_harvest_summary(
             selection_label=selection.label,
             metrics=metrics,
             pull_mode=pull_mode,
-            output_root=normalise_local_path(Path(output_root)) if output_root else None,
+            output_root=normalise_local_path(Path(artifacts_root)) if artifacts_root else None,
+            receipts_root=normalise_local_path(Path(receipts_root)) if receipts_root else None,
             preflight_skips=metrics.preflight_skips,
             runtime_skips=metrics.runtime_skips,
             policy_filtered=plan.policy_filtered,
@@ -672,7 +681,7 @@ def render_harvest_summary(
         _log_harvest_summary(
             harvest_result,
             no_new,
-            output_root,
+            artifacts_root,
             metadata,
             pull_mode,
             metrics.total_packages,
@@ -733,16 +742,24 @@ def _build_summary_card_lines(
 
     package_pairs = _format_breakdown_pairs(
         [
-            (metrics.packages_successful, "clean"),
-            (metrics.packages_with_partial_errors, "partial issues"),
-            (metrics.packages_failed, "failed"),
-            (metrics.packages_skipped_runtime, "runtime skipped"),
+            (metrics.executed_packages, "executed"),
             (metrics.blocked_packages, "blocked"),
         ]
     )
     lines.append(
         _format_card_line("Packages", f"{metrics.total_packages} total", package_pairs)
     )
+
+    outcome_pairs = _format_breakdown_pairs(
+        [
+            (metrics.packages_successful, "clean"),
+            (metrics.packages_with_partial_errors, "partial issues"),
+            (metrics.packages_failed, "failed"),
+            (metrics.packages_skipped_runtime, "runtime skipped"),
+        ]
+    )
+    if outcome_pairs:
+        lines.append(_format_card_line("Results", "executed outcomes", outcome_pairs))
 
     if metrics.planned_artifacts:
         artifact_value = f"{metrics.artifacts_written}/{metrics.planned_artifacts} saved"
@@ -1093,11 +1110,17 @@ def _package_dest_dir(package: PackageHarvestResult) -> str | None:
     return None
 
 
-def _run_output_root(result: HarvestResult) -> str | None:
+def _run_receipts_root(result: HarvestResult) -> str | None:
     if not result.run_timestamp:
         return None
     base = artifact_store.harvest_receipts_root() / result.run_timestamp
     return str(base)
+
+
+def _run_artifacts_root(*, serial: str | None, result: HarvestResult) -> str | None:
+    if not serial or not result.run_timestamp:
+        return None
+    return str(artifact_store.legacy_harvest_root() / serial / result.run_timestamp)
 
 
 def _packages_without_writes(

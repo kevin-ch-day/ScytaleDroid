@@ -43,7 +43,8 @@ LEFT JOIN (
   ) latest
     ON latest.max_id = rs1.id
 ) rs
-  ON LOWER(rs.package_name) = LOWER(ar.package_name);
+  ON LOWER(CONVERT(rs.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+   = LOWER(CONVERT(ar.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci;
 """
 
 __all__ = [
@@ -125,7 +126,9 @@ SELECT
   ds.device_serial,
   ds.grade
 FROM dynamic_sessions ds
-LEFT JOIN apps a ON a.package_name = ds.package_name;
+LEFT JOIN apps a
+  ON LOWER(CONVERT(a.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+   = LOWER(CONVERT(ds.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci;
 """
 
 __all__ += ["CREATE_V_RUN_IDENTITY"]

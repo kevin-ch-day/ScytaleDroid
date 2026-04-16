@@ -243,7 +243,7 @@ def _precheck_required_packages(
             print(f"- {pkg}{suffix}")
     if blocked:
         print()
-        print(status_messages.status("Present but blocked by policy (non-root paths):", level="warn"))
+        print(status_messages.status("Present but blocked by policy (non-root paths):", level="blocked"))
         for pkg in blocked:
             label = pkg_labels.get(pkg, "")
             suffix = f" ({label})" if label else ""
@@ -570,7 +570,7 @@ def _render_scope_table(
     mode_label = "root" if is_rooted else "non-root"
     print()
     print("----------------------------")
-    print("Pull APKs -- Status")
+    print("Execute Harvest -- Status")
     print("----------------------------")
     candidates = len(rows)
     eligible = candidates if is_rooted else sum(

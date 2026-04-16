@@ -166,19 +166,20 @@ def _render_db_masvs_summary() -> None:
             )
             return
         summary = None
+        summary_label = "run_id"
         session_stamp = ctx.session_stamp if ctx and ctx.session_stamp else None
         if session_stamp:
-            run_map = load_run_map(session_stamp)
-            static_ids = extract_static_run_ids(run_map)
+            static_ids = _resolve_static_run_ids(session_stamp)
             if static_ids:
                 summary = fetch_db_masvs_summary_static_many(static_ids)
+                summary_label = "static_run_id"
         if summary is None:
             summary = fetch_db_masvs_summary()
         if not summary:
             return
         run_id, rows = summary
         print()
-        print(f"DB MASVS Summary (run_id={run_id})")
+        print(f"DB MASVS Summary ({summary_label}={run_id})")
         print("MASVS matrix totals (area rollup)")
         print("Area       High  Med   Low   Info  Status  Worst CVSS                Avg  Bands")
         no_data = True

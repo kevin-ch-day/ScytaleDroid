@@ -120,6 +120,119 @@ def test_collect_secret_stats_aggregates_samples():
 
 
 @pytest.mark.unit
+def test_render_run_results_prints_context_sections_and_hides_runtime_wall(monkeypatch, capsys, tmp_path):
+    now = datetime.now(UTC)
+
+    def _make_app(index: int) -> AppRunResult:
+        manifest = SimpleNamespace(app_label=f"Example {index}", package_name=f"pkg.example.{index}")
+        report = SimpleNamespace(
+            manifest=manifest,
+            exported_components=SimpleNamespace(providers=["com.example.Provider"]),
+            detector_results=[
+                SimpleNamespace(
+                    findings=[SimpleNamespace(severity_gate=SimpleNamespace(value="P0"))]
+                )
+            ],
+            file_path=f"/tmp/example-{index}.apk",
+            metadata={"duration_seconds": 0.5},
+        )
+        artifact = ArtifactOutcome(
+            label="base.apk",
+            report=report,
+            severity=Counter(),
+            duration_seconds=0.5,
+            saved_path=str(tmp_path / f"report-{index}.json"),
+            started_at=now,
+            finished_at=now,
+            metadata={},
+        )
+        return AppRunResult(
+            package_name=f"pkg.example.{index}",
+            category="Test",
+            artifacts=[artifact],
+            app_label=f"Example {index}",
+        )
+
+    outcome = RunOutcome(
+        results=[_make_app(i) for i in range(6)],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
+        base_dir=tmp_path,
+    )
+    params = RunParameters(
+        profile="full",
+        scope="all",
+        scope_label="All apps",
+        dry_run=True,
+        verbose_output=False,
+    )
+
+    monkeypatch.setattr(results, "_derive_highlight_stats", lambda *_a, **_k: {"providers": 5, "nsc_guard": 0, "secrets_suppressed": 0})
+    monkeypatch.setattr(results, "_build_permission_profile", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_component_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_build_static_risk_row", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_secret_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_collect_masvs_profile", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_finding_signatures", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_bulk_trend_deltas", lambda *_a, **_k: [])
+    monkeypatch.setattr(results, "_apply_display_names", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_persist_cohort_rollup", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_post_run_views", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_cross_app_insights", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_db_masvs_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_db_severity_table", lambda *_a, **_k: False)
+    monkeypatch.setattr(results, "_render_persistence_footer", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_bucketed_session_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(AppRunResult, "base_artifact_outcome", lambda self: self.artifacts[0], raising=False)
+    monkeypatch.setattr(
+        results,
+        "_collect_static_output_context",
+        lambda *_a, **_k: {
+            "session_id": "sess-ctx",
+            "device_serial": "ZY22JK89DR",
+            "snapshot_id": 26,
+            "scope_analyzed": "Harvested APK artifacts only",
+            "mode_label": "Canonical / non-root",
+            "analyzed_apps": 6,
+            "planned_artifacts": 6,
+            "observed_artifacts": 6,
+            "acquisition": {
+                "inventoried": 546,
+                "in_scope": 546,
+                "policy_eligible": 117,
+                "scheduled": 117,
+                "harvested": 117,
+                "persisted": 117,
+                "blocked_policy": 411,
+                "blocked_scope": 18,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        results,
+        "render_app_result",
+        lambda *_a, **_k: (
+            ["line"],
+            {"baseline": {"findings": []}},
+            {"High": 1, "Medium": 2, "Low": 3, "Info": 0},
+        ),
+    )
+
+    results.render_run_results(outcome, params)
+    out = capsys.readouterr().out
+
+    assert "Stage Context" in out
+    assert "Acquisition Counters" in out
+    assert "Device reality" in out
+    assert "Artifact Completeness" in out
+    assert "Interpretation" in out
+    assert "Top Risk Driver" in out
+    assert "Blocked policy  : 411" in out
+    assert "Example 0 (runtime" not in out
+
+
+@pytest.mark.unit
 def test_compute_trend_delta_returns_differences(monkeypatch):
     previous = {"session_stamp": "20251020-000000", "high": 1, "med": 2, "low": 3}
 

@@ -911,7 +911,7 @@ def run_guided_dataset_run(
     if not scoped_groups:
         print(
             status_messages.status(
-                "No APK artifacts available for Research Dataset Alpha. Pull APKs or use Custom package name.",
+                "No APK artifacts available for Research Dataset Alpha. Execute Harvest or use Custom package name.",
                 level="warn",
             )
         )

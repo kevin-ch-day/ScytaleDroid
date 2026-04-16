@@ -50,6 +50,7 @@ from .artifacts import (
     write_baseline_json_artifact,
     write_manifest_evidence,
 )
+from .artifact_publication import publish_persisted_artifacts
 from .db_verification import (
     _render_db_masvs_summary,
     _render_db_severity_table,
@@ -72,6 +73,224 @@ from .view import DetailBuffer
 
 # Back-compat: tests and older callers patch these names.
 _REQUIRED_PAPER_ARTIFACTS = REQUIRED_PAPER_ARTIFACTS
+
+
+def _first_text(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _first_int(*values: object) -> int | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except Exception:
+            continue
+    return None
+
+
+def _load_json_mapping(path_value: str | None) -> Mapping[str, object]:
+    if not path_value:
+        return {}
+    try:
+        path = Path(path_value)
+        if not path.exists():
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, Mapping) else {}
+    except Exception:
+        return {}
+
+
+def _collect_static_output_context(
+    outcome: RunOutcome,
+    params: RunParameters,
+    *,
+    artifact_count: int,
+) -> dict[str, object]:
+    session_id = params.session_label or params.session_stamp or "n/a"
+    analyzed_apps = len(outcome.results)
+    planned_artifacts = int(outcome.total_artifacts or artifact_count)
+    observed_artifacts = int(artifact_count)
+    first_group = outcome.scope.groups[0] if getattr(outcome.scope, "groups", ()) else None
+    group_manifest = (
+        first_group.harvest_manifest
+        if first_group is not None and isinstance(getattr(first_group, "harvest_manifest", None), Mapping)
+        else {}
+    )
+    first_manifest_path = (
+        getattr(first_group, "harvest_manifest_path", None)
+        if first_group is not None
+        else None
+    )
+    result_manifest = _load_json_mapping(getattr(outcome.results[0], "harvest_manifest_path", None)) if outcome.results else {}
+    manifest = group_manifest or result_manifest
+    package_payload = manifest.get("package") if isinstance(manifest, Mapping) else {}
+    device_serial = _first_text(
+        package_payload.get("device_serial") if isinstance(package_payload, Mapping) else None,
+    )
+    snapshot_id = _first_int(
+        package_payload.get("snapshot_id") if isinstance(package_payload, Mapping) else None,
+    )
+    snapshot_captured_at = _first_text(
+        package_payload.get("snapshot_captured_at") if isinstance(package_payload, Mapping) else None,
+    )
+
+    harvested_packages = analyzed_apps
+    persisted_packages = sum(
+        1
+        for app in outcome.results
+        if str(getattr(app, "harvest_persistence_status", "") or "").strip().lower()
+        not in {"", "not_requested"}
+    )
+    if persisted_packages == 0 and analyzed_apps:
+        persisted_packages = analyzed_apps
+
+    acquisition = {
+        "inventoried": None,
+        "in_scope": None,
+        "policy_eligible": None,
+        "scheduled": None,
+        "harvested": harvested_packages,
+        "persisted": persisted_packages,
+        "blocked_policy": None,
+        "blocked_scope": None,
+    }
+
+    non_root = False
+    if device_serial and params.scope == "all":
+        try:
+            from scytaledroid.DeviceAnalysis import harvest
+            from scytaledroid.DeviceAnalysis.inventory.snapshot_io import load_latest_inventory
+
+            inventory_snapshot = load_latest_inventory(device_serial)
+            inventory_snapshot_id = _first_int(
+                inventory_snapshot.get("snapshot_id") if isinstance(inventory_snapshot, Mapping) else None,
+            )
+            if inventory_snapshot_id is not None and snapshot_id is not None and inventory_snapshot_id == snapshot_id:
+                packages = inventory_snapshot.get("packages") if isinstance(inventory_snapshot, Mapping) else None
+                if isinstance(packages, Sequence) and not isinstance(packages, (str, bytes)):
+                    rows = harvest.build_inventory_rows(packages)
+                    plan = harvest.build_harvest_plan(rows, include_system_partitions=False)
+                    scheduled = sum(1 for pkg in plan.packages if not pkg.skip_reason)
+                    blocked_policy = sum(1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root")
+                    blocked_scope = sum(
+                        1 for pkg in plan.packages if pkg.skip_reason and pkg.skip_reason != "policy_non_root"
+                    )
+                    acquisition.update(
+                        {
+                            "inventoried": len(rows),
+                            "in_scope": len(plan.packages),
+                            "policy_eligible": scheduled,
+                            "scheduled": scheduled,
+                            "blocked_policy": blocked_policy,
+                            "blocked_scope": blocked_scope,
+                        }
+                    )
+                    non_root = blocked_policy > 0
+        except Exception:
+            pass
+
+    mode_tokens = ["Canonical"]
+    if non_root:
+        mode_tokens.append("non-root")
+
+    return {
+        "session_id": session_id,
+        "device_serial": device_serial,
+        "snapshot_id": snapshot_id,
+        "snapshot_captured_at": snapshot_captured_at,
+        "scope_analyzed": "Harvested APK artifacts only",
+        "mode_label": " / ".join(mode_tokens),
+        "analyzed_apps": analyzed_apps,
+        "planned_artifacts": planned_artifacts,
+        "observed_artifacts": observed_artifacts,
+        "acquisition": acquisition,
+        "has_group_manifest": bool(manifest or first_manifest_path),
+    }
+
+
+def _format_counter_value(value: object) -> str:
+    return "—" if value is None else str(value)
+
+
+def _render_static_output_context(context: Mapping[str, object]) -> None:
+    acquisition = context.get("acquisition") if isinstance(context.get("acquisition"), Mapping) else {}
+    print("Stage Context")
+    print("-------------")
+    print("Stage           : Static Analysis")
+    print("Purpose         : Analyze harvested APK artifacts only")
+    print(f"Session ID      : {context.get('session_id') or 'n/a'}")
+    print(f"Device serial   : {context.get('device_serial') or 'n/a'}")
+    print(f"Inventory snap  : {_format_counter_value(context.get('snapshot_id'))}")
+    print(f"Scope analyzed  : {context.get('scope_analyzed') or 'n/a'}")
+    print(f"Mode            : {context.get('mode_label') or 'n/a'}")
+    print(f"Analyzed apps   : {_format_counter_value(context.get('analyzed_apps'))}")
+    print(f"Artifacts       : {_format_counter_value(context.get('observed_artifacts'))}")
+    print()
+    print("Acquisition Counters")
+    print("--------------------")
+    ordered_keys = (
+        ("Inventoried", "inventoried"),
+        ("In scope", "in_scope"),
+        ("Policy eligible", "policy_eligible"),
+        ("Scheduled", "scheduled"),
+        ("Harvested", "harvested"),
+        ("Persisted", "persisted"),
+        ("Blocked policy", "blocked_policy"),
+        ("Blocked scope", "blocked_scope"),
+    )
+    for label, key in ordered_keys:
+        print(f"{label:<16}: {_format_counter_value(acquisition.get(key))}")
+    print("Note            : Static analysis only uses harvested/persisted artifacts.")
+    print()
+    print("Device reality")
+    print("--------------")
+    print(f"Total inventoried packages : {_format_counter_value(acquisition.get('inventoried'))}")
+    print()
+    print("Acquired for analysis")
+    print("---------------------")
+    print(f"Harvested packages        : {_format_counter_value(acquisition.get('harvested'))}")
+    print(f"Persisted packages        : {_format_counter_value(acquisition.get('persisted'))}")
+    print(f"Analyzed applications     : {_format_counter_value(context.get('analyzed_apps'))}")
+    print(f"Analyzed artifacts        : {_format_counter_value(context.get('observed_artifacts'))}")
+    print()
+    print("Not analyzed")
+    print("------------")
+    print(f"Blocked by policy         : {_format_counter_value(acquisition.get('blocked_policy'))}")
+    print(f"Blocked by scope          : {_format_counter_value(acquisition.get('blocked_scope'))}")
+    print()
+
+
+def _render_artifact_completeness(
+    *,
+    planned_artifacts: int,
+    observed_artifacts: int,
+) -> None:
+    planned = max(int(planned_artifacts or 0), 0)
+    observed = max(int(observed_artifacts or 0), 0)
+    completeness_pct = int(round((observed / planned) * 100.0)) if planned else 0
+    drift_label = "none" if planned == observed else f"planned={planned} observed={observed}"
+    print("Artifact Completeness")
+    print("---------------------")
+    print(f"Planned artifacts  : {planned}")
+    print(f"Observed artifacts : {observed}")
+    print(f"Completeness       : {observed}/{planned} ({completeness_pct}%)")
+    print(f"Drift              : {drift_label}")
+    print()
+
+
+def _render_static_interpretation_footer() -> None:
+    print("Interpretation")
+    print("--------------")
+    print("This static analysis applies to harvested APK artifacts only.")
+    print("Blocked or unreadable packages were not statically analyzed here.")
+    print("Composite grades summarize static structural exposure, not runtime behavior.")
+    print()
 
 
 def write_baseline_json(payload: dict[str, object], *, package: str, profile: str, scope: str) -> Path:
@@ -313,6 +532,16 @@ def _render_run_results_impl(
             width=90,
         )
     )
+    static_output_context = _collect_static_output_context(
+        outcome,
+        params,
+        artifact_count=artifact_count,
+    )
+    _render_static_output_context(static_output_context)
+    _render_artifact_completeness(
+        planned_artifacts=int(static_output_context.get("planned_artifacts") or artifact_count),
+        observed_artifacts=int(static_output_context.get("observed_artifacts") or artifact_count),
+    )
     if len(outcome.results) == 1:
         app = outcome.results[0]
         version_name = app.version_name or "?"
@@ -394,6 +623,7 @@ def _render_run_results_impl(
                     pass
     p0_count = 0
     example_provider = None
+    example_provider_package = None
     for app_result in outcome.results:
         base_report = app_result.base_report()
         if base_report is None:
@@ -402,6 +632,7 @@ def _render_run_results_impl(
             providers = getattr(base_report.exported_components, "providers", ())
             if providers:
                 example_provider = str(providers[0])
+                example_provider_package = app_result.app_label or app_result.package_name
         for result in getattr(base_report, "detector_results", ()) or []:
             for finding in getattr(result, "findings", ()) or []:
                 sev = getattr(getattr(finding, "severity_gate", None), "value", None)
@@ -417,11 +648,19 @@ def _render_run_results_impl(
         print(status_messages.highlight("; ".join(highlight_tokens), show_icon=True))
     if p0_count and example_provider:
         print()
-        print("Top issue (P0)")
+        print("Top Risk Driver")
+        print("----------------")
         providers_count = highlight_stats.get("providers", 0)
-        print(f"  Exported providers without strong guards: {providers_count}")
-        print(f"  Example: {example_provider} (exported, no read/write permission)")
-        print("  Next: View options → [1] Summary details → Exported components")
+        print("Issue              : Exported providers without strong guards")
+        print(f"Count              : {providers_count}")
+        print(
+            "Why it matters     : Unprotected exported providers increase cross-app access risk "
+            "and weaken component isolation."
+        )
+        if example_provider_package:
+            print(f"Example package    : {example_provider_package}")
+        print(f"Example component  : {example_provider}")
+        print("Recommended next action: View options → [1] Summary details → Exported components")
     if params.dry_run:
         executed = outcome.completed_artifacts
         discovered = outcome.total_artifacts
@@ -582,7 +821,10 @@ def _render_run_results_impl(
                     baseline_hits = len(findings_payload)
         baseline_rule_hits_total += baseline_hits
 
-        if compact_mode:
+        show_compact_pipeline_lines = not (
+            compact_mode and params.scope in {"all", "profile"} and len(outcome.results) > 5
+        )
+        if compact_mode and show_compact_pipeline_lines:
             if manifest and manifest.app_label:
                 display_name = manifest.app_label
             elif manifest and manifest.package_name:
@@ -806,28 +1048,31 @@ def _render_run_results_impl(
         elif persist_enabled:
             consecutive_missing_run_ids = 0
         if persist_enabled and app_result.static_run_id:
-            try:
-                saved_path = write_baseline_json(
-                    payload,
-                    package=app_result.package_name,
-                    profile=params.profile,
-                    scope=params.scope,
-                )
-            except Exception as exc:
-                saved_path = None
-                warning = f"Failed to write baseline JSON for {app_result.package_name}: {exc}"
-                print(status_messages.status(warning, level="warn"))
-            try:
-                dynamic_plan_path = write_dynamic_plan_json(
-                    base_report,
-                    payload,
-                    package=app_result.package_name,
-                    profile=params.profile,
-                    scope=params.scope,
-                    static_run_id=app_result.static_run_id,
-                )
-            except Exception:
-                dynamic_plan_path = None
+            publication = publish_persisted_artifacts(
+                base_report=base_report,
+                payload=payload,
+                package_name=app_result.package_name,
+                static_run_id=app_result.static_run_id,
+                profile=params.profile,
+                scope=params.scope,
+                report_path=Path(base_artifact.saved_path) if base_artifact and base_artifact.saved_path else None,
+                paper_grade_requested=bool(params.paper_grade_requested),
+                required_paper_artifacts=REQUIRED_PAPER_ARTIFACTS,
+                ended_at_utc=ended_at_utc,
+                abort_signal=abort_signal,
+                write_baseline_json_fn=write_baseline_json,
+                write_dynamic_plan_json_fn=write_dynamic_plan_json,
+                governance_ready_fn=governance_ready,
+                write_manifest_evidence_fn=write_manifest_evidence,
+                build_artifact_registry_entries_fn=build_artifact_registry_entries,
+                record_artifacts_fn=record_artifacts,
+                run_sql_fn=core_q.run_sql,
+                refresh_static_run_manifest_fn=refresh_static_run_manifest,
+                finalize_static_run_fn=finalize_static_run,
+            )
+            saved_path = publication.saved_path
+            dynamic_plan_path = publication.dynamic_plan_path
+            persistence_errors.extend(publication.warnings)
 
         if saved_path:
             baseline_written_count += 1
@@ -844,109 +1089,13 @@ def _render_run_results_impl(
             except Exception:
                 app_result.dynamic_plan_path = None
 
-        if persist_enabled and app_result.static_run_id:
-            artifacts: list[dict[str, object]] = []
-            now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-            paper_grade_requested = bool(params.paper_grade_requested)
-            grade = "PAPER_GRADE" if paper_grade_requested else "EXPERIMENTAL"
-            grade_reasons: list[str] = []
-            if paper_grade_requested:
-                gov_ready, gov_detail = governance_ready()
-                if not gov_ready:
-                    grade = "EXPERIMENTAL"
-                    grade_reasons.append("MISSING_GOVERNANCE")
-                    if gov_detail and gov_detail != "governance_missing":
-                        warning = f"Governance check failed: {gov_detail}"
-                        print(status_messages.status(warning, level="warn"))
-                    warning = (
-                        "Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)"
-                    )
-                    print(status_messages.status(warning, level="warn"))
-                    persistence_errors.append(warning)
-            manifest_evidence_path = write_manifest_evidence(
-                base_report,
-                package_name=app_result.package_name,
-                static_run_id=app_result.static_run_id,
-                generated_at_utc=now,
-            )
-            report_path = None
-            if base_artifact and base_artifact.saved_path:
-                report_path = Path(base_artifact.saved_path)
-            missing_required: list[str] = []
-            if grade == "PAPER_GRADE":
-                if not saved_path or not saved_path.exists():
-                    missing_required.append("static_baseline_json")
-                if not dynamic_plan_path or not dynamic_plan_path.exists():
-                    missing_required.append("static_dynamic_plan_json")
-                if not report_path or not report_path.exists():
-                    missing_required.append("static_report")
-                if not manifest_evidence_path or not manifest_evidence_path.exists():
-                    missing_required.append("manifest_evidence")
-            artifacts = build_artifact_registry_entries(
-                saved_path=saved_path,
-                dynamic_plan_path=dynamic_plan_path,
-                manifest_evidence_path=manifest_evidence_path,
-                report_path=report_path,
-                created_at_utc=now,
-            )
-            if artifacts:
-                record_artifacts(
-                    run_id=str(app_result.static_run_id),
-                    run_type="static",
-                    artifacts=artifacts,
-                    origin="host",
-                    pull_status="n/a",
-                )
-            if grade == "PAPER_GRADE":
-                try:
-                    rows = core_q.run_sql(
-                        """
-                        SELECT DISTINCT artifact_type
-                        FROM artifact_registry
-                        WHERE run_id=%s AND run_type='static'
-                        """,
-                        (str(app_result.static_run_id),),
-                        fetch="all",
-                    )
-                    registry_types = {str(row[0]) for row in rows or [] if row and row[0]}
-                except Exception:
-                    registry_types = set()
-                for artifact_type in REQUIRED_PAPER_ARTIFACTS:
-                    if artifact_type not in registry_types and artifact_type not in missing_required:
-                        missing_required.append(artifact_type)
-                if missing_required:
-                    warning = (
-                        f"Canonical-grade artifacts missing for static_run_id={app_result.static_run_id}: "
-                        + ", ".join(missing_required)
-                    )
-                    print(status_messages.status(warning, level="warn"))
-                    persistence_errors.append(warning)
-                    finalize_static_run(
-                        static_run_id=app_result.static_run_id,
-                        status="FAILED",
-                        ended_at_utc=ended_at_utc,
-                        abort_reason="missing_required_artifacts",
-                        abort_signal=abort_signal,
-                    )
-                    continue
-                manifest_ok = refresh_static_run_manifest(
-                    app_result.static_run_id,
-                    grade=grade,
-                    grade_reasons=grade_reasons,
-                )
-                if not manifest_ok:
-                    warning = (
-                        f"Failed to publish run_manifest.json for static_run_id={app_result.static_run_id}"
-                    )
-                    print(status_messages.status(warning, level="warn"))
-                    persistence_errors.append(warning)
-                    finalize_static_run(
-                        static_run_id=app_result.static_run_id,
-                        status="FAILED",
-                        ended_at_utc=ended_at_utc,
-                        abort_reason="manifest_write_failed",
-                        abort_signal=abort_signal,
-                    )
+        if (
+            persist_enabled
+            and app_result.static_run_id
+            and publication is not None
+            and publication.skip_remaining_processing
+        ):
+            continue
 
         if report_reference:
             report_reference_count += 1
@@ -1069,6 +1218,7 @@ def _render_run_results_impl(
                 level="info",
             )
         )
+    _render_static_interpretation_footer()
     print()
 
     session_stamp = params.session_stamp
@@ -1149,7 +1299,8 @@ def _render_run_results_impl(
         if compact_mode:
             print(
                 status_messages.status(
-                    "Per-app details hidden. Re-run with --verbose-output for full reports.",
+                    "Per-app pipeline diagnostics hidden in default output. "
+                    "Re-run with --verbose-output for full reports.",
                     level="info",
                 )
             )
@@ -1173,7 +1324,7 @@ def _render_run_results_impl(
             print(f"{'OK' if linkage_ok else 'FAIL'} linkage resolvable (run_map/session links)")
             if not linkage_ok:
                 print("    Fix: ensure run_map.json is written or static_session_run_links rows exist.")
-                actionable.append("Ensure run_map.json is written or session links exist (rerun Full analysis once).")
+                actionable.append("Ensure run_map.json is written or session links exist (rerun Run Static Pipeline (Full) once).")
             print(f"{'OK' if identity_ok else 'FAIL'} identity valid (artifact_set_hash computed)")
             ready = pipeline_version and linkage_ok and identity_ok
             print(f"Result: {'READY' if ready else 'NOT READY'}")

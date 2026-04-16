@@ -152,9 +152,9 @@ def render_plan_overview(resolution: PlanResolution) -> None:
     print("APK Harvest Plan")
     print("-" * 86)
     print(
-        f"Scope={selection.label} | candidates={candidate_count} | selected={selected_count} | "
-        f"policy_eligible={eligible_policy} | scheduled_in_scope={scheduled_packages} | "
-        f"blocked_by_policy={policy_blocked} | blocked_by_scope={blocked_scope} | "
+        f"Scope={selection.label} | inventoried={candidate_count} | in_scope={selected_count} | "
+        f"with_paths={eligible_policy} | policy_eligible={scheduled_packages} | "
+        f"blocked_policy={policy_blocked} | blocked_scope={blocked_scope} | "
         f"blocked_total={blocked_packages} | files≈{scheduled_files} | policy={policy}"
     )
     if delta_line:
@@ -168,7 +168,7 @@ def render_plan_overview(resolution: PlanResolution) -> None:
 
 
 def prompt_plan_action(resolution: PlanResolution) -> str:
-    print("1) Pull APKs (default)   - download APK splits + metadata")
+    print("1) Execute Harvest (default) - download APK splits + metadata")
     print("2) Preview plan          - dry run (list only)")
     print("0) Cancel")
     choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Select: ")
@@ -247,24 +247,24 @@ def report_profile_v3_requires_inventory_sync(summary: Mapping[str, object]) -> 
     total_changed = summary.get("total_changed")
     total_text = f"{int(total_changed)}" if isinstance(total_changed, int) else "some"
     print()
-    print("Inventory Sync Required")
+    print("Refresh Inventory Required")
     print("───────────────────────")
     print(
         status_messages.status(
-            "Structural cohort harvest requires a fresh inventory snapshot before pulling APKs.",
+            "Structural cohort harvest requires a fresh inventory snapshot before executing a harvest.",
             level="warn",
         )
     )
     print(
         status_messages.status(
-            f"Device packages changed since the last snapshot ({total_text} change(s)). Sync before pulling APKs.",
+            f"Device packages changed since the last snapshot ({total_text} change(s)). Refresh inventory before executing a harvest.",
             level="warn",
         )
     )
 
 
 def prompt_profile_v3_inventory_sync_now() -> bool:
-    return prompt_utils.prompt_yes_no("Sync inventory now before pulling structural cohort APKs?", default=True)
+    return prompt_utils.prompt_yes_no("Refresh inventory now before executing structural cohort harvest?", default=True)
 
 
 def report_inventory_sync_failure(exc: Exception) -> None:
@@ -445,8 +445,8 @@ def report_harvest_started(
 ) -> None:
     line = (
         "APK Harvest started • "
-        f"inventory={candidate_count} • selected={selected_count} • policy_eligible={policy_eligible} "
-        f"• scheduled_in_scope={scheduled} • blocked_policy={blocked_policy} • blocked_scope={blocked_scope} "
+        f"inventoried={candidate_count} • in_scope={selected_count} • with_paths={policy_eligible} "
+        f"• policy_eligible={scheduled} • blocked_policy={blocked_policy} • blocked_scope={blocked_scope} "
         f"• artifacts≈{artifacts} • policy={policy}"
     )
     if harvest_mode:

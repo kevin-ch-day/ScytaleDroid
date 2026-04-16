@@ -10,7 +10,15 @@ from .canonical import schema as canonical_schema
 from .dynamic import schema as dynamic_schema
 from .harvest import device_inventory, dynamic_loading
 from .permissions import governance_snapshot, permission_support
-from .views import CREATE_V_PAPER_DYNAMIC_COHORT_V1, CREATE_V_STATIC_HANDOFF_V1
+from .views import (
+    CREATE_V_PAPER_DYNAMIC_COHORT_V1,
+    CREATE_V_RUN_IDENTITY,
+    CREATE_V_RUN_OVERVIEW,
+    CREATE_V_STATIC_HANDOFF_V1,
+    CREATE_VW_LATEST_APK_PER_PACKAGE,
+    CREATE_VW_LATEST_PERMISSION_RISK,
+    CREATE_VW_PERMISSION_AUDIT_LATEST,
+)
 from .static_analysis import (
     risk_scores,
     static_findings,
@@ -113,6 +121,11 @@ def ordered_schema_statements() -> list[str]:
     statements.extend(list(getattr(analysis_schema, "_DDL_STATEMENTS", [])))
 
     # Canonical static-dynamic handoff view.
+    statements.append(CREATE_VW_LATEST_APK_PER_PACKAGE)
+    statements.append(CREATE_VW_LATEST_PERMISSION_RISK)
+    statements.append(CREATE_VW_PERMISSION_AUDIT_LATEST)
+    statements.append(CREATE_V_RUN_OVERVIEW)
+    statements.append(CREATE_V_RUN_IDENTITY)
     statements.append(CREATE_V_STATIC_HANDOFF_V1)
     statements.append(CREATE_V_PAPER_DYNAMIC_COHORT_V1)
 

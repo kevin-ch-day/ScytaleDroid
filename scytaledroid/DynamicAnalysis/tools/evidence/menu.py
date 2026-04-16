@@ -198,7 +198,7 @@ def evidence_cleanup_workspace(*, pause: bool = True) -> None:
     purge_batches = choice in ("4",)
 
     if delete_extra_valid and not freeze_ids:
-        print(status_messages.status("Blocked: freeze anchor not available; cannot safely identify out-of-dataset runs.", level="error"))
+        print(status_messages.status("Blocked: freeze anchor not available; cannot safely identify out-of-dataset runs.", level="blocked"))
         if pause:
             prompt_utils.press_enter_to_continue()
         return
@@ -653,7 +653,7 @@ def evidence_verify_freeze_immutability(*, pause: bool = True) -> None:
             prompt_utils.press_enter_to_continue()
         return
     if res.mismatches or res.missing:
-        print(status_messages.status(f"FAILED: mismatches={res.mismatches} missing={res.missing}", level="warn"))
+        print(status_messages.status(f"Freeze immutability failed: mismatches={res.mismatches} missing={res.missing}", level="error"))
         for issue in res.issues[:10]:
             rid = str(issue.get("run_id") or "")
             path = str(issue.get("path") or "")

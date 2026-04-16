@@ -160,7 +160,7 @@ def _show_summary() -> None:
     dyn_size = _dir_size_bytes(dyn_evidence)
     if dyn_size > 5 * 1024 * 1024 * 1024:
         hints.append(
-            "Dynamic evidence is large: consider cleanup of invalid/ghost runs (Workspace & Evidence -> Cleanup dynamic evidence workspace)."
+            "Dynamic evidence is large: consider cleanup of invalid/ghost runs (Evidence & Workspace -> Cleanup dynamic evidence workspace)."
         )
     if cache_size > 1024 * 1024 * 1024:
         hints.append("Caches exceed 1GB: clear output cache if disk space is tight.")
@@ -323,7 +323,7 @@ def workspace_menu() -> None:
             _show_dashboard()
             shown_dashboard = True
         print()
-        menu_utils.print_header("Workspace & Evidence Options")
+        menu_utils.print_header("Evidence & Workspace Options")
         items = [
             menu_utils.MenuOption("1", "Show workspace usage"),
             menu_utils.MenuOption("2", "Verify evidence packs (overview)"),

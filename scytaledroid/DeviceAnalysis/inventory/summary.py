@@ -32,21 +32,41 @@ def _format_delta_text(delta_value: int, *, first_snapshot: bool = False) -> str
 
 def render_sync_summary_box(result) -> None:
     """Render the completion summary for a sync (plain text, forensic style)."""
+    rows = getattr(result, "rows", None) or []
+    stats = getattr(result, "stats", None)
+    total_packages = int(getattr(stats, "total_packages", len(rows)) or len(rows))
+    stats_split_packages = getattr(stats, "split_packages", None)
     delta = getattr(result, "delta", None)
     first_snapshot = bool(getattr(result, "first_snapshot", False))
     new_count = getattr(delta, "new_count", 0) if delta else 0
     removed_count = getattr(delta, "removed_count", 0) if delta else 0
     updated_count = getattr(delta, "updated_count", 0) if delta else 0
-    net_count_delta = result.stats.total_packages - (result.previous_total or 0)
+    net_count_delta = total_packages - (getattr(result, "previous_total", 0) or 0)
+    elapsed_seconds = float(getattr(result, "elapsed_seconds", 0.0) or 0.0)
+    avg_rate = (total_packages / elapsed_seconds) if elapsed_seconds > 0 else 0.0
+    fallback_used = bool(getattr(result, "fallback_used", False))
 
-    formatter.print_header("Inventory Sync · RUN SUMMARY")
+    user_scope_candidates = 0
+    split_packages = int(stats_split_packages or 0)
+    if rows:
+        user_scope_candidates = sum(
+            1 for row in rows if str((row or {}).get("primary_path") or "").startswith("/data/")
+        )
+        if split_packages <= 0:
+            split_packages = sum(1 for row in rows if int((row or {}).get("split_count") or 1) > 1)
+
+    formatter.print_header("Refresh Inventory · RUN SUMMARY")
     print(
         formatter.format_kv_block(
             "[RUN]",
             {
                 "Snapshot": str(result.snapshot_path),
-                "Packages": f"{result.stats.total_packages}",
-                "Split APK packages": f"{result.stats.split_packages}",
+                "Snapshot ID": str(getattr(result, "snapshot_id", None) if getattr(result, "snapshot_id", None) is not None else "—"),
+                "Packages": f"{total_packages}",
+                "Split APK packages": f"{split_packages}",
+                "Avg rate": f"{avg_rate:.2f} pkg/s",
+                "Fallback mode": "enabled" if fallback_used else "disabled",
+                "User apps (candidates)": str(user_scope_candidates),
             },
         )
     )
@@ -60,7 +80,7 @@ def render_sync_summary_box(result) -> None:
                     f"{_format_delta_text(net_count_delta if not first_snapshot else 0, first_snapshot=first_snapshot)}"
                 ),
                 "App defs synced": f"{getattr(result, 'synced_app_definitions', 0)}",
-                "Scan duration": _format_duration(result.elapsed_seconds),
+                "Scan duration": _format_duration(elapsed_seconds),
             },
         )
     )

@@ -29,13 +29,14 @@ def run_inventory_snapshot_checks(
         """
         SELECT COUNT(*)
         FROM (
-            SELECT LOWER(a.package_name) AS pkg_lower,
+            SELECT LOWER(CONVERT(a.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci AS pkg_lower,
                    COUNT(DISTINCT a.package_name) AS variants_in_apps,
                    COUNT(DISTINCT i.package_name) AS variants_in_inventory
             FROM apps a
             LEFT JOIN device_inventory i
-              ON LOWER(i.package_name) = LOWER(a.package_name)
-            GROUP BY LOWER(a.package_name)
+              ON LOWER(CONVERT(i.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+                 = LOWER(CONVERT(a.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
+            GROUP BY LOWER(CONVERT(a.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
             HAVING COUNT(DISTINCT a.package_name) > 1
                 OR COUNT(DISTINCT i.package_name) > 1
         ) v

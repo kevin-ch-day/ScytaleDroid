@@ -16,6 +16,7 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     get_last_guard_decision,
     get_latest_inventory_metadata,
 )
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -34,7 +35,7 @@ def run_apk_pull(
         ui.report_no_device()
         return OperationResult.failure(
             status="FAILED",
-            user_message="APK pull failed: no active device.",
+            user_message="Execute Harvest failed: no active device.",
             error_code="apk_pull_no_device",
         )
 
@@ -42,7 +43,7 @@ def run_apk_pull(
         ui.report_no_adb()
         return OperationResult.failure(
             status="FAILED",
-            user_message="APK pull failed: adb not available.",
+            user_message="Execute Harvest failed: adb not available.",
             error_code="apk_pull_no_adb",
         )
 
@@ -50,7 +51,7 @@ def run_apk_pull(
     if snapshot_ctx is None:
         return OperationResult.failure(
             status="FAILED",
-            user_message="APK pull failed: inventory snapshot unavailable.",
+            user_message="Execute Harvest failed: inventory snapshot unavailable.",
             error_code="apk_pull_inventory_missing",
         )
 
@@ -67,7 +68,7 @@ def run_apk_pull(
     if resolution is None:
         return OperationResult.failure(
             status="CANCELLED",
-            user_message="APK pull cancelled by user.",
+            user_message="Execute Harvest cancelled by user.",
             error_code="apk_pull_cancelled",
         )
 
@@ -76,7 +77,7 @@ def run_apk_pull(
         ui.report_no_adb()
         return OperationResult.failure(
             status="FAILED",
-            user_message="APK pull failed: adb not available.",
+            user_message="Execute Harvest failed: adb not available.",
             error_code="apk_pull_no_adb",
         )
 
@@ -187,7 +188,17 @@ def run_apk_pull(
     ui.maybe_save_watchlist(resolution.selection)
     log.close_harvest_adapter(run_id)
     return OperationResult.success(
-        context={"run_id": run_id, "device_serial": serial, "packages": len(resolution.plan.packages)}
+        context={
+            "run_id": run_id,
+            "device_serial": serial,
+            "packages": len(resolution.plan.packages),
+            "session_stamp": session_stamp,
+            "snapshot_id": snapshot_ctx.snapshot_id,
+            "artifacts_root": artifact_store.repo_relative_path(dest_root),
+            "receipts_root": artifact_store.repo_relative_path(
+                artifact_store.harvest_receipts_root() / session_stamp
+            ),
+        }
     )
 
 

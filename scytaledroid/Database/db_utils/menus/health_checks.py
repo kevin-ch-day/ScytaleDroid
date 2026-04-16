@@ -280,13 +280,13 @@ def run_health_checks() -> None:
 def run_evidence_integrity_check() -> None:
     """Check DB-only evidence linkage fields for static permission snapshots.
 
-    Note: dynamic evidence packs are verified via Workspace & Evidence, not via DB.
+    Note: dynamic evidence packs are verified via Evidence & Workspace, not via DB.
     """
     print()
     menu_utils.print_header("DB Integrity Check (Snapshot Linkage)")
     print(
         status_messages.status(
-            "For dynamic evidence packs integrity: Workspace & Evidence -> Verify dynamic evidence packs.",
+            "For dynamic evidence packs integrity: Evidence & Workspace -> Verify dynamic evidence packs.",
             level="info",
         )
     )
@@ -516,12 +516,11 @@ def _fetch_metrics_summary(run_id: int) -> list[dict[str, Any]] | None:
 
 
 def _print_status_line(level: str, label: str, *, detail: str | None = None) -> None:
-    icons = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
-    prefix = icons.get(level, "•")
-    line = f"  {prefix} {label}"
+    line = label
     if detail:
         line += f" ({detail})"
-    print(line)
+    mapped = {"ok": "success", "warn": "warn", "fail": "error"}.get(level, "info")
+    print(status_messages.status(line, level=mapped))
 
 
 def prompt_cleanup_orphan_inventory() -> None:

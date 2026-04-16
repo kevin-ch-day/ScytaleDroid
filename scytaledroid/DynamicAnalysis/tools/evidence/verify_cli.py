@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
 
 REQUIRED_FILES = [
     "run_manifest.json",
@@ -52,50 +53,31 @@ _ML_AUDIT_COLUMNS = {
 }
 
 
-def _truncate(text: str, width: int) -> str:
-    if width <= 0:
-        return ""
-    if len(text) <= width:
-        return text
-    if width <= 3:
-        return text[:width]
-    return text[: width - 3] + "..."  # noqa: E203
-
-
-def _render_table(
+def _render_shared_table(
     headers: list[str],
     rows: list[list[str]],
     *,
     max_widths: dict[int, int] | None = None,
     right_align: set[int] | None = None,
-    padding: int = 2,
 ) -> None:
     if not headers:
         return
     max_widths = max_widths or {}
     right_align = right_align or set()
 
-    widths = [len(h) for h in headers]
+    truncated_rows: list[list[str]] = []
     for row in rows:
+        truncated_row: list[str] = []
         for idx, cell in enumerate(row):
-            widths[idx] = max(widths[idx], len(cell))
+            text = str(cell)
+            limit = max_widths.get(idx)
+            if limit is not None and limit > 0 and len(text) > limit:
+                text = text if limit <= 3 else f"{text[: limit - 3]}..."
+            truncated_row.append(text)
+        truncated_rows.append(truncated_row)
 
-    for idx, limit in max_widths.items():
-        if 0 <= idx < len(widths):
-            widths[idx] = min(widths[idx], int(limit))
-
-    def _fmt_cell(idx: int, cell: str) -> str:
-        w = widths[idx]
-        val = _truncate(cell, w)
-        if idx in right_align:
-            return val.rjust(w)
-        return val.ljust(w)
-
-    pad = " " * padding
-    print(pad.join(_fmt_cell(i, h) for i, h in enumerate(headers)))
-    print(pad.join("-" * w for w in widths))
-    for row in rows:
-        print(pad.join(_fmt_cell(i, row[i]) for i in range(len(headers))))
+    alignments = ["right" if idx in right_align else "left" for idx in range(len(headers))]
+    table_utils.render_table(headers, truncated_rows, alignments=alignments)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -632,7 +614,7 @@ def run_dynamic_evidence_verify(
         right_align = {7, 8, 9, 10}
     else:
         right_align = {6, 7, 8, 9}
-    _render_table(headers, table_rows, max_widths=max_widths, right_align=right_align)
+    _render_shared_table(headers, table_rows, max_widths=max_widths, right_align=right_align)
 
     # Per-app summary.
     # Do not read env vars in deep tooling; keep this derived from config defaults.
@@ -656,8 +638,7 @@ def run_dynamic_evidence_verify(
     )
 
     print()
-    print("Per-app summary")
-    print("---------------")
+    menu_utils.print_header("Per-app summary")
     app_headers = ["App", "Baseline", "Interactive", "Need", "Valid", "LS", "Runs", "Last", "Next", "ML"]
     app_rows: list[list[str]] = []
     for a in apps:
@@ -693,7 +674,7 @@ def run_dynamic_evidence_verify(
                 "READY" if a.ml_ready else "WAIT",
             ]
         )
-    _render_table(app_headers, app_rows, max_widths={0: 28}, right_align={1, 2, 3, 4, 5, 6})
+    _render_shared_table(app_headers, app_rows, max_widths={0: 28}, right_align={1, 2, 3, 4, 5, 6})
 
     # Suggested next actions.
     need_base = [a.display_name for a in apps if a.baseline_valid < baseline_required]
@@ -705,8 +686,7 @@ def run_dynamic_evidence_verify(
     complete = [a.display_name for a in apps if a.next_recommended == "complete"]
 
     print()
-    print("Suggested next actions")
-    print("----------------------")
+    menu_utils.print_header("Suggested next actions")
     if need_base:
         print("Baseline runs needed: " + ", ".join(need_base))
     if need_inter:
@@ -717,11 +697,16 @@ def run_dynamic_evidence_verify(
         print("No actions suggested.")
 
     print()
-    print(f"[VERIFY] packs={len(rows)} ghosts={len(ghost_dirs)} failures={len(failures)} started={started_at}")
+    print(
+        status_messages.status(
+            f"Verification summary: packs={len(rows)} ghosts={len(ghost_dirs)} failures={len(failures)} started={started_at}",
+            level="info",
+        )
+    )
     if ghost_dirs:
-        print("[VERIFY] Ghost dirs (no run_manifest.json): " + ", ".join(ghost_dirs))
+        print(status_messages.status("Ghost dirs (no run_manifest.json): " + ", ".join(ghost_dirs), level="warn"))
     if failures:
-        print("[VERIFY] FAIL packs: " + ", ".join(failures))
+        print(status_messages.status("Failed packs: " + ", ".join(failures), level="error"))
 
     report: dict[str, Any] = {
         "generated_at": started_at,
@@ -754,7 +739,7 @@ def run_dynamic_evidence_verify(
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         dest = out_dir / f"verify-dynamic-evidence-{stamp}.json"
         dest.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-        print(f"[VERIFY] Report written: {dest}")
+        print(status_messages.status(f"Verification report written: {dest}", level="success"))
     return report
 
 
@@ -799,8 +784,7 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
     labels = _load_app_labels(packages) if enrich_db_labels else {}
 
     print()
-    print("Dynamic Evidence Quick Check")
-    print("----------------------------")
+    menu_utils.print_header("Dynamic Evidence Quick Check")
     print(f"packs    : {packs}")
     print(f"missing  : {missing}")
     print(f"bad      : {bad}")
@@ -890,7 +874,7 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
                     quic_ratio,
                 ]
             )
-        _render_table(headers, rows, max_widths={1: 18, 2: 16}, right_align={4, 5, 6, 7})
+        _render_shared_table(headers, rows, max_widths={1: 18, 2: 16}, right_align={4, 5, 6, 7})
 
         if sizes:
             sizes_sorted = sorted(sizes)
@@ -1066,8 +1050,7 @@ def run_dynamic_evidence_deep_checks(
                 )
 
     print()
-    print("Dynamic Evidence Deep Checks")
-    print("----------------------------")
+    menu_utils.print_header("Dynamic Evidence Deep Checks")
     print(f"packs           : {len(packs)}")
     print(f"db_available    : {int(db_available)}")
     print(f"db_mismatches   : {len(db_mismatch)}")
@@ -1127,7 +1110,7 @@ def run_dynamic_evidence_deep_checks(
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         dest = out_dir / f"deep-check-dynamic-evidence-{stamp}.json"
         dest.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-        print(f"[DEEP] Report written: {dest}")
+        print(status_messages.status(f"Deep-check report written: {dest}", level="success"))
     return report
 
 

@@ -269,6 +269,98 @@ def test_execute_harvest_preserves_capture_when_db_mirror_fails(
     assert '"capture_status": "clean"' in payload
 
 
+def test_execute_harvest_records_blocked_package_manifest_and_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.Database.db_utils import diagnostics
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.harvest.common import HarvestOptions
+    from scytaledroid.DeviceAnalysis.harvest.models import InventoryRow, PackagePlan
+
+    monkeypatch.setattr(
+        runner,
+        "load_options",
+        lambda config, *, pull_mode: HarvestOptions(
+            write_db=False,
+            write_meta=False,
+            pull_mode=pull_mode,
+        ),
+    )
+    monkeypatch.setattr(diagnostics, "check_connection", lambda: True)
+    monkeypatch.setattr(runner, "get_run_logger", lambda *args, **kwargs: _FakeRunLogger())
+    monkeypatch.setattr(runner.log, "harvest_adapter", lambda *args, **kwargs: _FakeAdapter())
+    monkeypatch.setattr(runner.log, "close_harvest_adapter", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "info", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "_quiet_mode", lambda: True)
+    monkeypatch.setattr(runner, "_compact_mode", lambda: True)
+
+    inventory = InventoryRow(
+        raw={},
+        package_name="com.example.blocked",
+        app_label="Blocked App",
+        installer="com.android.vending",
+        category=None,
+        primary_path="/system/app/Blocked/Blocked.apk",
+        profile_key="TEST_PROFILE",
+        profile=None,
+        version_name="1.0",
+        version_code="1",
+        apk_paths=["/system/app/Blocked/Blocked.apk"],
+        split_count=1,
+    )
+    plan = PackagePlan(
+        inventory=inventory,
+        artifacts=[],
+        total_paths=1,
+        policy_filtered_count=1,
+        policy_filtered_reason="non_root_paths",
+        skip_reason="policy_non_root",
+    )
+
+    results = runner.execute_harvest(
+        serial="SERIAL123",
+        adb_path="adb",
+        dest_root=tmp_path / "SERIAL123" / "20260328",
+        session_stamp="20260328",
+        plans=[plan],
+        config=object(),
+        pull_mode="inventory",
+        snapshot_id=26,
+        snapshot_captured_at="2026-04-16T04:31:10Z",
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.preflight_reason == "policy_non_root"
+    assert result.skipped == ["policy_non_root"]
+    assert result.capture_status == "failed"
+    assert result.persistence_status == "not_requested"
+    assert result.research_status == "ineligible"
+    assert result.package_manifest_path is not None
+    assert result.package_manifest_path.exists()
+
+    payload = result.package_manifest_path.read_text(encoding="utf-8")
+    assert '"preflight_reason": "policy_non_root"' in payload
+    assert '"snapshot_id": 26' in payload
+    assert '"primary_path": "/system/app/Blocked/Blocked.apk"' in payload
+    assert '"policy_filtered_count": 1' in payload
+    assert '"policy_filtered_reason": "non_root_paths"' in payload
+    assert '"capture_status": "failed"' in payload
+    assert '"research_status": "ineligible"' in payload
+
+    receipt_path = (
+        Path("data")
+        / "receipts"
+        / "harvest"
+        / "20260328"
+        / "com.example.blocked.json"
+    )
+    assert receipt_path.exists()
+
+
 def test_execute_harvest_replans_stale_package_and_recovers_cleanly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

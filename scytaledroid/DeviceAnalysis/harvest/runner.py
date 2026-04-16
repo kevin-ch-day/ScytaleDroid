@@ -421,14 +421,32 @@ def _execute_package_plan(
     )
 
     if plan.skip_reason:
+        inventory = plan.inventory
+        package_name = inventory.package_name
+        package_dir = dest_root / package_name
+        package_dir.mkdir(parents=True, exist_ok=True)
+        result.package_manifest_path = package_contract.package_manifest_path(package_dir)
         result.preflight_reason = plan.skip_reason
+        result.capture_status = "failed"
+        result.persistence_status = "not_requested"
+        result.research_status = "ineligible"
+        result.comparison = package_contract.build_package_comparison(plan, result)
         result.skipped.append(plan.skip_reason)
+        package_contract.write_package_manifest(
+            result=result,
+            package_dir=package_dir,
+            serial=serial,
+            session_stamp=session_stamp,
+            snapshot_id=snapshot_id,
+            snapshot_captured_at=snapshot_captured_at,
+            execution_state="completed",
+        )
         stats["packages_skipped"] += 1
         emit(
             "info",
             "harvest.package.skipped",
             extra={
-                "package_name": plan.inventory.package_name,
+                "package_name": package_name,
                 "skip_reason": plan.skip_reason,
                 "package_index": package_index,
                 "package_total": package_total,

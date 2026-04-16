@@ -537,7 +537,7 @@ def _preface_lines(
     lines = [legend_title, glyphs.rule * glyphs.line_width]
 
     lines.append(
-        "Badges: [OK] pass   [INFO] context   [WARN] needs review   [FAIL] defect   [skipped] unavailable"
+        "Badges: [OK ] clean   [INFO] context   [WARN] partial/review   [ERROR] failed   [BLOCKED] unavailable"
     )
     bars_descriptor = "▏▎▍▌▋▊▉█ proportional" if glyphs.supports_unicode else "##### proportional"
     fallback_note = " (plain-text fallback: #####)" if glyphs.supports_unicode else ""

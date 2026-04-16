@@ -14,6 +14,7 @@ class Palette:
     success: tuple[str, ...]
     warning: tuple[str, ...]
     error: tuple[str, ...]
+    blocked: tuple[str, ...]
     accent: tuple[str, ...]
     muted: tuple[str, ...]
     header: tuple[str, ...]

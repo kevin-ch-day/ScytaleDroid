@@ -33,6 +33,35 @@ _HELPER_ROUTES = {
 }
 
 
+def _print_action_feedback(
+    *,
+    action_name: str,
+    summary: str,
+    info_lines: list[str] | None = None,
+) -> None:
+    print(status_messages.status(action_name, level="progress"))
+    print(status_messages.status(summary, level="success"))
+    for line in info_lines or []:
+        print(status_messages.status(line, level="info"))
+
+
+def _print_inventory_feedback(action_name: str, result, *, scoped_label: str | None = None) -> None:
+    if result is None or not hasattr(result, "stats"):
+        return
+    if scoped_label:
+        summary = f"Scoped inventory refreshed: {result.stats.total_packages} package(s) for {scoped_label}."
+    else:
+        summary = f"Inventory refreshed: {result.stats.total_packages} package(s)."
+    _print_action_feedback(
+        action_name=action_name,
+        summary=summary,
+        info_lines=[
+            f"Snapshot ID: {result.snapshot_id if result.snapshot_id is not None else '—'}",
+            f"Inventory snapshot: {result.snapshot_path}",
+        ],
+    )
+
+
 def handle_choice(
     choice: str,
     devices: list[dict[str, str | None]],
@@ -88,12 +117,12 @@ def build_main_menu_options(
     options: list[menu_utils.MenuOption] = [
         menu_utils.MenuOption(
             "1",
-            "Sync inventory",
+            "Refresh Inventory",
             badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
             "2",
-            "Pull APKs",
+            "Execute Harvest",
             disabled=not has_device,
             badge=needs_active,
         ),
@@ -105,7 +134,7 @@ def build_main_menu_options(
         ),
         menu_utils.MenuOption(
             "4",
-            "View logcat",
+            "Open device logcat",
             disabled=not has_device,
             badge=needs_active,
         ),
@@ -279,23 +308,24 @@ def _run_apk_pull(
     serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
     if not serial:
         error_panels.print_error_panel(
-            "Pull APKs",
-            "No active device. Connect first to pull APKs.",
+            "Execute Harvest",
+            "No active device. Connect first to execute a harvest.",
         )
         prompt_utils.press_enter_to_continue()
         return
 
     status = device_service.fetch_inventory_metadata(serial)
     if status is None or status.status_label.upper() == "NONE":
-        print("\nPull APKs")
-        print("=========")
-        print(status_messages.status("No inventory snapshot found. Run a full inventory & DB sync first.", level="warn"))
+        print()
+        menu_utils.print_header("Execute Harvest")
+        print(status_messages.status("No inventory snapshot found. Run Refresh Inventory first.", level="warn"))
         from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
         try:
-            inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+            result = inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+            _print_inventory_feedback("Refresh Inventory", result)
             status = device_service.fetch_inventory_metadata(serial)
         except Exception as exc:
-            print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
+            print(status_messages.status(f"Refresh Inventory failed: {exc}", level="error"))
             return
         if status is None or status.status_label.upper() == "NONE":
             return
@@ -303,8 +333,8 @@ def _run_apk_pull(
     # Defer change-based gating to inventory_guard to avoid duplicate/noisy prompts.
     changed = False
     if status.is_stale:
-        print("\nPull APKs")
-        print("=========")
+        print()
+        menu_utils.print_header("Execute Harvest")
         print(
             status_messages.status(
                 f"Current inventory: {status.status_label} ({status.age_display}) • {status.package_count or 'unknown'} packages",
@@ -318,7 +348,7 @@ def _run_apk_pull(
             )
         )
         options = {
-            "1": "Run inventory & database sync first (recommended)",
+            "1": "Run Refresh Inventory first (recommended)",
             "2": "Proceed with stale inventory",
             "0": "Cancel",
         }
@@ -329,15 +359,16 @@ def _run_apk_pull(
         if choice == "1":
             from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
             try:
-                inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                result = inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                _print_inventory_feedback("Refresh Inventory", result)
                 status = device_service.fetch_inventory_metadata(serial)
             except Exception as exc:
-                print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
+                print(status_messages.status(f"Refresh Inventory failed: {exc}", level="error"))
                 return
         # fall through to pull if choice == "2" or after sync
     elif changed:
-        print("\nPull APKs")
-        print("=========")
+        print()
+        menu_utils.print_header("Execute Harvest")
         print(
             status_messages.status(
                 "Device packages changed since the last inventory snapshot.",
@@ -351,7 +382,7 @@ def _run_apk_pull(
             )
         )
         options = {
-            "1": "Run inventory & database sync now (recommended)",
+            "1": "Run Refresh Inventory now (recommended)",
             "2": "Use last snapshot anyway",
             "0": "Cancel",
         }
@@ -362,10 +393,11 @@ def _run_apk_pull(
         if choice == "1":
             from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
             try:
-                inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                result = inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
+                _print_inventory_feedback("Refresh Inventory", result)
                 status = device_service.fetch_inventory_metadata(serial)
             except Exception as exc:
-                print(status_messages.status(f"Inventory sync failed: {exc}", level="error"))
+                print(status_messages.status(f"Refresh Inventory failed: {exc}", level="error"))
                 return
 
     if not ensure_recent_inventory(serial, device_context=active_device):
@@ -378,11 +410,23 @@ def _run_apk_pull(
         result = apk_pull_workflow.run_apk_pull(serial, auto_scope=auto_scope)
         if hasattr(result, "ok") and not result.ok:
             error_panels.print_error_panel(
-                "Pull APKs",
-                result.user_message or "APK harvest failed.",
+                "Execute Harvest",
+                result.user_message or "Execute Harvest failed.",
                 hint=result.log_hint or "See logs for traceback.",
             )
             return False
+        context = getattr(result, "context", {}) or {}
+        _print_action_feedback(
+            action_name="Execute Harvest",
+            summary=f"Harvest complete: {context.get('packages', '—')} package(s).",
+            info_lines=[
+                f"Run ID: {context.get('run_id', '—')}",
+                f"Session: {context.get('session_stamp', '—')}",
+                f"Inventory snapshot ID: {context.get('snapshot_id', '—')}",
+                f"Artifacts root: {context.get('artifacts_root', '—')}",
+                f"Receipts root: {context.get('receipts_root', '—')}",
+            ],
+        )
     except Exception as exc:
         logging_engine.get_error_logger().exception(
             "APK harvest failed",
@@ -395,7 +439,7 @@ def _run_apk_pull(
             ),
         )
         error_panels.print_error_panel(
-            "Pull APKs",
+            "Execute Harvest",
             f"Failed to start APK harvest: {exc}",
             hint="See logs for traceback.",
         )
@@ -406,8 +450,8 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
     serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
     if not serial:
         error_panels.print_error_panel(
-            "Inventory Sync",
-            "No active device. Connect first to sync.",
+            "Refresh Inventory",
+            "No active device. Connect first to refresh inventory.",
         )
         prompt_utils.press_enter_to_continue()
         return
@@ -423,10 +467,10 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         print()
         # Keep the operator contract simple: canonical full sync, or scoped sync
         # against one of the currently active app profiles.
-        menu_utils.print_header("Inventory Sync", "Choose sync scope")
+        menu_utils.print_header("Refresh Inventory", "Choose sync scope")
         sync_opts = [
-            menu_utils.MenuOption("1", "Full device inventory sync (canonical)"),
-            menu_utils.MenuOption("2", "Scoped sync: app profile"),
+            menu_utils.MenuOption("1", "Full device inventory refresh (canonical)"),
+            menu_utils.MenuOption("2", "Scoped refresh: app profile"),
         ]
         menu_utils.render_menu(
             menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=False, compact=True)
@@ -434,7 +478,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(sync_opts, include_exit=True),
             default="1",
-            prompt="Select sync mode (or 0): ",
+            prompt="Select refresh mode (or 0): ",
         )
         if choice == "0":
             return
@@ -448,22 +492,23 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                     default=False,
                 ):
                     return
-            inventory_workflow.run_inventory_sync(
+            result = inventory_workflow.run_inventory_sync(
                 serial,
                 ui_prefs=None,
                 progress_sink="cli",
                 allow_fallbacks=allow_fallbacks,
             )
+            _print_inventory_feedback("Refresh Inventory", result)
         else:
             selected_profile = _select_inventory_sync_profile()
             if selected_profile is None:
                 return
             packages = set(selected_profile["packages"])
             if not packages:
-                print(status_messages.status("Scoped sync cancelled: selected profile has no packages.", level="warn"))
+                print(status_messages.status("Scoped refresh cancelled: selected profile has no packages.", level="warn"))
                 prompt_utils.press_enter_to_continue()
                 return
-            inventory_workflow.run_inventory_scoped_sync(
+            result = inventory_workflow.run_inventory_scoped_sync(
                 serial=serial,
                 scope_id=str(selected_profile["scope_id"]),
                 packages=packages,
@@ -471,9 +516,14 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 progress_sink="cli",
                 allow_fallbacks=allow_fallbacks,
             )
+            _print_inventory_feedback(
+                "Refresh Inventory",
+                result,
+                scoped_label=str(selected_profile["display_name"]),
+            )
     except Exception as exc:
         error_panels.print_error_panel(
-            "Inventory & database sync",
+            "Refresh Inventory",
             str(exc),
         )
         prompt_utils.press_enter_to_continue()
@@ -509,7 +559,7 @@ def _select_inventory_sync_profile() -> dict[str, object] | None:
     profiles.sort(key=lambda profile: str(profile["display_name"]).lower())
 
     if not profiles:
-        print(status_messages.status("No active app profiles are available for scoped inventory sync.", level="warn"))
+        print(status_messages.status("No active app profiles are available for scoped inventory refresh.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return None
 
@@ -524,7 +574,7 @@ def _select_inventory_sync_profile() -> dict[str, object] | None:
         return selected
 
     print()
-    menu_utils.print_header("Inventory Sync · Scope (Profile)")
+    menu_utils.print_header("Refresh Inventory · Scope (Profile)")
     rows = [
         [str(idx), str(profile["display_name"]), str(int(profile["app_count"]))]
         for idx, profile in enumerate(profiles, start=1)

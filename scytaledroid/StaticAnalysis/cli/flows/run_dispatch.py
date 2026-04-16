@@ -43,7 +43,8 @@ from ..execution import (
 from ..execution.db_verification import _render_persistence_footer
 from ..execution.results_persist import _persist_cohort_rollup
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
-from ..views.view_layouts import render_run_start, render_run_summary
+from ..views.view_layouts import render_run_start
+from .postprocessing import run_post_summary_postprocessing
 from . import persistence_runtime
 from .selection import format_scope_target
 
@@ -332,10 +333,6 @@ def _launch_scan_flow_resolved(
             outcome.session_stamp = params.session_stamp
     except Exception:
         pass
-    run_map = None
-    linkage_blocked_reason = None
-    linkage_warning_printed = False
-    missing_id_packages: list[str] = []
     summary_render_failed = False
 
     try:
@@ -381,126 +378,41 @@ def _launch_scan_flow_resolved(
                     )
                 )
             if not params.dry_run:
-                if summary_render_failed:
-                    linkage_blocked_reason = (
-                        "Run summary finalization failed; skipping run_map and permission refresh."
-                    )
-                elif not params.persistence_ready:
-                    linkage_blocked_reason = "Persistence gate failed; skipping run_map and permission refresh."
-                elif not outcome.results:
-                    linkage_blocked_reason = (
-                        "No analyzable artifacts; skipping run_map and permission refresh."
-                    )
-                else:
-                    missing_id_packages = [res.package_name for res in outcome.results if not res.static_run_id]
-                    if missing_id_packages:
-                        linkage_blocked_reason = (
-                            "static_run_id missing for one or more apps; skipping run_map and permission refresh."
-                        )
-
-                if params.session_stamp:
-                    if linkage_blocked_reason:
-                        print(status_messages.status(linkage_blocked_reason, level="warn"))
-                        linkage_warning_printed = True
-                    else:
-                        _emit_postprocessing_step("Building session run map", run_ctx=frozen_ctx)
-                        try:
-                            run_map = _build_session_run_map(
-                                outcome,
-                                params.session_stamp,
-                                allow_overwrite=bool(params.run_map_overwrite),
-                            )
-                            if run_map:
-                                for entry in run_map.get("apps", []):
-                                    missing = [
-                                        field
-                                        for field in ("static_run_id", *REQUIRED_FIELDS)
-                                        if entry.get(field) in (None, "")
-                                    ]
-                                    if missing:
-                                        raise RuntimeError(
-                                            "run_map incomplete for package "
-                                            f"{entry.get('package')}: missing {', '.join(missing)}"
-                                        )
-                                validate_run_map(run_map, params.session_stamp)
-                                _persist_session_run_links(params.session_stamp, run_map)
-                        except Exception as exc:
-                            if params.strict_persistence:
-                                raise RuntimeError(
-                                    f"Failed to build run map for session {params.session_stamp}: {exc}"
-                                ) from exc
-                            print(
-                                status_messages.status(
-                                    f"Failed to build run map for session {params.session_stamp}: {exc}",
-                                    level="error",
-                                )
-                            )
-                            run_map = None
-
-                _emit_postprocessing_step("Writing persistence audit artifacts", run_ctx=frozen_ctx)
-                _emit_missing_run_ids_artifact(
+                post_summary = run_post_summary_postprocessing(
                     outcome=outcome,
-                    session_stamp=params.session_stamp,
-                    linkage_blocked_reason=linkage_blocked_reason,
-                    missing_id_packages=missing_id_packages,
+                    params=params,
+                    selection=selection,
+                    run_ctx=frozen_ctx,
+                    summary_render_failed=summary_render_failed,
+                    required_fields=REQUIRED_FIELDS,
+                    emit_postprocessing_step=_emit_postprocessing_step,
+                    build_session_run_map=_build_session_run_map,
+                    validate_run_map=validate_run_map,
+                    persist_session_run_links=_persist_session_run_links,
+                    emit_missing_run_ids_artifact=_emit_missing_run_ids_artifact,
+                    execute_permission_scan=execute_permission_scan,
                 )
-
-                if params.permission_snapshot_refresh and params.profile in {"full", "lightweight"}:
-                    if linkage_blocked_reason:
-                        if not linkage_warning_printed:
-                            print()
-                            print(status_messages.status(linkage_blocked_reason, level="warn"))
-                            linkage_warning_printed = True
-                    else:
-                        try:
-                            _emit_postprocessing_step(
-                                "Re-rendering permission snapshot for parity",
-                                run_ctx=frozen_ctx,
-                            )
-                            execute_permission_scan(
-                                selection,
-                                params,
-                                persist_detections=True,
-                                run_map=run_map,
-                                require_run_map=True,
-                                compact_output=True,
-                                fail_on_persist_error=True,
-                            )
-                        except Exception as exc:
-                            run_status = "FAILED"
-                            abort_reason = "permission_snapshot_refresh_failed"
-                            logging_engine.get_error_logger().exception(
-                                "Permission snapshot refresh failed",
-                                extra=logging_engine.ensure_trace(
-                                    {
-                                        "event": "static.permission_snapshot_refresh_failed",
-                                        "session_stamp": params.session_stamp,
-                                        "scope_label": params.scope_label,
-                                        "profile": params.profile_label,
-                                    }
-                                ),
-                            )
-                            print(
-                                status_messages.status(
-                                    (
-                                        "Permission snapshot refresh failed — static run marked failed. "
-                                        "See logs for details."
-                                    ),
-                                    level="error",
-                                )
-                            )
-                elif params.profile in {"full", "lightweight"}:
-                    _emit_postprocessing_step(
-                        "Permission snapshot refresh skipped (disabled)",
-                        run_ctx=frozen_ctx,
+                if post_summary.permission_refresh_error is not None:
+                    run_status = "FAILED"
+                    abort_reason = "permission_snapshot_refresh_failed"
+                    logging_engine.get_error_logger().exception(
+                        "Permission snapshot refresh failed",
+                        extra=logging_engine.ensure_trace(
+                            {
+                                "event": "static.permission_snapshot_refresh_failed",
+                                "session_stamp": params.session_stamp,
+                                "scope_label": params.scope_label,
+                                "profile": params.profile_label,
+                            }
+                        ),
                     )
                     print(
                         status_messages.status(
                             (
-                                "Post-run permission refresh skipped. Enable it in Advanced options "
-                                "or set SCYTALEDROID_STATIC_REFRESH_PERMISSION_SNAPSHOT=1."
+                                "Permission snapshot refresh failed — static run marked failed. "
+                                "See logs for details."
                             ),
-                            level="info",
+                            level="error",
                         )
                     )
     except Exception as exc:
@@ -587,35 +499,6 @@ def _launch_scan_flow_resolved(
                 except Exception:
                     pass
 
-    # Structured RUN SUMMARY (formatter-based) for transcripts/screenshots.
-    # Batch mode must stay quiet and deterministic (no per-app blocks).
-    if outcome and getattr(outcome, "summary", None) and not frozen_ctx.batch:
-        summary = outcome.summary
-        sev_counts = {
-            "high": getattr(summary, "high", 0),
-            "medium": getattr(summary, "medium", 0),
-            "low": getattr(summary, "low", 0),
-        }
-        perm_stats = {
-            "dangerous": getattr(summary, "dangerous_permissions", 0),
-            "signature": getattr(summary, "signature_permissions", 0),
-            "custom": getattr(summary, "custom_permissions", 0),
-        }
-        failed_masvs = list(getattr(summary, "failed_masvs", []) or [])
-        evidence_root = getattr(summary, "evidence_root", None)
-
-        render_run_summary(
-            run_id=params.session_stamp,
-            profile_label=params.profile_label,
-            target=scope_target,
-            detectors_count=len(modules),
-            findings_total=getattr(summary, "findings_total", 0),
-            sev_counts=sev_counts,
-            failed_masvs=failed_masvs,
-            perm_stats=perm_stats,
-            run_ctx=frozen_ctx,
-            evidence_root=evidence_root,
-        )
     if run_persistence_enabled and params.session_stamp and outcome is not None:
         _emit_postprocessing_step("Refreshing canonical session views", run_ctx=frozen_ctx)
         try:

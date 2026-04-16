@@ -93,9 +93,27 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
     actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
 
     assert captured_menu["labels"] == [
-        "Full device inventory sync (canonical)",
-        "Scoped sync: app profile",
+        "Full device inventory refresh (canonical)",
+        "Scoped refresh: app profile",
     ]
     assert scoped_call["serial"] == "SERIAL123"
     assert scoped_call["scope_id"] == "profile::research_dataset_alpha"
     assert scoped_call["packages"] == {"com.example.alpha", "com.example.beta"}
+
+
+def test_build_main_menu_options_uses_pipeline_language(monkeypatch) -> None:
+    monkeypatch.setattr(
+        actions.device_service,
+        "fetch_inventory_metadata",
+        lambda _serial: SimpleNamespace(status_label="FRESH", is_stale=False),
+    )
+
+    options = actions.build_main_menu_options({"serial": "SERIAL123"})
+    labels = [option.label for option in options]
+
+    assert labels[:4] == [
+        "Refresh Inventory",
+        "Execute Harvest",
+        "View device details",
+        "Open device logcat",
+    ]

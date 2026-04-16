@@ -77,7 +77,7 @@ def _warn_if_code_changed() -> None:
     # Keep it extremely obvious: stale process == stale templates.
     changed_list = ", ".join(changed[:5]) + (" ..." if len(changed) > 5 else "")
     status_messages.print_status(
-        f"[WARN] Code changed on disk since this Dynamic Analysis menu started ({changed_list}).",
+        f"Code changed on disk since this Dynamic Analysis menu started ({changed_list}).",
         level="warn",
     )
     status_messages.print_status(
@@ -236,8 +236,8 @@ def _print_profile_v3_capture_runbook() -> None:
         f"- interaction_scripted: windows>={min_windows}, pcap_bytes>={min_pcap_scripted}",
         "",
         "Recommended order:",
-        "1. Device Analysis: Sync inventory; Pull APKs -> app profile (full refresh).",
-        "2. Static Analysis: Full analysis -> Profile.",
+        "1. Device Analysis: Refresh Inventory; Execute Harvest -> app profile (full refresh).",
+        "2. Static Analysis: Run Static Pipeline (Full) -> Profile.",
         "3. Reporting: Run structural archive integrity gates (freshness + scripted coverage).",
         "4. Dynamic Analysis: capture missing scripted runs (baseline_idle + interaction_scripted).",
         "5. Dynamic Analysis: Build v3 manifest (included runs).",
@@ -695,7 +695,7 @@ def dynamic_analysis_menu() -> None:
         # Freeze/profile contract: evidence packs are authoritative; DB is a derived index.
         # Do not block capture/collection on DB readiness. Surface a warning and
         # allow DB-free workflows to proceed.
-        status_messages.print_status(f"[WARN] {message}", level="warn")
+        status_messages.print_status(message, level="warn")
         if detail:
             status_messages.print_status(detail, level="warn")
         status_messages.print_status(
@@ -1430,8 +1430,8 @@ def _verify_host_pcap_tools() -> None:
     if not verbose and not missing:
         tshark_path = ((tools.get("tshark") or {}) if isinstance(tools, dict) else {}).get("path")
         capinfos_path = ((tools.get("capinfos") or {}) if isinstance(tools, dict) else {}).get("path")
-        tshark_ok = "OK" if tshark_path else "MISSING"
-        capinfos_ok = "OK" if capinfos_path else "MISSING"
+        tshark_ok = "present" if tshark_path else "missing"
+        capinfos_ok = "present" if capinfos_path else "missing"
         print(status_messages.status(f"tshark={tshark_ok} | capinfos={capinfos_ok}", level="success"))
         print(status_messages.status("Host toolchain is dataset-ready.", level="success"))
         return
@@ -1440,11 +1440,11 @@ def _verify_host_pcap_tools() -> None:
         path = meta.get("path") if isinstance(meta, dict) else None
         version = meta.get("version") if isinstance(meta, dict) else None
         if path:
-            print(status_messages.status(f"{name}: OK ({path})", level="success"))
+            print(status_messages.status(f"{name}: present ({path})", level="success"))
             if verbose and version:
                 print(status_messages.status(f"{name}: {version}", level="info"))
         else:
-            print(status_messages.status(f"{name}: MISSING", level="warn"))
+            print(status_messages.status(f"{name}: missing", level="warn"))
 
     script = Path("scripts/install_wireshark_cli.sh")
     if missing:
@@ -1717,7 +1717,7 @@ def _select_profile_package(groups) -> tuple[str, str | None] | None:
         if not scoped_groups:
             print(
                 status_messages.status(
-                    "No APK artifacts available yet for that profile. Pull APKs or use Custom package name.",
+                    "No APK artifacts available yet for that profile. Execute Harvest or use Custom package name.",
                     level="warn",
                 )
             )
@@ -1973,9 +1973,9 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         freeze_ok = bool(evidence_summary.get("evidence_root_exists")) and quota >= int(expected_runs) and apps_ok >= int(dataset_apps_total)
         paper_line = f"Evidence quota: {quota}/{expected_runs} | Apps satisfied: {apps_ok}/{dataset_apps_total}"
         if freeze_ok:
-            paper_line += " | Freeze: Allowed"
+            paper_line += " | Freeze: enabled"
         else:
-            paper_line += f" | Freeze: BLOCKED ({max(0, int(expected_runs) - int(quota))} run(s) missing)"
+            paper_line += f" | Freeze: blocked ({max(0, int(expected_runs) - int(quota))} run(s) missing)"
         print(paper_line)
         print()
 

@@ -215,7 +215,7 @@ def render_snapshot_block(
     prev_id = getattr(previous_meta, "snapshot_id", None) if previous_meta else None
 
     # Compact header with deterministic field ordering.
-    print(text_blocks.headline("Inventory Sync", width=70))
+    print(text_blocks.headline("Refresh Inventory", width=70))
     title = f"Device: {device_text}  |  mode={mode_text}"
     if prev_id is not None:
         title += f"  |  prev_snapshot={prev_id}"

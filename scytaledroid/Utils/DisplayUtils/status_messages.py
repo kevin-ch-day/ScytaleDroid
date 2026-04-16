@@ -11,7 +11,8 @@ _STATUS_PREFIX = {
     "info": "[INFO]",
     "warn": "[WARN]",
     "error": "[ERROR]",
-    "success": "[OK]",
+    "success": "[OK ]",
+    "blocked": "[BLOCKED]",
     "progress": "[RUN]",
 }
 
@@ -20,6 +21,7 @@ _STATUS_ICONS = {
     "warn": "⚠",
     "error": "✖",
     "success": "✔",
+    "blocked": "⊘",
     "progress": "▶",
 }
 
@@ -28,6 +30,7 @@ _STATUS_ICONS_ASCII = {
     "warn": "!",
     "error": "x",
     "success": "*",
+    "blocked": "-",
     "progress": ">",
 }
 
@@ -36,6 +39,7 @@ _STATUS_STYLES = {
     "warn": ("warning", "warning"),
     "error": ("error", "error"),
     "success": ("success", "success"),
+    "blocked": ("blocked", "blocked"),
     "progress": ("progress", "text"),
     "delta_new": ("success", "success"),
     "delta_removed": ("error", "error"),
@@ -145,10 +149,20 @@ def _strip_value_style(label: str, value: object) -> tuple[str, ...] | None:
         return None
     key = label.strip().lower()
     norm = raw.lower()
-    if key in {"status", "adb", "root"}:
-        if "connected" in norm or "fresh" in norm or norm in {"ok", "pass"}:
+    if key in {"status", "adb", "root", "artifact", "gate", "execution", "capability"}:
+        if "blocked" in norm:
+            return palette.blocked
+        if key == "root":
+            if norm == "yes":
+                return palette.success
+            if norm == "no":
+                return palette.info
+            return palette.muted
+        if "connected" in norm or "fresh" in norm or norm in {"ok", "pass", "present", "ready", "enabled", "clean"}:
             return palette.success
-        if "stale" in norm or "warn" in norm:
+        if "partial" in norm or "stale" in norm or "warn" in norm or norm == "not ready":
+            return palette.warning
+        if "missing" in norm:
             return palette.warning
         if "disconnected" in norm or "fail" in norm or "error" in norm:
             return palette.error

@@ -67,6 +67,7 @@ def render_harvest_summary_structured(
     metrics: HarvestRunMetrics,
     pull_mode: str,
     output_root: str | None = None,
+    receipts_root: str | None = None,
     preflight_skips: Mapping[str, int] | None = None,
     runtime_skips: Mapping[str, int] | None = None,
     policy_filtered: Mapping[str, int] | None = None,
@@ -77,7 +78,7 @@ def render_harvest_summary_structured(
     formatter.print_header("APK Harvest · RUN SUMMARY")
     run_pairs = {
         "Scope": selection_label,
-        "Pull mode": pull_mode,
+        "Harvest mode": pull_mode,
     }
     if session_stamp:
         run_pairs["Session"] = session_stamp
@@ -125,6 +126,11 @@ def render_harvest_summary_structured(
             print(f"  - {reason}: {count}")
         print()
 
+    evidence_pairs: dict[str, str] = {}
     if output_root:
-        print(formatter.format_kv_block("[EVIDENCE]", {"Artifacts root": output_root}))
+        evidence_pairs["Artifacts root"] = output_root
+    if receipts_root:
+        evidence_pairs["Receipts root"] = receipts_root
+    if evidence_pairs:
+        print(formatter.format_kv_block("[EVIDENCE]", evidence_pairs))
         print()

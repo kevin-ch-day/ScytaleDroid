@@ -38,17 +38,19 @@ def test_print_inventory_run_summary_from_result(capsys):
     result = _fake_result()
     print_inventory_run_summary_from_result(result)
     out = colors.strip(capsys.readouterr().out)
-    assert "Inventory Sync · RUN SUMMARY" in out
-    assert "[RUN] Snapshot path: data/state/device/inventory.json" in out
-    assert "[RUN] Snapshot id: 11" in out
+    assert "Refresh Inventory · RUN SUMMARY" in out
+    assert "[RUN] Snapshot" in out
+    assert "data/state/device/inventory.json" in out
+    assert "Snapshot ID" in out
+    assert "11" in out
     assert re.search(r"Packages\s*:\s*2", out)
-    assert re.search(r"Split packages\s*:\s*0", out)
-    assert "Duration: 05s" in out
-    assert "Avg rate: 0.40 pkg/s" in out
-    assert "Fallback mode: enabled" in out
+    assert re.search(r"Split APK packages\s*:\s*0", out)
+    assert "Scan duration" in out and "05s" in out
+    assert re.search(r"Avg rate\s*:\s*0.40 pkg/s", out)
+    assert re.search(r"Fallback mode\s*:\s*enabled", out)
     assert "Delta vs previous" in out
     assert "updated=0" in out
-    assert "User apps (candidates): 1" in out
+    assert re.search(r"User apps \(candidates\)\s*:\s*1", out)
 
 
 def test_inventory_summary_field_order_is_stable(capsys):
@@ -57,15 +59,15 @@ def test_inventory_summary_field_order_is_stable(capsys):
     out = colors.strip(capsys.readouterr().out)
 
     expected_order = [
-        "[RUN] Snapshot path:",
-        "[RUN] Snapshot id:",
-        "Packages:",
-        "Split packages:",
-        "Duration:",
-        "Avg rate:",
-        "Fallback mode:",
-        "Delta vs previous:",
-        "User apps (candidates):",
+        "Snapshot",
+        "Snapshot ID",
+        "Packages",
+        "Split APK packages",
+        "Avg rate",
+        "Fallback mode",
+        "User apps (candidates)",
+        "Delta vs previous",
+        "Scan duration",
     ]
     positions = [out.find(token) for token in expected_order]
     assert all(pos >= 0 for pos in positions)

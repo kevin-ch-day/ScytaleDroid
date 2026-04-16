@@ -98,9 +98,9 @@ def print_run_summary(result, duration_label: str) -> None:
             reason = validity.get("invalid_reason_code")
             label = "—"
             if valid is True:
-                label = "✅ VALID"
+                label = "VALID"
             elif valid is False:
-                label = f"❌ INVALID: {reason or 'UNKNOWN'}"
+                label = f"INVALID: {reason or 'UNKNOWN'}"
             lines.append(("Dataset validity", label))
             if (
                 valid is False
@@ -147,7 +147,7 @@ def print_run_summary(result, duration_label: str) -> None:
             dataset_validity = _dataset_validity_label(result.dynamic_run_id)
             if dataset_validity:
                 lines.append(("Dataset validity", dataset_validity))
-                if dataset_validity.startswith("❌"):
+                if dataset_validity.startswith("INVALID"):
                     reasons = _dataset_validity_reasons(result.dynamic_run_id)
                     if reasons:
                         lines.append(("Dataset issues", ", ".join(reasons)))
@@ -397,9 +397,9 @@ def _dataset_validity_label(dynamic_run_id: str | None) -> str | None:
                 continue
             valid = run.get("valid_dataset_run")
             if valid is True:
-                return "✅ VALID"
+                return "VALID"
             if valid is False:
-                return "❌ INVALID"
+                return "INVALID"
             return "—"
     return None
 

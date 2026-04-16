@@ -64,7 +64,7 @@ def static_analysis_menu() -> None:
     if not groups:
         print(
             status_messages.status(
-                "No harvested APK groups found. Run Device Analysis → Pull APKs, then retry.",
+                "No harvested APK groups found. Run Device Analysis → Execute Harvest, then retry.",
                 level="warn",
             )
         )
@@ -202,7 +202,7 @@ def static_analysis_menu() -> None:
         if not groups:
             print(
                 status_messages.status(
-                    "No harvested APK groups found. Run Device Analysis → Pull APKs, then retry.",
+                    "No harvested APK groups found. Run Device Analysis → Execute Harvest, then retry.",
                     level="warn",
                 )
             )

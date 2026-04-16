@@ -83,6 +83,12 @@ def render_run_summary(
     run_ctx: StaticRunContext | None = None,
     evidence_root: str | None = None,
 ) -> None:
+    """Legacy formatter summary kept for compatibility/testing.
+
+    The active CLI summary contract now lives in execution.results; this helper
+    is retained only for bounded callers that still want the compact formatter
+    block and for tests that pin that legacy output.
+    """
     if run_ctx is not None and run_ctx.quiet and run_ctx.batch:
         return
     status_messages.print_strip(

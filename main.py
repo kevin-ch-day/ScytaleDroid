@@ -116,15 +116,15 @@ def main_menu() -> None:
     ensure_db_ready()
     from scytaledroid.Database.db_utils import schema_gate
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
-        ("1", "Android Device Analysis", handle_device),
-        ("2", "Static APK analysis", handle_static),
-        ("3", "Dynamic analysis", handle_dynamic),
+        ("1", "Device Inventory & Harvest", handle_device),
+        ("2", "Static Analysis Pipeline", handle_static),
+        ("3", "Dynamic Analysis (Cohorts)", handle_dynamic),
         ("4", "API server", handle_api),
-        ("5", "Reporting", handle_reporting),
+        ("5", "Reporting & Exports", handle_reporting),
         ("6", "Database tools", handle_database),
-        ("7", "Governance Inputs & Readiness", handle_data_workspace),
-        ("8", "Workspace & Evidence", handle_workspace),
-        ("9", "APK library & archives", handle_browse_apks),
+        ("7", "Governance & Readiness", handle_data_workspace),
+        ("8", "Evidence & Workspace", handle_workspace),
+        ("9", "APK library", handle_browse_apks),
         ("10", "About ScytaleDroid", handle_about),
     ]
 
@@ -148,7 +148,7 @@ def main_menu() -> None:
         if db_warning is not None:
             warn_message, warn_detail = db_warning
             status_messages.print_status(
-                f"[WARN] Persistence is unavailable: {warn_message}",
+                f"Persistence is unavailable: {warn_message}",
                 level="warn",
             )
             if warn_detail:
@@ -360,16 +360,22 @@ def _print_tier1_status_banner() -> dict[str, object]:
         if apps and runs and windows:
             print(f"Cohort: {apps} apps | {runs} runs | {windows} windows | Quota: {quota_label}")
         else:
-            print(f"Quota: {quota_label} | Publication: {'READY' if pub_ready else 'MISSING'}")
-        print(f"Publication: {'READY' if pub_ready else 'MISSING'} | Path: {pub_root}")
+            print(f"Quota: {quota_label} | Publication: {'present' if pub_ready else 'missing'}")
+        print(f"Publication: {'present' if pub_ready else 'missing'} | Path: {pub_root}")
         print("Commands: [H] Copy freeze hash | [D] Details")
         return snapshot
 
     # Collection/default mode: keep it compact; avoid DB noise unless needed.
-    reason = ""
-    if audit != "GO":
-        reason = f" (Audit: {audit})"
-    print(status_messages.status(f"Mode: COLLECTION | Quota: {quota_label}{reason}", level="info"))
+    audit_ready = str(audit).strip().upper() == "GO"
+    audit_state = "ready" if audit_ready else "not ready"
+    audit_detail = "Evidence freeze present" if audit_ready else "No evidence freeze"
+    if quota_label == "unknown":
+        quota_line = "Quota: Not enforced"
+    else:
+        quota_line = f"Quota: {quota_label}"
+    print(status_messages.status("Mode: COLLECTION", level="info"))
+    print(status_messages.status(f"Audit State: {audit_state} ({audit_detail})", level="info" if audit_ready else "warn"))
+    print(status_messages.status(quota_line, level="info"))
     # Keep a single legacy hint if schema mismatch is present.
     schema_ver = tier1.get("schema_version") or "<unknown>"
     expected_schema = tier1.get("expected_schema") or "<unknown>"

@@ -30,7 +30,7 @@ def _inventory_badge(status: InventoryStatus | None) -> str:
 def _render_header(adb_status: str, live_count: int) -> None:
     ts = format_timestamp_utc(datetime.now(UTC))
     status_messages.print_strip(
-        "Android Device Analysis",
+        "Device Inventory & Harvest",
         [
             ("UTC", ts),
             ("ADB", adb_status),
@@ -63,11 +63,11 @@ def _render_live_devices(
         if rooted_value == "YES":
             rooted = "Yes"
             if use_color:
-                rooted = colors.apply(rooted, palette.warning, bold=True)
+                rooted = colors.apply(rooted, palette.success, bold=True)
         elif rooted_value == "NO":
             rooted = "No"
             if use_color:
-                rooted = colors.apply(rooted, palette.success, bold=True)
+                rooted = colors.apply(rooted, palette.info, bold=True)
         else:
             rooted = "Unknown"
             if use_color:
