@@ -1,5 +1,11 @@
 # File: simple.py
-"""Legacy wrapper for permission console helpers."""
+"""Legacy compatibility wrapper for permission console helpers.
+
+Active code should prefer importing from ``permission_console_rendering`` or
+``permission_manifest_extract`` directly. This module currently has no in-repo
+callers and remains only as a compatibility surface until the wrapper-removal
+batch is approved.
+"""
 
 from __future__ import annotations
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections import Counter
 from types import SimpleNamespace
 
 from scytaledroid.Database.db_core import db_engine
@@ -600,6 +601,89 @@ def test_canonical_enforcement_skips_profile_scope_fast_path(monkeypatch):
     assert outcome.persistence_failed is False
     assert outcome.canonical_failed is False
     assert not any("canonical_enforcement_failed" in err for err in outcome.errors)
+
+
+def test_persist_run_summary_rolls_up_persisted_findings_total(monkeypatch):
+    state: dict[str, object] = {"in_tx": False}
+    updates: list[tuple[object, object]] = []
+    monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
+    monkeypatch.setattr(rs, "database_session", lambda: _FakeDBSession(state))
+    monkeypatch.setattr(
+        rs,
+        "prepare_run_envelope",
+        lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
+    )
+    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs,
+        "_prepare_findings_persistence_context",
+        lambda **_kwargs: rs._PreparedFindingsPersistenceContext(
+            finding_rows=[
+                {"rule_id": "RULE-1", "severity": "High"},
+                {"rule_id": "RULE-2", "severity": "Low"},
+            ],
+            canonical_finding_rows=[],
+            correlation_rows=[],
+            control_summary=[],
+            control_entry_count=0,
+            total_findings=2,
+            persisted_totals=Counter({"high": 1, "low": 1}),
+            downgraded_high=0,
+            capped_by_detector=Counter(),
+            taxonomy_counter=Counter(),
+            rule_assigned=2,
+            base_vector_count=0,
+            bte_vector_count=0,
+            preview_assigned=2,
+            path_assigned=2,
+            missing_masvs=0,
+        ),
+    )
+    monkeypatch.setattr(
+        rs,
+        "_bootstrap_persistence_transaction",
+        lambda **_kwargs: rs._TransactionBootstrapResult(
+            run_id=7001,
+            static_run_id=8001,
+            created_run_id=False,
+            created_static_run_id=False,
+        ),
+    )
+    monkeypatch.setattr(rs, "_persist_findings_and_correlations_stage", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "_persist_permission_and_storage_stage", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "_persist_metrics_and_sections_stage", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "_finalize_static_handoff_stage", lambda **_kwargs: False)
+    monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
+
+    def _run_sql(sql, params=None, fetch=None):
+        text = str(sql)
+        if "FROM static_analysis_runs sar" in text:
+            return []
+        if "SELECT session_label FROM static_analysis_runs WHERE id=%s" in text:
+            return ("sess-rollup-1",)
+        if "UPDATE static_analysis_runs SET findings_total=%s" in text:
+            updates.append(params)
+            return None
+        return []
+
+    monkeypatch.setattr(rs.core_q, "run_sql", _run_sql)
+
+    outcome = rs.persist_run_summary(
+        _DummyReport(),
+        {},
+        "com.example.app",
+        session_stamp="sess-rollup-1",
+        scope_label="all",
+        finding_totals={"total": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        baseline_payload={},
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    assert outcome.persistence_failed is False
+    assert outcome.persisted_findings == 2
+    assert updates == [(2, 8001)]
 
 
 def test_redact_finding_evidence_payload_masks_jwt_like_tokens() -> None:

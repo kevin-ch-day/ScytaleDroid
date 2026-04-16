@@ -6,6 +6,7 @@ import json
 import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -73,6 +74,27 @@ from .view import DetailBuffer
 
 # Back-compat: tests and older callers patch these names.
 _REQUIRED_PAPER_ARTIFACTS = REQUIRED_PAPER_ARTIFACTS
+
+
+@dataclass(frozen=True, slots=True)
+class RunResultsSessionMeta:
+    session_label: str | None
+    attempts: int | None
+    canonical_id: int | None
+    latest_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class RunResultsViewModel:
+    title: str
+    overview_items: list[dict[str, object]]
+    subtitle: str | None
+    footer: str | None
+    static_output_context: Mapping[str, object]
+    planned_artifacts: int
+    observed_artifacts: int
+    version_line: str | None
+    session_meta: RunResultsSessionMeta
 
 
 def _first_text(*values: object) -> str | None:
@@ -212,6 +234,152 @@ def _collect_static_output_context(
         "acquisition": acquisition,
         "has_group_manifest": bool(manifest or first_manifest_path),
     }
+
+
+def _load_run_results_session_meta(
+    *,
+    params: RunParameters,
+) -> RunResultsSessionMeta:
+    session_label = params.session_label or params.session_stamp
+    if not session_label or params.dry_run:
+        return RunResultsSessionMeta(
+            session_label=session_label,
+            attempts=None,
+            canonical_id=None,
+            latest_id=None,
+        )
+
+    attempts: int | None = None
+    canonical_id: int | None = None
+    latest_id: int | None = None
+    try:
+        row = core_q.run_sql(
+            "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s",
+            (session_label,),
+            fetch="one",
+        )
+        attempts = int(row[0]) if row and row[0] is not None else None
+    except Exception:
+        attempts = None
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT id
+            FROM static_analysis_runs
+            WHERE session_label=%s AND is_canonical=1
+            ORDER BY canonical_set_at_utc DESC
+            LIMIT 1
+            """,
+            (session_label,),
+            fetch="one",
+        )
+        canonical_id = int(row[0]) if row and row[0] is not None else None
+    except Exception:
+        canonical_id = None
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT id
+            FROM static_analysis_runs
+            WHERE session_label=%s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (session_label,),
+            fetch="one",
+        )
+        latest_id = int(row[0]) if row and row[0] is not None else None
+    except Exception:
+        latest_id = None
+    return RunResultsSessionMeta(
+        session_label=session_label,
+        attempts=attempts,
+        canonical_id=canonical_id,
+        latest_id=latest_id,
+    )
+
+
+def build_run_results_view_model(
+    outcome: RunOutcome,
+    params: RunParameters,
+    *,
+    totals: Mapping[str, int],
+    artifact_count: int,
+) -> RunResultsViewModel:
+    runtime_findings_total = sum(int(value or 0) for value in totals.values())
+    overview_items = [
+        summary_cards.summary_item("Applications", len(outcome.results)),
+        summary_cards.summary_item("Artifacts", artifact_count),
+    ]
+    if params.dry_run:
+        overview_items.append(summary_cards.summary_item("Findings", "computed (not stored)"))
+    else:
+        overview_items.append(
+            summary_cards.summary_item(
+                "Detector hits (raw)",
+                runtime_findings_total,
+                value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis",
+            )
+        )
+
+    session_meta = _load_run_results_session_meta(params=params)
+    subtitle_parts = [params.profile_label]
+    if params.scope_label:
+        subtitle_parts.append(f"Scope: {params.scope_label}")
+    if session_meta.session_label:
+        session_note = f"Session: {session_meta.session_label}"
+        if session_meta.canonical_id or session_meta.latest_id:
+            parts: list[str] = []
+            if session_meta.canonical_id:
+                parts.append(f"canonical: {session_meta.canonical_id}")
+            if session_meta.latest_id:
+                parts.append(f"latest: {session_meta.latest_id}")
+            if session_meta.attempts is not None:
+                parts.append(f"attempts: {session_meta.attempts}")
+            session_note += f" ({', '.join(parts)})"
+        subtitle_parts.append(session_note)
+
+    grade_label = "CANONICAL_GRADE"
+    grade_reasons: list[str] = []
+    if not params.dry_run:
+        if not bool(params.persistence_ready):
+            grade_label = "EXPERIMENTAL"
+            grade_reasons.append("persistence gate failed")
+        if outcome.failures:
+            grade_label = "EXPERIMENTAL"
+            grade_reasons.append("run failures present")
+    grade_text = f"Grade: {grade_label}"
+    if grade_reasons:
+        grade_text += f" ({'; '.join(grade_reasons)})"
+    footer = f"{grade_text}  |  Use the prompts below to drill into per-app findings."
+
+    static_output_context = _collect_static_output_context(
+        outcome,
+        params,
+        artifact_count=artifact_count,
+    )
+    planned_artifacts = int(static_output_context.get("planned_artifacts") or artifact_count)
+    observed_artifacts = int(static_output_context.get("observed_artifacts") or artifact_count)
+
+    version_line = None
+    if len(outcome.results) == 1:
+        app = outcome.results[0]
+        version_name = app.version_name or "?"
+        version_code = app.version_code if app.version_code is not None else "?"
+        sha256 = app.base_apk_sha256 or "?"
+        version_line = f"Version: {version_name} ({version_code}) • SHA-256: {sha256}"
+
+    return RunResultsViewModel(
+        title="Static analysis summary",
+        overview_items=overview_items,
+        subtitle=" • ".join(subtitle_parts),
+        footer=footer,
+        static_output_context=static_output_context,
+        planned_artifacts=planned_artifacts,
+        observed_artifacts=observed_artifacts,
+        version_line=version_line,
+        session_meta=session_meta,
+    )
 
 
 def _format_counter_value(value: object) -> str:
@@ -431,125 +599,30 @@ def _render_run_results_impl(
 
     def _emit_detail(line: str = "") -> None:
         detail_output.add(line)
-    overview_items = [
-        summary_cards.summary_item("Applications", len(outcome.results)),
-        summary_cards.summary_item("Artifacts", artifact_count),
-    ]
-    if params.dry_run:
-        overview_items.append(
-            summary_cards.summary_item("Findings", "computed (not stored)")
-        )
-    else:
-        overview_items.append(
-            summary_cards.summary_item(
-                "Detector hits (raw)",
-                runtime_findings_total,
-                value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis",
-            )
-        )
-    # Remove duplicate severity counters from the summary card (shown in accounting below).
-    subtitle_parts = [params.profile_label]
-    if params.scope_label:
-        subtitle_parts.append(f"Scope: {params.scope_label}")
-    session_label = params.session_label or params.session_stamp
-    session_meta: dict[str, int | None] = {"attempts": None, "canonical": None, "latest": None}
-    if session_label and not params.dry_run:
-        try:
-            row = core_q.run_sql(
-                "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s",
-                (session_label,),
-                fetch="one",
-            )
-            session_meta["attempts"] = int(row[0]) if row and row[0] is not None else None
-        except Exception:
-            session_meta["attempts"] = None
-        try:
-            row = core_q.run_sql(
-                """
-                SELECT id
-                FROM static_analysis_runs
-                WHERE session_label=%s AND is_canonical=1
-                ORDER BY canonical_set_at_utc DESC
-                LIMIT 1
-                """,
-                (session_label,),
-                fetch="one",
-            )
-            session_meta["canonical"] = int(row[0]) if row and row[0] is not None else None
-        except Exception:
-            session_meta["canonical"] = None
-        try:
-            row = core_q.run_sql(
-                """
-                SELECT id
-                FROM static_analysis_runs
-                WHERE session_label=%s
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (session_label,),
-                fetch="one",
-            )
-            session_meta["latest"] = int(row[0]) if row and row[0] is not None else None
-        except Exception:
-            session_meta["latest"] = None
-    if session_label:
-        session_note = f"Session: {session_label}"
-        canonical_id = session_meta.get("canonical")
-        latest_id = session_meta.get("latest")
-        attempts = session_meta.get("attempts")
-        if canonical_id or latest_id:
-            parts: list[str] = []
-            if canonical_id:
-                parts.append(f"canonical: {canonical_id}")
-            if latest_id:
-                parts.append(f"latest: {latest_id}")
-            if attempts is not None:
-                parts.append(f"attempts: {attempts}")
-            session_note += f" ({', '.join(parts)})"
-        subtitle_parts.append(session_note)
-    subtitle = " • ".join(subtitle_parts)
-    grade_label = "CANONICAL_GRADE"
-    grade_reasons: list[str] = []
-    if not params.dry_run:
-        persistence_ready = bool(params.persistence_ready)
-        if not persistence_ready:
-            grade_label = "EXPERIMENTAL"
-            grade_reasons.append("persistence gate failed")
-        if outcome.failures:
-            grade_label = "EXPERIMENTAL"
-            grade_reasons.append("run failures present")
-    grade_text = f"Grade: {grade_label}"
-    if grade_reasons:
-        grade_text += f" ({'; '.join(grade_reasons)})"
-    footer = f"{grade_text}  |  Use the prompts below to drill into per-app findings."
+    view_model = build_run_results_view_model(
+        outcome,
+        params,
+        totals=totals,
+        artifact_count=artifact_count,
+    )
     print(
         summary_cards.format_summary_card(
-            "Static analysis summary",
-            overview_items,
-            subtitle=subtitle,
-            footer=footer,
+            view_model.title,
+            view_model.overview_items,
+            subtitle=view_model.subtitle,
+            footer=view_model.footer,
             width=90,
         )
     )
-    static_output_context = _collect_static_output_context(
-        outcome,
-        params,
-        artifact_count=artifact_count,
-    )
-    _render_static_output_context(static_output_context)
+    _render_static_output_context(view_model.static_output_context)
     _render_artifact_completeness(
-        planned_artifacts=int(static_output_context.get("planned_artifacts") or artifact_count),
-        observed_artifacts=int(static_output_context.get("observed_artifacts") or artifact_count),
+        planned_artifacts=view_model.planned_artifacts,
+        observed_artifacts=view_model.observed_artifacts,
     )
-    if len(outcome.results) == 1:
-        app = outcome.results[0]
-        version_name = app.version_name or "?"
-        version_code = app.version_code if app.version_code is not None else "?"
-        sha256 = app.base_apk_sha256 or "?"
+    if view_model.version_line:
         print(
             status_messages.status(
-                f"Version: {version_name} ({version_code}) • SHA-256: {sha256}",
+                view_model.version_line,
                 level="info",
             )
         )
@@ -1118,7 +1191,7 @@ def _render_run_results_impl(
                     dynamic_plan_path=dynamic_plan_path,
                     alias_base=alias_base,
                     canonical_action=params.canonical_action,
-                    prior_canonical_id=session_meta.get("canonical"),
+                    prior_canonical_id=view_model.session_meta.canonical_id,
                     static_run_id=app_result.static_run_id,
                 )
             )

@@ -32,16 +32,15 @@ from scytaledroid.DynamicAnalysis.plan_selection import (
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
 from scytaledroid.DynamicAnalysis.scenarios.manual import preview_script_template_for_package
+from scytaledroid.DynamicAnalysis.services.dataset_run_state import load_dataset_run_state
 from scytaledroid.DynamicAnalysis.templates.category_map import (
     category_for_package,
     resolved_template_for_package,
 )
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
-    dataset_tracker_counts,
     delete_dynamic_evidence_packs,
     find_dynamic_run_dirs,
-    recent_tracker_runs,
     reset_package_dataset_tracker,
 )
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
@@ -929,45 +928,16 @@ def run_guided_dataset_run(
     )
     meta_family_note = bool(pkg_lc in _META_FAMILY_PACKAGES)
 
-    # Per-app run menu: operators can run in any order and as many times as needed.
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
-
-    next_protocol = peek_next_run_protocol(package_name, tier="dataset") or {}
-    suggested_profile = (next_protocol.get("run_profile") or "interaction_scripted").strip()
-    if str(suggested_profile).strip().lower() == "baseline_idle":
-        suggested_profile = _canonical_baseline_profile_for_package(package_name)
-    suggested_slot = next_protocol.get("run_sequence")
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
     cfg = DatasetTrackerConfig()
-    total_required = int(cfg.baseline_required) + int(cfg.interactive_required)
-    counts = dataset_tracker_counts(package_name)
-    fs_runs = find_dynamic_run_dirs(package_name)
-    try:
-        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
-
-        tracker_payload = load_dataset_tracker()
-        tracker_apps = tracker_payload.get("apps") if isinstance(tracker_payload, dict) else {}
-        tracker_entry = tracker_apps.get(package_name) if isinstance(tracker_apps, dict) else {}
-        tracker_rows = tracker_entry.get("runs") if isinstance(tracker_entry, dict) else []
-    except Exception:
-        tracker_rows = []
-    paper_eligible_local = 0
-    quota_counted_local = 0
-    exclusion_reason_local: dict[str, int] = {}
-    if isinstance(tracker_rows, list):
-        for row in tracker_rows:
-            if not isinstance(row, dict):
-                continue
-            if row.get("valid_dataset_run") is not True:
-                continue
-            if row.get("paper_eligible") is True:
-                paper_eligible_local += 1
-            if row.get("counts_toward_quota") is True:
-                quota_counted_local += 1
-            if row.get("paper_eligible") is False:
-                reason = str(row.get("paper_exclusion_primary_reason_code") or "EXCLUDED_UNKNOWN").strip()
-                exclusion_reason_local[reason] = int(exclusion_reason_local.get(reason, 0)) + 1
+    state = load_dataset_run_state(package_name, config=cfg)
+    total_required = int(state.total_required)
+    counts = state.counts
+    suggested_profile = (state.effective_suggested_profile or "interaction_scripted").strip()
+    suggested_slot = state.suggested_slot
+    paper_eligible_local = int(state.paper_eligible_local)
+    quota_counted_local = int(state.quota_counted_local)
 
     print()
     # Operator-default: one short status line. Details are available via [V].
@@ -975,7 +945,7 @@ def run_guided_dataset_run(
         f"Runs: baseline {counts.baseline_valid_runs}/{cfg.baseline_required}, "
         f"interactive {counts.interactive_valid_runs}/{cfg.interactive_required} | "
         f"quota_counted(local)={quota_counted_local}/{total_required} | "
-        f"evidence_dirs={len(fs_runs)}"
+        f"evidence_dirs={state.local_evidence_dir_count}"
     )
     if counts.quota_met:
         # Once quota is met, runs are still allowed, but they're "extra" and don't change completion.
@@ -1001,11 +971,10 @@ def run_guided_dataset_run(
             f"  paper_eligible(local)={paper_eligible_local}\tquota_counted(local)={quota_counted_local}/{total_required}\n"
             f"  baseline={counts.baseline_valid_runs}/{cfg.baseline_required}\t"
             f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}\n"
-            f"  quota_met={int(counts.quota_met)}\tlocal_evidence={len(fs_runs)}"
+            f"  quota_met={int(counts.quota_met)}\tlocal_evidence={state.local_evidence_dir_count}"
         )
-        if exclusion_reason_local:
-            top_reasons = sorted(exclusion_reason_local.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:3]
-            reason_line = ", ".join([f"{k}={v}" for k, v in top_reasons])
+        if state.exclusion_reason_top:
+            reason_line = ", ".join([f"{k}={v}" for k, v in state.exclusion_reason_top])
             print(f"  local_exclusion_top: {reason_line}")
         if counts.quota_met:
             print("Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).")
@@ -1044,7 +1013,7 @@ def run_guided_dataset_run(
             return None
         return "suggested" if key == ("2" if suggested_is_interactive else "1") else None
 
-    can_reset = len(fs_runs) > 0
+    can_reset = bool(state.reset_available)
     protocol_options = [
         menu_utils.MenuOption(
             "1",
@@ -1195,32 +1164,17 @@ def run_guided_dataset_run(
         return
 
     # Show recent history before starting capture so operator can sanity-check state.
-    recent = recent_tracker_runs(package_name, limit=5)
-    baseline_connected_insufficient_streak = 0
+    recent = state.recent_runs
     if recent:
         rows = []
         for r in recent:
-            if r.valid is True:
-                status = "VALID"
-                if str(r.run_profile or "").strip().lower() == "baseline_idle" and r.low_signal is True:
-                    status += " (LOW_SIGNAL_IDLE)"
-            elif r.valid is False:
-                status = f"INVALID:{r.invalid_reason_code or 'UNKNOWN'}"
-                if (
-                    str(r.run_profile or "").strip().lower() == "baseline_idle"
-                    and str(r.invalid_reason_code or "").strip().upper() == "PCAP_MISSING"
-                    and str(getattr(r, "messaging_activity", "") or "").strip().lower() in {"none", ""}
-                ):
-                    status += " (LOW_SIGNAL_IDLE)"
-            else:
-                status = "UNKNOWN"
             rows.append(
                 [
                     (r.ended_at or "—")[:19],
                     (r.run_profile or "—"),
                     (r.interaction_level or "—"),
-                    (getattr(r, "messaging_activity", None) or "—"),
-                    status,
+                    (r.messaging_activity or "—"),
+                    r.status_label,
                     (r.run_id or "—")[:8],
                 ]
             )
@@ -1232,19 +1186,7 @@ def run_guided_dataset_run(
         )
         # Operator guidance: repeated baseline PCAP_MISSING usually indicates
         # low-signal app-idle behavior; suggest a warm baseline or scripted run.
-        pcap_missing_streak = 0
-        low_signal_idle_streak = 0
-        for r in recent:
-            prof = str(r.run_profile or "").strip().lower()
-            reason = str(r.invalid_reason_code or "").strip().upper()
-            if prof == "baseline_idle" and r.valid is False and reason == "PCAP_MISSING":
-                pcap_missing_streak += 1
-                continue
-            if prof == "baseline_idle" and r.valid is True and r.low_signal is True:
-                low_signal_idle_streak += 1
-                continue
-            break
-        if pcap_missing_streak >= 2:
+        if state.baseline_idle_pcap_missing_streak >= 2:
             print(
                 status_messages.status(
                     "Recent baseline_idle runs repeatedly failed with PCAP_MISSING. "
@@ -1253,7 +1195,7 @@ def run_guided_dataset_run(
                     level="warn",
                 )
             )
-        if low_signal_idle_streak >= 2:
+        if state.baseline_idle_low_signal_streak >= 2:
             print(
                 status_messages.status(
                     "Recent baseline_idle runs were VALID but LOW_SIGNAL_IDLE. "
@@ -1261,11 +1203,7 @@ def run_guided_dataset_run(
                     level="warn",
                 )
             )
-        baseline_connected_insufficient_streak = _messaging_baseline_connected_insufficient_duration_streak(
-            recent,
-            package_name=package_name,
-        )
-        if baseline_connected_insufficient_streak >= 2:
+        if state.baseline_connected_insufficient_duration_streak >= 2:
             print(
                 status_messages.status(
                     "Recent baseline_connected runs failed with INSUFFICIENT_DURATION. "
@@ -1273,7 +1211,7 @@ def run_guided_dataset_run(
                     level="warn",
                 )
             )
-            suggested_profile = "interaction_scripted"
+            suggested_profile = state.effective_suggested_profile
 
     # Capture modes.
     tier = "dataset"

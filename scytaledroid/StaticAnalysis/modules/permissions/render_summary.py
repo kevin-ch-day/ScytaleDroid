@@ -1,6 +1,8 @@
-"""Renderer: end-of-run risk summaries.
+"""Legacy compatibility wrapper for end-of-run permission summaries.
 
-Thin wrapper to make the summary entry point explicit in imports.
+Active code should prefer importing from ``permission_console_rendering``
+directly. This module currently has no in-repo callers and remains only as a
+compatibility alias until the wrapper-removal batch is approved.
 """
 
 from __future__ import annotations

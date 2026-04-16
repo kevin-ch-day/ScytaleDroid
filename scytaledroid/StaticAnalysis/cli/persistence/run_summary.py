@@ -142,6 +142,1038 @@ class PersistenceOutcome:
         self.errors.append(message)
 
 
+@dataclass(slots=True)
+class _PersistenceRunContext:
+    display_name: str
+    version_name: str | None
+    min_sdk: int | None
+    target_sdk: int | None
+    version_code: int | None
+    profile_token: str | None
+    category_token: str | None
+    scenario_id_token: str | None
+    device_serial_token: str | None
+    manifest_sha: str | None
+    base_apk_sha256: str | None
+    artifact_set_hash: str | None
+    run_signature: str | None
+    run_signature_version: str | None
+    identity_valid: object
+    identity_error_reason: str | None
+    config_hash: str | None
+    pipeline_version: str | None
+    catalog_versions: str | None
+    study_tag: str | None
+    analysis_version: str | None
+    harvest_manifest_path: str | None
+    harvest_capture_status: str | None
+    harvest_persistence_status: str | None
+    harvest_research_status: str | None
+    harvest_matches_planned_artifacts: object
+    harvest_observed_hashes_complete: object
+    harvest_non_canonical_reason_list: list[str]
+    research_usable: object
+
+
+@dataclass(slots=True)
+class _PersistenceMetricsContext:
+    metrics_payload: dict[str, tuple[object | None, str | None]]
+    exported_totals: dict[str, float]
+    flagged_normal_metric: float
+    weak_guard_metric: float
+    rule_cov_pct: float
+    base_cov_pct: float
+    bte_cov_pct: float
+    preview_cov_pct: float
+    path_cov_pct: float
+
+
+@dataclass(slots=True)
+class _PreparedFindingsPersistenceContext:
+    finding_rows: list[dict[str, Any]]
+    canonical_finding_rows: list[dict[str, object]]
+    correlation_rows: list[dict[str, object]]
+    control_summary: list[tuple[str, Mapping[str, Any]]]
+    control_entry_count: int
+    total_findings: int
+    persisted_totals: Counter[str]
+    downgraded_high: int
+    capped_by_detector: Counter[str]
+    taxonomy_counter: Counter[str]
+    rule_assigned: int
+    base_vector_count: int
+    bte_vector_count: int
+    preview_assigned: int
+    path_assigned: int
+    missing_masvs: int
+
+
+@dataclass(slots=True)
+class _TransactionBootstrapResult:
+    run_id: int
+    static_run_id: int | None
+    created_run_id: bool
+    created_static_run_id: bool
+
+
+@dataclass(slots=True)
+class _PersistenceStageContext:
+    base_report: object
+    string_data: Mapping[str, object]
+    package_for_run: str
+    session_stamp: str
+    scope_label: str
+    metadata_map: Mapping[str, object]
+    baseline_payload: Mapping[str, object]
+    metrics_bundle: object
+    manifest_obj: object | None
+
+
+@dataclass(slots=True)
+class _FindingPreparationAccumulator:
+    severity_counter: Counter[str] = field(default_factory=Counter)
+    downgraded_high: int = 0
+    persisted_by_detector: Counter[str] = field(default_factory=Counter)
+    capped_by_detector: Counter[str] = field(default_factory=Counter)
+    taxonomy_counter: Counter[str] = field(default_factory=Counter)
+    finding_rows: list[dict[str, Any]] = field(default_factory=list)
+    canonical_finding_rows: list[dict[str, object]] = field(default_factory=list)
+    control_entries: list[tuple[str, Mapping[str, Any]]] = field(default_factory=list)
+    correlation_rows: list[dict[str, object]] = field(default_factory=list)
+    total_findings: int = 0
+    rule_assigned: int = 0
+    base_vector_count: int = 0
+    bte_vector_count: int = 0
+    preview_assigned: int = 0
+    path_assigned: int = 0
+
+
+@dataclass(slots=True)
+class _PreparedFindingPayload:
+    detector_id: str
+    module_id: str | None
+    severity: str
+    evidence_payload: str
+    evidence_path: str | None
+    evidence_offset: str | None
+    evidence_preview: str | None
+    rule_id: str | None
+    masvs_area: str | None
+    base_vector: str | None
+    base_score_c: str | None
+    bt_vector: str | None
+    bt_score_c: str | None
+    be_vector: str | None
+    be_score_c: str | None
+    bte_vector: str | None
+    bte_score_c: str | None
+    profile_meta: Mapping[str, Any] | None
+    base_meta: Mapping[str, Any] | None
+    metrics_map: Mapping[str, object] | None
+
+
+def _build_persistence_run_context(
+    *,
+    base_report,
+    manifest_obj: object | None,
+    metadata_map: Mapping[str, object],
+    baseline_payload: Mapping[str, object],
+    package_for_run: str,
+) -> _PersistenceRunContext:
+    display_name = getattr(manifest_obj, "app_label", None) or package_for_run
+    version_name = getattr(manifest_obj, "version_name", None) if manifest_obj else None
+    min_sdk = safe_int(
+        getattr(manifest_obj, "min_sdk", None)
+        or getattr(manifest_obj, "min_sdk_version", None)
+    )
+    target_sdk = safe_int(getattr(manifest_obj, "target_sdk", None))
+    try:
+        version_code = safe_int(getattr(manifest_obj, "version_code", None)) if manifest_obj else None
+    except Exception:
+        version_code = None
+    profile_token = first_text(
+        metadata_map.get("scan_profile") if isinstance(metadata_map, Mapping) else None,
+        metadata_map.get("run_profile") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("scan_profile") if isinstance(baseline_payload, Mapping) else None,
+        baseline_payload.get("profile") if isinstance(baseline_payload, Mapping) else None,
+        "Full",
+    )
+    category_token = first_text(
+        metadata_map.get("category") if isinstance(metadata_map, Mapping) else None,
+        metadata_map.get("category_name") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("category") if isinstance(baseline_payload, Mapping) else None,
+        baseline_payload.get("category_name") if isinstance(baseline_payload, Mapping) else None,
+    )
+    scenario_id_token = first_text(
+        metadata_map.get("scenario_id") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("scenario_id") if isinstance(baseline_payload, Mapping) else None,
+        "static_default",
+    )
+    device_serial_token = first_text(
+        metadata_map.get("device_serial") if isinstance(metadata_map, Mapping) else None,
+        baseline_payload.get("device_serial") if isinstance(baseline_payload, Mapping) else None,
+    )
+    manifest_sha = None
+    base_apk_sha256 = None
+    artifact_set_hash = None
+    run_signature = None
+    run_signature_version = None
+    identity_valid = None
+    identity_error_reason = None
+    if isinstance(metadata_map, Mapping):
+        manifest_sha = first_text(
+            metadata_map.get("artifact_manifest_sha256"),
+            metadata_map.get("manifest_sha256"),
+        )
+        base_apk_sha256 = first_text(metadata_map.get("base_apk_sha256"))
+        artifact_set_hash = first_text(metadata_map.get("artifact_set_hash"))
+        run_signature = first_text(metadata_map.get("run_signature"))
+        run_signature_version = first_text(metadata_map.get("run_signature_version"))
+        identity_valid = metadata_map.get("identity_valid")
+        identity_error_reason = first_text(metadata_map.get("identity_error_reason"))
+    if not manifest_sha:
+        try:
+            manifest_sha = first_text(getattr(base_report, "hashes", {}).get("sha256"))
+        except Exception:
+            manifest_sha = None
+    config_hash = first_text(
+        metadata_map.get("config_hash") if isinstance(metadata_map, Mapping) else None,
+    )
+    pipeline_version = first_text(
+        metadata_map.get("pipeline_version") if isinstance(metadata_map, Mapping) else None,
+    )
+    catalog_versions = first_text(
+        metadata_map.get("catalog_versions") if isinstance(metadata_map, Mapping) else None,
+    )
+    study_tag = first_text(
+        metadata_map.get("study_tag") if isinstance(metadata_map, Mapping) else None,
+    )
+    analysis_version = first_text(getattr(base_report, "analysis_version", None))
+    harvest_manifest_path = first_text(
+        metadata_map.get("harvest_manifest_path") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_capture_status = first_text(
+        metadata_map.get("harvest_capture_status") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_persistence_status = first_text(
+        metadata_map.get("harvest_persistence_status") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_research_status = first_text(
+        metadata_map.get("harvest_research_status") if isinstance(metadata_map, Mapping) else None,
+    )
+    harvest_matches_planned_artifacts = (
+        metadata_map.get("harvest_matches_planned_artifacts")
+        if isinstance(metadata_map, Mapping)
+        else None
+    )
+    harvest_observed_hashes_complete = (
+        metadata_map.get("harvest_observed_hashes_complete")
+        if isinstance(metadata_map, Mapping)
+        else None
+    )
+    harvest_non_canonical_reasons = (
+        metadata_map.get("harvest_non_canonical_reasons")
+        if isinstance(metadata_map, Mapping)
+        else None
+    )
+    if isinstance(harvest_non_canonical_reasons, Sequence) and not isinstance(
+        harvest_non_canonical_reasons,
+        (str, bytes),
+    ):
+        harvest_non_canonical_reason_list = [str(item) for item in harvest_non_canonical_reasons if str(item).strip()]
+    else:
+        harvest_non_canonical_reason_list = []
+    research_usable = metadata_map.get("research_usable") if isinstance(metadata_map, Mapping) else None
+    return _PersistenceRunContext(
+        display_name=display_name,
+        version_name=version_name,
+        min_sdk=min_sdk,
+        target_sdk=target_sdk,
+        version_code=version_code,
+        profile_token=profile_token,
+        category_token=category_token,
+        scenario_id_token=scenario_id_token,
+        device_serial_token=device_serial_token,
+        manifest_sha=manifest_sha,
+        base_apk_sha256=base_apk_sha256,
+        artifact_set_hash=artifact_set_hash,
+        run_signature=run_signature,
+        run_signature_version=run_signature_version,
+        identity_valid=identity_valid,
+        identity_error_reason=identity_error_reason,
+        config_hash=config_hash,
+        pipeline_version=pipeline_version,
+        catalog_versions=catalog_versions,
+        study_tag=study_tag,
+        analysis_version=analysis_version,
+        harvest_manifest_path=harvest_manifest_path,
+        harvest_capture_status=harvest_capture_status,
+        harvest_persistence_status=harvest_persistence_status,
+        harvest_research_status=harvest_research_status,
+        harvest_matches_planned_artifacts=harvest_matches_planned_artifacts,
+        harvest_observed_hashes_complete=harvest_observed_hashes_complete,
+        harvest_non_canonical_reason_list=harvest_non_canonical_reason_list,
+        research_usable=research_usable,
+    )
+
+
+def _build_persistence_metrics_context(
+    *,
+    base_report,
+    metrics_bundle,
+    code_http_hosts: int,
+    asset_http_hosts: int,
+    total_findings: int,
+    persisted_finding_count: int,
+    downgraded_high: int,
+    capped_by_detector: Counter[str],
+    taxonomy_counter: Counter[str],
+    rule_assigned: int,
+    base_vector_count: int,
+    bte_vector_count: int,
+    preview_assigned: int,
+    path_assigned: int,
+) -> _PersistenceMetricsContext:
+    perm_detail_map: Mapping[str, object] = (
+        metrics_bundle.permission_detail
+        if isinstance(metrics_bundle.permission_detail, Mapping)
+        else {}
+    )
+    flagged_normal_metric = float(perm_detail_map.get("flagged_normal_count", 0) or 0)
+    weak_guard_metric = float(perm_detail_map.get("weak_guard_count", 0) or 0)
+
+    exported = getattr(base_report, "exported_components", None)
+    exported_totals = {
+        "exports.total": float(getattr(exported, "total", lambda: 0)()) if exported else 0.0,
+        "exports.activities": float(len(getattr(exported, "activities", []) or [])) if exported else 0.0,
+        "exports.services": float(len(getattr(exported, "services", []) or [])) if exported else 0.0,
+        "exports.receivers": float(len(getattr(exported, "receivers", []) or [])) if exported else 0.0,
+        "exports.providers": float(len(getattr(exported, "providers", []) or [])) if exported else 0.0,
+    }
+
+    metrics_payload: dict[str, tuple[object | None, str | None]] = {
+        "network.code_http_hosts": (float(code_http_hosts), None),
+        "network.asset_http_hosts": (float(asset_http_hosts), None),
+        "permissions.dangerous_count": (float(getattr(metrics_bundle, "dangerous_permissions", 0)), None),
+        "permissions.signature_count": (float(getattr(metrics_bundle, "signature_permissions", 0)), None),
+        "permissions.oem_count": (float(getattr(metrics_bundle, "oem_permissions", 0)), None),
+        "permissions.flagged_normal_count": (flagged_normal_metric, None),
+        "permissions.weak_guard_count": (weak_guard_metric, None),
+        "permissions.risk_score": (float(getattr(metrics_bundle, "permission_score", 0.0)), None),
+        "permissions.risk_grade": (None, getattr(metrics_bundle, "permission_grade", "")),
+        "findings.total": (float(total_findings), None),
+        "findings.persisted_total": (float(persisted_finding_count), None),
+        "findings.capped_total": (float(int(sum(capped_by_detector.values()))), None),
+        "findings.cap_per_detector_default": (float(_finding_cap_for_detector("__default__")), None),
+    }
+    for key, value in exported_totals.items():
+        metrics_payload[key] = (value, None)
+    if downgraded_high:
+        metrics_payload["findings.high_downgraded"] = (float(downgraded_high), None)
+    for detector_id, dropped in sorted(capped_by_detector.items()):
+        metrics_payload[f"findings.capped.{detector_id}"] = (float(dropped), None)
+    for label in ("RISK", "FINDING", "INFO"):
+        metrics_payload[f"findings.taxonomy.{label.lower()}"] = (float(taxonomy_counter.get(label, 0)), None)
+    rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
+    bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
+    preview_cov_pct = (float(preview_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    path_cov_pct = (float(path_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
+    metrics_payload["findings.ruleid_coverage_pct"] = (rule_cov_pct, None)
+    metrics_payload["findings.preview_coverage_pct"] = (preview_cov_pct, None)
+    metrics_payload["findings.path_coverage_pct"] = (path_cov_pct, None)
+    metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
+    metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
+    return _PersistenceMetricsContext(
+        metrics_payload=metrics_payload,
+        exported_totals=exported_totals,
+        flagged_normal_metric=flagged_normal_metric,
+        weak_guard_metric=weak_guard_metric,
+        rule_cov_pct=rule_cov_pct,
+        base_cov_pct=base_cov_pct,
+        bte_cov_pct=bte_cov_pct,
+        preview_cov_pct=preview_cov_pct,
+        path_cov_pct=path_cov_pct,
+    )
+
+
+def _collect_detector_correlation_rows(
+    *,
+    result: object,
+    detector_id: str,
+    static_run_id: int | None,
+    package_for_run: str,
+    accumulator: _FindingPreparationAccumulator,
+) -> None:
+    if detector_id == "correlation_engine" and static_run_id:
+        accumulator.correlation_rows.extend(
+            _correlation_rows_from_result(
+                result,
+                static_run_id=static_run_id,
+                package_name=package_for_run,
+            )
+        )
+
+
+def _append_prepared_finding_rows(
+    *,
+    finding: object,
+    payload: _PreparedFindingPayload,
+    accumulator: _FindingPreparationAccumulator,
+) -> None:
+    meta_combined: dict[str, Any] = {}
+    if payload.base_meta:
+        meta_combined.update(payload.base_meta)
+    if payload.profile_meta:
+        meta_combined.update(payload.profile_meta)
+    accumulator.finding_rows.append(
+        {
+            "severity": payload.severity,
+            "masvs": payload.masvs_area,
+            "cvss": truncate(payload.base_vector, 128),
+            "kind": payload.detector_id,
+            "module_id": payload.module_id,
+            "evidence": truncate(payload.evidence_payload, 512),
+            "evidence_path": truncate(payload.evidence_path, 512),
+            "evidence_offset": truncate(payload.evidence_offset, 64),
+            "evidence_preview": truncate(payload.evidence_preview, 256),
+            "rule_id": payload.rule_id,
+            "cvss_v40_b_vector": payload.base_vector,
+            "cvss_v40_b_score": payload.base_score_c,
+            "cvss_v40_bt_vector": payload.bt_vector,
+            "cvss_v40_bt_score": payload.bt_score_c,
+            "cvss_v40_be_vector": payload.be_vector,
+            "cvss_v40_be_score": payload.be_score_c,
+            "cvss_v40_bte_vector": payload.bte_vector,
+            "cvss_v40_bte_score": payload.bte_score_c,
+            "cvss_v40_meta": (
+                json.dumps(meta_combined, ensure_ascii=False, default=str) if meta_combined else None
+            ),
+        }
+    )
+    status_value = str(
+        getattr(getattr(finding, "status", None), "value", getattr(finding, "status", None)) or ""
+    ).upper()
+    tags_value = getattr(finding, "tags", None)
+    tags_json = None
+    if isinstance(tags_value, Sequence) and not isinstance(tags_value, (str, bytes)):
+        tags_json = json.dumps([str(tag) for tag in tags_value], ensure_ascii=False)
+    evidence_refs_payload = None
+    if isinstance(payload.metrics_map, Mapping):
+        hashes_payload = payload.metrics_map.get("hashes") or payload.metrics_map.get("evidence_refs")
+        if hashes_payload is not None:
+            evidence_refs_payload = json.dumps(hashes_payload, ensure_ascii=False, default=str)
+    accumulator.canonical_finding_rows.append(
+        {
+            "finding_id": truncate(first_text(getattr(finding, "finding_id", None), payload.rule_id), 128),
+            "status": truncate(status_value, 32),
+            "severity": truncate(payload.severity, 32),
+            "category": truncate(payload.masvs_area, 64),
+            "title": truncate(
+                first_text(getattr(finding, "title", None), payload.evidence_preview, payload.detector_id),
+                512,
+            ),
+            "tags": tags_json,
+            "evidence": payload.evidence_payload,
+            "fix": truncate(first_text(getattr(finding, "remediate", None)), 2048),
+            "rule_id": truncate(payload.rule_id, 128),
+            "cvss_score": payload.base_score_c,
+            "masvs_control": truncate(payload.masvs_area, 32),
+            "detector": truncate(payload.detector_id, 64),
+            "module": truncate(payload.module_id, 64),
+            "evidence_refs": evidence_refs_payload,
+        }
+    )
+
+
+def _build_findings_persistence_context(
+    *,
+    accumulator: _FindingPreparationAccumulator,
+    baseline_counts: Counter[str],
+) -> _PreparedFindingsPersistenceContext:
+    control_summary = summarise_controls(accumulator.control_entries)
+    missing_masvs = sum(1 for row in accumulator.finding_rows if not row.get("masvs"))
+    if accumulator.severity_counter:
+        severity_counts = canonical_severity_counts(accumulator.severity_counter)
+        persisted_totals = Counter(severity_counts)
+    else:
+        persisted_totals = Counter(baseline_counts)
+
+    return _PreparedFindingsPersistenceContext(
+        finding_rows=accumulator.finding_rows,
+        canonical_finding_rows=accumulator.canonical_finding_rows,
+        correlation_rows=accumulator.correlation_rows,
+        control_summary=control_summary,
+        control_entry_count=len(accumulator.control_entries),
+        total_findings=accumulator.total_findings,
+        persisted_totals=persisted_totals,
+        downgraded_high=accumulator.downgraded_high,
+        capped_by_detector=accumulator.capped_by_detector,
+        taxonomy_counter=accumulator.taxonomy_counter,
+        rule_assigned=accumulator.rule_assigned,
+        base_vector_count=accumulator.base_vector_count,
+        bte_vector_count=accumulator.bte_vector_count,
+        preview_assigned=accumulator.preview_assigned,
+        path_assigned=accumulator.path_assigned,
+        missing_masvs=missing_masvs,
+    )
+
+
+def _prepare_findings_persistence_context(
+    *,
+    base_report,
+    package_for_run: str,
+    static_run_id: int | None,
+    envelope,
+    baseline_counts: Counter[str],
+    canonical_cvss_score,
+) -> _PreparedFindingsPersistenceContext:
+    accumulator = _FindingPreparationAccumulator()
+
+    for result in (base_report.detector_results or ()):  # type: ignore[attr-defined]
+        detector_id = str(getattr(result, "detector_id", getattr(result, "section_key", None)) or "unknown")
+        detector_cap = _finding_cap_for_detector(detector_id)
+        module_id_val = getattr(result, "module_id", None)
+        module_id = str(module_id_val) if module_id_val not in (None, "") else None
+        result_metrics = getattr(result, "metrics", None)
+        policy_gate = bool(result_metrics.get("policy_gate", False)) if isinstance(result_metrics, Mapping) else False
+        _collect_detector_correlation_rows(
+            result=result,
+            detector_id=detector_id,
+            static_run_id=static_run_id,
+            package_for_run=package_for_run,
+            accumulator=accumulator,
+        )
+        for f in result.findings:
+            accumulator.total_findings += 1
+            detector_sev = normalise_severity_token(getattr(f, "severity", None))
+            if detector_sev is None:
+                detector_sev = normalise_severity_token(getattr(f, "severity_label", None))
+            metrics_map = getattr(f, "metrics", None)
+            if isinstance(metrics_map, Mapping):
+                detector_sev = detector_sev or normalise_severity_token(metrics_map.get("severity"))
+                detector_sev = detector_sev or normalise_severity_token(metrics_map.get("severity_level"))
+            gate_value = getattr(getattr(f, "severity_gate", None), "value", None)
+            gate_sev = normalise_severity_token(gate_value)
+            sev = detector_sev or gate_sev or "Info"
+            if detector_sev == "High" and sev != "High":
+                accumulator.downgraded_high += 1
+            accumulator.severity_counter[sev] += 1
+            if accumulator.persisted_by_detector[detector_id] >= detector_cap:
+                accumulator.capped_by_detector[detector_id] += 1
+                continue
+            evidence = normalize_evidence(
+                f.evidence,
+                detail_hint=getattr(f, "detail", None)
+                or getattr(f, "headline", None)
+                or getattr(f, "summary", None)
+                or getattr(f, "because", None),
+                path_hint=getattr(f, "path", None),
+                offset_hint=getattr(f, "offset", None),
+            )
+            evidence_payload = _redact_finding_evidence_payload(
+                json.dumps(evidence.as_payload(), ensure_ascii=False, default=str)
+            )
+            evidence_path = evidence.path
+            evidence_offset = evidence.offset
+            evidence_preview = evidence.detail
+            if evidence_preview:
+                accumulator.preview_assigned += 1
+            if evidence_path:
+                accumulator.path_assigned += 1
+            rule_id = derive_rule_id(
+                detector_id,
+                module_id,
+                evidence_path,
+                evidence_preview,
+                rule_id_hint=extract_rule_hint(f),
+            )
+            if rule_id:
+                accumulator.rule_assigned += 1
+            masvs_area = derive_masvs_tag(f, rule_id, lookup_rule_area=rule_to_area)
+            base_vector, base_score, base_meta = compute_cvss_base(rule_id)
+            if base_vector:
+                accumulator.base_vector_count += 1
+            bt_vector, bt_score, be_vector, be_score, bte_vector, bte_score, profile_meta = apply_profiles(
+                base_vector,
+                envelope.threat_profile,
+                envelope.env_profile,
+            )
+            base_score_c = canonical_cvss_score(base_score, field="cvss.base_score")
+            bt_score_c = canonical_cvss_score(bt_score, field="cvss.bt_score")
+            be_score_c = canonical_cvss_score(be_score, field="cvss.be_score")
+            bte_score_c = canonical_cvss_score(bte_score, field="cvss.bte_score")
+            if bte_vector:
+                accumulator.bte_vector_count += 1
+            taxonomy = _taxonomy_label(
+                severity=sev,
+                detector_status=getattr(result, "status", Badge.INFO),
+                policy_gate=policy_gate,
+            )
+            accumulator.taxonomy_counter[taxonomy] += 1
+            _append_prepared_finding_rows(
+                finding=f,
+                payload=_PreparedFindingPayload(
+                    detector_id=detector_id,
+                    module_id=module_id,
+                    severity=sev,
+                    evidence_payload=evidence_payload,
+                    evidence_path=evidence_path,
+                    evidence_offset=evidence_offset,
+                    evidence_preview=evidence_preview,
+                    rule_id=rule_id,
+                    masvs_area=masvs_area,
+                    base_vector=base_vector,
+                    base_score_c=base_score_c,
+                    bt_vector=bt_vector,
+                    bt_score_c=bt_score_c,
+                    be_vector=be_vector,
+                    be_score_c=be_score_c,
+                    bte_vector=bte_vector,
+                    bte_score_c=bte_score_c,
+                    profile_meta=profile_meta,
+                    base_meta=base_meta,
+                    metrics_map=metrics_map if isinstance(metrics_map, Mapping) else None,
+                ),
+                accumulator=accumulator,
+            )
+            accumulator.persisted_by_detector[detector_id] += 1
+            accumulator.control_entries.extend(getattr(result, "masvs_coverage", []))
+
+    return _build_findings_persistence_context(
+        accumulator=accumulator,
+        baseline_counts=baseline_counts,
+    )
+
+
+def _bootstrap_persistence_transaction(
+    *,
+    run_id: int | None,
+    static_run_id: int | None,
+    stage_context: _PersistenceStageContext,
+    run_context: _PersistenceRunContext,
+    envelope,
+    finding_totals: Mapping[str, int],
+    cached_schema_version: str,
+    raise_db_error,
+) -> _TransactionBootstrapResult:
+    created_run_id = False
+    created_static_run_id = False
+    if run_id is None:
+        try:
+            run_id = _dw.create_run(
+                package=stage_context.package_for_run,
+                app_label=run_context.display_name,
+                version_code=run_context.version_code,
+                version_name=run_context.version_name,
+                target_sdk=run_context.target_sdk,
+                session_stamp=stage_context.session_stamp,
+                threat_profile=envelope.threat_profile,
+                env_profile=envelope.env_profile,
+            )
+        except Exception as exc:
+            raise_db_error("run.create", f"{exc.__class__.__name__}:{exc}")
+        if run_id is None:
+            raise_db_error("run.create", "returned_null")
+        created_run_id = True
+
+    if static_run_id is None:
+        app_version_id = _ensure_app_version(
+            package_for_run=stage_context.package_for_run,
+            display_name=run_context.display_name,
+            version_name=run_context.version_name,
+            version_code=run_context.version_code,
+            min_sdk=run_context.min_sdk,
+            target_sdk=run_context.target_sdk,
+        )
+        if app_version_id is None:
+            raise_db_error("static_run.create", "app_version_unresolved")
+        static_run_id = _create_static_run(
+            app_version_id=app_version_id,
+            session_stamp=stage_context.session_stamp,
+            session_label=stage_context.session_stamp,
+            scope_label=stage_context.scope_label,
+            category=run_context.category_token,
+            profile=run_context.profile_token,
+            profile_key=run_context.profile_token,
+            scenario_id=run_context.scenario_id_token,
+            device_serial=run_context.device_serial_token,
+            tool_semver=app_config.APP_VERSION,
+            tool_git_commit=get_git_commit(),
+            schema_version=cached_schema_version,
+            findings_total=int(finding_totals.get("total", 0) or 0),
+            run_started_utc=None,
+            status="STARTED",
+            sha256=run_context.base_apk_sha256 or run_context.manifest_sha,
+            base_apk_sha256=run_context.base_apk_sha256,
+            artifact_set_hash=run_context.artifact_set_hash,
+            run_signature=run_context.run_signature,
+            run_signature_version=run_context.run_signature_version,
+            identity_valid=run_context.identity_valid if isinstance(run_context.identity_valid, bool) else None,
+            identity_error_reason=run_context.identity_error_reason,
+            config_hash=run_context.config_hash,
+            pipeline_version=run_context.pipeline_version,
+            analysis_version=run_context.analysis_version,
+            catalog_versions=run_context.catalog_versions,
+            study_tag=run_context.study_tag,
+        )
+        if static_run_id is None:
+            raise_db_error("static_run.create", "create_failed")
+        log.info(
+            f"Resolved static_run_id={static_run_id} for {stage_context.package_for_run} (session={stage_context.session_stamp})",
+            category="static_analysis",
+        )
+        created_static_run_id = True
+
+    if static_run_id:
+        identity_mode_value = _run_writers._identity_mode(
+            base_apk_sha256=run_context.base_apk_sha256,
+            version_code=run_context.version_code,
+        )
+        identity_conflict_value = _run_writers._detect_identity_conflict(
+            package_name=stage_context.package_for_run,
+            version_code=run_context.version_code,
+            base_apk_sha256=run_context.base_apk_sha256,
+        )
+        _update_static_run_metadata(
+            static_run_id,
+            sha256_value=run_context.base_apk_sha256 or run_context.manifest_sha,
+            base_apk_sha256=run_context.base_apk_sha256,
+            artifact_set_hash=run_context.artifact_set_hash,
+            run_signature=run_context.run_signature,
+            run_signature_version=run_context.run_signature_version,
+            identity_valid=run_context.identity_valid if isinstance(run_context.identity_valid, bool) else None,
+            identity_error_reason=run_context.identity_error_reason,
+            identity_mode=identity_mode_value,
+            identity_conflict_flag=identity_conflict_value,
+            config_hash=run_context.config_hash,
+            pipeline_version=run_context.pipeline_version,
+            analysis_version=run_context.analysis_version,
+            catalog_versions=run_context.catalog_versions,
+            study_tag=run_context.study_tag,
+        )
+
+    return _TransactionBootstrapResult(
+        run_id=int(run_id),
+        static_run_id=int(static_run_id) if static_run_id is not None else None,
+        created_run_id=created_run_id,
+        created_static_run_id=created_static_run_id,
+    )
+
+
+def _persist_findings_and_correlations_stage(
+    *,
+    run_id: int,
+    static_run_id: int | None,
+    stage_context: _PersistenceStageContext,
+    findings_context: _PreparedFindingsPersistenceContext,
+    raise_db_error,
+) -> None:
+    try:
+        ok = write_buckets(int(run_id), stage_context.metrics_bundle.buckets, static_run_id=static_run_id)
+    except Exception as exc:
+        raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
+    if not ok:
+        raise_db_error("buckets.write", "returned_false")
+
+    if findings_context.finding_rows:
+        if run_id is None:
+            sample = findings_context.finding_rows[0] if findings_context.finding_rows else {}
+            sample_view = {
+                key: sample.get(key)
+                for key in ("rule_id", "evidence_path", "evidence_preview", "severity")
+            }
+            log.info(
+                (
+                    f"Dry-run persistence payload for {stage_context.package_for_run}: "
+                    f"findings={findings_context.total_findings} "
+                    f"sample={json.dumps(sample_view, ensure_ascii=False, default=str)}"
+                ),
+                category="static_analysis",
+            )
+        elif not persist_findings(
+            int(run_id),
+            findings_context.finding_rows,
+            static_run_id=static_run_id,
+        ):
+            raise_db_error(
+                "findings.write",
+                f"returned_false:run_id={run_id}:static_run_id={static_run_id}",
+            )
+        if static_run_id is not None:
+            try:
+                _persist_static_analysis_findings(
+                    static_run_id=int(static_run_id),
+                    rows=findings_context.canonical_finding_rows,
+                )
+            except Exception as exc:
+                raise_db_error(
+                    "canonical_findings.write",
+                    f"{exc.__class__.__name__}:{exc}",
+                )
+
+    if static_run_id and findings_context.correlation_rows:
+        try:
+            ok = _persist_correlation_results(findings_context.correlation_rows)
+        except Exception as exc:
+            raise_db_error("correlations.write", f"{exc.__class__.__name__}:{exc}")
+        if not ok:
+            raise_db_error("correlations.write", f"returned_false:static_run_id={static_run_id}")
+
+
+def _persist_permission_and_storage_stage(
+    *,
+    run_id: int,
+    static_run_id: int | None,
+    stage_context: _PersistenceStageContext,
+    findings_context: _PreparedFindingsPersistenceContext,
+    raise_db_error,
+) -> None:
+    if findings_context.control_summary:
+        try:
+            persist_masvs_controls(
+                int(run_id),
+                stage_context.package_for_run,
+                findings_context.control_summary,
+            )
+        except Exception as exc:
+            raise_db_error("masvs_controls.write", f"{exc.__class__.__name__}:{exc}")
+    else:
+        log.info(
+            (
+                f"No MASVS control coverage derived for {stage_context.package_for_run}; "
+                f"total_findings={findings_context.total_findings} entries={findings_context.control_entry_count}"
+            ),
+            category="static_analysis",
+        )
+    try:
+        persist_storage_surface_data(
+            stage_context.base_report,
+            stage_context.session_stamp,
+            stage_context.scope_label,
+        )
+    except Exception as exc:
+        raise_db_error("storage_surface.write", f"{exc.__class__.__name__}:{exc}")
+    apk_identifier = safe_int(stage_context.metadata_map.get("apk_id")) if stage_context.metadata_map else None
+    if apk_identifier is None and stage_context.metadata_map:
+        apk_identifier = safe_int(stage_context.metadata_map.get("apkId"))
+    if apk_identifier is None:
+        apk_identifier = safe_int(stage_context.metadata_map.get("android_apk_id"))
+    if apk_identifier is None:
+        apk_identifier = int(run_id)
+
+    permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
+    detector_metrics = getattr(stage_context.base_report, "detector_metrics", None)
+    if isinstance(detector_metrics, Mapping):
+        permission_metrics = detector_metrics.get("permissions_profile")
+        if isinstance(permission_metrics, Mapping):
+            profiles = permission_metrics.get("permission_profiles")
+            if isinstance(profiles, Mapping):
+                permission_profiles_map = profiles
+
+    try:
+        persist_permission_matrix(
+            static_run_id=int(static_run_id) if static_run_id is not None else None,
+            package_name=stage_context.package_for_run,
+            apk_id=apk_identifier,
+            permission_profiles=permission_profiles_map,
+        )
+    except Exception as exc:
+        raise_db_error("permission_matrix.write", f"{exc.__class__.__name__}:{exc}")
+    try:
+        persist_permission_risk(
+            run_id=int(run_id),
+            static_run_id=int(static_run_id) if static_run_id is not None else None,
+            report=stage_context.base_report,
+            package_name=stage_context.package_for_run,
+            session_stamp=stage_context.session_stamp,
+            scope_label=stage_context.scope_label,
+            metrics_bundle=stage_context.metrics_bundle,
+            baseline_payload=stage_context.baseline_payload,
+            permission_profiles=permission_profiles_map,
+        )
+    except Exception as exc:
+        raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
+
+
+def _persist_metrics_and_sections_stage(
+    *,
+    run_id: int,
+    static_run_id: int | None,
+    stage_context: _PersistenceStageContext,
+    metrics_context: _PersistenceMetricsContext,
+    findings_context: _PreparedFindingsPersistenceContext,
+    outcome: PersistenceOutcome,
+    note_db_error,
+    raise_db_error,
+) -> None:
+    try:
+        ok = write_metrics(int(run_id), metrics_context.metrics_payload, static_run_id=static_run_id)
+    except Exception as exc:
+        raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
+    if not ok:
+        raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
+
+    if stage_context.metrics_bundle.contributors:
+        try:
+            ok = write_contributors(int(run_id), stage_context.metrics_bundle.contributors)
+        except Exception as exc:
+            raise_db_error("contributors.write", f"{exc.__class__.__name__}:{exc}")
+        if not ok:
+            raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
+
+    baseline_section = (
+        stage_context.baseline_payload.get("baseline")
+        if isinstance(stage_context.baseline_payload, Mapping)
+        else {}
+    )
+    string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
+    static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
+        package_name=stage_context.package_for_run,
+        session_stamp=stage_context.session_stamp,
+        scope_label=stage_context.scope_label,
+        finding_totals=findings_context.persisted_totals,
+        baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
+        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+        manifest=stage_context.manifest_obj,
+        app_metadata=(
+            stage_context.baseline_payload.get("app")
+            if isinstance(stage_context.baseline_payload, Mapping)
+            else {}
+        ),
+        run_id=run_id,
+        static_run_id=static_run_id,
+    )
+    if baseline_written:
+        outcome.baseline_written = True
+    outcome.string_samples_persisted = sample_total
+    for err in static_errors:
+        note_db_error(err)
+
+
+def _finalize_static_handoff_stage(
+    *,
+    static_run_id: int | None,
+    stage_context: _PersistenceStageContext,
+    run_context: _PersistenceRunContext,
+    cached_schema_version: str,
+    outcome: PersistenceOutcome,
+) -> bool:
+    handoff_failed = False
+    if static_run_id and isinstance(stage_context.base_report, StaticAnalysisReport):
+        try:
+            handoff_payload = build_static_handoff(
+                report=stage_context.base_report,
+                string_data=stage_context.string_data,
+                package_name=stage_context.package_for_run,
+                version_code=run_context.version_code,
+                base_apk_sha256=run_context.base_apk_sha256,
+                artifact_set_hash=run_context.artifact_set_hash,
+                static_run_id=int(static_run_id),
+                session_label=stage_context.session_stamp,
+                tool_semver=app_config.APP_VERSION,
+                tool_git_commit=get_git_commit(),
+                schema_version=cached_schema_version,
+            )
+            handoff_hash = persist_static_handoff(
+                static_run_id=int(static_run_id),
+                handoff_payload=handoff_payload,
+            )
+            outcome.static_handoff_hash = handoff_hash
+            handoff_json_path = str(
+                Path("evidence") / "static_runs" / str(static_run_id) / "static_handoff.json"
+            )
+            identity_block = handoff_payload.get("identity", {}) if isinstance(handoff_payload, Mapping) else {}
+            masvs_block = handoff_payload.get("masvs", {}) if isinstance(handoff_payload, Mapping) else {}
+            identity_mode = str(identity_block.get("identity_mode") or "") if isinstance(identity_block, Mapping) else None
+            identity_conflict_flag = (
+                bool(identity_block.get("identity_conflict_flag"))
+                if isinstance(identity_block, Mapping)
+                else None
+            )
+            masvs_mapping_hash = (
+                str(masvs_block.get("masvs_mapping_hash") or "")
+                if isinstance(masvs_block, Mapping)
+                else None
+            )
+            run_class, non_canonical_reasons = _classify_static_contract(
+                package_name=stage_context.package_for_run,
+                version_code=run_context.version_code,
+                base_apk_sha256=run_context.base_apk_sha256,
+                identity_mode=identity_mode,
+                identity_conflict_flag=identity_conflict_flag,
+                static_handoff_hash=handoff_hash,
+                static_handoff_json_path=handoff_json_path,
+                masvs_mapping_hash=masvs_mapping_hash,
+                schema_version=cached_schema_version,
+                tool_semver=app_config.APP_VERSION,
+                tool_git_commit=get_git_commit(),
+                static_config_hash=run_context.config_hash,
+                harvest_manifest_path=run_context.harvest_manifest_path,
+                harvest_capture_status=run_context.harvest_capture_status,
+                harvest_research_status=run_context.harvest_research_status,
+                harvest_matches_planned_artifacts=(
+                    bool(run_context.harvest_matches_planned_artifacts)
+                    if run_context.harvest_matches_planned_artifacts is not None
+                    else None
+                ),
+                harvest_observed_hashes_complete=(
+                    bool(run_context.harvest_observed_hashes_complete)
+                    if run_context.harvest_observed_hashes_complete is not None
+                    else None
+                ),
+                harvest_non_canonical_reasons=run_context.harvest_non_canonical_reason_list,
+                research_usable=(
+                    bool(run_context.research_usable)
+                    if run_context.research_usable is not None
+                    else None
+                ),
+            )
+            _update_static_run_metadata(
+                int(static_run_id),
+                static_handoff_hash=handoff_hash,
+                static_handoff_json_path=handoff_json_path,
+                masvs_mapping_hash=masvs_mapping_hash,
+                run_class=run_class,
+                non_canonical_reasons=(
+                    json.dumps(non_canonical_reasons, ensure_ascii=True, sort_keys=True)
+                    if non_canonical_reasons
+                    else None
+                ),
+            )
+            if run_class != "CANONICAL":
+                try:
+                    core_q.run_sql(
+                        """
+                        UPDATE static_analysis_runs
+                        SET is_canonical=0,
+                            canonical_reason=COALESCE(canonical_reason, %s)
+                        WHERE id=%s
+                        """,
+                        ("contract_violation", int(static_run_id)),
+                    )
+                except Exception:
+                    pass
+        except Exception as exc:
+            handoff_failed = True
+            message = f"Static handoff export failed for {stage_context.package_for_run}: {exc}"
+            log.warning(message, category="static_analysis")
+            outcome.add_error(message)
+    if handoff_failed and static_run_id:
+        try:
+            _update_static_run_metadata(
+                int(static_run_id),
+                run_class="NON_CANONICAL",
+                non_canonical_reasons=json.dumps(
+                    ["HANDOFF_HASH_MISSING", "PERSISTENCE_ERROR"],
+                    ensure_ascii=True,
+                ),
+            )
+        except Exception:
+            pass
+    return handoff_failed
+
+
 def _persist_static_sections_wrapper(
     *,
     package_name: str,
@@ -838,110 +1870,13 @@ def persist_run_summary(
     run_id = envelope.run_id
     if run_id:
         outcome.run_id = run_id
-    display_name = getattr(manifest_obj, "app_label", None) or package_for_run
-    version_name = getattr(manifest_obj, "version_name", None) if manifest_obj else None
-    min_sdk = safe_int(
-        getattr(manifest_obj, "min_sdk", None)
-        or getattr(manifest_obj, "min_sdk_version", None)
+    run_context = _build_persistence_run_context(
+        base_report=br,
+        manifest_obj=manifest_obj,
+        metadata_map=metadata_map,
+        baseline_payload=baseline_payload,
+        package_for_run=package_for_run,
     )
-    target_sdk = safe_int(getattr(manifest_obj, "target_sdk", None))
-    try:
-        version_code = safe_int(getattr(manifest_obj, "version_code", None)) if manifest_obj else None
-    except Exception:
-        version_code = None
-    profile_token = first_text(
-        metadata_map.get("scan_profile") if isinstance(metadata_map, Mapping) else None,
-        metadata_map.get("run_profile") if isinstance(metadata_map, Mapping) else None,
-        baseline_payload.get("scan_profile") if isinstance(baseline_payload, Mapping) else None,
-        baseline_payload.get("profile") if isinstance(baseline_payload, Mapping) else None,
-        "Full",
-    )
-    category_token = first_text(
-        metadata_map.get("category") if isinstance(metadata_map, Mapping) else None,
-        metadata_map.get("category_name") if isinstance(metadata_map, Mapping) else None,
-        baseline_payload.get("category") if isinstance(baseline_payload, Mapping) else None,
-        baseline_payload.get("category_name") if isinstance(baseline_payload, Mapping) else None,
-    )
-    scenario_id_token = first_text(
-        metadata_map.get("scenario_id") if isinstance(metadata_map, Mapping) else None,
-        baseline_payload.get("scenario_id") if isinstance(baseline_payload, Mapping) else None,
-        "static_default",
-    )
-    device_serial_token = first_text(
-        metadata_map.get("device_serial") if isinstance(metadata_map, Mapping) else None,
-        baseline_payload.get("device_serial") if isinstance(baseline_payload, Mapping) else None,
-    )
-    manifest_sha = None
-    base_apk_sha256 = None
-    artifact_set_hash = None
-    run_signature = None
-    run_signature_version = None
-    identity_valid = None
-    identity_error_reason = None
-    if isinstance(metadata_map, Mapping):
-        manifest_sha = first_text(
-            metadata_map.get("artifact_manifest_sha256"),
-            metadata_map.get("manifest_sha256"),
-        )
-        base_apk_sha256 = first_text(metadata_map.get("base_apk_sha256"))
-        artifact_set_hash = first_text(metadata_map.get("artifact_set_hash"))
-        run_signature = first_text(metadata_map.get("run_signature"))
-        run_signature_version = first_text(metadata_map.get("run_signature_version"))
-        identity_valid = metadata_map.get("identity_valid")
-        identity_error_reason = first_text(metadata_map.get("identity_error_reason"))
-    if not manifest_sha:
-        try:
-            manifest_sha = first_text(getattr(br, "hashes", {}).get("sha256"))
-        except Exception:
-            manifest_sha = None
-    config_hash = first_text(
-        metadata_map.get("config_hash") if isinstance(metadata_map, Mapping) else None,
-    )
-    pipeline_version = first_text(
-        metadata_map.get("pipeline_version") if isinstance(metadata_map, Mapping) else None,
-    )
-    catalog_versions = first_text(
-        metadata_map.get("catalog_versions") if isinstance(metadata_map, Mapping) else None,
-    )
-    study_tag = first_text(
-        metadata_map.get("study_tag") if isinstance(metadata_map, Mapping) else None,
-    )
-    analysis_version = first_text(getattr(br, "analysis_version", None))
-    harvest_manifest_path = first_text(
-        metadata_map.get("harvest_manifest_path") if isinstance(metadata_map, Mapping) else None,
-    )
-    harvest_capture_status = first_text(
-        metadata_map.get("harvest_capture_status") if isinstance(metadata_map, Mapping) else None,
-    )
-    harvest_persistence_status = first_text(
-        metadata_map.get("harvest_persistence_status") if isinstance(metadata_map, Mapping) else None,
-    )
-    harvest_research_status = first_text(
-        metadata_map.get("harvest_research_status") if isinstance(metadata_map, Mapping) else None,
-    )
-    harvest_matches_planned_artifacts = (
-        metadata_map.get("harvest_matches_planned_artifacts")
-        if isinstance(metadata_map, Mapping)
-        else None
-    )
-    harvest_observed_hashes_complete = (
-        metadata_map.get("harvest_observed_hashes_complete")
-        if isinstance(metadata_map, Mapping)
-        else None
-    )
-    harvest_non_canonical_reasons = (
-        metadata_map.get("harvest_non_canonical_reasons")
-        if isinstance(metadata_map, Mapping)
-        else None
-    )
-    if isinstance(harvest_non_canonical_reasons, Sequence) and not isinstance(
-        harvest_non_canonical_reasons,
-        (str, bytes),
-    ):
-        harvest_non_canonical_reason_list = [str(item) for item in harvest_non_canonical_reasons if str(item).strip()]
-    else:
-        harvest_non_canonical_reason_list = []
-    research_usable = metadata_map.get("research_usable") if isinstance(metadata_map, Mapping) else None
     if static_run_id is None:
         try:
             # Prefer an existing static_analysis_runs entry for this session/package.
@@ -978,8 +1913,17 @@ def persist_run_summary(
     outcome.static_run_id = static_run_id
     run_status = normalize_run_status(run_status)
     metrics_bundle = compute_metrics_bundle(br, string_data)
-    code_http_hosts = metrics_bundle.code_http_hosts
-    asset_http_hosts = metrics_bundle.asset_http_hosts
+    stage_context = _PersistenceStageContext(
+        base_report=br,
+        string_data=string_data,
+        package_for_run=package_for_run,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        metadata_map=metadata_map,
+        baseline_payload=baseline_payload,
+        metrics_bundle=metrics_bundle,
+        manifest_obj=manifest_obj,
+    )
 
     db_errors: list[str] = []
 
@@ -1011,271 +1955,78 @@ def persist_run_summary(
             _raise_db_error("cvss.validation", str(exc))
 
     baseline_counts = coerce_severity_counts(finding_totals)
-    severity_counter: Counter[str] = Counter()
-    downgraded_high = 0
-    persisted_by_detector: Counter[str] = Counter()
-    capped_by_detector: Counter[str] = Counter()
-    taxonomy_counter: Counter[str] = Counter()
-
-    finding_rows: list[dict[str, Any]] = []
-    canonical_finding_rows: list[dict[str, object]] = []
-    control_entries: list[tuple[str, Mapping[str, Any]]] = []
-    correlation_rows: list[dict[str, object]] = []
-    total_findings = 0
-    rule_assigned = 0
-    base_vector_count = 0
-    bte_vector_count = 0
-    preview_assigned = 0
-    path_assigned = 0
-
     try:
-        for result in (br.detector_results or ()):  # type: ignore[attr-defined]
-            detector_id = str(getattr(result, "detector_id", getattr(result, "section_key", None)) or "unknown")
-            detector_cap = _finding_cap_for_detector(detector_id)
-            module_id_val = getattr(result, "module_id", None)
-            module_id = str(module_id_val) if module_id_val not in (None, "") else None
-            result_metrics = getattr(result, "metrics", None)
-            policy_gate = bool(result_metrics.get("policy_gate", False)) if isinstance(result_metrics, Mapping) else False
-            if detector_id == "correlation_engine" and static_run_id:
-                correlation_rows.extend(
-                    _correlation_rows_from_result(
-                        result,
-                        static_run_id=static_run_id,
-                        package_name=package_for_run,
-                    )
-                )
-            for f in result.findings:
-                total_findings += 1
-                detector_sev = normalise_severity_token(getattr(f, "severity", None))
-                if detector_sev is None:
-                    detector_sev = normalise_severity_token(getattr(f, "severity_label", None))
-                metrics_map = getattr(f, "metrics", None)
-                if isinstance(metrics_map, Mapping):
-                    detector_sev = detector_sev or normalise_severity_token(
-                        metrics_map.get("severity")
-                    )
-                    detector_sev = detector_sev or normalise_severity_token(
-                        metrics_map.get("severity_level")
-                    )
-                gate_value = getattr(getattr(f, "severity_gate", None), "value", None)
-                gate_sev = normalise_severity_token(gate_value)
-                sev = detector_sev or gate_sev or "Info"
-                if detector_sev == "High" and sev != "High":
-                    downgraded_high += 1
-                severity_counter[sev] += 1
-                if persisted_by_detector[detector_id] >= detector_cap:
-                    capped_by_detector[detector_id] += 1
-                    continue
-                evidence = normalize_evidence(
-                    f.evidence,
-                    detail_hint=getattr(f, "detail", None)
-                    or getattr(f, "headline", None)
-                    or getattr(f, "summary", None)
-                    or getattr(f, "because", None),
-                    path_hint=getattr(f, "path", None),
-                    offset_hint=getattr(f, "offset", None),
-                )
-                evidence_payload = _redact_finding_evidence_payload(
-                    json.dumps(evidence.as_payload(), ensure_ascii=False, default=str)
-                )
-                evidence_path = evidence.path
-                evidence_offset = evidence.offset
-                evidence_preview = evidence.detail
-                if evidence_preview:
-                    preview_assigned += 1
-                if evidence_path:
-                    path_assigned += 1
-                rule_id = derive_rule_id(
-                    detector_id,
-                    module_id,
-                    evidence_path,
-                    evidence_preview,
-                    rule_id_hint=extract_rule_hint(f),
-                )
-                if rule_id:
-                    rule_assigned += 1
-                masvs_area = derive_masvs_tag(f, rule_id, lookup_rule_area=rule_to_area)
-                base_vector, base_score, base_meta = compute_cvss_base(rule_id)
-                if base_vector:
-                    base_vector_count += 1
-                (
-                    bt_vector,
-                    bt_score,
-                    be_vector,
-                    be_score,
-                    bte_vector,
-                    bte_score,
-                    profile_meta,
-                ) = apply_profiles(base_vector, envelope.threat_profile, envelope.env_profile)
-                base_score_c = _canonical_cvss_score(base_score, field="cvss.base_score")
-                bt_score_c = _canonical_cvss_score(bt_score, field="cvss.bt_score")
-                be_score_c = _canonical_cvss_score(be_score, field="cvss.be_score")
-                bte_score_c = _canonical_cvss_score(bte_score, field="cvss.bte_score")
-                if bte_vector:
-                    bte_vector_count += 1
-                taxonomy = _taxonomy_label(
-                    severity=sev,
-                    detector_status=getattr(result, "status", Badge.INFO),
-                    policy_gate=policy_gate,
-                )
-                taxonomy_counter[taxonomy] += 1
-                meta_combined: dict[str, Any] = {}
-                if base_meta:
-                    meta_combined.update(base_meta)
-                if profile_meta:
-                    meta_combined.update(profile_meta)
-                finding_rows.append(
-                    {
-                        "severity": sev,
-                        "masvs": masvs_area,
-                        "cvss": truncate(base_vector, 128),
-                        "kind": detector_id,
-                        "module_id": module_id,
-                        "evidence": truncate(evidence_payload, 512),
-                        "evidence_path": truncate(evidence_path, 512),
-                        "evidence_offset": truncate(evidence_offset, 64),
-                        "evidence_preview": truncate(evidence_preview, 256),
-                        "rule_id": rule_id,
-                        "cvss_v40_b_vector": base_vector,
-                        "cvss_v40_b_score": base_score_c,
-                        "cvss_v40_bt_vector": bt_vector,
-                        "cvss_v40_bt_score": bt_score_c,
-                        "cvss_v40_be_vector": be_vector,
-                        "cvss_v40_be_score": be_score_c,
-                        "cvss_v40_bte_vector": bte_vector,
-                        "cvss_v40_bte_score": bte_score_c,
-                        "cvss_v40_meta": (
-                            json.dumps(meta_combined, ensure_ascii=False, default=str)
-                            if meta_combined
-                            else None
-                        ),
-                    }
-                )
-                status_value = str(
-                    getattr(getattr(f, "status", None), "value", getattr(f, "status", None))
-                    or ""
-                ).upper()
-                tags_value = getattr(f, "tags", None)
-                tags_json = None
-                if isinstance(tags_value, Sequence) and not isinstance(tags_value, (str, bytes)):
-                    tags_json = json.dumps([str(tag) for tag in tags_value], ensure_ascii=False)
-                evidence_refs_payload = None
-                if isinstance(metrics_map, Mapping):
-                    hashes_payload = metrics_map.get("hashes") or metrics_map.get("evidence_refs")
-                    if hashes_payload is not None:
-                        evidence_refs_payload = json.dumps(hashes_payload, ensure_ascii=False, default=str)
-                canonical_finding_rows.append(
-                    {
-                        "finding_id": truncate(first_text(getattr(f, "finding_id", None), rule_id), 128),
-                        "status": truncate(status_value, 32),
-                        "severity": truncate(sev, 32),
-                        "category": truncate(masvs_area, 64),
-                        "title": truncate(
-                            first_text(getattr(f, "title", None), evidence_preview, detector_id),
-                            512,
-                        ),
-                        "tags": tags_json,
-                        "evidence": evidence_payload,
-                        "fix": truncate(first_text(getattr(f, "remediate", None)), 2048),
-                        "rule_id": truncate(rule_id, 128),
-                        "cvss_score": base_score_c,
-                        "masvs_control": truncate(masvs_area, 32),
-                        "detector": truncate(detector_id, 64),
-                        "module": truncate(module_id, 64),
-                        "evidence_refs": evidence_refs_payload,
-                    }
-                )
-                persisted_by_detector[detector_id] += 1
-                control_entries.extend(getattr(result, "masvs_coverage", []))
+        findings_context = _prepare_findings_persistence_context(
+            base_report=br,
+            package_for_run=package_for_run,
+            static_run_id=static_run_id,
+            envelope=envelope,
+            baseline_counts=baseline_counts,
+            canonical_cvss_score=_canonical_cvss_score,
+        )
     except Exception as exc:
         message = f"Failed to coerce findings for {run_package}: {exc}"
         log.warning(message, category="static_analysis")
         outcome.add_error(message)
+        findings_context = _PreparedFindingsPersistenceContext(
+            finding_rows=[],
+            canonical_finding_rows=[],
+            correlation_rows=[],
+            control_summary=[],
+            control_entry_count=0,
+            total_findings=0,
+            persisted_totals=Counter(baseline_counts),
+            downgraded_high=0,
+            capped_by_detector=Counter(),
+            taxonomy_counter=Counter(),
+            rule_assigned=0,
+            base_vector_count=0,
+            bte_vector_count=0,
+            preview_assigned=0,
+            path_assigned=0,
+            missing_masvs=0,
+        )
 
-    control_summary = summarise_controls(control_entries)
-    outcome.runtime_findings = int(total_findings)
-    outcome.persisted_findings = len(finding_rows)
-    missing_masvs = sum(1 for row in finding_rows if not row.get("masvs"))
+    outcome.runtime_findings = int(findings_context.total_findings)
+    outcome.persisted_findings = len(findings_context.finding_rows)
+    missing_masvs = findings_context.missing_masvs
     if missing_masvs:
         log.warning(
             f"{missing_masvs} findings missing MASVS tags for {run_package}; "
             "DB MASVS Summary may be incomplete.",
             category="static_analysis",
         )
-
-    if severity_counter:
-        severity_counts = canonical_severity_counts(severity_counter)
-        persisted_totals = Counter(severity_counts)
-        mismatch = {
-            key: severity_counts[key] - baseline_counts.get(key, 0)
-            for key in severity_counts
-            if severity_counts[key] != baseline_counts.get(key, 0)
-        }
-        if mismatch:
-            log.info(
-                f"Adjusted severity totals for {run_package} based on detector output: {mismatch}",
-                category="static_analysis",
-            )
-    else:
-        severity_counts = baseline_counts
-        persisted_totals = Counter(severity_counts)
-
-    perm_detail_map: Mapping[str, object] = (
-        metrics_bundle.permission_detail
-        if isinstance(metrics_bundle.permission_detail, Mapping)
-        else {}
-    )
-    flagged_normal_metric = float(perm_detail_map.get("flagged_normal_count", 0) or 0)
-    weak_guard_metric = float(perm_detail_map.get("weak_guard_count", 0) or 0)
-
-    exported = getattr(br, "exported_components", None)
-    exp_total = float(getattr(exported, "total", lambda: 0)()) if exported else 0.0
-    exp_activities = float(len(getattr(exported, "activities", []) or [])) if exported else 0.0
-    exp_services = float(len(getattr(exported, "services", []) or [])) if exported else 0.0
-    exp_receivers = float(len(getattr(exported, "receivers", []) or [])) if exported else 0.0
-    exp_providers = float(len(getattr(exported, "providers", []) or [])) if exported else 0.0
-
-    metrics_payload = {
-        "network.code_http_hosts": (float(code_http_hosts), None),
-        "network.asset_http_hosts": (float(asset_http_hosts), None),
-        "exports.total": (exp_total, None),
-        "exports.activities": (exp_activities, None),
-        "exports.services": (exp_services, None),
-        "exports.receivers": (exp_receivers, None),
-        "exports.providers": (exp_providers, None),
-        "permissions.dangerous_count": (float(getattr(metrics_bundle, "dangerous_permissions", 0)), None),
-        "permissions.signature_count": (float(getattr(metrics_bundle, "signature_permissions", 0)), None),
-        "permissions.oem_count": (float(getattr(metrics_bundle, "oem_permissions", 0)), None),
-        "permissions.flagged_normal_count": (flagged_normal_metric, None),
-        "permissions.weak_guard_count": (weak_guard_metric, None),
-        "permissions.risk_score": (float(getattr(metrics_bundle, "permission_score", 0.0)), None),
-        "permissions.risk_grade": (None, getattr(metrics_bundle, "permission_grade", "")),
+    mismatch = {
+        key: findings_context.persisted_totals.get(key, 0) - baseline_counts.get(key, 0)
+        for key in findings_context.persisted_totals
+        if findings_context.persisted_totals.get(key, 0) != baseline_counts.get(key, 0)
     }
-    metrics_payload["findings.total"] = (float(total_findings), None)
-    metrics_payload["findings.persisted_total"] = (float(len(finding_rows)), None)
-    if downgraded_high:
-        metrics_payload["findings.high_downgraded"] = (float(downgraded_high), None)
-    capped_total = int(sum(capped_by_detector.values()))
-    metrics_payload["findings.capped_total"] = (float(capped_total), None)
-    metrics_payload["findings.cap_per_detector_default"] = (float(_finding_cap_for_detector("__default__")), None)
-    for detector_id, dropped in sorted(capped_by_detector.items()):
-        metrics_payload[f"findings.capped.{detector_id}"] = (float(dropped), None)
-    for label in ("RISK", "FINDING", "INFO"):
-        metrics_payload[f"findings.taxonomy.{label.lower()}"] = (float(taxonomy_counter.get(label, 0)), None)
-    rule_cov_pct = (float(rule_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
-    base_cov_pct = (float(base_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
-    bte_cov_pct = (float(bte_vector_count) / float(total_findings) * 100.0) if total_findings else 0.0
-    preview_cov_pct = (float(preview_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
-    path_cov_pct = (float(path_assigned) / float(total_findings) * 100.0) if total_findings else 0.0
-    metrics_payload["findings.ruleid_coverage_pct"] = (rule_cov_pct, None)
-    metrics_payload["findings.preview_coverage_pct"] = (preview_cov_pct, None)
-    metrics_payload["findings.path_coverage_pct"] = (path_cov_pct, None)
-    metrics_payload["cvss.base_vector_coverage_pct"] = (base_cov_pct, None)
-    metrics_payload["cvss.bte_vector_coverage_pct"] = (bte_cov_pct, None)
+    if mismatch:
+        log.info(
+            f"Adjusted severity totals for {run_package} based on detector output: {mismatch}",
+            category="static_analysis",
+        )
+
+    metrics_context = _build_persistence_metrics_context(
+        base_report=br,
+        metrics_bundle=metrics_bundle,
+        code_http_hosts=metrics_bundle.code_http_hosts,
+        asset_http_hosts=metrics_bundle.asset_http_hosts,
+        total_findings=findings_context.total_findings,
+        persisted_finding_count=len(findings_context.finding_rows),
+        downgraded_high=findings_context.downgraded_high,
+        capped_by_detector=findings_context.capped_by_detector,
+        taxonomy_counter=findings_context.taxonomy_counter,
+        rule_assigned=findings_context.rule_assigned,
+        base_vector_count=findings_context.base_vector_count,
+        bte_vector_count=findings_context.bte_vector_count,
+        preview_assigned=findings_context.preview_assigned,
+        path_assigned=findings_context.path_assigned,
+    )
 
     # Canonicalize numeric metrics to deterministic fixed precision before write.
     canonical_metrics_payload: dict[str, tuple[object | None, str | None]] = {}
-    for key, (num_value, text_value) in metrics_payload.items():
+    for key, (num_value, text_value) in metrics_context.metrics_payload.items():
         if num_value is None:
             canonical_metrics_payload[key] = (None, text_value)
             continue
@@ -1288,7 +2039,7 @@ def persist_run_summary(
         except ValueError as exc:
             _raise_db_error("metrics.validation", str(exc))
         canonical_metrics_payload[key] = (canonical_num, text_value)
-    metrics_payload = canonical_metrics_payload
+    metrics_context.metrics_payload = canonical_metrics_payload
 
     persistence_failed = False
     if not dry_run:
@@ -1328,360 +2079,60 @@ def persist_run_summary(
                     _apply_mysql_session_lock_wait_timeout(db, lock_wait_timeout_s)
                     with db.transaction():
                         outcome.persistence_transaction_state = "in_txn"
-                        if run_id is None:
-                            try:
-                                run_id = _dw.create_run(
-                                    package=package_for_run,
-                                    app_label=display_name,
-                                    version_code=version_code,
-                                    version_name=version_name,
-                                    target_sdk=target_sdk,
-                                    session_stamp=session_stamp,
-                                    threat_profile=envelope.threat_profile,
-                                    env_profile=envelope.env_profile,
-                                )
-                            except Exception as exc:
-                                _raise_db_error("run.create", f"{exc.__class__.__name__}:{exc}")
-                            if run_id is None:
-                                _raise_db_error("run.create", "returned_null")
-                            outcome.run_id = int(run_id)
-                            created_run_id_this_attempt = True
-
-                        if static_run_id is None:
-                            app_version_id = _ensure_app_version(
-                                package_for_run=package_for_run,
-                                display_name=display_name,
-                                version_name=version_name,
-                                version_code=version_code,
-                                min_sdk=min_sdk,
-                                target_sdk=target_sdk,
-                            )
-                            if app_version_id is None:
-                                _raise_db_error("static_run.create", "app_version_unresolved")
-                            static_run_id = _create_static_run(
-                                app_version_id=app_version_id,
-                                session_stamp=session_stamp,
-                                session_label=session_stamp,
-                                scope_label=scope_label,
-                                category=category_token,
-                                profile=profile_token,
-                                profile_key=profile_token,
-                                scenario_id=scenario_id_token,
-                                device_serial=device_serial_token,
-                                tool_semver=app_config.APP_VERSION,
-                                tool_git_commit=get_git_commit(),
-                                schema_version=cached_schema_version,
-                                findings_total=int(finding_totals.get("total", 0) or 0),
-                                run_started_utc=None,
-                                status="STARTED",
-                                sha256=base_apk_sha256 or manifest_sha,
-                                base_apk_sha256=base_apk_sha256,
-                                artifact_set_hash=artifact_set_hash,
-                                run_signature=run_signature,
-                                run_signature_version=run_signature_version,
-                                identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
-                                identity_error_reason=identity_error_reason,
-                                config_hash=config_hash,
-                                pipeline_version=pipeline_version,
-                                analysis_version=analysis_version,
-                                catalog_versions=catalog_versions,
-                                study_tag=study_tag,
-                            )
-                            if static_run_id is None:
-                                _raise_db_error("static_run.create", "create_failed")
-                            log.info(
-                                f"Resolved static_run_id={static_run_id} for {package_for_run} (session={session_stamp})",
-                                category="static_analysis",
-                            )
-                            created_static_run_id_this_attempt = True
-                        outcome.static_run_id = static_run_id
-    
-                        if static_run_id:
-                            identity_mode_value = _run_writers._identity_mode(
-                                base_apk_sha256=base_apk_sha256,
-                                version_code=version_code,
-                            )
-                            identity_conflict_value = _run_writers._detect_identity_conflict(
-                                package_name=package_for_run,
-                                version_code=version_code,
-                                base_apk_sha256=base_apk_sha256,
-                            )
-                            _update_static_run_metadata(
-                                static_run_id,
-                                sha256_value=base_apk_sha256 or manifest_sha,
-                                base_apk_sha256=base_apk_sha256,
-                                artifact_set_hash=artifact_set_hash,
-                                run_signature=run_signature,
-                                run_signature_version=run_signature_version,
-                                identity_valid=identity_valid if isinstance(identity_valid, bool) else None,
-                                identity_error_reason=identity_error_reason,
-                                identity_mode=identity_mode_value,
-                                identity_conflict_flag=identity_conflict_value,
-                                config_hash=config_hash,
-                                pipeline_version=pipeline_version,
-                                analysis_version=analysis_version,
-                                catalog_versions=catalog_versions,
-                                study_tag=study_tag,
-                            )
-    
-                        try:
-                            ok = write_buckets(int(run_id), metrics_bundle.buckets, static_run_id=static_run_id)
-                        except Exception as exc:
-                            _raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
-                        if not ok:
-                            _raise_db_error("buckets.write", "returned_false")
-    
-                        if finding_rows:
-                            if run_id is None:
-                                sample = finding_rows[0] if finding_rows else {}
-                                sample_view = {
-                                    key: sample.get(key)
-                                    for key in ("rule_id", "evidence_path", "evidence_preview", "severity")
-                                }
-                                log.info(
-                                    (
-                                        f"Dry-run persistence payload for {run_package}: "
-                                        f"findings={total_findings} "
-                                        f"sample={json.dumps(sample_view, ensure_ascii=False, default=str)}"
-                                    ),
-                                    category="static_analysis",
-                                )
-                            elif not persist_findings(int(run_id), finding_rows, static_run_id=static_run_id):
-                                _raise_db_error(
-                                    "findings.write",
-                                    f"returned_false:run_id={run_id}:static_run_id={static_run_id}",
-                                )
-                            if static_run_id is not None:
-                                try:
-                                    _persist_static_analysis_findings(
-                                        static_run_id=int(static_run_id),
-                                        rows=canonical_finding_rows,
-                                    )
-                                except Exception as exc:
-                                    _raise_db_error(
-                                        "canonical_findings.write",
-                                        f"{exc.__class__.__name__}:{exc}",
-                                    )
-    
-                        if static_run_id and correlation_rows:
-                            try:
-                                ok = _persist_correlation_results(correlation_rows)
-                            except Exception as exc:
-                                _raise_db_error("correlations.write", f"{exc.__class__.__name__}:{exc}")
-                            if not ok:
-                                _raise_db_error("correlations.write", f"returned_false:static_run_id={static_run_id}")
-    
-                        if run_id is not None:
-                            if control_summary:
-                                try:
-                                    persist_masvs_controls(
-                                        int(run_id),
-                                        package_for_run,
-                                        control_summary,
-                                    )
-                                except Exception as exc:
-                                    _raise_db_error("masvs_controls.write", f"{exc.__class__.__name__}:{exc}")
-                            else:
-                                log.info(
-                                    (
-                                        f"No MASVS control coverage derived for {run_package}; "
-                                        f"total_findings={total_findings} entries={len(control_entries)}"
-                                    ),
-                                    category="static_analysis",
-                                )
-                            try:
-                                persist_storage_surface_data(br, session_stamp, scope_label)
-                            except Exception as exc:
-                                _raise_db_error("storage_surface.write", f"{exc.__class__.__name__}:{exc}")
-                            apk_identifier = safe_int(metadata_map.get("apk_id")) if metadata_map else None
-                            if apk_identifier is None and metadata_map:
-                                apk_identifier = safe_int(metadata_map.get("apkId"))
-                            if apk_identifier is None:
-                                apk_identifier = safe_int(metadata_map.get("android_apk_id"))
-                            if apk_identifier is None:
-                                apk_identifier = int(run_id)
-    
-                            permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
-                            detector_metrics = getattr(br, "detector_metrics", None)
-                            if isinstance(detector_metrics, Mapping):
-                                permission_metrics = detector_metrics.get("permissions_profile")
-                                if isinstance(permission_metrics, Mapping):
-                                    profiles = permission_metrics.get("permission_profiles")
-                                    if isinstance(profiles, Mapping):
-                                        permission_profiles_map = profiles
-    
-                            try:
-                                persist_permission_matrix(
-                                    static_run_id=int(static_run_id) if static_run_id is not None else None,
-                                    package_name=package_for_run,
-                                    apk_id=apk_identifier,
-                                    permission_profiles=permission_profiles_map,
-                                )
-                            except Exception as exc:
-                                _raise_db_error("permission_matrix.write", f"{exc.__class__.__name__}:{exc}")
-                            try:
-                                persist_permission_risk(
-                                    run_id=int(run_id),
-                                    static_run_id=int(static_run_id) if static_run_id is not None else None,
-                                    report=br,
-                                    package_name=package_for_run,
-                                    session_stamp=session_stamp,
-                                    scope_label=scope_label,
-                                    metrics_bundle=metrics_bundle,
-                                    baseline_payload=baseline_payload,
-                                    permission_profiles=permission_profiles_map,
-                                )
-                            except Exception as exc:
-                                _raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
-    
-                        try:
-                            ok = write_metrics(int(run_id), metrics_payload, static_run_id=static_run_id)
-                        except Exception as exc:
-                            _raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
-                        if not ok:
-                            _raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
-    
-                        contributors = metrics_bundle.contributors
-                        if contributors:
-                            try:
-                                ok = write_contributors(int(run_id), contributors)
-                            except Exception as exc:
-                                _raise_db_error("contributors.write", f"{exc.__class__.__name__}:{exc}")
-                            if not ok:
-                                _raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
-    
-                        baseline_section = baseline_payload.get("baseline") if isinstance(baseline_payload, Mapping) else {}
-                        string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
-                        static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
-                            package_name=package_for_run,
-                            session_stamp=session_stamp,
-                            scope_label=scope_label,
-                            finding_totals=persisted_totals,
-                            baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
-                            string_payload=string_payload if isinstance(string_payload, Mapping) else {},
-                            manifest=br.manifest,
-                            app_metadata=baseline_payload.get("app") if isinstance(baseline_payload, Mapping) else {},
+                        bootstrap = _bootstrap_persistence_transaction(
                             run_id=run_id,
                             static_run_id=static_run_id,
+                            stage_context=stage_context,
+                            run_context=run_context,
+                            envelope=envelope,
+                            finding_totals=finding_totals,
+                            cached_schema_version=cached_schema_version,
+                            raise_db_error=_raise_db_error,
                         )
-                        if baseline_written:
-                            outcome.baseline_written = True
-                        outcome.string_samples_persisted = sample_total
-                        for err in static_errors:
-                            _note_db_error(err)
-    
+                        run_id = bootstrap.run_id
+                        static_run_id = bootstrap.static_run_id
+                        created_run_id_this_attempt = bootstrap.created_run_id
+                        created_static_run_id_this_attempt = bootstrap.created_static_run_id
+                        outcome.run_id = int(run_id)
+                        outcome.static_run_id = static_run_id
+
+                        _persist_findings_and_correlations_stage(
+                            run_id=int(run_id),
+                            static_run_id=static_run_id,
+                            stage_context=stage_context,
+                            findings_context=findings_context,
+                            raise_db_error=_raise_db_error,
+                        )
+
+                        if run_id is not None:
+                            _persist_permission_and_storage_stage(
+                                run_id=int(run_id),
+                                static_run_id=static_run_id,
+                                stage_context=stage_context,
+                                findings_context=findings_context,
+                                raise_db_error=_raise_db_error,
+                            )
+
+                        _persist_metrics_and_sections_stage(
+                            run_id=int(run_id),
+                            static_run_id=static_run_id,
+                            stage_context=stage_context,
+                            metrics_context=metrics_context,
+                            findings_context=findings_context,
+                            outcome=outcome,
+                            note_db_error=_note_db_error,
+                            raise_db_error=_raise_db_error,
+                        )
+
                         if db_errors:
                             raise RuntimeError(db_errors[-1])
-                handoff_failed = False
-                if static_run_id and isinstance(br, StaticAnalysisReport):
-                    try:
-                        handoff_payload = build_static_handoff(
-                            report=br,
-                            string_data=string_data,
-                            package_name=package_for_run,
-                            version_code=version_code,
-                            base_apk_sha256=base_apk_sha256,
-                            artifact_set_hash=artifact_set_hash,
-                            static_run_id=int(static_run_id),
-                            session_label=session_stamp,
-                            tool_semver=app_config.APP_VERSION,
-                            tool_git_commit=get_git_commit(),
-                            schema_version=cached_schema_version,
-                        )
-                        handoff_hash = persist_static_handoff(
-                            static_run_id=int(static_run_id),
-                            handoff_payload=handoff_payload,
-                        )
-                        outcome.static_handoff_hash = handoff_hash
-                        handoff_json_path = str(
-                            Path("evidence") / "static_runs" / str(static_run_id) / "static_handoff.json"
-                        )
-                        identity_block = handoff_payload.get("identity", {}) if isinstance(handoff_payload, Mapping) else {}
-                        masvs_block = handoff_payload.get("masvs", {}) if isinstance(handoff_payload, Mapping) else {}
-                        identity_mode = str(identity_block.get("identity_mode") or "") if isinstance(identity_block, Mapping) else None
-                        identity_conflict_flag = (
-                            bool(identity_block.get("identity_conflict_flag"))
-                            if isinstance(identity_block, Mapping)
-                            else None
-                        )
-                        masvs_mapping_hash = (
-                            str(masvs_block.get("masvs_mapping_hash") or "")
-                            if isinstance(masvs_block, Mapping)
-                            else None
-                        )
-                        run_class, non_canonical_reasons = _classify_static_contract(
-                            package_name=package_for_run,
-                            version_code=version_code,
-                            base_apk_sha256=base_apk_sha256,
-                            identity_mode=identity_mode,
-                            identity_conflict_flag=identity_conflict_flag,
-                            static_handoff_hash=handoff_hash,
-                            static_handoff_json_path=handoff_json_path,
-                            masvs_mapping_hash=masvs_mapping_hash,
-                            schema_version=cached_schema_version,
-                            tool_semver=app_config.APP_VERSION,
-                            tool_git_commit=get_git_commit(),
-                            static_config_hash=config_hash,
-                            harvest_manifest_path=harvest_manifest_path,
-                            harvest_capture_status=harvest_capture_status,
-                            harvest_research_status=harvest_research_status,
-                            harvest_matches_planned_artifacts=(
-                                bool(harvest_matches_planned_artifacts)
-                                if harvest_matches_planned_artifacts is not None
-                                else None
-                            ),
-                            harvest_observed_hashes_complete=(
-                                bool(harvest_observed_hashes_complete)
-                                if harvest_observed_hashes_complete is not None
-                                else None
-                            ),
-                            harvest_non_canonical_reasons=harvest_non_canonical_reason_list,
-                            research_usable=(
-                                bool(research_usable) if research_usable is not None else None
-                            ),
-                        )
-                        _update_static_run_metadata(
-                            int(static_run_id),
-                            static_handoff_hash=handoff_hash,
-                            static_handoff_json_path=handoff_json_path,
-                            masvs_mapping_hash=masvs_mapping_hash,
-                            run_class=run_class,
-                            non_canonical_reasons=(
-                                json.dumps(non_canonical_reasons, ensure_ascii=True, sort_keys=True)
-                                if non_canonical_reasons
-                                else None
-                            ),
-                        )
-                        if run_class != "CANONICAL":
-                            try:
-                                core_q.run_sql(
-                                    """
-                                    UPDATE static_analysis_runs
-                                    SET is_canonical=0,
-                                        canonical_reason=COALESCE(canonical_reason, %s)
-                                    WHERE id=%s
-                                    """,
-                                    ("contract_violation", int(static_run_id)),
-                                )
-                            except Exception:
-                                pass
-                    except Exception as exc:
-                        handoff_failed = True
-                        message = f"Static handoff export failed for {package_for_run}: {exc}"
-                        log.warning(message, category="static_analysis")
-                        outcome.add_error(message)
-                if handoff_failed and static_run_id:
-                    try:
-                        _update_static_run_metadata(
-                            int(static_run_id),
-                            run_class="NON_CANONICAL",
-                            non_canonical_reasons=json.dumps(
-                                ["HANDOFF_HASH_MISSING", "PERSISTENCE_ERROR"],
-                                ensure_ascii=True,
-                            ),
-                        )
-                    except Exception:
-                        pass
+                handoff_failed = _finalize_static_handoff_stage(
+                    static_run_id=static_run_id,
+                    stage_context=stage_context,
+                    run_context=run_context,
+                    cached_schema_version=cached_schema_version,
+                    outcome=outcome,
+                )
                 persistence_failed = handoff_failed
                 outcome.persistence_transaction_state = "committed"
                 break
@@ -1772,8 +2223,8 @@ def persist_run_summary(
                 break
         outcome.persistence_failed = persistence_failed
     else:
-        if finding_rows:
-            sample = finding_rows[0] if finding_rows else {}
+        if findings_context.finding_rows:
+            sample = findings_context.finding_rows[0] if findings_context.finding_rows else {}
             sample_view = {
                 key: sample.get(key)
                 for key in ("rule_id", "evidence_path", "evidence_preview", "severity")
@@ -1781,7 +2232,7 @@ def persist_run_summary(
             log.info(
                 (
                     f"Dry-run persistence payload for {run_package}: "
-                    f"findings={total_findings} "
+                    f"findings={findings_context.total_findings} "
                     f"sample={json.dumps(sample_view, ensure_ascii=False, default=str)}"
                 ),
                 category="static_analysis",
@@ -1791,11 +2242,11 @@ def persist_run_summary(
     log.info(
         (
             f"Persistence summary for {run_package} (run_id={summary_run_id}): "
-            f"findings={total_findings} "
-            f"rule_id={rule_cov_pct:.1f}% "
-            f"preview={preview_cov_pct:.1f}% "
-            f"path={path_cov_pct:.1f}% "
-            f"bte={bte_cov_pct:.1f}%"
+            f"findings={findings_context.total_findings} "
+            f"rule_id={metrics_context.rule_cov_pct:.1f}% "
+            f"preview={metrics_context.preview_cov_pct:.1f}% "
+            f"path={metrics_context.path_cov_pct:.1f}% "
+            f"bte={metrics_context.bte_cov_pct:.1f}%"
         ),
         category="static_analysis",
     )
@@ -1935,10 +2386,7 @@ def persist_run_summary(
         # Keep static_analysis_runs.findings_total consistent with persisted findings.
         # This value is used by DB health summaries and run listings; leaving it at 0
         # makes completed runs look empty even when static_findings rows exist.
-        try:
-            total_findings = int(finding_totals.get("total", 0) or 0)
-        except Exception:
-            total_findings = 0
+        total_findings = int(outcome.persisted_findings)
         try:
             core_q.run_sql(
                 "UPDATE static_analysis_runs SET findings_total=%s WHERE id=%s",

@@ -216,6 +216,16 @@ class _PreparedPackageSelectionView:
     evidence_summary: dict[str, int | bool] | None
 
 
+@dataclass(frozen=True)
+class _PreparedPackageSelectionRow:
+    full_row: list[str]
+    op_row: list[str]
+    build_row: list[str] | None
+    dataset_app_count: int
+    dataset_complete_count: int
+    dataset_valid_runs_count: int
+
+
 def _load_dynamic_ui_defaults() -> _DynamicUiDefaults:
     # UI-layer defaults only. Execution semantics must rely on the frozen config
     # carried in DynamicSessionConfig/RunContext and recorded in run_manifest.json.
@@ -1536,146 +1546,24 @@ def _prepare_package_selection_view(groups) -> _PreparedPackageSelectionView | N
     dataset_valid_runs_total = 0
     evidence_summary: dict[str, int | bool] | None = None
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
-        display = ((app_label or package).strip() or package)
-        if str(package).strip().lower() == "com.twitter.android" and display.strip().lower() == "x":
-            display = "X (Twitter)"
-        if display in collisions:
-            display = f"{display} ({package})"
-        display = text_blocks.truncate_visible(display, 30)
-
-        base_label = "—"
-        inter_label = "—"
-        scripted_label = "—"
-        manual_label = "—"
-        need_label = "—"
-        next_label = "—"
-        build_label = "—"
-        total_label = "—"
-        legacy_label = "—"
-        last_label = "—"
-        if package.lower() in dataset_pkgs:
-            dataset_apps_total += 1
-            entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
-            runs = entry.get("runs") if isinstance(entry, dict) else []
-            scoped = _build_scoped_dataset_counts(package, runs if isinstance(runs, list) else [], cfg=cfg)
-            base_countable = int(scoped["baseline_countable"])
-            base_extra = int(scoped["baseline_extra"])
-            inter_countable = int(scoped["interactive_countable"])
-            inter_extra = int(scoped["interactive_extra"])
-            scripted_countable = int(scoped.get("interactive_scripted_countable") or 0)
-            scripted_extra = int(scoped.get("interactive_scripted_extra") or 0)
-            manual_countable = int(scoped.get("interactive_manual_countable") or 0)
-            manual_extra = int(scoped.get("interactive_manual_extra") or 0)
-            legacy_valid = int(scoped["legacy_valid"])
-            legacy_builds = int(scoped["legacy_builds"])
-            active_version = str(scoped.get("active_version_code") or "—")
-            active_sha = str(scoped.get("active_base_sha") or "")
-            active_build = active_version
-            if active_sha:
-                active_build = f"{active_version} / {active_sha[:10]}"
-            elif active_version == "—":
-                active_build = "unknown (tracker-only)"
-            active_runs = base_countable + base_extra + inter_countable + inter_extra
-            total_valid_runs = active_runs + legacy_valid
-
-            base_label = str(base_countable) if base_extra <= 0 else f"{base_countable} (+{base_extra})"
-            inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable} (+{inter_extra})"
-            scripted_label = (
-                str(scripted_countable) if scripted_extra <= 0 else f"{scripted_countable} (+{scripted_extra})"
-            )
-            manual_label = str(manual_countable) if manual_extra <= 0 else f"{manual_countable} (+{manual_extra})"
-            need_base = max(0, int(cfg.baseline_required) - base_countable)
-            need_inter = max(0, int(cfg.interactive_required) - inter_countable)
-            if need_base == 0 and need_inter == 0:
-                dataset_apps_complete += 1
-            dataset_valid_runs_total += base_countable + inter_countable
-            if need_base or need_inter:
-                need_parts = []
-                if need_base:
-                    need_parts.append(f"{need_base}B")
-                if need_inter:
-                    need_parts.append(f"{need_inter}I")
-                need_label = " ".join(need_parts)
-            else:
-                need_label = "0"
-            technical_total = int(scoped.get("technical_valid_total") or total_valid_runs)
-            total_label = str(technical_total)
-            legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
-            if active_runs > 0 and legacy_valid > 0:
-                build_label = "MIX"
-            elif active_runs > 0:
-                build_label = "CUR"
-            elif legacy_valid > 0:
-                build_label = "OLD"
-            else:
-                build_label = "—"
-
-            recent = recent_tracker_runs(package, limit=1)
-            if recent:
-                r = recent[0]
-                if r.valid is True:
-                    last_label = "valid"
-                elif r.valid is False:
-                    last_label = "invalid"
-                else:
-                    last_label = "unknown"
-                if (
-                    last_label == "valid"
-                    and isinstance(runs, list)
-                    and (scoped.get("active_version_code") or scoped.get("active_base_sha"))
-                ):
-                    recent_row = next(
-                        (
-                            item
-                            for item in runs
-                            if isinstance(item, dict) and str(item.get("run_id") or "") == str(r.run_id or "")
-                        ),
-                        None,
-                    )
-                    if isinstance(recent_row, dict):
-                        recent_ident = _resolve_tracker_run_identity(package, recent_row)
-                        active_ident = (
-                            str(scoped.get("active_version_code") or "") or None,
-                            str(scoped.get("active_base_sha") or "") or None,
-                        )
-                        if recent_ident != active_ident:
-                            last_label = "valid (id_mismatch)"
-            if legacy_valid > 0 and last_label != "—" and not last_label.endswith(" (L)"):
-                last_label = f"{last_label} (L)"
-
-            next_label = _next_action_from_need(need_base, need_inter)
-            if need_label == "0":
-                next_label = "—"
-            build_rows.append([display, active_build, str(active_runs), str(legacy_valid), str(legacy_builds)])
-
-        rows.append(
-            [
-                str(idx),
-                display,
-                base_label,
-                inter_label,
-                need_label,
-                next_label,
-                build_label,
-                total_label,
-                legacy_label,
-                last_label,
-            ]
+        prepared_row = _build_package_selection_row(
+            idx=idx,
+            package=package,
+            app_label=app_label,
+            collisions=collisions,
+            dataset_pkgs=dataset_pkgs,
+            tracker_apps=tracker_apps,
+            cfg=cfg,
+            recent_tracker_runs=recent_tracker_runs,
+            text_blocks=text_blocks,
         )
-        op_rows.append(
-            [
-                str(idx),
-                display,
-                base_label,
-                scripted_label,
-                manual_label,
-                need_label,
-                next_label,
-                build_label,
-                total_label,
-                last_label,
-            ]
-        )
+        dataset_apps_total += prepared_row.dataset_app_count
+        dataset_apps_complete += prepared_row.dataset_complete_count
+        dataset_valid_runs_total += prepared_row.dataset_valid_runs_count
+        rows.append(prepared_row.full_row)
+        op_rows.append(prepared_row.op_row)
+        if prepared_row.build_row is not None:
+            build_rows.append(prepared_row.build_row)
 
     expected_runs = 0
     if dataset_apps_total > 0:
@@ -1694,6 +1582,165 @@ def _prepare_package_selection_view(groups) -> _PreparedPackageSelectionView | N
         dataset_valid_runs_total=dataset_valid_runs_total,
         expected_runs=expected_runs,
         evidence_summary=evidence_summary,
+    )
+
+
+def _build_package_selection_row(
+    *,
+    idx: int,
+    package: str,
+    app_label: str | None,
+    collisions: set[str],
+    dataset_pkgs: set[str],
+    tracker_apps,
+    cfg,
+    recent_tracker_runs,
+    text_blocks,
+) -> _PreparedPackageSelectionRow:
+    display = ((app_label or package).strip() or package)
+    if str(package).strip().lower() == "com.twitter.android" and display.strip().lower() == "x":
+        display = "X (Twitter)"
+    if display in collisions:
+        display = f"{display} ({package})"
+    display = text_blocks.truncate_visible(display, 30)
+
+    base_label = "—"
+    inter_label = "—"
+    scripted_label = "—"
+    manual_label = "—"
+    need_label = "—"
+    next_label = "—"
+    build_label = "—"
+    total_label = "—"
+    legacy_label = "—"
+    last_label = "—"
+    build_row: list[str] | None = None
+    dataset_app_count = 0
+    dataset_complete_count = 0
+    dataset_valid_runs_count = 0
+
+    if package.lower() in dataset_pkgs:
+        dataset_app_count = 1
+        entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
+        runs = entry.get("runs") if isinstance(entry, dict) else []
+        scoped = _build_scoped_dataset_counts(package, runs if isinstance(runs, list) else [], cfg=cfg)
+        base_countable = int(scoped["baseline_countable"])
+        base_extra = int(scoped["baseline_extra"])
+        inter_countable = int(scoped["interactive_countable"])
+        inter_extra = int(scoped["interactive_extra"])
+        scripted_countable = int(scoped.get("interactive_scripted_countable") or 0)
+        scripted_extra = int(scoped.get("interactive_scripted_extra") or 0)
+        manual_countable = int(scoped.get("interactive_manual_countable") or 0)
+        manual_extra = int(scoped.get("interactive_manual_extra") or 0)
+        legacy_valid = int(scoped["legacy_valid"])
+        legacy_builds = int(scoped["legacy_builds"])
+        active_version = str(scoped.get("active_version_code") or "—")
+        active_sha = str(scoped.get("active_base_sha") or "")
+        active_build = active_version
+        if active_sha:
+            active_build = f"{active_version} / {active_sha[:10]}"
+        elif active_version == "—":
+            active_build = "unknown (tracker-only)"
+        active_runs = base_countable + base_extra + inter_countable + inter_extra
+        total_valid_runs = active_runs + legacy_valid
+
+        base_label = str(base_countable) if base_extra <= 0 else f"{base_countable} (+{base_extra})"
+        inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable} (+{inter_extra})"
+        scripted_label = str(scripted_countable) if scripted_extra <= 0 else f"{scripted_countable} (+{scripted_extra})"
+        manual_label = str(manual_countable) if manual_extra <= 0 else f"{manual_countable} (+{manual_extra})"
+        need_base = max(0, int(cfg.baseline_required) - base_countable)
+        need_inter = max(0, int(cfg.interactive_required) - inter_countable)
+        if need_base == 0 and need_inter == 0:
+            dataset_complete_count = 1
+        dataset_valid_runs_count = base_countable + inter_countable
+        if need_base or need_inter:
+            need_parts = []
+            if need_base:
+                need_parts.append(f"{need_base}B")
+            if need_inter:
+                need_parts.append(f"{need_inter}I")
+            need_label = " ".join(need_parts)
+        else:
+            need_label = "0"
+        technical_total = int(scoped.get("technical_valid_total") or total_valid_runs)
+        total_label = str(technical_total)
+        legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
+        if active_runs > 0 and legacy_valid > 0:
+            build_label = "MIX"
+        elif active_runs > 0:
+            build_label = "CUR"
+        elif legacy_valid > 0:
+            build_label = "OLD"
+        else:
+            build_label = "—"
+
+        recent = recent_tracker_runs(package, limit=1)
+        if recent:
+            r = recent[0]
+            if r.valid is True:
+                last_label = "valid"
+            elif r.valid is False:
+                last_label = "invalid"
+            else:
+                last_label = "unknown"
+            if (
+                last_label == "valid"
+                and isinstance(runs, list)
+                and (scoped.get("active_version_code") or scoped.get("active_base_sha"))
+            ):
+                recent_row = next(
+                    (
+                        item
+                        for item in runs
+                        if isinstance(item, dict) and str(item.get("run_id") or "") == str(r.run_id or "")
+                    ),
+                    None,
+                )
+                if isinstance(recent_row, dict):
+                    recent_ident = _resolve_tracker_run_identity(package, recent_row)
+                    active_ident = (
+                        str(scoped.get("active_version_code") or "") or None,
+                        str(scoped.get("active_base_sha") or "") or None,
+                    )
+                    if recent_ident != active_ident:
+                        last_label = "valid (id_mismatch)"
+        if legacy_valid > 0 and last_label != "—" and not last_label.endswith(" (L)"):
+            last_label = f"{last_label} (L)"
+
+        next_label = _next_action_from_need(need_base, need_inter)
+        if need_label == "0":
+            next_label = "—"
+        build_row = [display, active_build, str(active_runs), str(legacy_valid), str(legacy_builds)]
+
+    return _PreparedPackageSelectionRow(
+        full_row=[
+            str(idx),
+            display,
+            base_label,
+            inter_label,
+            need_label,
+            next_label,
+            build_label,
+            total_label,
+            legacy_label,
+            last_label,
+        ],
+        op_row=[
+            str(idx),
+            display,
+            base_label,
+            scripted_label,
+            manual_label,
+            need_label,
+            next_label,
+            build_label,
+            total_label,
+            last_label,
+        ],
+        build_row=build_row,
+        dataset_app_count=dataset_app_count,
+        dataset_complete_count=dataset_complete_count,
+        dataset_valid_runs_count=dataset_valid_runs_count,
     )
 
 
