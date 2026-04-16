@@ -121,13 +121,6 @@ def run_device_summary(serial: str | None) -> None:
 
     prompt_utils.press_enter_to_continue()
 
-
-def _render_inventory_summary(packages: list[dict[str, object]]) -> None:
-    """Compatibility wrapper for tests; delegates to summary renderer."""
-    from .summary import render_inventory_summary
-
-    render_inventory_summary(packages)
-
 __all__ = [
     # Preferred API
     "run_full_sync",

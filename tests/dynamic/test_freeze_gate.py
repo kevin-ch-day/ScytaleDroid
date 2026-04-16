@@ -11,7 +11,7 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def test_paper_gate_passes_minimal_contract(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_passes_minimal_contract(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
@@ -104,7 +104,7 @@ def test_paper_gate_passes_minimal_contract(tmp_path: Path, monkeypatch) -> None
     assert result.checked_runs == 1
 
 
-def test_paper_gate_fails_missing_linkage(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_fails_missing_linkage(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
@@ -140,7 +140,7 @@ def test_paper_gate_fails_missing_linkage(tmp_path: Path, monkeypatch) -> None:
     assert any("missing_plan_identity:static_handoff_hash" in err for err in result.errors)
 
 
-def test_paper_gate_fails_static_link_db_mismatch(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_fails_static_link_db_mismatch(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: False)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
@@ -205,7 +205,7 @@ def test_paper_gate_fails_static_link_db_mismatch(tmp_path: Path, monkeypatch) -
     assert any("static_link_db_mismatch" in err for err in result.errors)
 
 
-def test_paper_gate_fails_missing_package_identity(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_fails_missing_package_identity(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
@@ -270,7 +270,7 @@ def test_paper_gate_fails_missing_package_identity(tmp_path: Path, monkeypatch) 
     assert any("missing_plan_identity:package_name_lc" in err for err in result.errors)
 
 
-def test_paper_gate_fails_on_freeze_min_pcap_mismatch(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_fails_on_freeze_min_pcap_mismatch(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
@@ -337,7 +337,7 @@ def test_paper_gate_fails_on_freeze_min_pcap_mismatch(tmp_path: Path, monkeypatc
     assert any("freeze_manifest:min_pcap_bytes_mismatch" in err for err in result.errors)
 
 
-def test_paper_gate_normalizes_hashes(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_normalizes_hashes(tmp_path: Path, monkeypatch) -> None:
     seen = {}
 
     def _verify(**kwargs):
@@ -412,7 +412,7 @@ def test_paper_gate_normalizes_hashes(tmp_path: Path, monkeypatch) -> None:
     assert seen["artifact_set_hash"] == ("d" * 64)
 
 
-def test_paper_gate_fails_bad_identity_hash(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_fails_bad_identity_hash(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"
@@ -479,7 +479,7 @@ def test_paper_gate_fails_bad_identity_hash(tmp_path: Path, monkeypatch) -> None
     assert any("bad_identity_hash:static_handoff_hash" in err for err in result.errors)
 
 
-def test_paper_gate_fails_missing_artifact_set_hash(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_gate_fails_missing_artifact_set_hash(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("scytaledroid.DynamicAnalysis.tools.freeze_gate._verify_static_link", lambda **_k: True)
     freeze_path = tmp_path / "freeze.json"
     evidence_root = tmp_path / "evidence"

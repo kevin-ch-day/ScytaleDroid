@@ -668,7 +668,7 @@ def _run_scripted_protocol(
                         )
                     _run_countdown(
                         remaining,
-                        # In strict paper mode, do not allow accidental early-stop.
+                        # In strict freeze/demo mode, do not allow accidental early-stop.
                         continue_after_target=not (strict_paper and is_paper3),
                         allow_early_stop=not (strict_paper and is_paper3),
                         ignore_stop_inputs=bool(strict_paper and is_paper3),
@@ -1208,7 +1208,7 @@ def _wait_for_step_completion_with_stopwatch(
     except KeyboardInterrupt:
         _clear_status_line(line_width)
         print()
-        # In strict paper mode, do not finalize partially-completed scripted runs.
+        # In strict freeze/demo mode, do not finalize partially-completed scripted runs.
         strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
         if strict:
             raise ScenarioAbortRequested("ABORT_DISCARD") from None

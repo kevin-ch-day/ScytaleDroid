@@ -35,7 +35,7 @@ from scytaledroid.DynamicAnalysis.freeze_contract import (
     build_freeze_contract_snapshot,
     freeze_contract_hash,
 )
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     MIN_WINDOWS_PER_RUN,
@@ -617,7 +617,7 @@ class DynamicRunOrchestrator:
 
                     # Derive paper-eligibility from finalized in-memory state, then
                     # sync tracker from this final state so countability is not stale.
-                    eligibility = derive_paper_eligibility(
+                    eligibility = derive_freeze_eligibility(
                         manifest={
                             "dataset": manifest.dataset,
                             "operator": manifest.operator,

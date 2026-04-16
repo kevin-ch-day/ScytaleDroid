@@ -17,7 +17,7 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages,
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
@@ -101,7 +101,7 @@ def _compute_evidence_quota(
         if package not in dataset_pkgs_lc:
             continue
         plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
-        eligibility = derive_paper_eligibility(
+        eligibility = derive_freeze_eligibility(
             manifest=manifest,
             plan=plan if isinstance(plan, dict) else {},
             min_windows=min_window_count,
@@ -209,7 +209,7 @@ def run_freeze_readiness_audit(
                 issues["missing_signer_set_hash"].append(run_id)
 
             plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
-            eligibility = derive_paper_eligibility(
+            eligibility = derive_freeze_eligibility(
                 manifest=manifest,
                 plan=plan if isinstance(plan, dict) else {},
                 min_windows=min_window_count,
@@ -478,7 +478,7 @@ def _classify_freeze_run_id_presence(*, archive_dir: Path, evidence_root: Path) 
                 )
             continue
         plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
-        eligibility = derive_paper_eligibility(
+        eligibility = derive_freeze_eligibility(
             manifest=manifest,
             plan=plan if isinstance(plan, dict) else {},
             min_windows=int(MIN_WINDOWS_PER_RUN),

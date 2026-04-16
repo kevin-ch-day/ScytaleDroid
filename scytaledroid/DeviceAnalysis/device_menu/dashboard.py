@@ -97,16 +97,19 @@ def _state_badge(state: str | None) -> str:
 
 
 def _root_badge(root_state: str | None) -> str:
-    """Return a badge for the root detection result."""
+    """Return a compact capability label for the root detection result."""
 
     normalised = (root_state or "Unknown").strip().upper()
     if normalised == "YES":
-        tone = "success"
+        label = "ROOTED"
+        style = colors.get_palette().success
     elif normalised == "NO":
-        tone = "info"
+        label = "NON-ROOT"
+        style = colors.get_palette().info
     else:
-        tone = "info"
-    return _status_badge(normalised, tone)
+        label = "UNKNOWN"
+        style = colors.get_palette().muted
+    return colors.apply(label, style, bold=True)
 
 
 def _device_count_badge(count: int) -> str:
@@ -211,6 +214,27 @@ def _device_table_rows(
     return rows
 
 
+def _render_active_device_summary(details: dict[str, str | None]) -> None:
+    print("Device")
+    print("------")
+    model = prettify_model(details.get("model") or details.get("device"))
+    serial = details.get("serial") or "Unknown"
+    identity = f"{model} ({serial})" if model != "Unknown" else serial
+    print(identity)
+    summary_bits = [
+        prettify_manufacturer(details.get("manufacturer") or details.get("brand")),
+        format_android_release(details),
+        details.get("device_type") or "Unknown",
+    ]
+    print(" | ".join(bit for bit in summary_bits if bit))
+    print()
+    print("Device Capability")
+    print("-----------------")
+    print(f"{'Wi-Fi':<12} : {format_wifi_state(details.get('wifi_state'))}")
+    print(f"{'Battery':<12} : {format_battery(details)}")
+    print(f"{'Root access':<12} : {_root_badge(details.get('is_rooted'))}")
+
+
 def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
     """Format top-N added/removed/updated packages for display."""
 
@@ -293,11 +317,19 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
     blocked_policy = 0
     blocked_scope = 0
     executed = 0
+    harvest_snapshot_id: int | None = None
     for manifest_path in manifests:
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception:
             continue
+        if harvest_snapshot_id is None and isinstance(payload, dict):
+            package_ctx = payload.get("package") if isinstance(payload.get("package"), dict) else {}
+            snap_id = package_ctx.get("snapshot_id") if isinstance(package_ctx, dict) else None
+            if isinstance(snap_id, int):
+                harvest_snapshot_id = snap_id
+            elif isinstance(snap_id, str) and snap_id.isdigit():
+                harvest_snapshot_id = int(snap_id)
         planning = payload.get("planning") if isinstance(payload, dict) else {}
         reason = str(planning.get("preflight_reason") or "").strip()
         if reason == "policy_non_root":
@@ -315,6 +347,7 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
         "blocked_scope": blocked_scope,
         "manifest_count": len(manifests),
         "receipt_count": receipt_count,
+        "snapshot_id": harvest_snapshot_id,
         "artifacts_root": artifact_store.repo_relative_path(session_dir),
         "receipts_root": artifact_store.repo_relative_path(receipts_root) if receipts_root.exists() else None,
     }
@@ -322,6 +355,7 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
 
 def _compute_pipeline_state(serial: str | None) -> dict[str, object]:
     state = {
+        "inventory_snapshot_id": None,
         "inventoried": None,
         "in_scope": None,
         "policy_eligible": None,
@@ -338,6 +372,7 @@ def _compute_pipeline_state(serial: str | None) -> dict[str, object]:
         from scytaledroid.DeviceAnalysis.inventory.snapshot_io import load_latest_inventory
 
         snapshot = load_latest_inventory(serial)
+        snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
         packages = snapshot.get("packages") if isinstance(snapshot, dict) else None
         if isinstance(packages, list):
             rows = harvest.build_inventory_rows(packages)
@@ -347,6 +382,7 @@ def _compute_pipeline_state(serial: str | None) -> dict[str, object]:
             blocked_scope = sum(1 for pkg in plan.packages if pkg.skip_reason and pkg.skip_reason != "policy_non_root")
             state.update(
                 {
+                    "inventory_snapshot_id": snapshot_id if isinstance(snapshot_id, int) else None,
                     "inventoried": len(rows),
                     "in_scope": len(plan.packages),
                     "policy_eligible": scheduled,
@@ -476,11 +512,13 @@ def print_dashboard(
             line = f"{line} Last seen: {last_seen}"
         print(colors.apply(line, colors.get_palette().hint))
 
-    # Device table (single row is fine)
-    if show_device_table and summaries:
+    # Prefer a lighter single-device summary when an active device is selected.
+    if active_details:
+        _render_active_device_summary(active_details)
+    elif show_device_table and summaries:
         rows = _device_table_rows(summaries)
         table_utils.render_table(
-            ["Device", "OEM", "Android", "Battery", "Wi-Fi", "Root"],
+            ["Device", "OEM", "Android", "Battery", "Wi-Fi", "Root access"],
             rows,
             padding=3,
             accent_first_column=True,
@@ -494,32 +532,48 @@ def print_dashboard(
         pkg_text = f"{pkg_count}" if isinstance(pkg_count, int) else "—"
         print()
         print("Status")
-        print("------" if use_ascii_ui() else "----------------------------")
-        print(f"Inventory: {status_label}")
-        print(f"Last sync: {age_display} ago")
-        print(f"Device Packages: {pkg_text}")
+        print("------")
+        print(f"{'State':<12} : {status_label}")
+        print(f"{'Last sync':<12} : {age_display} ago")
+        print(f"{'Packages':<12} : {pkg_text}")
         serial = active_details.get("serial") if isinstance(active_details, dict) else None
         pipeline = _compute_pipeline_state(serial)
         latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
         print()
         print("Pipeline State")
         print("--------------")
-        print(f"Inventoried: {pipeline.get('inventoried') if pipeline.get('inventoried') is not None else '—'}")
-        print(f"In scope: {pipeline.get('in_scope') if pipeline.get('in_scope') is not None else '—'}")
+        print("Inventory")
+        print(f"  {'Inventoried':<16} : {pipeline.get('inventoried') if pipeline.get('inventoried') is not None else '—'}")
+        print("Planning")
+        print(f"  {'In scope':<16} : {pipeline.get('in_scope') if pipeline.get('in_scope') is not None else '—'}")
         print(
-            f"Policy eligible: {pipeline.get('policy_eligible') if pipeline.get('policy_eligible') is not None else '—'}"
+            f"  {'Policy eligible':<16} : {pipeline.get('policy_eligible') if pipeline.get('policy_eligible') is not None else '—'}"
         )
-        print(f"Scheduled: {pipeline.get('scheduled') if pipeline.get('scheduled') is not None else '—'}")
-        print(f"Harvested: {pipeline.get('harvested') if pipeline.get('harvested') is not None else '—'}")
-        print(f"Persisted: {pipeline.get('persisted') if pipeline.get('persisted') is not None else '—'}")
-        print(f"Blocked (Policy): {pipeline.get('blocked_policy') if pipeline.get('blocked_policy') is not None else '—'}")
-        print(f"Blocked (Scope): {pipeline.get('blocked_scope') if pipeline.get('blocked_scope') is not None else '—'}")
+        print(f"  {'Scheduled':<16} : {pipeline.get('scheduled') if pipeline.get('scheduled') is not None else '—'}")
+        print("Execution")
+        print(f"  {'Harvested':<16} : {pipeline.get('harvested') if pipeline.get('harvested') is not None else '—'}")
+        print(f"  {'Persisted':<16} : {pipeline.get('persisted') if pipeline.get('persisted') is not None else '—'}")
+        print(
+            f"  {'Blocked policy':<16} : {pipeline.get('blocked_policy') if pipeline.get('blocked_policy') is not None else '—'}"
+        )
+        print(
+            f"  {'Blocked scope':<16} : {pipeline.get('blocked_scope') if pipeline.get('blocked_scope') is not None else '—'}"
+        )
         if isinstance(latest_harvest, dict):
             session_label = latest_harvest.get("session_label") or "unknown"
             print()
             print("Evidence")
             print("--------")
             print(f"Latest harvest: {session_label}")
+            harvest_snapshot_id = latest_harvest.get("snapshot_id")
+            inventory_snapshot_id = pipeline.get("inventory_snapshot_id")
+            if harvest_snapshot_id is not None:
+                if harvest_snapshot_id == inventory_snapshot_id:
+                    print(f"Snapshot linkage: inventory snapshot {harvest_snapshot_id}")
+                    print("Alignment: current")
+                else:
+                    print(f"Snapshot linkage: harvest snapshot {harvest_snapshot_id}")
+                    print("Alignment: stale vs latest inventory")
             artifacts_root = latest_harvest.get("artifacts_root")
             receipts_root = latest_harvest.get("receipts_root")
             if artifacts_root:

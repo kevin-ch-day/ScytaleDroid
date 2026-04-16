@@ -13,7 +13,7 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def test_paper_readiness_audit_detects_policy_signer_and_window_issues(tmp_path: Path) -> None:
+def test_freeze_readiness_audit_detects_policy_signer_and_window_issues(tmp_path: Path) -> None:
     evidence_root = tmp_path / "evidence"
     out_dir = tmp_path / "audit"
 
@@ -57,7 +57,7 @@ def test_paper_readiness_audit_detects_policy_signer_and_window_issues(tmp_path:
     assert Path(summary.report_path).exists()
 
 
-def test_paper_readiness_audit_uses_default_output_root_only(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_readiness_audit_uses_default_output_root_only(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     out_dir = tmp_path / "output" / "audit" / "dynamic"
     _write_json(
@@ -75,7 +75,7 @@ def test_paper_readiness_audit_uses_default_output_root_only(tmp_path: Path, mon
     assert summary.evidence_root.endswith("output/evidence/dynamic")
 
 
-def test_paper_readiness_audit_no_runs_is_no_go_with_reasons(tmp_path: Path) -> None:
+def test_freeze_readiness_audit_no_runs_is_no_go_with_reasons(tmp_path: Path) -> None:
     evidence_root = tmp_path / "empty-evidence"
     out_dir = tmp_path / "audit"
 
@@ -91,7 +91,7 @@ def test_paper_readiness_audit_no_runs_is_no_go_with_reasons(tmp_path: Path) -> 
     assert Path(summary.report_path).exists()
 
 
-def test_paper_readiness_audit_surfaces_static_runs_hint(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_readiness_audit_surfaces_static_runs_hint(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     out_dir = tmp_path / "audit"
     static_root = tmp_path / "evidence" / "static_runs" / "1"
@@ -105,7 +105,7 @@ def test_paper_readiness_audit_surfaces_static_runs_hint(tmp_path: Path, monkeyp
     assert summary.result == "NO_GO"
 
 
-def test_paper_readiness_audit_detects_identity_mismatch(tmp_path: Path) -> None:
+def test_freeze_readiness_audit_detects_identity_mismatch(tmp_path: Path) -> None:
     evidence_root = tmp_path / "evidence"
     out_dir = tmp_path / "audit"
     run_dir = evidence_root / "r-mismatch"
@@ -151,7 +151,7 @@ def test_paper_readiness_audit_detects_identity_mismatch(tmp_path: Path) -> None
     assert "IDENTITY_MISMATCH" in summary.reasons
 
 
-def test_paper_readiness_audit_flags_orphan_evidence_dirs(tmp_path: Path) -> None:
+def test_freeze_readiness_audit_flags_orphan_evidence_dirs(tmp_path: Path) -> None:
     evidence_root = tmp_path / "evidence"
     out_dir = tmp_path / "audit"
     (evidence_root / "orphan-run").mkdir(parents=True, exist_ok=True)
@@ -170,7 +170,7 @@ def test_paper_readiness_audit_flags_orphan_evidence_dirs(tmp_path: Path) -> Non
     assert "INCOMPLETE_EVIDENCE_DIRS_PRESENT" in summary.reasons
 
 
-def test_paper_readiness_audit_demotes_noncanonical_freeze(tmp_path: Path, monkeypatch) -> None:
+def test_freeze_readiness_audit_demotes_noncanonical_freeze(tmp_path: Path, monkeypatch) -> None:
     out_dir = tmp_path / "output" / "audit" / "dynamic"
     output_dir = tmp_path / "output"
     data_dir = tmp_path / "data"

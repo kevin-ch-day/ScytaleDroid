@@ -1,5 +1,7 @@
 """About App panel with enriched styling."""
 
+from pathlib import Path
+
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, text_blocks
 
@@ -21,6 +23,7 @@ def about_app() -> None:
         [
             ("Maintainer", app_config.APP_AUTHOR),
             ("Source", app_config.GITHUB_REPO),
+            ("Workspace", str(Path(app_config.DATA_DIR).resolve().parent)),
             ("Data directory", app_config.DATA_DIR),
             ("Logs directory", app_config.LOGS_DIR),
         ]

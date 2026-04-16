@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 
 
 def _manifest(*, run_profile: str = "interaction_scripted", valid: bool = True, wc: int | None = 25, cpv: int = 1):
@@ -45,7 +45,7 @@ def _plan(*, with_identity: bool = True, with_static: bool = True):
 
 
 def test_paper_eligibility_happy_path() -> None:
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=_manifest(),
         plan=_plan(),
         min_windows=20,
@@ -56,7 +56,7 @@ def test_paper_eligibility_happy_path() -> None:
 
 
 def test_paper_eligibility_manual_is_allowed() -> None:
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=_manifest(run_profile="interaction_manual"),
         plan=_plan(),
         min_windows=20,
@@ -67,7 +67,7 @@ def test_paper_eligibility_manual_is_allowed() -> None:
 
 
 def test_paper_eligibility_window_missing_precedence() -> None:
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=_manifest(wc=None),
         plan=_plan(),
         min_windows=20,
@@ -78,7 +78,7 @@ def test_paper_eligibility_window_missing_precedence() -> None:
 
 
 def test_paper_eligibility_policy_mismatch_precedence_over_window() -> None:
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=_manifest(wc=10, cpv=2),
         plan=_plan(),
         min_windows=20,
@@ -90,7 +90,7 @@ def test_paper_eligibility_policy_mismatch_precedence_over_window() -> None:
 
 
 def test_paper_eligibility_missing_required_identity_field() -> None:
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=_manifest(),
         plan=_plan(with_identity=False),
         min_windows=20,
@@ -103,7 +103,7 @@ def test_paper_eligibility_missing_required_identity_field() -> None:
 def test_paper_eligibility_script_end_missing() -> None:
     manifest = _manifest()
     manifest["operator"]["script_end_marker"] = False
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -116,7 +116,7 @@ def test_paper_eligibility_script_end_missing() -> None:
 def test_paper_eligibility_script_step_mismatch() -> None:
     manifest = _manifest()
     manifest["operator"]["step_count_completed"] = 3
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -130,7 +130,7 @@ def test_paper_eligibility_script_template_mismatch() -> None:
     manifest = _manifest()
     manifest["operator"]["template_id"] = "messaging_basic_v1"
     manifest["operator"]["scenario_template"] = "messaging_basic_v1"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -143,7 +143,7 @@ def test_paper_eligibility_script_template_mismatch() -> None:
 def test_paper_eligibility_script_timing_drift_is_warning_only() -> None:
     manifest = _manifest()
     manifest["operator"]["script_timing_within_tolerance"] = False
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -156,7 +156,7 @@ def test_paper_eligibility_script_timing_drift_is_warning_only() -> None:
 def test_paper_eligibility_social_template_v2_allowed() -> None:
     manifest = _manifest()
     manifest["operator"]["scenario_template"] = "social_feed_basic_v2"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -170,7 +170,7 @@ def test_paper_eligibility_snapchat_template_allowed() -> None:
     manifest["target"]["package_name"] = "com.snapchat.android"
     manifest["operator"]["template_id"] = "snapchat_basic_v1"
     manifest["operator"]["scenario_template"] = "snapchat_basic_v1"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -184,7 +184,7 @@ def test_paper_eligibility_snapchat_wrong_template_excluded() -> None:
     manifest["target"]["package_name"] = "com.snapchat.android"
     manifest["operator"]["template_id"] = "social_feed_basic_v2"
     manifest["operator"]["scenario_template"] = "social_feed_basic_v2"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -199,7 +199,7 @@ def test_paper_eligibility_x_twitter_template_allowed() -> None:
     manifest["target"]["package_name"] = "com.twitter.android"
     manifest["operator"]["template_id"] = "x_twitter_full_session_v1"
     manifest["operator"]["scenario_template"] = "x_twitter_full_session_v1"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -213,7 +213,7 @@ def test_paper_eligibility_x_wrong_template_excluded() -> None:
     manifest["target"]["package_name"] = "com.twitter.android"
     manifest["operator"]["template_id"] = "social_feed_basic_v2"
     manifest["operator"]["scenario_template"] = "social_feed_basic_v2"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -228,7 +228,7 @@ def test_paper_eligibility_whatsapp_template_allowed() -> None:
     manifest["target"]["package_name"] = "com.whatsapp"
     manifest["operator"]["template_id"] = "whatsapp_basic_v1"
     manifest["operator"]["scenario_template"] = "whatsapp_basic_v1"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -242,7 +242,7 @@ def test_paper_eligibility_facebook_template_allowed() -> None:
     manifest["target"]["package_name"] = "com.facebook.katana"
     manifest["operator"]["template_id"] = "facebook_basic_v2"
     manifest["operator"]["scenario_template"] = "facebook_basic_v2"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -255,7 +255,7 @@ def test_paper_eligibility_legacy_template_is_excluded() -> None:
     manifest = _manifest()
     manifest["operator"]["template_id"] = "social_feed_basic"
     manifest["operator"]["scenario_template"] = "social_feed_basic"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -268,7 +268,7 @@ def test_paper_eligibility_legacy_template_is_excluded() -> None:
 def test_paper_eligibility_protocol_fit_poor_does_not_exclude() -> None:
     manifest = _manifest()
     manifest["operator"]["protocol_fit"] = "poor"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -281,7 +281,7 @@ def test_paper_eligibility_protocol_fit_poor_does_not_exclude() -> None:
 def test_paper_eligibility_script_send_is_excluded() -> None:
     manifest = _manifest()
     manifest["operator"]["script_protocol_send"] = True
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -299,7 +299,7 @@ def test_paper_eligibility_identity_mismatch_version() -> None:
         "artifact_set_hash": "b" * 64,
         "signer_set_hash": "c" * 64,
     }
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -315,7 +315,7 @@ def test_messaging_baseline_idle_low_signal_reason_is_explicit() -> None:
     manifest["dataset"]["low_signal"] = True
     manifest["dataset"]["exploratory_class"] = "LOW_SIGNAL_IDLE"
     manifest["target"]["package_name"] = "com.whatsapp"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -328,7 +328,7 @@ def test_messaging_baseline_idle_low_signal_reason_is_explicit() -> None:
 def test_messaging_baseline_idle_is_non_cohort_even_if_valid() -> None:
     manifest = _manifest(run_profile="baseline_idle", valid=True)
     manifest["target"]["package_name"] = "com.whatsapp"
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -343,7 +343,7 @@ def test_messaging_baseline_connected_v1_is_legacy_non_cohort() -> None:
     manifest["target"]["package_name"] = "com.whatsapp"
     manifest["operator"]["baseline_protocol_id"] = "baseline_connected_v1"
     manifest["operator"]["baseline_protocol_version"] = 1
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -360,7 +360,7 @@ def test_messaging_call_template_is_exploratory_only() -> None:
     manifest["operator"]["scenario_template"] = "messaging_call_basic_v1"
     manifest["operator"]["call_attempted"] = True
     manifest["operator"]["call_connected"] = True
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,
@@ -376,7 +376,7 @@ def test_call_action_in_non_call_template_is_excluded() -> None:
     manifest["operator"]["template_id"] = "whatsapp_basic_v1"
     manifest["operator"]["scenario_template"] = "whatsapp_basic_v1"
     manifest["operator"]["script_call_in_non_call_template"] = True
-    out = derive_paper_eligibility(
+    out = derive_freeze_eligibility(
         manifest=manifest,
         plan=_plan(),
         min_windows=20,

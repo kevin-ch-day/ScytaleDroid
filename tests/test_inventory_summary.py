@@ -20,7 +20,7 @@ def test_inventory_summary_no_duplicate_partitions(capsys):
     stub_device_service = types.SimpleNamespace()
     sys.modules["scytaledroid.DeviceAnalysis.services.device_service"] = stub_device_service
 
-    from scytaledroid.DeviceAnalysis import inventory  # imported late to avoid circulars
+    from scytaledroid.DeviceAnalysis.inventory.summary import render_inventory_summary
 
     rows = [
         _fake_pkg("app.user", "Data", category="User", source="Play Store"),
@@ -31,7 +31,7 @@ def test_inventory_summary_no_duplicate_partitions(capsys):
 
     buf = StringIO()
     with contextlib.redirect_stdout(buf):
-        inventory._render_inventory_summary(rows)  # type: ignore[attr-defined]
+        render_inventory_summary(rows)
 
     out = buf.getvalue()
 

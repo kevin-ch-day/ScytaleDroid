@@ -270,7 +270,7 @@ def ensure_recent_inventory(
                 prompt_key="none",
             )
             return _finish(True)
-        print(status_messages.status("Sync is recommended before pulling APKs.", level="info"))
+        print(status_messages.status("Refresh Inventory is recommended before Execute Harvest.", level="info"))
 
     options = ["1", "0"]
     labels = {"1": "Sync now (recommended)", "0": "Cancel"}
@@ -300,7 +300,7 @@ def ensure_recent_inventory(
         )
         return _finish(True)
     if choice == "0":
-        print(status_messages.status("APK pull cancelled until inventory sync is run.", level="warn"))
+        print(status_messages.status("Execute Harvest cancelled until Refresh Inventory is run.", level="warn"))
         decision = _record_guard_policy(decision, None)
         decision = replace(
             decision,
@@ -317,11 +317,11 @@ def ensure_recent_inventory(
     if prompt_message:
         print(status_messages.status(prompt_message, level="warn"))
         if not prompt_utils.prompt_yes_no(
-            "Run inventory sync before pulling APKs?", default=False
+            "Run Refresh Inventory before Execute Harvest?", default=False
         ):
             print(
                 status_messages.status(
-                    "APK pull cancelled until inventory sync is run.", level="warn"
+                    "Execute Harvest cancelled until Refresh Inventory is run.", level="warn"
                 )
             )
             decision = _record_guard_policy(decision, None)
@@ -435,7 +435,7 @@ def ensure_recent_inventory(
         if not prompt_utils.prompt_yes_no("Continue with inventory sync?", default=False):
             print(
                 status_messages.status(
-                    "APK pull cancelled until inventory sync is run.", level="warn"
+                    "Execute Harvest cancelled until Refresh Inventory is run.", level="warn"
                 )
             )
             decision = _record_guard_policy(decision, None)
@@ -454,8 +454,8 @@ def ensure_recent_inventory(
     decision = _record_guard_policy(decision, "refresh")
     decision = replace(
         decision,
-        reason="Inventory sync completed before APK pull.",
-        guard_brief="Inventory sync completed before APK pull.",
+        reason="Refresh Inventory completed before Execute Harvest.",
+        guard_brief="Refresh Inventory completed before Execute Harvest.",
         decision_enum="allow",
         reason_code="sync_completed",
         next_action="continue",

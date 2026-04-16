@@ -25,7 +25,7 @@ from scytaledroid.DynamicAnalysis.freeze_contract import (
     build_freeze_contract_snapshot,
     freeze_contract_hash,
 )
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
@@ -221,7 +221,7 @@ def build_dataset_freeze_manifest(
         run_plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
         if isinstance(run_plan, dict):
             run_plan = enrich_dynamic_plan(run_plan)
-        eligibility = derive_paper_eligibility(
+        eligibility = derive_freeze_eligibility(
             manifest=mf,
             plan=run_plan if isinstance(run_plan, dict) else {},
             min_windows=int(MIN_WINDOWS_PER_RUN),

@@ -1,6 +1,6 @@
 """Capture toolchain versions for deterministic artifacts.
 
-Phase E / paper toolchain posture:
+Freeze/publication reproducibility posture:
 - We guarantee reproducibility inside a pinned toolchain (Python + NumPy + tshark, etc.).
 - Outside that toolchain, outputs are best-effort and may drift.
 """
@@ -80,4 +80,3 @@ def gather_toolchain_versions() -> dict[str, Any]:
 
 
 __all__ = ["gather_toolchain_versions"]
-

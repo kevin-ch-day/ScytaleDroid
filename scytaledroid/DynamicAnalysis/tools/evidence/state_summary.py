@@ -11,10 +11,10 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import load_dataset_packages
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, load_dataset_tracker
 from scytaledroid.DynamicAnalysis.templates.category_map import category_for_package
-from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import run_paper_readiness_audit
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import run_freeze_readiness_audit
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -44,7 +44,7 @@ def _run_profile_bucket(run_profile: str) -> str:
 
 
 def build_state_summary() -> dict[str, Any]:
-    summary = run_paper_readiness_audit()
+    summary = run_freeze_readiness_audit()
     payload = _read_json(Path(summary.report_path)) or {}
     out: dict[str, Any] = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
@@ -129,7 +129,7 @@ def _tracker_vs_evidence_per_app() -> list[dict[str, Any]]:
             if pkg not in dataset_pkgs:
                 continue
             plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
-            eligibility = derive_paper_eligibility(
+            eligibility = derive_freeze_eligibility(
                 manifest=manifest,
                 plan=plan,
                 min_windows=_min_windows_per_run(),
@@ -200,7 +200,7 @@ def _build_collection_priorities(rows: list[dict[str, Any]]) -> list[dict[str, A
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Dynamic paper state summary")
+    parser = argparse.ArgumentParser(description="Dynamic freeze/evidence state summary")
     parser.add_argument("--json-out", default="", help="Optional output path for JSON summary.")
     args = parser.parse_args(argv)
     out = build_state_summary()

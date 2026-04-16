@@ -405,9 +405,9 @@ def _run_apk_pull(
 
     # Proceed to APK harvesting flow.
     try:
-        from scytaledroid.DeviceAnalysis.workflows import apk_pull_workflow
+        from scytaledroid.DeviceAnalysis.apk.workflow import run_apk_pull
 
-        result = apk_pull_workflow.run_apk_pull(serial, auto_scope=auto_scope)
+        result = run_apk_pull(serial, auto_scope=auto_scope)
         if hasattr(result, "ok") and not result.ok:
             error_panels.print_error_panel(
                 "Execute Harvest",

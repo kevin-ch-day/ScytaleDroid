@@ -101,7 +101,7 @@ def print_run_summary(result, duration_label: str) -> None:
                 label = "VALID"
             elif valid is False:
                 label = f"INVALID: {reason or 'UNKNOWN'}"
-            lines.append(("Dataset validity", label))
+            lines.append(("Dataset verdict", label))
             if (
                 valid is False
                 and str(reason or "").strip().upper() == "PCAP_MISSING"
@@ -146,7 +146,7 @@ def print_run_summary(result, duration_label: str) -> None:
         else:
             dataset_validity = _dataset_validity_label(result.dynamic_run_id)
             if dataset_validity:
-                lines.append(("Dataset validity", dataset_validity))
+                lines.append(("Dataset verdict", dataset_validity))
                 if dataset_validity.startswith("INVALID"):
                     reasons = _dataset_validity_reasons(result.dynamic_run_id)
                     if reasons:
@@ -163,10 +163,10 @@ def print_run_summary(result, duration_label: str) -> None:
         dbp = _load_db_persistence_status(run_dir)
         if isinstance(dbp, dict) and dbp.get("attempted") is True:
             if dbp.get("ok") is True:
-                lines.append(("DB persistence", "OK (derived index)"))
+                lines.append(("DB persistence", "clean (derived index)"))
             else:
                 code = dbp.get("error_code") or "DB_PERSISTENCE_FAILED"
-                lines.append(("DB persistence", f"FAILED: {code} (derived index)"))
+                lines.append(("DB persistence", f"failed: {code} (derived index)"))
     if result.evidence_path:
         lines.append(("Evidence", result.evidence_path))
     status_messages.print_strip("Session", lines, width=70)
@@ -289,7 +289,7 @@ def print_run_summary(result, duration_label: str) -> None:
                 _print_simple_list("Monitor", [f"Runtime: {monitor_path}"])
 
     if status == "blocked":
-        print(status_messages.status("Session blocked by plan validation.", level="warn"))
+        print(status_messages.status("Session blocked by plan validation.", level="blocked"))
     elif status != "success":
         print(status_messages.status("Session marked as degraded. Check observer errors above.", level="warn"))
     if result.dynamic_run_id and result.evidence_path:

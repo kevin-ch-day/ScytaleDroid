@@ -276,6 +276,76 @@ def resolve_last_selection(groups):
     return None
 
 
+def describe_last_selection(groups) -> dict[str, object]:
+    try:
+        package_name = _get_last_static_package()
+    except Exception:
+        package_name = None
+    if package_name:
+        selection_group = _find_latest_group_for_package(groups, package_name)
+        if selection_group:
+            return {
+                "available": True,
+                "label": package_name,
+                "source": "static-run",
+            }
+        return {
+            "available": False,
+            "label": package_name,
+            "source": "static-run-missing-library",
+        }
+
+    try:
+        harvested = _get_last_harvested_package()
+    except Exception:
+        harvested = None
+    if harvested:
+        selection_group = _find_group_by_sha(groups, harvested.get("sha256"))
+        if not selection_group:
+            selection_group = _find_latest_group_for_package(groups, harvested.get("package_name"))
+        if selection_group:
+            return {
+                "available": True,
+                "label": selection_group.package_name,
+                "source": "latest-harvest",
+            }
+        return {
+            "available": False,
+            "label": str(harvested.get("package_name") or ""),
+            "source": "harvest-missing-library",
+        }
+
+    return {
+        "available": False,
+        "label": "",
+        "source": "none",
+    }
+
+
+def diff_last_available(groups) -> tuple[bool, str]:
+    try:
+        package_name = _get_last_static_package()
+    except Exception:
+        package_name = None
+    if not package_name:
+        return False, ""
+
+    try:
+        from scytaledroid.StaticAnalysis.persistence.reports import list_reports
+
+        reports = [stored for stored in list_reports() if stored.report.manifest.package_name == package_name]
+    except Exception:
+        reports = []
+
+    if len(reports) >= 2:
+        return True, package_name
+
+    matches = tuple(group for group in groups if group.package_name == package_name)
+    if len(matches) >= 2:
+        return True, package_name
+    return False, package_name
+
+
 def _sort_report_key(stored):
     report = stored.report
     version_code = report.manifest.version_code
@@ -361,6 +431,8 @@ __all__ = [
     "choose_scope",
     "collect_view_options",
     "confirm_reset",
+    "describe_last_selection",
+    "diff_last_available",
     "prompt_session_label",
     "render_reset_outcome",
     "render_version_diff",

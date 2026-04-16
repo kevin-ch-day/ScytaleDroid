@@ -1263,19 +1263,6 @@ def sync_contracts_to_db() -> None:
     print(status_messages.status(f"Upserted ordering rows: {n_order}", level="success"))
     prompt_utils.press_enter_to_continue()
 
-
-def seed_paper_dataset_profile() -> None:
-    """Compatibility wrapper for legacy call sites."""
-
-    seed_dataset_profile()
-
-
-def sync_paper_contracts_to_db() -> None:
-    """Compatibility wrapper for legacy call sites."""
-
-    sync_contracts_to_db()
-
-
 def ensure_dynamic_tier_column(*, prompt_user: bool = True) -> bool:
     """Ensure dynamic_sessions has a tier column (DB migration helper)."""
 
@@ -1684,9 +1671,7 @@ __all__ = [
     "backfill_static_permission_risk_vnext",
     "audit_static_risk_coverage",
     "seed_dataset_profile",
-    "seed_paper_dataset_profile",
     "sync_contracts_to_db",
-    "sync_paper_contracts_to_db",
     "apply_canonical_schema_bootstrap",
     "ensure_dynamic_tier_column",
     "ensure_dynamic_network_quality_column",

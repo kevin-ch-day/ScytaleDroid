@@ -1,10 +1,11 @@
 """Publication bundle contract.
 
-This module defines what *must* exist under `output/publication/` for a submission-grade
-paper bundle. Keeping this centralized prevents brittle allowlists from drifting.
+This module defines what *must* exist under `output/publication/` for a
+submission-grade publication bundle. Keeping this centralized prevents brittle
+allowlists from drifting.
 
 Bundle policy:
-- `output/publication/` is paper-facing and must remain minimal.
+- `output/publication/` is manuscript-facing and must remain minimal.
 - Figures are PNG-only (we do not ship PDFs in the publication bundle).
 """
 
@@ -22,7 +23,7 @@ class PublicationLint:
     warnings: list[str]
 
 
-# Minimal, paper-facing required structure.
+# Minimal, manuscript-facing required structure.
 REQUIRED_DIRS = {
     "appendix",
     "figures",
@@ -33,7 +34,7 @@ REQUIRED_DIRS = {
 
 # Minimal required files for "publication bundle ready".
 #
-# Keep this list paper-facing: no internal baseline tables, no exploratory outputs.
+# Keep this list manuscript-facing: no internal baseline tables, no exploratory outputs.
 REQUIRED_FILES = {
     # Manifests (reproducibility anchors).
     Path("manifests") / "dataset_freeze.json",

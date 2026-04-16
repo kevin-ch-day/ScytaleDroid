@@ -13,7 +13,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_for_run
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
@@ -279,7 +279,7 @@ def _refresh_paper_eligibility_in_place(r: dict[str, Any]) -> bool:
     # remains excluded by identity rules.
     manifest = _load(manifest_path)
     plan = _load(run_dir / "inputs" / "static_dynamic_plan.json")
-    eligibility = derive_paper_eligibility(
+    eligibility = derive_freeze_eligibility(
         manifest=manifest if isinstance(manifest, dict) else {},
         plan=plan if isinstance(plan, dict) else {},
         min_windows=int(MIN_WINDOWS_PER_RUN),
@@ -1024,7 +1024,7 @@ def _derive_paper_eligibility_fields(
             "paper_exclusion_primary_reason_code": "EXCLUDED_NO_EVIDENCE_PACK",
             "paper_exclusion_all_reason_codes": ["EXCLUDED_NO_EVIDENCE_PACK"],
         }
-    eligibility = derive_paper_eligibility(
+    eligibility = derive_freeze_eligibility(
         manifest=manifest if isinstance(manifest, dict) else {},
         plan=plan if isinstance(plan, dict) else {},
         min_windows=int(MIN_WINDOWS_PER_RUN),

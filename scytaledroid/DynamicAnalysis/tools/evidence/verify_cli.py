@@ -639,7 +639,7 @@ def run_dynamic_evidence_verify(
 
     print()
     menu_utils.print_header("Per-app summary")
-    app_headers = ["App", "Baseline", "Interactive", "Need", "Valid", "LS", "Runs", "Last", "Next", "ML"]
+    app_headers = ["App", "Baseline", "Interactive", "Need", "Valid", "LS", "Runs", "Last", "Next", "ML-ready"]
     app_rows: list[list[str]] = []
     for a in apps:
         need_parts: list[str] = []
@@ -671,7 +671,7 @@ def run_dynamic_evidence_verify(
                 str(a.total_runs),
                 a.last_status,
                 a.next_recommended,
-                "READY" if a.ml_ready else "WAIT",
+                "yes" if a.ml_ready else "no",
             ]
         )
     _render_shared_table(app_headers, app_rows, max_widths={0: 28}, right_align={1, 2, 3, 4, 5, 6})

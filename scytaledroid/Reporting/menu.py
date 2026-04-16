@@ -91,7 +91,7 @@ def _reporting_menu_v2_frozen() -> None:
         print(f"Output root: {pub_root}")
         print(f"Freeze: {freeze_short}")
 
-        audit = str(status.get("paper_audit_result") or "unknown")
+        audit = str(status.get("freeze_audit_result") or status.get("paper_audit_result") or "unknown")
         quota = status.get("evidence_quota_counted")
         expected = status.get("evidence_quota_expected")
         pub_ready = "READY" if status.get("publication_ready") else "NOT READY"

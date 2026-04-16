@@ -340,11 +340,11 @@ def report_summary_failure(exc: Exception) -> None:
 
 
 def report_apk_pull_cancelled() -> None:
-    print(status_messages.status("APK pull cancelled by user.", level="warn"))
+    print(status_messages.status("Execute Harvest cancelled by user.", level="warn"))
 
 
 def report_no_packages_selected() -> None:
-    print(status_messages.status("Selection contains no packages. Nothing to pull.", level="warn"))
+    print(status_messages.status("Selection contains no packages. Nothing to harvest.", level="warn"))
 
 
 def report_delta_scope_empty() -> None:

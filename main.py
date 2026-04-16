@@ -79,36 +79,12 @@ def print_banner(*, show_clocks: bool = False) -> None:
         app_config.APP_DESCRIPTION,
         build_id=get_git_commit(),
         metrics=metrics,
-        hero_lines=[f"Repo: {get_git_toplevel() or Path(__file__).resolve().parent}"],
     )
 
     log.info(
         f"Application started - {app_config.APP_NAME} {app_config.APP_VERSION} ({app_config.APP_RELEASE})",
         category="application",
     )
-
-
-def get_git_toplevel() -> str | None:
-    """Return the git repo toplevel directory if available.
-
-    Operational safety: helps operators confirm they are running the working tree
-    they think they are (not an installed wheel or a different checkout).
-    """
-    try:
-        import subprocess
-        from pathlib import Path
-
-        out = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=Path(__file__).resolve().parent,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=2.0,
-        ).strip()
-        return out or None
-    except Exception:
-        return None
-
 
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
@@ -118,7 +94,7 @@ def main_menu() -> None:
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
         ("1", "Device Inventory & Harvest", handle_device),
         ("2", "Static Analysis Pipeline", handle_static),
-        ("3", "Dynamic Analysis (Cohorts)", handle_dynamic),
+        ("3", "Dynamic Analysis", handle_dynamic),
         ("4", "API server", handle_api),
         ("5", "Reporting & Exports", handle_reporting),
         ("6", "Database tools", handle_database),
@@ -171,9 +147,6 @@ def main_menu() -> None:
         extra_valid: list[str] = []
         if status_snapshot.get("allow_copy_freeze_hash"):
             extra_valid.append("h")
-        if status_snapshot.get("allow_details"):
-            extra_valid.append("d")
-
         choice = prompt_utils.get_choice(
             valid=valid_choices + ["0", *extra_valid],
             default=default_choice,
@@ -196,10 +169,6 @@ def main_menu() -> None:
 
         if choice.lower() == "h" and status_snapshot.get("allow_copy_freeze_hash"):
             _handle_copy_freeze_hash(status_snapshot)
-            continue
-
-        if choice.lower() == "d" and status_snapshot.get("allow_details"):
-            _handle_main_menu_details(status_snapshot)
             continue
 
         selected = handlers.get(choice)
@@ -227,17 +196,17 @@ def _resolve_operator_mode(*, pub_status: dict[str, object]) -> str:
     if override in {"collection", "collect"}:
         return "collection"
 
-    # Auto-detect: we treat "paper freeze" as locked only when we have both
+    # Auto-detect: treat publication freeze as locked only when we have both
     # an audit GO and a freeze anchor present (freeze hash exists).
     has_freeze = bool(pub_status.get("freeze_dataset_hash"))
-    audit_go = str(pub_status.get("paper_audit_result") or "").strip().upper() == "GO"
+    audit_go = str(pub_status.get("freeze_audit_result") or pub_status.get("paper_audit_result") or "").strip().upper() == "GO"
     can_freeze = bool(pub_status.get("can_freeze"))
     if has_freeze and audit_go and can_freeze:
         return "paper"
     return "collection"
 
 
-def _load_paper_cohort_counts() -> dict[str, int] | None:
+def _load_publication_cohort_counts() -> dict[str, int] | None:
     """Return compact cohort counts from paper_results_v1.json if present."""
 
     try:
@@ -278,28 +247,6 @@ def _handle_copy_freeze_hash(snapshot: dict[str, object]) -> None:
     prompt_utils.press_enter_to_continue()
 
 
-def _handle_main_menu_details(snapshot: dict[str, object]) -> None:
-    print()
-    menu_utils.print_header("Dataset Status (Details)")
-    for k in (
-        "mode",
-        "locked",
-        "paper_audit_result",
-        "can_freeze",
-        "evidence_quota_counted",
-        "evidence_quota_expected",
-        "freeze_dataset_hash",
-        "publication_root",
-        "publication_ready",
-    ):
-        if k in snapshot:
-            print(f"- {k}: {snapshot.get(k)}")
-    override = str(os.environ.get("SCYTALEDROID_MODE") or "").strip()
-    if override:
-        print(f"- SCYTALEDROID_MODE (override): {override}")
-    prompt_utils.press_enter_to_continue()
-
-
 def _print_tier1_status_banner() -> dict[str, object]:
     """Render the main-menu mode banner. Returns a snapshot for extra actions."""
 
@@ -322,7 +269,7 @@ def _print_tier1_status_banner() -> dict[str, object]:
         pub_status = {}
 
     mode = _resolve_operator_mode(pub_status=pub_status)
-    audit = str(pub_status.get("paper_audit_result") or "unknown").upper()
+    audit = str(pub_status.get("freeze_audit_result") or pub_status.get("paper_audit_result") or "unknown").upper()
     can_freeze = bool(pub_status.get("can_freeze"))
     freeze_hash = str(pub_status.get("freeze_dataset_hash") or "")
     freeze_short = freeze_hash[:12] if freeze_hash else "missing"
@@ -336,24 +283,15 @@ def _print_tier1_status_banner() -> dict[str, object]:
     lock_label = "LOCKED" if locked else "NOT LOCKED"
 
     snapshot: dict[str, object] = {
-        "mode": mode,
-        "locked": locked,
-        "paper_audit_result": audit,
-        "can_freeze": can_freeze,
-        "evidence_quota_counted": quota,
-        "evidence_quota_expected": expected,
         "freeze_dataset_hash": freeze_hash,
-        "publication_root": pub_root,
-        "publication_ready": pub_ready,
         "allow_copy_freeze_hash": bool(locked and freeze_hash),
-        "allow_details": True,
     }
 
     # Loud, impossible-to-miss banner (PM acceptance criteria).
     if mode == "paper":
         banner = f"Mode: FREEZE ({lock_label}) | Freeze: {freeze_short} | Audit: {audit}"
         print(status_messages.status(banner, level="success" if locked else "warn"))
-        counts = _load_paper_cohort_counts() or {}
+        counts = _load_publication_cohort_counts() or {}
         apps = counts.get("apps")
         runs = counts.get("runs")
         windows = counts.get("windows")
@@ -362,26 +300,26 @@ def _print_tier1_status_banner() -> dict[str, object]:
         else:
             print(f"Quota: {quota_label} | Publication: {'present' if pub_ready else 'missing'}")
         print(f"Publication: {'present' if pub_ready else 'missing'} | Path: {pub_root}")
-        print("Commands: [H] Copy freeze hash | [D] Details")
+        print("Commands: [H] Copy freeze hash")
         return snapshot
 
     # Collection/default mode: keep it compact; avoid DB noise unless needed.
     audit_ready = str(audit).strip().upper() == "GO"
     audit_state = "ready" if audit_ready else "not ready"
-    audit_detail = "Evidence freeze present" if audit_ready else "No evidence freeze"
+    audit_detail = "evidence freeze recorded" if audit_ready else "no evidence freeze recorded"
     if quota_label == "unknown":
         quota_line = "Quota: Not enforced"
     else:
         quota_line = f"Quota: {quota_label}"
     print(status_messages.status("Mode: COLLECTION", level="info"))
-    print(status_messages.status(f"Audit State: {audit_state} ({audit_detail})", level="info" if audit_ready else "warn"))
+    print(status_messages.status(f"Audit State: {audit_state}", level="info" if audit_ready else "warn"))
+    print(status_messages.status(f"Reason: {audit_detail}", level="info"))
     print(status_messages.status(quota_line, level="info"))
     # Keep a single legacy hint if schema mismatch is present.
     schema_ver = tier1.get("schema_version") or "<unknown>"
     expected_schema = tier1.get("expected_schema") or "<unknown>"
     if schema_ver and expected_schema and schema_ver != expected_schema:
         print(status_messages.status(f"DB schema mismatch: {schema_ver} (expects {expected_schema})", level="warn"))
-    print("Commands: [D] Details")
     return snapshot
 
 
@@ -506,16 +444,21 @@ def main(argv: list[str] | None = None) -> int:
         from scytaledroid.StaticAnalysis.cli.flows import headless_run
 
         return int(headless_run.main(argv[1:]))
-    if argv and argv[0] == "dynamic-gate":
-        from scytaledroid.DynamicAnalysis.tools import paper_gate
+    if argv and argv[0] in {"dynamic-freeze-gate", "dynamic-gate"}:
+        from scytaledroid.DynamicAnalysis.tools import freeze_gate
 
-        return int(paper_gate.main(argv[1:]))
+        return int(freeze_gate.main(argv[1:]))
     if argv and argv[0] == "dynamic-research-gate":
-        from scytaledroid.DynamicAnalysis.tools import paper_gate
+        from scytaledroid.DynamicAnalysis.tools import freeze_gate
 
-        return int(paper_gate.main(["--research", *argv[1:]]))
+        return int(freeze_gate.main(["--research", *argv[1:]]))
     if argv and argv[0] == "dynamic":
         dynamic_parser = argparse.ArgumentParser(description="ScytaleDroid dynamic commands")
+        dynamic_parser.add_argument(
+            "--freeze-gate",
+            action="store_true",
+            help="Run canonical research gate checks and exit.",
+        )
         dynamic_parser.add_argument(
             "--paper-gate",
             action="store_true",
@@ -527,11 +470,11 @@ def main(argv: list[str] | None = None) -> int:
             help="Run canonical research gate checks and exit.",
         )
         dynamic_args = dynamic_parser.parse_args(argv[1:])
-        if dynamic_args.paper_gate or dynamic_args.research_gate:
-            from scytaledroid.DynamicAnalysis.tools import paper_gate
+        if dynamic_args.freeze_gate or dynamic_args.paper_gate or dynamic_args.research_gate:
+            from scytaledroid.DynamicAnalysis.tools import freeze_gate
 
-            return int(paper_gate.main(["--research"]))
-        dynamic_parser.error("No dynamic command selected. Use --research-gate.")
+            return int(freeze_gate.main(["--research"]))
+        dynamic_parser.error("No dynamic command selected. Use --freeze-gate.")
     if argv and argv[0] == "db":
         return _run_db_maintenance(argv[1:])
 

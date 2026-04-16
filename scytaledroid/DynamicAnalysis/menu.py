@@ -23,7 +23,11 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages as _load_dataset_packages,
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.paper_eligibility import derive_paper_eligibility
+from scytaledroid.DynamicAnalysis.menu_views import (
+    build_dynamic_menu_sections,
+    render_dynamic_menu_overview,
+)
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.services.observer_service import (
     select_observers as _service_select_observers,
@@ -150,7 +154,7 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         if package not in dataset_pkgs:
             continue
         plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
-        eligibility = derive_paper_eligibility(
+        eligibility = derive_freeze_eligibility(
             manifest=payload,
             plan=plan,
             min_windows=_min_windows_per_run(),
@@ -197,6 +201,21 @@ class _DynamicUiDefaults:
     pcapdroid_api_key: str | None
 
 
+@dataclass(frozen=True)
+class _PreparedPackageSelectionView:
+    packages: list[tuple[str, str | None, int | None, str | None]]
+    dataset_pkgs: set[str]
+    cfg: object
+    rows: list[list[str]]
+    op_rows: list[list[str]]
+    build_rows: list[list[str]]
+    dataset_apps_total: int
+    dataset_apps_complete: int
+    dataset_valid_runs_total: int
+    expected_runs: int
+    evidence_summary: dict[str, int | bool] | None
+
+
 def _load_dynamic_ui_defaults() -> _DynamicUiDefaults:
     # UI-layer defaults only. Execution semantics must rely on the frozen config
     # carried in DynamicSessionConfig/RunContext and recorded in run_manifest.json.
@@ -241,7 +260,7 @@ def _print_profile_v3_capture_runbook() -> None:
         "3. Reporting: Run structural archive integrity gates (freshness + scripted coverage).",
         "4. Dynamic Analysis: capture missing scripted runs (baseline_idle + interaction_scripted).",
         "5. Dynamic Analysis: Build v3 manifest (included runs).",
-        "6. Reporting: Strict v3 export + strict lint -> READY.",
+        "6. Reporting: Strict v3 export + strict lint -> ready.",
         "",
         "Notes:",
         "- If v3 exporter fails with included_run_ids=0, you have not built the manifest yet.",
@@ -703,32 +722,8 @@ def dynamic_analysis_menu() -> None:
             level="warn",
         )
 
-    v2_options = [
-        MenuOption("1", "Guided cohort run (Research Dataset Alpha)"),
-        MenuOption("2", "Cohort status overview"),
-    ]
-    archive_options = [
-        MenuOption("3", "Archived structural cohort tools"),
-    ]
-    integrity_options = [
-        MenuOption("4", "Freeze readiness audit (evidence packs)"),
-        MenuOption("5", "Reindex/repair tracker from evidence packs"),
-        MenuOption("6", "Prune incomplete dynamic evidence dirs"),
-    ]
-    reporting_options = [
-        MenuOption("7", "Export frozen archive CSVs (Reporting)"),
-    ]
-    system_options = [
-        MenuOption("8", "Verify host PCAP tools (tshark + capinfos)"),
-        MenuOption("9", "State summary (freeze/evidence/tracker deltas)"),
-    ]
-    options = [
-        *v2_options,
-        *archive_options,
-        *integrity_options,
-        *reporting_options,
-        *system_options,
-    ]
+    sections = build_dynamic_menu_sections()
+    options = sections.all_options
 
     ui_defaults = _load_dynamic_ui_defaults()
 
@@ -743,17 +738,24 @@ def dynamic_analysis_menu() -> None:
         print()
         menu_utils.print_header("Dynamic Analysis")
         _warn_if_code_changed()
-        menu_utils.print_section("Operational Cohort")
-        menu_utils.print_menu(v2_options, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Legacy / Archive")
-        menu_utils.print_menu(archive_options, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Integrity & Audit")
-        menu_utils.print_menu(integrity_options, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Reporting")
-        menu_utils.print_menu(reporting_options, show_exit=False, show_descriptions=False, compact=True)
+        render_dynamic_menu_overview()
+        print()
+        menu_utils.print_section("Primary Actions")
+        menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Evidence & Integrity")
+        menu_utils.print_menu(sections.evidence_integrity, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Exports")
+        menu_utils.print_menu(sections.exports, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_section("System")
         menu_utils.print_menu(
-            system_options,
+            sections.system,
+            show_exit=False,
+            show_descriptions=False,
+            compact=True,
+        )
+        menu_utils.print_section("Legacy / Archive")
+        menu_utils.print_menu(
+            sections.legacy_archive,
             show_exit=True,
             exit_label="Back",
             show_descriptions=False,
@@ -783,7 +785,7 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "4":
-            _run_paper_readiness_audit()
+            _run_freeze_readiness_audit()
             _pause_if_verbose()
             continue
 
@@ -936,7 +938,7 @@ def _repair_reindex_tracker() -> None:
                 continue
             manifest = _read_json(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id / "run_manifest.json") or {}
             plan = _read_json(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id / "inputs" / "static_dynamic_plan.json") or {}
-            eligibility = derive_paper_eligibility(
+            eligibility = derive_freeze_eligibility(
                 manifest=manifest,
                 plan=plan,
                 min_windows=_min_windows_per_run(),
@@ -995,208 +997,31 @@ def _repair_reindex_tracker() -> None:
     print(status_messages.status(f"Report: {report_path}", level="info"))
 
 
-def _run_paper_readiness_audit() -> None:
-    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
-        run_freeze_readiness_audit,
-    )
+def _run_freeze_readiness_audit() -> None:
+    from scytaledroid.DynamicAnalysis.menu_reports import run_freeze_readiness_audit_report
 
-    summary = run_freeze_readiness_audit()
-    print()
-    menu_utils.print_header("Freeze Readiness Audit")
-    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
-    verbose = ui_level in {"details", "debug"}
-    if not verbose:
-        verdict = "GO" if summary.result == "GO" else "NO-GO"
-        can_freeze = "YES" if summary.can_freeze else "NO"
-        msg = (
-            f"Audit={verdict} | CAN_FREEZE={can_freeze} | "
-            f"VALID={summary.valid_runs} | eligible={summary.paper_eligible_runs} | "
-            f"missing_window_count={summary.missing_window_count} | identity_mismatch={summary.identity_mismatch}"
-        )
-        level = "success" if summary.result == "GO" else "error"
-        print(status_messages.status(msg, level=level))
-        if summary.first_failing_reason:
-            print(status_messages.status(f"First failing reason: {summary.first_failing_reason}", level="warn"))
-        if summary.report_path:
-            print(status_messages.status(f"Report: {summary.report_path}", level="info"))
-        return
-    rows = [
-        ("Total runs", str(summary.total_runs)),
-        ("VALID runs", str(summary.valid_runs)),
-        ("Cohort-eligible runs", str(summary.paper_eligible_runs)),
-        ("CAN_FREEZE", "YES" if summary.can_freeze else "NO"),
-        ("First failing reason", str(summary.first_failing_reason or "—")),
-        ("Incomplete dirs (no manifest)", str(summary.missing_run_manifest_dirs)),
-        ("Expected valid runs", str(summary.expected_valid_runs)),
-        ("Expected total runs", str(summary.expected_total_runs)),
-        ("Missing capture_policy_version", str(summary.missing_capture_policy_version)),
-        ("capture_policy_version mismatch", str(summary.capture_policy_version_mismatch)),
-        ("Missing signer_set_hash", str(summary.missing_signer_set_hash)),
-        ("Identity mismatch", str(summary.identity_mismatch)),
-        ("Missing window_count", str(summary.missing_window_count)),
-        ("window_count < min", str(summary.window_count_below_min)),
-        ("Canonical freeze role", str(summary.canonical_freeze_role)),
-        ("Canonical freeze hash present", str(summary.canonical_freeze_contract_hash_present).lower()),
-        ("Canonical freeze run IDs present", f"{summary.freeze_run_ids_present}/{summary.freeze_run_ids_total}"),
-        ("Tracker runs (hint)", str(summary.tracker_runs_hint)),
-        ("Static runs (hint)", str(summary.static_runs_hint)),
-    ]
-    table_utils.render_table(["Metric", "Count"], rows, compact=False)
-    if summary.result != "GO":
-        print(status_messages.status("Audit result: NO-GO (freeze readiness checks failed).", level="error"))
-    else:
-        print(status_messages.status("Audit result: GO (freeze readiness checks passed).", level="success"))
-    if summary.reasons:
-        reason_text = ", ".join(summary.reasons)
-        print(status_messages.status(f"Reasons: {reason_text}", level="warn"))
-    if "NO_EVIDENCE_PACKS_FOUND" in summary.reasons and summary.tracker_runs_hint > 0:
-        print(
-            status_messages.status(
-                "Tracker contains historical runs but local evidence packs are missing. Recollect runs or repoint evidence root before freeze.",
-                level="warn",
-            )
-        )
-    if summary.missing_run_manifest_dirs > 0:
-        print(
-            status_messages.status(
-                "Incomplete dynamic evidence directories detected (missing run_manifest.json). "
-                "Clean up orphan run folders before freeze.",
-                level="warn",
-            )
-        )
-    if "NO_EVIDENCE_PACKS_FOUND" in summary.reasons and summary.static_runs_hint > 0:
-        print(
-            status_messages.status(
-                "Static evidence packs were found in this workspace, but dynamic evidence packs were not. Run dynamic collection on this host or copy dynamic evidence packs before freeze.",
-                level="warn",
-            )
-        )
-    if summary.canonical_freeze_demoted_to_legacy:
-        print(
-            status_messages.status(
-                f"Renamed stale dataset_freeze.json -> {summary.canonical_freeze_demoted_to_legacy} (blocked from export).",
-                level="warn",
-            )
-        )
-    print(status_messages.status(f"Evidence root: {summary.evidence_root}", level="info"))
-    print(status_messages.status(f"Evidence root exists: {str(summary.evidence_root_exists).lower()}", level="info"))
-    print(status_messages.status(f"Runs discovered from: {summary.runs_discovered_from}", level="info"))
-    print(status_messages.status(f"Report: {summary.report_path}", level="info"))
+    run_freeze_readiness_audit_report()
 
 
 def _run_state_summary() -> None:
     from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
         run_freeze_readiness_audit,
     )
+    from scytaledroid.DynamicAnalysis.menu_reports import run_state_summary_report
     from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_state_summary
 
     summary = run_freeze_readiness_audit()
     payload = _read_json(Path(summary.report_path)) or {}
     state_payload = build_state_summary()
-    print()
-    menu_utils.print_header("State Summary")
-    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
-    verbose = ui_level in {"details", "debug"}
-    if not verbose:
-        line = (
-            f"CAN_FREEZE={'YES' if summary.can_freeze else 'NO'}"
-            f" | total_runs={summary.total_runs}"
-            f" | eligible_runs={summary.paper_eligible_runs}"
-        )
-        if summary.first_failing_reason:
-            line += f" | first_fail={summary.first_failing_reason}"
-        print(status_messages.status(line, level="success" if summary.can_freeze else "warn"))
-        print(status_messages.status(f"Audit report: {summary.report_path}", level="info"))
-        return
-    rows = [
-        ("CAN_FREEZE", "YES" if summary.can_freeze else "NO"),
-        ("First failing reason", str(summary.first_failing_reason or "—")),
-        ("Canonical freeze role", str(summary.canonical_freeze_role)),
-        ("Canonical freeze hash present", str(summary.canonical_freeze_contract_hash_present).lower()),
-        ("Freeze run IDs present", f"{summary.freeze_run_ids_present}/{summary.freeze_run_ids_total}"),
-        ("Evidence root", str(summary.evidence_root)),
-        ("Total runs", str(summary.total_runs)),
-        ("Cohort-eligible runs", str(summary.paper_eligible_runs)),
-    ]
-    table_utils.render_table(["Metric", "Value"], rows, compact=False)
-
-    canonical = payload.get("canonical_freeze") if isinstance(payload.get("canonical_freeze"), dict) else {}
-    presence = (
-        canonical.get("run_id_presence_classification")
-        if isinstance(canonical.get("run_id_presence_classification"), dict)
-        else {}
-    )
-    if presence:
-        print()
-        menu_utils.print_header("Freeze Run-ID Presence")
-        prow = [
-            ("Total IDs", str(int(presence.get("total_run_ids") or 0))),
-            ("Present run dirs", str(int(presence.get("present_run_dirs") or 0))),
-            ("Missing run dirs", str(int(presence.get("missing_run_dirs") or 0))),
-            ("Found but incomplete", str(int(presence.get("found_but_incomplete") or 0))),
-            ("Missing required files", str(int(presence.get("found_but_missing_required_files") or 0))),
-            ("Found but identity mismatch", str(int(presence.get("found_but_identity_mismatch") or 0))),
-        ]
-        table_utils.render_table(["Category", "Count"], prow, compact=False)
-
-    exclusion_counts = payload.get("exclusion_reason_counts") if isinstance(payload.get("exclusion_reason_counts"), dict) else {}
-    if exclusion_counts:
-        print()
-        menu_utils.print_header("Exclusion Reasons")
-        erows = [[k, str(int(v))] for k, v in sorted(exclusion_counts.items(), key=lambda kv: (-int(kv[1]), str(kv[0])))]
-        table_utils.render_table(["Reason", "Count"], erows, compact=False)
-
-    baseline_signal = (
-        state_payload.get("baseline_signal_summary")
-        if isinstance(state_payload.get("baseline_signal_summary"), dict)
-        else {}
-    )
-    if baseline_signal:
-        print()
-        menu_utils.print_header("Baseline Signal")
-        by_cat = (
-            baseline_signal.get("baseline_idle_failures_by_category")
-            if isinstance(baseline_signal.get("baseline_idle_failures_by_category"), dict)
-            else {}
-        )
-        brows = [[f"baseline_idle failures ({k})", str(int(v))] for k, v in sorted(by_cat.items())]
-        brows.append(
-            [
-                "baseline_connected successes",
-                str(int(baseline_signal.get("baseline_connected_successes") or 0)),
-            ]
-        )
-        table_utils.render_table(["Metric", "Count"], brows, compact=False)
-
     delta_rows = _compute_tracker_vs_evidence_deltas()
-    if delta_rows:
-        print()
-        menu_utils.print_header("Tracker vs Evidence (Per App)")
-        table_utils.print_table(
-            delta_rows,
-            headers=[
-                "Package",
-                "Tracker countable",
-                "Evidence eligible countable",
-                "Extras",
-                "Excluded",
-            ],
-        )
-        priorities = _build_collection_priorities(delta_rows)
-        if priorities:
-            print()
-            menu_utils.print_header("Next Collection Priorities")
-            table_utils.print_table(
-                priorities,
-                headers=[
-                    "Package",
-                    "Need baseline",
-                    "Need interactive",
-                    "Total needed",
-                    "Suggested next",
-                ],
-            )
-    print(status_messages.status(f"Audit report: {summary.report_path}", level="info"))
+    priorities = _build_collection_priorities(delta_rows)
+    run_state_summary_report(
+        summary=summary,
+        payload=payload,
+        state_payload=state_payload,
+        delta_rows=delta_rows,
+        priorities=priorities,
+    )
 
 
 def _compute_tracker_vs_evidence_deltas() -> list[dict[str, object]]:
@@ -1223,7 +1048,7 @@ def _compute_tracker_vs_evidence_deltas() -> list[dict[str, object]]:
             if pkg not in dataset_pkgs:
                 continue
             plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
-            eligibility = derive_paper_eligibility(
+            eligibility = derive_freeze_eligibility(
                 manifest=manifest,
                 plan=plan,
                 min_windows=_min_windows_per_run(),
@@ -1303,42 +1128,9 @@ def _next_action_from_need(need_baseline: int, need_interactive: int) -> str:
 
 
 def _render_dataset_status() -> None:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+    from scytaledroid.DynamicAnalysis.menu_reports import render_dataset_status
 
-    print()
-    menu_utils.print_header("Dataset Run Status")
-    payload = load_dataset_tracker()
-    apps = payload.get("apps", {})
-    rows = []
-    for package, entry in sorted(apps.items()):
-        runs = int(entry.get("run_count") or 0)
-        valid = int(entry.get("valid_runs") or 0)
-        target = int(entry.get("target_runs") or 0)
-        base = int(entry.get("baseline_valid_runs") or 0)
-        inter = int(entry.get("interactive_valid_runs") or 0)
-        extra = int(entry.get("extra_valid_runs") or 0)
-        quota_met_at = entry.get("quota_met_at") or ""
-        status = "DONE" if entry.get("app_complete") else "IN_PROGRESS"
-        rows.append(
-            {
-                "Package": package,
-                "Valid": valid,
-                "Base": base,
-                "Inter": inter,
-                "Runs": runs,
-                "Target": target,
-                "Extra": extra,
-                "Quota met at": str(quota_met_at),
-                "Status": status,
-            }
-        )
-    if not rows:
-        print(status_messages.status("No dataset runs recorded yet.", level="info"))
-        return
-    table_utils.print_table(
-        rows,
-        headers=["Package", "Valid", "Base", "Inter", "Runs", "Target", "Extra", "Quota met at", "Status"],
-    )
+    render_dataset_status()
 
 
 def _export_pcap_features_csv() -> None:
@@ -1417,53 +1209,9 @@ def _count_csv_rows(path: Path) -> int | None:
 
 def _verify_host_pcap_tools() -> None:
     """Verify host toolchain required for dataset-tier PCAP post-analysis."""
-    from pathlib import Path
+    from scytaledroid.DynamicAnalysis.menu_reports import render_host_pcap_tools
 
-    from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
-
-    print()
-    menu_utils.print_header("Host PCAP Tools")
-    tools = collect_host_tools()
-    missing = missing_required_tools(tier="dataset")
-    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
-    verbose = ui_level in {"details", "debug"}
-    if not verbose and not missing:
-        tshark_path = ((tools.get("tshark") or {}) if isinstance(tools, dict) else {}).get("path")
-        capinfos_path = ((tools.get("capinfos") or {}) if isinstance(tools, dict) else {}).get("path")
-        tshark_ok = "present" if tshark_path else "missing"
-        capinfos_ok = "present" if capinfos_path else "missing"
-        print(status_messages.status(f"tshark={tshark_ok} | capinfos={capinfos_ok}", level="success"))
-        print(status_messages.status("Host toolchain is dataset-ready.", level="success"))
-        return
-    for name in ("tshark", "capinfos"):
-        meta = tools.get(name) if isinstance(tools, dict) else None
-        path = meta.get("path") if isinstance(meta, dict) else None
-        version = meta.get("version") if isinstance(meta, dict) else None
-        if path:
-            print(status_messages.status(f"{name}: present ({path})", level="success"))
-            if verbose and version:
-                print(status_messages.status(f"{name}: {version}", level="info"))
-        else:
-            print(status_messages.status(f"{name}: missing", level="warn"))
-
-    script = Path("scripts/install_wireshark_cli.sh")
-    if missing:
-        if script.exists():
-            print(
-                status_messages.status(
-                    "Fix: install required tools with: sudo scripts/install_wireshark_cli.sh",
-                    level="warn",
-                )
-            )
-        else:
-            print(
-                status_messages.status(
-                    "Fix: install wireshark-cli (tshark + capinfos) using your OS package manager.",
-                    level="warn",
-                )
-            )
-    else:
-        print(status_messages.status("Host toolchain is dataset-ready.", level="success"))
+    render_host_pcap_tools()
 
 
 def _select_dynamic_target() -> tuple[str, str] | None:
@@ -1748,21 +1496,25 @@ def _select_profile_package(groups) -> tuple[str, str | None] | None:
 
 
 def _select_package_from_groups(groups, *, title: str) -> str | None:
-    packages = list_packages(groups)
-    if not packages:
+    prepared = _prepare_package_selection_view(groups)
+    if prepared is None:
         print(status_messages.status("No apps available for selection.", level="warn"))
         return None
     print()
     menu_utils.print_header(title)
-    # Dataset progress columns (valid runs + suggested next profile) help operators
-    # track collection without opening the tracker view.
+    return _run_package_selection_menu(prepared)
+
+
+def _prepare_package_selection_view(groups) -> _PreparedPackageSelectionView | None:
+    packages = list_packages(groups)
+    if not packages:
+        return None
     dataset_pkgs: set[str] = set()
     try:
         dataset_pkgs = {pkg.lower() for pkg in _load_dataset_packages()}
     except Exception:
         dataset_pkgs = set()
 
-    # Lazy imports avoid unnecessary module work for non-dataset menus.
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
         DatasetTrackerConfig,
         load_dataset_tracker,
@@ -1773,20 +1525,15 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
     cfg = DatasetTrackerConfig()
     tracker = load_dataset_tracker()
     tracker_apps = tracker.get("apps") if isinstance(tracker, dict) else {}
-
-    # Prefer human-friendly app labels in the table. If labels collide, append the
-    # package name so operators can disambiguate.
     labels = [((app_label or package).strip() or package) for package, _v, _c, app_label in packages]
     collisions = {label for label in labels if labels.count(label) > 1}
 
-    rows = []  # full table (debug/details)
-    op_rows = []  # operator-default table
+    rows = []
+    op_rows = []
     build_rows = []
     dataset_apps_total = 0
     dataset_apps_complete = 0
     dataset_valid_runs_total = 0
-    dataset_window_count_total = 0
-    dataset_window_count_missing = 0
     evidence_summary: dict[str, int | bool] | None = None
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
         display = ((app_label or package).strip() or package)
@@ -1794,7 +1541,6 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             display = "X (Twitter)"
         if display in collisions:
             display = f"{display} ({package})"
-        # Keep app labels readable without overloading the main run-selection view.
         display = text_blocks.truncate_visible(display, 30)
 
         base_label = "—"
@@ -1809,10 +1555,6 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         last_label = "—"
         if package.lower() in dataset_pkgs:
             dataset_apps_total += 1
-            # Important: the dataset tracker deterministically counts only the
-            # first N valid runs per bucket (baseline/interactive). Operators can
-            # still collect extra valid runs for exploration. To avoid confusion,
-            # show "countable(+extra)" here rather than a quota-style "x/y".
             entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
             runs = entry.get("runs") if isinstance(entry, dict) else []
             scoped = _build_scoped_dataset_counts(package, runs if isinstance(runs, list) else [], cfg=cfg)
@@ -1856,8 +1598,6 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                 need_label = " ".join(need_parts)
             else:
                 need_label = "0"
-            # Total should reflect technical capture volume, not just paper-eligible quota math.
-            # Baseline/Interactive show countable(+extra) for the active build cohort.
             technical_total = int(scoped.get("technical_valid_total") or total_valid_runs)
             total_label = str(technical_total)
             legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
@@ -1874,13 +1614,13 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             if recent:
                 r = recent[0]
                 if r.valid is True:
-                    last_label = "VALID"
+                    last_label = "valid"
                 elif r.valid is False:
-                    last_label = "INVALID"
+                    last_label = "invalid"
                 else:
-                    last_label = "UNKNOWN"
+                    last_label = "unknown"
                 if (
-                    last_label == "VALID"
+                    last_label == "valid"
                     and isinstance(runs, list)
                     and (scoped.get("active_version_code") or scoped.get("active_base_sha"))
                 ):
@@ -1899,57 +1639,29 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
                             str(scoped.get("active_base_sha") or "") or None,
                         )
                         if recent_ident != active_ident:
-                            last_label = "VALID (ID_MISMATCH)"
-            if legacy_valid > 0 and last_label != "—":
-                if not last_label.endswith(" (L)"):
-                    last_label = f"{last_label} (L)"
+                            last_label = "valid (id_mismatch)"
+            if legacy_valid > 0 and last_label != "—" and not last_label.endswith(" (L)"):
+                last_label = f"{last_label} (L)"
 
-            # Keep "Next Action" deterministic from displayed need to avoid
-            # confusion when tracker recommendation and scoped display diverge.
             next_label = _next_action_from_need(need_base, need_inter)
-            # When quota is satisfied, avoid showing an action label in the table.
             if need_label == "0":
                 next_label = "—"
-            build_rows.append(
-                [
-                    display,
-                    active_build,
-                    str(active_runs),
-                    str(legacy_valid),
-                    str(legacy_builds),
-                ]
-            )
-            if isinstance(runs, list):
-                for run in runs:
-                    if not isinstance(run, dict):
-                        continue
-                    if run.get("valid_dataset_run") is not True:
-                        continue
-                    wc_raw = run.get("window_count")
-                    if wc_raw in (None, ""):
-                        dataset_window_count_missing += 1
-                        continue
-                    try:
-                        wc = int(wc_raw)
-                    except Exception:
-                        dataset_window_count_missing += 1
-                        continue
-                    dataset_window_count_total += max(0, wc)
+            build_rows.append([display, active_build, str(active_runs), str(legacy_valid), str(legacy_builds)])
 
-        full_row = [
-            str(idx),
-            display,
-            base_label,
-            inter_label,
-            need_label,
-            next_label,
-            build_label,
-            total_label,
-            legacy_label,
-            last_label,
-        ]
-        rows.append(full_row)
-        # Operator view: include a few high-signal columns without dumping the full debug table.
+        rows.append(
+            [
+                str(idx),
+                display,
+                base_label,
+                inter_label,
+                need_label,
+                next_label,
+                build_label,
+                total_label,
+                legacy_label,
+                last_label,
+            ]
+        )
         op_rows.append(
             [
                 str(idx),
@@ -1965,21 +1677,49 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
             ]
         )
 
+    expected_runs = 0
     if dataset_apps_total > 0:
         evidence_summary = _summarize_evidence_quota(dataset_pkgs, cfg)
         expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
-        quota = int(evidence_summary.get("quota_runs_counted", 0))
-        apps_ok = int(evidence_summary.get("apps_satisfied", 0))
-        freeze_ok = bool(evidence_summary.get("evidence_root_exists")) and quota >= int(expected_runs) and apps_ok >= int(dataset_apps_total)
-        paper_line = f"Evidence quota: {quota}/{expected_runs} | Apps satisfied: {apps_ok}/{dataset_apps_total}"
+
+    return _PreparedPackageSelectionView(
+        packages=packages,
+        dataset_pkgs=dataset_pkgs,
+        cfg=cfg,
+        rows=rows,
+        op_rows=op_rows,
+        build_rows=build_rows,
+        dataset_apps_total=dataset_apps_total,
+        dataset_apps_complete=dataset_apps_complete,
+        dataset_valid_runs_total=dataset_valid_runs_total,
+        expected_runs=expected_runs,
+        evidence_summary=evidence_summary,
+    )
+
+
+def _run_package_selection_menu(prepared: _PreparedPackageSelectionView) -> str | None:
+    evidence_summary = prepared.evidence_summary
+    if prepared.dataset_apps_total > 0:
+        evidence_summary = evidence_summary or _summarize_evidence_quota(prepared.dataset_pkgs, prepared.cfg)
+        quota = int(evidence_summary.get("quota_runs_counted", 0)) if evidence_summary else 0
+        apps_ok = int(evidence_summary.get("apps_satisfied", 0)) if evidence_summary else 0
+        freeze_ok = (
+            bool(evidence_summary.get("evidence_root_exists"))
+            and quota >= int(prepared.expected_runs)
+            and apps_ok >= int(prepared.dataset_apps_total)
+        ) if evidence_summary else False
+        line = f"Evidence quota: {quota}/{prepared.expected_runs} | Apps satisfied: {apps_ok}/{prepared.dataset_apps_total}"
         if freeze_ok:
-            paper_line += " | Freeze: enabled"
+            line += " | Freeze: enabled"
         else:
-            paper_line += f" | Freeze: blocked ({max(0, int(expected_runs) - int(quota))} run(s) missing)"
-        print(paper_line)
+            line += f" | Freeze: blocked ({max(0, int(prepared.expected_runs) - int(quota))} run(s) missing)"
+        print(line)
         print()
 
-    _render_package_table(op_rows, headers=["#", "App", "Baseline", "Scripted", "Manual", "Need", "Next", "Build", "Total", "QA"])
+    _render_package_table(
+        prepared.op_rows,
+        headers=["#", "App", "Baseline", "Scripted", "Manual", "Need", "Next", "Build", "Total", "QA"],
+    )
 
     while True:
         print()
@@ -1993,63 +1733,36 @@ def _select_package_from_groups(groups, *, title: str) -> str | None:
         choice = prompt_utils.prompt_text("Select", required=False).strip()
 
         if choice in {"", "1"}:
-            index = _choose_index("Select app #", len(packages))
+            index = _choose_index("Select app #", len(prepared.packages))
             if index is None:
                 return None
-            package_name, _, _, _ = packages[index]
+            package_name, _, _, _ = prepared.packages[index]
             return package_name
         if choice == "2":
-            print()
-            menu_utils.print_header("Details", "Tracker vs evidence (compact)")
-            if dataset_apps_total > 0:
-                evidence_summary = evidence_summary or _summarize_evidence_quota(dataset_pkgs, cfg)
-                expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
-                print("Tracker (informational)")
-                print(f"  Apps satisfied  : {dataset_apps_complete} / {dataset_apps_total}")
-                print(f"  Valid runs      : {dataset_valid_runs_total} / {expected_runs}")
-                print("Evidence (authoritative)")
-                print(f"  Apps satisfied  : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
-                print(f"  Eligible counted: {int(evidence_summary.get('quota_runs_counted', 0))} / {expected_runs}")
-                print(f"  Eligible found  : {int(evidence_summary.get('paper_eligible_runs', 0))}")
-                print(f"  Extras          : {int(evidence_summary.get('extra_eligible_runs', 0))}")
-                print(f"  Excluded        : {int(evidence_summary.get('excluded_runs', 0))}")
-                if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
-                    print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (flagged)")
-                if int(evidence_summary.get("low_signal_exploratory_runs", 0)) > 0:
-                    print(f"  Low-signal (exploratory): {int(evidence_summary.get('low_signal_exploratory_runs', 0))}")
-            prompt_utils.press_enter_to_continue()
+            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_details
+
+            render_cohort_status_details(
+                dataset_apps_total=prepared.dataset_apps_total,
+                dataset_apps_complete=prepared.dataset_apps_complete,
+                dataset_valid_runs_total=prepared.dataset_valid_runs_total,
+                expected_runs=prepared.expected_runs,
+                evidence_summary=evidence_summary,
+            )
             continue
         if choice == "3":
-            print()
-            menu_utils.print_header("Build History Details")
-            table_utils.render_table(
-                ["App", "Identity (vc/base)", "Active Runs", "Legacy Runs", "Legacy Builds"],
-                build_rows,
-                compact=True,
-            )
-            prompt_utils.press_enter_to_continue()
+            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_build_history
+
+            render_cohort_build_history(prepared.build_rows)
             continue
         if choice == "4":
-            print()
-            menu_utils.print_header("Help", "Legend (short)")
-            print("Baseline / Interactive = countable valid runs for active build")
-            print("Scripted / Manual      = interactive run breakdown (countable(+extra))")
-            print("(+N)                   = extra valid runs (not quota-counted)")
-            print("Need                   = remaining quota slots for this package")
-            print("Next                   = deterministic suggestion from Need")
-            print("Build                  = CUR(current build) | OLD(legacy only) | MIX(both)")
-            print("Total                  = technically VALID evidence packs found (includes excluded/exploratory)")
-            print("QA                     = latest tracker QA status (may include identity mismatch note)")
-            prompt_utils.press_enter_to_continue()
+            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_help
+
+            render_cohort_status_help()
             continue
         if choice == "5":
-            print()
-            menu_utils.print_header("Debug", "Full table + legacy/QA fields")
-            _render_package_table(
-                rows,
-                headers=["#", "App", "Baseline", "Interactive", "Need", "Next Action", "Build", "Total", "Legacy", "Last QA"],
-            )
-            prompt_utils.press_enter_to_continue()
+            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_debug
+
+            render_cohort_status_debug(prepared.rows)
             continue
         if choice == "0":
             return None

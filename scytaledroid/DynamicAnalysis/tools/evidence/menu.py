@@ -170,12 +170,12 @@ def evidence_cleanup_workspace(*, pause: bool = True) -> None:
     menu_utils.print_header("Workspace Cleanup (Dynamic Evidence)", "Safe cleanup (does not touch frozen dataset)")
     if not freeze_ids:
         print(status_messages.status(f"Canonical freeze anchor missing/invalid: {freeze_path}", level="warn"))
-        print(status_messages.status("Cleanup of out-of-dataset VALID runs is blocked (need freeze included_run_ids).", level="info"))
+        print(status_messages.status("Cleanup of out-of-dataset valid runs is blocked (need freeze included_run_ids).", level="info"))
 
     items = [
         menu_utils.MenuOption("1", "Delete ghost dirs", description="dirs under output/evidence/dynamic without run_manifest.json"),
-        menu_utils.MenuOption("2", "Delete INVALID dataset runs", description="valid_dataset_run=false (never in frozen dataset)"),
-        menu_utils.MenuOption("3", "Delete out-of-dataset VALID runs", description="valid_dataset_run=true but not in freeze included_run_ids"),
+        menu_utils.MenuOption("2", "Delete invalid dataset runs", description="valid_dataset_run=false (never in frozen dataset)"),
+        menu_utils.MenuOption("3", "Delete out-of-dataset valid runs", description="valid_dataset_run=true but not in freeze included_run_ids"),
         menu_utils.MenuOption("4", "Purge old dynamic batch reports", description="delete output/batches/dynamic/* (derived)"),
     ]
     menu_utils.render_menu(
@@ -205,8 +205,8 @@ def evidence_cleanup_workspace(*, pause: bool = True) -> None:
 
     confirm_msg = {
         "1": "Delete ghost dirs now?",
-        "2": "Delete INVALID dataset runs now?",
-        "3": "Delete out-of-dataset VALID dataset runs now?",
+        "2": "Delete invalid dataset runs now?",
+        "3": "Delete out-of-dataset valid dataset runs now?",
         "4": "Purge old dynamic batch reports now?",
     }.get(choice, "Proceed?")
     if not prompt_utils.prompt_yes_no(confirm_msg, default=False):
@@ -398,7 +398,7 @@ def _render_app_runs(root: Path, display_name: str, package_name: str, runs: lis
     rows = []
     for idx, r in enumerate(runs, start=1):
         valid = r.get("valid")
-        valid_label = "VALID" if valid is True else ("INVALID" if valid is False else "—")
+        valid_label = "valid" if valid is True else ("invalid" if valid is False else "—")
         reason = r.get("reason") or "—"
         rows.append(
             [
@@ -540,7 +540,7 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
     print()
     items2 = [
         menu_utils.MenuOption("D", "Delete a run (local)"),
-        menu_utils.MenuOption("X", "Delete INVALID runs for this app (local)"),
+        menu_utils.MenuOption("X", "Delete invalid runs for this app (local)"),
     ]
     menu_utils.render_menu(menu_utils.MenuSpec(items=items2, exit_label="Back", show_exit=True))
     action = prompt_utils.get_choice(
@@ -568,18 +568,18 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
     elif action == "X":
         invalid = [r for r in runs if r.get("valid") is False]
         if not invalid:
-            print(status_messages.status("No INVALID runs for this app.", level="info"))
+            print(status_messages.status("No invalid runs for this app.", level="info"))
             if pause:
                 prompt_utils.press_enter_to_continue()
             return
-        if not prompt_utils.prompt_yes_no(f"Delete {len(invalid)} INVALID run(s) for this app locally?", default=False):
+        if not prompt_utils.prompt_yes_no(f"Delete {len(invalid)} invalid run(s) for this app locally?", default=False):
             return
         deleted = 0
         for r in invalid:
             run_id = str(r.get("run_id") or "")
             if run_id and _safe_rmtree(root / run_id, root=root):
                 deleted += 1
-        print(status_messages.status(f"Deleted {deleted} INVALID run(s).", level="success"))
+        print(status_messages.status(f"Deleted {deleted} invalid run(s).", level="success"))
 
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import recompute_dataset_tracker
 

@@ -902,12 +902,13 @@ def fetch_publication_status() -> dict[str, object]:
     bundle are the authoritative sources for publication exports.
     """
 
-    from scytaledroid.DynamicAnalysis.tools.evidence.paper_readiness_audit import (
-        run_paper_readiness_audit,
+    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
+        run_freeze_readiness_audit,
     )
 
     status: dict[str, object] = {
-        "paper_audit_result": "unknown",
+        "freeze_audit_result": "unknown",
+        "paper_audit_result": "unknown",  # compatibility alias
         "can_freeze": False,
         "evidence_quota_counted": None,
         "evidence_quota_expected": None,
@@ -924,7 +925,8 @@ def fetch_publication_status() -> dict[str, object]:
 
     # Freeze readiness audit (authoritative).
     try:
-        audit = run_paper_readiness_audit()
+        audit = run_freeze_readiness_audit()
+        status["freeze_audit_result"] = str(audit.result)
         status["paper_audit_result"] = str(audit.result)
         status["can_freeze"] = bool(audit.can_freeze)
         # The audit module knows expected counts; surface them for the UI.
@@ -1159,7 +1161,7 @@ def handle_profile_v3_integrity_gates() -> None:
 def handle_generate_exploratory_risk_scoring() -> None:
     """Generate exploratory risk scoring artifacts (neutral filenames).
 
-    These are intentionally not wired into the paper bundle's canonical filenames
+    These are intentionally not wired into the canonical publication bundle filenames
     until the authors sign off on naming, interpretation, and placement.
     """
 
@@ -1171,7 +1173,7 @@ def handle_generate_exploratory_risk_scoring() -> None:
     import runpy
 
     print()
-    menu_utils.print_header("Exploratory Risk Scoring (Not Paper-Named)")
+    menu_utils.print_header("Exploratory Risk Scoring (Publication-Neutral Naming)")
     try:
         runpy.run_path(str(script), run_name="__main__")
     except SystemExit as exc:

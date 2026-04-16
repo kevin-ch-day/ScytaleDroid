@@ -1,6 +1,8 @@
-"""Paper-mode eligibility derivation and exclusion taxonomy.
+"""Legacy compatibility module for freeze/cohort eligibility logic.
 
-Single source of truth for evidence-first paper eligibility decisions.
+Active code should prefer ``scytaledroid.DynamicAnalysis.freeze_eligibility``.
+This module remains because persisted artifact fields still use ``paper_*``
+naming and older callers may still import the legacy path.
 """
 
 from __future__ import annotations

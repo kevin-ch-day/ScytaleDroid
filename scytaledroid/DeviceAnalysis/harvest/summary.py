@@ -442,9 +442,12 @@ def render_harvest_summary(
                 level="info",
             )
         )
-        output_root = _run_output_root(harvest_result)
-        if output_root:
-            print(status_messages.status(f"output: {output_root}", level="info"))
+        artifacts_root = _run_artifacts_root(serial=serial, result=harvest_result)
+        receipts_root = _run_receipts_root(harvest_result)
+        if artifacts_root:
+            print(status_messages.status(f"artifacts: {artifacts_root}", level="info"))
+        if receipts_root:
+            print(status_messages.status(f"receipts: {receipts_root}", level="info"))
         if metadata.get("delta_filter_applied"):
             delta_total = metadata.get("delta_filter_total")
             delta_matched = metadata.get("delta_filter_matched")
@@ -714,7 +717,7 @@ def render_harvest_summary(
                 "runtime_skips": dict(metrics.runtime_skips),
                 "policy_filtered": plan.policy_filtered,
                 "session_stamp": run_timestamp,
-                "output_root": normalise_local_path(Path(output_root)) if output_root else None,
+                "output_root": normalise_local_path(Path(artifacts_root)) if artifacts_root else None,
             }
             log_adapter.info("Harvest RUN_END", extra=payload)
         except Exception:

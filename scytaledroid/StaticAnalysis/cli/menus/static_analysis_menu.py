@@ -16,12 +16,15 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuItemSpec, MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from ..commands.models import SelectionMode
 from .static_analysis_menu_helpers import (
     apply_command_overrides,
     ask_run_controls,
     choose_scope,
     collect_view_options,
     confirm_reset,
+    describe_last_selection,
+    diff_last_available,
     prompt_session_label,
     render_reset_outcome,
     render_version_diff,
@@ -42,7 +45,6 @@ def static_analysis_menu() -> None:
     from scytaledroid.StaticAnalysis.services import static_service
 
     from ..commands import get_command, iter_commands
-    from ..commands.models import SelectionMode
     from ..core.models import RunParameters
     from ..core.run_prompts import prompt_advanced_options
 
@@ -95,15 +97,42 @@ def static_analysis_menu() -> None:
             return False, f"{message_static}{detail}"
         return True, None
 
+    def _menu_state(groups_now: tuple) -> dict[str, object]:
+        persistence_ok, persistence_detail = _persistence_gate_status()
+        selected_apks = static_scope_service.count()
+        last_info = describe_last_selection(groups_now)
+        diff_ok, diff_package = diff_last_available(groups_now)
+        return {
+            "group_count": len(groups_now),
+            "selected_apks": selected_apks,
+            "persistence_ok": persistence_ok,
+            "persistence_detail": persistence_detail,
+            "last_available": bool(last_info.get("available")),
+            "last_label": str(last_info.get("label") or ""),
+            "last_source": str(last_info.get("source") or ""),
+            "diff_available": bool(diff_ok),
+            "diff_label": diff_package,
+        }
+
     while True:
         print()
         menu_utils.print_header("Android APK Static Analysis")
-        persistence_ready, persistence_detail = _persistence_gate_status()
-        selected_apks = static_scope_service.count()
-        if selected_apks:
+        state = _menu_state(groups)
+        persistence_ready = bool(state["persistence_ok"])
+        persistence_detail = state["persistence_detail"]
+        print("Static Pipeline State")
+        print("---------------------")
+        print(f"{'Library groups':<16} : {state['group_count']}")
+        print(f"{'Selected APKs':<16} : {state['selected_apks']}")
+        print(f"{'Persistence':<16} : {'ready' if persistence_ready else 'blocked'}")
+        print(f"{'Re-analyze last':<16} : {'available' if state['last_available'] else 'unavailable'}")
+        print(f"{'Version diff':<16} : {'available' if state['diff_available'] else 'unavailable'}")
+        if state["last_label"]:
+            print(f"{'Last target':<16} : {state['last_label']}")
+        if state["selected_apks"]:
             print(
                 status_messages.status(
-                    f"Library selection: {selected_apks} APKs marked. You can run scans on this selection.",
+                    f"Library selection is active: {state['selected_apks']} APKs marked.",
                     level="info",
                 )
             )
@@ -121,7 +150,7 @@ def static_analysis_menu() -> None:
                 )
             )
         workflow_spec = MenuSpec(
-            items=[_command_option(cmd) for cmd in workflow_commands],
+            items=[_command_option(cmd, state=state) for cmd in workflow_commands],
             show_exit=False,
             show_descriptions=False,
         )
@@ -134,7 +163,7 @@ def static_analysis_menu() -> None:
             print("History")
             print("-------")
             history_spec = MenuSpec(
-                items=[_command_option(cmd) for cmd in history_commands],
+                items=[_command_option(cmd, state=state) for cmd in history_commands],
                 show_exit=False,
                 show_descriptions=False,
             )
@@ -144,7 +173,7 @@ def static_analysis_menu() -> None:
             print("Tools")
             print("-----")
             tool_spec = MenuSpec(
-                items=[_command_option(cmd) for cmd in tool_commands],
+                items=[_command_option(cmd, state=state) for cmd in tool_commands],
                 show_exit=False,
                 show_descriptions=False,
             )
@@ -157,7 +186,12 @@ def static_analysis_menu() -> None:
             show_descriptions=False,
         )
         menu_utils.render_menu(back_spec)
-        choice_pool = selectable_ids + ["0"]
+        rendered_options = list(workflow_spec.items)
+        if history_commands:
+            rendered_options.extend(history_spec.items)
+        if tool_commands:
+            rendered_options.extend(tool_spec.items)
+        choice_pool = menu_utils.selectable_keys(rendered_options, include_exit=True)
         choice = prompt_utils.get_choice(choice_pool, default=default_choice)
 
         if choice == "0":
@@ -300,12 +334,21 @@ def static_analysis_menu() -> None:
             break
 
 
-def _command_option(command: Command) -> menu_utils.MenuOption:
+def _command_option(command: Command, *, state: dict[str, object]) -> menu_utils.MenuOption:
+    disabled = False
+    badge = None
+    if command.selection_mode is SelectionMode.LAST and not bool(state.get("last_available")):
+        disabled = True
+        badge = "not available"
+    elif command.selection_mode is SelectionMode.DIFF_LAST and not bool(state.get("diff_available")):
+        disabled = True
+        badge = "not available"
     return MenuItemSpec(
         key=command.id,
         label=command.title,
         description=command.description,
-        badge=None,
+        badge=badge,
+        disabled=disabled,
         hint=None,
     )
 

@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scytaledroid.DynamicAnalysis import menu
 from scytaledroid.DynamicAnalysis.menu import _summarize_evidence_quota
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import AuditSummary
+from scytaledroid.Utils.DisplayUtils import colors
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -199,3 +202,68 @@ def test_summarize_evidence_quota_tracks_low_signal_idle_as_exploratory(
     assert int(summary["paper_eligible_runs"]) == 2
     assert int(summary["quota_runs_counted"]) == 1
     assert int(summary["low_signal_exploratory_runs"]) == 1
+
+
+def test_dynamic_menu_renders_state_and_evidence_overview(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.schema_gate.dynamic_schema_gate",
+        lambda: (True, "", ""),
+    )
+    monkeypatch.setattr(menu, "_warn_if_code_changed", lambda: None)
+    monkeypatch.setattr(menu.prompt_utils, "get_choice", lambda *_a, **_k: "0")
+
+    summary = AuditSummary(
+        total_runs=36,
+        valid_runs=24,
+        paper_eligible_runs=24,
+        missing_run_manifest_dirs=0,
+        missing_capture_policy_version=0,
+        capture_policy_version_mismatch=0,
+        missing_signer_set_hash=0,
+        identity_mismatch=0,
+        missing_window_count=0,
+        window_count_below_min=0,
+        evidence_root="data/output/evidence/dynamic",
+        evidence_root_exists=True,
+        runs_discovered_from="evidence",
+        expected_valid_runs=24,
+        expected_total_runs=36,
+        quota_runs_counted=24,
+        apps_satisfied=12,
+        result="NO-GO",
+        reasons=("insufficient valid evidence packs",),
+        tracker_runs_hint=36,
+        static_runs_hint=12,
+        can_freeze=False,
+        first_failing_reason="insufficient valid evidence packs",
+        freeze_run_ids_present=0,
+        freeze_run_ids_total=0,
+        canonical_freeze_role="none",
+        canonical_freeze_contract_hash_present=False,
+        canonical_freeze_demoted_to_legacy=None,
+        report_path="output/audit/dynamic/example.json",
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.menu_views.run_freeze_readiness_audit",
+        lambda: summary,
+    )
+
+    menu.dynamic_analysis_menu()
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "State" in out
+    assert "Freeze capability" in out
+    assert "BLOCKED" in out
+    assert "Freeze audit" in out
+    assert "NO-GO" in out
+    assert "Reason" in out
+    assert "insufficient valid evidence packs" in out
+    assert "Evidence packs" in out
+    assert "(valid 24, invalid 12)" in out
+    assert "Latest freeze" in out
+    assert "Evidence" in out
+    assert "Root" in out
+    assert "Freeze" in out
+    assert "Tracker" in out
+    assert "Primary Actions" in out
+    assert "Evidence & Integrity" in out
