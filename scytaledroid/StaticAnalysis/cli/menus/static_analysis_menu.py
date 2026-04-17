@@ -117,18 +117,23 @@ def static_analysis_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Android APK Static Analysis")
+        menu_utils.print_hint(
+            "Run workflow actions from harvested APK groups, review prior runs, or use tools without leaving the pipeline."
+        )
         state = _menu_state(groups)
         persistence_ready = bool(state["persistence_ok"])
         persistence_detail = state["persistence_detail"]
-        print("Static Pipeline State")
-        print("---------------------")
-        print(f"{'Library groups':<16} : {state['group_count']}")
-        print(f"{'Selected APKs':<16} : {state['selected_apks']}")
-        print(f"{'Persistence':<16} : {'ready' if persistence_ready else 'blocked'}")
-        print(f"{'Re-analyze last':<16} : {'available' if state['last_available'] else 'unavailable'}")
-        print(f"{'Version diff':<16} : {'available' if state['diff_available'] else 'unavailable'}")
+        menu_utils.print_section("Static Pipeline State")
+        state_metrics = [
+            ("Library groups", state["group_count"]),
+            ("Selected APKs", state["selected_apks"]),
+            ("Persistence", "ready" if persistence_ready else "blocked"),
+            ("Re-analyze last", "available" if state["last_available"] else "unavailable"),
+            ("Version diff", "available" if state["diff_available"] else "unavailable"),
+        ]
         if state["last_label"]:
-            print(f"{'Last target':<16} : {state['last_label']}")
+            state_metrics.append(("Last target", state["last_label"]))
+        menu_utils.print_metrics(state_metrics)
         if state["selected_apks"]:
             print(
                 status_messages.status(
@@ -155,13 +160,11 @@ def static_analysis_menu() -> None:
             show_descriptions=False,
         )
         if workflow_commands:
-            print("Primary actions")
-            print("---------------")
+            menu_utils.print_section("Primary Actions")
         menu_utils.render_menu(workflow_spec)
         if history_commands:
             print()
-            print("History")
-            print("-------")
+            menu_utils.print_section("History")
             history_spec = MenuSpec(
                 items=[_command_option(cmd, state=state) for cmd in history_commands],
                 show_exit=False,
@@ -170,8 +173,7 @@ def static_analysis_menu() -> None:
             menu_utils.render_menu(history_spec)
         if tool_commands:
             print()
-            print("Tools")
-            print("-----")
+            menu_utils.print_section("Tools")
             tool_spec = MenuSpec(
                 items=[_command_option(cmd, state=state) for cmd in tool_commands],
                 show_exit=False,

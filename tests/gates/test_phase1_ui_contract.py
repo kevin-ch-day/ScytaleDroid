@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import main as app_main
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.DeviceAnalysis.device_menu import dashboard
 from scytaledroid.Utils.DisplayUtils import status_messages
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.ui_contract, pytest.mark.gate]
 
 
 def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:

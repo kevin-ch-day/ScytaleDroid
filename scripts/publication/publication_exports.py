@@ -2,16 +2,16 @@
 """Generate publication-facing cohort summary exports (freeze-anchored).
 
 Outputs are written to stable publication-facing paths under `output/publication/`:
-- tables/paper_cohort_summary_v1.csv
+- tables/publication_cohort_summary_v1.csv
 - tables/baseline_stability_summary.csv
 - tables/interaction_delta_summary.csv
 - tables/static_dynamic_correlation.csv
-- manifests/paper_results_v1.json
+- manifests/publication_results_v1.json
 
 Inputs:
 - data/archive/dataset_freeze.json (canonical freeze anchor)
-- output/_internal/paper2/baseline/tables/table_1_rdi_prevalence.csv (RDI prevalence by app/phase)
-- output/_internal/paper2/baseline/tables/table_7_exposure_deviation_summary.csv (static-vs-dynamic)
+- output/_internal/publication/baseline/tables/table_1_rdi_prevalence.csv (RDI prevalence by app/phase)
+- output/_internal/publication/baseline/tables/table_7_exposure_deviation_summary.csv (static-vs-dynamic)
 - output/evidence/dynamic/<run_id>/run_manifest.json (window_count + run_profile)
 """
 
@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
 from scytaledroid.Utils.LatexUtils import LatexTableSpec, RawLatex, render_tabular_only, render_table_float
+from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_paths
 
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
@@ -50,7 +51,9 @@ PUB_QA = PUB_ROOT / "qa"
     # Baseline bundle is the source-of-truth for internal baseline tables (Table 1-8).
 # Publication outputs should stay minimal and paper-facing; do not depend on
 # publication/ containing internal baseline tables.
-INTERNAL_BASELINE_ROOT = REPO_ROOT / "output" / "_internal" / "paper2" / "baseline"
+INTERNAL_BASELINE_ROOT = bundle_paths.existing_phase_e_bundle_root()
+PUBLICATION_RESULTS = PUB_MANIFESTS / "publication_results_v1.json"
+LEGACY_PUBLICATION_RESULTS = PUB_MANIFESTS / "paper_results_v1.json"
 
 APP_ORDER = PUB_MANIFESTS / "app_ordering.json"
 DISPLAY_MAP = PUB_MANIFESTS / "display_name_map.json"
@@ -90,14 +93,14 @@ def _read_csv_skip_comments(path: Path) -> list[dict[str, str]]:
     return read_csv_with_provenance(path).rows
 
 
-def _write_csv_paper_facing(path: Path, *, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
+def _write_csv_publication_facing(path: Path, *, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
     """Write a plain CSV (no comment headers).
 
-    Paper-facing CSVs should be directly sortable/filterable in standard tools
+    Publication-facing CSVs should be directly sortable/filterable in standard tools
     (Excel/LibreOffice/pandas) without special provenance-aware parsing.
 
     Provenance lives in:
-    - output/publication/manifests/paper_results_v1.json
+    - output/publication/manifests/publication_results_v1.json
     - output/publication/manifests/canonical_receipt.json
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -298,10 +301,10 @@ def _try_write_delta_distribution_figure(*, deltas: list[float]) -> None:
     plt.close(fig)
 
 
-def _write_paper_latex_tables(*, paper_results_payload: dict[str, object] | None = None) -> None:
+def _write_publication_latex_tables(*, publication_results_payload: dict[str, object] | None = None) -> None:
     """Write minimal IEEE-friendly LaTeX tables for manuscript inclusion.
 
-    CSVs remain the authoritative paper-facing exports; LaTeX is a rendering layer.
+    CSVs remain the authoritative publication-facing exports; LaTeX is a rendering layer.
     """
     PUB_TABLES.mkdir(parents=True, exist_ok=True)
 
@@ -421,7 +424,7 @@ def _write_paper_latex_tables(*, paper_results_payload: dict[str, object] | None
                 "neg_apps": str(delta_neg),
             }
         ]
-        _write_csv_paper_facing(CSV_DELTA_DISTRIBUTION, fieldnames=list(dd_rows[0].keys()), rows=dd_rows)
+        _write_csv_publication_facing(CSV_DELTA_DISTRIBUTION, fieldnames=list(dd_rows[0].keys()), rows=dd_rows)
 
         headers = ["n", "Mean", "Median", "Q1", "Q3", "Min", "Max", "SD", "+", "−"]
         body = [
@@ -486,18 +489,19 @@ def _write_paper_latex_tables(*, paper_results_payload: dict[str, object] | None
 
     # Effect size / inferential summary (pull from paper_results payload to avoid drift).
     # Keep this table app-level (n=12).
-    if paper_results_payload is None:
-        paper_results_payload = {}
+    if publication_results_payload is None:
+        publication_results_payload = {}
         try:
-            paper_results_payload = json.loads((PUB_MANIFESTS / "paper_results_v1.json").read_text(encoding="utf-8"))
+            source = PUBLICATION_RESULTS if PUBLICATION_RESULTS.exists() else LEGACY_PUBLICATION_RESULTS
+            publication_results_payload = json.loads(source.read_text(encoding="utf-8"))
         except Exception:
-            paper_results_payload = {}
+            publication_results_payload = {}
 
-    dz = paper_results_payload.get("effect_size_cohens_dz")
-    w_stat = paper_results_payload.get("wilcoxon_w_statistic")
-    w_p = paper_results_payload.get("wilcoxon_p_value")
-    delta_mean = paper_results_payload.get("if_delta_mean")
-    delta_ci = paper_results_payload.get("if_delta_mean_ci95")
+    dz = publication_results_payload.get("effect_size_cohens_dz")
+    w_stat = publication_results_payload.get("wilcoxon_w_statistic")
+    w_p = publication_results_payload.get("wilcoxon_p_value")
+    delta_mean = publication_results_payload.get("if_delta_mean")
+    delta_ci = publication_results_payload.get("if_delta_mean_ci95")
 
     # Hedges' g small-sample correction for paired dz (df=n-1).
     hedges_gz = None
@@ -613,7 +617,7 @@ def _write_paper_latex_tables(*, paper_results_payload: dict[str, object] | None
                     "hedges_g_unpaired_phase_means": g_unpaired,
                 }
             ]
-            _write_csv_paper_facing(
+            _write_csv_publication_facing(
                 CSV_PHASE_DISPERSION_STATS,
                 fieldnames=list(rows[0].keys()),
                 rows=rows,
@@ -751,7 +755,7 @@ def _write_paper_latex_tables(*, paper_results_payload: dict[str, object] | None
         )
     # Rank by composite descending for convenience.
     comp_rows.sort(key=lambda rr: (-float(rr.get("composite_0_100") or 0.0), str(rr.get("app") or "")))
-    _write_csv_paper_facing(CSV_STATIC_DYNAMIC_COMPOSITE, fieldnames=list(comp_rows[0].keys()), rows=comp_rows)
+    _write_csv_publication_facing(CSV_STATIC_DYNAMIC_COMPOSITE, fieldnames=list(comp_rows[0].keys()), rows=comp_rows)
 
     headers = ["App", "Static", RawLatex(r"$\Delta D$"), RawLatex(r"$\Delta D$ (norm)"), "Composite"]
     body = [
@@ -1039,7 +1043,7 @@ def main() -> int:
     windows_interactive_total_by_bucket = int(windows_scripted_total + windows_manual_total + windows_other_total)
     windows_idle_total_by_bucket = int(sum(windows_by_pkg[p]["idle"] for p in order))
 
-    # Export: paper_cohort_summary_v1.csv
+    # Export: publication_cohort_summary_v1.csv
     excluded_counts = freeze.get("excluded_reason_counts_by_app") if isinstance(freeze.get("excluded_reason_counts_by_app"), dict) else {}
     cohort_rows: list[dict[str, object]] = []
     for pkg in order:
@@ -1067,8 +1071,8 @@ def main() -> int:
                 "excluded_reasons": json.dumps(excluded_counts.get(pkg) or {}, sort_keys=True),
             }
         )
-    cohort_path = PUB_TABLES / "paper_cohort_summary_v1.csv"
-    _write_csv_paper_facing(cohort_path, fieldnames=list(cohort_rows[0].keys()), rows=cohort_rows)
+    cohort_path = PUB_TABLES / "publication_cohort_summary_v1.csv"
+    _write_csv_publication_facing(cohort_path, fieldnames=list(cohort_rows[0].keys()), rows=cohort_rows)
 
     # Export: baseline_stability_summary.csv (per-app + cohort summary).
     baseline_rows: list[dict[str, object]] = []
@@ -1086,7 +1090,7 @@ def main() -> int:
             }
         )
     baseline_path = PUB_TABLES / "baseline_stability_summary.csv"
-    _write_csv_paper_facing(baseline_path, fieldnames=list(baseline_rows[0].keys()), rows=baseline_rows)
+    _write_csv_publication_facing(baseline_path, fieldnames=list(baseline_rows[0].keys()), rows=baseline_rows)
 
     # Export: interaction_delta_summary.csv
     delta_rows: list[dict[str, object]] = []
@@ -1130,7 +1134,7 @@ def main() -> int:
             }
         )
     delta_path = PUB_TABLES / "interaction_delta_summary.csv"
-    _write_csv_paper_facing(delta_path, fieldnames=list(delta_rows[0].keys()), rows=delta_rows)
+    _write_csv_publication_facing(delta_path, fieldnames=list(delta_rows[0].keys()), rows=delta_rows)
 
     # Export: Appendix Table A1 (OC-SVM robustness summary).
     oc_rows: list[dict[str, object]] = []
@@ -1154,7 +1158,7 @@ def main() -> int:
                 "runs_interactive_other": runs_by_pkg[pkg]["other"],
             }
         )
-    _write_csv_paper_facing(APPENDIX_A1_OCSVM, fieldnames=list(oc_rows[0].keys()), rows=oc_rows)
+    _write_csv_publication_facing(APPENDIX_A1_OCSVM, fieldnames=list(oc_rows[0].keys()), rows=oc_rows)
 
     # Export: static_dynamic_correlation.csv
     corr_rows: list[dict[str, object]] = []
@@ -1174,7 +1178,7 @@ def main() -> int:
             }
         )
     corr_path = PUB_TABLES / "static_dynamic_correlation.csv"
-    _write_csv_paper_facing(corr_path, fieldnames=list(corr_rows[0].keys()), rows=corr_rows)
+    _write_csv_publication_facing(corr_path, fieldnames=list(corr_rows[0].keys()), rows=corr_rows)
 
     # Export: static_feature_groups_v1.csv (structured static groups; static context support).
     # This is a paper-facing convenience export that aggregates the existing baseline bundle tables:
@@ -1213,7 +1217,7 @@ def main() -> int:
             }
         )
     static_groups_path = PUB_TABLES / "static_feature_groups_v1.csv"
-    _write_csv_paper_facing(static_groups_path, fieldnames=list(static_rows[0].keys()), rows=static_rows)
+    _write_csv_publication_facing(static_groups_path, fieldnames=list(static_rows[0].keys()), rows=static_rows)
 
     # Export: stimulus_coverage_v1.csv (what interaction stimulus was actually exercised).
     #
@@ -1262,7 +1266,7 @@ def main() -> int:
             }
         )
     stim_path = PUB_TABLES / "stimulus_coverage_v1.csv"
-    _write_csv_paper_facing(stim_path, fieldnames=list(stim_rows[0].keys()), rows=stim_rows)
+    _write_csv_publication_facing(stim_path, fieldnames=list(stim_rows[0].keys()), rows=stim_rows)
 
     # Export: qa_interactive_consistency.csv (per-app scripted vs manual consistency, where applicable).
     # This supports reviewer questions without changing the frozen cohort.
@@ -1289,9 +1293,9 @@ def main() -> int:
         )
     PUB_QA.mkdir(parents=True, exist_ok=True)
     cons_path = PUB_QA / "qa_interactive_consistency.csv"
-    _write_csv_paper_facing(cons_path, fieldnames=list(cons_rows[0].keys()), rows=cons_rows)
+    _write_csv_publication_facing(cons_path, fieldnames=list(cons_rows[0].keys()), rows=cons_rows)
 
-    # Export consolidated paper_results_v1.json (single source of truth for numbers).
+    # Export consolidated publication_results_v1.json (single source of truth for numbers).
     toolchain = {
         "python": sys.version.split()[0],
         "numpy": getattr(np, "__version__", "unknown"),
@@ -1452,11 +1456,11 @@ def main() -> int:
         toolchain=toolchain,
         host=host,
     )
-    out_path = PUB_MANIFESTS / "paper_results_v1.json"
+    out_path = PUB_MANIFESTS / "publication_results_v1.json"
     out_path.write_text(json.dumps(asdict(out), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     # LaTeX renderings for manuscript inclusion.
-    _write_paper_latex_tables()
+    _write_publication_latex_tables()
 
     print(str(cohort_path))
     print(str(baseline_path))

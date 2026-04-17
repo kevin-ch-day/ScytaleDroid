@@ -3,11 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DeviceAnalysis.services.legacy_harvest_migration import (
     migrate_legacy_harvest_tree,
 )
+
+
+# Retire with the legacy harvest storage migration seam once the transitional
+# migration path is deleted from the filesystem workflow.
+pytestmark = [pytest.mark.legacy_contract, pytest.mark.retire_with_code, pytest.mark.tier3]
 
 
 def test_migrate_legacy_harvest_tree_writes_store_and_receipt(monkeypatch, tmp_path: Path) -> None:

@@ -56,6 +56,11 @@ from .pcap_window_features import (
     extract_packet_timeline,
     write_anomaly_scores_csv,
 )
+from .query_mode_phases import (
+    prepare_group_training_inputs,
+    prepare_query_selection_groups,
+)
+from .query_mode_snapshot_outputs import finalize_query_snapshot_outputs
 from .seed_identity import derive_seed
 from .selectors.models import SelectionResult, write_selection_manifest
 from .snapshot_freeze import write_snapshot_freeze_manifest
@@ -217,172 +222,11 @@ def _write_cohort_status(
         payload["details"] = details
     (out_dir / "cohort_status.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
-
-def _pcap_size_bytes(inputs: RunInputs) -> int | None:
-    if isinstance(inputs.pcap_report, dict):
-        try:
-            v = inputs.pcap_report.get("pcap_size_bytes")
-            if v is not None:
-                return int(v)
-        except Exception:
-            pass
-    if inputs.pcap_path and inputs.pcap_path.exists():
-        try:
-            return int(inputs.pcap_path.stat().st_size)
-        except Exception:
-            return None
-    return None
-
-
-def _clamp01(v: float | None) -> float | None:
-    if v is None:
-        return None
-    try:
-        x = float(v)
-    except Exception:
-        return None
-    if x < 0.0:
-        return 0.0
-    if x > 1.0:
-        return 1.0
-    return x
-
-
 def _safe_float(v: object) -> float | None:
     try:
         return float(v)  # type: ignore[arg-type]
     except Exception:
         return None
-
-
-def _transport_ratios_from_inputs(inputs: RunInputs) -> tuple[float | None, float | None, float | None, float | None]:
-    proxies = None
-    if isinstance(inputs.pcap_features, dict):
-        p = inputs.pcap_features.get("proxies")
-        if isinstance(p, dict):
-            proxies = p
-    if proxies:
-        return (
-            _safe_float(proxies.get("tls_ratio")),
-            _safe_float(proxies.get("quic_ratio")),
-            _safe_float(proxies.get("tcp_ratio")),
-            _safe_float(proxies.get("udp_ratio")),
-        )
-    if not isinstance(inputs.pcap_report, dict):
-        return None, None, None, None
-    pb: dict[str, int] = {}
-    for row in inputs.pcap_report.get("protocol_hierarchy") or []:
-        if not isinstance(row, dict):
-            continue
-        proto = str(row.get("protocol") or "").strip().lower()
-        if not proto:
-            continue
-        try:
-            b = int(row.get("bytes") or 0)
-        except Exception:
-            b = 0
-        pb[proto] = pb.get(proto, 0) + max(b, 0)
-    tcp_b = pb.get("tcp") or 0
-    udp_b = pb.get("udp") or 0
-    tls_b = pb.get("tls") or 0
-    quic_b = (pb.get("quic") or 0) + (pb.get("gquic") or 0)
-    total = float(tcp_b + udp_b) if (tcp_b + udp_b) > 0 else 0.0
-    tls_ratio = float(min(tls_b, tcp_b)) / float(tcp_b) if tcp_b > 0 else None
-    quic_denom = float(max(udp_b, quic_b))
-    quic_ratio = (float(quic_b) / quic_denom) if quic_denom > 0 else None
-    tcp_ratio = float(tcp_b) / total if total > 0 else None
-    udp_ratio = float(udp_b) / total if total > 0 else None
-    return _clamp01(tls_ratio), _clamp01(quic_ratio), _clamp01(tcp_ratio), _clamp01(udp_ratio)
-
-
-def _extract_static_features_snapshot(plan: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(plan, dict):
-        return {}
-    sf = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
-    if not isinstance(sf, dict):
-        return {}
-    out: dict[str, Any] = {}
-    out["static_features_schema_version"] = sf.get("schema_version")
-    for key in (
-        "permissions_total",
-        "high_value_permission_count",
-        "nsc_cleartext_domain_count",
-        "masvs_control_count_total",
-    ):
-        try:
-            if sf.get(key) is not None:
-                out[key] = int(sf.get(key))
-        except Exception:
-            continue
-    for key in ("uses_webview",):
-        if sf.get(key) is not None:
-            out[key] = bool(sf.get(key))
-    for key in ("static_risk_score",):
-        try:
-            if sf.get(key) is not None:
-                out[key] = float(sf.get(key))
-        except Exception:
-            continue
-    for key in ("static_risk_band",):
-        value = sf.get(key)
-        if isinstance(value, str) and value.strip():
-            out[key] = value.strip()
-    if "masvs_area_counts" in sf:
-        out["masvs_area_counts"] = sf.get("masvs_area_counts")
-    return out
-
-
-def _paper_identity_consistency_issue(inputs: RunInputs) -> tuple[str | None, dict[str, Any] | None]:
-    if not isinstance(inputs.plan, dict):
-        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_plan"}
-    identity = inputs.plan.get("run_identity") if isinstance(inputs.plan.get("run_identity"), dict) else {}
-    if not isinstance(identity, dict):
-        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_run_identity"}
-    base_sha = _normalize_hex_hash(identity.get("base_apk_sha256"), expected_len=64)
-    static_handoff_hash = _normalize_hex_hash(identity.get("static_handoff_hash"), expected_len=64)
-    artifact_set_hash = _normalize_hex_hash(identity.get("artifact_set_hash"), expected_len=64)
-    signer_set_hash = _normalize_hex_hash(identity.get("signer_set_hash") or identity.get("signer_digest"), expected_len=64)
-    if not base_sha:
-        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "base_apk_sha256"}
-    if not static_handoff_hash:
-        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "static_handoff_hash"}
-    if not artifact_set_hash:
-        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "artifact_set_hash"}
-    if not signer_set_hash:
-        return "ML_SKIPPED_BAD_IDENTITY_HASH", {"field": "signer_set_hash"}
-
-    package = str(identity.get("package_name_lc") or inputs.plan.get("package_name") or "").strip().lower()
-    version_code = str(identity.get("version_code") or inputs.plan.get("version_code") or "").strip()
-    signer_digest = str(identity.get("signer_digest") or "").strip()
-    if not package or not version_code:
-        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_package_or_version"}
-    if not signer_digest or signer_digest.upper() == "UNKNOWN":
-        return "ML_SKIPPED_MISSING_STATIC_LINK", {"reason": "missing_signer_digest"}
-
-    target = inputs.manifest.get("target") if isinstance(inputs.manifest.get("target"), dict) else {}
-    target_package = str(target.get("package_name") or "").strip().lower()
-    target_version = str(target.get("version_code") or "").strip()
-    if target_package and target_package != package:
-        return "ML_SKIPPED_APK_CHANGED_DURING_RUN", {
-            "expected_package_name_lc": package,
-            "observed_package_name_lc": target_package,
-        }
-    if target_version and target_version != version_code:
-        return "ML_SKIPPED_APK_CHANGED_DURING_RUN", {
-            "expected_version_code": version_code,
-            "observed_version_code": target_version,
-        }
-    return None, None
-
-
-def _normalize_hex_hash(value: object, *, expected_len: int) -> str | None:
-    raw = str(value or "").strip().lower()
-    if not raw or len(raw) != int(expected_len):
-        return None
-    allowed = set("0123456789abcdef")
-    if any(ch not in allowed for ch in raw):
-        return None
-    return raw
 
 
 def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:
@@ -632,134 +476,48 @@ def run_ml_query_mode(
     paper_mode = str(selection.selector_type or "") == "freeze"
     min_windows_baseline_req = int(paper_config.MIN_WINDOWS_BASELINE if paper_mode else config.MIN_WINDOWS_BASELINE)
     min_pcap_bytes_req_default = int(paper_config.MIN_PCAP_BYTES if paper_mode else config.MIN_PCAP_BYTES_FALLBACK)
-    # Group by base_apk_sha256 in paper/freeze mode; query mode keeps legacy fallback.
-    groups: dict[str, list[RunInputs]] = defaultdict(list)
-    skipped_runs = 0
-    for ref in selection.included:
-        inputs = load_run_inputs(ref.evidence_dir)
-        if not inputs:
-            skipped_runs += 1
-            continue
-        if paper_mode:
-            ident = inputs.plan.get("run_identity") if isinstance(inputs.plan, dict) and isinstance(inputs.plan.get("run_identity"), dict) else {}
-            static_handoff_hash = str(ident.get("static_handoff_hash") or "").strip() if isinstance(ident, dict) else ""
-            if not static_handoff_hash:
-                out_dir = _run_output_dir(snapshot_dir, ref.run_id)
-                out_dir.mkdir(parents=True, exist_ok=True)
-                payload = {
-                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
-                    "run_id": str(ref.run_id),
-                    "package_name": ref.package_name,
-                    "skip": {"reason": "ML_SKIPPED_MISSING_STATIC_LINK"},
-                }
-                (out_dir / "ml_summary.json").write_text(
-                    json.dumps(payload, indent=2, sort_keys=True),
-                    encoding="utf-8",
-                )
-                _write_cohort_status(
-                    snapshot_dir=snapshot_dir,
-                    run_id=str(ref.run_id),
-                    package_name=ref.package_name,
-                    status="EXCLUDED",
-                    reason_code="ML_SKIPPED_MISSING_STATIC_LINK",
-                    min_windows_baseline=min_windows_baseline_req,
-                    min_pcap_bytes=min_pcap_bytes_req_default,
-                )
-                skipped_runs += 1
-                continue
-            identity_reason, identity_details = _paper_identity_consistency_issue(inputs)
-            if identity_reason:
-                out_dir = _run_output_dir(snapshot_dir, ref.run_id)
-                out_dir.mkdir(parents=True, exist_ok=True)
-                payload = {
-                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
-                    "run_id": str(ref.run_id),
-                    "package_name": ref.package_name,
-                    "skip": {"reason": identity_reason},
-                }
-                if identity_details:
-                    payload["skip"]["details"] = identity_details
-                (out_dir / "ml_summary.json").write_text(
-                    json.dumps(payload, indent=2, sort_keys=True),
-                    encoding="utf-8",
-                )
-                _write_cohort_status(
-                    snapshot_dir=snapshot_dir,
-                    run_id=str(ref.run_id),
-                    package_name=ref.package_name,
-                    status="EXCLUDED",
-                    reason_code=identity_reason,
-                    details=identity_details,
-                    min_windows_baseline=min_windows_baseline_req,
-                    min_pcap_bytes=min_pcap_bytes_req_default,
-                )
-                skipped_runs += 1
-                continue
-            static_features = (
-                inputs.plan.get("static_features")
-                if isinstance(inputs.plan, dict) and isinstance(inputs.plan.get("static_features"), dict)
-                else {}
-            )
-            required_static_features = (
-                "exported_components_total",
-                "dangerous_permission_count",
-                "uses_cleartext_traffic",
-                "sdk_indicator_score",
-            )
-            missing_static_features = [key for key in required_static_features if key not in static_features]
-            if missing_static_features:
-                out_dir = _run_output_dir(snapshot_dir, ref.run_id)
-                out_dir.mkdir(parents=True, exist_ok=True)
-                payload = {
-                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
-                    "run_id": str(ref.run_id),
-                    "package_name": ref.package_name,
-                    "skip": {"reason": "ML_SKIPPED_MISSING_STATIC_FEATURES"},
-                }
-                (out_dir / "ml_summary.json").write_text(
-                    json.dumps(payload, indent=2, sort_keys=True),
-                    encoding="utf-8",
-                )
-                _write_cohort_status(
-                    snapshot_dir=snapshot_dir,
-                    run_id=str(ref.run_id),
-                    package_name=ref.package_name,
-                    status="EXCLUDED",
-                    reason_code="ML_SKIPPED_MISSING_STATIC_FEATURES",
-                    details={"missing_static_features": missing_static_features},
-                    min_windows_baseline=min_windows_baseline_req,
-                    min_pcap_bytes=min_pcap_bytes_req_default,
-                )
-                skipped_runs += 1
-                continue
-        base_sha = ref.base_apk_sha256 or ""
-        if not base_sha and paper_mode:
-            out_dir = _run_output_dir(snapshot_dir, ref.run_id)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "ml_schema_version": int(config.ML_SCHEMA_VERSION),
-                "run_id": str(ref.run_id),
-                "package_name": ref.package_name,
-                "skip": {"reason": "ML_SKIPPED_MISSING_BASE_APK_SHA256"},
-            }
-            (out_dir / "ml_summary.json").write_text(
-                json.dumps(payload, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            _write_cohort_status(
-                snapshot_dir=snapshot_dir,
-                run_id=str(ref.run_id),
-                package_name=ref.package_name,
-                status="EXCLUDED",
-                reason_code="ML_SKIPPED_MISSING_BASE_APK_SHA256",
-                min_windows_baseline=min_windows_baseline_req,
-                min_pcap_bytes=min_pcap_bytes_req_default,
-            )
-            skipped_runs += 1
-            continue
-        if not base_sha:
-            base_sha = ref.package_name or "unknown"
-        groups[base_sha].append(inputs)
+    def _exclude_run(
+        run_id: str,
+        package_name: str | None,
+        reason_code: str,
+        details: dict[str, Any] | None,
+        min_windows_baseline: int,
+        min_pcap_bytes: int,
+    ) -> None:
+        out_dir = _run_output_dir(snapshot_dir, run_id)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "ml_schema_version": int(config.ML_SCHEMA_VERSION),
+            "run_id": str(run_id),
+            "package_name": package_name,
+            "skip": {"reason": reason_code},
+        }
+        if details:
+            payload["skip"]["details"] = details
+        (out_dir / "ml_summary.json").write_text(
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        _write_cohort_status(
+            snapshot_dir=snapshot_dir,
+            run_id=str(run_id),
+            package_name=package_name,
+            status="EXCLUDED",
+            reason_code=reason_code,
+            details=details,
+            min_windows_baseline=min_windows_baseline,
+            min_pcap_bytes=min_pcap_bytes,
+        )
+
+    selection_groups = prepare_query_selection_groups(
+        selection=selection,
+        paper_mode=paper_mode,
+        exclude_run=_exclude_run,
+        min_windows_baseline_req=min_windows_baseline_req,
+        min_pcap_bytes_req_default=min_pcap_bytes_req_default,
+    )
+    groups = selection_groups.groups
+    skipped_runs = selection_groups.skipped_runs
 
     window_spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
 
@@ -786,174 +544,48 @@ def run_ml_query_mode(
     groups_baseline_thin = 0
 
     for group_key in sorted(groups.keys()):
-        runs = groups[group_key]
-        # Sort runs deterministically.
-        runs = sorted(
-            runs,
-            key=lambda r: (
-                str(r.package_name or ""),
-                _mode_rank(derive_run_mode(r)[0]),
-                str(r.manifest.get("ended_at") or ""),
-                r.run_id,
-            ),
+        prepared, prep_stats = prepare_group_training_inputs(
+            group_key=group_key,
+            runs=groups[group_key],
+            snapshot_dir=snapshot_dir,
+            paper_mode=paper_mode,
+            min_windows_baseline_req=min_windows_baseline_req,
+            min_pcap_bytes_req_default=min_pcap_bytes_req_default,
+            window_spec=window_spec,
+            run_output_dir=lambda run_id: _run_output_dir(snapshot_dir, run_id),
+            exclude_run=_exclude_run,
         )
-        pkg = next((r.package_name for r in runs if r.package_name), None) or "<unknown>"
-        # Static inputs: plan is embedded in evidence packs (baseline run is canonical).
-        # If missing, we still run dynamic ML; static is optional for operational summary.
-        static_inputs = None
-        for candidate in runs:
-            if derive_run_mode(candidate)[0] == "baseline":
-                plan_path = candidate.run_dir / "inputs" / "static_dynamic_plan.json"
-                if plan_path.exists():
-                    try:
-                        plan = json.loads(plan_path.read_text(encoding="utf-8"))
-                    except Exception:
-                        plan = None
-                    if isinstance(plan, dict):
-                        static_inputs = build_static_inputs_from_plan(plan)
-                break
-        if static_inputs is not None:
-            static_inputs_by_group[group_key] = {
-                "package_name": pkg,
-                "E_raw": int(static_inputs.exported_components_total),
-                "P_raw": int(static_inputs.dangerous_permission_count),
-                "C": int(static_inputs.uses_cleartext_traffic),
-                "S": float(static_inputs.sdk_indicator_score),
-            }
-            static_inputs_by_group[group_key].update(_extract_static_features_snapshot(plan))
-
-        # Preflight + windowing per run.
-        by_run_rows: dict[str, tuple[list[dict[str, Any]], int, str]] = {}
-        all_rows: list[dict[str, Any]] = []
-        for r in runs:
-            out_dir = _run_output_dir(snapshot_dir, r.run_id)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            pf_path = out_dir / "ml_preflight.json"
-            if not pf_path.exists():
-                write_ml_preflight(pf_path, compute_ml_preflight(r))
-
-            duration = get_sampling_duration_seconds(r)
-            if duration is None or duration <= 0 or not r.pcap_path or not r.pcap_path.exists():
-                runs_skipped += 1
-                continue
-            try:
-                packets = extract_packet_timeline(r.pcap_path)
-                rows, dropped = build_window_features(packets, duration_s=float(duration), spec=window_spec)
-            except Exception:
-                runs_skipped += 1
-                continue
-            if not rows:
-                runs_skipped += 1
-                continue
-            mode, _ = derive_run_mode(r)
-            for row in rows:
-                row["_run_id"] = r.run_id
-                row["_mode"] = mode
-            by_run_rows[r.run_id] = (rows, dropped, mode)
-            all_rows.extend(rows)
-
-            # Transport mix per run (best-effort; independent of ML scoring).
-            tls, quic, tcp, udp = _transport_ratios_from_inputs(r)
-            transport_rows.append(
-                {
-                    "group_key": group_key,
-                    "package_name": pkg,
-                    "run_id": r.run_id,
-                    "mode": mode,
-                    "tls_ratio": tls,
-                    "quic_ratio": quic,
-                    "tcp_ratio": tcp,
-                    "udp_ratio": udp,
-                    "pcap_bytes": _pcap_size_bytes(r),
-                }
-            )
-
-        if not by_run_rows:
+        runs_skipped += prep_stats.runs_skipped
+        groups_skipped_no_baseline += prep_stats.groups_skipped_no_baseline
+        groups_union_fallback += prep_stats.groups_union_fallback
+        groups_skipped_baseline_gate_fail += prep_stats.groups_skipped_baseline_gate_fail
+        groups_baseline_thin += prep_stats.groups_baseline_thin
+        if prepared is None:
             continue
 
-        # Split by mode.
-        baseline_rows: list[dict[str, Any]] = []
-        interactive_rows: list[dict[str, Any]] = []
-        unknown_rows: list[dict[str, Any]] = []
-        for _rid, (rows, _, mode) in by_run_rows.items():
-            if mode == "baseline":
-                baseline_rows.extend(rows)
-            elif mode == "interactive":
-                interactive_rows.extend(rows)
-            else:
-                unknown_rows.extend(rows)
+        runs = prepared.runs
+        pkg = prepared.package_name
+        by_run_rows = prepared.by_run_rows
+        all_rows = prepared.all_rows
+        baseline_rows = prepared.baseline_rows
+        interactive_rows = prepared.interactive_rows
+        unknown_rows = prepared.unknown_rows
+        baseline_run_count = prepared.baseline_run_count
+        interactive_run_count = prepared.interactive_run_count
+        unknown_run_count = prepared.unknown_run_count
+        baseline_run_ids = prepared.baseline_run_ids
+        training_mode = prepared.training_mode
+        train_rows = prepared.train_rows
+        baseline_windows_ok = prepared.baseline_windows_ok
+        baseline_bytes_ok = prepared.baseline_bytes_ok
+        baseline_pcap_bytes_total = prepared.baseline_pcap_bytes_total
+        min_bytes = prepared.min_pcap_bytes
+        baseline_p95_bps = prepared.baseline_p95_bps
+        transport_rows.extend(prepared.transport_rows)
 
-        if not baseline_rows:
-            # Policy: need >=1 baseline to train.
-            groups_skipped_no_baseline += 1
-            continue
-        baseline_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "baseline")
-        interactive_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "interactive")
-        unknown_run_count = sum(1 for _, (_, _, m) in by_run_rows.items() if m == "unknown")
-        baseline_run_ids = [rid for rid, (_, _, m) in by_run_rows.items() if m == "baseline"]
-        if baseline_run_count < 2:
-            groups_baseline_thin += 1
-
-        # Training selection:
-        # - paper/freeze mode: baseline-only fail-closed
-        # - query mode: legacy union fallback allowed
-        baseline_windows_ok = len(baseline_rows) >= int(min_windows_baseline_req)
-        min_bytes = int(min_pcap_bytes_req_default)
-        baseline_pcap_bytes_total = 0
-        for r in runs:
-            mode, _ = derive_run_mode(r)
-            if mode != "baseline":
-                continue
-            if r.pcap_path and r.pcap_path.exists():
-                baseline_pcap_bytes_total += int(r.pcap_path.stat().st_size)
-            ds = r.manifest.get("dataset") if isinstance(r.manifest.get("dataset"), dict) else {}
-            try:
-                mb = int(ds.get("min_pcap_bytes") or 0)
-                if mb > min_bytes:
-                    min_bytes = mb
-            except Exception:
-                pass
-        baseline_bytes_ok = baseline_pcap_bytes_total >= int(min_bytes)
-        if baseline_bytes_ok and baseline_windows_ok:
-            training_mode = "baseline_only"
-            train_rows = baseline_rows
-        elif paper_mode:
-            groups_skipped_baseline_gate_fail += 1
-            for r in runs:
-                out_dir = _run_output_dir(snapshot_dir, r.run_id)
-                out_dir.mkdir(parents=True, exist_ok=True)
-                payload = {
-                    "ml_schema_version": int(config.ML_SCHEMA_VERSION),
-                    "run_id": str(r.run_id),
-                    "package_name": r.package_name,
-                    "skip": {"reason": "ML_SKIPPED_BASELINE_GATE_FAIL"},
-                }
-                (out_dir / "ml_summary.json").write_text(
-                    json.dumps(payload, indent=2, sort_keys=True),
-                    encoding="utf-8",
-                )
-                _write_cohort_status(
-                    snapshot_dir=snapshot_dir,
-                    run_id=str(r.run_id),
-                    package_name=r.package_name,
-                    status="EXCLUDED",
-                    reason_code="ML_SKIPPED_BASELINE_GATE_FAIL",
-                    details={
-                        "baseline_windows_total": int(len(baseline_rows)),
-                        "min_windows_baseline": int(min_windows_baseline_req),
-                        "baseline_windows_ok": bool(baseline_windows_ok),
-                        "baseline_pcap_bytes_ok": bool(baseline_bytes_ok),
-                        "baseline_min_pcap_bytes": int(min_bytes),
-                    },
-                    min_windows_baseline=min_windows_baseline_req,
-                    min_pcap_bytes=min_bytes,
-                )
-            runs_skipped += len(runs)
-            continue
-        else:
-            training_mode = "union_fallback"
-            groups_union_fallback += 1
-            train_rows = baseline_rows + interactive_rows
+        if prepared.static_inputs is not None:
+            static_inputs_by_group[group_key] = dict(prepared.static_inputs)
+            static_inputs_by_group[group_key].update(prepared.static_snapshot)
 
         # Training run provenance (Phase F3): unknown-mode runs are never used for training.
         training_run_ids: list[str] = []
@@ -963,16 +595,6 @@ def run_ml_query_mode(
             elif m == "interactive" and training_mode == "union_fallback":
                 training_run_ids.append(rid)
         training_run_ids = sorted(set(training_run_ids))
-
-        # Baseline p95 bytes/sec for intensity inference (heuristic).
-        baseline_p95_bps: float | None = None
-        try:
-            denom = float(window_spec.window_size_s) if window_spec.window_size_s > 0 else 1.0
-            bps = [float(r.get("byte_count") or 0.0) / denom for r in baseline_rows]
-            if bps:
-                baseline_p95_bps = float(np_percentile(np.asarray(bps, dtype=float), 95.0, method="linear"))
-        except Exception:
-            baseline_p95_bps = None
 
         X_train, feature_names = _rows_to_matrix(train_rows, window_spec=window_spec)
         X_all, _ = _rows_to_matrix(all_rows, window_spec=window_spec)
@@ -1540,8 +1162,26 @@ def run_ml_query_mode(
             }
         )
 
-    _write_tables(
-        snapshot_dir,
+    snapshot_outputs = finalize_query_snapshot_outputs(
+        snapshot_dir=snapshot_dir,
+        sid=sid,
+        selection=selection,
+        groups_seen=groups_seen,
+        groups_trained=groups_trained,
+        groups_skipped_no_baseline=groups_skipped_no_baseline,
+        groups_union_fallback=groups_union_fallback,
+        groups_skipped_baseline_gate_fail=groups_skipped_baseline_gate_fail,
+        groups_baseline_thin=groups_baseline_thin,
+        runs_scored=runs_scored,
+        runs_skipped=runs_skipped + skipped_runs,
+        manifest_path=manifest_path,
+        model_registry_rows=model_registry_rows,
+        write_tables=_write_tables,
+        write_snapshot_freeze_manifest=write_snapshot_freeze_manifest,
+        lint_operational_snapshot=lint_operational_snapshot,
+        write_snapshot_bundle_manifest=_write_snapshot_bundle_manifest,
+        write_snapshot_summary=_write_snapshot_summary,
+        output_dir=app_config.OUTPUT_DIR,
         per_run_rows=per_run_prevalence,
         per_group_mode_rows=per_group_mode_prevalence,
         persistence_rows=per_run_persistence,
@@ -1554,70 +1194,6 @@ def run_ml_query_mode(
         transport_group_mode_rows=transport_group_mode_rows,
     )
 
-    # Phase F3: snapshot closure artifacts (freeze + lint + model registry + bundle manifest).
-    evidence_root_fs = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    freeze_ok = True
-    freeze_err: str | None = None
-    try:
-        write_snapshot_freeze_manifest(snapshot_dir=snapshot_dir, evidence_root=evidence_root_fs, overwrite=True)
-    except Exception as exc:  # noqa: BLE001
-        freeze_ok = False
-        freeze_err = str(exc)
-        (snapshot_dir / "freeze_manifest_error.txt").write_text(freeze_err + "\n", encoding="utf-8")
-
-    lint = lint_operational_snapshot(snapshot_dir)
-    lint_path = snapshot_dir / "operational_lint.json"
-    lint_path.write_text(json.dumps({"ok": lint.ok, "issues": lint.issues}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-    reg_path = snapshot_dir / "model_registry.json"
-    reg_path.write_text(
-        json.dumps(
-            {
-                "artifact_type": "operational_model_registry",
-                "created_at_utc": datetime.now(UTC).isoformat(),
-                "snapshot_id": sid,
-                "models": model_registry_rows,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    bundle_manifest = _write_snapshot_bundle_manifest(snapshot_dir)
-
-    _write_snapshot_summary(
-        snapshot_dir,
-        {
-            "snapshot_id": sid,
-            "selector_type": selection.selector_type,
-            "generated_at_utc": datetime.now(UTC).isoformat(),
-            "groups_seen": int(groups_seen),
-            "groups_trained": int(groups_trained),
-            "groups_skipped_no_baseline": int(groups_skipped_no_baseline),
-            "groups_union_fallback": int(groups_union_fallback),
-            "groups_skipped_baseline_gate_fail": int(groups_skipped_baseline_gate_fail),
-            "groups_baseline_thin": int(groups_baseline_thin),
-            "runs_selected": int(len(selection.included)),
-            "runs_scored": int(runs_scored),
-            "runs_skipped": int(runs_skipped + skipped_runs),
-            "outputs": {
-                "selection_manifest": str(manifest_path),
-                "tables_dir": str(snapshot_dir / "tables"),
-                "runs_dir": str(snapshot_dir / "runs"),
-                "freeze_manifest": str(snapshot_dir / "freeze_manifest.json"),
-                "operational_lint": str(lint_path),
-                "model_registry": str(reg_path),
-                "snapshot_bundle_manifest": str(bundle_manifest),
-            },
-            "bundle_ok": bool(lint.ok and freeze_ok),
-            "freeze_ok": bool(freeze_ok),
-            "freeze_error": freeze_err,
-            "lint_ok": bool(lint.ok),
-        },
-    )
-
     return QueryMlRunStats(
         groups_seen=int(groups_seen),
         groups_trained=int(groups_trained),
@@ -1625,7 +1201,7 @@ def run_ml_query_mode(
         runs_skipped=int(runs_skipped + skipped_runs),
         snapshot_id=sid,
         snapshot_dir=snapshot_dir,
-        generated_at_utc=datetime.now(UTC).isoformat(),
+        generated_at_utc=snapshot_outputs.generated_at_utc,
     )
 
 

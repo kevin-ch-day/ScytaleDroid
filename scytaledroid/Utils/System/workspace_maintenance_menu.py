@@ -323,7 +323,11 @@ def workspace_menu() -> None:
             _show_dashboard()
             shown_dashboard = True
         print()
-        menu_utils.print_header("Evidence & Workspace Options")
+        menu_utils.print_header("Evidence & Workspace")
+        menu_utils.print_hint(
+            "Verify evidence packs, inspect app run coverage, and maintain derived indexes without changing authoritative artifacts."
+        )
+        menu_utils.print_section("Actions")
         items = [
             menu_utils.MenuOption("1", "Show workspace usage"),
             menu_utils.MenuOption("2", "Verify evidence packs (overview)"),

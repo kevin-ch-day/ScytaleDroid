@@ -378,7 +378,10 @@ def _fetch_profile_v2_ordering_db() -> list[str]:
         from scytaledroid.Database.db_func.apps.app_ordering import fetch_ordering
     except Exception:
         return []
-    # Ordering key remains 'paper2' for DB compatibility.
+    ordering = fetch_ordering("publication")
+    if ordering:
+        return ordering
+    # Fall back to legacy DB rows while older workspaces are still being migrated.
     return fetch_ordering("paper2")
 
 

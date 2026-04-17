@@ -69,20 +69,29 @@ def render_dataset_readiness_line() -> None:
 def _render_header(base: Path, palette) -> None:
     print()
     menu_utils.print_header("Governance & Readiness")
-    print(f"Workspace: {colors.apply(str(base.resolve()), palette.text)}")
-    print(f"Snapshot drop path: {colors.apply(str((base / 'governance').resolve()), palette.muted)}")
-    print("Governance snapshot (v1)")
-    print("------------------------")
-    print("  Bundle name : erebus_gov_v0_YYYYMMDD_NN/")
-    print("  Required    : permission_governance_snapshot.csv (one row per permission)")
-    print("  Optional    : snapshot_meta.json, qa_report.json, checksums.sha256, source_query.sql")
-    print("  Rule        : exactly one CSV per snapshot; extras are audit-only")
-    print()
+    menu_utils.print_hint(
+        "Manage filesystem-canonical governance bundles and confirm research readiness before persisted static runs."
+    )
+    menu_utils.print_section("Workspace")
+    menu_utils.print_metrics(
+        [
+            ("Workspace", str(base.resolve())),
+            ("Snapshot drop path", str((base / "governance").resolve())),
+        ]
+    )
+    menu_utils.print_section("Governance Snapshot Bundle")
+    menu_utils.print_metrics(
+        [
+            ("Bundle name", "erebus_gov_v0_YYYYMMDD_NN/"),
+            ("Required", "permission_governance_snapshot.csv"),
+            ("Optional", "snapshot_meta.json, qa_report.json, checksums.sha256, source_query.sql"),
+            ("Rule", "exactly one CSV per snapshot; extras are audit-only"),
+        ]
+    )
 
 
 def _render_checklist() -> None:
-    print("Operator checklist")
-    print("------------------")
+    menu_utils.print_section("Operator Checklist")
     print("  1) Place bundle under data/governance/")
     print("  2) Verify required CSV exists")
     print("  3) (Optional) Run validate-only to confirm counts")
@@ -92,8 +101,7 @@ def _render_checklist() -> None:
 
 
 def _render_status(palette) -> None:
-    print("Current governance status")
-    print("-------------------------")
+    menu_utils.print_section("Current Governance Status")
     status, version, sha, rows, loaded_at = _latest_governance_status()
     if status == "present":
         sha_display = sha
@@ -128,8 +136,7 @@ def _render_status(palette) -> None:
 
 def _scan_governance_folder(base: Path) -> None:
     gov_root = base / "governance"
-    print("Governance bundle scan")
-    print("----------------------")
+    menu_utils.print_section("Governance Bundle Scan")
     if not gov_root.exists():
         print("  Status : missing folder")
         return
@@ -150,8 +157,7 @@ def _scan_governance_folder(base: Path) -> None:
 
 def _show_latest_bundle(base: Path) -> None:
     gov_root = base / "governance"
-    print("Latest bundle status")
-    print("--------------------")
+    menu_utils.print_section("Latest Bundle Status")
     if not gov_root.exists():
         print("  Status : missing folder")
         return
@@ -169,8 +175,7 @@ def _show_latest_bundle(base: Path) -> None:
 
 def _bundle_health_summary(base: Path) -> None:
     gov_root = base / "governance"
-    print("Bundle health summary")
-    print("---------------------")
+    menu_utils.print_section("Bundle Health Summary")
     if not gov_root.exists():
         print("  Bundles : 0 (governance folder missing)")
         return
@@ -188,8 +193,7 @@ def _bundle_health_summary(base: Path) -> None:
 
 def _missing_file_diagnostics(base: Path) -> None:
     gov_root = base / "governance"
-    print("Missing-file diagnostics")
-    print("------------------------")
+    menu_utils.print_section("Missing-File Diagnostics")
     if not gov_root.exists():
         print("  Status : governance folder missing")
         return
@@ -225,8 +229,7 @@ def _sha256_file(path: Path) -> str:
 
 def _verify_checksums(base: Path) -> None:
     gov_root = base / "governance"
-    print("Bundle checksum verification")
-    print("----------------------------")
+    menu_utils.print_section("Bundle Checksum Verification")
     if not gov_root.exists():
         print("  Status : governance folder missing")
         return
@@ -266,8 +269,7 @@ def _verify_checksums(base: Path) -> None:
 
 def _show_active_vs_latest(base: Path) -> None:
     gov_root = base / "governance"
-    print("Active snapshot vs latest bundle")
-    print("-------------------------------")
+    menu_utils.print_section("Active Snapshot vs Latest Bundle")
     status, version, sha, rows, loaded_at = _latest_governance_status()
     if status == "present":
         print(f"  Active : {version} (rows={rows})")
@@ -291,23 +293,32 @@ def _show_active_vs_latest(base: Path) -> None:
 def render_governance_inputs() -> None:
     base = _ensure_workspace()
     palette = colors.get_palette()
+    options = [
+        menu_utils.MenuOption("1", "Scan governance folder (read-only)"),
+        menu_utils.MenuOption("2", "Show latest bundle status"),
+        menu_utils.MenuOption("3", "Refresh database status"),
+        menu_utils.MenuOption("4", "Bundle health summary"),
+        menu_utils.MenuOption("5", "Missing-file diagnostics"),
+        menu_utils.MenuOption("6", "Verify checksums (if present)"),
+        menu_utils.MenuOption("7", "Active vs latest bundle"),
+    ]
     while True:
         _render_header(base, palette)
         _render_checklist()
         print()
         _render_status(palette)
-        print("Options")
-        print("-------")
-        print("  1) Scan governance folder (read-only)")
-        print("  2) Show latest bundle status")
-        print("  3) Refresh database status")
-        print("  4) Bundle health summary")
-        print("  5) Missing-file diagnostics")
-        print("  6) Verify checksums (if present)")
-        print("  7) Active vs latest bundle")
-        print("  0) Return to Main Menu")
+        menu_utils.print_section("Actions")
+        menu_utils.render_menu(
+            menu_utils.MenuSpec(
+                items=options,
+                exit_label="Back",
+                show_exit=True,
+                show_descriptions=False,
+                compact=True,
+            )
+        )
         choice = prompt_utils.get_choice(
-            valid=["1", "2", "3", "4", "5", "6", "7", "0"],
+            valid=menu_utils.selectable_keys(options, include_exit=True),
             default="0",
         )
         print()

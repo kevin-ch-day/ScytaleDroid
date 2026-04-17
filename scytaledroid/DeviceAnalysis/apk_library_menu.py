@@ -366,11 +366,17 @@ def apk_library_menu(device_filter: str | None = None) -> None:
     while True:
         selected_count = static_scope_service.count()
         print()
-        print(
-            text_blocks.headline(
-                f"APK library & archives — groups: {len(all_groups)}   devices: {device_count}   selected: {selected_count}",
-                width=display_settings.default_width(),
-            )
+        menu_utils.print_header("APK Library")
+        menu_utils.print_hint(
+            "Browse harvested APK groups, inspect library coverage, and hand selections off to the Static Analysis pipeline."
+        )
+        menu_utils.print_section("Library Summary")
+        menu_utils.print_metrics(
+            [
+                ("Groups", len(all_groups)),
+                ("Devices", device_count),
+                ("Selected", selected_count),
+            ]
         )
         selection_line = (
             f"Selection: {selected_count} APKs marked (commands: m/u/t/a/c/s, q/0=Back)"
@@ -402,6 +408,7 @@ def apk_library_menu(device_filter: str | None = None) -> None:
                 hint="Mark APKs and hand off to the Static Analysis menu",
             )
         )
+        menu_utils.print_section("Actions")
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
         )

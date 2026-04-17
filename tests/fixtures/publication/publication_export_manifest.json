@@ -32,5 +32,5 @@
   "description": "Fixture manifest for publication export gate tests.",
   "generated_utc": "2026-02-16T18:56:27.301243+00:00",
   "manifest_version": 1,
-  "paper": "paper2"
+  "paper": "publication"
 }

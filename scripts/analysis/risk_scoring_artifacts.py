@@ -33,7 +33,8 @@ from scytaledroid.Utils.LatexUtils import RawLatex, render_tabular_only
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
 
 PUB_ROOT = REPO_ROOT / "output" / "publication"
-PAPER_RESULTS = PUB_ROOT / "manifests" / "paper_results_v1.json"
+PUBLICATION_RESULTS = PUB_ROOT / "manifests" / "publication_results_v1.json"
+LEGACY_PUBLICATION_RESULTS = PUB_ROOT / "manifests" / "paper_results_v1.json"
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 TABLE_6 = PUB_ROOT / "tables" / "table_6_static_posture_scores.csv"
 TABLE_5 = PUB_ROOT / "tables" / "table_5_masvs_coverage.csv"
@@ -184,7 +185,8 @@ def main(argv: list[str] | None = None) -> int:
     FIG_RANK_PDF = out_dir / "ranked_fused_scores.pdf"
     FIG_RANK_PNG = out_dir / "ranked_fused_scores.png"
 
-    for p in (TABLE_6, TABLE_5, PCAP_FEATURES, PAPER_RESULTS, FREEZE):
+    results_path = PUBLICATION_RESULTS if PUBLICATION_RESULTS.exists() else LEGACY_PUBLICATION_RESULTS
+    for p in (TABLE_6, TABLE_5, PCAP_FEATURES, results_path, FREEZE):
         if not p.exists():
             raise SystemExit(f"Missing required input: {p}")
 
@@ -195,10 +197,12 @@ def main(argv: list[str] | None = None) -> int:
     t5_by_pkg = _row_by_pkg(_read_csv_skip_comments(TABLE_5))
     pcap_rows = _read_csv_skip_comments(PCAP_FEATURES)
 
-    pr = json.loads(PAPER_RESULTS.read_text(encoding="utf-8"))
+    pr = json.loads(results_path.read_text(encoding="utf-8"))
     per_app = pr.get("per_app") or []
     if not isinstance(per_app, list) or len(per_app) != 12:
-        raise SystemExit(f"Unexpected per_app length in paper_results_v1.json: {len(per_app) if isinstance(per_app, list) else 'non-list'}")
+        raise SystemExit(
+            f"Unexpected per_app length in {results_path.name}: {len(per_app) if isinstance(per_app, list) else 'non-list'}"
+        )
 
     # Dynamic aggregations from pcap_features (interactive runs, per app).
     # IMPORTANT: "interactive" here mirrors the freeze/profile RDI aggregation inputs.
@@ -285,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         app = str(item.get("app") or "").strip()
         pkg = str(item.get("package_name") or "").strip().lower()
         if not app or not pkg:
-            raise SystemExit("paper_results_v1.json per_app row missing app/package_name")
+            raise SystemExit(f"{results_path.name} per_app row missing app/package_name")
         rdi_idle = float(item["idle_rdi_mean"])
         rdi_scripted = float(item["scripted_rdi_mean"])
         delta = float(item["delta_rdi"])
@@ -340,7 +344,9 @@ def main(argv: list[str] | None = None) -> int:
             f.write("# DRS_v1 = 100*clip(0.40*rdi + 0.20*delta + 0.15*domains + 0.10*dns + 0.10*out + 0.05*cleartext_permitted_static,0,1)\n")
             f.write("# FRS_v1 = 0.55*DRS + 0.45*SRS\n")
             f.write("# note: domains/dns/out are cohort-normalized (min-max of log1p).\n")
-            f.write("# note: domains/dns/out are computed from interactive runs (scripted + manual) to match paper_results_v1.json aggregation.\n")
+            f.write(
+                "# note: domains/dns/out are computed from interactive runs (scripted + manual) to match publication_results_v1.json aggregation.\n"
+            )
             f.write(f"# generated_at_utc: {datetime.now(UTC).isoformat()}\n")
             w = csv.DictWriter(
                 f,

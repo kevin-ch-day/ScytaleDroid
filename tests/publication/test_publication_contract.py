@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scytaledroid.Publication.publication_contract import lint_publication_bundle
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 
 
 def _touch(p: Path) -> None:

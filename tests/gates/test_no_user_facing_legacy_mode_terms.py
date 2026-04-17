@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = [pytest.mark.ui_contract, pytest.mark.gate]
+
 
 def test_no_user_facing_paper_mode_phrase_regression() -> None:
     """Prevent legacy user-facing wording from reappearing in the OSS UI.
@@ -27,4 +32,3 @@ def test_no_user_facing_paper_mode_phrase_regression() -> None:
             haystack += p.read_text(encoding="utf-8", errors="replace").lower() + "\n"
 
     assert "paper mode" not in haystack
-

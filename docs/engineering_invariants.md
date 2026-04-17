@@ -46,13 +46,13 @@ Menu modules are UI-only orchestration entry points.
 - Menu code performs no transaction control.
 - Services orchestrate; repositories access DB/filesystem.
 
-## 6) Legacy Publication Is Opt-In
+## 6) Legacy Publication Is Read-Fallback Only
 
-Legacy publication/export code is isolated and disabled by default.
+Legacy publication naming is no longer an active workflow branch.
 
-- `SCYTALEDROID_ENABLE_LEGACY_PUBLICATION=0` is the default behavior.
-- Core workflows must run without importing or probing legacy publication paths.
-- Legacy publication support is temporary and exists only for Paper #2 reproducibility.
+- Core workflows must run without a legacy publication toggle.
+- Remaining legacy publication support is read-side fallback only.
+- Compatibility exists only for bounded Paper #2 reproducibility/migration seams.
 
 ## 7) Export Freeze Is Manifest-Driven
 

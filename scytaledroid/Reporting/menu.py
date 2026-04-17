@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import traceback
 
-from scytaledroid.Utils.DisplayUtils import error_panels, menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import error_panels, menu_utils, prompt_utils, status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
 from .menu_actions import (
@@ -33,11 +33,23 @@ def reporting_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Reporting")
+        print(
+            summary_cards.format_summary_card(
+                "Reporting Workspace",
+                [
+                    summary_cards.summary_item("Frozen archive", "validated exports and bundle generation", value_style="accent"),
+                    summary_cards.summary_item("Structural archive", "integrity gates and structural exports", value_style="accent"),
+                    summary_cards.summary_item("Exploratory", "saved reports and non-canonical analysis", value_style="info"),
+                ],
+                footer="Choose the archive profile that matches the evidence contract you are working with.",
+            )
+        )
         options = [
             MenuOption("1", "Frozen cohort archive tools"),
             MenuOption("2", "Structural cohort archive tools"),
             MenuOption("3", "Exploratory / saved reports"),
         ]
+        menu_utils.print_hint("Frozen archive is the canonical export path; exploratory remains separate by design.")
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         top_choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if top_choice == "0":
@@ -87,10 +99,6 @@ def _reporting_menu_v2_frozen() -> None:
         freeze_hash = str(status.get("freeze_dataset_hash") or "")
         freeze_short = freeze_hash[:12] if freeze_hash else "missing"
         pub_root = str(status.get("publication_root_label") or "output/publication")
-        print("Active export profile: frozen cohort archive")
-        print(f"Output root: {pub_root}")
-        print(f"Freeze: {freeze_short}")
-
         audit = str(status.get("freeze_audit_result") or status.get("paper_audit_result") or "unknown")
         quota = status.get("evidence_quota_counted")
         expected = status.get("evidence_quota_expected")
@@ -99,12 +107,33 @@ def _reporting_menu_v2_frozen() -> None:
         figs_label = status.get("publication_figures_label") or "0"
         results_ok = (status.get("results_numbers_label") or "").strip().lower() == "present"
         qa_ok = (status.get("qa_label") or "").strip().lower() == "present"
+        analysis_ok = bool(status.get("analysis_ready"))
+        analysis_label = str(status.get("analysis_label") or "missing")
         if quota is not None and expected is not None:
             counts = f"{quota}/{expected} runs"
         else:
             counts = "runs unknown"
-        print(f"Status: Audit {audit} | {counts} | Bundle {pub_ready}")
-        print(f"Artifacts: Tables {tables_label} | Figures {figs_label} | Results {'✓' if results_ok else '✗'} | QA {'✓' if qa_ok else '✗'}")
+        footer = f"Output root: {pub_root}"
+        if status.get("analysis_cohort_label"):
+            footer = f"{footer} · DB cohort: {status['analysis_cohort_label']}"
+        print(
+            summary_cards.format_summary_card(
+                "Frozen Archive Status",
+                [
+                    summary_cards.summary_item("Audit", audit, value_style="success" if audit == "GO" else "warning"),
+                    summary_cards.summary_item("Quota", counts, value_style="accent"),
+                    summary_cards.summary_item("Bundle", pub_ready, value_style="success" if pub_ready == "READY" else "warning"),
+                    summary_cards.summary_item("Derived", analysis_label, value_style="success" if analysis_ok else "warning"),
+                    summary_cards.summary_item("Freeze", freeze_short, value_style="accent"),
+                    summary_cards.summary_item("Tables", tables_label, value_style="accent"),
+                    summary_cards.summary_item("Figures", figs_label, value_style="accent"),
+                    summary_cards.summary_item("Results", "present" if results_ok else "missing", value_style="success" if results_ok else "warning"),
+                    summary_cards.summary_item("QA", "present" if qa_ok else "missing", value_style="success" if qa_ok else "warning"),
+                ],
+                subtitle="Active export profile: frozen cohort archive",
+                footer=footer,
+            )
+        )
 
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True, disabled=[o.key for o in options if o.disabled]), default="0")
@@ -147,13 +176,22 @@ def _reporting_menu_v3_structural() -> None:
         out_root = Path("output") / "publication" / "profile_v3"
         lint = lint_profile_v3_bundle(out_root)
         ready = "READY" if lint.ok else "NOT READY"
-        print("Active export profile: structural cohort archive")
-        print(f"Output root: {out_root}")
-        print(f"Bundle: {ready}")
+        print(
+            summary_cards.format_summary_card(
+                "Structural Archive Status",
+                [
+                    summary_cards.summary_item("Bundle", ready, value_style="success" if lint.ok else "warning"),
+                    summary_cards.summary_item("Warnings", len(lint.warnings), value_style="warning" if lint.warnings else "muted"),
+                    summary_cards.summary_item("Errors", len(lint.errors), value_style="error" if lint.errors else "muted"),
+                ],
+                subtitle="Active export profile: structural cohort archive",
+                footer=f"Output root: {out_root}",
+            )
+        )
         if lint.errors:
-            print(status_messages.status(f"First error: {lint.errors[0]}", level="warn"))
+            menu_utils.print_hint(f"First error: {lint.errors[0]}")
         if lint.warnings:
-            print(status_messages.status(f"Warnings: {len(lint.warnings)}", level="info"))
+            menu_utils.print_hint(f"Warnings: {len(lint.warnings)}")
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if choice == "0":
@@ -186,6 +224,16 @@ def _reporting_menu_exploratory() -> None:
     while True:
         print()
         menu_utils.print_header("Reporting · Exploratory")
+        print(
+            summary_cards.format_summary_card(
+                "Exploratory Reporting",
+                [
+                    summary_cards.summary_item("Purpose", "non-canonical analysis and saved report review", value_style="info"),
+                    summary_cards.summary_item("Boundary", "kept separate from frozen archive outputs", value_style="warning"),
+                ],
+                footer="Use this area for experimental outputs that should not affect canonical exports.",
+            )
+        )
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if choice == "0":

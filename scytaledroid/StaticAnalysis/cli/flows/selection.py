@@ -36,9 +36,12 @@ def format_scope_target(selection: ScopeSelection) -> str:
 def select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     print()
     menu_utils.print_header("Scope", "Select the analysis scope (app, profile, or all)")
+    menu_utils.print_hint(
+        "Choose a single app, a profile cohort, or all harvested APK groups before building the static run spec."
+    )
     options: list[tuple[str, str]] = [("1", "App"), ("2", "Profile"), ("3", "All apps")]
-    for key, label in options:
-        print(f" {key}) {label}")
+    menu_utils.print_section("Actions")
+    menu_utils.print_menu(options, show_exit=False, show_descriptions=False, compact=True)
     choice = prompt_utils.get_choice([key for key, _ in options], default="1")
 
     if choice == "1":
@@ -69,6 +72,7 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         "Static Analysis · Scope (App)",
         "Select a package (latest capture chosen automatically)",
     )
+    menu_utils.print_hint("The newest harvested capture is chosen automatically when multiple artifact groups exist for a package.")
     rows: list[list[str]] = []
     lookup_labels: list[str] = []
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
@@ -114,11 +118,11 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         return ScopeSelection("all", "All apps", tuple(groups))
 
     print()
-    print("Static Analysis · Scope (Profile)")
-    print("-" * 86)
+    menu_utils.print_header("Static Analysis · Scope (Profile)")
+    menu_utils.print_hint("Select a profile cohort assembled from the latest harvested capture per package.")
     rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
     table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True)
-    print(f"Status: profiles={len(categories)}")
+    menu_utils.print_metrics([("Profiles", len(categories))])
 
     if len(categories) == 1:
         category_name, _ = categories[0]

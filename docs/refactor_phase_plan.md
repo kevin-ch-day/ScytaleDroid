@@ -96,17 +96,17 @@ Acceptance:
 
 Scope:
 - Keep only minimal paper export reproducibility path.
-- Hide legacy publication actions by default.
+- Remove legacy publication actions from active workflows.
 - Remove unreachable/deprecated legacy paths after isolation proves safe.
 
 Hard gates:
-- `SCYTALEDROID_ENABLE_LEGACY_PUBLICATION=0` produces no legacy menu entries.
-- Legacy publication modules are not imported in core workflows when disabled.
-- No filesystem probes for publication paths when disabled.
+- Core reporting has no runtime dependency on a legacy publication toggle.
+- Legacy publication modules are not imported in core workflows except bounded read fallback.
+- No unnecessary filesystem probes for removed legacy publication paths.
 - Reachability proof is required before each deletion batch.
 
 Acceptance:
-- Legacy-disabled smoke tests pass.
+- Core reporting smoke tests pass without legacy branches.
 - No unexpected publication probes/imports in core workflow.
 - Export reproducibility checks pass for PRs touching frozen outputs.
 - Import smoke and menu smoke pass.

@@ -10,6 +10,10 @@ def render_static_diagnostics_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Static Analysis Diagnostics")
+        menu_utils.print_hint(
+            "Verify persisted session summaries, run records, and harvested artifacts without leaving the static pipeline."
+        )
+        menu_utils.print_section("Actions")
         options = {
             "1": "Latest session snapshot",
             "2": "Session table counts",

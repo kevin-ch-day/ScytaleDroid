@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
-import socket
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,619 +15,52 @@ from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
-
-
-def show_connection_and_config() -> None:
-    """Display database configuration details and test connectivity."""
-
-    try:
-        cfg = db_config.DB_CONFIG
-        backend = str(cfg.get("engine", "disabled"))
-        host = str(cfg.get("host", "<unknown>"))
-        port_display = str(cfg.get("port", "<unknown>"))
-        database = str(cfg.get("database", "<unknown>"))
-        user = str(cfg.get("user", "<unknown>"))
-        cfg_source = getattr(db_config, "DB_CONFIG_SOURCE", "default")
-    except Exception as exc:
-        backend = host = port_display = database = user = "<unknown>"
-        cfg_source = "error"
-        print(status_messages.status(f"Unable to read DB config: {exc}", level="warn"))
-
-    def _section(title: str) -> None:
-        print(title)
-        print("-" * len(title))
-
-    _section("Database Configuration")
-    print(f"    Backend:    {backend}")
-    print(f"    Host:       {host}")
-    print(f"    Port:       {port_display}")
-    print(f"    Database:   {database}")
-    print(f"    Username:   {user}")
-    print(f"    Config via: {cfg_source}")
-    schema_version = diagnostics.get_schema_version()
-    print(f"    Schema ver: {schema_version or '<unknown>'}")
-    print()
-
-    _section("Test Database Connection")
-    success = diagnostics.check_connection()
-    if success:
-        print("    Connection established successfully")
-    else:
-        print("    Connection failed. Check logs for details.")
-        if backend == "mysql":
-            print("    Verify SCYTALEDROID_DB_URL and ensure schema is bootstrapped.")
-    prompt_utils.press_enter_to_continue()
-
-
-def write_db_schema_snapshot_audit() -> None:
-    """Write a read-only DB schema snapshot under output/audit/db/.
-
-    OSS posture:
-    - Filesystem is canonical.
-    - DB is optional. If disabled, we do nothing and return cleanly.
-    """
-
-    if not db_config.db_enabled():
-        print(
-            status_messages.status(
-                "DB is disabled (no mysql/mariadb config). Schema snapshot skipped.",
-                level="info",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return
-
-    out_dir = Path(app_config.OUTPUT_DIR) / "audit" / "db"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%SZ")
-    out_path = out_dir / f"db_schema_snapshot_{stamp}.json"
-    latest_path = out_dir / "latest.json"
-
-    cfg = dict(db_config.DB_CONFIG)
-    # Never write secrets to disk.
-    if "password" in cfg:
-        cfg["password"] = "***"
-
-    snapshot: dict[str, object] = {
-        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "db_enabled": True,
-        "db_config_source": getattr(db_config, "DB_CONFIG_SOURCE", "unknown"),
-        "db_config": cfg,
-        "server_info": diagnostics.get_server_info(),
-        "schema_version": diagnostics.get_schema_version(),
-        "required_tables": {
-            "base": diagnostics.check_required_tables(["schema_version", "apps"]),
-            "inventory": diagnostics.check_required_tables(
-                [
-                    "device_inventory_snapshots",
-                    "device_inventory",
-                    "apps",
-                    "android_apk_repository",
-                    "apk_split_groups",
-                    "harvest_artifact_paths",
-                    "harvest_source_paths",
-                    "harvest_storage_roots",
-                ]
-            ),
-            "static": diagnostics.check_required_tables(
-                [
-                    "static_analysis_runs",
-                    "static_session_run_links",
-                    "static_session_rollups",
-                    "findings",
-                    "static_permission_matrix",
-                    "risk_scores",
-                ]
-            ),
-            "dynamic": diagnostics.check_required_tables(
-                [
-                    "dynamic_sessions",
-                    "dynamic_session_issues",
-                    "dynamic_telemetry_process",
-                    "dynamic_telemetry_network",
-                ]
-            ),
-        },
-        "gates": {
-            "base_schema_gate": schema_gate.check_base_schema(),
-            "inventory_schema_gate": schema_gate.inventory_schema_gate(),
-            "static_schema_gate": schema_gate.static_schema_gate(),
-            "dynamic_schema_gate": schema_gate.dynamic_schema_gate(),
-            "permissions_schema_gate": schema_gate.permissions_schema_gate(),
-        },
-        "tables": {},
-        "tables_error": None,
-    }
-
-    try:
-        table_names = diagnostics.list_tables()
-        counts = diagnostics.table_counts(table_names)
-        snapshot["tables"] = {
-            name: {"row_count": counts.get(name)} for name in table_names
-        }
-        # Schema version history (best-effort).
-        try:
-            rows = core_q.run_sql(
-                "SELECT version, applied_at_utc, note FROM schema_version ORDER BY applied_at_utc ASC",
-                fetch="all_dict",
-            ) or []
-            snapshot["schema_version_history"] = [dict(r) for r in rows]
-        except Exception as exc:  # noqa: BLE001
-            snapshot["schema_version_history"] = []
-            snapshot["schema_version_history_error"] = f"{type(exc).__name__}: {exc}"
-    except Exception as exc:  # noqa: BLE001
-        snapshot["tables_error"] = f"{type(exc).__name__}: {exc}"
-
-    out_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
-    latest_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
-
-    print(status_messages.status("DB schema snapshot written.", level="success"))
-    print(f"  {out_path}")
-    prompt_utils.press_enter_to_continue()
-
-
-def run_inventory_determinism_comparator() -> None:
-    """Run strict inventory comparator on two snapshots for one device serial."""
-    from scytaledroid.DeviceAnalysis.inventory.determinism import (
-        build_snapshot_payload,
-        compare_inventory_payloads,
-    )
-    from scytaledroid.Utils.version_utils import get_git_commit
-
-    def _latest_serial() -> str | None:
-        row = core_q.run_sql(
-            """
-            SELECT device_serial
-            FROM device_inventory_snapshots
-            ORDER BY snapshot_id DESC
-            LIMIT 1
-            """,
-            fetch="one",
-        )
-        if not row:
-            return None
-        return str(row[0] or "").strip() or None
-
-    def _latest_two_snapshot_ids(device_serial: str) -> tuple[int, int] | None:
-        rows = core_q.run_sql(
-            """
-            SELECT snapshot_id
-            FROM device_inventory_snapshots
-            WHERE device_serial=%s
-            ORDER BY snapshot_id DESC
-            LIMIT 2
-            """,
-            (device_serial,),
-            fetch="all",
-        ) or []
-        if len(rows) < 2:
-            return None
-        left = int(rows[1][0])
-        right = int(rows[0][0])
-        return left, right
-
-    def _load_snapshot(snapshot_id: int) -> dict[str, object] | None:
-        row = core_q.run_sql(
-            """
-            SELECT
-              snapshot_id,
-              device_serial,
-              package_count,
-              package_list_hash,
-              package_signature_hash,
-              scope_hash,
-              captured_at
-            FROM device_inventory_snapshots
-            WHERE snapshot_id = %s
-            """,
-            (snapshot_id,),
-            fetch="one_dict",
-        )
-        return dict(row) if row else None
-
-    def _load_rows(snapshot_id: int) -> list[dict[str, object]]:
-        rows = core_q.run_sql(
-            """
-            SELECT
-              package_name,
-              version_code,
-              app_label,
-              version_name,
-              installer,
-              primary_path,
-              split_count,
-              extras,
-              apk_paths
-            FROM device_inventory
-            WHERE snapshot_id = %s
-            ORDER BY package_name ASC
-            """,
-            (snapshot_id,),
-            fetch="all_dict",
-        ) or []
-        return [dict(row) for row in rows]
-
-    print()
-    print("Inventory Determinism Comparator (Strict)")
-    print("----------------------------------------")
-    print("Mode: strict (missing/duplicate keys fail; only timestamp/run_id diffs allowed)")
-    print()
-
-    default_serial = _latest_serial()
-    if not default_serial:
-        print(status_messages.status("No inventory snapshots found in DB.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    device_serial = (
-        prompt_utils.prompt_text(
-            "Device serial",
-            default=default_serial,
-            required=True,
-            show_arrow=False,
-        ).strip()
-        or default_serial
-    )
-    pair = _latest_two_snapshot_ids(device_serial)
-    if not pair:
-        print(status_messages.status(f"Need at least two snapshots for {device_serial}.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-    left_id, right_id = pair
-
-    left_snapshot = _load_snapshot(left_id)
-    right_snapshot = _load_snapshot(right_id)
-    if not left_snapshot or not right_snapshot:
-        print(status_messages.status("Failed to load snapshot metadata.", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    left_rows = _load_rows(left_id)
-    right_rows = _load_rows(right_id)
-    left_payload = build_snapshot_payload(snapshot=left_snapshot, rows=left_rows)
-    right_payload = build_snapshot_payload(snapshot=right_snapshot, rows=right_rows)
-    compare = compare_inventory_payloads(
-        left_payload=left_payload,
-        right_payload=right_payload,
-        left_meta={
-            "run_id": left_id,
-            "source": "db:device_inventory",
-            "timestamp_utc": str(left_snapshot.get("captured_at") or ""),
-        },
-        right_meta={
-            "run_id": right_id,
-            "source": "db:device_inventory",
-            "timestamp_utc": str(right_snapshot.get("captured_at") or ""),
-        },
-        tool_semver=app_config.APP_VERSION,
-        git_commit=get_git_commit(),
-        compare_type="inventory_guard",
-    )
-    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%SZ")
-    output_path = Path("output") / "audit" / "comparators" / "inventory_guard" / stamp / "diff.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(compare.payload, indent=2, sort_keys=True, ensure_ascii=True),
-        encoding="utf-8",
-    )
-    passed = bool(compare.passed)
-    diff_count = int(compare.payload.get("result", {}).get("diff_counts", {}).get("disallowed", 0))
-    print()
-    if passed:
-        print(status_messages.status("PASS: no disallowed diffs.", level="success"))
-    else:
-        print(status_messages.status(f"FAIL: {diff_count} disallowed diffs.", level="error"))
-    print(f"Left snapshot : {left_id}")
-    print(f"Right snapshot: {right_id}")
-    print(f"Artifact      : {output_path}")
-    prompt_utils.press_enter_to_continue()
+from .action_groups.risk_actions import (
+    audit_static_risk_coverage as _audit_static_risk_coverage,
+    backfill_static_permission_risk_vnext as _backfill_static_permission_risk_vnext,
+    show_governance_snapshot_status as _show_governance_snapshot_status,
+)
+from .action_groups.schema_actions import (
+    _ensure_db_ops_log_table as _schema_ensure_db_ops_log_table,
+    ensure_dynamic_gap_columns as _ensure_dynamic_gap_columns,
+    ensure_dynamic_netstats_rows_columns as _ensure_dynamic_netstats_rows_columns,
+    ensure_dynamic_network_quality_column as _ensure_dynamic_network_quality_column,
+    ensure_dynamic_pcap_columns as _ensure_dynamic_pcap_columns,
+    ensure_dynamic_sampling_duration_columns as _ensure_dynamic_sampling_duration_columns,
+    ensure_dynamic_tier_column as _ensure_dynamic_tier_column,
+    ensure_dynamic_tier_migrations as _ensure_dynamic_tier_migrations,
+    _log_db_op as _schema_log_db_op,
+    log_db_op as _grouped_log_db_op,
+)
+from .action_groups.status_actions import (
+    run_inventory_determinism_comparator,
+    show_connection_and_config,
+    write_db_schema_snapshot_audit,
+)
 
 
 def backfill_static_permission_risk_vnext() -> None:
-    """Backfill canonical risk tables from legacy/static artifacts."""
-    from scytaledroid.Database.db_func.static_analysis import static_permission_risk as spr_db
-
-    print()
-    print("Backfill Static Permission Risk (vNext)")
-    print("--------------------------------------")
-    print("Idempotent operation:")
-    print("1) Fill missing risk_scores rows from static run metrics.")
-    print("2) Fill missing risk_scores rows from legacy static_permission_risk.")
-    print("3) Fill missing static_permission_risk_vnext rows from permission matrix + risk_scores.")
-    print()
-
-    if not prompt_utils.prompt_yes_no("Run backfill now?", default=False):
-        print(status_messages.status("Backfill cancelled.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    if not spr_db.ensure_table_vnext():
-        print(status_messages.status("static_permission_risk_vnext table unavailable.", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    def _scalar(sql: str) -> int:
-        row = core_q.run_sql(sql, fetch="one")
-        return int((row or [0])[0] or 0)
-
-    before_scores = _scalar("SELECT COUNT(*) FROM risk_scores")
-    before_vnext = _scalar("SELECT COUNT(*) FROM static_permission_risk_vnext")
-
-    core_q.run_sql_write(
-        """
-        INSERT INTO risk_scores (
-          package_name, app_label, session_stamp, scope_label,
-          risk_score, risk_grade, dangerous, signature, vendor
-        )
-        SELECT
-          a.package_name,
-          a.display_name AS app_label,
-          sar.session_stamp,
-          COALESCE(NULLIF(sar.scope_label, ''), a.package_name) AS scope_label,
-          ROUND(ms.value_num, 3) AS risk_score,
-          COALESCE(NULLIF(mg.value_text, ''), 'A') AS risk_grade,
-          CAST(COALESCE(md.value_num, 0) AS SIGNED) AS dangerous,
-          CAST(COALESCE(msig.value_num, 0) AS SIGNED) AS signature,
-          CAST(COALESCE(mv.value_num, 0) AS SIGNED) AS vendor
-        FROM static_analysis_runs sar
-        JOIN app_versions av ON av.id = sar.app_version_id
-        JOIN apps a ON a.id = av.app_id
-        JOIN metrics ms
-          ON ms.run_id = sar.id
-         AND ms.feature_key = 'permissions.risk_score'
-        LEFT JOIN metrics mg
-          ON mg.run_id = sar.id
-         AND mg.feature_key = 'permissions.risk_grade'
-        LEFT JOIN metrics md
-          ON md.run_id = sar.id
-         AND md.feature_key = 'permissions.dangerous_count'
-        LEFT JOIN metrics msig
-          ON msig.run_id = sar.id
-         AND msig.feature_key = 'permissions.signature_count'
-        LEFT JOIN metrics mv
-          ON mv.run_id = sar.id
-         AND mv.feature_key = 'permissions.oem_count'
-        LEFT JOIN risk_scores rs
-          ON rs.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-         AND rs.session_stamp COLLATE utf8mb4_unicode_ci = sar.session_stamp COLLATE utf8mb4_unicode_ci
-         AND rs.scope_label COLLATE utf8mb4_unicode_ci = COALESCE(NULLIF(sar.scope_label, ''), a.package_name) COLLATE utf8mb4_unicode_ci
-        WHERE rs.id IS NULL
-          AND sar.session_stamp IS NOT NULL
-          AND sar.session_stamp <> ''
-        """,
-        query_name="db_utils.backfill.risk_scores_from_metrics",
+    _backfill_static_permission_risk_vnext(
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
     )
-
-    core_q.run_sql_write(
-        """
-        INSERT INTO risk_scores (
-          package_name, app_label, session_stamp, scope_label,
-          risk_score, risk_grade, dangerous, signature, vendor
-        )
-        SELECT
-          spr.package_name,
-          a.display_name AS app_label,
-          spr.session_stamp,
-          spr.scope_label,
-          spr.risk_score,
-          spr.risk_grade,
-          spr.dangerous,
-          spr.signature,
-          spr.vendor
-        FROM static_permission_risk spr
-        LEFT JOIN apps a
-          ON (
-            (spr.app_id IS NOT NULL AND a.id = spr.app_id)
-            OR (spr.app_id IS NULL AND a.package_name COLLATE utf8mb4_general_ci = spr.package_name COLLATE utf8mb4_general_ci)
-          )
-        LEFT JOIN risk_scores rs
-          ON rs.package_name COLLATE utf8mb4_general_ci = spr.package_name COLLATE utf8mb4_general_ci
-         AND rs.session_stamp COLLATE utf8mb4_general_ci = spr.session_stamp COLLATE utf8mb4_general_ci
-         AND rs.scope_label COLLATE utf8mb4_general_ci = spr.scope_label COLLATE utf8mb4_general_ci
-        WHERE rs.id IS NULL
-        """,
-        query_name="db_utils.backfill.risk_scores_from_legacy",
-    )
-
-    core_q.run_sql_write(
-        """
-        INSERT INTO static_permission_risk_vnext (
-          run_id, permission_name, risk_score, risk_class, rationale_code
-        )
-        SELECT
-          spm.run_id,
-          LOWER(spm.permission_name) AS permission_name,
-          rs.risk_score,
-          CASE
-            WHEN spm.is_runtime_dangerous = 1 AND LOWER(COALESCE(spm.guard_strength, '')) IN ('weak', 'unknown') THEN 'HIGH'
-            WHEN spm.is_runtime_dangerous = 1 THEN 'MEDIUM'
-            WHEN spm.is_flagged_normal = 1 THEN 'LOW'
-            ELSE NULL
-          END AS risk_class,
-          CASE
-            WHEN spm.is_runtime_dangerous = 1 AND LOWER(COALESCE(spm.guard_strength, '')) IN ('weak', 'unknown') THEN 'RUNTIME_DANGEROUS_WEAK_GUARD'
-            WHEN spm.is_runtime_dangerous = 1 THEN 'RUNTIME_DANGEROUS'
-            WHEN spm.is_flagged_normal = 1 THEN 'FLAGGED_NORMAL_PERMISSION'
-            ELSE NULL
-          END AS rationale_code
-        FROM static_permission_matrix spm
-        JOIN static_analysis_runs sar ON sar.id = spm.run_id
-        JOIN app_versions av ON av.id = sar.app_version_id
-        JOIN apps a ON a.id = av.app_id
-        JOIN risk_scores rs
-          ON rs.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-         AND rs.session_stamp COLLATE utf8mb4_unicode_ci = sar.session_stamp COLLATE utf8mb4_unicode_ci
-         AND rs.scope_label COLLATE utf8mb4_unicode_ci = sar.scope_label COLLATE utf8mb4_unicode_ci
-        LEFT JOIN static_permission_risk_vnext v
-          ON v.run_id = spm.run_id
-         AND v.permission_name COLLATE utf8mb4_general_ci = LOWER(spm.permission_name) COLLATE utf8mb4_general_ci
-        WHERE v.id IS NULL
-          AND spm.permission_name IS NOT NULL
-          AND spm.permission_name <> ''
-        """,
-        query_name="db_utils.backfill.permission_risk_vnext",
-    )
-
-    after_scores = _scalar("SELECT COUNT(*) FROM risk_scores")
-    after_vnext = _scalar("SELECT COUNT(*) FROM static_permission_risk_vnext")
-
-    print(status_messages.status("Backfill complete.", level="success"))
-    print(f"risk_scores: {before_scores} -> {after_scores} (inserted={max(0, after_scores - before_scores)})")
-    print(
-        "static_permission_risk_vnext: "
-        f"{before_vnext} -> {after_vnext} (inserted={max(0, after_vnext - before_vnext)})"
-    )
-    print("note: inserted counts are derived from before/after totals.")
-    prompt_utils.press_enter_to_continue()
 
 
 def audit_static_risk_coverage() -> None:
-    """Audit coverage gaps for risk_scores and static_permission_risk_vnext."""
-    print()
-    print("Static Risk Coverage Audit")
-    print("--------------------------")
-
-    def _scalar(sql: str) -> int:
-        row = core_q.run_sql(sql, fetch="one")
-        return int((row or [0])[0] or 0)
-
-    runs_total = _scalar("SELECT COUNT(*) FROM static_analysis_runs")
-    runs_with_risk = _scalar(
-        """
-        SELECT COUNT(*) FROM (
-          SELECT sar.id
-          FROM static_analysis_runs sar
-          JOIN app_versions av ON av.id = sar.app_version_id
-          JOIN apps a ON a.id = av.app_id
-          JOIN risk_scores rs
-            ON rs.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-           AND rs.session_stamp COLLATE utf8mb4_unicode_ci = sar.session_stamp COLLATE utf8mb4_unicode_ci
-           AND rs.scope_label COLLATE utf8mb4_unicode_ci = sar.scope_label COLLATE utf8mb4_unicode_ci
-          GROUP BY sar.id
-        ) x
-        """
+    _audit_static_risk_coverage(
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
     )
-    runs_without_risk = max(0, runs_total - runs_with_risk)
-    spm_total = _scalar("SELECT COUNT(*) FROM static_permission_matrix")
-    vnext_total = _scalar("SELECT COUNT(*) FROM static_permission_risk_vnext")
-    spm_missing_vnext = _scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_permission_matrix spm
-        LEFT JOIN static_permission_risk_vnext v
-          ON v.run_id = spm.run_id
-         AND v.permission_name COLLATE utf8mb4_general_ci = LOWER(spm.permission_name) COLLATE utf8mb4_general_ci
-        WHERE v.id IS NULL
-        """
-    )
-    runs_missing_metric = _scalar(
-        """
-        SELECT COUNT(*)
-        FROM static_analysis_runs sar
-        LEFT JOIN metrics m
-          ON m.run_id = sar.id
-         AND m.feature_key = 'permissions.risk_score'
-        WHERE m.run_id IS NULL
-        """
-    )
-    missing_status_rows = core_q.run_sql(
-        """
-        SELECT sar.status, COUNT(*)
-        FROM static_analysis_runs sar
-        JOIN app_versions av ON av.id = sar.app_version_id
-        JOIN apps a ON a.id = av.app_id
-        LEFT JOIN risk_scores rs
-          ON rs.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-         AND rs.session_stamp COLLATE utf8mb4_unicode_ci = sar.session_stamp COLLATE utf8mb4_unicode_ci
-         AND rs.scope_label COLLATE utf8mb4_unicode_ci = sar.scope_label COLLATE utf8mb4_unicode_ci
-        WHERE rs.id IS NULL
-        GROUP BY sar.status
-        ORDER BY sar.status
-        """,
-        fetch="all",
-    ) or []
-    unresolved_sample = core_q.run_sql(
-        """
-        SELECT sar.id, a.package_name, sar.session_stamp, sar.scope_label, sar.status
-        FROM static_analysis_runs sar
-        JOIN app_versions av ON av.id = sar.app_version_id
-        JOIN apps a ON a.id = av.app_id
-        LEFT JOIN risk_scores rs
-          ON rs.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-         AND rs.session_stamp COLLATE utf8mb4_unicode_ci = sar.session_stamp COLLATE utf8mb4_unicode_ci
-         AND rs.scope_label COLLATE utf8mb4_unicode_ci = sar.scope_label COLLATE utf8mb4_unicode_ci
-        WHERE rs.id IS NULL
-        ORDER BY sar.id DESC
-        LIMIT 10
-        """,
-        fetch="all",
-    ) or []
-
-    print(f"runs: total={runs_total} with_risk_scores={runs_with_risk} without_risk_scores={runs_without_risk}")
-    print(f"permission_matrix rows={spm_total} vnext rows={vnext_total} missing vnext rows={spm_missing_vnext}")
-    print(f"runs missing permissions.risk_score metric={runs_missing_metric}")
-    if missing_status_rows:
-        status_detail = ", ".join(f"{row[0] or '<null>'}:{int(row[1] or 0)}" for row in missing_status_rows)
-        print(f"missing risk_scores by run status: {status_detail}")
-    if unresolved_sample:
-        print("sample unresolved runs (id, package, session, scope, status):")
-        for row in unresolved_sample:
-            print(f"  {row[0]} | {row[1]} | {row[2]} | {row[3]} | {row[4]}")
-    if runs_without_risk or spm_missing_vnext:
-        print(status_messages.status("Coverage gaps remain.", level="warn"))
-    else:
-        print(status_messages.status("Coverage complete for current DB snapshot.", level="success"))
-    prompt_utils.press_enter_to_continue()
 
 
 def show_governance_snapshot_status() -> None:
-    """Show high-level governance snapshot status and import guidance."""
-
-    def _section(title: str) -> None:
-        print(title)
-        print("-" * len(title))
-
-    _section("Governance Snapshot Status")
-    version = None
-    sha = None
-    row_count = 0
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT s.governance_version, s.snapshot_sha256, COUNT(r.permission_string) AS row_count
-            FROM permission_governance_snapshots s
-            LEFT JOIN permission_governance_snapshot_rows r
-              ON r.governance_version = s.governance_version
-            GROUP BY s.governance_version, s.snapshot_sha256
-            ORDER BY s.created_at_utc DESC
-            LIMIT 1
-            """,
-            fetch="one",
-        )
-        if row:
-            version = row[0]
-            sha = row[1]
-            row_count = int(row[2] or 0)
-    except Exception as exc:
-        print(status_messages.status(f"Unable to read governance snapshot: {exc}", level="warn"))
-
-    if version:
-        print(f"    Version : {version}")
-        print(f"    SHA-256 : {sha or '<unknown>'}")
-        print(f"    Rows    : {row_count}")
-    else:
-        print("    Status  : missing")
-        print("    Rows    : 0")
-
-    print()
-    _section("Import (required for research-grade runs)")
-    print(
-        "    python -m scytaledroid.Database.tools.permission_governance_import \\"
+    _show_governance_snapshot_status(
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
     )
-    print("      /path/to/governance_snapshot.csv \\")
-    print("      --version gov_vYYYYMMDD --source EREBUS")
-    print()
-    prompt_utils.press_enter_to_continue()
 
 
 def show_db_status() -> None:
@@ -795,7 +226,7 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
 def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
     """Apply canonical schema statements (CREATE/ALTER) for missing tables/columns."""
 
-    _ensure_db_ops_log_table()
+    _schema_ensure_db_ops_log_table(core_q=core_q)
     schema_before = diagnostics.get_schema_version() or "<unknown>"
     started_at = datetime.now(UTC)
     success = False
@@ -829,7 +260,9 @@ def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
         return False
     finally:
         finished_at = datetime.now(UTC)
-        _log_db_op(
+        _schema_log_db_op(
+            app_config=app_config,
+            core_q=core_q,
             operation="canonical_schema_bootstrap",
             schema_before=schema_before,
             schema_after=diagnostics.get_schema_version() or schema_before,
@@ -1208,18 +641,18 @@ def seed_dataset_profile() -> None:
 
     # Seed display names (best-effort).
     # Important: DB canonical display names should remain the full product name.
-    # Paper/publication alias shortening is stored separately as an alias set.
+    # Publication alias shortening is stored separately as an alias set.
     try:
         contracts = load_publication_contracts(fail_closed=True)
         # Do not overwrite existing canonical names.
         upsert_display_names(contracts.display_name_by_package, overwrite=False)
-        # Persist research/publication aliases explicitly.
+        # Persist publication aliases explicitly under the canonical key.
         try:
             from scytaledroid.Database.db_func.apps.app_labels import upsert_display_aliases
-            upsert_display_aliases("paper2", contracts.display_name_by_package, overwrite=True)
+            upsert_display_aliases("publication", contracts.display_name_by_package, overwrite=True)
         except Exception:
             pass
-        upsert_ordering("paper2", contracts.package_order)
+        upsert_ordering("publication", contracts.package_order)
     except Exception:
         pass
 
@@ -1254,9 +687,9 @@ def sync_contracts_to_db() -> None:
     # Canonical display names: never clobber full product names with publication abbreviations.
     n_names = upsert_display_names(contracts.display_name_by_package, overwrite=False)
     # Publication aliases (short labels) live in a separate table.
-    n_alias = upsert_display_aliases("paper2", contracts.display_name_by_package, overwrite=True)
+    n_alias = upsert_display_aliases("publication", contracts.display_name_by_package, overwrite=True)
     # Ordering
-    n_order = upsert_ordering("paper2", contracts.package_order)
+    n_order = upsert_ordering("publication", contracts.package_order)
 
     print(status_messages.status(f"Upserted display names: {n_names}", level="success"))
     print(status_messages.status(f"Upserted research aliases: {n_alias}", level="success"))
@@ -1264,383 +697,80 @@ def sync_contracts_to_db() -> None:
     prompt_utils.press_enter_to_continue()
 
 def ensure_dynamic_tier_column(*, prompt_user: bool = True) -> bool:
-    """Ensure dynamic_sessions has a tier column (DB migration helper)."""
-
-    cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "disabled"))
-    if backend != "mysql":
-        print(
-            status_messages.status(
-                "Tier column migration is only supported for MySQL/MariaDB backends.",
-                level="warn",
-            )
-        )
-        return False
-
-    columns = diagnostics.get_table_columns("dynamic_sessions") or []
-    if "tier" in {col.lower() for col in columns}:
-        print(status_messages.status("dynamic_sessions.tier already present.", level="success"))
-        return True
-
-    print(status_messages.status("Missing dynamic_sessions.tier column.", level="warn"))
-    if prompt_user and not prompt_utils.prompt_yes_no(
-        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN tier)",
-        default=True,
-    ):
-        return False
-
-    sql = "ALTER TABLE dynamic_sessions ADD COLUMN tier VARCHAR(32) DEFAULT NULL"
-    core_q.run_sql_write(sql, query_name="db_utils.dynamic_sessions.add_tier")
-    print(status_messages.status("Added dynamic_sessions.tier column.", level="success"))
-    return True
-
-
-def ensure_dynamic_network_quality_column(*, prompt_user: bool = True) -> bool:
-    """Ensure dynamic_sessions has a network_signal_quality column (DB migration helper)."""
-
-    cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "disabled"))
-    if backend != "mysql":
-        print(
-            status_messages.status(
-                "network_signal_quality migration is only supported for MySQL/MariaDB backends.",
-                level="warn",
-            )
-        )
-        return False
-
-    columns = diagnostics.get_table_columns("dynamic_sessions") or []
-    if "network_signal_quality" in {col.lower() for col in columns}:
-        print(status_messages.status("dynamic_sessions.network_signal_quality already present.", level="success"))
-        return True
-
-    print(status_messages.status("Missing dynamic_sessions.network_signal_quality column.", level="warn"))
-    if prompt_user and not prompt_utils.prompt_yes_no(
-        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN network_signal_quality)",
-        default=True,
-    ):
-        return False
-
-    sql = "ALTER TABLE dynamic_sessions ADD COLUMN network_signal_quality VARCHAR(32) DEFAULT NULL"
-    core_q.run_sql_write(sql, query_name="db_utils.dynamic_sessions.add_network_signal_quality")
-    print(status_messages.status("Added dynamic_sessions.network_signal_quality column.", level="success"))
-    return True
-
-
-def ensure_dynamic_pcap_columns(*, prompt_user: bool = True) -> bool:
-    """Ensure dynamic_sessions has PCAP metadata columns (DB migration helper)."""
-
-    cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "disabled"))
-    if backend != "mysql":
-        print(
-            status_messages.status(
-                "PCAP metadata migrations are only supported for MySQL/MariaDB backends.",
-                level="warn",
-            )
-        )
-        return False
-
-    columns = diagnostics.get_table_columns("dynamic_sessions") or []
-    column_set = {col.lower() for col in columns}
-    needed = {"pcap_relpath", "pcap_bytes", "pcap_sha256", "pcap_valid", "pcap_validated_at_utc"}
-    missing = sorted(needed - column_set)
-    if not missing:
-        print(status_messages.status("dynamic_sessions PCAP columns already present.", level="success"))
-        return True
-
-    print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
-    if prompt_user and not prompt_utils.prompt_yes_no(
-        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN pcap metadata)",
-        default=True,
-    ):
-        return False
-
-    if "pcap_relpath" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_relpath VARCHAR(512) DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_pcap_relpath",
-        )
-        print(status_messages.status("Added dynamic_sessions.pcap_relpath column.", level="success"))
-    if "pcap_bytes" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_bytes BIGINT DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_pcap_bytes",
-        )
-        print(status_messages.status("Added dynamic_sessions.pcap_bytes column.", level="success"))
-    if "pcap_sha256" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_sha256 CHAR(64) DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_pcap_sha256",
-        )
-        print(status_messages.status("Added dynamic_sessions.pcap_sha256 column.", level="success"))
-    if "pcap_valid" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_valid TINYINT(1) DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_pcap_valid",
-        )
-        print(status_messages.status("Added dynamic_sessions.pcap_valid column.", level="success"))
-    if "pcap_validated_at_utc" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN pcap_validated_at_utc DATETIME DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_pcap_validated_at",
-        )
-        print(status_messages.status("Added dynamic_sessions.pcap_validated_at_utc column.", level="success"))
-    return True
-
-
-def ensure_dynamic_netstats_rows_columns(*, prompt_user: bool = True) -> bool:
-    """Ensure dynamic_sessions has netstats row counters (DB migration helper)."""
-
-    cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "disabled"))
-    if backend != "mysql":
-        print(
-            status_messages.status(
-                "netstats row counter migrations are only supported for MySQL/MariaDB backends.",
-                level="warn",
-            )
-        )
-        return False
-
-    columns = diagnostics.get_table_columns("dynamic_sessions") or []
-    column_set = {col.lower() for col in columns}
-    needed = {"netstats_rows", "netstats_missing_rows"}
-    missing = sorted(needed - column_set)
-    if not missing:
-        print(status_messages.status("dynamic_sessions netstats row columns already present.", level="success"))
-        return True
-
-    print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
-    if prompt_user and not prompt_utils.prompt_yes_no(
-        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN netstats rows)",
-        default=True,
-    ):
-        return False
-
-    if "netstats_rows" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN netstats_rows INT DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_netstats_rows",
-        )
-        print(status_messages.status("Added dynamic_sessions.netstats_rows column.", level="success"))
-    if "netstats_missing_rows" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN netstats_missing_rows INT DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_netstats_missing_rows",
-        )
-        print(status_messages.status("Added dynamic_sessions.netstats_missing_rows column.", level="success"))
-    return True
-
-
-def ensure_dynamic_sampling_duration_columns(*, prompt_user: bool = True) -> bool:
-    """Ensure dynamic_sessions has sampling duration alignment columns."""
-
-    cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "disabled"))
-    if backend != "mysql":
-        print(
-            status_messages.status(
-                "sampling duration migrations are only supported for MySQL/MariaDB backends.",
-                level="warn",
-            )
-        )
-        return False
-
-    columns = diagnostics.get_table_columns("dynamic_sessions") or []
-    column_set = {col.lower() for col in columns}
-    needed = {"sampling_duration_seconds", "clock_alignment_delta_s"}
-    missing = sorted(needed - column_set)
-    if not missing:
-        print(status_messages.status("dynamic_sessions sampling duration columns already present.", level="success"))
-        return True
-
-    print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
-    if prompt_user and not prompt_utils.prompt_yes_no(
-        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN sampling duration)",
-        default=True,
-    ):
-        return False
-
-    if "sampling_duration_seconds" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN sampling_duration_seconds DOUBLE DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_sampling_duration_seconds",
-        )
-        print(status_messages.status("Added dynamic_sessions.sampling_duration_seconds column.", level="success"))
-    if "clock_alignment_delta_s" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN clock_alignment_delta_s DOUBLE DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_clock_alignment_delta_s",
-        )
-        print(status_messages.status("Added dynamic_sessions.clock_alignment_delta_s column.", level="success"))
-    return True
-
-
-def ensure_dynamic_gap_columns(*, prompt_user: bool = True) -> bool:
-    """Ensure dynamic_sessions has warm-up gap columns."""
-
-    cfg = db_config.DB_CONFIG
-    backend = str(cfg.get("engine", "disabled"))
-    if backend != "mysql":
-        print(
-            status_messages.status(
-                "gap column migrations are only supported for MySQL/MariaDB backends.",
-                level="warn",
-            )
-        )
-        return False
-
-    columns = diagnostics.get_table_columns("dynamic_sessions") or []
-    column_set = {col.lower() for col in columns}
-    needed = {"sample_first_gap_s", "sample_max_gap_excluding_first_s"}
-    missing = sorted(needed - column_set)
-    if not missing:
-        print(status_messages.status("dynamic_sessions warm-up gap columns already present.", level="success"))
-        return True
-
-    print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
-    if prompt_user and not prompt_utils.prompt_yes_no(
-        "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN warm-up gap)",
-        default=True,
-    ):
-        return False
-
-    if "sample_first_gap_s" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN sample_first_gap_s FLOAT DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_sample_first_gap_s",
-        )
-        print(status_messages.status("Added dynamic_sessions.sample_first_gap_s column.", level="success"))
-    if "sample_max_gap_excluding_first_s" in missing:
-        core_q.run_sql_write(
-            "ALTER TABLE dynamic_sessions ADD COLUMN sample_max_gap_excluding_first_s FLOAT DEFAULT NULL",
-            query_name="db_utils.dynamic_sessions.add_sample_max_gap_excluding_first_s",
-        )
-        print(
-            status_messages.status(
-                "Added dynamic_sessions.sample_max_gap_excluding_first_s column.", level="success"
-            )
-        )
-    return True
-
-
-def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
-    """Apply all Baseline dynamic schema migrations in one step."""
-
-    _ensure_db_ops_log_table()
-    schema_before = diagnostics.get_schema_version() or "<unknown>"
-    started_at = datetime.now(UTC)
-    success = False
-    error_text = None
-    try:
-        tier_ok = ensure_dynamic_tier_column(prompt_user=prompt_user)
-        quality_ok = ensure_dynamic_network_quality_column(prompt_user=prompt_user)
-        netstats_ok = ensure_dynamic_netstats_rows_columns(prompt_user=prompt_user)
-        pcap_ok = ensure_dynamic_pcap_columns(prompt_user=prompt_user)
-        sampling_ok = ensure_dynamic_sampling_duration_columns(prompt_user=prompt_user)
-        gap_ok = ensure_dynamic_gap_columns(prompt_user=prompt_user)
-        success = tier_ok and quality_ok and netstats_ok and pcap_ok and sampling_ok and gap_ok
-        target_version = _tier1_schema_version()
-        if success and schema_before != target_version:
-            _record_schema_version(target_version)
-        return success
-    except Exception as exc:
-        error_text = str(exc)
-        raise
-    finally:
-        finished_at = datetime.now(UTC)
-        _log_db_op(
-            operation="tier1_schema_migrations",
-            schema_before=schema_before,
-            schema_after=_tier1_schema_version() if success else (diagnostics.get_schema_version() or schema_before),
-            started_at=started_at,
-            finished_at=finished_at,
-            success=success,
-            error_text=error_text,
-        )
-
-
-def _tier1_schema_version() -> str:
-    return "0.2.6"
-
-
-def _ensure_db_ops_log_table() -> None:
-    sql = """
-        CREATE TABLE IF NOT EXISTS db_ops_log (
-          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-          operation VARCHAR(64) NOT NULL,
-          schema_before VARCHAR(64) DEFAULT NULL,
-          schema_after VARCHAR(64) DEFAULT NULL,
-          tool_version VARCHAR(32) DEFAULT NULL,
-          username VARCHAR(64) DEFAULT NULL,
-          hostname VARCHAR(128) DEFAULT NULL,
-          pid INT DEFAULT NULL,
-          started_at_utc DATETIME DEFAULT NULL,
-          finished_at_utc DATETIME DEFAULT NULL,
-          success TINYINT(1) DEFAULT NULL,
-          error_text TEXT DEFAULT NULL,
-          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (id),
-          KEY idx_db_ops_operation (operation),
-          KEY idx_db_ops_created (created_at)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """
-    core_q.run_sql_write(sql, query_name="db_utils.db_ops_log.ensure")
-
-
-def _record_schema_version(version: str) -> None:
-    if not version:
-        return
-    sql = "INSERT INTO schema_version (version, applied_at_utc) VALUES (%s, %s)"
-    core_q.run_sql_write(
-        sql,
-        (version, datetime.now(UTC)),
-        query_name="db_utils.schema_version.insert",
+    return _ensure_dynamic_tier_column(
+        db_config=db_config,
+        diagnostics=diagnostics,
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        prompt_user=prompt_user,
     )
 
 
-def _log_db_op(
-    *,
-    operation: str,
-    schema_before: str | None,
-    schema_after: str | None,
-    started_at: datetime,
-    finished_at: datetime,
-    success: bool,
-    error_text: str | None,
-) -> None:
-    sql = """
-        INSERT INTO db_ops_log (
-          operation,
-          schema_before,
-          schema_after,
-          tool_version,
-          username,
-          hostname,
-          pid,
-          started_at_utc,
-          finished_at_utc,
-          success,
-          error_text
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """
-    core_q.run_sql_write(
-        sql,
-        (
-            operation,
-            schema_before,
-            schema_after,
-            app_config.APP_VERSION,
-            getpass.getuser(),
-            socket.gethostname(),
-            os.getpid(),
-            started_at,
-            finished_at,
-            1 if success else 0,
-            error_text,
-        ),
-        query_name="db_utils.db_ops_log.insert",
+def ensure_dynamic_network_quality_column(*, prompt_user: bool = True) -> bool:
+    return _ensure_dynamic_network_quality_column(
+        db_config=db_config,
+        diagnostics=diagnostics,
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        prompt_user=prompt_user,
+    )
+
+
+def ensure_dynamic_pcap_columns(*, prompt_user: bool = True) -> bool:
+    return _ensure_dynamic_pcap_columns(
+        db_config=db_config,
+        diagnostics=diagnostics,
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        prompt_user=prompt_user,
+    )
+
+
+def ensure_dynamic_netstats_rows_columns(*, prompt_user: bool = True) -> bool:
+    return _ensure_dynamic_netstats_rows_columns(
+        db_config=db_config,
+        diagnostics=diagnostics,
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        prompt_user=prompt_user,
+    )
+
+
+def ensure_dynamic_sampling_duration_columns(*, prompt_user: bool = True) -> bool:
+    return _ensure_dynamic_sampling_duration_columns(
+        db_config=db_config,
+        diagnostics=diagnostics,
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        prompt_user=prompt_user,
+    )
+
+
+def ensure_dynamic_gap_columns(*, prompt_user: bool = True) -> bool:
+    return _ensure_dynamic_gap_columns(
+        db_config=db_config,
+        diagnostics=diagnostics,
+        core_q=core_q,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        prompt_user=prompt_user,
+    )
+
+
+def ensure_dynamic_tier_migrations(*, prompt_user: bool = True) -> bool:
+    return _ensure_dynamic_tier_migrations(
+        diagnostics=diagnostics,
+        app_config=app_config,
+        core_q=core_q,
+        db_config=db_config,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        prompt_user=prompt_user,
     )
 
 
@@ -1652,12 +782,11 @@ def log_db_op(
     success: bool,
     error_text: str | None,
 ) -> None:
-    """Public wrapper for logging DB operations."""
-    _ensure_db_ops_log_table()
-    _log_db_op(
+    _grouped_log_db_op(
+        app_config=app_config,
+        core_q=core_q,
+        diagnostics=diagnostics,
         operation=operation,
-        schema_before=diagnostics.get_schema_version() or "<unknown>",
-        schema_after=diagnostics.get_schema_version() or "<unknown>",
         started_at=started_at,
         finished_at=finished_at,
         success=success,

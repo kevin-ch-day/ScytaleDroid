@@ -50,14 +50,21 @@ def run_health_summary() -> None:
     """One-screen DB health summary for quick operator checks."""
     print()
     menu_utils.print_header("DB Health Summary")
+    menu_utils.print_hint(
+        "Quick operator snapshot of run ingestion, orphan checks, evidence linkage, and governance presence."
+    )
 
     summary = fetch_health_summary()
     menu_utils.print_section("Run status")
-    print(f"RUNNING (total)   : {summary.running_total if summary.running_total is not None else '—'}")
-    print(f"RUNNING (last 24h): {summary.running_recent if summary.running_recent is not None else '—'}")
-    print(f"OK (last 24h)     : {summary.ok_recent if summary.ok_recent is not None else '—'}")
-    print(f"FAILED (last 24h) : {summary.failed_recent if summary.failed_recent is not None else '—'}")
-    print(f"ABORTED (last 24h): {summary.aborted_recent if summary.aborted_recent is not None else '—'}")
+    menu_utils.print_metrics(
+        [
+            ("RUNNING (total)", summary.running_total if summary.running_total is not None else "—"),
+            ("RUNNING (last 24h)", summary.running_recent if summary.running_recent is not None else "—"),
+            ("OK (last 24h)", summary.ok_recent if summary.ok_recent is not None else "—"),
+            ("FAILED (last 24h)", summary.failed_recent if summary.failed_recent is not None else "—"),
+            ("ABORTED (last 24h)", summary.aborted_recent if summary.aborted_recent is not None else "—"),
+        ]
+    )
 
     menu_utils.print_section("Orphan checks")
     print(
@@ -113,6 +120,9 @@ def run_health_summary() -> None:
 def run_health_checks() -> None:
     print()
     menu_utils.print_header("Data Health Checks")
+    menu_utils.print_hint(
+        "Validate recent static-analysis ingestion, run linkage, scoring coverage, and integrity without changing database state."
+    )
 
     latest_run = fetch_latest_run(run_sql)
     latest_session = fetch_latest_session(run_sql)
@@ -133,10 +143,8 @@ def run_health_checks() -> None:
     session_from_run = (latest_run or {}).get("session_stamp")
     session_stamp = session_from_run or (latest_session or {}).get("session_stamp")
 
-    print(
-        "Ingestion — latest session "
-        f"(session={session_stamp or 'unknown'})"
-    )
+    menu_utils.print_section("Ingestion")
+    menu_utils.print_metrics([("Latest session", session_stamp or "unknown")])
 
     if session_stamp:
         findings_total = scalar(
@@ -239,7 +247,7 @@ def run_health_checks() -> None:
     _run_inventory_health_check()
 
     print()
-    print("Run linkage")
+    menu_utils.print_section("Run Linkage")
     if latest_run:
         run_label = f"run_id={run_id}, pkg={package}, ts={ts_dt or ts_value}"
         _print_status_line("ok", "runs", detail=run_label)
@@ -267,11 +275,11 @@ def run_health_checks() -> None:
         )
 
     print()
-    print("Scoring & coverage")
+    menu_utils.print_section("Scoring & Coverage")
     _render_scoring_checks()
 
     print()
-    print("Integrity")
+    menu_utils.print_section("Integrity")
     _render_integrity_checks(session_stamp)
 
     prompt_utils.press_enter_to_continue()

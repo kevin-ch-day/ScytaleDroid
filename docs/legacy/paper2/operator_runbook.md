@@ -4,7 +4,7 @@ This runbook is for operators collecting and validating the Paper #2 dataset and
 running Phase E ML without drifting the frozen inputs.
 
 Index / context:
-- `docs/paper2/README.md`
+- `docs/legacy/paper2/README.md`
 
 ## 1) During Dynamic Collection (Phase D)
 

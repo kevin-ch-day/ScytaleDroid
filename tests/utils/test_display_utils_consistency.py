@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from scytaledroid.DeviceAnalysis.inventory import progress as inventory_progress
-from scytaledroid.Utils.DisplayUtils import colors, error_panels, severity, summary_cards, table_utils
+from scytaledroid.Utils.DisplayUtils import colors, error_panels, menu_utils, severity, summary_cards, table_utils
 
 
 def test_error_panel_divider_is_rendered_line() -> None:
@@ -48,3 +48,21 @@ def test_summary_card_unknown_style_falls_back(capsys) -> None:
         [summary_cards.summary_item("Key", "Value", value_style="nonexistent_style")],
     )
     assert "Value" in colors.strip(rendered)
+
+
+def test_menu_utils_print_section_and_metrics_use_readable_output(capsys) -> None:
+    menu_utils.print_section("Current settings")
+    menu_utils.print_metrics([("Theme", "blackhat-night"), ("Color output", "on")])
+    out = colors.strip(capsys.readouterr().out)
+    assert "Current settings" in out
+    assert "Theme" in out
+    assert "blackhat-night" in out
+    assert "Color output" in out
+
+
+def test_menu_utils_print_hint_wraps_cleanly(capsys) -> None:
+    menu_utils.print_hint(
+        "Choose a darker high-contrast theme for demos, or use auto to follow the terminal environment."
+    )
+    out = colors.strip(capsys.readouterr().out)
+    assert "Choose a darker high-contrast theme for demos" in out

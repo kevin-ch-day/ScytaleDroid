@@ -161,9 +161,10 @@ Each detector owns a specific concern area and returns a `DetectorResult` meetin
     - `modules/permissions/analysis/capability_signal_classifier.py` — LOC/CAM/MIC/… signals
     - `modules/permissions/analysis/risk_scoring_engine.py` — risk score (3 decimals) + grade (A–F)
   - Renderers:
-    - `modules/permissions/render_postcard.py` — postcard (Risk bar, Score/Grade, High‑signal, Footprint table)
-    - `modules/permissions/render_summary.py` — Risk Summary (Abbr | Score | Grade | D | S | V)
-    - `modules/permissions/render_matrix.py` — Signal & Permission matrices
+    - `modules/permissions/permission_console_rendering.py::render_permission_postcard` — postcard (Risk bar, Score/Grade, High‑signal, Footprint table)
+    - `modules/permissions/permission_console_rendering.py::render_after_run_summary` — Risk Summary (Abbr | Score | Grade | D | S | V)
+    - `modules/permissions/permission_console_rendering.py::render_signal_matrix`
+    - `modules/permissions/permission_console_rendering.py::render_permission_matrix` — Signal & Permission matrices
   Status `[INFO]` with concise notes; secrets never printed.
 - **components.py:** Export posture for activities, services, receivers, and
   shared UID partners, including exported intent filters and namespace overlap

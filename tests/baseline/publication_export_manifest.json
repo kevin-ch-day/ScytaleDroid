@@ -102,5 +102,5 @@
   "description": "Frozen export artifact manifest. Update only with approved drift rationale.",
   "generated_utc": "2026-02-16T18:56:52.644921+00:00",
   "manifest_version": 1,
-  "paper": "paper2"
+  "paper": "publication"
 }

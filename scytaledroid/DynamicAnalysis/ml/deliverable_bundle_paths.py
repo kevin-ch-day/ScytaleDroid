@@ -84,10 +84,24 @@ def output_publication_internal_snapshot_dir(snapshot_id: str) -> Path:
     return output_publication_internal_snapshots_root() / snapshot_id
 
 
+def legacy_output_phase_e_bundle_root() -> Path:
+    return output_internal_root() / "paper2" / "baseline"
+
+
+def existing_phase_e_bundle_root() -> Path:
+    canonical = output_phase_e_bundle_root()
+    if canonical.exists():
+        return canonical
+    legacy = legacy_output_phase_e_bundle_root()
+    if legacy.exists():
+        return legacy
+    return canonical
+
+
 # Internal Phase E baseline bundle (deterministic, used for regression gates).
 def output_phase_e_bundle_root() -> Path:
-    # Keep deterministic Phase E artifacts outside the paper bundle.
-    return output_internal_root() / "paper2" / "baseline"
+    # Keep deterministic Phase E artifacts outside the publication bundle.
+    return output_internal_root() / "publication" / "baseline"
 
 
 def output_phase_e_bundle_figures_dir() -> Path:

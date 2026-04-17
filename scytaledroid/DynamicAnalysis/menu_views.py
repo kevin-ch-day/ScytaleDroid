@@ -9,7 +9,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
-from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
 
@@ -95,18 +95,32 @@ def render_dynamic_menu_overview() -> None:
     )
     freeze_manifest = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
     tracker_state = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
-    menu_utils.print_section("State")
-    print(f"{'Freeze capability':<18} : {capability}")
-    print(f"{'Freeze audit':<18} : {_humanize_code(summary.result, hyphenate_go=True)}")
-    print(f"{'Reason':<18} : {_humanize_code(summary.first_failing_reason)}")
     print(
-        f"{'Evidence packs':<18} : {summary.total_runs} "
-        f"(valid {summary.valid_runs}, invalid {max(int(summary.total_runs) - int(summary.valid_runs), 0)})"
+        summary_cards.format_summary_card(
+            "Dynamic State",
+            [
+                summary_cards.summary_item("Freeze capability", "ENABLED" if summary.can_freeze else "BLOCKED", value_style="success" if summary.can_freeze else "warning"),
+                summary_cards.summary_item("Freeze audit", _humanize_code(summary.result, hyphenate_go=True), value_style="success" if str(summary.result).upper() == "GO" else "warning"),
+                summary_cards.summary_item("Reason", _humanize_code(summary.first_failing_reason), value_style="muted"),
+                summary_cards.summary_item(
+                    "Evidence packs",
+                    f"{summary.total_runs} (valid {summary.valid_runs}, invalid {max(int(summary.total_runs) - int(summary.valid_runs), 0)})",
+                    value_style="accent",
+                ),
+                summary_cards.summary_item("Latest freeze", latest_freeze, value_style="text"),
+            ],
+            subtitle="Freeze readiness, evidence health, and tracker alignment.",
+        )
     )
-    print(f"{'Latest freeze':<18} : {latest_freeze}")
     print()
-    menu_utils.print_section("Evidence")
-    print(f"{'Root':<18} : {_short_path(summary.evidence_root)}")
-    print(f"{'Freeze':<18} : {_short_path(freeze_manifest)}")
-    print(f"{'Tracker':<18} : {_short_path(tracker_state)}")
-
+    print(
+        summary_cards.format_summary_card(
+            "Evidence Roots",
+            [
+                summary_cards.summary_item("Root", _short_path(summary.evidence_root), value_style="muted"),
+                summary_cards.summary_item("Freeze", _short_path(freeze_manifest), value_style="muted"),
+                summary_cards.summary_item("Tracker", _short_path(tracker_state), value_style="muted"),
+            ],
+            footer="Use State summary for per-app tracker vs evidence deltas.",
+        )
+    )

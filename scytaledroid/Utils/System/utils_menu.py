@@ -53,6 +53,10 @@ def utils_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Utilities")
+        menu_utils.print_hint(
+            "Adjust terminal preferences, world clocks, and low-risk maintenance helpers without changing core evidence state."
+        )
+        menu_utils.print_section("Actions")
         spec = MenuSpec(
             items=options,
             show_exit=True,

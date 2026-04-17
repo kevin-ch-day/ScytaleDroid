@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -34,6 +33,7 @@ from . import assembly as _assembly
 from . import manifest_writer as _manifest_writer
 from . import run_writers as _run_writers
 from .dep_export import export_dep_json
+from .finalization_flow import StaticRunFinalizationCallbacks, finalize_persisted_static_run
 from .findings_writer import (
     compute_cvss_base,
     derive_masvs_tag,
@@ -51,6 +51,15 @@ from .static_sections import (
     coerce_severity_counts,
     persist_static_sections,
     persist_storage_surface_data,
+)
+from .stage_writers import (
+    persist_metrics_and_sections_stage as _stage_persist_metrics_and_sections,
+    persist_permission_and_storage_stage as _stage_persist_permission_and_storage,
+)
+from .transaction_flow import (
+    PersistenceRetryPolicy,
+    PersistenceTransactionCallbacks,
+    execute_persistence_transaction,
 )
 from .utils import (
     canonical_decimal_text,
@@ -929,71 +938,18 @@ def _persist_permission_and_storage_stage(
     findings_context: _PreparedFindingsPersistenceContext,
     raise_db_error,
 ) -> None:
-    if findings_context.control_summary:
-        try:
-            persist_masvs_controls(
-                int(run_id),
-                stage_context.package_for_run,
-                findings_context.control_summary,
-            )
-        except Exception as exc:
-            raise_db_error("masvs_controls.write", f"{exc.__class__.__name__}:{exc}")
-    else:
-        log.info(
-            (
-                f"No MASVS control coverage derived for {stage_context.package_for_run}; "
-                f"total_findings={findings_context.total_findings} entries={findings_context.control_entry_count}"
-            ),
-            category="static_analysis",
-        )
-    try:
-        persist_storage_surface_data(
-            stage_context.base_report,
-            stage_context.session_stamp,
-            stage_context.scope_label,
-        )
-    except Exception as exc:
-        raise_db_error("storage_surface.write", f"{exc.__class__.__name__}:{exc}")
-    apk_identifier = safe_int(stage_context.metadata_map.get("apk_id")) if stage_context.metadata_map else None
-    if apk_identifier is None and stage_context.metadata_map:
-        apk_identifier = safe_int(stage_context.metadata_map.get("apkId"))
-    if apk_identifier is None:
-        apk_identifier = safe_int(stage_context.metadata_map.get("android_apk_id"))
-    if apk_identifier is None:
-        apk_identifier = int(run_id)
-
-    permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
-    detector_metrics = getattr(stage_context.base_report, "detector_metrics", None)
-    if isinstance(detector_metrics, Mapping):
-        permission_metrics = detector_metrics.get("permissions_profile")
-        if isinstance(permission_metrics, Mapping):
-            profiles = permission_metrics.get("permission_profiles")
-            if isinstance(profiles, Mapping):
-                permission_profiles_map = profiles
-
-    try:
-        persist_permission_matrix(
-            static_run_id=int(static_run_id) if static_run_id is not None else None,
-            package_name=stage_context.package_for_run,
-            apk_id=apk_identifier,
-            permission_profiles=permission_profiles_map,
-        )
-    except Exception as exc:
-        raise_db_error("permission_matrix.write", f"{exc.__class__.__name__}:{exc}")
-    try:
-        persist_permission_risk(
-            run_id=int(run_id),
-            static_run_id=int(static_run_id) if static_run_id is not None else None,
-            report=stage_context.base_report,
-            package_name=stage_context.package_for_run,
-            session_stamp=stage_context.session_stamp,
-            scope_label=stage_context.scope_label,
-            metrics_bundle=stage_context.metrics_bundle,
-            baseline_payload=stage_context.baseline_payload,
-            permission_profiles=permission_profiles_map,
-        )
-    except Exception as exc:
-        raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
+    _stage_persist_permission_and_storage(
+        run_id=run_id,
+        static_run_id=static_run_id,
+        stage_context=stage_context,
+        findings_context=findings_context,
+        raise_db_error=raise_db_error,
+        persist_masvs_controls=persist_masvs_controls,
+        persist_storage_surface_data=persist_storage_surface_data,
+        persist_permission_matrix=persist_permission_matrix,
+        persist_permission_risk=persist_permission_risk,
+        safe_int=safe_int,
+    )
 
 
 def _persist_metrics_and_sections_stage(
@@ -1007,48 +963,19 @@ def _persist_metrics_and_sections_stage(
     note_db_error,
     raise_db_error,
 ) -> None:
-    try:
-        ok = write_metrics(int(run_id), metrics_context.metrics_payload, static_run_id=static_run_id)
-    except Exception as exc:
-        raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
-    if not ok:
-        raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
-
-    if stage_context.metrics_bundle.contributors:
-        try:
-            ok = write_contributors(int(run_id), stage_context.metrics_bundle.contributors)
-        except Exception as exc:
-            raise_db_error("contributors.write", f"{exc.__class__.__name__}:{exc}")
-        if not ok:
-            raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
-
-    baseline_section = (
-        stage_context.baseline_payload.get("baseline")
-        if isinstance(stage_context.baseline_payload, Mapping)
-        else {}
-    )
-    string_payload = baseline_section.get("string_analysis") if isinstance(baseline_section, Mapping) else {}
-    static_errors, baseline_written, sample_total = _persist_static_sections_wrapper(
-        package_name=stage_context.package_for_run,
-        session_stamp=stage_context.session_stamp,
-        scope_label=stage_context.scope_label,
-        finding_totals=findings_context.persisted_totals,
-        baseline_section=baseline_section if isinstance(baseline_section, Mapping) else {},
-        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
-        manifest=stage_context.manifest_obj,
-        app_metadata=(
-            stage_context.baseline_payload.get("app")
-            if isinstance(stage_context.baseline_payload, Mapping)
-            else {}
-        ),
+    _stage_persist_metrics_and_sections(
         run_id=run_id,
         static_run_id=static_run_id,
+        stage_context=stage_context,
+        metrics_context=metrics_context,
+        findings_context=findings_context,
+        outcome=outcome,
+        note_db_error=note_db_error,
+        raise_db_error=raise_db_error,
+        write_metrics=write_metrics,
+        write_contributors=write_contributors,
+        persist_static_sections_wrapper=_persist_static_sections_wrapper,
     )
-    if baseline_written:
-        outcome.baseline_written = True
-    outcome.string_samples_persisted = sample_total
-    for err in static_errors:
-        note_db_error(err)
 
 
 def _finalize_static_handoff_stage(
@@ -1926,6 +1853,7 @@ def persist_run_summary(
     )
 
     db_errors: list[str] = []
+    failure_state: dict[str, str | None] = {"stage": None}
 
     def _note_db_error(message: str) -> None:
         # Standardize DB persistence blockers so batch mode can display actionable reasons.
@@ -1937,6 +1865,7 @@ def persist_run_summary(
         token = truncate(f"{op}:{reason}", 240)
         nonlocal failure_stage
         failure_stage = op
+        failure_state["stage"] = op
         _note_db_error(token)
         raise RuntimeError(token)
 
@@ -2043,185 +1972,67 @@ def persist_run_summary(
 
     persistence_failed = False
     if not dry_run:
-        cached_schema_version = db_diagnostics.get_schema_version() or "<unknown>"
-        max_txn_attempts = max(1, int(getattr(app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 4) or 4))
-        max_lock_wait_attempts = max(
-            1,
-            int(getattr(app_config, "STATIC_PERSIST_LOCK_WAIT_RETRIES", 2) or 2),
+        policy = PersistenceRetryPolicy(
+            cached_schema_version=db_diagnostics.get_schema_version() or "<unknown>",
+            max_txn_attempts=max(1, int(getattr(app_config, "STATIC_PERSIST_TRANSIENT_RETRIES", 4) or 4)),
+            max_lock_wait_attempts=max(
+                1,
+                int(getattr(app_config, "STATIC_PERSIST_LOCK_WAIT_RETRIES", 2) or 2),
+            ),
+            lock_wait_timeout_s=max(
+                1,
+                int(getattr(app_config, "STATIC_PERSIST_LOCK_WAIT_TIMEOUT_S", 15) or 15),
+            ),
+            retry_backoff_base_s=max(
+                0.0,
+                float(getattr(app_config, "STATIC_PERSIST_RETRY_BACKOFF_BASE_S", 0.35) or 0.35),
+            ),
+            retry_backoff_max_s=0.0,
         )
-        lock_wait_timeout_s = max(
-            1,
-            int(getattr(app_config, "STATIC_PERSIST_LOCK_WAIT_TIMEOUT_S", 15) or 15),
-        )
-        retry_backoff_base_s = max(
-            0.0,
-            float(getattr(app_config, "STATIC_PERSIST_RETRY_BACKOFF_BASE_S", 0.35) or 0.35),
-        )
-        retry_backoff_max_s = max(
-            retry_backoff_base_s,
+        policy.retry_backoff_max_s = max(
+            policy.retry_backoff_base_s,
             float(getattr(app_config, "STATIC_PERSIST_RETRY_BACKOFF_MAX_S", 3.0) or 3.0),
         )
-        attempt = 0
-        while attempt < max_txn_attempts:
-            attempt += 1
-            failure_stage = None
-            db_errors.clear()
-            created_run_id_this_attempt = False
-            created_static_run_id_this_attempt = False
-            outcome.run_id = int(run_id) if run_id is not None else None
-            outcome.static_run_id = static_run_id
-            outcome.baseline_written = False
-            outcome.string_samples_persisted = 0
-            outcome.persistence_retry_count = max(0, attempt - 1)
-            attempt_error_start = len(outcome.errors)
-            try:
-                with database_session() as db:
-                    _apply_mysql_session_lock_wait_timeout(db, lock_wait_timeout_s)
-                    with db.transaction():
-                        outcome.persistence_transaction_state = "in_txn"
-                        bootstrap = _bootstrap_persistence_transaction(
-                            run_id=run_id,
-                            static_run_id=static_run_id,
-                            stage_context=stage_context,
-                            run_context=run_context,
-                            envelope=envelope,
-                            finding_totals=finding_totals,
-                            cached_schema_version=cached_schema_version,
-                            raise_db_error=_raise_db_error,
-                        )
-                        run_id = bootstrap.run_id
-                        static_run_id = bootstrap.static_run_id
-                        created_run_id_this_attempt = bootstrap.created_run_id
-                        created_static_run_id_this_attempt = bootstrap.created_static_run_id
-                        outcome.run_id = int(run_id)
-                        outcome.static_run_id = static_run_id
-
-                        _persist_findings_and_correlations_stage(
-                            run_id=int(run_id),
-                            static_run_id=static_run_id,
-                            stage_context=stage_context,
-                            findings_context=findings_context,
-                            raise_db_error=_raise_db_error,
-                        )
-
-                        if run_id is not None:
-                            _persist_permission_and_storage_stage(
-                                run_id=int(run_id),
-                                static_run_id=static_run_id,
-                                stage_context=stage_context,
-                                findings_context=findings_context,
-                                raise_db_error=_raise_db_error,
-                            )
-
-                        _persist_metrics_and_sections_stage(
-                            run_id=int(run_id),
-                            static_run_id=static_run_id,
-                            stage_context=stage_context,
-                            metrics_context=metrics_context,
-                            findings_context=findings_context,
-                            outcome=outcome,
-                            note_db_error=_note_db_error,
-                            raise_db_error=_raise_db_error,
-                        )
-
-                        if db_errors:
-                            raise RuntimeError(db_errors[-1])
-                handoff_failed = _finalize_static_handoff_stage(
-                    static_run_id=static_run_id,
-                    stage_context=stage_context,
-                    run_context=run_context,
-                    cached_schema_version=cached_schema_version,
-                    outcome=outcome,
-                )
-                persistence_failed = handoff_failed
-                outcome.persistence_transaction_state = "committed"
-                break
-            except Exception as exc:
-                transient = _is_transient_persistence_error(exc)
-                lock_wait = _looks_like_lock_wait_error(exc)
-                db_disconnect = _looks_like_db_disconnect(exc)
-                outcome.persistence_db_disconnect = bool(db_disconnect)
-                outcome.persistence_exception_class = exc.__class__.__name__
-                outcome.persistence_failure_stage = failure_stage
-                outcome.persistence_transaction_state = "rolled_back"
-                outcome.persistence_retry_count = max(0, attempt - 1)
-                lock_retry_budget_exhausted = lock_wait and attempt >= max_lock_wait_attempts
-                if transient and attempt < max_txn_attempts and not lock_retry_budget_exhausted:
-                    if len(outcome.errors) > attempt_error_start:
-                        del outcome.errors[attempt_error_start:]
-                    reset_identity = failure_stage in {"run.create", "static_run.create"}
-                    if reset_identity and created_run_id_this_attempt:
-                        run_id = None
-                    if reset_identity and created_static_run_id_this_attempt:
-                        static_run_id = None
-                    outcome.run_id = int(run_id) if run_id is not None else None
-                    outcome.static_run_id = int(static_run_id) if static_run_id is not None else None
-                    sleep_seconds = min(
-                        retry_backoff_max_s,
-                        retry_backoff_base_s * (2 ** max(0, attempt - 1)),
-                    )
-                    log.warning(
-                        (
-                            "Transient DB failure during static persistence "
-                            f"for {run_package}; retrying full transaction "
-                            f"(attempt={attempt}/{max_txn_attempts}, "
-                            f"lock_wait={int(lock_wait)} "
-                            f"backoff={sleep_seconds:.2f}s): {exc}"
-                        ),
-                        category="static_analysis",
-                    )
-                    try:
-                        time.sleep(sleep_seconds)
-                    except Exception:
-                        pass
-                    continue
-
-                persistence_failed = True
-                retries_used = max(0, attempt - 1)
-                message = (
-                    f"Static persistence transaction failed for {run_package}: {exc} "
-                    f"(retry_count={retries_used} transaction_state=rolled_back "
-                    f"stage={failure_stage or 'unknown'} db_disconnect={int(db_disconnect)} "
-                    f"db_lock_wait={int(lock_wait)})"
-                )
-                log.warning(message, category="static_analysis")
-                if message not in outcome.errors:
-                    outcome.add_error(message)
-                # Best-effort durable failure record (outside the rolled-back transaction).
-                if static_run_id:
-                    try:
-                        record_static_persistence_failure(
-                            static_run_id=int(static_run_id),
-                            stage=failure_stage,
-                            exc_class=exc.__class__.__name__,
-                            exc_message=str(exc),
-                            errors_tail=list(outcome.errors)[-10:],
-                        )
-                    except Exception:
-                        pass
-                    try:
-                        _update_static_run_metadata(
-                            int(static_run_id),
-                            run_class="NON_CANONICAL",
-                            non_canonical_reasons=json.dumps(["PERSISTENCE_ERROR"], ensure_ascii=True),
-                        )
-                    except Exception:
-                        pass
-                    try:
-                        update_static_run_status(
-                            static_run_id=int(static_run_id),
-                            status="FAILED",
-                            ended_at_utc=ended_at_utc,
-                            abort_reason=abort_reason or "persist_error",
-                            abort_signal=abort_signal,
-                        )
-                    except Exception:
-                        pass
-                # Transaction failed: scientific rows are rolled back and no run_id is authoritative.
-                static_run_id = None
-                outcome.static_run_id = None
-                break
-        outcome.persistence_failed = persistence_failed
+        callbacks = PersistenceTransactionCallbacks(
+            database_session=database_session,
+            apply_lock_wait_timeout=_apply_mysql_session_lock_wait_timeout,
+            bootstrap_persistence_transaction=_bootstrap_persistence_transaction,
+            persist_findings_and_correlations_stage=_persist_findings_and_correlations_stage,
+            persist_permission_and_storage_stage=_persist_permission_and_storage_stage,
+            persist_metrics_and_sections_stage=_persist_metrics_and_sections_stage,
+            finalize_static_handoff_stage=_finalize_static_handoff_stage,
+            is_transient_persistence_error=_is_transient_persistence_error,
+            looks_like_lock_wait_error=_looks_like_lock_wait_error,
+            looks_like_db_disconnect=_looks_like_db_disconnect,
+            record_static_persistence_failure=record_static_persistence_failure,
+            update_static_run_metadata=_update_static_run_metadata,
+            update_static_run_status=update_static_run_status,
+        )
+        txn_result = execute_persistence_transaction(
+            run_package=run_package,
+            run_id=run_id,
+            static_run_id=static_run_id,
+            stage_context=stage_context,
+            run_context=run_context,
+            envelope=envelope,
+            finding_totals=finding_totals,
+            findings_context=findings_context,
+            metrics_context=metrics_context,
+            outcome=outcome,
+            ended_at_utc=ended_at_utc,
+            abort_reason=abort_reason,
+            abort_signal=abort_signal,
+            policy=policy,
+            callbacks=callbacks,
+            db_errors=db_errors,
+            failure_state=failure_state,
+            note_db_error=_note_db_error,
+            raise_db_error=_raise_db_error,
+        )
+        run_id = txn_result.run_id
+        static_run_id = txn_result.static_run_id
+        failure_stage = failure_state.get("stage")
+        persistence_failed = txn_result.persistence_failed
     else:
         if findings_context.finding_rows:
             sample = findings_context.finding_rows[0] if findings_context.finding_rows else {}
@@ -2251,177 +2062,30 @@ def persist_run_summary(
         category="static_analysis",
     )
 
-    if static_run_id and not dry_run:
-        dep_path = export_dep_json(static_run_id)
-        if dep_path:
-            log.info(
-                f"DEP snapshot written for static_run_id={static_run_id}",
-                category="static_analysis",
-            )
-
-    if static_run_id and not dry_run:
-        # Default static CLI runs are not paper-grade unless explicitly requested.
-        # Enforcing canonical single-row invariants in routine exploratory runs
-        # incorrectly marks otherwise successful persistence as FAILED.
-        if paper_grade_requested is None:
-            paper_grade_requested = False
-
-        if persistence_failed:
-            run_status = "FAILED"
-        # Canonical enforcement must check the *session_label* that was actually written for this run.
-        # session_stamp may differ (e.g., auto-suffix collisions), and using the stamp here can
-        # incorrectly fail PAPER_GRADE runs with "found 0 canonicals".
-        enforced_session_label: str | None = None
-        if static_run_id:
-            try:
-                row = core_q.run_sql(
-                    "SELECT session_label FROM static_analysis_runs WHERE id=%s",
-                    (static_run_id,),
-                    fetch="one",
-                )
-                if row and row[0]:
-                    enforced_session_label = str(row[0])
-            except Exception:
-                enforced_session_label = None
-        if not enforced_session_label:
-            enforced_session_label = session_stamp
-
-        if (
-            not persistence_failed
-            and static_run_id
-            and canonical_action in {"first_run", "replace"}
-        ):
-            try:
-                row = core_q.run_sql(
-                    "SELECT run_class FROM static_analysis_runs WHERE id=%s",
-                    (static_run_id,),
-                    fetch="one",
-                )
-                run_class_value = str(row[0] or "").upper() if row else ""
-            except Exception:
-                run_class_value = ""
-            if run_class_value == "CANONICAL":
-                try:
-                    _maybe_set_canonical_static_run(
-                        session_label=enforced_session_label or session_stamp,
-                        static_run_id=int(static_run_id),
-                        canonical_action=canonical_action,
-                    )
-                except Exception:
-                    # Canonical marker update is best-effort here; enforcement below
-                    # remains the source of truth for paper-grade singleton checks.
-                    pass
-
-        if not persistence_failed and enforced_session_label and paper_grade_requested:
-            # Canonical singleton applies only to true single-app sessions.
-            # Group/profile sessions intentionally persist multiple static rows under one session label.
-            # static_analysis_runs does not carry package_name directly, so resolve scope via app_versions/apps.
-            # Fail safe toward "group scope" if the scope cannot be resolved reliably.
-            is_group_scope = False
-            scope_label_norm = str(scope_label or "").strip().lower()
-            package_norm = str(package_for_run or "").strip().lower()
-            # Fast-path: if scope label is not the package name, this is not a single-app session.
-            # Example: profile/group scope labels like "Research Dataset Alpha" or "All apps".
-            if scope_label_norm and package_norm and scope_label_norm != package_norm:
-                is_group_scope = True
-            try:
-                if not is_group_scope:
-                    row = core_q.run_sql(
-                        """
-                        SELECT
-                          COUNT(*) AS run_rows,
-                          COUNT(DISTINCT sar.app_version_id) AS distinct_app_versions,
-                          COUNT(DISTINCT a.package_name) AS distinct_packages
-                        FROM static_analysis_runs sar
-                        LEFT JOIN app_versions av ON av.id = sar.app_version_id
-                        LEFT JOIN apps a ON a.id = av.app_id
-                        WHERE sar.session_label=%s
-                        """,
-                        (enforced_session_label,),
-                        fetch="one",
-                    )
-                    run_rows = int(row[0] or 0) if row else 0
-                    distinct_app_versions = int(row[1] or 0) if row else 0
-                    distinct_packages = int(row[2] or 0) if row else 0
-                    is_group_scope = bool(
-                        distinct_packages > 1
-                        or distinct_app_versions > 1
-                        # If joins are unavailable but multiple rows exist, avoid false singleton hard-fail.
-                        or (run_rows > 1 and distinct_packages == 0 and distinct_app_versions == 0)
-                    )
-            except Exception:
-                # Fail-safe: never hard-fail canonical enforcement when scope
-                # cannot be reliably resolved from metadata.
-                is_group_scope = True
-
-            if is_group_scope:
-                log.info(
-                    f"Skipping canonical singleton enforcement for group scope session_label={enforced_session_label}",
-                    category="static_analysis",
-                )
-            else:
-                try:
-                    row = core_q.run_sql(
-                        """
-                        SELECT COUNT(*)
-                        FROM static_analysis_runs
-                        WHERE session_label=%s AND is_canonical=1
-                        """,
-                        (enforced_session_label,),
-                        fetch="one",
-                    )
-                    canonical_count = int(row[0] or 0) if row else 0
-                except Exception:
-                    canonical_count = 0
-                if canonical_count != 1:
-                    outcome.canonical_failed = True
-                    run_status = "FAILED"
-                    message = (
-                        "canonical_enforcement_failed: expected exactly one canonical row "
-                        f"for session_label={enforced_session_label}, found {canonical_count}."
-                    )
-                    log.warning(message, category="static_analysis")
-                    outcome.add_error(message)
-
-        # Keep static_analysis_runs.findings_total consistent with persisted findings.
-        # This value is used by DB health summaries and run listings; leaving it at 0
-        # makes completed runs look empty even when static_findings rows exist.
-        total_findings = int(outcome.persisted_findings)
-        try:
-            core_q.run_sql(
-                "UPDATE static_analysis_runs SET findings_total=%s WHERE id=%s",
-                (total_findings, static_run_id),
-            )
-        except Exception:
-            # Never fail the run due to a rollup write; the per-finding rows are authoritative.
-            pass
-
-        if static_run_id and normalize_run_status(run_status) != "COMPLETED":
-            failure_reasons = ["RUN_STATUS_FAILED"]
-            if persistence_failed:
-                failure_reasons.append("PERSISTENCE_ERROR")
-            try:
-                _update_static_run_metadata(
-                    int(static_run_id),
-                    run_class="NON_CANONICAL",
-                    non_canonical_reasons=json.dumps(
-                        sorted(set(failure_reasons)),
-                        ensure_ascii=True,
-                    ),
-                )
-            except Exception as exc:
-                outcome.add_error(
-                    f"db_write_failed:static_run.classification_update:{exc.__class__.__name__}:{exc}"
-                )
-
-        update_static_run_status(
-            static_run_id=static_run_id,
-            status=normalize_run_status(run_status),
-            ended_at_utc=ended_at_utc,
-            abort_reason=abort_reason,
-            abort_signal=abort_signal,
-        )
-        # Manifest publication is deferred until artifacts are registered.
+    run_status = finalize_persisted_static_run(
+        static_run_id=static_run_id,
+        dry_run=dry_run,
+        package_for_run=package_for_run,
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        run_package=run_package,
+        run_status=run_status,
+        paper_grade_requested=paper_grade_requested,
+        canonical_action=canonical_action,
+        persistence_failed=persistence_failed,
+        outcome=outcome,
+        ended_at_utc=ended_at_utc,
+        abort_reason=abort_reason,
+        abort_signal=abort_signal,
+        callbacks=StaticRunFinalizationCallbacks(
+            run_sql=core_q.run_sql,
+            export_dep_json=export_dep_json,
+            maybe_set_canonical_static_run=_maybe_set_canonical_static_run,
+            update_static_run_metadata=_update_static_run_metadata,
+            update_static_run_status=update_static_run_status,
+            normalize_run_status=normalize_run_status,
+        ),
+    )
 
     return outcome
 

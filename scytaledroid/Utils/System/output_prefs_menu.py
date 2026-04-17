@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, ui_prefs
+from scytaledroid.Utils.DisplayUtils import (
+    colors,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    summary_cards,
+    ui_prefs,
+)
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.DisplayUtils.theme_preview import print_theme_preview
 
@@ -14,14 +21,35 @@ def output_prefs_menu() -> None:
         print()
         menu_utils.print_header("Output Preferences")
         current = prefs.get()
-        menu_utils.print_section("Current settings")
-        print(f"  Verbose:           {'on' if current.verbose else 'off'}")
-        print(f"  Analytics detail:  {'on' if current.analytics_detail else 'off'}")
-        print(f"  String samples:    {current.string_max_samples}")
-        print(f"  Endpoints panel:   cleartext-only={'on' if current.cleartext_only else 'off'}")
-        print(f"  Color output:      {'on' if ui_prefs.use_color() else 'off'}")
-        print(f"  Unicode symbols:   {'on' if ui_prefs.use_unicode() else 'off'}")
-        print(f"  Theme:             {ui_prefs.get_theme()}")
+        print(
+            summary_cards.format_summary_card(
+                "Current settings",
+                [
+                    summary_cards.summary_item("Verbose", "on" if current.verbose else "off", value_style="accent" if current.verbose else "muted"),
+                    summary_cards.summary_item(
+                        "Analytics detail",
+                        "on" if current.analytics_detail else "off",
+                        value_style="accent" if current.analytics_detail else "muted",
+                    ),
+                    summary_cards.summary_item("String samples", current.string_max_samples, value_style="accent"),
+                    summary_cards.summary_item(
+                        "Endpoints panel",
+                        f"cleartext-only={'on' if current.cleartext_only else 'off'}",
+                        value_style="warning" if current.cleartext_only else "muted",
+                    ),
+                    summary_cards.summary_item("Color output", "on" if ui_prefs.use_color() else "off", value_style="success" if ui_prefs.use_color() else "muted"),
+                    summary_cards.summary_item(
+                        "Unicode symbols",
+                        "on" if ui_prefs.use_unicode() else "off",
+                        value_style="success" if ui_prefs.use_unicode() else "muted",
+                    ),
+                    summary_cards.summary_item("Theme", ui_prefs.get_theme(), value_style="accent"),
+                ],
+                subtitle="Process-local CLI presentation settings",
+                footer="Changes apply to the current session immediately.",
+            )
+        )
+        print()
 
         options = [
             ("1", "Toggle verbose mode", None),
@@ -78,6 +106,9 @@ def _select_theme() -> None:
     print()
     menu_utils.print_header("Choose Theme")
     print(status_messages.status(f"Current theme: {current_theme}", level="info"))
+    menu_utils.print_hint(
+        "Choose a darker high-contrast theme for demos, or use auto to follow the terminal environment."
+    )
     menu_utils.render_menu(MenuSpec(items=options, show_exit=True))
 
     choice = prompt_utils.get_choice(

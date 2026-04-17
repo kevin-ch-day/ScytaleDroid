@@ -685,12 +685,12 @@ def ingest_publication_bundle_to_db(
 
     # Ensure labels and ordering are populated (avoid scattered JSON maps).
     # Canonical DB display_name should remain the full product name; publication shortening
-    # is stored under app_display_aliases (alias_key='paper2').
+    # is stored under app_display_aliases (alias_key='publication').
     try:
         contracts = load_publication_contracts(fail_closed=True)
         upsert_display_names(contracts.display_name_by_package, overwrite=False)
-        upsert_display_aliases("paper2", contracts.display_name_by_package, overwrite=True)
-        upsert_ordering("paper2", contracts.package_order)
+        upsert_display_aliases("publication", contracts.display_name_by_package, overwrite=True)
+        upsert_ordering("publication", contracts.package_order)
     except Exception:
         pass
 

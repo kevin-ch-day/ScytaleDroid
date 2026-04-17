@@ -275,15 +275,28 @@ def print_hint(message: str, *, icon: str | None = None) -> None:
     if not text:
         return
 
-    prefix = icon.strip() if icon else "-"
-    print(f"{prefix} {text}")
+    prefix = icon.strip() if icon else ("→" if not use_ascii_ui() else "->")
+    palette = colors.get_palette()
+    prefix_text = colors.apply(prefix, palette.hint, bold=True)
+    body_width = max(20, min(get_terminal_width(), 100) - 4)
+    wrapped = _wrap_text(text, body_width)
+    for index, line in enumerate(wrapped):
+        leader = f"{prefix_text} " if index == 0 else "  "
+        print(f"{leader}{colors.apply(line, palette.hint)}")
 
 
 def print_metrics(metrics: Sequence[tuple[str, object]]) -> None:
     """Display key metrics as a short bulleted list."""
 
-    for label, value in metrics:
-        print(f"- {label}: {value}")
+    palette = colors.get_palette()
+    valid_metrics = [(str(label), value) for label, value in metrics]
+    if not valid_metrics:
+        return
+    max_label = max((len(label) for label, _ in valid_metrics), default=0)
+    for label, value in valid_metrics:
+        label_text = colors.apply(label.ljust(max_label), palette.muted, bold=True)
+        value_text = colors.apply(str(value), palette.accent, bold=True)
+        print(f"{label_text} : {value_text}")
 
 
 def print_menu(
@@ -559,9 +572,9 @@ def print_section(title: str) -> None:
     if not heading:
         return
 
-    underline = "-" * len(heading)
-    print(heading)
-    print(underline)
+    palette = colors.get_palette()
+    print(colors.apply(heading, palette.banner_primary, bold=True))
+    print(text_blocks.divider(width=max(4, len(heading)), style="divider"))
 
 
 __all__ = [

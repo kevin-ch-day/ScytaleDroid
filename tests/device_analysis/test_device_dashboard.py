@@ -122,9 +122,9 @@ def test_print_device_details_shows_moved_pipeline_and_evidence_blocks(monkeypat
     assert "Battery" in out
     assert "Root access" in out
     assert "Inventory and Harvest" in out
-    assert "Status       : FRESH | Last sync : 14 Hrs 39 Mins ago | Packages : 546" in out
-    assert "Inventory    : inventoried 546 | in scope 546 | eligible 117" in out
-    assert "Harvest      : scheduled 117 | harvested 117 | persisted 117" in out
+    assert "Status       : FRESH | Last sync : 14h 39m ago | Packages : 546" in out
+    assert "Inventory    : 546 inventoried | 546 in scope | 117 eligible" in out
+    assert "Harvest      : 117 scheduled | 117 harvested | 117 persisted" in out
     assert "Blocked      : 411 policy | 18 scope" in out
     assert "Evidence and Paths" in out
     assert "Latest harvest  : 20260416" in out

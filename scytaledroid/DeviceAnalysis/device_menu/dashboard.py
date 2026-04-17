@@ -22,6 +22,7 @@ from scytaledroid.Utils.DisplayUtils import (
     colors,
     error_panels,
     menu_utils,
+    status_messages,
     table_utils,
     text_blocks,
 )
@@ -116,6 +117,44 @@ def _device_count_badge(count: int) -> str:
     label = f"{count} device{'s' if count != 1 else ''}"
     tone = "success" if count else "warning"
     return _status_badge(label.upper(), tone)
+
+
+def _styled_summary_value(value: object, *, tone: str = "text", bold: bool = True) -> str:
+    text = _format_summary_value(value)
+    palette = colors.get_palette()
+    style = getattr(palette, tone, palette.text)
+    return colors.apply(text, style, bold=bold)
+
+
+def _styled_count_phrase(count: object, noun: str, *, tone: str = "text") -> str:
+    text = f"{_format_summary_value(count)} {noun}"
+    palette = colors.get_palette()
+    style = getattr(palette, tone, palette.text)
+    return colors.apply(text, style, bold=True)
+
+
+def _inventory_status_text(status_label: str) -> str:
+    tone = "success"
+    if status_label == "STALE":
+        tone = "warning"
+    elif status_label not in {"FRESH", "STALE"}:
+        tone = "muted"
+    return _styled_summary_value(status_label, tone=tone)
+
+
+def _evidence_alignment_tone(
+    *,
+    latest_harvest: dict[str, object] | None,
+    inventory_snapshot_id: object,
+) -> str:
+    if not latest_harvest:
+        return "muted"
+    harvest_snapshot_id = latest_harvest.get("snapshot_id")
+    if harvest_snapshot_id is None:
+        return "warning"
+    if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
+        return "success"
+    return "warning"
 
 
 # -------------------------
@@ -215,17 +254,20 @@ def _device_table_rows(
 
 
 def _render_active_device_summary(details: dict[str, str | None]) -> None:
-    print("Device")
-    print("------")
+    print(colors.apply("Device", colors.style("header"), bold=True))
+    print(text_blocks.divider(width=6, style="divider"))
     model = prettify_model(details.get("model") or details.get("device"))
     serial = details.get("serial") or "Unknown"
     identity = f"{model} ({serial})" if model != "Unknown" else serial
-    print(identity)
+    print(colors.apply(identity, colors.style("banner_primary"), bold=True))
     summary_bits = [
-        prettify_manufacturer(details.get("manufacturer") or details.get("brand")),
-        format_android_release(details),
-        details.get("device_type") or "Unknown",
-        colors.strip(_root_badge(details.get("is_rooted"))),
+        colors.apply(
+            prettify_manufacturer(details.get("manufacturer") or details.get("brand")),
+            colors.style("muted"),
+        ),
+        colors.apply(format_android_release(details), colors.style("accent"), bold=True),
+        colors.apply(details.get("device_type") or "Unknown", colors.style("text")),
+        _root_badge(details.get("is_rooted")),
     ]
     print(" | ".join(bit for bit in summary_bits if bit))
 
@@ -543,37 +585,42 @@ def _render_compact_status(
     )
 
     print()
-    print("Summary")
-    print("-------")
+    print(colors.apply("Summary", colors.style("header"), bold=True))
+    print(text_blocks.divider(width=7, style="divider"))
     print(
-        f"{'Inventory':<12} : {status_label} | "
-        f"{_format_summary_value(pkg_count)} packages | "
-        f"{age_display} ago"
+        f"{'Inventory':<12} : {_inventory_status_text(status_label)} | "
+        f"{_styled_count_phrase(pkg_count, 'packages', tone='accent')} | "
+        f"{colors.apply(f'{age_display} ago', colors.style('muted'))}"
     )
     print(
-        f"{'Harvest':<12} : {_format_summary_value(persisted_count, fallback='0')} persisted | "
-        f"{_format_summary_value(blocked_policy, fallback='0')} policy blocked | "
-        f"{_format_summary_value(blocked_scope, fallback='0')} scope blocked"
+        f"{'Harvest':<12} : {_styled_count_phrase(persisted_count, 'persisted', tone='success')} | "
+        f"{_styled_count_phrase(blocked_policy, 'policy blocked', tone='blocked')} | "
+        f"{_styled_count_phrase(blocked_scope, 'scope blocked', tone='warning')}"
     )
-    print(f"{'Evidence':<12} : {evidence_alignment}")
+    print(
+        f"{'Evidence':<12} : "
+        f"{colors.apply(evidence_alignment, colors.style(_evidence_alignment_tone(latest_harvest=latest_harvest, inventory_snapshot_id=inventory_snapshot_id)), bold=True)}"
+    )
 
     print()
-    print("Next Step")
-    print("---------")
+    print(colors.apply("Next Step", colors.style("header"), bold=True))
+    print(text_blocks.divider(width=9, style="divider"))
     print(
-        _summary_next_step(
+        status_messages.highlight(
+            _summary_next_step(
             inventory_status=status_label,
             inventory_snapshot_id=inventory_snapshot_id,
             harvest_snapshot_id=harvest_snapshot_id,
             has_harvest=bool(latest_harvest),
+            )
         )
     )
 
 
 def _render_grouped_actions(options: list[menu_utils.MenuOption]) -> None:
     print()
-    print("Actions")
-    print("-------")
+    print(colors.apply("Actions", colors.style("header"), bold=True))
+    print(text_blocks.divider(width=7, style="divider"))
     ordered = sorted(options, key=lambda option: int(option.key) if option.key.isdigit() else 999)
     menu_utils.print_menu(
         ordered,
@@ -593,66 +640,66 @@ def print_device_details(
 
     _render_active_device_summary(active_details)
     print()
-    print("Device Capability")
-    print("-----------------")
-    print(f"{'Wi-Fi':<12} : {format_wifi_state(active_details.get('wifi_state'))}")
-    print(f"{'Battery':<12} : {format_battery(active_details)}")
+    print(colors.apply("Device Capability", colors.style("header"), bold=True))
+    print(text_blocks.divider(width=17, style="divider"))
+    print(f"{'Wi-Fi':<12} : {colors.apply(format_wifi_state(active_details.get('wifi_state')), colors.style('info'), bold=True)}")
+    print(f"{'Battery':<12} : {colors.apply(format_battery(active_details), colors.style('accent'), bold=True)}")
     print(f"{'Root access':<12} : {_root_badge(active_details.get('is_rooted'))}")
 
     if not inventory_metadata:
         return
 
     status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
-    age_display = getattr(inventory_metadata, "age_display", None) or "unknown"
+    age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
     pkg_count = getattr(inventory_metadata, "package_count", None)
     serial = active_details.get("serial") if isinstance(active_details, dict) else None
     pipeline = _compute_pipeline_state(serial)
     latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
 
     print()
-    print("Inventory and Harvest")
-    print("---------------------")
+    print(colors.apply("Inventory and Harvest", colors.style("header"), bold=True))
+    print(text_blocks.divider(width=21, style="divider"))
     print(
-        f"{'Status':<12} : {status_label} | "
-        f"Last sync : {age_display} ago | "
-        f"Packages : {pkg_count if isinstance(pkg_count, int) else '—'}"
+        f"{'Status':<12} : {_inventory_status_text(status_label)} | "
+        f"Last sync : {colors.apply(f'{age_display} ago', colors.style('muted'))} | "
+        f"Packages : {_styled_summary_value(pkg_count if isinstance(pkg_count, int) else '—', tone='accent')}"
     )
     print(
-        f"{'Inventory':<12} : inventoried {_format_summary_value(pipeline.get('inventoried'))} | "
-        f"in scope {_format_summary_value(pipeline.get('in_scope'))} | "
-        f"eligible {_format_summary_value(pipeline.get('policy_eligible'))}"
+        f"{'Inventory':<12} : {_styled_count_phrase(pipeline.get('inventoried'), 'inventoried', tone='accent')} | "
+        f"{_styled_count_phrase(pipeline.get('in_scope'), 'in scope', tone='text')} | "
+        f"{_styled_count_phrase(pipeline.get('policy_eligible'), 'eligible', tone='success')}"
     )
     print(
-        f"{'Harvest':<12} : scheduled {_format_summary_value(pipeline.get('scheduled'))} | "
-        f"harvested {_format_summary_value(pipeline.get('harvested'))} | "
-        f"persisted {_format_summary_value(pipeline.get('persisted'))}"
+        f"{'Harvest':<12} : {_styled_count_phrase(pipeline.get('scheduled'), 'scheduled', tone='accent')} | "
+        f"{_styled_count_phrase(pipeline.get('harvested'), 'harvested', tone='info')} | "
+        f"{_styled_count_phrase(pipeline.get('persisted'), 'persisted', tone='success')}"
     )
     print(
-        f"{'Blocked':<12} : {_format_summary_value(pipeline.get('blocked_policy'), fallback='0')} policy | "
-        f"{_format_summary_value(pipeline.get('blocked_scope'), fallback='0')} scope"
+        f"{'Blocked':<12} : {_styled_count_phrase(pipeline.get('blocked_policy'), 'policy', tone='blocked')} | "
+        f"{_styled_count_phrase(pipeline.get('blocked_scope'), 'scope', tone='warning')}"
     )
 
     if isinstance(latest_harvest, dict):
         session_label = latest_harvest.get("session_label") or "unknown"
         print()
-        print("Evidence and Paths")
-        print("------------------")
-        print(f"{'Latest harvest':<15} : {session_label}")
+        print(colors.apply("Evidence and Paths", colors.style("header"), bold=True))
+        print(text_blocks.divider(width=18, style="divider"))
+        print(f"{'Latest harvest':<15} : {colors.apply(str(session_label), colors.style('accent'), bold=True)}")
         harvest_snapshot_id = latest_harvest.get("snapshot_id")
         inventory_snapshot_id = pipeline.get("inventory_snapshot_id")
         if harvest_snapshot_id is not None:
             if harvest_snapshot_id == inventory_snapshot_id:
-                print(f"{'Snapshot link':<15} : inventory snapshot {harvest_snapshot_id}")
-                print(f"{'Alignment':<15} : current")
+                print(f"{'Snapshot link':<15} : {colors.apply(f'inventory snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}")
+                print(f"{'Alignment':<15} : {colors.apply('current', colors.style('success'), bold=True)}")
             else:
-                print(f"{'Snapshot link':<15} : harvest snapshot {harvest_snapshot_id}")
-                print(f"{'Alignment':<15} : stale vs latest inventory")
+                print(f"{'Snapshot link':<15} : {colors.apply(f'harvest snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}")
+                print(f"{'Alignment':<15} : {colors.apply('stale vs latest inventory', colors.style('warning'), bold=True)}")
         artifacts_root = latest_harvest.get("artifacts_root")
         receipts_root = latest_harvest.get("receipts_root")
         if artifacts_root:
-            print(f"{'Artifacts root':<15} : {artifacts_root}")
+            print(f"{'Artifacts root':<15} : {colors.apply(str(artifacts_root), colors.style('muted'))}")
         if receipts_root:
-            print(f"{'Receipts root':<15} : {receipts_root}")
+            print(f"{'Receipts root':<15} : {colors.apply(str(receipts_root), colors.style('muted'))}")
 
 
 def build_device_summaries(

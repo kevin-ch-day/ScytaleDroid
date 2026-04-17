@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.menus import health_checks
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .menu_actions import (
@@ -65,12 +65,19 @@ def database_menu() -> None:
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
         expected_schema = "0.2.6"
         menu_utils.print_header("Database Tools")
+        menu_utils.print_hint(
+            "Check schema readiness, integrity, governance state, and database-backed maintenance tasks."
+        )
+        menu_utils.print_section("Database State")
+        menu_utils.print_metrics(
+            [
+                ("Schema", schema_ver),
+                ("Baseline", expected_schema),
+            ]
+        )
         if schema_ver != expected_schema and schema_ver != "<unknown>":
-            print(f"Schema: {schema_ver} (baseline expects {expected_schema}) [OUTDATED]")
-            print("Tip: Run option (1) Apply schema updates")
-        else:
-            print(f"Schema: {schema_ver}")
-        print()
+            print(status_messages.status(f"Schema baseline mismatch: expected {expected_schema}.", level="warn"))
+            menu_utils.print_hint("Run option 1 to apply schema updates before DB-backed workflows.")
 
         menu_utils.print_section("Readiness & Integrity")
         menu_utils.render_menu(

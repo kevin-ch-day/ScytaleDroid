@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scytaledroid.DynamicAnalysis.services import dataset_run_state as state_service
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.state_contract]
 
 
 def _tracker_path(tmp_path: Path) -> Path:

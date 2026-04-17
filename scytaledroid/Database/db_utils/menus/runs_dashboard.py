@@ -13,6 +13,9 @@ from .sql_helpers import coerce_datetime, format_session_stamp
 def show_recent_runs_dashboard(limit: int = 5) -> None:
     print()
     menu_utils.print_header("Recent Runs Dashboard")
+    menu_utils.print_hint(
+        "Review the most recent persisted runs with scoring, findings, string summaries, and permission audit snapshots."
+    )
 
     runs = _fetch_recent_runs(limit)
     if runs is None:
@@ -56,7 +59,7 @@ def _render_run_entry(run: dict[str, Any]) -> None:
         f"Run #{run_id}  {package}  v{version_name}  "
         f"target={target_sdk or '—'}  {ts_dt or ts_value}"
     )
-    print(header)
+    menu_utils.print_section(header)
 
     total_points = run.get("total_points")
     total_cap = run.get("total_cap")

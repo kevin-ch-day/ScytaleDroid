@@ -18,6 +18,10 @@ def run_query_menu() -> None:
     while True:
         print()
         menu_utils.print_header("Curated Read-only Queries")
+        menu_utils.print_hint(
+            "Inspect persisted static-analysis summaries and harvested artifact records without mutating database state."
+        )
+        menu_utils.print_section("Actions")
 
         options: Sequence[tuple[str, str, str]] = (
             ("1", "Latest session snapshot", "Show most recent session stamp and table counts."),
@@ -67,9 +71,13 @@ def show_latest_session() -> None:
     session_stamp = session["session_stamp"]
     created_at = coerce_datetime(session.get("created_at"))
     package = session.get("package_name")
-    print(f"Session stamp : {session_stamp}")
-    print(f"Package       : {package or '—'}")
-    print(f"Created at    : {created_at or session.get('created_at')}")
+    menu_utils.print_metrics(
+        [
+            ("Session stamp", session_stamp),
+            ("Package", package or "—"),
+            ("Created at", created_at or session.get("created_at")),
+        ]
+    )
     print()
 
     _print_session_counts(session_stamp)
@@ -202,9 +210,13 @@ def _print_session_counts(session_stamp: str) -> None:
         print(status_messages.status("No matching session found.", level="warn"))
         return
 
-    print(f"Static run id : {audit.static_run_id}")
-    print(f"Run id        : {audit.run_id or '—'}")
-    print(f"Scope label   : {audit.scope_label or '—'}")
+    menu_utils.print_metrics(
+        [
+            ("Static run id", audit.static_run_id),
+            ("Run id", audit.run_id or "—"),
+            ("Scope label", audit.scope_label or "—"),
+        ]
+    )
     print()
 
     table_rows: list[list[str]] = []

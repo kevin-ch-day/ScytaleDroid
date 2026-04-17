@@ -7,6 +7,9 @@ import pytest
 from scytaledroid.Publication.canonical_bundle_writer import write_canonical_publication_directory
 
 
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
+
+
 def test_bundle_writer_warns_on_optional_snapshot_tex_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     # Minimal baseline bundle root (not used by this optional snapshot branch).
     baseline_root = tmp_path / "baseline"

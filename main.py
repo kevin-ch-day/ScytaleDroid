@@ -6,14 +6,12 @@ import argparse
 import os
 import sys
 from collections.abc import Callable
-from datetime import datetime
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-from scytaledroid.Utils.LoggingUtils.logging_core import LOG_DIR
 from scytaledroid.Utils.System.world_clock.display import (
     ClockSnapshot,
     describe_timezone,
@@ -135,12 +133,16 @@ def main_menu() -> None:
             )
             print()
         menu_utils.print_header("Main Menu")
+        menu_utils.print_hint(
+            "Choose a workflow stage."
+        )
         spec = MenuSpec(
             items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],
             default=None,
             exit_label="Exit",
             show_exit=True,
             show_descriptions=False,
+            compact=True,
         )
         menu_utils.render_menu(spec)
 
@@ -155,16 +157,7 @@ def main_menu() -> None:
 
         if choice == "0":
             log.info("Application shutting down", category="application")
-            shutdown_time = datetime.now().astimezone().strftime("%-m/%-d/%Y %-I:%M %p")
-            status_messages.print_strip(
-                "Session End",
-                [
-                    ("Time", shutdown_time),
-                    ("Logs", str(LOG_DIR)),
-                ],
-                width=70,
-            )
-            status_messages.print_status("Goodbye!", level="info")
+            print("Exiting ScytaleDroid.")
             break
 
         if choice.lower() == "h" and status_snapshot.get("allow_copy_freeze_hash"):
@@ -289,37 +282,53 @@ def _print_tier1_status_banner() -> dict[str, object]:
 
     # Loud, impossible-to-miss banner (PM acceptance criteria).
     if mode == "paper":
-        banner = f"Mode: FREEZE ({lock_label}) | Freeze: {freeze_short} | Audit: {audit}"
-        print(status_messages.status(banner, level="success" if locked else "warn"))
+        print(
+            summary_cards.format_summary_card(
+                "Freeze Mode",
+                [
+                    summary_cards.summary_item("Mode", lock_label, value_style="success" if locked else "warning"),
+                    summary_cards.summary_item("Freeze", freeze_short, value_style="accent"),
+                    summary_cards.summary_item("Audit", audit, value_style="success" if audit == "GO" else "warning"),
+                    summary_cards.summary_item("Quota", quota_label, value_style="accent"),
+                    summary_cards.summary_item("Publication", "present" if pub_ready else "missing", value_style="success" if pub_ready else "warning"),
+                ],
+                subtitle="Archive/export mode is anchored to a validated evidence freeze.",
+                footer=f"Output root: {pub_root}",
+            )
+        )
         counts = _load_publication_cohort_counts() or {}
         apps = counts.get("apps")
         runs = counts.get("runs")
         windows = counts.get("windows")
         if apps and runs and windows:
-            print(f"Cohort: {apps} apps | {runs} runs | {windows} windows | Quota: {quota_label}")
+            print(
+                summary_cards.format_summary_card(
+                    "Frozen Cohort",
+                    [
+                        summary_cards.summary_item("Apps", apps, value_style="accent"),
+                        summary_cards.summary_item("Runs", runs, value_style="accent"),
+                        summary_cards.summary_item("Windows", windows, value_style="accent"),
+                    ],
+                    footer="Command: [H] Copy freeze hash",
+                )
+            )
         else:
-            print(f"Quota: {quota_label} | Publication: {'present' if pub_ready else 'missing'}")
-        print(f"Publication: {'present' if pub_ready else 'missing'} | Path: {pub_root}")
-        print("Commands: [H] Copy freeze hash")
+            menu_utils.print_hint("Command: [H] Copy freeze hash")
         return snapshot
 
     # Collection/default mode: keep it compact; avoid DB noise unless needed.
     audit_ready = str(audit).strip().upper() == "GO"
     audit_state = "ready" if audit_ready else "not ready"
     audit_detail = "evidence freeze recorded" if audit_ready else "no evidence freeze recorded"
-    if quota_label == "unknown":
-        quota_line = "Quota: Not enforced"
-    else:
-        quota_line = f"Quota: {quota_label}"
-    print(status_messages.status("Mode: COLLECTION", level="info"))
-    print(status_messages.status(f"Audit State: {audit_state}", level="info" if audit_ready else "warn"))
-    print(status_messages.status(f"Reason: {audit_detail}", level="info"))
-    print(status_messages.status(quota_line, level="info"))
+    menu_utils.print_section("Collection")
+    print(f"Audit  : {audit_state}")
+    print(f"Reason : {audit_detail}")
+    print(f"Quota  : {'Not enforced' if quota_label == 'unknown' else quota_label}")
     # Keep a single legacy hint if schema mismatch is present.
     schema_ver = tier1.get("schema_version") or "<unknown>"
     expected_schema = tier1.get("expected_schema") or "<unknown>"
     if schema_ver and expected_schema and schema_ver != expected_schema:
-        print(status_messages.status(f"DB schema mismatch: {schema_ver} (expects {expected_schema})", level="warn"))
+        menu_utils.print_hint(f"DB schema mismatch: {schema_ver} (expects {expected_schema})")
     return snapshot
 
 

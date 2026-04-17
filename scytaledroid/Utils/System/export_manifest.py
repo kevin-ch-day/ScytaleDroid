@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 
 MANIFEST_VERSION = 1
-# Legacy schema field name is `paper`. Keep accepting paper ids for back-compat.
-# Newer tooling should treat this as a generic export/profile id, not a paper id.
-ALLOWED_EXPORT_IDS = {"paper2", "publication"}
-EXPORT_ID = "paper2"
+# Legacy schema field name is `paper`. Keep accepting older paper ids on read,
+# but all newly generated manifests must use the canonical publication id.
+ALLOWED_EXPORT_IDS = {"publication", "paper2"}
+EXPORT_ID = "publication"
 # Back-compat aliases (internal API only).
 ALLOWED_PAPER_IDS = ALLOWED_EXPORT_IDS
 PAPER_ID = EXPORT_ID
@@ -143,7 +143,7 @@ def compare_manifest(
     *,
     baseline_manifest: dict[str, Any],
     artifact_root: Path,
-    compare_type: str = "paper2_export",
+    compare_type: str = "publication_export",
 ) -> ManifestCompareResult:
     schema_issues = validate_manifest_schema(baseline_manifest)
     diffs: list[dict[str, Any]] = []

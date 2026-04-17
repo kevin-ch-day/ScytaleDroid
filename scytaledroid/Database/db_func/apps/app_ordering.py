@@ -3,7 +3,7 @@
 This module centralizes "display ordering" so we don't rely on scattered JSON
 lists or implicit sorts when DB is available.
 
-Ordering is keyed (e.g., 'paper2', 'operational_default') and maps:
+Ordering is keyed (e.g., 'publication', 'operational_default') and maps:
   (ordering_key, package_name) -> sort_order
 """
 
@@ -80,4 +80,3 @@ def fetch_ordering(ordering_key: str) -> list[str]:
 
 
 __all__ = ["upsert_ordering", "fetch_ordering"]
-

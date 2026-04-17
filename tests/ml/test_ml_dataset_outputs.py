@@ -218,6 +218,72 @@ def test_paper_artifacts_json_written_once(tmp_path, monkeypatch):
     assert second["fig_B1_run_id"] == "rid1"
 
 
+def test_select_fig_b1_exemplar_skips_bad_pcap_windowing(tmp_path, monkeypatch):
+    from scytaledroid.DynamicAnalysis.ml import evidence_pack_ml_orchestrator as orchestrator
+
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "rid1").mkdir(parents=True, exist_ok=True)
+    (evidence_root / "rid2").mkdir(parents=True, exist_ok=True)
+
+    def _inputs_for(run_id: str):
+        run_dir = evidence_root / run_id
+        pcap_path = run_dir / "capture.pcap"
+        pcap_path.write_bytes(b"pcap")
+        return type(
+            "RI",
+            (),
+            {
+                "run_id": run_id,
+                "run_dir": run_dir,
+                "pcap_path": pcap_path,
+                "manifest": {
+                    "operator": {"messaging_activity": "video"},
+                    "dataset": {"low_signal": False},
+                },
+                "pcap_report": {},
+                "pcap_features": {},
+            },
+        )()
+
+    inputs_by_rid = {"rid1": _inputs_for("rid1"), "rid2": _inputs_for("rid2")}
+    monkeypatch.setattr(orchestrator, "load_run_inputs", lambda path: inputs_by_rid[path.name])
+    monkeypatch.setattr(orchestrator, "get_sampling_duration_seconds", lambda _inputs: 60.0)
+
+    def _extract_packet_timeline(path):
+        if path.parent.name == "rid1":
+            raise RuntimeError("tshark failed")
+        return []
+
+    monkeypatch.setattr(orchestrator, "extract_packet_timeline", _extract_packet_timeline)
+    monkeypatch.setattr(
+        orchestrator,
+        "build_window_features",
+        lambda _packets, *, duration_s, spec: (
+            [{"byte_count": 1200, "window_start_s": 0.0, "window_end_s": 10.0}] * 6,
+            0,
+        ),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_scores_and_threshold",
+        lambda _path: ([0.9] * 6, 0.5),
+    )
+
+    candidate = orchestrator._select_fig_b1_exemplar_from_existing_or_inputs(
+        evidence_root=evidence_root,
+        freeze_apps={
+            "org.telegram.messenger": {
+                "baseline_run_ids": ["base"],
+                "interactive_run_ids": ["rid1", "rid2"],
+            }
+        },
+        checksums={"rid1": {"ended_at": "2026-01-01T00:00:00Z"}, "rid2": {"ended_at": "2026-01-02T00:00:00Z"}},
+    )
+
+    assert candidate is not None
+    assert candidate.run_id == "rid2"
+
+
 def test_new_paper_tables_written(tmp_path, monkeypatch):
     from scytaledroid.Config import app_config
     from scytaledroid.DynamicAnalysis.ml import evidence_pack_ml_orchestrator as orchestrator

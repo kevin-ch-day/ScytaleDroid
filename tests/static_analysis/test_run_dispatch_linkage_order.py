@@ -3,8 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 
 
 def test_launch_scan_flow_builds_run_map_after_render_persistence(monkeypatch) -> None:

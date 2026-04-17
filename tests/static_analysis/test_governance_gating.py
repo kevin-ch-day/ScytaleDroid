@@ -4,6 +4,8 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from scytaledroid.StaticAnalysis.cli.core.models import (
     AppRunResult,
     ArtifactOutcome,
@@ -14,6 +16,9 @@ from scytaledroid.StaticAnalysis.cli.core.models import (
 from scytaledroid.StaticAnalysis.cli.execution import results
 from scytaledroid.StaticAnalysis.cli.persistence.run_summary import PersistenceOutcome
 from scytaledroid.StaticAnalysis.core.models import ManifestSummary, StaticAnalysisReport
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 
 
 def _make_report(tmp_path: Path, *, package: str) -> StaticAnalysisReport:

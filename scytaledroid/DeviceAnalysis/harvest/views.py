@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from scytaledroid.ui import formatter
+from scytaledroid.Utils.DisplayUtils import menu_utils, summary_cards
 
 from .models import HarvestPlan, ScopeSelection
 
@@ -34,13 +35,14 @@ def render_scope_overview(
 
     formatter.print_header("APK Harvest · RUN START")
     print(
-        formatter.format_kv_block(
-            "[RUN]",
-            {
-                "Scope": selection.label,
-                "Packages": f"{scheduled_packages}{blocked_text}",
-                "Artifacts": f"~{scheduled_files}",
-            },
+        summary_cards.format_summary_card(
+            "Harvest Scope",
+            [
+                summary_cards.summary_item("Scope", selection.label, value_style="accent"),
+                summary_cards.summary_item("Packages", f"{scheduled_packages}{blocked_text}", value_style="info"),
+                summary_cards.summary_item("Artifacts", f"~{scheduled_files}", value_style="accent"),
+            ],
+            footer="Harvest execution will use the current inventory-derived scope.",
         )
     )
     print()
@@ -59,6 +61,7 @@ def render_scope_overview(
     if policy_lines:
         print(formatter.format_kv_block("[META]", {"Policy": "; ".join(policy_lines)}))
         print()
+    menu_utils.print_hint("Use receipts and artifact roots after completion to verify alignment with the latest inventory.")
 
 
 def render_harvest_summary_structured(
@@ -76,6 +79,19 @@ def render_harvest_summary_structured(
     """Structured end-of-run summary (non-boxed, formatter-based)."""
 
     formatter.print_header("APK Harvest · RUN SUMMARY")
+    print(
+        summary_cards.format_summary_card(
+            "Harvest Summary",
+            [
+                summary_cards.summary_item("Scope", selection_label, value_style="accent"),
+                summary_cards.summary_item("Mode", pull_mode, value_style="info"),
+                summary_cards.summary_item("Packages", f"{metrics.executed_packages} executed / {metrics.total_packages} total", value_style="accent"),
+                summary_cards.summary_item("Artifacts", f"{metrics.artifacts_written} written / {metrics.planned_artifacts} planned", value_style="success" if metrics.artifacts_failed == 0 else "warning"),
+            ],
+            footer=f"Session: {session_stamp}" if session_stamp else None,
+        )
+    )
+    print()
     run_pairs = {
         "Scope": selection_label,
         "Harvest mode": pull_mode,

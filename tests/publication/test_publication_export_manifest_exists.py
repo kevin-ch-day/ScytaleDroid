@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
+
 
 def test_publication_export_manifest_exists_and_has_schema():
     path = Path("tests/baseline/publication_export_manifest.json")
     assert path.exists()
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload.get("manifest_version") == 1
-    assert payload.get("paper") == "paper2"
+    assert payload.get("paper") == "publication"
     artifacts = payload.get("artifacts")
     assert isinstance(artifacts, list)
     assert artifacts, "baseline manifest must lock at least one artifact"

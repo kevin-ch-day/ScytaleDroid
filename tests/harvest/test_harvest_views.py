@@ -1,6 +1,8 @@
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from scytaledroid.DeviceAnalysis.harvest.models import (
     ArtifactPlan,
     HarvestPlan,
@@ -13,6 +15,9 @@ from scytaledroid.DeviceAnalysis.harvest.views import (
     render_harvest_summary_structured,
     render_scope_overview,
 )
+
+
+pytestmark = [pytest.mark.ui_contract]
 
 
 def _dummy_selection() -> ScopeSelection:
@@ -65,7 +70,7 @@ def test_render_scope_overview(capsys):
     render_scope_overview(selection=selection, plan=plan, is_rooted=False, include_system_partitions=False)
     out = capsys.readouterr().out
     assert "APK Harvest · RUN START" in out
-    assert "[RUN] Scope" in out
+    assert "Harvest Scope" in out
     assert "Test Scope" in out
 
 
@@ -100,6 +105,5 @@ def test_render_harvest_summary_structured(capsys):
     )
     out = capsys.readouterr().out
     assert "APK Harvest · RUN SUMMARY" in out
-    assert "[RUN] Scope" in out
-    assert "planned=1" in out or "planned=1  written=1" in out
+    assert "Test Scope" in out
     assert "/tmp/output" in out

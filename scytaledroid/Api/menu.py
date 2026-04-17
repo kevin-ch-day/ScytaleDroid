@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from scytaledroid.ui import formatter
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 from .runtime import api_status, start_api_server, stop_api_server
@@ -15,16 +14,15 @@ def api_menu() -> None:
         status = api_status()
         print()
         menu_utils.print_header("API Server")
-        print(
-            formatter.format_kv_block(
-                "Status",
-                {
-                    "State": status.status,
-                    "Host": status.host,
-                    "Port": str(status.port),
-                    "Detail": status.detail or "-",
-                },
-            )
+        menu_utils.print_hint("Start, stop, or restart the local API runtime without leaving the operator console.")
+        menu_utils.print_section("Runtime State")
+        menu_utils.print_metrics(
+            [
+                ("State", status.status),
+                ("Host", status.host),
+                ("Port", status.port),
+                ("Detail", status.detail or "-"),
+            ]
         )
 
         options = [
@@ -42,6 +40,7 @@ def api_menu() -> None:
             ),
             menu_utils.MenuOption("3", "Restart server"),
         ]
+        menu_utils.print_section("Actions")
         menu_utils.render_menu(
             menu_utils.MenuSpec(
                 items=options,

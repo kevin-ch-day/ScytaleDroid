@@ -4,10 +4,15 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from scytaledroid.Utils.System.export_manifest import (
     compare_manifest,
     load_manifest,
 )
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "publication"
 _BUNDLE_ROOT = _FIXTURE_ROOT / "publication_bundle"
@@ -61,3 +66,10 @@ def test_export_manifest_comparator_fails_on_csv_drift(tmp_path: Path):
     assert result.payload["result"]["diff_counts"]["disallowed"] >= 1
     fields = {str(item.get("field")) for item in result.payload.get("diffs", [])}
     assert "sha256" in fields
+
+
+def test_export_manifest_comparator_accepts_legacy_paper2_manifest_id():
+    baseline = _load_fixture_manifest()
+    baseline["paper"] = "paper2"
+    result = compare_manifest(baseline_manifest=baseline, artifact_root=_BUNDLE_ROOT)
+    assert result.passed is True

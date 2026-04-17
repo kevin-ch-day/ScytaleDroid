@@ -38,14 +38,14 @@ REQUIRED_DIRS = {
 REQUIRED_FILES = {
     # Manifests (reproducibility anchors).
     Path("manifests") / "dataset_freeze.json",
-    Path("manifests") / "paper_results_v1.json",
+    Path("manifests") / "publication_results_v1.json",
     Path("manifests") / "canonical_receipt.json",
     Path("manifests") / "toolchain.txt",
     # Paste-ready text blocks.
     Path("appendix") / "results_section_V.md",
     Path("appendix") / "publication_paste_blocks.md",
     # Paper-facing tables (authoritative for writing Section V).
-    Path("tables") / "paper_cohort_summary_v1.csv",
+    Path("tables") / "publication_cohort_summary_v1.csv",
     Path("tables") / "baseline_stability_summary.csv",
     Path("tables") / "interaction_delta_summary.csv",
     Path("tables") / "static_dynamic_correlation.csv",
@@ -97,6 +97,27 @@ NOT_ALLOWED_TOP_DIRS = {
 # This keeps the submission surface small and avoids toolchain drift issues.
 HARD_BANNED_SUFFIXES = {".pdf"}
 
+LEGACY_FILE_ALIASES: dict[Path, tuple[Path, ...]] = {
+    Path("manifests") / "publication_results_v1.json": (Path("manifests") / "paper_results_v1.json",),
+    Path("tables") / "publication_cohort_summary_v1.csv": (Path("tables") / "paper_cohort_summary_v1.csv",),
+}
+
+
+def _has_required_file(pub_root: Path, rel: Path) -> bool:
+    if (pub_root / rel).exists():
+        return True
+    for legacy in LEGACY_FILE_ALIASES.get(rel, ()):
+        if (pub_root / legacy).exists():
+            return True
+    return False
+
+
+def _resolve_results_manifest(pub_root: Path) -> Path:
+    canonical = pub_root / "manifests" / "publication_results_v1.json"
+    if canonical.exists():
+        return canonical
+    return pub_root / "manifests" / "paper_results_v1.json"
+
 
 def _cohort_enforcement_v2(pub_root: Path) -> list[str]:
     """Fail-closed cohort enforcement for Profile v2 (Paper #2) publication bundle.
@@ -110,7 +131,7 @@ def _cohort_enforcement_v2(pub_root: Path) -> list[str]:
 
     errs: list[str] = []
     freeze_path = pub_root / "manifests" / "dataset_freeze.json"
-    results_path = pub_root / "manifests" / "paper_results_v1.json"
+    results_path = _resolve_results_manifest(pub_root)
 
     try:
         freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
@@ -119,7 +140,7 @@ def _cohort_enforcement_v2(pub_root: Path) -> list[str]:
     try:
         results = json.loads(results_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
-        return [f"invalid_json:manifests/paper_results_v1.json:{type(exc).__name__}"]
+        return [f"invalid_json:{results_path.relative_to(pub_root).as_posix()}:{type(exc).__name__}"]
 
     apps = freeze.get("apps")
     if not isinstance(apps, dict) or not apps:
@@ -186,7 +207,7 @@ def lint_publication_bundle(pub_root: Path) -> PublicationLint:
 
     # Required files must be present.
     for rel in sorted(REQUIRED_FILES):
-        if not (pub_root / rel).exists():
+        if not _has_required_file(pub_root, rel):
             errors.append(f"missing_file:{rel.as_posix()}")
 
     # At least one B2 variant must exist.
@@ -230,7 +251,9 @@ def lint_publication_bundle(pub_root: Path) -> PublicationLint:
 
     # Cohort enforcement is a correctness guardrail for the submission-facing v2 bundle.
     # It should never "expand" beyond the frozen cohort.
-    if (pub_root / "manifests" / "dataset_freeze.json").exists() and (pub_root / "manifests" / "paper_results_v1.json").exists():
+    if (pub_root / "manifests" / "dataset_freeze.json").exists() and _has_required_file(
+        pub_root, Path("manifests") / "publication_results_v1.json"
+    ):
         errors.extend(_cohort_enforcement_v2(pub_root))
 
     return PublicationLint(ok=(len(errors) == 0), errors=errors, warnings=warnings)

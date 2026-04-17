@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from scytaledroid.DynamicAnalysis.controllers import guided_run
 from scytaledroid.DynamicAnalysis.services.dataset_run_state import DatasetRunRecentSummary, DatasetRunState
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import PackageRunCounts
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.state_contract]
 
 
 def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, capsys) -> None:

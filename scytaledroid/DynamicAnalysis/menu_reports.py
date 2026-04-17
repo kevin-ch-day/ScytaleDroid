@@ -15,6 +15,9 @@ def run_freeze_readiness_audit_report() -> None:
     summary = run_freeze_readiness_audit()
     print()
     menu_utils.print_header("Freeze Readiness Audit")
+    menu_utils.print_hint(
+        "Check whether local dynamic evidence is technically valid and eligible for a frozen cohort export."
+    )
     ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
     verbose = ui_level in {"details", "debug"}
     if not verbose:
@@ -101,6 +104,9 @@ def render_dataset_status() -> None:
 
     print()
     menu_utils.print_header("Dataset Run Status")
+    menu_utils.print_hint(
+        "Review tracker-recorded quota progress by package without opening the guided-run controller."
+    )
     payload = load_dataset_tracker()
     apps = payload.get("apps", {})
     rows = []
@@ -151,6 +157,9 @@ def run_state_summary_report(
 ) -> None:
     print()
     menu_utils.print_header("State Summary")
+    menu_utils.print_hint(
+        "Compare tracker state, evidence-pack state, exclusion reasons, and next collection priorities."
+    )
     ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
     verbose = ui_level in {"details", "debug"}
     if not verbose:

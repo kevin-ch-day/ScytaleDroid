@@ -73,17 +73,17 @@ This matrix ties each refactor/removal PR to risk coverage and acceptance checks
 ## PR5: Legacy Publication Isolation + Removal
 
 - Risks:
-  - Legacy modules still impact core runtime.
-  - Hidden file probes and noisy warnings when disabled.
+  - Legacy-named compatibility paths still impact core runtime.
+  - Hidden file probes and noisy warnings from transitional fallbacks.
   - Deletion of reachable code without comparators/manifest checks.
 - Required tests:
-  - Menu render smoke with `SCYTALEDROID_ENABLE_LEGACY_PUBLICATION=0`.
-  - Import/probe smoke confirming no legacy publication modules are loaded.
+  - Menu render smoke with no legacy publication branch enabled.
+  - Import/probe smoke confirming core reporting does not depend on removed legacy paths.
   - Reachability report per removed candidate.
   - Import smoke + menu smoke.
   - Export reproducibility check only for PRs touching export paths.
 - Acceptance:
-  - Core reporting works with legacy publication disabled.
-  - Legacy entries are hidden by default.
+  - Core reporting works without a legacy publication toggle.
+  - Legacy entries are gone or reduced to explicit read-side fallback only.
   - No removed component is reachable from core menu workflows.
   - Smoke checks pass.

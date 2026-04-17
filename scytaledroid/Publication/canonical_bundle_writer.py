@@ -306,7 +306,7 @@ def write_canonical_publication_directory(
         tables_dir,
         keep={
             # Paper-facing consolidated exports (manuscript inputs).
-            "paper_cohort_summary_v1.csv",
+            "publication_cohort_summary_v1.csv",
             "baseline_stability_summary.csv",
             "interaction_delta_summary.csv",
             "static_dynamic_correlation.csv",
@@ -358,7 +358,7 @@ def write_canonical_publication_directory(
         keep={
             # Reproducibility anchors (PM-locked).
             "dataset_freeze.json",
-            "paper_results_v1.json",
+            "publication_results_v1.json",
             "canonical_receipt.json",
             "toolchain.txt",
             # Small helper manifests for consistent ordering and display names.
@@ -385,7 +385,7 @@ def write_canonical_publication_directory(
     )
 
     # NOTE: The canonical publication bundle intentionally does NOT surface internal baseline tables
-    # (Table 1-8, TeX renderings, etc.). Those live under output/_internal/paper2/baseline/ and can be
+    # (Table 1-8, TeX renderings, etc.). Those live under output/_internal/publication/baseline/ and can be
     # used for exploration without polluting the submission bundle.
 
     # Surface baseline figures for publication assembly (pure copy).

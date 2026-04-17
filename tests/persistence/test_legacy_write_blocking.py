@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import pytest
+
 from scytaledroid.StaticAnalysis.cli.persistence import (
     findings_writer,
     static_findings_writer,
     strings_writer,
 )
+
+
+# Retire with the remaining legacy findings/string writer compatibility seams
+# once the old write paths are fully removed.
+pytestmark = [pytest.mark.legacy_contract, pytest.mark.retire_with_code, pytest.mark.tier3]
 
 
 def test_static_findings_requires_static_run_id(monkeypatch):

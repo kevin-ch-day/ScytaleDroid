@@ -5,7 +5,7 @@ Policy:
 - Canonical truth is filesystem: output/publication/* (rebuildable from evidence).
 - DB is a mirror/index/cache. This step is optional and may fail without blocking workflows.
 
-This script reads output/publication/manifests/paper_results_v1.json to derive a
+This script reads output/publication/manifests/publication_results_v1.json to derive a
 deterministic cohort_id keyed by freeze_dataset_hash, then invokes the existing
 DB ingest tool.
 """
@@ -35,14 +35,16 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     bundle_root = Path(args.bundle_root).resolve()
-    results = bundle_root / "manifests" / "paper_results_v1.json"
+    results = bundle_root / "manifests" / "publication_results_v1.json"
+    if not results.exists():
+        results = bundle_root / "manifests" / "paper_results_v1.json"
     if not results.exists():
         print(f"Missing: {results}", file=sys.stderr)
         return 2
     payload = _read_json(results)
     freeze_hash = str(payload.get("freeze_dataset_hash") or "").strip()
     if not freeze_hash:
-        print("paper_results_v1.json missing freeze_dataset_hash", file=sys.stderr)
+        print(f"{results.name} missing freeze_dataset_hash", file=sys.stderr)
         return 2
 
     cohort_id = f"freeze_{freeze_hash}"

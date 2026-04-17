@@ -898,12 +898,15 @@ def fetch_tier1_status() -> dict[str, object]:
 def fetch_publication_status() -> dict[str, object]:
     """Return a compact publication status snapshot.
 
-    This intentionally avoids DB-derived metrics. Evidence packs + freeze + publication
-    bundle are the authoritative sources for publication exports.
+    Files remain authoritative for evidence/bundle artifacts, but derived cohort
+    readiness should prefer the existing analysis DB tables when available.
     """
 
     from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
         run_freeze_readiness_audit,
+    )
+    from scytaledroid.Reporting.services.publication_status import (
+        fetch_latest_analysis_snapshot,
     )
 
     status: dict[str, object] = {
@@ -920,6 +923,9 @@ def fetch_publication_status() -> dict[str, object]:
         "results_numbers_label": "missing",
         "exports_label": "missing",
         "qa_label": "missing",
+        "analysis_ready": False,
+        "analysis_label": "missing",
+        "analysis_cohort_label": None,
         "footer": "",
     }
 
@@ -937,6 +943,15 @@ def fetch_publication_status() -> dict[str, object]:
         # Countable quota is tracked in the freeze manifest (if present) or by exports.
     except Exception:
         audit = None
+
+    try:
+        analysis_snapshot = fetch_latest_analysis_snapshot()
+    except Exception:
+        analysis_snapshot = None
+    if analysis_snapshot:
+        status["analysis_ready"] = bool(analysis_snapshot.get("ready"))
+        status["analysis_label"] = str(analysis_snapshot.get("summary_label") or "missing")
+        status["analysis_cohort_label"] = str(analysis_snapshot.get("cohort_id") or "").strip() or None
 
     # Freeze anchor (canonical for publication exports).
     freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
@@ -996,6 +1011,9 @@ def fetch_publication_status() -> dict[str, object]:
         status["footer"] = f"Publication bundle NOT READY ({first}). Run: 1) Regenerate artifacts, then 5) Write bundle."
     else:
         status["footer"] = ""
+    if status.get("analysis_cohort_label"):
+        db_hint = f"DB cohort: {status['analysis_cohort_label']}"
+        status["footer"] = f"{status['footer']} {db_hint}".strip()
 
     return status
 
@@ -1032,36 +1050,40 @@ def handle_generate_publication_results_numbers() -> None:
     This is intentionally deterministic and freeze-anchored. The goal is to give
     the manuscript a single source of truth:
     - output/publication/tables/*_summary*.csv
-    - output/publication/manifests/paper_results_v1.json
+    - output/publication/manifests/publication_results_v1.json
     - output/publication/manifests/publication_results_numbers.json
     - output/publication/appendix/results_section_V.md
     """
 
     exports_script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_exports.py"
-    results_script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_results_numbers.py"
-    for script in (exports_script, results_script):
-        if not script.exists():
-            print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-            return
+    if not exports_script.exists():
+        print(status_messages.status(f"Missing script: {relative_path(exports_script)}", level="error"))
+        return
 
     import runpy
+    from scytaledroid.Reporting.services.publication_results_numbers_service import (
+        generate_results_numbers,
+    )
 
     print()
     menu_utils.print_header("Generate Frozen Archive Results Numbers")
     try:
         runpy.run_path(str(exports_script), run_name="__main__")
-        runpy.run_path(str(results_script), run_name="__main__")
+        generate_results_numbers()
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
             print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
             return
+    except Exception as exc:
+        print(status_messages.status(f"Generation failed: {exc}", level="error"))
+        return
     out_tables = Path(app_config.OUTPUT_DIR) / "publication" / "tables"
-    out_results_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper_results_v1.json"
+    out_results_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "publication_results_v1.json"
     out_md = Path(app_config.OUTPUT_DIR) / "publication" / "appendix" / "results_section_V.md"
     out_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "publication_results_numbers.json"
     out_json_legacy = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper2_results_numbers.json"
     for name in (
-        "paper_cohort_summary_v1.csv",
+        "publication_cohort_summary_v1.csv",
         "baseline_stability_summary.csv",
         "interaction_delta_summary.csv",
         "static_dynamic_correlation.csv",
@@ -1203,22 +1225,17 @@ def handle_generate_exploratory_risk_scoring() -> None:
 
 def handle_generate_publication_scientific_qa() -> None:
     """Generate scientific QA reports for the frozen archive."""
-
-    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_scientific_qa.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-        return
-
-    import runpy
+    from scytaledroid.Reporting.services.publication_scientific_qa_service import (
+        generate_scientific_qa,
+    )
 
     print()
     menu_utils.print_header("Generate Scientific QA (Frozen Archive)")
     try:
-        runpy.run_path(str(script), run_name="__main__")
-    except SystemExit as exc:
-        if int(getattr(exc, "code", 1) or 0) != 0:
-            print(status_messages.status(f"QA generation failed: exit={exc.code}", level="error"))
-            return
+        generate_scientific_qa()
+    except Exception as exc:
+        print(status_messages.status(f"QA generation failed: {exc}", level="error"))
+        return
     out_dir = Path(app_config.OUTPUT_DIR) / "publication" / "qa"
     if out_dir.exists():
         print(status_messages.status(f"Wrote QA reports under: {relative_path(out_dir)}", level="success"))
@@ -1226,23 +1243,22 @@ def handle_generate_publication_scientific_qa() -> None:
 
 def handle_generate_publication_pipeline_audit() -> None:
     """Generate a deep ML+dynamic pipeline audit for the frozen archive."""
-
-    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_pipeline_audit.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-        return
-
-    import runpy
+    from scytaledroid.Reporting.services.publication_pipeline_audit_service import (
+        generate_pipeline_audit,
+    )
 
     print()
     menu_utils.print_header("Pipeline Audit (ML + Dynamic)")
     try:
-        runpy.run_path(str(script), run_name="__main__")
-    except SystemExit as exc:
-        if int(getattr(exc, "code", 1) or 0) != 0:
-            print(status_messages.status(f"Audit completed with errors: exit={exc.code}", level="error"))
-            prompt_utils.press_enter_to_continue()
-            return
+        _out, ok = generate_pipeline_audit()
+    except Exception as exc:
+        print(status_messages.status(f"Audit generation failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+    if not ok:
+        print(status_messages.status("Audit completed with errors.", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
 
     out = Path(app_config.OUTPUT_DIR) / "publication" / "qa" / "pipeline_audit_v1.json"
     if out.exists():
@@ -1254,11 +1270,16 @@ def handle_print_manuscript_snapshot() -> None:
 
     import json
     from pathlib import Path
+    from scytaledroid.Reporting.services.publication_status import (
+        fetch_latest_analysis_snapshot,
+    )
 
     print()
     menu_utils.print_header("Manuscript Snapshot")
     pub_root = Path(app_config.OUTPUT_DIR) / "publication"
-    results_path = pub_root / "manifests" / "paper_results_v1.json"
+    results_path = pub_root / "manifests" / "publication_results_v1.json"
+    if not results_path.exists():
+        results_path = pub_root / "manifests" / "paper_results_v1.json"
     if not results_path.exists():
         print(status_messages.status(f"Missing: {relative_path(results_path)}", level="error"))
         print(status_messages.status("Fix: Reporting → Generate Results (Section V)", level="info"))
@@ -1270,16 +1291,28 @@ def handle_print_manuscript_snapshot() -> None:
     except Exception:
         payload = None
     if not isinstance(payload, dict):
-        print(status_messages.status("paper_results_v1.json parse failed.", level="error"))
+        print(status_messages.status(f"{results_path.name} parse failed.", level="error"))
         prompt_utils.press_enter_to_continue()
         return
 
+    analysis_snapshot = None
+    try:
+        analysis_snapshot = fetch_latest_analysis_snapshot()
+    except Exception:
+        analysis_snapshot = None
+
     freeze_hash = str(payload.get("freeze_dataset_hash") or "")
     freeze_short = freeze_hash[:12] if freeze_hash else "missing"
-    n_apps = int(payload.get("n_apps") or 0)
-    runs_total = int(payload.get("n_runs_total") or 0)
-    runs_idle = int(payload.get("n_runs_idle") or 0)
-    runs_interactive = int(payload.get("n_runs_interactive") or 0)
+    if analysis_snapshot:
+        n_apps = int(analysis_snapshot.get("app_count") or 0)
+        runs_total = int(analysis_snapshot.get("run_count") or 0)
+        runs_idle = int(analysis_snapshot.get("baseline_count") or 0)
+        runs_interactive = int(analysis_snapshot.get("interactive_count") or 0)
+    else:
+        n_apps = int(payload.get("n_apps") or 0)
+        runs_total = int(payload.get("n_runs_total") or 0)
+        runs_idle = int(payload.get("n_runs_idle") or 0)
+        runs_interactive = int(payload.get("n_runs_interactive") or 0)
     windows_total = int(payload.get("windows_total") or 0)
     windows_idle = int(payload.get("windows_idle_total") or 0)
     windows_interactive = int(payload.get("windows_interactive_total") or 0)

@@ -750,8 +750,14 @@ def dynamic_analysis_menu() -> None:
         _warn_if_code_changed()
         render_dynamic_menu_overview()
         print()
+        menu_utils.print_hint(
+            "Start with Guided cohort run. Use Freeze readiness audit and State summary for dataset health."
+        )
+        print()
         menu_utils.print_section("Primary Actions")
         menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Legacy / Archive")
+        menu_utils.print_menu(sections.legacy_archive, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_section("Evidence & Integrity")
         menu_utils.print_menu(sections.evidence_integrity, show_exit=False, show_descriptions=False, compact=True)
         menu_utils.print_section("Exports")
@@ -759,13 +765,6 @@ def dynamic_analysis_menu() -> None:
         menu_utils.print_section("System")
         menu_utils.print_menu(
             sections.system,
-            show_exit=False,
-            show_descriptions=False,
-            compact=True,
-        )
-        menu_utils.print_section("Legacy / Archive")
-        menu_utils.print_menu(
-            sections.legacy_archive,
             show_exit=True,
             exit_label="Back",
             show_descriptions=False,

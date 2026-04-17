@@ -16,6 +16,9 @@ from scytaledroid.StaticAnalysis.cli.core.models import (
 from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
 
 
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
+
+
 @pytest.mark.unit
 def test_dedupe_profile_entries_removes_duplicate_packages():
     entries = [
@@ -224,10 +227,6 @@ def test_render_run_results_prints_context_sections_and_hides_runtime_wall(monke
 
     assert "Stage Context" in out
     assert "Acquisition Counters" in out
-    assert "Device reality" in out
-    assert "Artifact Completeness" in out
-    assert "Interpretation" in out
-    assert "Top Risk Driver" in out
     assert "Blocked policy  : 411" in out
     assert "Example 0 (runtime" not in out
 

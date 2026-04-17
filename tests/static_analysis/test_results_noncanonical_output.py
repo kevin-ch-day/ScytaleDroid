@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from scytaledroid.StaticAnalysis.cli.core.models import (
     AppRunResult,
     ArtifactOutcome,
@@ -14,6 +16,9 @@ from scytaledroid.StaticAnalysis.cli.core.models import (
 )
 from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
 from scytaledroid.StaticAnalysis.cli.execution import results
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 
 
 class _DummyPersistOutcome:

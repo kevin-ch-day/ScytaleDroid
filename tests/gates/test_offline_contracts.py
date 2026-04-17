@@ -5,10 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import main as app_main
+import pytest
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows import headless_run, session_uniqueness
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
+
+
+pytestmark = [pytest.mark.contract, pytest.mark.ui_contract, pytest.mark.gate]
 
 
 def _dummy_group():

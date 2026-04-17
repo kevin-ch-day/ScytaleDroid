@@ -10,6 +10,7 @@ from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 from scytaledroid.Utils.DisplayUtils import (
     colors,
     display_settings,
+    menu_utils,
     prompt_utils,
     status_messages,
     table_utils,
@@ -29,14 +30,17 @@ def _inventory_badge(status: InventoryStatus | None) -> str:
 
 def _render_header(adb_status: str, live_count: int) -> None:
     ts = format_timestamp_utc(datetime.now(UTC))
-    status_messages.print_strip(
-        "Device Inventory & Harvest",
+    menu_utils.print_header("Device Inventory & Harvest")
+    menu_utils.print_hint(
+        "Select an attached device to open the compact operator dashboard for inventory, harvest, and evidence state."
+    )
+    menu_utils.print_section("Hub State")
+    menu_utils.print_metrics(
         [
             ("UTC", ts),
             ("ADB", adb_status),
-            ("Live", live_count),
-        ],
-        width=96,
+            ("Live devices", live_count),
+        ]
     )
 
 
@@ -133,7 +137,7 @@ def devices_hub() -> None:
 
         print()
         _render_header(adb_status, live_count)
-        print(text_blocks.headline("Devices", width=96))
+        menu_utils.print_section("Devices")
         _render_live_devices(summaries, inv_lookup)
 
         if warnings:
@@ -146,11 +150,11 @@ def devices_hub() -> None:
                 continue
 
         print()
-        hint = "Hint: r=Refresh  0/q=Back"
+        hint = "Hint: select a device number, or use 0/q to return."
         if colors.colors_enabled():
             hint = colors.apply(hint, colors.get_palette().muted)
         print(hint)
-        print("Select device #:")
+        print("Select device:")
         choice_keys = [str(idx) for idx in range(1, len(summaries) + 1)]
         default_choice = "0" if len(summaries) == 0 else ("1" if len(summaries) == 1 else "1")
         choice = prompt_utils.get_choice(

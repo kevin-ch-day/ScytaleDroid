@@ -21,12 +21,8 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
     this to core library code once user-facing wording is cleaned.
     """
 
-    allow_prefixes = (
-        Path("docs/legacy/"),
-        Path("docs/paper2/"),  # stubs (planned removal v4.0)
-    )
+    allow_prefixes = (Path("docs/legacy/"),)
     allow_exact = {
-        Path("docs/contracts/paper2_capture_policy_v1.md"),  # stub (planned removal v4.0)
         # Temporary exceptions: these scripts still write legacy output paths and
         # will be cleaned as part of the experimental output rename milestone.
         Path("scripts/analysis/risk_scoring_artifacts.py"),

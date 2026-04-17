@@ -6,11 +6,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "publication" / "export_manifest_gate.py"
 _FIXTURE_ROOT = _ROOT / "tests" / "fixtures" / "publication"
 _MANIFEST = _FIXTURE_ROOT / "publication_export_manifest.json"
 _BUNDLE = _FIXTURE_ROOT / "publication_bundle"
+
+
+pytestmark = [pytest.mark.gate, pytest.mark.tier3]
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:

@@ -1861,8 +1861,15 @@ def _select_fig_b1_exemplar_from_existing_or_inputs(
             dur = get_sampling_duration_seconds(inputs)
             if not inputs.pcap_path or not inputs.pcap_path.exists() or not dur:
                 continue
-            packets = extract_packet_timeline(inputs.pcap_path)
-            rows, dropped = build_window_features(packets, duration_s=float(dur), spec=WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S))
+            try:
+                packets = extract_packet_timeline(inputs.pcap_path)
+                rows, dropped = build_window_features(
+                    packets,
+                    duration_s=float(dur),
+                    spec=WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S),
+                )
+            except Exception:
+                continue
             per_run_rows[rid] = (rows, dropped)
 
         candidate = _select_fig_b1_exemplar_candidate(

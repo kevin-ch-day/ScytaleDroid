@@ -28,4 +28,14 @@ show_error_codes = true
 markers = [
     "integration: marks tests that exercise database integrations (deselect with '-m \"not integration\"')",
     "unit: marks hermetic unit tests",
+    "contract: active architectural or operator-facing contract coverage",
+    "ui_contract: menu/dashboard/terminology/state-block contract coverage",
+    "state_contract: state-service or controller/state boundary coverage",
+    "report_contract: builder/report/persistence/output meaning coverage",
+    "slow: materially slower or higher-cost tests",
+    "gate: broad policy, lexical, compile, or schema guard coverage",
+    "db_live: tests that depend on reachable canonical DB behavior or DB-specific environment",
+    "legacy_contract: compatibility or transition behavior still protected",
+    "retire_with_code: legacy test intended to retire with its related compatibility seam",
+    "tier3: heavy or infrequent verification coverage",
 ]
