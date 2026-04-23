@@ -18,6 +18,7 @@ env/
 htmlcov/
 .coverage*
 pytest_cache/
+.pytest_cache/
 .mypy_cache/
 
 # IDE settings

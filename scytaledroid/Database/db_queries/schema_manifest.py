@@ -11,10 +11,16 @@ from .dynamic import schema as dynamic_schema
 from .harvest import device_inventory, dynamic_loading
 from .permissions import governance_snapshot, permission_support
 from .views import (
+    CREATE_V_ARTIFACT_REGISTRY_INTEGRITY,
+    CREATE_V_CURRENT_ARTIFACT_REGISTRY,
     CREATE_V_PAPER_DYNAMIC_COHORT_V1,
+    CREATE_V_RUNTIME_DYNAMIC_COHORT_STATUS_V1,
     CREATE_V_RUN_IDENTITY,
     CREATE_V_RUN_OVERVIEW,
     CREATE_V_STATIC_HANDOFF_V1,
+    CREATE_V_WEB_APP_DIRECTORY,
+    CREATE_V_WEB_RUNTIME_RUN_DETAIL,
+    CREATE_V_WEB_RUNTIME_RUN_INDEX,
     CREATE_VW_LATEST_APK_PER_PACKAGE,
     CREATE_VW_LATEST_PERMISSION_RISK,
     CREATE_VW_PERMISSION_AUDIT_LATEST,
@@ -127,7 +133,13 @@ def ordered_schema_statements() -> list[str]:
     statements.append(CREATE_V_RUN_OVERVIEW)
     statements.append(CREATE_V_RUN_IDENTITY)
     statements.append(CREATE_V_STATIC_HANDOFF_V1)
+    statements.append(CREATE_V_RUNTIME_DYNAMIC_COHORT_STATUS_V1)
     statements.append(CREATE_V_PAPER_DYNAMIC_COHORT_V1)
+    statements.append(CREATE_V_WEB_APP_DIRECTORY)
+    statements.append(CREATE_V_WEB_RUNTIME_RUN_INDEX)
+    statements.append(CREATE_V_WEB_RUNTIME_RUN_DETAIL)
+    statements.append(CREATE_V_ARTIFACT_REGISTRY_INTEGRITY)
+    statements.append(CREATE_V_CURRENT_ARTIFACT_REGISTRY)
 
     return _dedupe_create_tables(statements)
 

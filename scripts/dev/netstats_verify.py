@@ -7,6 +7,10 @@ import argparse
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.Utils.netstats_collector import NetstatsCollector
 from scytaledroid.Utils.netstats_parser import NetstatsParser

@@ -290,10 +290,12 @@ def _run_profile_v3_guided_phase2_capture() -> None:
 
     import csv
     import io
-    import runpy
-    import sys
     from contextlib import redirect_stdout
     from datetime import UTC, datetime
+
+    from scytaledroid.DynamicAnalysis.services.profile_v3_capture_status_service import (
+        main as capture_status_main,
+    )
 
     print()
     # Phase 2 is often time-constrained. If the operator did not explicitly configure this
@@ -313,48 +315,41 @@ def _run_profile_v3_guided_phase2_capture() -> None:
 
     repo_root = Path(__file__).resolve().parents[2]
     audit_dir = repo_root / "output" / "audit" / "profile_v3"
-    script = repo_root / "scripts" / "profile_tools" / "profile_v3_capture_status.py"
-    if script.exists():
-        # Refresh the dashboard artifacts so the guided view is current.
-        #
-        # The dashboard script prints a verbose blockers list; for this guided screen we keep
-        # output tight and replay only its stable [COPY] lines (PM/audit-friendly).
-        # It may exit non-zero (blockers present); that's expected, so swallow SystemExit.
-        argv_saved = list(sys.argv)
+    # Refresh the dashboard artifacts so the guided view is current.
+    #
+    # The dashboard service prints a verbose blockers list; for this guided screen we keep
+    # output tight and replay only its stable [COPY] lines (PM/audit-friendly).
+    # It may exit non-zero (blockers present); that's expected, so swallow SystemExit.
+    buf = io.StringIO()
+    try:
+        with redirect_stdout(buf):
+            capture_status_main(["--write-audit"])
+    except SystemExit:
+        pass
+    finally:
+        # Replay only a compact subset of [COPY] lines:
+        # - the main cohort status line
+        # - a single receipts line with the latest CSV/JSON paths
         try:
-            sys.argv = [str(script), "--write-audit"]
-            try:
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    runpy.run_path(str(script), run_name="__main__")
-            except SystemExit:
-                pass
-            finally:
-                # Replay only a compact subset of [COPY] lines:
-                # - the main cohort status line
-                # - a single receipts line with the latest CSV/JSON paths
-                try:
-                    out = buf.getvalue().splitlines()
-                except Exception:
-                    out = []
-                copy_lines = [ln for ln in out if ln.startswith("[COPY] ")]
-                main = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_capture_status ")), None)
-                if main:
-                    print(main)
-                csv_ln = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_capture_status_csv ")), None)
-                rec_ln = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_capture_status_receipt ")), None)
-                plan_ln = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_recapture_plan_csv ")), None)
-                parts = []
-                if csv_ln:
-                    parts.append("csv=" + (csv_ln.split("path=", 1)[-1].strip() if "path=" in csv_ln else "").strip())
-                if rec_ln:
-                    parts.append("receipt=" + (rec_ln.split("path=", 1)[-1].strip() if "path=" in rec_ln else "").strip())
-                if plan_ln:
-                    parts.append("plan=" + (plan_ln.split("path=", 1)[-1].strip() if "path=" in plan_ln else "").strip())
-                if parts:
-                    print("[COPY] v3_capture_receipts " + " ".join(parts))
-        finally:
-            sys.argv = argv_saved
+            out = buf.getvalue().splitlines()
+        except Exception:
+            out = []
+        copy_lines = [ln for ln in out if ln.startswith("[COPY] ")]
+        main = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_capture_status ")), None)
+        if main:
+            print(main)
+        csv_ln = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_capture_status_csv ")), None)
+        rec_ln = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_capture_status_receipt ")), None)
+        plan_ln = next((ln for ln in copy_lines if ln.startswith("[COPY] v3_recapture_plan_csv ")), None)
+        parts = []
+        if csv_ln:
+            parts.append("csv=" + (csv_ln.split("path=", 1)[-1].strip() if "path=" in csv_ln else "").strip())
+        if rec_ln:
+            parts.append("receipt=" + (rec_ln.split("path=", 1)[-1].strip() if "path=" in rec_ln else "").strip())
+        if plan_ln:
+            parts.append("plan=" + (plan_ln.split("path=", 1)[-1].strip() if "path=" in plan_ln else "").strip())
+        if parts:
+            print("[COPY] v3_capture_receipts " + " ".join(parts))
 
     status_csvs = sorted(audit_dir.glob("capture_status_*.csv"))
     if not status_csvs:
@@ -590,19 +585,14 @@ def _run_profile_v3_guided_phase2_capture() -> None:
 
 def _run_profile_v3_manifest_build() -> None:
     """Build/update the structural cohort manifest from existing evidence packs."""
+    from scytaledroid.DynamicAnalysis.services.profile_v3_manifest_build_service import (
+        main as manifest_build_main,
+    )
 
     print()
     menu_utils.print_header("Structural Cohort Manifest Build")
-    script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_manifest_build.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {script}", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    import runpy
-
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        manifest_build_main([])
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
             print(status_messages.status(f"Manifest build failed: exit={exc.code}", level="error"))
@@ -614,18 +604,14 @@ def _run_profile_v3_manifest_build() -> None:
 
 def _run_profile_v3_capture_status_dashboard() -> None:
     """Show per-app structural cohort capture readiness."""
+    from scytaledroid.DynamicAnalysis.services.profile_v3_capture_status_service import (
+        main as capture_status_main,
+    )
 
     print()
     menu_utils.print_header("Structural Cohort Capture Status")
-    script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_capture_status.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {script}", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-    import runpy
-
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        capture_status_main([])
     except SystemExit as exc:
         # The dashboard may return non-zero in strict mode; do not treat that as a crash.
         code = int(getattr(exc, "code", 1) or 0)

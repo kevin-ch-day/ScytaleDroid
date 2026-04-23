@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import importlib
 import json
 import shutil
@@ -31,7 +32,10 @@ def try_aapt2():
     except Exception as e:
         return {"aapt2": True, "error": str(e)}
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Check local Android/static-analysis tool availability.")
+    parser.parse_args(argv)
+
     out = {
         "python": pyver(),
         "bins": [which("aapt2"), which("apksigner")],

@@ -11,19 +11,17 @@ No "auto" mode: callers must choose a profile explicitly.
 from __future__ import annotations
 
 import argparse
-import runpy
-import sys
 import os
+import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-def _run(script: Path) -> None:
-    if not script.exists():
-        raise SystemExit(f"Missing script: {script}")
-    runpy.run_path(str(script), run_name="__main__")
+from scytaledroid.Reporting.services.profile_v3_exports_service import main as run_profile_v3_exports
+from scytaledroid.Reporting.services.publication_exports_service import generate_publication_exports
+from scytaledroid.Reporting.services.publication_results_numbers_service import generate_results_numbers
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,19 +40,15 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     if args.profile == "v2":
-        _run(REPO_ROOT / "scripts" / "publication" / "publication_exports.py")
+        generate_publication_exports()
         if args.v2_include_results_numbers:
-            _run(REPO_ROOT / "scripts" / "publication" / "publication_results_numbers.py")
+            generate_results_numbers()
         return 0
 
     if args.profile == "v3":
-        script = REPO_ROOT / "scripts" / "publication" / "profile_v3_exports.py"
         if args.strict:
-            # Pass-through strict flag by setting argv for the script's argparse.
             os.environ["SCYTALEDROID_PAPER_STRICT"] = "1"
-            sys.argv = [str(script), "--strict"]
-        _run(script)
-        return 0
+        return run_profile_v3_exports(["--strict"] if args.strict else [])
 
     raise SystemExit(f"Unsupported profile: {args.profile}")
 

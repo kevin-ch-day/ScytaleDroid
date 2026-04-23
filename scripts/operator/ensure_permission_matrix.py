@@ -8,15 +8,19 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Ensure the static_permission_matrix table exists and inspect latest run coverage.")
+    parser.parse_args(argv)
+
     from scytaledroid.Database.db_core import run_sql
     from scytaledroid.Database.db_func.static_analysis import static_permission_matrix
 

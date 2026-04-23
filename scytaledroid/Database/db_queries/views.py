@@ -254,8 +254,8 @@ WHERE UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
 
 __all__ += ["CREATE_V_STATIC_HANDOFF_V1"]
 
-CREATE_V_PAPER_DYNAMIC_COHORT_V1 = """
-CREATE OR REPLACE VIEW v_paper_dynamic_cohort_v1 AS
+CREATE_V_RUNTIME_DYNAMIC_COHORT_STATUS_V1 = """
+CREATE OR REPLACE VIEW v_runtime_dynamic_cohort_status_v1 AS
 SELECT
   adcs.dynamic_run_id,
   adcs.package_name,
@@ -281,6 +281,7 @@ SELECT
   adcs.identity_end_json,
   adcs.identity_gate_json,
   adcs.paper_eligible,
+  adcs.paper_eligible AS runtime_cohort_eligible,
   adcs.status,
   adcs.reason_code,
   adcs.details_json,
@@ -289,4 +290,272 @@ SELECT
 FROM analysis_dynamic_cohort_status adcs;
 """
 
-__all__ += ["CREATE_V_PAPER_DYNAMIC_COHORT_V1"]
+CREATE_V_PAPER_DYNAMIC_COHORT_V1 = """
+CREATE OR REPLACE VIEW v_paper_dynamic_cohort_v1 AS
+SELECT
+  dynamic_run_id,
+  package_name,
+  package_name_lc,
+  version_name,
+  version_code,
+  base_apk_sha256,
+  artifact_set_hash,
+  signer_set_hash,
+  signer_primary_digest,
+  static_handoff_hash,
+  freeze_manifest_sha256,
+  paper_contract_version,
+  reason_taxonomy_version,
+  plan_schema_version,
+  freeze_contract_version,
+  ml_schema_version,
+  identity_check_status,
+  identity_checked_at_start_utc,
+  identity_checked_at_end_utc,
+  identity_checked_at_gate_utc,
+  identity_start_json,
+  identity_end_json,
+  identity_gate_json,
+  paper_eligible,
+  status,
+  reason_code,
+  details_json,
+  created_at_utc,
+  updated_at_utc
+FROM v_runtime_dynamic_cohort_status_v1;
+"""
+
+__all__ += ["CREATE_V_RUNTIME_DYNAMIC_COHORT_STATUS_V1", "CREATE_V_PAPER_DYNAMIC_COHORT_V1"]
+
+CREATE_V_WEB_APP_DIRECTORY = """
+CREATE OR REPLACE VIEW v_web_app_directory AS
+SELECT
+  pkg.package_name,
+  COALESCE(NULLIF(a.display_name, ''), latest_audit.app_label, pkg.package_name) AS app_label,
+  COALESCE(cat.category_name, 'Uncategorized') AS category,
+  COALESCE(ap.display_name, a.profile_key, 'Unclassified') AS profile_label,
+  latest_audit.grade,
+  latest_audit.score_capped,
+  COALESCE(latest_audit.last_scanned, latest_static.created_at) AS last_scanned,
+  COALESCE(latest_static.session_stamp, latest_audit.session_stamp) AS session_stamp,
+  COALESCE(latest_static.high, 0) AS high,
+  COALESCE(latest_static.med, 0) AS med,
+  COALESCE(latest_static.low, 0) AS low,
+  COALESCE(latest_static.info, 0) AS info,
+  CASE
+    WHEN latest_static.package_name IS NOT NULL AND latest_audit.package_name IS NOT NULL THEN 'static+permission_audit'
+    WHEN latest_static.package_name IS NOT NULL THEN 'static'
+    WHEN latest_audit.package_name IS NOT NULL THEN 'permission_audit'
+    ELSE 'catalog'
+  END AS source_state
+FROM (
+  SELECT package_name
+  FROM permission_audit_apps
+  UNION
+  SELECT package_name
+  FROM static_findings_summary
+) pkg
+LEFT JOIN apps a
+  ON a.package_name COLLATE utf8mb4_general_ci = pkg.package_name COLLATE utf8mb4_general_ci
+LEFT JOIN android_app_categories cat
+  ON cat.category_id = a.category_id
+LEFT JOIN android_app_profiles ap
+  ON ap.profile_key = a.profile_key
+LEFT JOIN (
+  SELECT
+    pa.package_name,
+    pa.app_label,
+    pa.grade,
+    pa.score_capped,
+    pas.created_at AS last_scanned,
+    SUBSTRING_INDEX(pas.snapshot_key, ':', -1) AS session_stamp
+  FROM permission_audit_apps pa
+  JOIN permission_audit_snapshots pas
+    ON pas.snapshot_id = pa.snapshot_id
+  JOIN (
+    SELECT pa2.package_name,
+           MAX(pas2.created_at) AS max_created
+    FROM permission_audit_apps pa2
+    JOIN permission_audit_snapshots pas2
+      ON pas2.snapshot_id = pa2.snapshot_id
+    GROUP BY pa2.package_name
+  ) latest
+    ON latest.package_name COLLATE utf8mb4_general_ci = pa.package_name COLLATE utf8mb4_general_ci
+   AND latest.max_created = pas.created_at
+) latest_audit
+  ON latest_audit.package_name COLLATE utf8mb4_general_ci = pkg.package_name COLLATE utf8mb4_general_ci
+LEFT JOIN (
+  SELECT s1.*
+  FROM static_findings_summary s1
+  JOIN (
+    SELECT package_name, MAX(created_at) AS max_created
+    FROM static_findings_summary
+    GROUP BY package_name
+  ) latest
+    ON latest.package_name COLLATE utf8mb4_general_ci = s1.package_name COLLATE utf8mb4_general_ci
+   AND latest.max_created = s1.created_at
+) latest_static
+  ON latest_static.package_name COLLATE utf8mb4_general_ci = pkg.package_name COLLATE utf8mb4_general_ci;
+"""
+
+CREATE_V_WEB_RUNTIME_RUN_INDEX = """
+CREATE OR REPLACE VIEW v_web_runtime_run_index AS
+SELECT
+  ds.dynamic_run_id,
+  ds.package_name,
+  COALESCE(NULLIF(a.display_name, ''), ds.package_name) AS app_label,
+  ds.status,
+  ds.tier,
+  COALESCE(ds.operator_run_profile, nf.run_profile, ds.profile_key, 'unknown') AS run_profile,
+  COALESCE(ds.operator_interaction_level, nf.interaction_level, 'unknown') AS interaction_level,
+  ds.started_at_utc,
+  ds.ended_at_utc,
+  ds.duration_seconds,
+  ds.grade,
+  ds.countable,
+  ds.valid_dataset_run,
+  ds.invalid_reason_code,
+  ds.pcap_valid,
+  ds.pcap_bytes,
+  ds.network_signal_quality,
+  nf.feature_schema_version,
+  nf.packet_count,
+  nf.bytes_per_sec,
+  nf.packets_per_sec,
+  nf.low_signal,
+  COALESCE(issues.issue_count, 0) AS issue_count,
+  latest_regime.static_grade,
+  latest_regime.dynamic_grade_if,
+  latest_regime.dynamic_score_if,
+  latest_regime.final_regime_if,
+  CASE WHEN nf.dynamic_run_id IS NULL THEN 'missing_features' ELSE 'features_available' END AS feature_state,
+  CASE
+    WHEN ds.static_run_id IS NULL THEN 'missing_static_run_id'
+    WHEN sar.id IS NULL THEN 'dangling_static_run_id'
+    ELSE 'static_linked'
+  END AS static_link_state
+FROM dynamic_sessions ds
+LEFT JOIN apps a
+  ON a.package_name COLLATE utf8mb4_general_ci = ds.package_name COLLATE utf8mb4_general_ci
+LEFT JOIN dynamic_network_features nf
+  ON nf.dynamic_run_id = ds.dynamic_run_id
+LEFT JOIN static_analysis_runs sar
+  ON sar.id = ds.static_run_id
+LEFT JOIN (
+  SELECT dynamic_run_id, COUNT(*) AS issue_count
+  FROM dynamic_session_issues
+  GROUP BY dynamic_run_id
+) issues
+  ON issues.dynamic_run_id = ds.dynamic_run_id
+LEFT JOIN (
+  SELECT rr.*
+  FROM analysis_risk_regime_summary rr
+  JOIN (
+    SELECT package_name, MAX(created_at_utc) AS max_created
+    FROM analysis_risk_regime_summary
+    GROUP BY package_name
+  ) latest
+    ON latest.package_name COLLATE utf8mb4_general_ci = rr.package_name COLLATE utf8mb4_general_ci
+   AND latest.max_created = rr.created_at_utc
+) latest_regime
+  ON latest_regime.package_name COLLATE utf8mb4_general_ci = ds.package_name COLLATE utf8mb4_general_ci;
+"""
+
+CREATE_V_WEB_RUNTIME_RUN_DETAIL = """
+CREATE OR REPLACE VIEW v_web_runtime_run_detail AS
+SELECT
+  ds.*,
+  COALESCE(NULLIF(a.display_name, ''), ds.package_name) AS app_label,
+  nf.feature_schema_version,
+  nf.host_tools_json,
+  nf.capture_duration_s,
+  nf.packet_count,
+  nf.data_size_bytes,
+  nf.bytes_per_sec,
+  nf.packets_per_sec,
+  nf.avg_packet_rate_pps,
+  nf.tls_ratio,
+  nf.quic_ratio,
+  nf.tcp_ratio,
+  nf.udp_ratio,
+  nf.low_signal,
+  nf.low_signal_reasons_json,
+  nf.bytes_per_second_p50,
+  nf.bytes_per_second_p95,
+  nf.bytes_per_second_max,
+  nf.packets_per_second_p50,
+  nf.packets_per_second_p95,
+  nf.packets_per_second_max,
+  nf.burstiness_bytes_p95_over_p50,
+  nf.burstiness_packets_p95_over_p50,
+  nf.unique_dst_ip_count,
+  nf.unique_dst_port_count,
+  nf.unique_sni_count,
+  nf.unique_dns_qname_count,
+  nf.domains_per_min,
+  nf.new_domain_rate_per_min,
+  nf.new_sni_rate_per_min,
+  nf.new_dns_rate_per_min,
+  CASE WHEN nf.dynamic_run_id IS NULL THEN 'missing_features' ELSE 'features_available' END AS feature_state,
+  CASE
+    WHEN ds.static_run_id IS NULL THEN 'missing_static_run_id'
+    WHEN sar.id IS NULL THEN 'dangling_static_run_id'
+    ELSE 'static_linked'
+  END AS static_link_state
+FROM dynamic_sessions ds
+LEFT JOIN apps a
+  ON a.package_name COLLATE utf8mb4_general_ci = ds.package_name COLLATE utf8mb4_general_ci
+LEFT JOIN dynamic_network_features nf
+  ON nf.dynamic_run_id = ds.dynamic_run_id
+LEFT JOIN static_analysis_runs sar
+  ON sar.id = ds.static_run_id;
+"""
+
+__all__ += [
+    "CREATE_V_WEB_APP_DIRECTORY",
+    "CREATE_V_WEB_RUNTIME_RUN_INDEX",
+    "CREATE_V_WEB_RUNTIME_RUN_DETAIL",
+]
+
+CREATE_V_ARTIFACT_REGISTRY_INTEGRITY = """
+CREATE OR REPLACE VIEW v_artifact_registry_integrity AS
+SELECT
+  ar.artifact_id,
+  ar.run_id,
+  ar.run_type,
+  ar.artifact_type,
+  ar.origin,
+  ar.device_path,
+  ar.host_path,
+  ar.pull_status,
+  ar.sha256,
+  ar.size_bytes,
+  ar.created_at_utc,
+  ar.pulled_at_utc,
+  ar.status_reason,
+  ar.meta_json,
+  CASE
+    WHEN ar.run_type = 'dynamic' AND ds.dynamic_run_id IS NOT NULL THEN 'linked'
+    WHEN ar.run_type = 'dynamic' THEN 'dangling_dynamic_run'
+    WHEN ar.run_type = 'static' AND ar.run_id REGEXP '^[0-9]+$' AND sar.id IS NOT NULL THEN 'linked'
+    WHEN ar.run_type = 'static' THEN 'dangling_static_run'
+    ELSE 'unknown_run_type'
+  END AS link_state
+FROM artifact_registry ar
+LEFT JOIN dynamic_sessions ds
+  ON ar.run_type = 'dynamic'
+ AND ds.dynamic_run_id = ar.run_id
+LEFT JOIN static_analysis_runs sar
+  ON ar.run_type = 'static'
+ AND ar.run_id REGEXP '^[0-9]+$'
+ AND sar.id = CAST(ar.run_id AS UNSIGNED);
+"""
+
+CREATE_V_CURRENT_ARTIFACT_REGISTRY = """
+CREATE OR REPLACE VIEW v_current_artifact_registry AS
+SELECT *
+FROM v_artifact_registry_integrity
+WHERE link_state = 'linked';
+"""
+
+__all__ += ["CREATE_V_ARTIFACT_REGISTRY_INTEGRITY", "CREATE_V_CURRENT_ARTIFACT_REGISTRY"]

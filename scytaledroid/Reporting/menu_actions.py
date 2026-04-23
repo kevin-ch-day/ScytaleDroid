@@ -1055,12 +1055,9 @@ def handle_generate_publication_results_numbers() -> None:
     - output/publication/appendix/results_section_V.md
     """
 
-    exports_script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "publication_exports.py"
-    if not exports_script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(exports_script)}", level="error"))
-        return
-
-    import runpy
+    from scytaledroid.Reporting.services.publication_exports_service import (
+        generate_publication_exports,
+    )
     from scytaledroid.Reporting.services.publication_results_numbers_service import (
         generate_results_numbers,
     )
@@ -1068,7 +1065,7 @@ def handle_generate_publication_results_numbers() -> None:
     print()
     menu_utils.print_header("Generate Frozen Archive Results Numbers")
     try:
-        runpy.run_path(str(exports_script), run_name="__main__")
+        generate_publication_exports()
         generate_results_numbers()
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
@@ -1112,22 +1109,19 @@ def handle_generate_publication_results_numbers() -> None:
 
 def handle_generate_profile_v3_exports() -> None:
     """Generate structural archive exports."""
-
-    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "profile_v3_exports.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-        return
-
-    import runpy
+    from scytaledroid.Reporting.services.profile_v3_exports_service import main
 
     print()
     menu_utils.print_header("Generate Structural Archive Exports")
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        main([])
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
             print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
             return
+    except Exception as exc:
+        print(status_messages.status(f"Generation failed: {exc}", level="error"))
+        return
     out_root = Path(app_config.OUTPUT_DIR) / "publication" / "profile_v3"
     print(status_messages.status(f"Wrote: {relative_path(out_root)}", level="success"))
     prompt_utils.press_enter_to_continue()
@@ -1135,22 +1129,19 @@ def handle_generate_profile_v3_exports() -> None:
 
 def handle_generate_profile_v3_phase2_exports() -> None:
     """Generate structural archive draft exports from current runs."""
-
-    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "profile_v3_phase2_exports.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-        return
-
-    import runpy
+    from scytaledroid.Reporting.services.profile_v3_phase2_exports_service import main
 
     print()
     menu_utils.print_header("Generate Structural Archive Draft Exports")
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        main([])
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
             print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
             return
+    except Exception as exc:
+        print(status_messages.status(f"Generation failed: {exc}", level="error"))
+        return
     out_root = Path(app_config.OUTPUT_DIR) / "audit" / "profile_v3" / "phase2_exports"
     print(status_messages.status(f"Wrote: {relative_path(out_root)}", level="success"))
     prompt_utils.press_enter_to_continue()
@@ -1158,24 +1149,21 @@ def handle_generate_profile_v3_phase2_exports() -> None:
 
 def handle_profile_v3_integrity_gates() -> None:
     """Run structural archive integrity gates."""
+    from scytaledroid.Reporting.services.profile_v3_integrity_gates_service import main
 
     print()
     menu_utils.print_header("Structural Archive Integrity Gates")
-    script = Path(__file__).resolve().parents[2] / "scripts" / "profile_tools" / "profile_v3_integrity_gates.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    import runpy
-
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        main([])
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
             print(status_messages.status(f"Gates failed: exit={exc.code}", level="error"))
             prompt_utils.press_enter_to_continue()
             return
+    except Exception as exc:
+        print(status_messages.status(f"Gates failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
 
     print(status_messages.status("Structural archive gates: PASS", level="success"))
     prompt_utils.press_enter_to_continue()
@@ -1186,22 +1174,19 @@ def handle_generate_exploratory_risk_scoring() -> None:
     These are intentionally not wired into the canonical publication bundle filenames
     until the authors sign off on naming, interpretation, and placement.
     """
-
-    script = Path(__file__).resolve().parents[2] / "scripts" / "publication" / "exploratory_risk_scoring.py"
-    if not script.exists():
-        print(status_messages.status(f"Missing script: {relative_path(script)}", level="error"))
-        return
-
-    import runpy
+    from scytaledroid.Reporting.services.risk_scoring_artifacts_service import main
 
     print()
     menu_utils.print_header("Exploratory Risk Scoring (Publication-Neutral Naming)")
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        main([])
     except SystemExit as exc:
         if int(getattr(exc, "code", 1) or 0) != 0:
             print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
             return
+    except Exception as exc:
+        print(status_messages.status(f"Generation failed: {exc}", level="error"))
+        return
 
     # New location is paper-neutral; keep legacy path readable for one major cycle.
     # Legacy path removal is planned in v4.0.

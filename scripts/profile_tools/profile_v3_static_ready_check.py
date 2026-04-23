@@ -8,6 +8,7 @@ in the canonical DB schema.
 
 from __future__ import annotations
 
+import argparse
 import json
 import signal
 import sys
@@ -26,13 +27,21 @@ def _load_catalog(catalog_path: Path) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Check Profile v3 static readiness in the canonical DB.")
+    parser.add_argument(
+        "--catalog",
+        default=str(Path("profiles") / "profile_v3_app_catalog.json"),
+        help="Profile v3 app catalog path.",
+    )
+    args = parser.parse_args(argv)
+
     try:
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     except Exception:
         pass
 
-    catalog_path = Path("profiles") / "profile_v3_app_catalog.json"
+    catalog_path = Path(args.catalog)
     catalog = _load_catalog(catalog_path)
     pkgs = [str(k).strip().lower() for k in catalog.keys() if str(k).strip()]
     if not pkgs:

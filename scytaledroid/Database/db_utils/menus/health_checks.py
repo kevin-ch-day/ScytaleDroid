@@ -16,6 +16,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 from ..health_checks import fetch_latest_run, fetch_latest_session
+from ..health_checks.analysis_integrity import fetch_analysis_integrity_summary
 from ..health_checks.inventory_checks import run_inventory_snapshot_checks
 from ..health_checks.summary import fetch_health_summary
 from ..menu_actions import log_db_op
@@ -113,6 +114,41 @@ def run_health_summary() -> None:
     gov_rows = scalar("SELECT COUNT(*) FROM permission_governance_snapshot_rows")
     print(f"snapshots              : {gov_headers if gov_headers is not None else '—'}")
     print(f"rows                   : {gov_rows if gov_rows is not None else '—'}")
+
+    analysis = fetch_analysis_integrity_summary()
+    menu_utils.print_section("Analysis/web contracts")
+    print(f"dynamic_runs           : {analysis.dynamic_runs if analysis.dynamic_runs is not None else '—'}")
+    print(f"dynamic_feature_rows   : {analysis.dynamic_feature_rows if analysis.dynamic_feature_rows is not None else '—'}")
+    print(
+        "missing_features       : "
+        f"{analysis.dynamic_runs_missing_features if analysis.dynamic_runs_missing_features is not None else '—'}"
+    )
+    print(
+        "countable_missing_feat : "
+        f"{analysis.countable_runs_missing_features if analysis.countable_runs_missing_features is not None else '—'}"
+    )
+    print(
+        "dangling_static_links  : "
+        f"{analysis.dynamic_runs_with_dangling_static_id if analysis.dynamic_runs_with_dangling_static_id is not None else '—'}"
+    )
+    print(
+        "artifact_orphans       : "
+        f"dynamic={analysis.dynamic_artifact_orphan_rows if analysis.dynamic_artifact_orphan_rows is not None else '—'} "
+        f"static={analysis.static_artifact_orphan_rows if analysis.static_artifact_orphan_rows is not None else '—'}"
+    )
+    print(
+        "app_catalog_gaps       : "
+        f"no_analysis={analysis.app_catalog_without_analysis if analysis.app_catalog_without_analysis is not None else '—'} "
+        f"no_versions={analysis.apps_without_versions if analysis.apps_without_versions is not None else '—'}"
+    )
+    print(
+        "package_collations     : "
+        f"{analysis.package_collation_variants if analysis.package_collation_variants is not None else '—'}"
+    )
+    print(
+        "schema_contracts       : "
+        + ("ok" if not analysis.missing_schema_objects else "missing " + ", ".join(analysis.missing_schema_objects))
+    )
 
     prompt_utils.press_enter_to_continue()
 

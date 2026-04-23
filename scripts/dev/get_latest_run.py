@@ -3,15 +3,19 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Print the latest static-analysis run metadata.")
+    parser.parse_args(argv)
+
     from scytaledroid.Database.db_core import run_sql
 
     row = run_sql(

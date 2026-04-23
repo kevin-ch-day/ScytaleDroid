@@ -5,14 +5,19 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 import mysql.connector
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from scytaledroid.DynamicAnalysis.exports import dataset_export
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-ENV_FILE = Path(os.environ.get("SCYTALEDROID_ENV_FILE", ROOT_DIR / ".env"))
+ENV_FILE = Path(os.environ.get("SCYTALEDROID_ENV_FILE", REPO_ROOT / ".env"))
 
 
 def _load_env() -> None:
@@ -29,11 +34,15 @@ def _load_env() -> None:
 
 
 def _db_connect():
-    url = os.environ.get("SCYTALEDROID_DB_URL")
+    url = _resolve_db_url()
     if not url:
-        raise SystemExit("SCYTALEDROID_DB_URL not set (add to .env).")
+        raise SystemExit(
+            "Database configuration not set "
+            "(SCYTALEDROID_DB_URL or SCYTALEDROID_DB_NAME/USER/PASSWD/HOST/PORT)."
+        )
     parsed = urlparse(url)
-    if parsed.scheme not in {"mysql", "mariadb"}:
+    scheme = _normalize_db_scheme(parsed.scheme)
+    if scheme not in {"mysql", "mariadb"}:
         raise SystemExit(f"Unsupported DB scheme: {parsed.scheme}")
     return mysql.connector.connect(
         user=parsed.username,
@@ -42,6 +51,37 @@ def _db_connect():
         port=parsed.port or 3306,
         database=(parsed.path or "").lstrip("/"),
     )
+
+
+def _normalize_db_scheme(scheme: str) -> str:
+    token = (scheme or "").strip().lower()
+    if "+" in token:
+        token = token.split("+", 1)[0]
+    return token
+
+
+def _compose_db_url_from_parts() -> str | None:
+    name = (os.environ.get("SCYTALEDROID_DB_NAME") or "").strip()
+    if not name:
+        return None
+    user = (os.environ.get("SCYTALEDROID_DB_USER") or "").strip()
+    passwd = (os.environ.get("SCYTALEDROID_DB_PASSWD") or "").strip()
+    host = (os.environ.get("SCYTALEDROID_DB_HOST") or "").strip() or "localhost"
+    port = (os.environ.get("SCYTALEDROID_DB_PORT") or "").strip() or "3306"
+    scheme = _normalize_db_scheme(os.environ.get("SCYTALEDROID_DB_SCHEME") or "mysql")
+    auth = user
+    if passwd:
+        auth = f"{user}:{passwd}" if user else f":{passwd}"
+    if auth:
+        return f"{scheme}://{auth}@{host}:{port}/{name}"
+    return f"{scheme}://{host}:{port}/{name}"
+
+
+def _resolve_db_url() -> str | None:
+    raw = (os.environ.get("SCYTALEDROID_DB_URL") or "").strip()
+    if raw:
+        return raw
+    return _compose_db_url_from_parts()
 
 
 def _fetchall(cur, sql, params=()):

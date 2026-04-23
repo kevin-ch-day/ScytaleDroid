@@ -19,7 +19,7 @@ if str(_ROOT) not in sys.path:
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
-from scytaledroid.StaticAnalysis.cli.flows.selection import _select_latest_groups
+from scytaledroid.StaticAnalysis.cli.flows.selection import select_latest_groups
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts
 from scytaledroid.StaticAnalysis.services import static_service
 from scytaledroid.StaticAnalysis.session import normalize_session_stamp
@@ -38,7 +38,7 @@ def _select_latest_per_package(groups):
 
     selected = []
     for pkg in order:
-        selected.extend(_select_latest_groups(tuple(by_pkg[pkg])))
+        selected.extend(select_latest_groups(tuple(by_pkg[pkg])))
     return tuple(selected)
 
 

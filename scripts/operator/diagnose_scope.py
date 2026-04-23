@@ -13,6 +13,7 @@ If no serial is provided, the active device (if any) is used.
 
 from __future__ import annotations
 
+import argparse
 import sys
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -181,5 +182,7 @@ def main(serial: str | None) -> int:
 
 
 if __name__ == "__main__":
-    serial_arg = sys.argv[1] if len(sys.argv) > 1 else None
-    raise SystemExit(main(serial_arg))
+    parser = argparse.ArgumentParser(description="Diagnose harvest scope counts from the latest inventory snapshot.")
+    parser.add_argument("serial", nargs="?", help="Device serial. Defaults to active device.")
+    args = parser.parse_args()
+    raise SystemExit(main(args.serial))

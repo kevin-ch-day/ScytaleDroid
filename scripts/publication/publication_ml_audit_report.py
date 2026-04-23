@@ -37,6 +37,15 @@ OUT_JSON = OUT_DIR / "ml_audit_report_v1.json"
 OUT_CSV = OUT_DIR / "ml_audit_report_v1.csv"
 
 
+def _print_help() -> None:
+    print("usage: publication_ml_audit_report.py [-h]")
+    print()
+    print("Generate frozen-archive ML audit report.")
+    print()
+    print("options:")
+    print("  -h, --help  show this help message and exit")
+
+
 def _write_legacy_aliases() -> bool:
     # Opt-in only: reduces bundle clutter for OSS users.
     return str((os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "")).strip().lower() in {
@@ -325,4 +334,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if any(arg in {"-h", "--help"} for arg in sys.argv[1:]):
+        _print_help()
+        raise SystemExit(0)
     raise SystemExit(main())

@@ -23,9 +23,6 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
 
     allow_prefixes = (Path("docs/legacy/"),)
     allow_exact = {
-        # Temporary exceptions: these scripts still write legacy output paths and
-        # will be cleaned as part of the experimental output rename milestone.
-        Path("scripts/analysis/risk_scoring_artifacts.py"),
         Path("scripts/experimental/ml_diagnostics.py"),
         # Temporary allowlist (v2.x): existing OSS-facing text that still contains
         # paper2 wording. PR3 shrinks this set as wording is cleaned.
@@ -44,11 +41,7 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
         Path("scripts/dynamic/evidence_hunt.py"),
         Path("scripts/publication/export_manifest_gate.py"),
         Path("scripts/publication/ingest_publication_bundle.py"),
-        Path("scripts/publication/publication_exports.py"),
         Path("scripts/publication/publication_ml_audit_report.py"),
-        Path("scripts/publication/publication_pipeline_audit.py"),
-        Path("scripts/publication/publication_results_numbers.py"),
-        Path("scripts/publication/publication_scientific_qa.py"),
     }
 
     roots = [Path("README.md"), Path("docs"), Path("scripts")]

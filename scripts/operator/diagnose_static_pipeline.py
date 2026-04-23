@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -218,7 +219,10 @@ def _compare_packages(cur, session_stamp: str, run_map: dict | None) -> list[str
     return warnings
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run static pipeline linkage and run_map health checks.")
+    parser.parse_args(argv)
+
     _load_env()
     from scytaledroid.Config import app_config
 
