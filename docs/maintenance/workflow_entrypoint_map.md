@@ -228,7 +228,9 @@ operator routing does not require a second overlapping workflow doc.
 - Static reports and evidence under `output/` and `evidence/`
 - Persistence audit JSON
 - Permission parity snapshot output
-- CLI logs
+- CLI logs (`logs/static_analysis.log`, `logs/error.log`, optional `logs/third_party/`)
+- Operator log scan (session-scoped tails + audit JSON headline): `python -m scytaledroid.StaticAnalysis.audit` — see `docs/maintenance/static_analysis_audit_runbook.md`
+- Workflow / health audit (design-first): `docs/maintenance/static_analysis_workflow_audit_v1.md`
 
 ### Downstream consumers
 

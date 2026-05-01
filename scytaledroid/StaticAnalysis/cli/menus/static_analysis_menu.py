@@ -23,223 +23,17 @@ from .static_analysis_menu_helpers import (
     render_version_diff,
     resolve_last_selection,
 )
+from .static_analysis_menu_ops import (
+    choose_all_scope_variant as _choose_all_scope_variant,
+    choose_run_profile as _choose_run_profile,
+    distinct_package_count as _distinct_package_count,
+    latest_scope_for_all as _latest_scope_for_all,
+    search_app_scope as _search_app_scope,
+)
 
 if TYPE_CHECKING:
     from ..commands.models import Command
     from ..core.models import ScopeSelection
-
-
-def _distinct_package_count(groups: tuple) -> int:
-    return len(
-        {
-            str(getattr(group, "package_name", "") or "").strip().lower()
-            for group in groups
-            if getattr(group, "package_name", None)
-        }
-    )
-
-
-def _latest_scope_for_all(groups: tuple) -> "ScopeSelection":
-    from ..core.models import ScopeSelection
-    from ..flows.selection import select_latest_groups
-
-    grouped: dict[str, list[object]] = {}
-    order: list[str] = []
-    for group in groups:
-        package = str(getattr(group, "package_name", "") or "").strip().lower()
-        if not package:
-            continue
-        if package not in grouped:
-            grouped[package] = []
-            order.append(package)
-        grouped[package].append(group)
-
-    selected = []
-    for package in order:
-        selected.extend(select_latest_groups(tuple(grouped[package])))
-    return ScopeSelection("all", "All harvested apps", tuple(selected))
-
-
-def _choose_all_scope_variant(selection: "ScopeSelection") -> "ScopeSelection | None":
-    from ..core.models import ScopeSelection
-
-    total = len(selection.groups)
-    print()
-    menu_utils.print_section("Batch Size")
-    print("1) All apps")
-    print("2) Smoke batch (5)")
-    print("3) Smoke batch (10)")
-    print("4) Smoke batch (20)")
-    print("5) Persistence test batch (10)")
-    print("0) Back")
-    choice = prompt_utils.get_choice(["1", "2", "3", "4", "5", "0"], default="1")
-    if choice == "0":
-        return None
-    if choice == "1":
-        return selection
-
-    batch_sizes = {"2": 5, "3": 10, "4": 20, "5": 10}
-    batch_size = min(batch_sizes[choice], total)
-    scoped = tuple(selection.groups[:batch_size])
-    return ScopeSelection(
-        "all",
-        (
-            f"Persistence test ({batch_size} apps)"
-            if choice == "5"
-            else f"Smoke batch ({batch_size} apps)"
-        ),
-        scoped,
-    )
-
-
-def _search_app_scope(groups: tuple) -> "ScopeSelection | None":
-    from ..core.models import ScopeSelection
-    from ..flows.selection import select_latest_groups
-    from ...core.repository import list_packages
-
-    packages = list_packages(groups)
-    if not packages:
-        print(status_messages.status("No packages available for analysis.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return None
-
-    print()
-    menu_utils.print_header("Analyze One App")
-    print("Search by package or app name.")
-    print()
-    print("Examples:")
-    print("- signal")
-    print("- instagram")
-    print("- com.whatsapp")
-    print("- twitter")
-    print("- google")
-    print()
-    query = prompt_utils.prompt_text("Search", required=False).strip().lower()
-    if not query:
-        return None
-
-    indexed_matches: list[tuple[int, tuple[str, str, int, str | None]]] = [
-        (idx, item)
-        for idx, item in enumerate(packages)
-        if query in item[0].lower() or (item[3] and query in item[3].lower())
-    ]
-    if not indexed_matches:
-        print(status_messages.status(f"No apps matched '{query}'.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return None
-
-    def _match_rank(item: tuple[str, str, int, str | None], original_index: int) -> tuple[int, int, int, int, int]:
-        package_name, _version, _count, app_label = item
-        package_lc = package_name.lower()
-        label_lc = str(app_label or "").lower()
-
-        if package_lc == query:
-            rank = 0
-        elif label_lc == query:
-            rank = 1
-        elif package_lc.startswith(query):
-            rank = 2
-        elif label_lc.startswith(query):
-            rank = 3
-        elif query in package_lc:
-            rank = 4
-        else:
-            rank = 5
-
-        return (
-            rank,
-            len(package_name),
-            len(str(app_label or package_name)),
-            0 if package_name.startswith("com.") else 1,
-            original_index,
-        )
-
-    matches = [item for _idx, item in sorted(indexed_matches, key=lambda entry: _match_rank(entry[1], entry[0]))]
-
-    print()
-    menu_utils.print_section("Matches")
-    limited = matches[:20]
-    for idx, (package, _version, _count, app_label) in enumerate(limited, start=1):
-        label = app_label or package
-        print(f"{idx}) {label:<18} {package}")
-    print("0) Back")
-    choice = prompt_utils.get_choice(
-        [str(i) for i in range(1, len(limited) + 1)] + ["0"],
-        default="1",
-    )
-    if choice == "0":
-        return None
-
-    package_name, _version, _count, app_label = limited[int(choice) - 1]
-    matching_groups = tuple(group for group in groups if group.package_name == package_name)
-    scoped = select_latest_groups(matching_groups)
-    label = f"{app_label} | {package_name}" if app_label else package_name
-    return ScopeSelection("app", label, scoped)
-
-
-def _choose_run_profile() -> "Command | None":
-    from ..commands import get_command
-    from ..commands.models import Command
-
-    print()
-    menu_utils.print_section("Analysis Preset")
-    print("1) Full analysis")
-    print("2) Fast analysis")
-    print("3) Persistence test")
-    print("4) Advanced profiles")
-    print("0) Back")
-    choice = prompt_utils.get_choice(["1", "2", "3", "4", "0"], default="1", casefold=True)
-    if choice == "0":
-        return None
-    if choice in {"1", "2"}:
-        command = get_command(choice)
-        if command is not None:
-            return command
-    if choice == "3":
-        return Command(
-            id="T",
-            title="Persistence test",
-            description="Run a compact end-to-end persistence/finalization validation.",
-            kind="scan",
-            profile="full",
-            section="workflow",
-            auto_verify=True,
-            prompt_reset=True,
-            workers_override="2",
-        )
-
-    print()
-    menu_utils.print_section("Advanced Profiles")
-    print("1) Metadata smoke")
-    print("2) Permission audit")
-    print("3) Strings and secrets")
-    print("4) IPC and components")
-    print("5) Network surface")
-    print("6) Crypto hygiene")
-    print("7) SDK inventory")
-    print("0) Back")
-    choice = prompt_utils.get_choice(["1", "2", "3", "4", "5", "6", "7", "0"], default="1")
-    if choice == "0":
-        return None
-    focused_profiles = {
-        "1": ("metadata", "Metadata smoke"),
-        "2": ("permissions", "Permission audit"),
-        "3": ("strings", "Strings and secrets"),
-        "4": ("ipc", "IPC and components"),
-        "5": ("nsc", "Network surface"),
-        "6": ("crypto", "Crypto hygiene"),
-        "7": ("sdk", "SDK inventory"),
-    }
-    profile, title = focused_profiles[choice]
-    return Command(
-        id=choice,
-        title=title,
-        description=title,
-        kind="scan",
-        profile=profile,
-        section="workflow",
-        auto_verify=True,
-    )
 
 
 def _run_command_for_selection(
@@ -382,6 +176,20 @@ def static_analysis_menu() -> None:
             return False, f"{message_static}{detail}"
         return True, None
 
+    def _dispatch_run(command: "Command", selection: "ScopeSelection") -> None:
+        _run_command_for_selection(
+            command,
+            selection,
+            analysis_root=analysis_root,
+            persistence_gate_status=_persistence_gate_status,
+            query_runner=query_runner,
+            prompt_advanced_options=prompt_advanced_options,
+            reset_static_analysis_data=reset_static_analysis_data,
+            build_static_run_spec=build_static_run_spec,
+            execute_run_spec=execute_run_spec,
+            static_service=static_service,
+        )
+
     while True:
         groups = _load_groups()
         static_scope_service.prune_missing_paths(
@@ -400,9 +208,19 @@ def static_analysis_menu() -> None:
         last_info = describe_last_selection(groups)
 
         print()
-        menu_utils.print_header("Android APK Static Analysis")
+        menu_utils.print_header(
+            "Android APK Static Analysis",
+            "Analyze APKs that have already been harvested and stored locally.",
+        )
+        menu_utils.print_hint("This does not query the live device inventory.")
+
+        pkgs = _distinct_package_count(groups)
         print()
-        print(f"APK library: {_distinct_package_count(groups)} packages")
+        menu_utils.print_section("Harvested library")
+        print(f"  Packages          : {pkgs}")
+        print(f"  Harvest captures  : {len(groups)}")
+        print("  Capture meaning   : one package/version harvested in one session;")
+        print("                      may include a base APK plus split APKs.")
 
         persistence_ready, persistence_detail = _persistence_gate_status()
         if not persistence_ready:
@@ -419,18 +237,17 @@ def static_analysis_menu() -> None:
                 )
             )
 
-        print("1) Analyze all harvested apps")
-        print("2) Analyze by profile")
-        print("3) Analyze one app")
-        print("4) Re-analyze last app")
+        menu_utils.print_section("Run scope")
+        print("  1) Analyze all harvested apps")
+        print("  2) Analyze by profile")
+        print("  3) Analyze one app")
+        print("  4) Re-analyze last app")
 
-        print()
-        print("5) View previous static runs")
-        print("6) Compare two app versions")
-
-        print()
-        print("D) APK drilldown")
-        print("L) Library details")
+        menu_utils.print_section("Review")
+        print("  5) View previous static runs")
+        print("  6) Compare two app versions")
+        print("  D) APK drilldown")
+        print("  L) Library details")
 
         print()
         print("0) Back")
@@ -462,18 +279,7 @@ def static_analysis_menu() -> None:
             if last_info.get("label"):
                 print()
                 menu_utils.print_header("Re-analyze Last App", str(last_info.get("label") or ""))
-            _run_command_for_selection(
-                command,
-                selection,
-                analysis_root=analysis_root,
-                persistence_gate_status=_persistence_gate_status,
-                query_runner=query_runner,
-                prompt_advanced_options=prompt_advanced_options,
-                reset_static_analysis_data=reset_static_analysis_data,
-                build_static_run_spec=build_static_run_spec,
-                execute_run_spec=execute_run_spec,
-                static_service=static_service,
-            )
+            _dispatch_run(command, selection)
             continue
 
         if choice == "6":
@@ -494,18 +300,7 @@ def static_analysis_menu() -> None:
                 print(status_messages.status("Static drilldown command is not registered.", level="error"))
                 prompt_utils.press_enter_to_continue()
                 continue
-            _run_command_for_selection(
-                command,
-                selection,
-                analysis_root=analysis_root,
-                persistence_gate_status=_persistence_gate_status,
-                query_runner=query_runner,
-                prompt_advanced_options=prompt_advanced_options,
-                reset_static_analysis_data=reset_static_analysis_data,
-                build_static_run_spec=build_static_run_spec,
-                execute_run_spec=execute_run_spec,
-                static_service=static_service,
-            )
+            _dispatch_run(command, selection)
             continue
 
         selection: ScopeSelection | None
@@ -515,12 +310,14 @@ def static_analysis_menu() -> None:
             if selection is None:
                 continue
             print()
-            menu_utils.print_header("Analyze All Apps")
+            menu_utils.print_header(
+                "Analyze All Harvested Apps",
+                "Targets below follow 'newest capture per package' (batch options may shorten the list).",
+            )
             menu_utils.print_metrics(
                 [
-                    ("Packages", len(selection.groups)),
-                    ("Mode", "latest per package"),
-                    ("Scope", selection.label),
+                    ("Apps in run", len(selection.groups)),
+                    ("Batch label", selection.label),
                 ]
             )
         elif choice == "2":
@@ -542,21 +339,9 @@ def static_analysis_menu() -> None:
         if command is None:
             continue
 
-        _run_command_for_selection(
-            command,
-            selection,
-            analysis_root=analysis_root,
-            persistence_gate_status=_persistence_gate_status,
-            query_runner=query_runner,
-            prompt_advanced_options=prompt_advanced_options,
-            reset_static_analysis_data=reset_static_analysis_data,
-            build_static_run_spec=build_static_run_spec,
-            execute_run_spec=execute_run_spec,
-            static_service=static_service,
-        )
+        _dispatch_run(command, selection)
 
 
 __all__ = [
     "static_analysis_menu",
-    "_distinct_package_count",
 ]

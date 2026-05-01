@@ -315,7 +315,12 @@ def replace_findings(
                         ),
                     )
                     inserted += 1
-                except Exception:
+                except Exception as exc:
+                    log.warning(
+                        f"static_findings SQLite insert failed summary_id={summary_id}: "
+                        f"{exc.__class__.__name__}:{exc}",
+                        category="database",
+                    )
                     continue
         return deleted, inserted
     deleted = 0
@@ -351,7 +356,12 @@ def replace_findings(
                     ),
                 )
                 inserted += 1
-            except Exception:
+            except Exception as exc:
+                log.warning(
+                    f"static_findings insert failed summary_id={summary_id} static_run_id={static_run_id}: "
+                    f"{exc.__class__.__name__}:{exc}",
+                    category="database",
+                )
                 continue
     return deleted, inserted
 

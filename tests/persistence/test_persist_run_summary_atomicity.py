@@ -760,7 +760,11 @@ def test_persist_run_summary_rolls_up_persisted_findings_total(monkeypatch):
             return []
         if "SELECT session_label FROM static_analysis_runs WHERE id=%s" in text:
             return ("sess-rollup-1",)
-        if "UPDATE static_analysis_runs SET findings_total=%s" in text:
+        if (
+            "UPDATE static_analysis_runs SET" in text
+            and "findings_total" in text
+            and "findings_runtime_total" in text
+        ):
             updates.append(params)
             return None
         return []
@@ -781,7 +785,7 @@ def test_persist_run_summary_rolls_up_persisted_findings_total(monkeypatch):
 
     assert outcome.persistence_failed is False
     assert outcome.persisted_findings == 2
-    assert updates == [(2, 8001)]
+    assert updates == [(2, 2, 0, None, 8001)]
 
 
 def test_redact_finding_evidence_payload_masks_jwt_like_tokens() -> None:

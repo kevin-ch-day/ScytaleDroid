@@ -155,14 +155,38 @@ def finalize_persisted_static_run(
                 log.warning(message, category="static_analysis")
                 outcome.add_error(message)
 
-    total_findings = int(outcome.persisted_findings)
+    total_findings = int(getattr(outcome, "persisted_findings", 0) or 0)
+    runtime_findings = int(getattr(outcome, "runtime_findings", total_findings) or 0)
+    capped_total = int(getattr(outcome, "findings_capped_total", 0) or 0)
+    capped_map = getattr(outcome, "findings_capped_by_detector", None)
+    capped_json: str | None = None
+    if isinstance(capped_map, dict) and capped_map:
+        capped_json = json.dumps(
+            {str(k): int(v) for k, v in capped_map.items()},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
     try:
         callbacks.run_sql(
-            "UPDATE static_analysis_runs SET findings_total=%s WHERE id=%s",
-            (total_findings, static_run_id),
+            """
+            UPDATE static_analysis_runs SET
+              findings_total=%s,
+              findings_runtime_total=%s,
+              findings_capped_total=%s,
+              findings_capped_by_detector_json=%s
+            WHERE id=%s
+            """,
+            (total_findings, runtime_findings, capped_total, capped_json, static_run_id),
         )
     except Exception:
-        pass
+        try:
+            callbacks.run_sql(
+                "UPDATE static_analysis_runs SET findings_total=%s WHERE id=%s",
+                (total_findings, static_run_id),
+            )
+        except Exception:
+            pass
 
     if callbacks.normalize_run_status(run_status) != "COMPLETED":
         failure_reasons = ["RUN_STATUS_FAILED"]

@@ -364,7 +364,9 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
         ],
     )
 
-    assert "Current: Switch Access (27/120)" in text
+    assert "Working on: Switch Access" in text
+    assert "com.google.android.accessibility.switchaccess" in text
+    assert "(app 28/120)" in text  # ordinal = apps completed + active app
     assert "Package:" not in text
     assert "Progress: 106/459 artifacts" in text
     assert "elapsed 24m 18s" in text

@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_engine
 
 from ..persistence.reports.masvs_summary_report import (
     fetch_db_masvs_summary,
@@ -231,5 +232,17 @@ def render_db_masvs_summary() -> None:
             rows=rows,
         )
 
-    except Exception:
-        pass
+    except Exception as exc:
+        logging_engine.get_error_logger().exception(
+            "render_db_masvs_summary failed",
+            extra=logging_engine.ensure_trace({"event": "static.cli.masvs_render_failed"}),
+        )
+        print(
+            status_messages.status(
+                (
+                    "MASVS summary could not be rendered from DB (best-effort skip). "
+                    f"See logs for details: {exc.__class__.__name__}"
+                ),
+                level="warn",
+            )
+        )

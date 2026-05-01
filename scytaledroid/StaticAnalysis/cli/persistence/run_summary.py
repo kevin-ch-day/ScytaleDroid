@@ -92,6 +92,23 @@ def _redact_secret_like_text(text: str) -> str:
     return redacted
 
 
+def _finding_severity_raw_label(finding: Finding) -> str | None:
+    """Best-effort original severity / gate tier before normalization (Critical, P0, etc.)."""
+
+    for attr in ("severity", "severity_label"):
+        value = getattr(finding, attr, None)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    gate = getattr(getattr(finding, "severity_gate", None), "value", None)
+    if gate is None:
+        return None
+    text = str(gate).strip()
+    return text or None
+
+
 def _redact_finding_evidence_payload(evidence_payload: str) -> str:
     if not evidence_payload:
         return evidence_payload
@@ -140,6 +157,8 @@ class PersistenceOutcome:
     static_run_id: int | None = None
     runtime_findings: int = 0
     persisted_findings: int = 0
+    findings_capped_total: int = 0
+    findings_capped_by_detector: dict[str, int] = field(default_factory=dict)
     baseline_written: bool = False
     string_samples_persisted: int = 0
     persistence_failed: bool = False
@@ -590,6 +609,7 @@ def _append_prepared_finding_rows(
             "finding_id": truncate(first_text(getattr(finding, "finding_id", None), payload.rule_id), 128),
             "status": truncate(status_value, 32),
             "severity": truncate(payload.severity, 32),
+            "severity_raw": truncate(_finding_severity_raw_label(finding), 32),
             "category": truncate(payload.masvs_area, 64),
             "title": truncate(
                 first_text(getattr(finding, "title", None), payload.evidence_preview, payload.detector_id),
@@ -608,6 +628,19 @@ def _append_prepared_finding_rows(
             "evidence_refs": evidence_refs_payload,
         }
     )
+
+
+def _persisted_severity_totals_from_finding_rows(
+    finding_rows: Sequence[Mapping[str, Any]],
+) -> Counter[str]:
+    """Severity counts for rows actually queued for DB insert (post per-detector cap)."""
+
+    raw: Counter[str] = Counter()
+    for row in finding_rows:
+        sev = row.get("severity")
+        if isinstance(sev, str) and sev.strip():
+            raw[sev.strip()] += 1
+    return Counter(canonical_severity_counts(raw))
 
 
 def _build_findings_persistence_context(
@@ -636,11 +669,12 @@ def _build_findings_persistence_context(
             )
     control_summary = summarise_controls(accumulator.control_entries)
     missing_masvs = sum(1 for row in accumulator.finding_rows if not row.get("masvs"))
-    if accumulator.severity_counter:
-        severity_counts = canonical_severity_counts(accumulator.severity_counter)
-        persisted_totals = Counter(severity_counts)
-    else:
+    if accumulator.finding_rows:
+        persisted_totals = _persisted_severity_totals_from_finding_rows(accumulator.finding_rows)
+    elif accumulator.total_findings == 0:
         persisted_totals = Counter(baseline_counts)
+    else:
+        persisted_totals = _persisted_severity_totals_from_finding_rows(())
 
     return _PreparedFindingsPersistenceContext(
         finding_rows=accumulator.finding_rows,
@@ -1458,10 +1492,10 @@ def _persist_static_analysis_findings(
         return
     sql = """
         INSERT INTO static_analysis_findings (
-          run_id, finding_id, status, severity, category, title, tags, evidence, fix,
+          run_id, finding_id, status, severity, severity_raw, category, title, tags, evidence, fix,
           rule_id, cvss_score, masvs_area, masvs_control_id, masvs_control, detector, module, evidence_refs
         ) VALUES (
-          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
     """
     params: list[tuple[object, ...]] = []
@@ -1472,6 +1506,7 @@ def _persist_static_analysis_findings(
                 row.get("finding_id"),
                 row.get("status"),
                 row.get("severity"),
+                row.get("severity_raw"),
                 row.get("category"),
                 row.get("title"),
                 row.get("tags"),
@@ -1951,6 +1986,16 @@ def persist_run_summary(
 
     outcome.runtime_findings = int(findings_context.total_findings)
     outcome.persisted_findings = len(findings_context.finding_rows)
+    outcome.findings_capped_total = int(sum(findings_context.capped_by_detector.values()))
+    outcome.findings_capped_by_detector = dict(findings_context.capped_by_detector)
+    capped_total = outcome.findings_capped_total
+    if capped_total > 0:
+        log.warning(
+            f"{capped_total} finding(s) omitted from DB inserts for {run_package} "
+            f"(per-detector cap; default={_finding_cap_for_detector('__default__')}); "
+            f"by_detector={outcome.findings_capped_by_detector}",
+            category="static_analysis",
+        )
     missing_masvs = findings_context.missing_masvs
     if missing_masvs:
         log.warning(

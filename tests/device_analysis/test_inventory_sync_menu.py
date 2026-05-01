@@ -156,7 +156,7 @@ def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, 
     actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
 
     out = capsys.readouterr().out
-    assert "Snapshot is fresh (34s · 546 pkgs)" in out
+    assert "Snapshot already fresh (34s · 546 pkgs)" in out
     assert prompted["prompt"] == "Continue"
     assert prompted["default"] is False
 

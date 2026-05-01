@@ -118,11 +118,24 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         return ScopeSelection("all", "All apps", tuple(groups))
 
     print()
-    menu_utils.print_header("Static Analysis · Scope (Profile)")
-    menu_utils.print_hint("Select a profile cohort assembled from the latest harvested capture per package.")
+    menu_utils.print_header(
+        "Static Analysis · Select Profile",
+        "Profiles group harvested apps into analysis cohorts.",
+    )
+    print()
+    print("Default selection rule:")
+    print("  For each package, the newest harvest capture is selected.")
+    print("  Older captures remain stored but are excluded from this run.")
+    print()
+    print(
+        "Artifact counts shown after selection refer to APK files in the selected newest capture, "
+        "including base APKs and split APKs."
+    )
+    print()
     rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
-    table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True)
-    menu_utils.print_metrics([("Profiles", len(categories))])
+    table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True, padding=2)
+    print()
+    print(f"Profiles: {len(categories)}")
 
     if len(categories) == 1:
         category_name, _ = categories[0]
@@ -159,8 +172,19 @@ def resolve_profile_scope(
 
     if scoped:
         print()
-        menu_utils.print_header("Profile selection", f"{category_name} selected (latest capture)")
+        menu_utils.print_header(
+            "Static Analysis · Apps in profile",
+            f"{category_name} — newest capture per package below",
+        )
         _render_profile_selection_table(scoped)
+        print(
+            status_messages.status(
+                "Each row is one captured app; APK counts include base + split members when splits were harvested. "
+                "Full preset scans split rows unless you turn split scans off in Run Options.",
+                level="info",
+                show_icon=False,
+            )
+        )
     return ScopeSelection("profile", category_name, scoped)
 
 
@@ -181,23 +205,30 @@ def _render_profile_selection_table(
         preferred = display_map.get(package.lower())
         override = overrides.get(package.lower())
         label = override or app_label or display_name or preferred or package
-        rows.append([str(label), group.package_name, str(len(group.artifacts))])
+        split_n = sum(1 for a in group.artifacts if getattr(a, "is_split_member", False))
+        total_a = len(group.artifacts)
+        base_n = total_a - split_n
+        if split_n > 0:
+            breakdown = f"{total_a} ({base_n} base + {split_n} split)"
+        else:
+            breakdown = str(total_a)
+        rows.append([str(label), group.package_name, breakdown])
 
     # Operator UX: for paper cohorts (<= ~30 apps), show the full list to avoid
     # confusion ("Showing 15 of 21") and extra prompts mid-demo.
     if len(rows) <= 30:
-        table_utils.render_table(["App", "Package", "Artifacts"], rows)
+        table_utils.render_table(["App", "Package", "APKs (detail)"], rows)
         return
 
     max_rows = 15
-    table_utils.render_table(["App", "Package", "Artifacts"], rows[:max_rows])
+    table_utils.render_table(["App", "Package", "APKs (detail)"], rows[:max_rows])
     print(f"Showing {max_rows} of {len(rows)} apps.")
     response = prompt_utils.prompt_text(
         "Press L to list all, or Enter to continue",
         required=False,
     ).strip().lower()
     if response == "l":
-        table_utils.render_table(["App", "Package", "Artifacts"], rows)
+        table_utils.render_table(["App", "Package", "APKs (detail)"], rows)
         _ = prompt_utils.prompt_text("Press Enter to continue", required=False)
 
 

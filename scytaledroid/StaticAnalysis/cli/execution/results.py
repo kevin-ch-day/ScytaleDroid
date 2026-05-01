@@ -64,6 +64,7 @@ from .diagnostics import (
 )
 from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
 from .plan import build_dynamic_plan_artifact
+from .results_dedupe import dedupe_profile_entries
 from .results_formatters import _format_highlight_tokens
 from .results_persistence import (
     apply_persistence_outcome,
@@ -478,10 +479,7 @@ def build_run_results_view_model(
 
 
 def write_baseline_json(payload: dict[str, object], *, package: str, profile: str, scope: str) -> Path:
-    """Write the baseline JSON artifact.
-
-    This wrapper exists to keep a stable patch point for tests and legacy code.
-    """
+    """Delegate to artifact writer (tests commonly patch ``results.write_baseline_json``)."""
     return write_baseline_json_artifact(
         payload,
         package_name=package,
@@ -499,10 +497,7 @@ def write_dynamic_plan_json(
     scope: str,
     static_run_id: int,
 ) -> Path | None:
-    """Build and write the dynamic plan JSON artifact.
-
-    This wrapper exists to keep a stable patch point for tests and legacy code.
-    """
+    """Delegate to plan builder (tests commonly patch ``results.write_dynamic_plan_json``)."""
     return build_dynamic_plan_artifact(
         base_report,
         payload,
@@ -1292,12 +1287,12 @@ def _render_run_results_impl(
         if index < len(outcome.results) and not (compact_mode and large_compact_batch):
             _emit_detail("")
 
-    permission_profiles = _dedupe_profile_entries(permission_profiles)
-    component_profiles = _dedupe_profile_entries(component_profiles)
-    secret_profiles = _dedupe_profile_entries(secret_profiles)
-    finding_profiles = _dedupe_profile_entries(finding_profiles)
+    permission_profiles = dedupe_profile_entries(permission_profiles)
+    component_profiles = dedupe_profile_entries(component_profiles)
+    secret_profiles = dedupe_profile_entries(secret_profiles)
+    finding_profiles = dedupe_profile_entries(finding_profiles)
     trend_deltas = _bulk_trend_deltas(params.session_stamp, finding_totals_by_package)
-    static_risk_rows = _dedupe_profile_entries(static_risk_rows)
+    static_risk_rows = dedupe_profile_entries(static_risk_rows)
     _apply_display_names(permission_profiles)
 
     if run_notes and not interrupted_compact:
@@ -1704,6 +1699,46 @@ def _render_run_results_impl(
             audit_notes.append({"code": "canonical_error", "message": str(message)})
         outcome.audit_notes = audit_notes
 
+    if outcome.results:
+        from .run_health import (
+            attach_run_health_outputs_on_document,
+            build_run_health_document,
+            compact_run_health_stdout_line,
+            compute_run_aggregate_status,
+            reconcile_app_final_status_after_persistence,
+            sanitize_session_stamp_for_filename,
+            write_run_health_json,
+        )
+
+        for res in outcome.results:
+            reconcile_app_final_status_after_persistence(res, persistence_enabled=bool(persist_enabled))
+        outcome.run_aggregate_status = compute_run_aggregate_status(outcome)
+
+        health_doc = build_run_health_document(
+            outcome,
+            params,
+            persistence_enabled=bool(persist_enabled),
+            persist_attempted=bool(persist_enabled and not params.dry_run),
+        )
+        health_doc["final_run_status"] = outcome.run_aggregate_status or health_doc.get("final_run_status")
+        stamp_name = sanitize_session_stamp_for_filename(getattr(params, "session_stamp", None))
+        health_target = outcome.base_dir / f"{stamp_name}_run_health.json"
+        attach_run_health_outputs_on_document(
+            health_doc,
+            path=health_target.resolve(),
+            base_dir=outcome.base_dir.resolve(),
+        )
+        try:
+            write_run_health_json(health_target, health_doc)
+            outcome.run_health_json_path = str(health_target)
+        except OSError as exc:
+            print(status_messages.status(f"Run health JSON could not be written ({exc}).", level="warn"))
+
+        quiet_batch_out = isinstance(run_ctx, StaticRunContext) and run_ctx.quiet and run_ctx.batch
+        if not quiet_batch_out:
+            print()
+            print(status_messages.status(compact_run_health_stdout_line(health_doc), level="info"))
+
     if outcome.aborted:
         completed = outcome.completed_artifacts
         total = outcome.total_artifacts
@@ -1740,88 +1775,6 @@ def _render_run_results_impl(
         and not large_compact_batch
     ):
         _render_db_masvs_summary()
-
-def _dedupe_profile_entries(entries: Sequence[dict[str, object]]) -> list[dict[str, object]]:
-    seen: set[str] = set()
-    deduped: list[dict[str, object]] = []
-    for entry in entries:
-        if not isinstance(entry, Mapping):
-            deduped.append(entry)
-            continue
-        key_token = entry.get("package") or entry.get("label") or entry.get("package_name")
-        label = str(key_token or "").strip()
-        if not label:
-            deduped.append(entry)
-            continue
-        if label in seen:
-            continue
-        seen.add(label)
-        deduped.append(entry)
-    return deduped
-
-
-def _summarize_app_pipeline_for_results(app_result: object) -> dict[str, int]:
-    ok = warn = fail = error = 0
-    finding_fail = policy_fail = 0
-    p0 = p1 = p2 = note = 0
-    for artifact in getattr(app_result, "artifacts", []) or []:
-        report = getattr(artifact, "report", None)
-        metadata = getattr(report, "metadata", None)
-        if not isinstance(metadata, Mapping):
-            continue
-        summary = metadata.get("pipeline_summary")
-        if not isinstance(summary, Mapping):
-            continue
-        status_counts = summary.get("status_counts")
-        if isinstance(status_counts, Mapping):
-            ok += int(status_counts.get("OK", 0) or 0)
-            warn += int(status_counts.get("WARN", 0) or 0)
-        finding_fail += int(summary.get("finding_fail_count", 0) or 0)
-        policy_fail += int(summary.get("policy_fail_count", 0) or 0)
-        fail += int(summary.get("finding_fail_count", 0) or 0) + int(summary.get("policy_fail_count", 0) or 0)
-        error += int(summary.get("error_count", 0) or 0)
-        sev = summary.get("severity_counts")
-        if isinstance(sev, Mapping):
-            p0 += int(sev.get("P0", 0) or 0)
-            p1 += int(sev.get("P1", 0) or 0)
-            p2 += int(sev.get("P2", 0) or 0)
-            note += int(sev.get("NOTE", 0) or 0)
-    return {
-        "ok": ok,
-        "warn": warn,
-        "fail": fail,
-        "finding_fail": finding_fail,
-        "policy_fail": policy_fail,
-        "error": error,
-        "p0": p0,
-        "p1": p1,
-        "p2": p2,
-        "note": note,
-    }
-
-
-def _collect_app_error_detectors(app_result: object) -> list[tuple[str, str]]:
-    """Return (detector, reason) tuples for pipeline execution errors."""
-    out: list[tuple[str, str]] = []
-    for artifact in getattr(app_result, "artifacts", []) or []:
-        report = getattr(artifact, "report", None)
-        metadata = getattr(report, "metadata", None)
-        if not isinstance(metadata, Mapping):
-            continue
-        summary = metadata.get("pipeline_summary")
-        if not isinstance(summary, Mapping):
-            continue
-        payload = summary.get("error_detectors")
-        if not isinstance(payload, Sequence):
-            continue
-        for entry in payload:
-            if not isinstance(entry, Mapping):
-                continue
-            detector = str(entry.get("detector") or entry.get("section") or "").strip()
-            reason = str(entry.get("reason") or "").strip()
-            if detector:
-                out.append((detector, reason))
-    return out
 
 def prompt_deferred_post_run_diagnostics(outcome: RunOutcome, params: RunParameters) -> None:
     payload = outcome.deferred_diagnostics or {}

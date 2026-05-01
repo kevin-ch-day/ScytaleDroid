@@ -23,7 +23,7 @@ def render_run_start(
         target_value = target.split(":", 1)[1].strip() or target
     print("Static Analysis")
     print("───────────────")
-    print(f"{profile_label} | workers={workers_desc} | detectors={detector_count}")
+    print(f"{profile_label} | workers={workers_desc} | profile_modules={detector_count}")
     if target_value and target_value != "All apps":
         print(f"Target: {target_value}")
     print()

@@ -54,11 +54,19 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
     menu_module.static_analysis_menu()
 
     out = capsys.readouterr().out
-    assert "APK library: 1 packages" in out
+    assert "harvested and stored locally" in out
+    assert "does not query the live device inventory" in out
+    assert "Harvested library" in out
+    assert "Packages          : 1" in out
+    assert "Harvest captures  : 1" in out
+    assert "Capture meaning" in out
+    assert "Profile vs pipeline" not in out
+    assert "Run scope" in out
     assert "Analyze all harvested apps" in out
     assert "Analyze by profile" in out
     assert "Analyze one app" in out
     assert "Re-analyze last app" in out
+    assert "Review" in out
     assert "View previous static runs" in out
     assert "Compare two app versions" in out
     assert "APK drilldown" in out
@@ -72,6 +80,21 @@ def test_reanalyze_last_command_prompts_reset() -> None:
 
     assert command is not None
     assert command.prompt_reset is True
+
+
+def test_choose_run_profile_full_shows_pipeline_summary_after_selection(monkeypatch, capsys) -> None:
+    menu_module = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu")
+
+    monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "1")
+
+    command = menu_module._choose_run_profile()
+
+    assert command is not None
+    assert command.profile == "full"
+    out = capsys.readouterr().out
+    assert "Preset            : Full analysis" in out
+    assert "Analyzer modules  : 9" in out
+    assert "Detector stages   :" in out and "ordered" in out
 
 
 def test_choose_run_profile_exposes_focused_validation_modes(monkeypatch) -> None:
@@ -255,9 +278,9 @@ def test_static_menu_renders_library_size_not_internal_state(monkeypatch, capsys
     menu_module.static_analysis_menu()
 
     out = capsys.readouterr().out
-    assert "APK library: 1 packages" in out
+    assert "Harvest captures  : 2" in out
     assert "Capture sessions" not in out
     assert "Target groups" not in out
     assert "Primary Actions" not in out
-    assert "Review" not in out
+    assert "Review" in out
     assert "Tools" not in out

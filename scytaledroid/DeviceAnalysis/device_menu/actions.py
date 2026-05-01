@@ -409,7 +409,10 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 )
                 print(
                     status_messages.status(
-                        f"Snapshot is fresh ({age_compact} · {pkg_note}). Run full refresh anyway?",
+                        inventory_cli_labels.FULL_SYNC_WHILE_FRESH_PROMPT.format(
+                            age=age_compact,
+                            packages=pkg_note,
+                        ),
                         level="info",
                     )
                 )
@@ -418,6 +421,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                     default=False,
                 ):
                     return
+            print()
             result = inventory_workflow.run_inventory_sync(
                 serial,
                 ui_prefs=None,

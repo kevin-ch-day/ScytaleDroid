@@ -108,3 +108,39 @@ def test_publish_persisted_artifacts_prepares_required_artifacts_before_validati
     assert ("prepare", 321) in calls
     assert calls.index(("prepare", 321)) < calls.index(("validate", None))
     assert not any(call[0] == "finalize" for call in calls)
+
+
+def test_publish_persisted_artifacts_governance_downgrade_does_not_emit_persistence_warnings(
+    tmp_path: Path, capsys,
+) -> None:
+    """MISSING_GOVERNANCE is printed but must not land in warnings (avoids false persistence_failed)."""
+    report_path = tmp_path / "report.json"
+    report_path.write_text("{}", encoding="utf-8")
+
+    result = publish_persisted_artifacts(
+        base_report=SimpleNamespace(metadata={}),
+        payload={},
+        package_name="com.example.app",
+        static_run_id=999,
+        profile="full",
+        scope="app",
+        report_path=report_path,
+        paper_grade_requested=True,
+        required_paper_artifacts=("static_baseline_json",),
+        ended_at_utc="2026-05-01T00:00:00Z",
+        abort_signal=None,
+        write_baseline_json_fn=lambda *_a, **_k: tmp_path / "baseline.json",
+        write_dynamic_plan_json_fn=lambda *_a, **_k: tmp_path / "plan.json",
+        governance_ready_fn=lambda: (False, "governance_query_failed:no_db"),
+        write_manifest_evidence_fn=lambda *_a, **_k: tmp_path / "manifest.json",
+        build_artifact_registry_entries_fn=lambda **_k: [],
+        record_artifacts_fn=lambda **_k: None,
+        run_sql_fn=lambda *_a, **_k: [],
+        refresh_static_run_manifest_fn=lambda *_a, **_k: True,
+        finalize_static_run_fn=lambda **_k: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)" in out
+    assert "Core persistence still applies" in out
+    assert result.warnings == []

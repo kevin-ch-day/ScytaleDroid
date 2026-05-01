@@ -316,7 +316,12 @@ def prompt_run_setup(
 
     groups = tuple(getattr(selection, "groups", ()) or ())
     package_count = len(groups)
-    artifact_count = sum(len(getattr(group, "artifacts", ()) or ()) for group in groups)
+    artifact_counts = [len(getattr(group, "artifacts", ()) or ()) for group in groups]
+    artifact_count = sum(artifact_counts)
+    split_apk_total = sum(
+        sum(1 for a in getattr(group, "artifacts", ()) or () if getattr(a, "is_split_member", False))
+        for group in groups
+    )
     target = getattr(selection, "label", None) or "selected scope"
     if package_count == 1 and groups:
         group = groups[0]
@@ -332,7 +337,27 @@ def prompt_run_setup(
     menu_utils.print_section("Run Setup")
     print(f"Target         : {target}")
     print(f"Mode           : {params.profile_label}")
-    print(f"Artifacts est. : {artifact_count}")
+    print(f"Packages       : {package_count}")
+    print(f"APK files      : {artifact_count} ({artifact_count - split_apk_total} base + {split_apk_total} split)")
+    scan_splits_note = (
+        "on (every APK row scanned)"
+        if bool(getattr(params, "scan_splits", True))
+        else "off (dataset-style runs may trim to base only when batch quiet)"
+    )
+    print(f"Split APK scan : {scan_splits_note}")
+    if artifact_counts and max(artifact_counts) >= 15:
+        top = sorted(
+            (
+                (
+                    len(getattr(g, "artifacts", ()) or ()),
+                    str(getattr(g, "package_name", "") or "unknown"),
+                )
+                for g in groups
+            ),
+            reverse=True,
+        )[:3]
+        top_txt = ", ".join(f"{pkg} ({n} APK{'s' if n != 1 else ''})" for n, pkg in top)
+        print(status_messages.status(f"High-split apps: {top_txt}", level="warn"))
     print(f"Session        : {session_stamp}")
     if has_existing:
         existing = "found"
