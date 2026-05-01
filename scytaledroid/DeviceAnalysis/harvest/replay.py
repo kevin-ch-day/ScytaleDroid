@@ -41,13 +41,14 @@ class ReplayPackageOutcome:
 
 
 def find_package_manifests(root: Path) -> list[Path]:
-    root = root.resolve()
-    legacy = sorted(path for path in root.rglob("harvest_package_manifest.json") if path.is_file())
-    if legacy:
-        return legacy
-    if root.name == "receipts" and (root / "harvest").exists():
-        root = (root / "harvest").resolve()
-    return sorted(path for path in root.glob("*/*.json") if path.is_file())
+    """Return every ``harvest_package_manifest.json`` under *root* (recursive).
+
+    Only on-disk **package manifests** are supported; shallow receipt JSON trees
+    without that filename are not inferred (use ``device_apks`` or pass a directory
+    tree that actually contains package manifests).
+    """
+
+    return common.iter_harvest_package_manifest_paths(root.resolve())
 
 
 def load_package_manifest(path: Path) -> dict[str, Any]:
@@ -69,7 +70,6 @@ def replay_package_manifest(
     payload = load_package_manifest(manifest_path)
     package = dict(payload.get("package") or {})
     inventory = dict(payload.get("inventory") or {})
-    planning = dict(payload.get("planning") or {})
     execution = dict(payload.get("execution") or {})
     status = dict(payload.get("status") or {})
 

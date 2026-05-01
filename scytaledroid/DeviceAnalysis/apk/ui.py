@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from scytaledroid.DeviceAnalysis import harvest, inventory
+from scytaledroid.DeviceAnalysis.inventory.cli_labels import BANNER_REFRESH_REQUIRED
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import (
     coerce_float,
@@ -247,7 +248,7 @@ def report_profile_v3_requires_inventory_sync(summary: Mapping[str, object]) -> 
     total_changed = summary.get("total_changed")
     total_text = f"{int(total_changed)}" if isinstance(total_changed, int) else "some"
     print()
-    print("Refresh Inventory Required")
+    print(BANNER_REFRESH_REQUIRED)
     print("───────────────────────")
     print(
         status_messages.status(
@@ -443,17 +444,23 @@ def report_harvest_started(
     harvest_mode: str | None = None,
     delta_filter_applied: bool | None = None,
 ) -> None:
-    line = (
-        "APK Harvest started • "
-        f"inventoried={candidate_count} • in_scope={selected_count} • with_paths={policy_eligible} "
-        f"• policy_eligible={scheduled} • blocked_policy={blocked_policy} • blocked_scope={blocked_scope} "
-        f"• artifacts≈{artifacts} • policy={policy}"
-    )
+    _ = policy_eligible  # schedule/blocked_policy already summarize policy surface for operators
+    if candidate_count != selected_count:
+        scope_frag = f"{selected_count}/{candidate_count} in scope"
+    else:
+        scope_frag = f"{selected_count} in scope"
+    head = f"Harvest start · {scope_frag} · {scheduled} pull(s)"
+    if blocked_policy:
+        head += f" · {blocked_policy} policy-blocked"
+    if blocked_scope:
+        head += f" · {blocked_scope} scope-blocked"
+    print(status_messages.status(head, level="info"))
+    tail = f"Est. ~{artifacts} artifact file(s) · policy={policy}"
     if harvest_mode:
-        line += f" • harvest_mode={harvest_mode}"
+        tail += f" · harvest_mode={harvest_mode}"
     if delta_filter_applied is not None:
-        line += f" • delta_filter_applied={'true' if delta_filter_applied else 'false'}"
-    print(status_messages.status(line, level="info"))
+        tail += f" · delta={'on' if delta_filter_applied else 'off'}"
+    print(status_messages.status(tail, level="info"))
 
 
 def pause_after_preview() -> None:

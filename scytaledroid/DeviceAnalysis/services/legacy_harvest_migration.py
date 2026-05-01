@@ -24,7 +24,7 @@ class LegacyHarvestMigrationSummary:
 
 
 def migrate_legacy_harvest_tree(source_root: Path | None = None) -> LegacyHarvestMigrationSummary:
-    root = (source_root or artifact_store.legacy_harvest_root()).expanduser().resolve()
+    root = (source_root or artifact_store.device_apks_root()).expanduser().resolve()
     summary = LegacyHarvestMigrationSummary()
     if not root.exists():
         return summary
@@ -35,7 +35,7 @@ def migrate_legacy_harvest_tree(source_root: Path | None = None) -> LegacyHarves
         pull_mode="migrated",
     )
 
-    for manifest_path in sorted(root.glob("*/*/*/harvest_package_manifest.json")):
+    for manifest_path in sorted(root.rglob("harvest_package_manifest.json")):
         summary.manifests_scanned += 1
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))

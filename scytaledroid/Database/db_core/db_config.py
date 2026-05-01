@@ -175,7 +175,7 @@ def resolve_db_config_from_root(root: str) -> tuple[dict[str, str | int] | None,
 
 
 def _load_from_env() -> dict[str, str | int]:
-    loaded_dotenv = _load_dotenv()
+    _load_dotenv()
     # When running tests via pytest, force default SQLite to avoid hitting real DBs.
     if any("pytest" in arg for arg in sys.argv[:1]) or "PYTEST_CURRENT_TEST" in os.environ:
         raw_url = None

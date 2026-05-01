@@ -167,4 +167,4 @@ else
   echo "[Setup] Android tools helper not found; skipping Android tools setup."
 fi
 
-echo "[Setup] Completed."
+echo "[Setup] Completed. (Optional: ./run.sh --deploy-check)"

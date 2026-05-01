@@ -124,32 +124,30 @@ def main_menu() -> None:
     valid_choices = list(handlers)
     # Keep a default for enter-to-select but do not show "(default)" in UI.
     default_choice = "1"
+    ui_once: dict[str, bool] = {}
     while True:
         print()
         status_snapshot = _print_tier1_status_banner()
-        print()
-        ok, message, detail = schema_gate.check_base_schema()
-        db_warning: tuple[str, str] | None = None
-        if not ok:
-            db_warning = (message, detail)
-            log.warning(
-                "Main menu continuing without base schema readiness",
-                category="application",
-                extra={"schema_gate_message": message, "schema_gate_detail": detail},
-            )
-        if db_warning is not None:
-            warn_message, warn_detail = db_warning
-            status_messages.print_status(
-                f"Persistence is unavailable: {warn_message}",
-                level="warn",
-            )
-            if warn_detail:
-                status_messages.print_status(warn_detail, level="warn")
-            status_messages.print_status(
-                "DB-backed actions will gate individually. Filesystem-first workflows remain available.",
-                level="warn",
-            )
+        if status_snapshot.get("had_status_output"):
             print()
+        ok, message, detail = schema_gate.check_base_schema()
+        if not ok:
+            msg_stripped = message.strip()
+            if msg_stripped == "Database disabled.":
+                if not ui_once.get("db_disabled_logged"):
+                    log.info(
+                        "Running without DB persistence (SCYTALEDROID_DB_URL unset).",
+                        category="application",
+                    )
+                    ui_once["db_disabled_logged"] = True
+            else:
+                log.warning(
+                    "Main menu continuing without base schema readiness",
+                    category="application",
+                    extra={"schema_gate_message": message, "schema_gate_detail": detail},
+                )
+        _emit_main_menu_db_connection_line(ok, message, detail or "")
+        print()
         menu_utils.print_header("Main Menu")
         menu_utils.print_hint(
             "Choose a workflow stage."
@@ -258,6 +256,36 @@ def _handle_copy_freeze_hash(snapshot: dict[str, object]) -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def _emit_main_menu_db_connection_line(ok: bool, message: str, detail: str) -> None:
+    """Single-line persistence status on every main-menu draw (MariaDB/MySQL)."""
+
+    from scytaledroid.Database.db_core import db_config
+
+    if ok:
+        cfg = db_config.DB_CONFIG
+        host = cfg.get("host", "?")
+        port = cfg.get("port", "?")
+        database = (cfg.get("database") or "").strip() or "?"
+        status_messages.print_status(
+            f"DB: {database} @ {host}:{port}",
+            level="success",
+        )
+        return
+
+    headline = message.strip()
+    if headline == "Database disabled.":
+        status_messages.print_status(
+            "DB: off — set DSN in .env (menu 6)",
+            level="warn",
+        )
+        return
+
+    status_messages.print_status(f"DB: error — {headline}", level="warn")
+    trimmed = (detail or "").strip()
+    if trimmed:
+        status_messages.print_status(trimmed, level="warn")
+
+
 def _print_tier1_status_banner() -> dict[str, object]:
     """Render the main-menu mode banner. Returns a snapshot for extra actions."""
 
@@ -296,6 +324,7 @@ def _print_tier1_status_banner() -> dict[str, object]:
     snapshot: dict[str, object] = {
         "freeze_dataset_hash": freeze_hash,
         "allow_copy_freeze_hash": bool(locked and freeze_hash),
+        "had_status_output": False,
     }
 
     # Loud, impossible-to-miss banner (PM acceptance criteria).
@@ -332,21 +361,23 @@ def _print_tier1_status_banner() -> dict[str, object]:
             )
         else:
             menu_utils.print_hint("Command: [H] Copy freeze hash")
+        snapshot["had_status_output"] = True
         return snapshot
 
-    # Collection/default mode: keep it compact; avoid DB noise unless needed.
-    audit_ready = str(audit).strip().upper() == "GO"
-    audit_state = "ready" if audit_ready else "not ready"
-    audit_detail = "evidence freeze recorded" if audit_ready else "no evidence freeze recorded"
-    menu_utils.print_section("Collection")
-    print(f"Audit  : {audit_state}")
-    print(f"Reason : {audit_detail}")
-    print(f"Quota  : {'Not enforced' if quota_label == 'unknown' else quota_label}")
-    # Keep a single legacy hint if schema mismatch is present.
+    # Collection/default mode: stay quiet — routine publication/freeze state is
+    # irrelevant for most runs. Surface only an actionable schema drift hint.
+    from scytaledroid.Database.db_core import db_config
+
     schema_ver = tier1.get("schema_version") or "<unknown>"
     expected_schema = tier1.get("expected_schema") or "<unknown>"
-    if schema_ver and expected_schema and schema_ver != expected_schema:
+    if (
+        schema_ver
+        and expected_schema
+        and schema_ver != expected_schema
+        and not (schema_ver == "<unknown>" and not db_config.db_enabled())
+    ):
         menu_utils.print_hint(f"DB schema mismatch: {schema_ver} (expects {expected_schema})")
+        snapshot["had_status_output"] = True
     return snapshot
 
 
@@ -517,14 +548,35 @@ def main(argv: list[str] | None = None) -> int:
         help="Show multi-city clocks in the banner",
     )
     parser.add_argument(
+        "--deploy-check",
+        action="store_true",
+        help="Host / adb / DB smoke check, then exit",
+    )
+    parser.add_argument(
+        "--require-database",
+        action="store_true",
+        help="With --deploy-check: fail if DB missing or unreachable",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit diagnostics in JSON format (requires --diag)",
+        help="Emit machine-readable JSON (with --diag or --deploy-check)",
     )
     args = parser.parse_args(argv)
 
-    if args.json and not args.diag:
-        parser.error("--json requires --diag")
+    if args.json and not args.diag and not args.deploy_check:
+        parser.error("--json requires --diag or --deploy-check")
+
+    if args.diag and args.deploy_check:
+        parser.error("Choose either --diag or --deploy-check (not both)")
+
+    if args.deploy_check:
+        from scytaledroid.Diagnostics.deployment_check import run as run_deploy_check
+
+        return run_deploy_check(
+            json_mode=args.json,
+            require_database=args.require_database,
+        )
 
     if args.diag:
         _run_diagnostics(json_mode=args.json)
@@ -534,8 +586,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         main_menu()
     except KeyboardInterrupt:
+        try:
+            from scytaledroid.DeviceAnalysis.inventory.cli_labels import MAIN_INTERRUPT_NOTICE
+            from scytaledroid.DeviceAnalysis.inventory.progress import finalize_inventory_live_tty
+
+            finalize_inventory_live_tty()
+        except Exception:
+            MAIN_INTERRUPT_NOTICE = "Stopped by operator (Ctrl+C)."
         print()
-        status_messages.print_status("Interrupted by user. Exiting…", level="warn")
+        status_messages.print_status(MAIN_INTERRUPT_NOTICE, level="warn")
         log.info("Application interrupted by user.", category="application")
     return 0
 

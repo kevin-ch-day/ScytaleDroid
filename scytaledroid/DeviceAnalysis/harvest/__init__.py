@@ -1,6 +1,6 @@
 """Utilities for targeted APK harvest operations."""
 
-from importlib import import_module
+from scytaledroid.DeviceAnalysis.lazy_pkg import lazy_getattr as _lazy_getattr
 
 from . import rules
 from .models import (
@@ -42,13 +42,7 @@ _LAZY_EXPORTS = {
 
 
 def __getattr__(name: str) -> object:
-    if name not in _LAZY_EXPORTS:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attr_name = _LAZY_EXPORTS[name]
-    module = import_module(module_name, __name__)
-    value = getattr(module, attr_name)
-    globals()[name] = value
-    return value
+    return _lazy_getattr(__name__, _LAZY_EXPORTS, globals(), name)
 
 __all__ = [
     "ArtifactError",

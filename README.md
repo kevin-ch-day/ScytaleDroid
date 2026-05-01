@@ -120,8 +120,8 @@ ScytaleDroid talks to devices and, optionally, a backing MariaDB/MySQL database.
 Useful smoke checks:
 
 ```bash
-adb devices              # Ensure your device is listed and authorized
-./run.sh                 # Confirm the CLI launches cleanly
+adb devices              # Authorized device(s) listed as 'device'
+./run.sh                 # Launch CLI (--deploy-check for host/ADB/DB probe)
 ```
 
 If you are targeting a database, export the DSN variables your environment

@@ -111,4 +111,4 @@ def test_compute_inventory_metrics_from_result():
     assert metrics.by_partition.get("System (/system, /system_ext)") == 1
     assert metrics.delta_new == 1
     assert metrics.delta_updated == 2
-    assert metrics.scan_duration == "02m 05s"
+    assert metrics.scan_duration == "2m05s"

@@ -49,8 +49,32 @@ def upload_inbox_root() -> Path:
     return data_root() / "inbox" / "uploads"
 
 
-def legacy_harvest_root() -> Path:
+def device_apks_root() -> Path:
+    """Return ``DATA_DIR/device_apks`` (per-device pulled APK evidence tree)."""
+
     return data_root() / "device_apks"
+
+
+def filesystem_harvest_run_label(run_id: str) -> str:
+    """Map *run_id* to a single directory / receipt segment (calendar is not the root)."""
+
+    cleaned = _safe_name(str(run_id or "").strip().replace(":", "-"))
+    return (cleaned[:160] if cleaned else "harvest-run") or "harvest-run"
+
+
+def compose_harvest_run_destination(*, serial: str, run_id: str) -> tuple[Path, str]:
+    """Build per-run layout and receipt key.
+
+    Artifacts land under::
+
+        device_apks/<serial>/runs/<filesystem_harvest_run_label(run_id)>/
+
+    *session_stamp* matches that run label so sessions are **run-scoped**, not day-scoped.
+    """
+
+    label = filesystem_harvest_run_label(run_id)
+    dest_root = device_apks_root() / serial.strip() / "runs" / label
+    return dest_root, label
 
 
 def canonical_apk_path(sha256_digest: str, *, suffix: str = ".apk") -> Path:
@@ -149,10 +173,12 @@ __all__ = [
     "analysis_apk_root",
     "apk_store_root",
     "canonical_apk_path",
+    "compose_harvest_run_destination",
+    "filesystem_harvest_run_label",
     "data_root",
     "harvest_receipts_root",
+    "device_apks_root",
     "harvest_receipt_path",
-    "legacy_harvest_root",
     "materialize_apk",
     "repo_relative_path",
     "receipts_root",

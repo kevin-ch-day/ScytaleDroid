@@ -9,7 +9,7 @@ from pathlib import Path
 from scytaledroid.DeviceAnalysis.services import artifact_store
 
 from . import common
-from .common import normalise_local_path
+from .common import normalise_local_path, package_evidence_leaf_name
 from .models import PackagePlan, PullResult
 
 
@@ -118,6 +118,7 @@ def write_package_manifest(
             "app_label": inventory.app_label,
             "version_name": inventory.version_name,
             "version_code": inventory.version_code,
+            "evidence_leaf": package_evidence_leaf_name(inventory),
             "device_serial": serial,
             "snapshot_id": snapshot_id,
             "snapshot_captured_at": snapshot_captured_at,

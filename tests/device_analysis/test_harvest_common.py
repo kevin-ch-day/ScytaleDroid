@@ -102,3 +102,21 @@ def test_adb_pull_returns_path_stale_error_for_stale_remote_path(
 
     assert isinstance(result, ArtifactError)
     assert result.reason == "path_stale"
+
+
+def test_iter_harvest_package_manifest_paths_sorted_and_skips_missing(tmp_path: Path) -> None:
+    from scytaledroid.DeviceAnalysis.harvest import common
+
+    assert common.iter_harvest_package_manifest_paths(tmp_path / "nope") == []
+
+    d1 = tmp_path / "a" / "x"
+    d2 = tmp_path / "b"
+    d1.mkdir(parents=True)
+    d2.mkdir(parents=True)
+    (d1 / "harvest_package_manifest.json").write_text("{}", encoding="utf-8")
+    (d2 / "harvest_package_manifest.json").write_text("{}", encoding="utf-8")
+
+    paths = common.iter_harvest_package_manifest_paths(tmp_path)
+    assert len(paths) == 2
+    assert paths[0].name == "harvest_package_manifest.json"
+    assert paths[0].as_posix() < paths[1].as_posix()

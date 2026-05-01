@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from scytaledroid.DeviceAnalysis.inventory.progress import format_inventory_elapsed
+
 
 @dataclass
 class InventoryMetrics:
@@ -18,21 +20,6 @@ class InventoryMetrics:
     delta_removed: int
     delta_updated: int
     scan_duration: str
-
-
-def _format_duration(seconds: float | None) -> str:
-    if seconds is None or seconds < 0:
-        return "--"
-    total_seconds = int(round(seconds))
-    minutes, secs = divmod(total_seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    parts = []
-    if hours:
-        parts.append(f"{hours}h")
-    if minutes or hours:
-        parts.append(f"{minutes:02d}m")
-    parts.append(f"{secs:02d}s")
-    return " ".join(parts)
 
 
 def compute_inventory_metrics(result) -> InventoryMetrics:
@@ -101,7 +88,7 @@ def compute_inventory_metrics(result) -> InventoryMetrics:
     delta_removed = int(getattr(delta, "removed_count", 0) or 0) if delta else 0
     delta_updated = int(getattr(delta, "updated_count", 0) or 0) if delta else 0
 
-    scan_duration = _format_duration(getattr(result, "elapsed_seconds", None))
+    scan_duration = format_inventory_elapsed(getattr(result, "elapsed_seconds", None), absent="--")
 
     return InventoryMetrics(
         total_packages=total,

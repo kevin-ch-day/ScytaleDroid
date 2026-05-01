@@ -53,13 +53,12 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     out = colors.strip(capsys.readouterr().out)
     assert "moto g 5G - 2024 (ZY22JK89DR)" in out
     assert "moto g 5G - 2024 (ZY22JK89DR) | Physical | Motorola" not in out
-    assert "Motorola | 15 | Physical | NON-ROOT" in out
-    assert "Summary" in out
-    assert "Inventory    : FRESH | 546 packages | 14h 39m ago" in out
-    assert "Harvest      : 117 harvested | 411 policy blocked | 18 scope blocked" in out
-    assert "Evidence     : aligned with snapshot 26" in out
-    assert "Next Step" in out
-    assert "Inventory and harvest are aligned. Static analysis can proceed." in out
+    assert "Motorola" in out and "Android 15" in out and "Physical" in out and "NON-ROOT" in out
+    assert "Inv" in out and "Har" in out and "Ev" in out
+    assert "546 pkgs" in out and "14h 39m ago" in out
+    assert "117 hv" in out and "411 pol" in out and "18 sc" in out
+    assert "OK @ 26" in out
+    assert "Next: static analysis (menu 2)" in out
     assert "Device Capability" not in out
     assert "Pipeline State" not in out
     assert "Artifacts root:" not in out
@@ -76,6 +75,21 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     assert "Device tools" not in out
     assert "Artifacts / exports" not in out
     assert "Advanced" not in out
+
+
+def test_print_dashboard_hint_when_active_but_no_adb_rows(capsys) -> None:
+    active = {"serial": "ZY22JK89DR", "model": "test", "manufacturer": "ACME", "android_release": "15"}
+    dashboard.print_dashboard(
+        summaries=[],
+        active_details=active,
+        warnings=[],
+        last_refresh_ts=None,
+        serial_map={},
+        inventory_metadata=None,
+    )
+    out = colors.strip(capsys.readouterr().out)
+    assert "ADB listed no devices" in out
+    assert "ZY22JK89DR" in out
 
 
 def test_print_device_details_shows_moved_pipeline_and_evidence_blocks(monkeypatch, capsys) -> None:
@@ -178,5 +192,5 @@ def test_dashboard_next_step_explains_inventory_harvest_misalignment(monkeypatch
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "Evidence     : harvest snapshot 30; inventory snapshot 31 pending harvest" in out
-    assert "Harvest evidence is behind the latest inventory. Run harvest to align evidence with the current snapshot." in out
+    assert "stale hv 30 vs inv 31" in out
+    assert "Next: run harvest (2) to match latest inventory." in out

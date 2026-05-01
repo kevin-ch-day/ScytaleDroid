@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 from .constants import INVENTORY_STALE_SECONDS
@@ -110,7 +111,7 @@ def prompt_inventory_decision(
         )
         print(
             status_messages.status(
-                "Refresh Inventory is recommended before Execute Harvest; using the existing snapshot may miss changes.",
+                inventory_cli_labels.HARVEST_HINT_REFRESH_FIRST,
                 level="info",
             )
         )

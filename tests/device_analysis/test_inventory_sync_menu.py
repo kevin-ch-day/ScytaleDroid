@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from scytaledroid.DeviceAnalysis.device_menu import actions
+from scytaledroid.DeviceAnalysis.device_menu import actions, inventory_sync_feedback
 
 
 def test_select_inventory_sync_profile_auto_selects_single_active_profile(monkeypatch, capsys) -> None:
@@ -93,8 +93,8 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
     actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
 
     assert captured_menu["labels"] == [
-        "Full refresh",
-        "Scoped refresh",
+        actions.inventory_cli_labels.MENU_OPTION_FULL,
+        actions.inventory_cli_labels.MENU_OPTION_SCOPED,
     ]
     assert scoped_call["serial"] == "SERIAL123"
     assert scoped_call["scope_id"] == "profile::research_dataset_alpha"
@@ -130,7 +130,12 @@ def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, 
     monkeypatch.setattr(
         actions.device_service,
         "fetch_inventory_metadata",
-        lambda _serial: SimpleNamespace(status_label="FRESH", is_stale=False),
+        lambda _serial: SimpleNamespace(
+            status_label="FRESH",
+            is_stale=False,
+            age_display="34s",
+            package_count=546,
+        ),
     )
     monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
     monkeypatch.setattr(actions.menu_utils, "print_header", lambda *args, **kwargs: None)
@@ -151,19 +156,22 @@ def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, 
     actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
 
     out = capsys.readouterr().out
-    assert "Inventory is FRESH for SERIAL123. Re-run?" in out
-    assert prompted["prompt"] == "Proceed?"
+    assert "Snapshot is fresh (34s · 546 pkgs)" in out
+    assert prompted["prompt"] == "Continue"
     assert prompted["default"] is False
 
 
-def test_print_inventory_feedback_uses_single_compact_success_line(capsys) -> None:
+def test_print_inventory_run_feedback_uses_single_compact_success_line(capsys) -> None:
     result = SimpleNamespace(
         stats=SimpleNamespace(total_packages=546),
         snapshot_id=33,
+        elapsed_seconds=125.0,
     )
 
-    actions._print_inventory_feedback("Refresh Inventory", result)
+    inventory_sync_feedback.print_inventory_run_feedback(result)
 
     out = capsys.readouterr().out
-    assert "Inventory refreshed: 546 packages. Snapshot 33." in out
+    assert "Refresh inventory ·" in out
+    assert "546 pkgs" in out and "snap 33" in out
+    assert "2m 05s" in out
     assert "Snapshot ID:" not in out

@@ -14,7 +14,6 @@ from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     status_messages,
     table_utils,
-    text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Replay harvest DB mirror rows from authoritative package manifests."""
+"""Replay harvest DB mirror rows from authoritative package manifests.
+
+Scans recursively for ``harvest_package_manifest.json`` only. Default root is
+``DATA_DIR/device_apks``. To replay from another tree, pass ``--root`` to a directory
+that contains those manifest files (flat session receipt JSON without manifests is
+not supported).
+"""
 
 from __future__ import annotations
 
@@ -23,7 +29,7 @@ from scytaledroid.DeviceAnalysis.harvest.replay import (
 
 
 def _default_root() -> Path:
-    return artifact_store.harvest_receipts_root().resolve()
+    return artifact_store.device_apks_root().resolve()
 
 
 def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -78,7 +84,12 @@ def _dry_run_candidates(root: Path, *, session_label: str | None, package_names:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Replay harvest DB mirror rows from package manifests.")
-    parser.add_argument("--root", type=Path, default=_default_root(), help="Root directory to search for harvest manifests.")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=_default_root(),
+        help="Root directory containing harvest_package_manifest.json files (default: DATA_DIR/device_apks).",
+    )
     parser.add_argument("--session", dest="session_label", help="Only replay manifests for this harvest session label.")
     parser.add_argument("--package", action="append", default=[], help="Replay only the given package name(s).")
     parser.add_argument("--limit", type=int, default=None, help="Maximum number of package manifests to process.")

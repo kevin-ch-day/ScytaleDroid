@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from pathlib import Path
-
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import harvest, inventory
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.apk import delta, planner, ui
+from scytaledroid.DeviceAnalysis.apk.harvest_inventory_reload import reload_harvest_inventory_after_sync
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution, SnapshotContext
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     get_last_guard_decision,
@@ -39,7 +38,8 @@ def run_apk_pull(
             error_code="apk_pull_no_device",
         )
 
-    if not adb_client.is_available():
+    adb_path = adb_client.get_adb_binary()
+    if not adb_client.is_available() or not adb_path:
         ui.report_no_adb()
         return OperationResult.failure(
             status="FAILED",
@@ -72,21 +72,10 @@ def run_apk_pull(
             error_code="apk_pull_cancelled",
         )
 
-    adb_path = adb_client.get_adb_binary()
-    if not adb_path:
-        ui.report_no_adb()
-        return OperationResult.failure(
-            status="FAILED",
-            user_message="Execute Harvest failed: adb not available.",
-            error_code="apk_pull_no_adb",
-        )
-
     now_utc = datetime.now(UTC)
-    session_stamp = now_utc.strftime("%Y%m%d")
-    dest_root = Path(app_config.DATA_DIR) / "device_apks" / serial / session_stamp
+    run_id = f"{serial or 'device'}-{now_utc.strftime('%Y%m%d-%H%M%S')}-{now_utc.strftime('%f')}"
+    dest_root, session_stamp = artifact_store.compose_harvest_run_destination(serial=serial, run_id=run_id)
     dest_root.mkdir(parents=True, exist_ok=True)
-
-    run_id = f"{serial or 'device'}-{now_utc.strftime('%Y%m%d-%H%M%S')}"
     harvest_logger = log.harvest_adapter(
         run_id,
         started_at=datetime.now(UTC),
@@ -160,6 +149,24 @@ def run_apk_pull(
             for result in results:
                 harvest.print_package_result(result, verbose=False)
 
+    packages_total = len(resolution.plan.packages)
+    packages_harvested = sum(1 for pkg in resolution.plan.packages if not pkg.skip_reason)
+    packages_blocked = max(packages_total - packages_harvested, 0)
+    outcome_context: dict[str, object] = {
+        "run_id": run_id,
+        "device_serial": serial,
+        "packages": packages_harvested,
+        "packages_total": packages_total,
+        "packages_blocked": packages_blocked,
+        "session_stamp": session_stamp,
+        "snapshot_id": snapshot_ctx.snapshot_id,
+        "artifacts_root": artifact_store.repo_relative_path(dest_root),
+        "receipts_root": artifact_store.repo_relative_path(
+            artifact_store.harvest_receipts_root() / session_stamp
+        ),
+    }
+
+    summary_ok = True
     try:
         harvest.render_harvest_summary(
             resolution.plan,
@@ -171,8 +178,10 @@ def run_apk_pull(
             guard_brief=resolution.selection.metadata.get("inventory_guard_brief"),
             run_id=run_id,
             harvest_logger=harvest_logger,
+            harvest_session_root=dest_root,
         )
     except Exception as exc:
+        summary_ok = False
         logging_engine.get_error_logger().exception(
             "Harvest summary rendering failed",
             extra=logging_engine.ensure_trace(
@@ -187,24 +196,17 @@ def run_apk_pull(
         ui.report_summary_failure(exc)
     ui.maybe_save_watchlist(resolution.selection)
     log.close_harvest_adapter(run_id)
-    packages_total = len(resolution.plan.packages)
-    packages_harvested = sum(1 for pkg in resolution.plan.packages if not pkg.skip_reason)
-    packages_blocked = max(packages_total - packages_harvested, 0)
-    return OperationResult.success(
-        context={
-            "run_id": run_id,
-            "device_serial": serial,
-            "packages": packages_harvested,
-            "packages_total": packages_total,
-            "packages_blocked": packages_blocked,
-            "session_stamp": session_stamp,
-            "snapshot_id": snapshot_ctx.snapshot_id,
-            "artifacts_root": artifact_store.repo_relative_path(dest_root),
-            "receipts_root": artifact_store.repo_relative_path(
-                artifact_store.harvest_receipts_root() / session_stamp
+    if not summary_ok:
+        return OperationResult.partial(
+            user_message=(
+                "Harvest pull finished, but rendering the summary failed. "
+                "Artifacts were still written — check logs and paths below."
             ),
-        }
-    )
+            error_code="apk_harvest_summary_failed",
+            log_hint="See logs/error.log for the summary traceback.",
+            context=outcome_context,
+        )
+    return OperationResult.success(context=outcome_context)
 
 
 def device_is_rooted(serial: str) -> bool:
@@ -394,16 +396,14 @@ def resolve_harvest_plan(
             except Exception as exc:
                 ui.report_inventory_sync_issue(exc)
                 return None
-            refreshed = inventory.load_latest_inventory(serial)
-            if not refreshed or not refreshed.get("packages"):
+            reloaded = reload_harvest_inventory_after_sync(serial)
+            if reloaded == "missing":
                 ui.report_refresh_snapshot_invalid()
                 return None
-            active_snapshot_id = refreshed.get("snapshot_id") if isinstance(refreshed.get("snapshot_id"), int) else None
-            active_snapshot_captured_at = str(refreshed.get("generated_at") or "") or None
-            active_rows = harvest.build_inventory_rows(refreshed.get("packages", []))
-            if not active_rows:
+            if reloaded == "empty_rows":
                 ui.report_refresh_snapshot_empty()
                 return None
+            active_rows, active_snapshot_id, active_snapshot_captured_at = reloaded
             # Restart selection with fresh inventory.
             continue
         delta_applied = False
@@ -517,15 +517,14 @@ def resolve_harvest_plan(
                 return None
             if action == "refresh_subset":
                 if ui.run_scope_refresh(serial, selection.packages):
-                    snapshot = inventory.load_latest_inventory(serial)
-                    if not snapshot or not snapshot.get("packages"):
+                    reloaded = reload_harvest_inventory_after_sync(serial)
+                    if reloaded == "missing":
                         ui.report_scoped_snapshot_invalid()
                         return None
-                    packages = snapshot.get("packages", [])
-                    rows = harvest.build_inventory_rows(packages)
-                    if not rows:
+                    if reloaded == "empty_rows":
                         ui.report_scoped_snapshot_empty()
                         return None
+                    active_rows, active_snapshot_id, active_snapshot_captured_at = reloaded
                     latest_metadata = get_latest_inventory_metadata(
                         serial,
                         with_current_state=True,
@@ -549,15 +548,14 @@ def resolve_harvest_plan(
                     ui.report_inventory_sync_issue(exc)
                     continue
 
-                snapshot = inventory.load_latest_inventory(serial)
-                if not snapshot or not snapshot.get("packages"):
+                reloaded = reload_harvest_inventory_after_sync(serial)
+                if reloaded == "missing":
                     ui.report_refresh_snapshot_invalid()
                     return None
-                packages = snapshot.get("packages", [])
-                rows = harvest.build_inventory_rows(packages)
-                if not rows:
+                if reloaded == "empty_rows":
                     ui.report_refresh_snapshot_empty()
                     return None
+                active_rows, active_snapshot_id, active_snapshot_captured_at = reloaded
                 latest_metadata = get_latest_inventory_metadata(
                     serial,
                     with_current_state=True,

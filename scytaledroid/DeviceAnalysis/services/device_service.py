@@ -6,14 +6,15 @@ can stay focused on rendering and prompting.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from scytaledroid.DeviceAnalysis import device_manager, inventory_meta
 from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 from scytaledroid.DeviceAnalysis.adb import status as adb_status
-from scytaledroid.DeviceAnalysis.inventory import load_latest_inventory
-from scytaledroid.DeviceAnalysis.inventory import runner as inventory_runner
+from scytaledroid.DeviceAnalysis.inventory.snapshot_io import load_latest_inventory
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 
 
@@ -30,6 +31,17 @@ def scan_devices(
     """Return raw adb devices, warnings, enriched summaries, and a serial map."""
 
     devices, warnings = adb_devices.scan_devices()
+    # After long inventory/sync runs, adb sometimes returns an empty list once while
+    # the device is still attached. One short rescan avoids dropping the active session.
+    active_serial = device_manager.get_active_serial()
+    if not devices and active_serial:
+        time.sleep(0.25)
+        devices_retry, warnings_retry = adb_devices.scan_devices()
+        if devices_retry:
+            devices = devices_retry
+            if warnings_retry:
+                warnings = list(dict.fromkeys([*warnings, *warnings_retry]))
+
     summary_cache = cache or {}
     summaries, serial_map = build_device_summaries(
         devices,
@@ -119,6 +131,9 @@ def resolve_active_device(devices: list[dict[str, str | None]]) -> dict[str, str
     serial = device_manager.get_active_serial()
     if not serial:
         return None
+    if not devices:
+        # Empty adb output is often transient after heavy adb usage; do not wipe session.
+        return {"serial": serial}
     for device in devices:
         if device.get("serial") == serial:
             return device
@@ -132,9 +147,7 @@ def _compute_inventory_status(
 ) -> InventoryStatus:
     """Compute a unified InventoryStatus from metadata or snapshot."""
     # Local import to avoid circular dependency when services are used headless.
-    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
-        INVENTORY_STALE_SECONDS,
-    )
+    from scytaledroid.DeviceAnalysis.device_analysis_settings import INVENTORY_STALE_SECONDS
     from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 
     ts = None
@@ -219,14 +232,16 @@ def sync_inventory(
     serial: str,
     *,
     filter_name: str | None = None,
-    filter_fn: callable | None = None,
+    filter_fn: Callable[..., object] | None = None,
 ) -> InventoryStatus:
     """
     Run an inventory sync for the given device serial and return updated status.
 
     filter_name/filter_fn are passed through to the existing sync helper for scoped syncs.
     """
-    inventory_runner.run_full_sync(serial=serial, filter_fn=filter_fn, progress_cb=None)
+    from scytaledroid.DeviceAnalysis.inventory.runner import run_full_sync
+
+    run_full_sync(serial=serial, filter_fn=filter_fn, progress_cb=None)
     # Refresh metadata after sync
     status = fetch_inventory_metadata(serial, with_current_state=True)
     return status or InventoryStatus(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +22,6 @@ from scytaledroid.Database.summary_surfaces import (
     refresh_static_dynamic_summary_cache as _refresh_static_dynamic_summary_cache,
 )
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from .action_groups.risk_actions import (
@@ -47,6 +45,10 @@ from .action_groups.status_actions import (
     run_inventory_determinism_comparator,
     show_connection_and_config,
     write_db_schema_snapshot_audit,
+)
+from .menu_actions_reconcile_helpers import (
+    format_collation_preview,
+    print_warning_preview,
 )
 from .static_reconcile import (
     reconcile_static_session,

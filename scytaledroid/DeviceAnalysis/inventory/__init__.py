@@ -7,23 +7,23 @@ Notes for new code:
 
 from __future__ import annotations
 
-from scytaledroid.Utils.DisplayUtils import (
-    error_panels,
-    prompt_utils,
-    status_messages,
-    table_utils,
-    text_blocks,
-)
+from scytaledroid.DeviceAnalysis.lazy_pkg import lazy_getattr as _lazy_getattr
 
-from .runner import InventoryResult, InventorySyncStats, run_full_sync
-from .snapshot_io import (
-    hash_rows,
-    load_canonical_metadata,
-    load_latest_inventory,
-    load_latest_snapshot_meta,
-    persist_snapshot,
-)
-from .views import print_inventory_run_summary_from_result
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "run_full_sync": (".runner", "run_full_sync"),
+    "InventoryResult": (".runner", "InventoryResult"),
+    "InventorySyncStats": (".runner", "InventorySyncStats"),
+    "hash_rows": (".snapshot_io", "hash_rows"),
+    "load_canonical_metadata": (".snapshot_io", "load_canonical_metadata"),
+    "load_latest_inventory": (".snapshot_io", "load_latest_inventory"),
+    "load_latest_snapshot_meta": (".snapshot_io", "load_latest_snapshot_meta"),
+    "persist_snapshot": (".snapshot_io", "persist_snapshot"),
+    "print_inventory_run_summary_from_result": (".views", "print_inventory_run_summary_from_result"),
+}
+
+
+def __getattr__(name: str) -> object:
+    return _lazy_getattr(__name__, _LAZY_EXPORTS, globals(), name)
 
 
 def _owner_role(entry: dict[str, object]) -> str:
@@ -59,6 +59,16 @@ def _preview_rows(packages: list[dict[str, object]], *, role: str, limit: int) -
 
 def run_device_summary(serial: str | None) -> None:
     """Display the latest inventory snapshot with highlighted insights."""
+
+    from scytaledroid.Utils.DisplayUtils import (
+        error_panels,
+        prompt_utils,
+        status_messages,
+        table_utils,
+        text_blocks,
+    )
+
+    from .snapshot_io import load_latest_inventory
 
     if not serial:
         error_panels.print_error_panel(
@@ -121,6 +131,7 @@ def run_device_summary(serial: str | None) -> None:
 
     prompt_utils.press_enter_to_continue()
 
+
 __all__ = [
     # Preferred API
     "run_full_sync",
@@ -134,3 +145,4 @@ __all__ = [
     "print_inventory_run_summary_from_result",
     "run_device_summary",
 ]
+
