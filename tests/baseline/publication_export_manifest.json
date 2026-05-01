@@ -1,0 +1,106 @@
+{
+  "artifacts": [
+    {
+      "kind": "tex",
+      "normalization": "tex_whitespace_lf",
+      "path": "tables/table_masvs_domain_mapping.tex",
+      "sha256": "72fd5463b425c0023e502e6b7a968ce15b737c51169d8d6ac0d66fc27075abab",
+      "size_bytes": 397
+    },
+    {
+      "kind": "tex",
+      "normalization": "tex_whitespace_lf",
+      "path": "tables/table_4_signature_deltas.tex",
+      "sha256": "8c8cbfdc7ca763a1c21b577d63aec6bfd9e44e05b9f74eb761f74779a71a0887",
+      "size_bytes": 1024
+    },
+    {
+      "kind": "csv",
+      "normalization": "none",
+      "path": "tables/table_4_signature_deltas.csv",
+      "sha256": "17d56bce8907d8b049c2987ae4826981aba99096413e0cb648a5187405488eda",
+      "size_bytes": 954
+    },
+    {
+      "kind": "tex",
+      "normalization": "tex_whitespace_lf",
+      "path": "tables/table_7_exposure_deviation_summary.tex",
+      "sha256": "4780c8f9825868c5441e03f388b66f0aad62ba6113c943f927ea7348444da1a0",
+      "size_bytes": 1959
+    },
+    {
+      "kind": "csv",
+      "normalization": "none",
+      "path": "tables/table_7_exposure_deviation_summary.csv",
+      "sha256": "e2c0cfd6e7d70b1c7d53126c93c1efa12c661abb84451ac4eea4cf5b48dcc851",
+      "size_bytes": 1927
+    },
+    {
+      "kind": "tex",
+      "normalization": "tex_whitespace_lf",
+      "path": "tables/table_risk_scoring.tex",
+      "sha256": "13a03a78ebb4bb7dc5f96a9e669545355b1a6df0c7cdc4a1191bd9c32270d86e",
+      "size_bytes": 712
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b2_rdi_social_by_app.pdf",
+      "sha256": "8c2221ade0089076900d7ab712d90c0fa0356025eb0bd5d0558eceb70ad391a6",
+      "size_bytes": 18606
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b2_rdi_social_by_app.png",
+      "sha256": "7eb4f33aaef131e1cbc8e9766aac060081a56f82ff722dce2420c699573ac7fb",
+      "size_bytes": 110189
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b2_rdi_messaging_by_app.pdf",
+      "sha256": "266fa783dce67aacf469e5a784f4fc7463211cd8f592727039e543eae12e8550",
+      "size_bytes": 17608
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b2_rdi_messaging_by_app.png",
+      "sha256": "f1d5ab6fe51db7cc5a6b730f16ab2f337cd2d98b477ce1b9169e3eb75d6e2221",
+      "size_bytes": 97681
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi_social.pdf",
+      "sha256": "43d15e75419e06603338bd343086e4a84ef51b83f0dfb09b0e558eba9ea7a07c",
+      "size_bytes": 20176
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi_social.png",
+      "sha256": "0ff3210cb766f78bf8c154cb0a680cd2fb0c30f8a36038c443e8347365c7a0f1",
+      "size_bytes": 110069
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi_messaging.pdf",
+      "sha256": "43d15e75419e06603338bd343086e4a84ef51b83f0dfb09b0e558eba9ea7a07c",
+      "size_bytes": 20176
+    },
+    {
+      "kind": "figure",
+      "normalization": "none",
+      "path": "figures/fig_b4_static_vs_rdi_messaging.png",
+      "sha256": "0ff3210cb766f78bf8c154cb0a680cd2fb0c30f8a36038c443e8347365c7a0f1",
+      "size_bytes": 110069
+    }
+  ],
+  "description": "Frozen export artifact manifest. Update only with approved drift rationale.",
+  "generated_utc": "2026-02-16T18:56:52.644921+00:00",
+  "manifest_version": 1,
+  "paper": "publication"
+}

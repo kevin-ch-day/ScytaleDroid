@@ -1,0 +1,42 @@
+{
+  "snapshot": {
+    "device_serial": "ZY22JK89DR",
+    "package_list_hash": "list-hash-1",
+    "package_signature_hash": "sig-hash-1",
+    "scope_hash": "scope-abc"
+  },
+  "rows": [
+    {
+      "package_name": "com.alpha.app",
+      "version_code": "1001",
+      "app_label": "Alpha",
+      "version_name": "1.0.1",
+      "installer": "com.android.vending",
+      "primary_path": "/data/app/com.alpha.app/base.apk",
+      "split_count": 2,
+      "apk_paths": [
+        "/data/app/com.alpha.app/base.apk",
+        "/data/app/com.alpha.app/split_config.en.apk"
+      ],
+      "extras": {
+        "signer_cert_digest": "ffffeeee"
+      }
+    },
+    {
+      "package_name": "com.beta.app",
+      "version_code": "77",
+      "app_label": "Beta",
+      "version_name": "7.7",
+      "installer": "sideload",
+      "primary_path": "/data/app/com.beta.app/base.apk",
+      "split_count": 1,
+      "apk_paths": [
+        "/data/app/com.beta.app/base.apk"
+      ],
+      "extras": {
+        "signer_cert_digest": "cafebabe"
+      }
+    }
+  ]
+}
+

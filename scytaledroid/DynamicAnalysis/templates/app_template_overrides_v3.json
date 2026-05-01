@@ -1,0 +1,12 @@
+{
+  "version": "v3",
+  "packages": {
+    "com.discord": "discord_basic_v1",
+    "com.google.android.apps.docs": "drive_browse_search_open_star_v1",
+    "com.google.android.apps.docs.editors.docs": "docs_open_edit_comment_refresh_v1",
+    "com.google.android.apps.docs.editors.sheets": "sheets_open_edit_sort_row_refresh_v1",
+    "com.google.android.apps.tachyon": "meet_join_mic_on_cam_off_v1",
+    "us.zoom.videomeetings": "zoom_join_audio_only_v1",
+    "com.zhiliaoapp.musically": "tiktok_basic_v2"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "com.facebook.katana": "Facebook",
+  "com.facebook.orca": "Facebook Messenger",
+  "com.instagram.android": "Instagram",
+  "com.linkedin.android": "LinkedIn",
+  "com.pinterest": "Pinterest",
+  "com.reddit.frontpage": "Reddit",
+  "com.snapchat.android": "Snapchat",
+  "com.twitter.android": "X",
+  "com.whatsapp": "WhatsApp",
+  "com.zhiliaoapp.musically": "TikTok",
+  "org.telegram.messenger": "Telegram",
+  "org.thoughtcrime.securesms": "Signal"
+}

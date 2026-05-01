@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+
+__all__ = [
+    "ControlEvidence",
+    "RULE_TO_CONTROL",
+    "STATUS_PRECEDENCE",
+    "summarise_controls",
+    "rule_to_control",
+    "rule_to_area",
+]
+
+RULE_TO_CONTROL: dict[str, tuple[str, str]] = {
+    "BASE-IPC-COMP-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
+    "BASE-IPC-PROVIDER-NO-ACL": ("PLATFORM-IPC-1", "FAIL"),
+    "BASE-IPC-EXPORTED-WITH-PERM": ("PLATFORM-IPC-1", "PASS"),
+    "BASE-002": ("PLATFORM-IPC-1", "FAIL"),
+    "BASE-CLR-001": ("NETWORK-1", "FAIL"),
+    "BASE-STO-LEGACY": ("STORAGE-2", "FAIL"),
+    "STR-SECRET-AWS-HC": ("STORAGE-2", "INCONCLUSIVE"),
+    "diff_exported_activities": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_exported_services": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_exported_receivers": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_exported_providers": ("PLATFORM-IPC-1", "FAIL"),
+    "diff_new_permissions": ("PRIVACY-1", "FAIL"),
+    "diff_cleartext_enabled": ("NETWORK-1", "FAIL"),
+    "diff_flag_usesCleartextTraffic": ("NETWORK-1", "FAIL"),
+    "diff_flag_requestLegacyExternalStorage": ("STORAGE-2", "FAIL"),
+}
+
+STATUS_PRECEDENCE = {"FAIL": 3, "INCONCLUSIVE": 2, "PASS": 1}
+
+
+@dataclass(slots=True)
+class ControlEvidence:
+    control_id: str
+    status: str
+    evidence: list[Mapping[str, object]] = field(default_factory=list)
+    rubric: Mapping[str, object] = field(default_factory=dict)
+
+    def merge(self, other: ControlEvidence) -> ControlEvidence:
+        if STATUS_PRECEDENCE[other.status] > STATUS_PRECEDENCE[self.status]:
+            self.status = other.status
+        if other.evidence:
+            self.evidence.extend(other.evidence)
+        if other.rubric:
+            self.rubric = other.rubric
+        return self
+
+    def payload(self) -> Mapping[str, object]:
+        return {
+            "status": self.status,
+            "evidence": self.evidence,
+            "rubric": self.rubric,
+        }
+
+
+def summarise_controls(entries: Iterable[tuple[str, Mapping[str, object]]]) -> dict[str, ControlEvidence]:
+    summary: dict[str, ControlEvidence] = {}
+    for rule_id, evidence in entries:
+        mapping = RULE_TO_CONTROL.get(rule_id)
+        if not mapping:
+            continue
+        control_id, status = mapping
+        payload = ControlEvidence(
+            control_id=control_id,
+            status=status,
+            evidence=[evidence],
+            rubric={"rule_id": rule_id, "source": "detector"},
+        )
+        existing = summary.get(control_id)
+        if existing is None:
+            summary[control_id] = payload
+        else:
+            existing.merge(payload)
+    return summary
+
+
+def rule_to_control(rule_id: str) -> tuple[str, str] | None:
+    return RULE_TO_CONTROL.get(rule_id)
+
+
+def rule_to_area(rule_id: str) -> str | None:
+    mapping = RULE_TO_CONTROL.get(rule_id)
+    if not mapping:
+        return None
+    control_id, _status = mapping
+    parts = [segment for segment in control_id.split("-") if segment]
+    if not parts:
+        return None
+    return parts[0].upper()

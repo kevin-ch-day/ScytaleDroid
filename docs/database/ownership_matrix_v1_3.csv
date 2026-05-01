@@ -1,0 +1,95 @@
+object_name,object_type,logical_domain,classification,write_owner,read_consumers,replacement_target,migration_action,confidence,notes
+analysis_cohorts,table,analysis,DERIVED_KEEP,Database.tools.analysis_ingest,reports;paper exports;future web summary,n/a,keep,high,Derived research cohort registry
+analysis_cohort_runs,table,analysis,DERIVED_KEEP,Database.tools.analysis_ingest,reports;paper exports;future web summary,n/a,keep,high,Links cohort membership to dynamic runs
+analysis_derivation_receipts,table,analysis,DERIVED_KEEP,Database.tools.analysis_ingest,reports;ops audit,n/a,keep,high,Provenance ledger for derived analysis
+analysis_dynamic_cohort_status,table,analysis,DERIVED_KEEP,UNASSIGNED_PROPOSED,research views;future web summary,n/a,assign_owner_and_populator,high,Schema exists but live table is empty
+analysis_ml_app_phase_model_metrics,table,analysis,DERIVED_KEEP,Database.tools.analysis_ingest,reports;paper exports;narrative QA,n/a,keep,high,Derived model summary layer
+analysis_risk_regime_summary,table,analysis,DERIVED_KEEP,Database.tools.analysis_ingest,reports;v_web_runtime_run_index;future web summary,n/a,keep,high,Current dynamic/static regime bridge
+analysis_signature_deltas,table,analysis,DERIVED_KEEP,Database.tools.analysis_ingest,reports;paper exports,n/a,keep,high,Derived delta summaries
+analysis_static_exposure,table,analysis,DERIVED_KEEP,Database.tools.analysis_ingest,reports;future web summary,n/a,keep,high,Derived static posture summaries
+android_apk_repository,table,identity,CORE_KEEP,DeviceAnalysis.harvest,cli;web views;reports,n/a,keep,high,Canonical harvested APK identity
+android_app_categories,table,reference,REFERENCE_KEEP,DeviceAnalysis.harvest;admin tools,cli;web;reports,n/a,keep,high,App category lookup
+android_app_profiles,table,reference,REFERENCE_KEEP,reference seed/admin tools,cli;web;reports,n/a,keep,high,Profile lookup and display metadata
+android_app_publishers,table,reference,REFERENCE_KEEP,reference seed/admin tools,cli;web;reports,n/a,keep,high,Publisher lookup
+android_permission_dict_aosp,table,reference,REFERENCE_KEEP,permission dictionary tooling,cli;governance tooling;reports,android_permission_intel.android_permission_dict_aosp,copy_to_permission_intel_then_redirect_reads,high,Shared permission-intel candidate for framework permission reference
+android_permission_dict_oem,table,reference,REFERENCE_KEEP,permission dictionary tooling,cli;governance tooling;reports,android_permission_intel.android_permission_dict_oem,copy_to_permission_intel_then_redirect_reads,high,Shared permission-intel candidate for OEM permission reference
+android_permission_dict_queue,table,reference,REFERENCE_KEEP,permission dictionary tooling,governance triage,android_permission_intel.android_permission_dict_unknown,copy_to_permission_intel_then_redirect_reads,medium,Shared permission-intel candidate for unknown-permission triage queue
+android_permission_dict_unknown,table,reference,REFERENCE_KEEP,permission dictionary tooling,governance triage;reports,android_permission_intel.android_permission_dict_unknown,copy_to_permission_intel_then_redirect_reads,high,Shared permission-intel candidate for observed unknown permission ledger
+android_permission_meta_oem_prefix,table,reference,REFERENCE_KEEP,permission dictionary tooling,governance tooling,android_permission_intel.android_permission_meta_oem_prefix,copy_to_permission_intel_then_redirect_reads,high,Shared permission-intel candidate for OEM namespace prefix metadata
+android_permission_meta_oem_vendor,table,reference,REFERENCE_KEEP,permission dictionary tooling,governance tooling,android_permission_intel.android_permission_meta_oem_vendor,copy_to_permission_intel_then_redirect_reads,high,Shared permission-intel candidate for OEM vendor metadata
+android_publisher_prefix_rules,table,reference,REFERENCE_KEEP,reference seed/admin tools,harvest;identity enrichment,n/a,keep,high,Publisher classification rules
+apk_split_groups,table,identity,CORE_KEEP,DeviceAnalysis.harvest,harvest;web apk views,n/a,keep,high,Canonical split APK grouping support validated by live harvest rows
+apps,table,identity,CORE_KEEP,DeviceAnalysis.harvest;StaticAnalysis.ensure_app_version,cli;web;reports,n/a,keep,high,Canonical package identity
+app_display_aliases,table,identity,CORE_REVIEW,Database.tools.analysis_ingest;app label tooling,reports;paper exports,apps.display_name,keep_and_document,medium,Context specific label overrides
+app_display_orderings,table,identity,CORE_REVIEW,Database.tools.analysis_ingest;app ordering tooling,reports;paper exports,n/a,keep_and_document,medium,Ordering metadata not core runtime identity
+app_versions,table,identity,CORE_REVIEW,StaticAnalysis canonical persistence,cli;web runtime links;reports,android_apk_repository for harvested version truth,document_analysis_owned_contract_then_decide_backfill,high,Currently analysis-owned and not a complete harvested-version ledger
+artifact_registry,table,artifacts,CORE_KEEP,DynamicAnalysis.persistence;artifact registry helpers,cli;ops audit;future web summary,n/a,keep,high,Cross-run artifact ledger without FK enforcement
+buckets,table,legacy_static,LEGACY_ACTIVE_BRIDGE,Persistence.db_writer,legacy reports;v_run_overview;db menus,canonical severity/category summaries,freeze_then_drop_later,high,Still actively written
+contributors,table,legacy_static,LEGACY_ACTIVE_BRIDGE,Persistence.db_writer,legacy reports;db menus,derived contributor summaries,freeze_then_drop_later,high,Still actively written
+correlations,table,legacy_static,LEGACY_ACTIVE_BRIDGE,Persistence.db_writer,legacy reports;db menus,static_correlation_results or derived views,freeze_then_drop_later,high,Currently written even though live count is zero
+db_ops_log,table,operational,CORE_REVIEW,Database.db_utils schema actions,ops audit,n/a,keep_and_document,medium,Utility log outside main bootstrap path
+device_inventory,table,identity,CORE_KEEP,DeviceAnalysis.inventory capture,cli;harvest scope;reports,n/a,keep,high,Installed package snapshot contents
+device_inventory_snapshots,table,identity,CORE_KEEP,DeviceAnalysis.inventory capture,cli;reports,n/a,keep,high,Inventory capture headers
+doc_hosts,table,static,EMPTY_REVIEW,StaticAnalysis string persistence,reports;string analysis,derived from static string samples,review_then_keep_or_drop,medium,Live usage unclear and currently empty
+dynamic_network_features,table,dynamic,CORE_KEEP,DynamicAnalysis.storage.index_from_evidence,web runtime views;reports;future web summary,n/a,backfill_coverage_and_keep,high,Derived but operationally core
+dynamic_network_indicators,table,dynamic,CORE_KEEP,DynamicAnalysis.storage.network_indicators,cli;reports;future web detail,n/a,keep,high,Per-run indicator ledger
+dynamic_sessions,table,dynamic,CORE_KEEP,DynamicAnalysis.storage.persistence,cli;web runtime views;analysis derivation,n/a,keep,high,Canonical dynamic run ledger
+dynamic_session_issues,table,dynamic,CORE_KEEP,DynamicAnalysis.storage.persistence,web runtime views;ops audit,n/a,keep,high,Run quality and issue tracking
+dynamic_telemetry_network,table,dynamic,CORE_KEEP,DynamicAnalysis.storage.persistence,cli;reports;future derivation,n/a,keep,high,Raw network telemetry
+dynamic_telemetry_process,table,dynamic,CORE_KEEP,DynamicAnalysis.storage.persistence,cli;reports;future derivation,n/a,keep,high,Raw process telemetry
+findings,table,legacy_static,LEGACY_ACTIVE_BRIDGE,StaticAnalysis.cli.persistence.findings_writer;Persistence.db_writer,legacy reports;db menus,static_analysis_findings,freeze_then_drop_later,high,Live count matches canonical findings
+findings_base002,table,legacy_static,EMPTY_REVIEW,none_expected,legacy diagnostics,static_analysis_findings,review_then_drop_later,medium,Empty compatibility table
+harvest_artifact_paths,table,artifacts,CORE_KEEP,DeviceAnalysis.harvest,cli;ops audit;harvest diagnostics,n/a,keep,high,Canonical host artifact path lineage validated as complete against android_apk_repository
+harvest_source_paths,table,artifacts,CORE_KEEP,DeviceAnalysis.harvest,cli;ops audit;harvest diagnostics,n/a,keep,high,Canonical source-device path lineage validated as complete against android_apk_repository
+harvest_storage_roots,table,artifacts,CORE_KEEP,DeviceAnalysis.harvest,cli;ops audit;harvest diagnostics,n/a,keep,high,Canonical storage-root contract for harvested artifact locations
+masvs_control_coverage,table,legacy_static,LEGACY_ACTIVE_BRIDGE,StaticAnalysis.cli.persistence.findings_writer,legacy reports;v_masvs_matrix candidate,canonical MASVS mapping in static_analysis_findings,freeze_then_drop_later,high,Active write path despite zero live rows
+metrics,table,legacy_static,LEGACY_ACTIVE_BRIDGE,Persistence.db_writer,legacy reports;db menus,run row JSON plus derived views,freeze_then_drop_later,high,Still actively written
+ml_feature_windows,table,dynamic,EMPTY_REVIEW,no_active_owner,research tooling,analysis_ml_app_phase_model_metrics,review_then_keep_or_drop,high,Empty low-level ML table
+ml_scores,table,dynamic,EMPTY_REVIEW,no_active_owner,research tooling,analysis_ml_app_phase_model_metrics,review_then_keep_or_drop,high,Empty low-level ML score table
+permission_audit_apps,table,static,CORE_REVIEW,permission audit flow;static CLI persistence,v_web_app_directory;reports,static_permission_risk_vnext or future summary view,keep_local_run_output_and_decide_summary_contract,high,ScytaleDroid-local per-run permission audit output and active web-facing summary dependency
+permission_audit_snapshots,table,static,CORE_REVIEW,permission audit flow;static CLI persistence,v_web_app_directory;reports,n/a,keep_local_run_output_and_decide_summary_contract,high,ScytaleDroid-local snapshot header for permission audit output
+permission_cohort_expectations,table,reference,REFERENCE_KEEP,governance tooling,permission audit tooling,android_permission_intel.permission_cohort_expectations,copy_to_permission_intel_then_redirect_reads,medium,Shared permission-intel candidate for cohort expectation metadata
+permission_governance_snapshots,table,reference,REFERENCE_KEEP,Database.tools.permission_governance_import,static correlation;observations;reports,android_permission_intel.permission_governance_snapshots,copy_to_permission_intel_then_redirect_reads,high,Shared permission-intel candidate for governance version anchor
+permission_governance_snapshot_rows,table,reference,REFERENCE_KEEP,Database.tools.permission_governance_import,static correlation;observations;reports,android_permission_intel.permission_governance_snapshot_rows,copy_to_permission_intel_then_redirect_reads,high,Shared permission-intel candidate for governance row detail
+permission_signal_catalog,table,reference,REFERENCE_KEEP,no_active_owner_yet,permission audit design layer,android_permission_intel.permission_signal_catalog,seed_in_permission_intel_then_redirect_reads,high,Shared permission-intel candidate even though current live table is empty
+permission_signal_mappings,table,reference,REFERENCE_KEEP,no_active_owner_yet,permission audit design layer,android_permission_intel.permission_signal_mappings,seed_in_permission_intel_then_redirect_reads,high,Shared permission-intel candidate even though current live table is empty
+permission_signal_observations,table,static,CORE_REVIEW,static correlation and permission signal logic,reports;future web summary,n/a,keep_local_run_output_and_document,high,ScytaleDroid-local derived permission signal observations
+perm_groups,table,reference,EMPTY_REVIEW,no_clear_owner,legacy permission grouping,android_app_profiles or signal catalog,review_then_keep_or_drop,medium,Live usage low and role overlaps newer models
+risk_scores,table,legacy_static,LEGACY_ACTIVE_BRIDGE,legacy risk scoring persistence,vw_latest_permission_risk;legacy reports,static_permission_risk_vnext or permission audit summaries,freeze_then_replace_view,high,Still active summary score surface
+runs,table,legacy_static,LEGACY_ACTIVE_BRIDGE,Persistence.db_writer;StaticAnalysis.cli.persistence.run_writers,legacy reports;db menus;v_run_overview,static_analysis_runs,freeze_then_drop_later,high,Still actively written
+schema_version,table,operational,CORE_KEEP,Database.tools.bootstrap,ops audit;n/a,n/a,keep,high,Schema manifest version marker
+static_analysis_findings,table,static,CORE_KEEP,StaticAnalysis.cli.persistence.run_summary,cli;reports;future web summary,n/a,keep,high,Canonical static finding detail table
+static_analysis_runs,table,static,CORE_KEEP,StaticAnalysis.persistence.ingest;StaticAnalysis.cli.persistence.run_writers,cli;dynamic handoff;reports;web runtime links,n/a,keep,high,Canonical static run ledger
+static_correlation_results,table,static,EMPTY_REVIEW,static correlation logic,reports;future summary,n/a,review_then_activate_or_drop,medium,Schema present but live count zero
+static_dynload_events,table,static,CORE_REVIEW,static dynamic-loading detector,pipeline analytics;views,n/a,keep_and_document,medium,Domain-specific static evidence table
+static_fileproviders,table,static,CORE_KEEP,canonical ingest/provider promotion,cli;reports;niche views,n/a,keep,high,Canonical provider exposure table
+static_findings,table,static,CORE_REVIEW,static findings summary persistence,v_web_app_directory indirectly;db verification,static_analysis_findings,decide_if_summary_layer_or_legacy,high,Summary/detail compatibility family
+static_findings_summary,table,static,CORE_REVIEW,static findings summary persistence,v_web_app_directory;cli analytics;db health,view from static_analysis_findings or keep as summary table,decide_summary_contract,high,Current web app directory dependency
+static_permission_matrix,table,static,CORE_KEEP,static permission matrix persistence,cli;reports;future web summary,n/a,keep_local_run_output,high,ScytaleDroid-local permission-first canonical run matrix
+static_permission_risk_vnext,table,static,CORE_REVIEW,static permission risk persistence,cli;reports;future web summary,n/a,stabilize_and_keep_local_run_output,high,ScytaleDroid-local permission-level canonical candidate
+static_persistence_failures,table,static,CORE_KEEP,static CLI persistence failure logging,ops audit;n/a,n/a,keep,high,Durable failure trail
+static_provider_acl,table,static,CORE_KEEP,canonical ingest/provider promotion,cli;reports;niche views,n/a,keep,high,Canonical provider ACL detail table
+static_reflection_calls,table,static,CORE_REVIEW,static dynamic-loading detector,pipeline analytics;views,n/a,keep_and_document,medium,Companion table to dynload events
+static_session_rollups,table,static,CORE_REVIEW,StaticAnalysis.cli.execution.results_persist,cli batch reporting;ops audit,n/a,keep_and_document,high,Session scope summary keyed by session and scope
+static_session_run_links,table,static,CORE_REVIEW,StaticAnalysis.cli.flows.run_dispatch,cli batch reporting;ops audit,n/a,keep_and_document,high,Maps session to canonical static run ids
+static_string_samples,table,static,CORE_REVIEW,static string persistence,cli;reports;niche views,n/a,keep_and_document,high,Canonical sample detail but still considered compatibility in docs
+static_string_sample_sets,table,static,CORE_REVIEW,static string persistence,cli;reports,n/a,keep_and_document,medium,String sample grouping support
+static_string_selected_samples,table,static,CORE_REVIEW,static string persistence,cli;reports,n/a,keep_and_document,medium,Selected sample subset support
+static_string_summary,table,static,CORE_REVIEW,static string persistence,cli;reports;legacy web summary candidates,n/a,keep_and_document,high,Summary layer still used operationally
+v_artifact_registry_integrity,view,artifacts,DERIVED_KEEP,derived from artifact_registry,ops audit;future web summary,v_current_artifact_registry,keep,high,Integrity projection over artifact ledger
+v_current_artifact_registry,view,artifacts,DERIVED_KEEP,derived from artifact_registry,ops audit;future web summary,n/a,keep,high,Filtered current artifact registry view
+v_dep_static_profile,view,static,CORE_REVIEW,derived from static canonical tables,dep export diagnostics,n/a,keep_and_document,low,Local diagnostic/export helper view
+v_paper_dynamic_cohort_v1,view,analysis,DERIVED_KEEP,derived from v_runtime_dynamic_cohort_status_v1,paper exports;future web summary,n/a,populate_underlying_table,high,Structurally clean but currently empty due to source table
+v_provider_exposure,view,static,CORE_REVIEW,derived from static_fileproviders/static_provider_acl,reports;diagnostics,n/a,keep_and_document,medium,Domain-specific exposure convenience view
+v_runtime_dynamic_cohort_status_v1,view,analysis,DERIVED_KEEP,derived from analysis_dynamic_cohort_status,paper exports;future web summary,n/a,assign_owner_and_populator,high,Current source table is empty
+v_run_overview,view,legacy_static,LEGACY_ACTIVE_BRIDGE,derived from runs and buckets,legacy reports;db menus,canonical static summary view,freeze_then_replace,high,Pure legacy compatibility view
+v_session_string_samples,view,static,CORE_REVIEW,derived from static string tables,reports;diagnostics,n/a,keep_and_document,medium,Convenience string sample projection
+v_static_handoff_v1,view,static,CORE_KEEP,derived from static_analysis_runs/app_versions/apps,dynamic tools;freeze gate;future web summary,n/a,keep,high,Canonical static-to-dynamic handoff contract
+v_static_run_category_summary,view,static,CORE_REVIEW,derived from static canonical tables,reports;db utilities,n/a,keep_and_document,medium,Convenience aggregation view
+v_web_app_directory,view,web,WEB_VIEW_KEEP,derived from apps and static/permission summaries,web app;future reports,v_web_static_dynamic_app_summary for richer cross-analysis,stabilize_then_replace_in_stages,high,Current directory view depends on older summary tables
+v_web_static_dynamic_app_summary,view,web,WEB_VIEW_KEEP,derived from apps plus static/dynamic/readiness summaries,reporting cli;future web app;cross-analysis reviews,n/a,keep_and_expand_package_level_readers,high,Current cross-analysis package summary contract for static+dynamic+regime state
+v_web_runtime_run_detail,view,web,WEB_VIEW_KEEP,derived from dynamic canonical tables,web app runtime detail,n/a,keep,high,Strong long-term runtime view candidate
+v_web_runtime_run_index,view,web,WEB_VIEW_KEEP,derived from dynamic canonical and analysis tables,web app runtime list;future summary,n/a,keep,high,Strong long-term runtime index view
+vw_latest_apk_per_package,view,identity,CORE_REVIEW,derived from android_apk_repository,web app;legacy score view;niche reports,n/a,keep_and_document,high,Stable APK identity helper view
+vw_latest_permission_risk,view,legacy_static,LEGACY_ACTIVE_BRIDGE,derived from vw_latest_apk_per_package and risk_scores,legacy web/report consumers,view over static_permission_risk_vnext or permission audit summary,replace_view_then_freeze_source,high,Still depends on legacy risk_scores
+vw_permission_audit_latest,view,static,CORE_REVIEW,derived from permission_audit_apps,web app;reports,n/a,keep_and_document,high,Useful current permission audit summary view

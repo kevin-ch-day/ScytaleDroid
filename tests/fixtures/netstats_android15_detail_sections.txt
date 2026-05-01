@@ -1,0 +1,5 @@
+uid=10234 tag=0x0 set=DEFAULT
+rxBytes=1200 txBytes=2400
+rxBytes=300 txBytes=600
+uid=9999 tag=0x0 set=DEFAULT
+rxBytes=10 txBytes=20

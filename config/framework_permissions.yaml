@@ -1,0 +1,101 @@
+# Minimal Android framework permission catalog.
+# Extend this list as needed for more complete coverage.
+- perm_name: android.permission.CAMERA
+  short: CAMERA
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Access to device camera
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#CAMERA
+  source: default
+
+- perm_name: android.permission.RECORD_AUDIO
+  short: RECORD_AUDIO
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Capture audio from microphone
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#RECORD_AUDIO
+  source: default
+
+- perm_name: android.permission.READ_CONTACTS
+  short: READ_CONTACTS
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Read user contacts
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#READ_CONTACTS
+  source: default
+
+- perm_name: android.permission.ACCESS_FINE_LOCATION
+  short: ACCESS_FINE_LOCATION
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Precise location access
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#ACCESS_FINE_LOCATION
+  source: default
+
+- perm_name: android.permission.ACCESS_COARSE_LOCATION
+  short: ACCESS_COARSE_LOCATION
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Approximate location access
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#ACCESS_COARSE_LOCATION
+  source: default
+
+- perm_name: android.permission.READ_MEDIA_IMAGES
+  short: READ_MEDIA_IMAGES
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 33
+  deprecated_api: null
+  summary: Read shared media images
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#READ_MEDIA_IMAGES
+  source: default
+
+- perm_name: android.permission.READ_MEDIA_VIDEO
+  short: READ_MEDIA_VIDEO
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 33
+  deprecated_api: null
+  summary: Read shared media video
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#READ_MEDIA_VIDEO
+  source: default
+
+- perm_name: android.permission.POST_NOTIFICATIONS
+  short: POST_NOTIFICATIONS
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 33
+  deprecated_api: null
+  summary: Post notifications to the user
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#POST_NOTIFICATIONS
+  source: default
+
+- perm_name: android.permission.SYSTEM_ALERT_WINDOW
+  short: SYSTEM_ALERT_WINDOW
+  protection: signature
+  protection_raw: signature
+  added_api: 1
+  deprecated_api: null
+  summary: Draw overlays on top of other apps
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#SYSTEM_ALERT_WINDOW
+  source: default
+
+- perm_name: android.permission.READ_PHONE_STATE
+  short: READ_PHONE_STATE
+  protection: dangerous
+  protection_raw: dangerous
+  added_api: 1
+  deprecated_api: null
+  summary: Access phone state and identifiers
+  doc_url: https://developer.android.com/reference/android/Manifest.permission#READ_PHONE_STATE
+  source: default

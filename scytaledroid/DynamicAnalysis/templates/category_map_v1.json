@@ -1,0 +1,21 @@
+{
+  "version": "v1",
+  "categories": {
+    "social_feed": "social_feed_basic_v2",
+    "messaging": "messaging_basic_v1"
+  },
+  "packages": {
+    "com.zhiliaoapp.musically": "social_feed",
+    "com.facebook.katana": "social_feed",
+    "com.facebook.orca": "messaging",
+    "com.instagram.android": "social_feed",
+    "com.linkedin.android": "social_feed",
+    "com.pinterest": "social_feed",
+    "com.reddit.frontpage": "social_feed",
+    "com.snapchat.android": "social_feed",
+    "com.twitter.android": "social_feed",
+    "com.whatsapp": "messaging",
+    "org.telegram.messenger": "messaging",
+    "org.thoughtcrime.securesms": "messaging"
+  }
+}
