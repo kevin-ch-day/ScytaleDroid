@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +29,7 @@ from .common import (
     is_system_package,
     load_options,
     normalise_local_path,
+    package_evidence_dir,
     resolve_storage_root,
     write_metadata_sidecar,
 )
@@ -66,6 +66,7 @@ def execute_harvest(
             meta_fields=options.meta_fields,
             pull_mode=options.pull_mode,
             overwrite_existing=True,
+            thin_session=options.thin_session,
         )
     # DB is optional for OSS vNext. If the backend is configured but not reachable,
     # do not skip filesystem harvests due to DB mirror failures.
@@ -88,6 +89,7 @@ def execute_harvest(
                     meta_fields=options.meta_fields,
                     pull_mode=options.pull_mode,
                     overwrite_existing=options.overwrite_existing,
+                    thin_session=options.thin_session,
                 )
         except Exception:
             # If diagnostics isn't available, keep the existing posture; DB failures will
@@ -277,6 +279,8 @@ def execute_harvest(
                     write_meta=options.write_meta,
                     meta_fields=options.meta_fields,
                     pull_mode=options.pull_mode,
+                    overwrite_existing=options.overwrite_existing,
+                    thin_session=options.thin_session,
                 )
                 storage_root_id = None
 
@@ -378,14 +382,6 @@ def execute_harvest(
             category="device",
             extra={**summary, **base_context},
         )
-        if _quiet_mode() and stats.get("packages_skipped", 0):
-            skip_reasons: Counter[str] = Counter()
-            for result in results:
-                skip_reasons.update(result.skipped)
-            if skip_reasons:
-                top = skip_reasons.most_common(2)
-                reason_text = ", ".join(f"{reason}={count}" for reason, count in top)
-                print(status_messages.status(f"Skip summary: {reason_text}", level="info"))
         if close_logger:
             log.close_harvest_adapter(run_identifier)
 
@@ -423,7 +419,7 @@ def _execute_package_plan(
     if plan.skip_reason:
         inventory = plan.inventory
         package_name = inventory.package_name
-        package_dir = dest_root / package_name
+        package_dir = package_evidence_dir(dest_root, inventory)
         package_dir.mkdir(parents=True, exist_ok=True)
         result.package_manifest_path = package_contract.package_manifest_path(package_dir)
         result.preflight_reason = plan.skip_reason
@@ -456,7 +452,7 @@ def _execute_package_plan(
 
     inventory = plan.inventory
     package_name = inventory.package_name
-    package_dir = dest_root / package_name
+    package_dir = package_evidence_dir(dest_root, inventory)
     package_dir.mkdir(parents=True, exist_ok=True)
     result.package_manifest_path = package_contract.package_manifest_path(package_dir)
     package_contract.write_package_manifest(
@@ -504,6 +500,8 @@ def _execute_package_plan(
                 write_meta=options.write_meta,
                 meta_fields=options.meta_fields,
                 pull_mode=options.pull_mode,
+                overwrite_existing=options.overwrite_existing,
+                thin_session=options.thin_session,
             )
 
     group_id: int | None = None
@@ -536,6 +534,8 @@ def _execute_package_plan(
                 write_meta=options.write_meta,
                 meta_fields=options.meta_fields,
                 pull_mode=options.pull_mode,
+                overwrite_existing=options.overwrite_existing,
+                thin_session=options.thin_session,
             )
             group_id = None
 
@@ -779,12 +779,14 @@ def _pull_and_record(
 
     local_rel_path = normalise_local_path(dest_path)
     canonical_store_path: str | None = None
+    canonical_abs: Path | None = None
     try:
         canonical_path = artifact_store.materialize_apk(
             dest_path,
             sha256_digest=hashes["sha256"],
             suffix=dest_path.suffix or ".apk",
         )
+        canonical_abs = canonical_path.expanduser().resolve()
         canonical_store_path = artifact_store.repo_relative_path(canonical_path)
     except Exception as exc:
         log.warning(
@@ -962,6 +964,13 @@ def _pull_and_record(
         },
     )
 
+    if canonical_abs is not None:
+        common.replace_session_apk_with_symlink_to_canonical(
+            session_artifact_path=dest_path,
+            canonical_absolute=canonical_abs,
+            enabled=options.thin_session,
+        )
+
     return (
         ArtifactResult(
             file_name=dest_path.name,
@@ -1021,11 +1030,22 @@ def _simple_mode() -> bool:
 
 
 def _progress_every() -> int:
-    value = os.getenv("SCYTALEDROID_HARVEST_PROGRESS_EVERY", "5").strip()
+    value = os.getenv("SCYTALEDROID_HARVEST_PROGRESS_EVERY", "10").strip()
     try:
         return max(int(value), 1)
     except ValueError:
-        return 5
+        return 10
+
+
+def _progress_step_for_total(display_total: int) -> int:
+    """Larger runs get wider spacing so the CLI is not flooded (~10 updates per harvest)."""
+    base = _progress_every()
+    if display_total <= 0:
+        return base
+    # Simple/quiet mode: fewer milestone lines for long runs.
+    target_lines = 5 if _simple_mode() else 10
+    adaptive = max(1, (display_total + target_lines - 1) // target_lines)
+    return max(base, adaptive)
 
 
 def _update_package_outcome(stats: dict[str, int], result: PullResult) -> None:
@@ -1066,8 +1086,8 @@ def _maybe_print_progress(
     if result.errors:
         _print_progress_line(result, stats, index, total, force=True)
         return
-    every = _progress_every()
-    if index % every == 0 or index == total:
+    step = _progress_step_for_total(total)
+    if index % step == 0 or index == total:
         _print_progress_line(result, stats, index, total, force=False)
 
 
@@ -1109,15 +1129,18 @@ def _print_progress_line(
             break
         if recent_reason:
             skip_hint = f" (latest_skip={recent_reason})"
-    line = (
-        f"Progress: {package_index}/{package_total} "
-        f"clean={clean_count} partial={partial_count} failed={err_count} "
-        f"drifted={drifted_count}"
-    )
+    pct = (100 * package_index) // package_total if package_total else 0
+    line = f"Progress {package_index}/{package_total} ({pct}%)"
+    if partial_count or err_count or drifted_count:
+        line += (
+            f" · clean={clean_count} partial={partial_count} failed={err_count} drifted={drifted_count}"
+        )
+    else:
+        line += " · pulls OK"
     if blocked_total > 0:
-        line += f" blocked_seen={min(skipped_seen, blocked_total)}/{blocked_total}"
+        line += f" · preflight {min(skipped_seen, blocked_total)}/{blocked_total}"
     elif skipped_seen > 0:
-        line += f" skipped={skipped_seen}"
+        line += f" · skipped={skipped_seen}"
     line += skip_hint
     level = "error" if err_count or drifted_count else "info"
     print(status_messages.status(line, level=level))

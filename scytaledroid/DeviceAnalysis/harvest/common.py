@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import socket
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
@@ -13,12 +14,59 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
-from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import ArtifactError, InventoryRow
+
+_EVIDENCE_SLUG = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _harvest_evidence_slug(text: str, *, default: str, max_len: int) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return default
+    slug = _EVIDENCE_SLUG.sub("-", raw).strip("-.")
+    slug = slug or default
+    return slug[:max_len]
+
+
+def package_evidence_leaf_name(inventory: InventoryRow) -> str:
+    """Directory name under *package_name/* grouping by app title + version."""
+
+    app = (inventory.app_label or "").strip()
+    if not app:
+        tail = inventory.package_name.rsplit(".", 1)[-1] if "." in inventory.package_name else inventory.package_name
+        app = str(tail).strip() or "app"
+    safe_app = _harvest_evidence_slug(app, default="app", max_len=56)
+    vc = _harvest_evidence_slug(str(inventory.version_code or ""), default="unknown", max_len=28)
+    vn_raw = str(inventory.version_name or "").strip()
+    if vn_raw:
+        safe_vn = _harvest_evidence_slug(vn_raw, default="na", max_len=48)
+        leaf = f"{safe_app}_v{vc}_{safe_vn}"
+    else:
+        leaf = f"{safe_app}_v{vc}"
+    return leaf[:140]
+
+
+def package_evidence_dir(dest_root: Path, inventory: InventoryRow) -> Path:
+    """Per-package directory: ``<dest_root>/<package>/<app>_v<code>_<versionName>/``."""
+
+    return dest_root / inventory.package_name / package_evidence_leaf_name(inventory)
+
+
+def iter_harvest_package_manifest_paths(root: Path) -> list[Path]:
+    """Return sorted paths to ``harvest_package_manifest.json`` under *root*.
+
+    If *root* does not exist, returns an empty list (no exception).
+    """
+
+    base = root.expanduser().resolve()
+    if not base.exists():
+        return []
+    return sorted(p for p in base.rglob("harvest_package_manifest.json") if p.is_file())
+
 
 DEFAULT_META_FIELDS: tuple[str, ...] = (
     "package_name",
@@ -57,13 +105,43 @@ def _harvest_base_dir() -> Path:
 def normalise_local_path(dest_path: Path) -> str:
     """Return the harvest-relative path for *dest_path*."""
 
+    base = _harvest_base_dir().resolve()
     try:
-        base = _harvest_base_dir()
-        relative = dest_path.resolve().relative_to(base)
-        return relative.as_posix()
+        dest_abs = dest_path.expanduser().absolute()
+        return dest_abs.relative_to(base).as_posix()
     except ValueError:
-        # Fallback to POSIX string when the file is outside the expected tree
-        return dest_path.as_posix()
+        # Fallback when outside the harvest tree or cross-device (follow symlinks)
+        return dest_path.expanduser().resolve().as_posix()
+
+
+def replace_session_apk_with_symlink_to_canonical(
+    *,
+    session_artifact_path: Path,
+    canonical_absolute: Path,
+    enabled: bool,
+) -> None:
+    """After materializing *canonical_absolute*, optionally drop the duplicated session copy."""
+
+    if not enabled or not canonical_absolute.exists():
+        return
+    try:
+        if not session_artifact_path.exists():
+            return
+        if hasattr(os, "samefile") and os.path.samefile(session_artifact_path, canonical_absolute):
+            return
+        rel = Path(
+            os.path.relpath(
+                canonical_absolute.resolve(),
+                session_artifact_path.expanduser().absolute().parent,
+            )
+        )
+        session_artifact_path.unlink()
+        session_artifact_path.symlink_to(rel, target_is_directory=False)
+    except OSError as exc:
+        log.warning(
+            f"Thin session symlink skipped for {session_artifact_path}: {exc}",
+            category="filesystem",
+        )
 
 
 def resolve_storage_root() -> tuple[str, str]:
@@ -88,6 +166,7 @@ class HarvestOptions:
     # This is required for paper-grade "full refresh" harvests where filenames
     # may be stable (same version_code) but the on-device artifact changed.
     overwrite_existing: bool = False
+    thin_session: bool = False
 
 
 def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
@@ -129,6 +208,13 @@ def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
     else:
         meta_fields = DEFAULT_META_FIELDS
 
+    thin_session = os.getenv("SCYTALEDROID_HARVEST_THIN_SESSION", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
     return HarvestOptions(
         dedupe_sha256=dedupe,
         keep_last=keep_last,
@@ -137,6 +223,7 @@ def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
         meta_fields=meta_fields,
         pull_mode=pull_mode,
         overwrite_existing=False,
+        thin_session=thin_session,
     )
 
 

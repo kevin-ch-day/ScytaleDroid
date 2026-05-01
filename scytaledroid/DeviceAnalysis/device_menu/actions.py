@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib import import_module
 
 from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DeviceAnalysis.services import device_service, info_service
+from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels
+from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,
     menu_utils,
     prompt_utils,
     status_messages,
     table_utils,
-    text_blocks,
 )
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .formatters import (
-    format_battery,
-    format_device_line,
-)
+from .dashboard import _compact_age_display
+from .harvest_entry import run_execute_harvest_menu_precheck
 from .inventory_guard import ensure_recent_inventory
+from .inventory_sync_feedback import print_inventory_run_feedback
 
 # Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
@@ -44,18 +44,54 @@ def _print_action_feedback(
         print(status_messages.status(line, level="info"))
 
 
-def _print_inventory_feedback(action_name: str, result, *, scoped_label: str | None = None) -> None:
-    if result is None or not hasattr(result, "stats"):
+def _harvest_run_context_detail_lines(context: Mapping[str, object] | None) -> list[str]:
+    ctx = context or {}
+    lines: list[str] = []
+    for key, label in (
+        ("run_id", "Run ID"),
+        ("session_stamp", "Session"),
+        ("snapshot_id", "Inventory snapshot ID"),
+        ("artifacts_root", "Artifacts root"),
+        ("receipts_root", "Receipts root"),
+    ):
+        val = ctx.get(key)
+        if val is None or str(val).strip() == "":
+            continue
+        lines.append(f"{label}: {val}")
+    return lines
+
+
+def _print_harvest_success_menu_feedback(result_context: Mapping[str, object] | None) -> None:
+    """Full menu rollup; skipped in harvest simple-mode to avoid repeating the transcript block."""
+
+    from scytaledroid.DeviceAnalysis import harvest as harvest_pkg
+
+    ctx = dict(result_context or {})
+    if harvest_pkg.is_harvest_simple_mode():
+        print()
+        print(
+            status_messages.status(
+                "Harvest session closed · menus: 8) Browse harvested APKs · 3) Inventory & harvest details",
+                level="info",
+            )
+        )
         return
-    if scoped_label:
-        summary = (
-            f"Scoped inventory refreshed: {result.stats.total_packages} packages "
-            f"for {scoped_label}."
+
+    harvested = ctx.get("packages", "—")
+    total_scope = ctx.get("packages_total")
+    blocked = ctx.get("packages_blocked")
+    if total_scope not in (None, "—") and blocked not in (None, "—"):
+        harvest_summary = (
+            f"Harvest complete: {harvested} harvested / {total_scope} in scope "
+            f"({blocked} blocked)."
         )
     else:
-        summary = f"Inventory refreshed: {result.stats.total_packages} packages."
-    snapshot_id = result.snapshot_id if result.snapshot_id is not None else "—"
-    print(status_messages.status(f"{summary} Snapshot {snapshot_id}.", level="success"))
+        harvest_summary = f"Harvest complete: {harvested} package(s)."
+    _print_action_feedback(
+        action_name="Execute Harvest",
+        summary=harvest_summary,
+        info_lines=_harvest_run_context_detail_lines(ctx),
+    )
 
 
 def handle_choice(
@@ -174,91 +210,13 @@ def build_main_menu_options(
     return options
 
 
-def _list_devices(summaries: list[dict[str, str | None]]) -> None:
-    # Instead of an inline list + extra prompt, jump to the full devices hub.
-    from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
-
-    devices_hub()
-
-
-def _connect_to_device(
-    devices: list[dict[str, str | None]],
-    summaries: list[dict[str, str | None]],
-) -> None:
-    if not devices:
-        error_panels.print_info_panel(
-            "Connect to Device",
-            "No devices detected by adb.",
-            hint="Attach a device and ensure adb recognizes it (adb devices).",
-        )
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Select Device", subtitle="Available adb devices")
-    numbered_devices = {str(idx): summary for idx, summary in enumerate(summaries, start=1)}
-    options = []
-    for idx, summary in numbered_devices.items():
-        label = format_device_line(summary, include_release=True)
-        description = format_battery(summary)
-        options.append(menu_utils.MenuOption(str(idx), label, description=description))
-    menu_utils.print_menu(options)
-
-    choice = prompt_utils.get_choice(list(numbered_devices.keys()) + ["0"], default="1")
-    if choice == "0":
-        return
-
-    summary = numbered_devices[choice]
-    serial = summary.get("serial")
-    if not serial:
-        error_panels.print_warning_panel(
-            "Connect to Device",
-            "Selected device has no serial identifier.",
-        )
-        prompt_utils.press_enter_to_continue()
-        return
-
-    from scytaledroid.DeviceAnalysis.services import device_service
-
-    if device_service.set_active_serial(serial):
-        label = format_device_line(summary, include_release=True)
-        print(f"\nActive device set to {label}.")
-        log.info(f"Active device set to {serial}.", category="device")
-    else:
-        error_panels.print_warning_panel(
-            "Connect to Device",
-            f"Failed to activate device with serial {serial}.",
-            hint="Retry after verifying adb authorization on the device.",
-        )
-        log.warning(f"Failed to activate device {serial}.", category="device")
-    prompt_utils.press_enter_to_continue()
-
-
-def _show_device_info(
-    active_device: dict[str, str | None | None],
-    active_details: dict[str, str | None | None],
-) -> None:
-    info_rows = info_service.fetch_device_info(active_details)
-    if not info_rows:
-        error_panels.print_error_panel(
-            "Device Info",
-            "No active device. Use option 9 to select a device first.",
-        )
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print("\nDevice information:")
-    table_utils.render_table(["Field", "Value"], [[field, value] for field, value in info_rows.items()])
-    prompt_utils.press_enter_to_continue()
-
-
 def _show_inventory_harvest_details(
     active_details: dict[str, str | None | None],
 ) -> None:
     if not active_details or not active_details.get("serial"):
         error_panels.print_error_panel(
             "Inventory and harvest details",
-            "No active device. Use option 9 to select a device first.",
+            "No active device. Choose 6) Switch device from this menu.",
         )
         prompt_utils.press_enter_to_continue()
         return
@@ -273,18 +231,6 @@ def _show_inventory_harvest_details(
     menu_utils.print_header("Inventory and harvest details")
     print_device_details(active_details, inventory_metadata)
     prompt_utils.press_enter_to_continue()
-
-
-def _disconnect_device() -> None:
-    if device_manager.get_active_serial():
-        device_manager.disconnect()
-        log.info("Active device cleared by user.", category="device")
-    else:
-        log.info("Disconnect request received but no active device was set.", category="device")
-    # Immediately return to the devices hub for a clean navigation model.
-    from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
-
-    devices_hub()
 
 
 def _open_apk_library_filtered(active_device: dict[str, str | None | None]) -> None:
@@ -353,93 +299,16 @@ def _run_apk_pull(
         prompt_utils.press_enter_to_continue()
         return
 
-    status = device_service.fetch_inventory_metadata(serial)
-    if status is None or status.status_label.upper() == "NONE":
-        print()
-        menu_utils.print_header("Execute Harvest")
-        print(status_messages.status("No inventory snapshot found. Run Refresh Inventory first.", level="warn"))
-        from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
-        try:
-            result = inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
-            _print_inventory_feedback("Refresh Inventory", result)
-            status = device_service.fetch_inventory_metadata(serial)
-        except Exception as exc:
-            print(status_messages.status(f"Refresh Inventory failed: {exc}", level="error"))
-            return
-        if status is None or status.status_label.upper() == "NONE":
-            return
-    # Detect change vs snapshot (if metadata carries change flags) or age-based staleness
-    # Defer change-based gating to inventory_guard to avoid duplicate/noisy prompts.
-    changed = False
-    if status.is_stale:
-        print()
-        menu_utils.print_header("Execute Harvest")
-        print(
-            status_messages.status(
-                f"Current inventory: {status.status_label} ({status.age_display}) • {status.package_count or 'unknown'} packages",
-                level="warn",
-            )
-        )
-        print(
-            status_messages.status(
-                "Pulling APKs now may miss recently added or removed apps (stale by age).",
-                level="warn",
-            )
-        )
-        options = {
-            "1": "Run Refresh Inventory first (recommended)",
-            "2": "Proceed with stale inventory",
-            "0": "Cancel",
-        }
-        menu_utils.print_menu(options, show_exit=False, show_descriptions=False)
-        choice = prompt_utils.get_choice(list(options) + ["0"], default="1")
-        if choice == "0":
-            return
-        if choice == "1":
-            from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
-            try:
-                result = inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
-                _print_inventory_feedback("Refresh Inventory", result)
-                status = device_service.fetch_inventory_metadata(serial)
-            except Exception as exc:
-                print(status_messages.status(f"Refresh Inventory failed: {exc}", level="error"))
-                return
-        # fall through to pull if choice == "2" or after sync
-    elif changed:
-        print()
-        menu_utils.print_header("Execute Harvest")
-        print(
-            status_messages.status(
-                "Device packages changed since the last inventory snapshot.",
-                level="info",
-            )
-        )
-        print(
-            status_messages.status(
-                "Proceeding without sync may miss newly installed or metadata-changed packages.",
-                level="warn",
-            )
-        )
-        options = {
-            "1": "Run Refresh Inventory now (recommended)",
-            "2": "Use last snapshot anyway",
-            "0": "Cancel",
-        }
-        menu_utils.print_menu(options, show_exit=False, show_descriptions=False)
-        choice = prompt_utils.get_choice(list(options) + ["0"], default="1")
-        if choice == "0":
-            return
-        if choice == "1":
-            from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
-            try:
-                result = inventory_workflow.run_inventory_sync(serial=serial, ui_prefs=text_blocks.UI_PREFS)
-                _print_inventory_feedback("Refresh Inventory", result)
-                status = device_service.fetch_inventory_metadata(serial)
-            except Exception as exc:
-                print(status_messages.status(f"Refresh Inventory failed: {exc}", level="error"))
-                return
+    precheck = run_execute_harvest_menu_precheck(serial)
+    if precheck is None:
+        return
+    accept_age_stale_harvest = precheck
 
-    if not ensure_recent_inventory(serial, device_context=active_device):
+    if not ensure_recent_inventory(
+        serial,
+        device_context=active_device,
+        accept_age_stale_harvest=accept_age_stale_harvest,
+    ):
         return
 
     # Proceed to APK harvesting flow.
@@ -447,35 +316,32 @@ def _run_apk_pull(
         from scytaledroid.DeviceAnalysis.apk.workflow import run_apk_pull
 
         result = run_apk_pull(serial, auto_scope=auto_scope)
-        if hasattr(result, "ok") and not result.ok:
+        ctx = getattr(result, "context", {}) or {}
+        code = getattr(result, "error_code", "") or ""
+        if code == "apk_pull_cancelled":
+            print()
+            print(status_messages.status(result.user_message or "Harvest cancelled.", level="info"))
+            prompt_utils.press_enter_to_continue()
+            return
+        if not result.ok and getattr(result, "status", "") == "PARTIAL":
+            error_panels.print_warning_panel(
+                "Execute Harvest",
+                result.user_message or "Harvest partially completed.",
+                hint=result.log_hint or "See logs.",
+            )
+            for line in _harvest_run_context_detail_lines(ctx):
+                print(status_messages.status(line, level="info"))
+            prompt_utils.press_enter_to_continue()
+            return
+        if not result.ok:
             error_panels.print_error_panel(
                 "Execute Harvest",
                 result.user_message or "Execute Harvest failed.",
                 hint=result.log_hint or "See logs for traceback.",
             )
-            return False
-        context = getattr(result, "context", {}) or {}
-        harvested = context.get("packages", "—")
-        total_scope = context.get("packages_total")
-        blocked = context.get("packages_blocked")
-        if total_scope not in (None, "—") and blocked not in (None, "—"):
-            harvest_summary = (
-                f"Harvest complete: {harvested} harvested / {total_scope} in scope "
-                f"({blocked} blocked)."
-            )
-        else:
-            harvest_summary = f"Harvest complete: {harvested} package(s)."
-        _print_action_feedback(
-            action_name="Execute Harvest",
-            summary=harvest_summary,
-            info_lines=[
-                f"Run ID: {context.get('run_id', '—')}",
-                f"Session: {context.get('session_stamp', '—')}",
-                f"Inventory snapshot ID: {context.get('snapshot_id', '—')}",
-                f"Artifacts root: {context.get('artifacts_root', '—')}",
-                f"Receipts root: {context.get('receipts_root', '—')}",
-            ],
-        )
+            prompt_utils.press_enter_to_continue()
+            return
+        _print_harvest_success_menu_feedback(ctx)
     except Exception as exc:
         logging_engine.get_error_logger().exception(
             "APK harvest failed",
@@ -499,8 +365,8 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
     serial = active_device.get("serial") if active_device else device_manager.get_active_serial()
     if not serial:
         error_panels.print_error_panel(
-            "Refresh Inventory",
-            "No active device. Connect first to refresh inventory.",
+            inventory_cli_labels.ERROR_SECTION,
+            "No active device. Connect a device first.",
         )
         prompt_utils.press_enter_to_continue()
         return
@@ -514,12 +380,10 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         allow_fallbacks = str(root_state).strip().lower() != "yes"
         set_allow_inventory_fallbacks(allow_fallbacks)
         print()
-        # Keep the operator contract simple: canonical full sync, or scoped sync
-        # against one of the currently active app profiles.
-        menu_utils.print_header("Refresh Inventory", "Choose scope")
+        menu_utils.print_header(inventory_cli_labels.SECTION_HEADLINE, inventory_cli_labels.SCOPE_MENU_SUBTITLE)
         sync_opts = [
-            menu_utils.MenuOption("1", "Full refresh"),
-            menu_utils.MenuOption("2", "Scoped refresh"),
+            menu_utils.MenuOption("1", inventory_cli_labels.MENU_OPTION_FULL),
+            menu_utils.MenuOption("2", inventory_cli_labels.MENU_OPTION_SCOPED),
         ]
         menu_utils.render_menu(
             menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=False, compact=True)
@@ -536,9 +400,21 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
             # Full sync is the slow path; if the inventory is already fresh, ask once.
             if status and status.status_label.upper() == "FRESH" and not status.is_stale:
                 print()
-                print(f"Inventory is FRESH for {serial}. Re-run?")
+                age_raw = getattr(status, "age_display", None)
+                age_compact = _compact_age_display(age_raw) if age_raw else "recent"
+                pkg_note = (
+                    f"{status.package_count} pkgs"
+                    if getattr(status, "package_count", None) is not None
+                    else "pkgs on snapshot"
+                )
+                print(
+                    status_messages.status(
+                        f"Snapshot is fresh ({age_compact} · {pkg_note}). Run full refresh anyway?",
+                        level="info",
+                    )
+                )
                 if not prompt_utils.prompt_yes_no(
-                    "Proceed?",
+                    "Continue",
                     default=False,
                 ):
                     return
@@ -548,7 +424,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 progress_sink="cli",
                 allow_fallbacks=allow_fallbacks,
             )
-            _print_inventory_feedback("Refresh Inventory", result)
+            print_inventory_run_feedback(result)
         else:
             selected_profile = _select_inventory_sync_profile()
             if selected_profile is None:
@@ -566,14 +442,13 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 progress_sink="cli",
                 allow_fallbacks=allow_fallbacks,
             )
-            _print_inventory_feedback(
-                "Refresh Inventory",
+            print_inventory_run_feedback(
                 result,
                 scoped_label=str(selected_profile["display_name"]),
             )
     except Exception as exc:
         error_panels.print_error_panel(
-            "Refresh Inventory",
+            inventory_cli_labels.ERROR_SECTION,
             str(exc),
         )
         prompt_utils.press_enter_to_continue()
@@ -624,7 +499,7 @@ def _select_inventory_sync_profile() -> dict[str, object] | None:
         return selected
 
     print()
-    menu_utils.print_header("Refresh Inventory · Profile")
+    menu_utils.print_header(f"{inventory_cli_labels.SECTION_HEADLINE} · profile")
     rows = [
         [str(idx), str(profile["display_name"]), str(int(profile["app_count"]))]
         for idx, profile in enumerate(profiles, start=1)

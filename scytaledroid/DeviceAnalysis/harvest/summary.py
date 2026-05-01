@@ -326,6 +326,7 @@ def build_harvest_run_report(
     serial: str | None = None,
     run_timestamp: str | None = None,
     guard_brief: str | None = None,
+    harvest_session_root: Path | str | None = None,
 ) -> HarvestRunReport:
     """Build the authoritative interpreted harvest run report."""
 
@@ -343,6 +344,8 @@ def build_harvest_run_report(
     status, status_level = _derive_harvest_status(metrics)
     runtime_note_summary = _build_runtime_note_summary(metrics)
     artifacts_root = _run_artifacts_root(serial=serial, result=harvest_result)
+    if harvest_session_root is not None:
+        artifacts_root = str(Path(harvest_session_root).expanduser().resolve())
     receipts_root = _run_receipts_root(harvest_result)
     delta_summary = metadata.get("package_delta_summary")
 
@@ -485,6 +488,7 @@ def render_harvest_summary(
     run_id: str | None = None,
     harvest_logger: logging_engine.ContextAdapter | None = None,
     log_summary: bool = True,
+    harvest_session_root: Path | str | None = None,
 ) -> None:
     """Render the end-of-run summary with diagnostics."""
     report = build_harvest_run_report(
@@ -495,6 +499,7 @@ def render_harvest_summary(
         serial=serial,
         run_timestamp=run_timestamp,
         guard_brief=guard_brief,
+        harvest_session_root=harvest_session_root,
     )
     harvest_result = report.harvest_result
     metrics = report.metrics
@@ -509,12 +514,26 @@ def render_harvest_summary(
 
     if simple_mode:
         print()
-        print(status_messages.status(f"status: {report.status}", level=report.status_level))
-        print(status_messages.status(report.copy_line, level="info"))
-        if report.artifacts_root:
-            print(status_messages.status(f"artifacts: {report.artifacts_root}", level="info"))
-        if report.receipts_root:
-            print(status_messages.status(f"receipts: {report.receipts_root}", level="info"))
+        print(
+            status_messages.status(
+                _operator_harvest_finish_line(report, run_id=run_id),
+                level=report.status_level,
+            )
+        )
+        log.info(report.copy_line, category="device")
+        if _harvest_transcript_copy_stdout():
+            print(status_messages.status(report.copy_line, level="info"))
+        art_disp = _storage_path_display(report.artifacts_root)
+        rc_disp = _storage_path_display(report.receipts_root)
+        path_line_parts: list[str] = []
+        if run_timestamp:
+            path_line_parts.append(f"session={run_timestamp}")
+        if art_disp:
+            path_line_parts.append(f"artifacts {art_disp}")
+        if rc_disp:
+            path_line_parts.append(f"receipts {rc_disp}")
+        if path_line_parts:
+            print(status_messages.status(" · ".join(path_line_parts), level="info"))
         if report.delta_line:
             print(status_messages.status(report.delta_line, level="info"))
         if report.runtime_note_summary:
@@ -549,10 +568,10 @@ def render_harvest_summary(
                             joined = ", ".join(pkgs)
                             print(status_messages.status(f"notes pkgs: {reason}: {joined}", level="info"))
 
-        if report.skip_counts_line:
+        if report.skip_counts_line and not _skip_counts_redundant_with_finish_line(report):
             print(status_messages.status(report.skip_counts_line, level="info"))
 
-        # Compact mode: avoid duplicating information already captured by the [COPY] line above.
+        # Compact mode: avoid duplicating rollups shown in dashboard-style menus downstream.
         # Leave the evidence path + notes/skips lines intact.
         if _harvest_compact_mode():
             return
@@ -1004,6 +1023,52 @@ def _describe_reason(code: str, mapping: dict[str, str]) -> str:
     return mapping.get(code, code)
 
 
+def _harvest_transcript_copy_stdout() -> bool:
+    """Paste-friendly [COPY] line for transcripts; logs always carry the full string."""
+
+    return os.getenv("SCYTALEDROID_HARVEST_COPY_LINE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _operator_harvest_finish_line(report: HarvestRunReport, *, run_id: str | None = None) -> str:
+    m = report.metrics
+    scope = getattr(report.harvest_result, "scope_name", None) or "unknown"
+    parts = [
+        f"Harvest finished ({report.status})",
+        f"scope={scope}",
+        f"pulled {m.executed_packages}/{m.total_packages} packages",
+    ]
+    if run_id:
+        parts.append(f"run_id={run_id}")
+    if m.blocked_packages:
+        parts.append(f"skipped {m.blocked_packages} (preflight/policy)")
+    if m.planned_artifacts:
+        parts.append(f"artifacts {m.artifacts_written}/{m.planned_artifacts} written")
+    return " · ".join(parts)
+
+
+def _storage_path_display(path_str: str | None) -> str | None:
+    if not path_str:
+        return None
+    try:
+        return artifact_store.repo_relative_path(Path(path_str))
+    except Exception:
+        return path_str
+
+
+def _skip_counts_redundant_with_finish_line(report: HarvestRunReport) -> bool:
+    """Single preflight bucket matching all blocked packages — already spelled out above."""
+
+    m = report.metrics
+    if not m.preflight_skips or m.runtime_skips:
+        return False
+    return sum(m.preflight_skips.values()) == m.blocked_packages and len(m.preflight_skips) == 1
+
+
 def _derive_harvest_status(metrics: HarvestRunMetrics) -> tuple[str, str]:
     status = "success"
     if metrics.packages_with_mirror_failures and metrics.executed_packages and (
@@ -1225,9 +1290,32 @@ def _run_receipts_root(result: HarvestResult) -> str | None:
 
 
 def _run_artifacts_root(*, serial: str | None, result: HarvestResult) -> str | None:
-    if not serial or not result.run_timestamp:
+    if not serial:
         return None
-    return str(artifact_store.legacy_harvest_root() / serial / result.run_timestamp)
+    harvest_base = artifact_store.device_apks_root().resolve()
+    for pkg in result.packages:
+        manifest_raw = pkg.manifest_path
+        if not manifest_raw:
+            continue
+        manifest = Path(str(manifest_raw))
+        if manifest.is_absolute():
+            candidate = manifest.parent.parent
+        else:
+            candidate = (harvest_base / manifest).resolve().parent.parent
+        try:
+            candidate.relative_to(harvest_base / serial.strip())
+        except ValueError:
+            continue
+        return str(candidate.resolve())
+    if result.run_timestamp:
+        ts = str(result.run_timestamp).strip()
+        serial_p = harvest_base / serial.strip()
+        if len(ts) == 8 and ts.isdigit():
+            return str((serial_p / ts).resolve())
+        if len(ts) > 9 and ts[8] == "_" and ts[:8].isdigit():
+            return str((serial_p / ts[:8] / ts[9:]).resolve())
+        return str((serial_p / "runs" / ts).resolve())
+    return None
 
 
 def _packages_without_writes(

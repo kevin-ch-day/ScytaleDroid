@@ -38,12 +38,15 @@ INSERT INTO android_apk_repository (
 )
 ON DUPLICATE KEY UPDATE
     app_id = COALESCE(VALUES(app_id), app_id),
+    package_name = VALUES(package_name),
     file_name = VALUES(file_name),
     file_size = VALUES(file_size),
     is_system = VALUES(is_system),
     installer = VALUES(installer),
     version_name = VALUES(version_name),
     version_code = VALUES(version_code),
+    md5 = COALESCE(VALUES(md5), md5),
+    sha1 = COALESCE(VALUES(sha1), sha1),
     signer_fingerprint = COALESCE(VALUES(signer_fingerprint), signer_fingerprint),
     device_serial = VALUES(device_serial),
     harvested_at = COALESCE(VALUES(harvested_at), harvested_at),

@@ -87,6 +87,32 @@ def test_guard_allows_pull_when_fresh_and_no_changes(monkeypatch):
     assert guard_module.ensure_recent_inventory(serial="ABC123") is True
 
 
+def test_guard_allows_precheck_age_stale_when_operator_already_confirmed(monkeypatch):
+    old = datetime.now(UTC) - timedelta(days=2)
+
+    def _fake_metadata(_serial, with_current_state=False, scope_packages=None):
+        return {
+            "timestamp": old,
+            "delta": {"new": 0, "removed": 0, "updated": 0, "changed": 0},
+            "scope_changed": False,
+            "scope_hash_changed": False,
+        }
+
+    def _fail_if_prompted(*_args, **_kwargs):  # pragma: no cover
+        raise AssertionError("Guard should bypass prompt when Execute Harvest accepted age-stale")
+
+    monkeypatch.setattr(guard_module, "get_latest_inventory_metadata", _fake_metadata)
+    monkeypatch.setattr(guard_module.prompt_utils, "get_choice", _fail_if_prompted)
+
+    assert guard_module.ensure_recent_inventory(
+        serial="ABC123",
+        accept_age_stale_harvest=True,
+    ) is True
+    decision = guard_module.get_last_guard_decision()
+    assert decision["reason_code"] == "precheck_stale_proceed"
+    assert decision["decision_enum"] == "allow"
+
+
 def test_guard_handles_dict_delta_without_prompt(monkeypatch):
     now = datetime.now(UTC)
 

@@ -26,7 +26,11 @@ def device_menu(*, return_to: str = "main") -> str:
         active_device = device_service.resolve_active_device(devices)
         active_details = None
         if active_device:
-            active_details = serial_map.get(active_device.get("serial")) or active_device
+            ser = active_device.get("serial")
+            if ser:
+                active_details = serial_map.get(ser) or summary_cache.get(ser) or active_device
+            else:
+                active_details = active_device
 
         inventory_metadata = None
         if active_details and active_details.get("serial"):

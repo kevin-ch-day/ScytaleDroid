@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
@@ -56,10 +55,7 @@ def _status_badge(label: str, tone: str = "info") -> str:
     }
     style = style_map.get(tone, palette.info)
     cleaned = (label or "").strip() or "UNKNOWN"
-    # Prefer a solid bullet when colours are enabled; fall back to ASCII
-    # depending on terminal capability otherwise.
-    # When colours are enabled (e.g., tests via FORCE_COLOR), prefer a solid bullet
-    # to ensure consistent snapshots regardless of Unicode heuristics.
+    # Solid bullet when colour is enabled (stable test snapshots); ASCII fallback otherwise.
     if colors.colors_enabled():
         marker = "●"
     else:
@@ -254,22 +250,24 @@ def _device_table_rows(
 
 
 def _render_active_device_summary(details: dict[str, str | None]) -> None:
-    print(colors.apply("Device", colors.style("header"), bold=True))
-    print(text_blocks.divider(width=6, style="divider"))
     model = prettify_model(details.get("model") or details.get("device"))
     serial = details.get("serial") or "Unknown"
     identity = f"{model} ({serial})" if model != "Unknown" else serial
     print(colors.apply(identity, colors.style("banner_primary"), bold=True))
+    rel = format_android_release(details)
+    if rel not in {"", "Unknown"} and rel.isdigit():
+        rel = f"Android {rel}"
+    sep = colors.apply(" · ", colors.style("muted"))
     summary_bits = [
         colors.apply(
             prettify_manufacturer(details.get("manufacturer") or details.get("brand")),
             colors.style("muted"),
         ),
-        colors.apply(format_android_release(details), colors.style("accent"), bold=True),
+        colors.apply(rel, colors.style("accent"), bold=True),
         colors.apply(details.get("device_type") or "Unknown", colors.style("text")),
         _root_badge(details.get("is_rooted")),
     ]
-    print(" | ".join(bit for bit in summary_bits if bit))
+    print(sep.join(bit for bit in summary_bits if bit))
 
 
 def _build_delta_items(delta: object, *, limit: int = 5) -> list[str]:
@@ -343,19 +341,25 @@ def _safe_int(value: object) -> int | None:
 def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
     if not serial:
         return {}
-    root = artifact_store.legacy_harvest_root() / serial
+    root = artifact_store.device_apks_root() / serial
     if not root.exists():
         return {}
-    session_dirs = sorted((path for path in root.iterdir() if path.is_dir()), key=lambda path: path.name)
-    if not session_dirs:
+    manifests = sorted(
+        root.rglob("harvest_package_manifest.json"),
+        key=lambda path: path.stat().st_mtime_ns,
+    )
+    if not manifests:
         return {}
-    session_dir = session_dirs[-1]
-    manifests = list(session_dir.rglob("harvest_package_manifest.json"))
+
+    latest_manifest = manifests[-1]
+    session_dir = latest_manifest.parent.parent
+    session_resolved = session_dir.resolve()
+    session_manifests = [m for m in manifests if m.parent.parent.resolve() == session_resolved]
     blocked_policy = 0
     blocked_scope = 0
     executed = 0
     harvest_snapshot_id: int | None = None
-    for manifest_path in manifests:
+    for manifest_path in session_manifests:
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception:
@@ -375,14 +379,24 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
             blocked_scope += 1
         else:
             executed += 1
-    receipts_root = artifact_store.harvest_receipts_root() / session_dir.name
+    receipt_key = ""
+    try:
+        latest_payload = json.loads(latest_manifest.read_text(encoding="utf-8"))
+        pkg_blk = latest_payload.get("package") if isinstance(latest_payload, dict) else None
+        if isinstance(pkg_blk, dict):
+            receipt_key = str(pkg_blk.get("session_label") or "").strip()
+    except Exception:
+        receipt_key = ""
+    if not receipt_key:
+        receipt_key = session_dir.name
+    receipts_root = artifact_store.harvest_receipts_root() / receipt_key
     receipt_count = len(list(receipts_root.glob("*.json"))) if receipts_root.exists() else 0
     return {
-        "session_label": session_dir.name,
+        "session_label": receipt_key or session_dir.name,
         "executed": executed,
         "blocked_policy": blocked_policy,
         "blocked_scope": blocked_scope,
-        "manifest_count": len(manifests),
+        "manifest_count": len(session_manifests),
         "receipt_count": receipt_count,
         "snapshot_id": harvest_snapshot_id,
         "artifacts_root": artifact_store.repo_relative_path(session_dir),
@@ -442,7 +456,7 @@ def _compute_pipeline_state(serial: str | None) -> dict[str, object]:
 def _render_inventory_status(metadata: object) -> None:
     """Render a compact inventory status block with delta hints."""
 
-    # Accept both legacy dict metadata and InventoryStatus dataclass
+    # Plain dict snapshots (menus/CLI) or InventoryStatus instances
     ts = None
     package_count = None
     stale = False
@@ -517,6 +531,8 @@ def _format_summary_value(value: object, *, fallback: str = "—") -> str:
 def _compact_age_display(age_display: object) -> str:
     text = _format_summary_value(age_display, fallback="unknown").strip()
     replacements = {
+        " Days ": "d ",
+        " Day ": "d ",
         " Hrs ": "h ",
         " Hr ": "h ",
         " Mins": "m",
@@ -535,16 +551,16 @@ def _evidence_alignment_text(
     inventory_snapshot_id: object,
 ) -> str:
     if not latest_harvest:
-        return "not harvested yet"
+        return "none"
 
     harvest_snapshot_id = latest_harvest.get("snapshot_id")
     if harvest_snapshot_id is None:
-        return "present (snapshot unknown)"
+        return "snapshot ?"
     if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
-        return f"aligned with snapshot {harvest_snapshot_id}"
+        return f"OK @ {harvest_snapshot_id}"
     if inventory_snapshot_id is not None:
-        return f"harvest snapshot {harvest_snapshot_id}; inventory snapshot {inventory_snapshot_id} pending harvest"
-    return f"linked to snapshot {harvest_snapshot_id}"
+        return f"stale hv {harvest_snapshot_id} vs inv {inventory_snapshot_id}"
+    return f"hv @ {harvest_snapshot_id}"
 
 
 def _summary_next_step(
@@ -555,14 +571,14 @@ def _summary_next_step(
     has_harvest: bool,
 ) -> str:
     if inventory_status == "NONE":
-        return "Run Refresh Inventory to establish current device scope."
+        return "Next: refresh inventory (1)."
     if inventory_status == "STALE":
-        return "Inventory is stale; refresh recommended before harvest."
+        return "Next: refresh inventory (1) — snapshot stale."
     if not has_harvest:
-        return "Inventory is current. Execute harvest when you are ready."
+        return "Next: run harvest (2)."
     if harvest_snapshot_id is not None and inventory_snapshot_id is not None and harvest_snapshot_id != inventory_snapshot_id:
-        return "Harvest evidence is behind the latest inventory. Run harvest to align evidence with the current snapshot."
-    return "Inventory and harvest are aligned. Static analysis can proceed."
+        return "Next: run harvest (2) to match latest inventory."
+    return "Next: static analysis (menu 2) or re-harvest as needed."
 
 
 def _render_compact_status(
@@ -583,35 +599,40 @@ def _render_compact_status(
         latest_harvest=latest_harvest,
         inventory_snapshot_id=inventory_snapshot_id,
     )
+    ev_tone = _evidence_alignment_tone(
+        latest_harvest=latest_harvest,
+        inventory_snapshot_id=inventory_snapshot_id,
+    )
+    ev_styled = colors.apply(evidence_alignment, colors.style(ev_tone), bold=True)
+    palette = colors.get_palette()
+    pipe = colors.apply(" │ ", palette.muted)
 
-    print()
-    print(colors.apply("Summary", colors.style("header"), bold=True))
-    print(text_blocks.divider(width=7, style="divider"))
-    print(
-        f"{'Inventory':<12} : {_inventory_status_text(status_label)} | "
-        f"{_styled_count_phrase(pkg_count, 'packages', tone='accent')} | "
+    inv_part = (
+        f"{_inventory_status_text(status_label)} · "
+        f"{_styled_count_phrase(pkg_count, 'pkgs', tone='accent')} · "
         f"{colors.apply(f'{age_display} ago', colors.style('muted'))}"
     )
-    print(
-        f"{'Harvest':<12} : {_styled_count_phrase(harvested_count, 'harvested', tone='success')} | "
-        f"{_styled_count_phrase(blocked_policy, 'policy blocked', tone='blocked')} | "
-        f"{_styled_count_phrase(blocked_scope, 'scope blocked', tone='warning')}"
-    )
-    print(
-        f"{'Evidence':<12} : "
-        f"{colors.apply(evidence_alignment, colors.style(_evidence_alignment_tone(latest_harvest=latest_harvest, inventory_snapshot_id=inventory_snapshot_id)), bold=True)}"
+    har_part = (
+        f"{_styled_count_phrase(harvested_count, 'hv', tone='success')} · "
+        f"{_styled_count_phrase(blocked_policy, 'pol', tone='blocked')} · "
+        f"{_styled_count_phrase(blocked_scope, 'sc', tone='warning')}"
     )
 
     print()
-    print(colors.apply("Next Step", colors.style("header"), bold=True))
-    print(text_blocks.divider(width=9, style="divider"))
+    print(
+        f"{colors.apply('Inv', palette.muted, bold=True)} {inv_part}"
+        f"{pipe}"
+        f"{colors.apply('Har', palette.muted, bold=True)} {har_part}"
+        f"{pipe}"
+        f"{colors.apply('Ev', palette.muted, bold=True)} {ev_styled}"
+    )
     print(
         status_messages.highlight(
             _summary_next_step(
-            inventory_status=status_label,
-            inventory_snapshot_id=inventory_snapshot_id,
-            harvest_snapshot_id=harvest_snapshot_id,
-            has_harvest=bool(latest_harvest),
+                inventory_status=status_label,
+                inventory_snapshot_id=inventory_snapshot_id,
+                harvest_snapshot_id=harvest_snapshot_id,
+                has_harvest=bool(latest_harvest),
             )
         )
     )
@@ -619,8 +640,6 @@ def _render_compact_status(
 
 def _render_grouped_actions(options: list[menu_utils.MenuOption]) -> None:
     print()
-    print(colors.apply("Actions", colors.style("header"), bold=True))
-    print(text_blocks.divider(width=7, style="divider"))
     ordered = sorted(options, key=lambda option: int(option.key) if option.key.isdigit() else 999)
     menu_utils.print_menu(
         ordered,
@@ -746,6 +765,15 @@ def print_dashboard(
 
     # Prefer a lighter single-device summary when an active device is selected.
     if active_details:
+        if devices_found == 0:
+            print(
+                colors.apply(
+                    "ADB listed no devices (often brief after inventory). "
+                    "Keeping your selected device — press r to refresh if actions fail.",
+                    colors.get_palette().hint,
+                )
+            )
+            print()
         _render_active_device_summary(active_details)
     elif show_device_table and summaries:
         rows = _device_table_rows(summaries)

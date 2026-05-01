@@ -43,6 +43,7 @@ Notes:
 - `support`
   - [adb_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/adb_contract.md)
   - [workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
+  - [v1_evidence_catalog_verification.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/design/v1_evidence_catalog_verification.md) — ACK-pending V1 schema/verify semantics (**do not reopen without blocker**)
 - `historical`
   - none currently separated
 

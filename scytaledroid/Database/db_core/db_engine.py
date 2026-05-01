@@ -466,6 +466,20 @@ def _execute(
             if transient:
                 raise TransientDbError(str(exc)) from exc
             raise DatabaseError(str(exc)) from exc
+        except sqlite3.OperationalError as exc:
+            # SQLite backends (tests / bootstrap) routinely hit DDL/view limits; avoid full tracebacks.
+            _LOG.warning(
+                "db.exec.sqlite_operational",
+                extra={
+                    **base_extra,
+                    **summary,
+                    "event": "db.exec.sqlite_operational",
+                    "detected_style": normalised.detected_style,
+                    "err_class": exc.__class__.__name__,
+                    "attempt": attempt,
+                },
+            )
+            raise DatabaseError(str(exc)) from exc
         except sqlite3.DatabaseError as exc:
             _LOG.error(
                 "db.exec.failed",

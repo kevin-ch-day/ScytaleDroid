@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.inventory import db_sync
@@ -9,13 +10,13 @@ from scytaledroid.Utils.DisplayUtils import colors
 
 
 def test_sync_app_definitions_skips_numeric_only_package(monkeypatch) -> None:
-    calls: list[tuple[str, str | None]] = []
+    batches: list[list[tuple[str, str | None]]] = []
 
-    def _ensure(package_name: str, app_name: str | None = None) -> int:
-        calls.append((package_name, app_name))
-        return 1
+    def _bulk(rows: list[tuple[str, str | None]]) -> int:
+        batches.append(list(rows))
+        return len(rows)
 
-    monkeypatch.setattr(db_sync, "ensure_app_definition", _ensure)
+    monkeypatch.setattr(db_sync, "bulk_ensure_app_definitions", _bulk)
 
     rows = [
         {"package_name": "20260204", "app_label": "Bad Token"},
@@ -25,7 +26,7 @@ def test_sync_app_definitions_skips_numeric_only_package(monkeypatch) -> None:
     synced = db_sync.sync_app_definitions(rows)
 
     assert synced == 1
-    assert calls == [("com.example.valid", "Valid App")]
+    assert batches == [[("com.example.valid", "Valid App")]]
 
 
 def test_render_snapshot_block_uses_labeled_lines_and_compact_non_root_warning(monkeypatch, capsys) -> None:
@@ -55,14 +56,42 @@ def test_render_snapshot_block_uses_labeled_lines_and_compact_non_root_warning(m
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "Refresh Inventory" in out
+    assert "Refresh inventory" in out
     assert "Device       : ZY22JK89DR" in out
     assert "Previous snap: 26" in out
-    assert "Inventory    : UNKNOWN" in out
-    assert "Last sync    : unknown ago" in out
+    assert "Inventory    : none" in out
+    assert "Last sync    : never" in out
     assert "Packages     : —" in out
     assert "Mode         : baseline" in out
     assert "Non-root collection active; harvest remains policy-filtered." in out
+    assert "Next: ADB package dump" in out
+
+
+def test_render_snapshot_block_formats_last_sync_age(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(progress.colors, "colors_enabled", lambda: False)
+    monkeypatch.setattr(
+        progress,
+        "INVENTORY_STALE_SECONDS",
+        24 * 60 * 60,
+    )
+
+    captured = datetime.now(UTC) - timedelta(minutes=48, seconds=17)
+    meta = SimpleNamespace(
+        captured_at=captured,
+        snapshot_id=42,
+        package_count=546,
+    )
+
+    progress.render_snapshot_block(
+        meta,
+        mode="baseline",
+        serial="ZY22JK89DR",
+        allow_fallbacks=False,
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Inventory    : FRESH" in out
+    assert "Last sync    : " in out and "ago" in out
 
 
 def test_prune_inventory_files_keeps_last_n_snapshots(tmp_path, monkeypatch):

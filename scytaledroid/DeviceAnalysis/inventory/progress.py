@@ -8,22 +8,74 @@ from datetime import UTC, datetime
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
 from scytaledroid.Utils.DisplayUtils.colors import ansi
 
-# Avoid pulling in the entire device_menu stack when running headless (e.g., measure_inventory_latency).
-try:
-    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
-        INVENTORY_STALE_SECONDS,
-    )
-except Exception:  # pragma: no cover - headless fall-back
-    INVENTORY_STALE_SECONDS = 24 * 60 * 60
+from scytaledroid.DeviceAnalysis.device_analysis_settings import INVENTORY_STALE_SECONDS
+from scytaledroid.DeviceAnalysis.inventory.cli_labels import (
+    PROGRESS_FOOTER_TIP,
+    SECTION_HEADLINE,
+)
 
 
-def _format_duration(seconds: float | None) -> str:
-    """Return a compact duration like 8m49s for fast operator scanning."""
-    if seconds is None:
-        return ""
-    if seconds < 0:
-        return "--"
-    total = int(seconds)
+# Live redraw uses CR/carriage tricks; Ctrl+C leaves the cursor mid-line unless we tidy up.
+_LIVE_INVENTORY_TTY_ACTIVE: bool = False
+_LIVE_INVENTORY_ROWS: int = 3
+
+
+def mark_live_inventory_progress_active(*, rows: int = 3) -> None:
+    """Mark stdin/out as owning a CR-based progress block."""
+
+    global _LIVE_INVENTORY_TTY_ACTIVE, _LIVE_INVENTORY_ROWS
+
+    stream = getattr(sys, "stdout", None)
+    if stream and getattr(stream, "isatty", lambda: False)():
+        _LIVE_INVENTORY_TTY_ACTIVE = True
+        _LIVE_INVENTORY_ROWS = max(rows, _LIVE_INVENTORY_ROWS)
+
+
+def record_live_inventory_row_count(rows: int) -> None:
+    """Track tallest progress rendering so Ctrl+C clears enough lines."""
+
+    global _LIVE_INVENTORY_ROWS
+    _LIVE_INVENTORY_ROWS = max(_LIVE_INVENTORY_ROWS, rows)
+
+
+def mark_live_inventory_progress_done() -> None:
+    """Call when the CLI progress finishes normally."""
+
+    global _LIVE_INVENTORY_TTY_ACTIVE
+    _LIVE_INVENTORY_TTY_ACTIVE = False
+
+
+def finalize_inventory_live_tty() -> None:
+    """Clear progress residue after KeyboardInterrupt (^C merges into CR-based lines otherwise)."""
+
+    global _LIVE_INVENTORY_TTY_ACTIVE
+    stream = getattr(sys, "stdout", None)
+    if not _LIVE_INVENTORY_TTY_ACTIVE or not (
+        stream and getattr(stream, "isatty", lambda: False)()
+    ):
+        _LIVE_INVENTORY_TTY_ACTIVE = False
+        return
+
+    rows = max(3, _LIVE_INVENTORY_ROWS)
+    buf = ansi.RESET
+    for _ in range(rows):
+        buf += f"\r{ansi.CLEAR_LINE}\n"
+    try:
+        stream.write(buf + "\r")
+        stream.flush()
+    except Exception:
+        pass
+    _LIVE_INVENTORY_TTY_ACTIVE = False
+
+
+def format_inventory_elapsed(seconds: float | None, *, absent: str = "") -> str:
+    """Compact duration shared by live progress + summary (aligned rounding).
+
+    Uses ``int(round(seconds))`` so the final summary matches the last progress tick.
+    """
+    if seconds is None or seconds < 0:
+        return absent
+    total = max(0, int(round(float(seconds))))
     mins, secs = divmod(total, 60)
     hours, mins = divmod(mins, 60)
     days, hours = divmod(hours, 24)
@@ -34,6 +86,16 @@ def _format_duration(seconds: float | None) -> str:
     if mins > 0:
         return f"{mins}m{secs:02d}s"
     return f"{secs}s"
+
+
+def _format_rate(pkg_per_s: float) -> str:
+    if pkg_per_s <= 0:
+        return "— pkg/s"
+    if pkg_per_s >= 100:
+        return f"{pkg_per_s:.0f} pkg/s"
+    if pkg_per_s >= 10:
+        return f"{pkg_per_s:.1f} pkg/s"
+    return f"{pkg_per_s:.2f} pkg/s"
 
 
 def _compact_package_name(value: str | None, *, limit: int = 40) -> str:
@@ -70,7 +132,7 @@ def _format_progress_lines(
         and elapsed_seconds >= 60.0
         and processed >= max(10, int(total * 0.15) if total else 10)
     ):
-        eta_text = _format_duration(eta_seconds)
+        eta_text = format_inventory_elapsed(eta_seconds, absent="")
 
     # Scale the bar to the terminal to avoid line wrapping on narrow consoles.
     term_width = terminal.get_terminal_width(default=100)
@@ -88,10 +150,9 @@ def _format_progress_lines(
         filled_bar = colors.apply(filled_bar, palette.accent)
         empty_bar = colors.apply(empty_bar, palette.muted)
     bar = f"{filled_bar}{empty_bar}"
-    # Rate helps operators see that the run is alive.
     rate = rate_override if rate_override is not None else ((processed / elapsed_seconds) if elapsed_seconds > 0 else 0.0)
-    elapsed_text = _format_duration(elapsed_seconds)
-    eta_field = eta_text or "--"
+    elapsed_text = format_inventory_elapsed(elapsed_seconds, absent="0s")
+    eta_display = eta_text if eta_text else "—"
 
     label = (phase_label or "Collecting").strip()
     if colors.colors_enabled():
@@ -101,18 +162,20 @@ def _format_progress_lines(
     # Two-line layout: keep the progress bar readable and move timing/rate to line 2.
     line1 = f"{label}  [{bar}] {processed}/{total} ({percentage:.1f}%)"
 
-    line2 = f"elapsed {elapsed_text}  eta {eta_field}  rate {rate:.2f} pkg/s"
+    line2 = (
+        f"Elapsed {elapsed_text} · ETA {eta_display} · {_format_rate(rate)}"
+    )
     if split_processed and show_splits:
-        line2 += f"  splits {split_processed}"
+        line2 += f" · split APKs {split_processed}"
     if total > 0 and (path_calls_completed is not None or metadata_calls_completed is not None):
         path_text = path_calls_completed if path_calls_completed is not None else 0
         meta_text = metadata_calls_completed if metadata_calls_completed is not None else 0
-        line2 += f"  path {path_text}/{total}  meta {meta_text}/{total}"
+        line2 += f" · paths {path_text}/{total} · metadata {meta_text}/{total}"
 
     line3: str | None = None
     if current_package:
         stage_label = (current_stage or "working").strip()
-        verb = "active" if active else "last"
+        verb = "Active" if active else "Last"
         line3 = f"{verb} {stage_label}: {_compact_package_name(current_package)}"
     return line1, line2, line3
 
@@ -140,11 +203,14 @@ def make_cli_progress_printer(ui_prefs=None):
             split_milestones_seen.clear()
             rendered_lines = 3
             if live_redraw:
+                mark_live_inventory_progress_active(rows=3)
                 print()  # visual separation after snapshot block
                 print()  # reserve line2
                 print()  # reserve line3
                 print(ansi.CURSOR_UP_ONE, end="")
                 print(ansi.CURSOR_UP_ONE, end="")  # move cursor back to line1
+            else:
+                mark_live_inventory_progress_done()
             return True
         if phase == "progress":
             processed = int(event.get("processed", 0) or 0)
@@ -194,6 +260,7 @@ def make_cli_progress_printer(ui_prefs=None):
                 lines_to_render.append(line3)
             rendered_lines = max(rendered_lines, len(lines_to_render))
             if live_redraw:
+                record_live_inventory_row_count(rendered_lines)
                 padded_lines = list(lines_to_render)
                 while len(padded_lines) < rendered_lines:
                     padded_lines.append("")
@@ -208,6 +275,7 @@ def make_cli_progress_printer(ui_prefs=None):
                 for rendered in lines_to_render:
                     print(rendered)
         elif phase == "complete":
+            mark_live_inventory_progress_done()
             if live_redraw:
                 # Ensure we end on a clean line below the progress block.
                 print(ansi.CR, end="")
@@ -230,8 +298,8 @@ def render_snapshot_block(
     allow_fallbacks: bool | None = None,
 ) -> None:
     """Render a stable snapshot info block before sync starts."""
-    status_text = "UNKNOWN"
-    age_text = "unknown"
+    status_text = "none"
+    age_text = "never"
     pkg_text = "—"
 
     if previous_meta and getattr(previous_meta, "captured_at", None):
@@ -240,7 +308,7 @@ def render_snapshot_block(
         )
         is_stale = age_seconds >= INVENTORY_STALE_SECONDS
         status_text = "STALE" if is_stale else "FRESH"
-        age_text = _format_duration(age_seconds)
+        age_text = format_inventory_elapsed(age_seconds)
         snapshot_count = getattr(previous_meta, "package_count", None)
         device_count = None
         if serial:
@@ -261,7 +329,7 @@ def render_snapshot_block(
     prev_id = getattr(previous_meta, "snapshot_id", None) if previous_meta else None
 
     # Compact header with deterministic field ordering.
-    print(text_blocks.headline("Refresh Inventory", width=70))
+    print(text_blocks.headline(SECTION_HEADLINE, width=70))
     if colors.colors_enabled():
         palette = colors.get_palette()
         def _style(line: str) -> str:
@@ -274,24 +342,30 @@ def render_snapshot_block(
     if prev_id is not None:
         print(_style(f"Previous snap: {prev_id}"))
     print(_style(f"Inventory    : {status_text}"))
-    print(_style(f"Last sync    : {age_text} ago"))
+    last_sync_line = age_text if age_text == "never" else f"{age_text} ago"
+    print(_style(f"Last sync    : {last_sync_line}"))
     print(_style(f"Packages     : {pkg_text}"))
     print(_style(f"Mode         : {mode_text}"))
 
     if allow_fallbacks is True:
         warn_key = f"{device_text}|{mode_text}"
-        if warn_key in _FALLBACK_WARNED_KEYS:
-            return
-        _FALLBACK_WARNED_KEYS.add(warn_key)
-        print(
-            status_messages.status(
-                "Non-root collection active; harvest remains policy-filtered.",
-                level="warn",
+        if warn_key not in _FALLBACK_WARNED_KEYS:
+            _FALLBACK_WARNED_KEYS.add(warn_key)
+            print(
+                status_messages.status(
+                    "Non-root collection active; harvest remains policy-filtered.",
+                    level="warn",
+                )
             )
-        )
+    print(status_messages.status(PROGRESS_FOOTER_TIP, level="info"))
 
 
-__all__ = ["make_cli_progress_printer", "render_snapshot_block"]
+__all__ = [
+    "finalize_inventory_live_tty",
+    "make_cli_progress_printer",
+    "mark_live_inventory_progress_done",
+    "render_snapshot_block",
+]
 
 
 _FALLBACK_WARNED_KEYS: set[str] = set()

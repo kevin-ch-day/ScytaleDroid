@@ -1,4 +1,5 @@
 from collections import Counter
+from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.harvest.models import (
     ArtifactError,
@@ -162,6 +163,20 @@ def test_build_harvest_run_report_scope_and_exclusion_summary():
     assert report.policy_details is None
 
 
+def test_build_harvest_run_report_respects_explicit_harvest_session_root(tmp_path: Path) -> None:
+    selection, plan, pkg_plan = _single_package_plan()
+    result = PullResult(plan=pkg_plan)
+    root = tmp_path / "device_apks" / "ABC" / "20990101" / "120000_000001"
+    report = build_harvest_run_report(
+        plan,
+        [result],
+        selection=selection,
+        run_timestamp="20990101_120000_000001",
+        harvest_session_root=root,
+    )
+    assert report.artifacts_root == str(root.resolve())
+
+
 def test_build_harvest_run_report_collects_policy_and_denied_packages():
     selection, plan, pkg_plan = _single_package_plan()
     plan.policy_filtered = {"non_root_paths": 2}
@@ -197,7 +212,11 @@ def test_render_harvest_summary_consumes_report_without_rederiving_status(monkey
     )
     selection, plan, _pkg_plan = _single_package_plan()
     fake_report = HarvestRunReport(
-        harvest_result=type("HarvestResultLike", (), {"packages": [], "device_serial": None})(),
+        harvest_result=type(
+            "HarvestResultLike",
+            (),
+            {"packages": [], "device_serial": None, "scope_name": "Test Scope"},
+        )(),
         metrics=metrics,
         pull_errors=0,
         files_written=1,
@@ -235,5 +254,13 @@ def test_render_harvest_summary_consumes_report_without_rederiving_status(monkey
     render_harvest_summary(plan, [], selection=selection)
     out = capsys.readouterr().out
 
-    assert "status: degraded_db_mirror_total_loss" in out
-    assert "[COPY] harvest" in out
+    assert "Harvest finished (degraded_db_mirror_total_loss)" in out
+    assert "scope=Test Scope" in out
+    assert "[COPY] harvest" not in out
+
+    monkeypatch.setattr(
+        "scytaledroid.DeviceAnalysis.harvest.summary._harvest_transcript_copy_stdout",
+        lambda: True,
+    )
+    render_harvest_summary(plan, [], selection=selection)
+    assert "[COPY] harvest" in capsys.readouterr().out

@@ -134,13 +134,19 @@ def run_full_sync(
         effective_filter = _user_only if filter_fn is None else lambda entry: filter_fn(entry) and _user_only(entry)
 
     collect_start = time.time()
-    rows, coll_stats = package_collection.collect_inventory(
-        serial=serial,
-        filter_fn=effective_filter,
-        package_allowlist=None,
-        progress_cb=_progress_adapter if progress_cb else None,
-        allow_fallbacks=resolved_config.allow_fallbacks,
-    )
+    try:
+        rows, coll_stats = package_collection.collect_inventory(
+            serial=serial,
+            filter_fn=effective_filter,
+            package_allowlist=None,
+            progress_cb=_progress_adapter if progress_cb else None,
+            allow_fallbacks=resolved_config.allow_fallbacks,
+        )
+    except KeyboardInterrupt:
+        from scytaledroid.DeviceAnalysis.inventory.progress import finalize_inventory_live_tty
+
+        finalize_inventory_live_tty()
+        raise
     collect_elapsed = time.time() - collect_start
 
     # Build package name maps for delta computation.
@@ -310,13 +316,19 @@ def run_scoped_sync(
         progress_cb({"phase": "start", "total": None, "phase_label": "Collecting packages"})
 
     collect_start = time.time()
-    rows, coll_stats = package_collection.collect_inventory(
-        serial=serial,
-        filter_fn=None,
-        package_allowlist={p.strip().lower() for p in package_allowlist if str(p).strip()},
-        progress_cb=_progress_adapter if progress_cb else None,
-        allow_fallbacks=resolved_config.allow_fallbacks,
-    )
+    try:
+        rows, coll_stats = package_collection.collect_inventory(
+            serial=serial,
+            filter_fn=None,
+            package_allowlist={p.strip().lower() for p in package_allowlist if str(p).strip()},
+            progress_cb=_progress_adapter if progress_cb else None,
+            allow_fallbacks=resolved_config.allow_fallbacks,
+        )
+    except KeyboardInterrupt:
+        from scytaledroid.DeviceAnalysis.inventory.progress import finalize_inventory_live_tty
+
+        finalize_inventory_live_tty()
+        raise
     collect_elapsed = time.time() - collect_start
 
     stats = InventorySyncStats(

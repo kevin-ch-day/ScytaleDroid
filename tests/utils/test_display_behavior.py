@@ -85,9 +85,10 @@ def test_inventory_progress_shows_active_package_and_call_counts(capsys) -> None
         }
     )
     out = colors.strip(capsys.readouterr().out)
-    assert "path 6/10" in out
-    assert "meta 5/10" in out
-    assert "active pm dump: com.google.android.apps.messaging" in out
+    assert "paths 6/10" in out
+    assert "metadata 5/10" in out
+    assert "Elapsed" in out and "ETA" in out
+    assert "Active pm dump: com.google.android.apps.messaging" in out
 
 
 def test_table_utils_unknown_column_style_does_not_raise(capsys) -> None:

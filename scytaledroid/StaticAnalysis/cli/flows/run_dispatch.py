@@ -46,7 +46,7 @@ from ..execution.results import _emit_static_persistence_event, prompt_deferred_
 from ..execution.results_persist import _persist_cohort_rollup
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
 from ..views.view_layouts import render_run_start
-from .postprocessing import run_post_summary_postprocessing
+from .postprocessing import PostSummaryResult, run_post_summary_postprocessing
 from .session_finalizer import emit_persistence_audit_artifact, refresh_static_session_cache
 from . import persistence_runtime
 from .selection import format_scope_target

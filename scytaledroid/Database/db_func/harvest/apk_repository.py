@@ -9,7 +9,7 @@ from functools import lru_cache
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from ...db_core import database_session, run_sql
+from ...db_core import database_session, run_sql, run_sql_many
 from ...db_queries.harvest import apk_repository as queries
 from ...db_utils.package_utils import normalize_package_name
 from ...db_utils.publisher_rules import apply_publisher_mapping
@@ -172,7 +172,13 @@ def fetch_split_members(group_id: int) -> list[dict[str, object]]:
 
 
 def fetch_duplicate_hashes(limit: int = 100) -> list[dict[str, object]]:
-    """Return a list of duplicate sha256 hashes for auditing purposes."""
+    """Return SHA-256 values that appear in more than one repository row.
+
+    Expected when the **same APK bytes** were harvested from multiple devices;
+    caller interprets multiplicity as reusable content, not necessarily corruption.
+
+    Rows include ``sha256`` and ``occurrences`` counts (see ``SELECT_DUPLICATE_HASHES``).
+    """
     return run_sql(queries.SELECT_DUPLICATE_HASHES, (limit,), fetch="all", dictionary=True)
 
 
@@ -261,6 +267,44 @@ def ensure_app_definition(
         apply_publisher_mapping([cleaned_package], context=query_context)
 
     return app_id
+
+
+def bulk_ensure_app_definitions(
+    package_rows: Sequence[tuple[str, str | None]],
+) -> int:
+    """Upsert many canonical app definitions in one DB session.
+
+    Rows are inventory-style ``(package_name, app_label)`` pairs; normalization
+    and display-name trimming match ``ensure_app_definition``.
+    """
+
+    merged: dict[str, tuple[str, str | None]] = {}
+    for raw_pkg, app_name in package_rows:
+        cleaned = normalize_package_name(str(raw_pkg), context="database")
+        if not cleaned:
+            continue
+        if app_name and str(app_name).strip():
+            candidate = str(app_name).strip()
+            label: str | None = None if candidate.lower() == cleaned.lower() else candidate
+        else:
+            label = None
+        merged[cleaned] = (cleaned, label)
+
+    batch = list(merged.values())
+    if not batch:
+        return 0
+
+    query_context = {"bulk_app_definitions": len(batch)}
+    with database_session():
+        ensure_default_reference_rows()
+        run_sql_many(
+            queries.UPSERT_APP_DEFINITION,
+            batch,
+            query_name="harvest.app_definition.upsert_bulk",
+            context=query_context,
+        )
+        apply_publisher_mapping([row[0] for row in batch], context=query_context)
+    return len(batch)
 
 
 @lru_cache(maxsize=1)
@@ -432,6 +476,7 @@ __all__ = [
     "get_category_id",
     "list_categories",
     "assign_split_members",
+    "bulk_ensure_app_definitions",
     "ensure_app_definition",
     "ensure_storage_root",
     "upsert_artifact_path",

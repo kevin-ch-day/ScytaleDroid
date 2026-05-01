@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 
+from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
     InventoryDeltaSummary,
     describe_inventory_state,
@@ -52,6 +53,7 @@ GUARD_REASON_CODES = frozenset(
         "sync_prompt_declined",
         "long_running_sync_declined",
         "sync_completed",
+        "precheck_stale_proceed",
     }
 )
 
@@ -96,6 +98,7 @@ def ensure_recent_inventory(
     *,
     device_context: dict[str, str | None | None] = None,
     scope_packages: Sequence[object | None] = None,
+    accept_age_stale_harvest: bool = False,
 ) -> bool:
     decision = _EMPTY_GUARD_DECISION
 
@@ -148,6 +151,35 @@ def ensure_recent_inventory(
         )
     else:
         delta_obj = delta_obj or InventoryDeltaSummary(0, 0, 0, 0)
+
+    # Execute Harvest pre-check already asked age-stale vs refresh; skip duplicate guard UX
+    # when staleness is age-only (no drift delta vs snapshot) and harvest scope unchanged.
+    if (
+        accept_age_stale_harvest
+        and timestamp is not None
+        and age_seconds is not None
+        and age_seconds >= INVENTORY_STALE_SECONDS
+        and delta_obj.changed_packages_count == 0
+        and not scope_changed
+        and not scope_hash_changed
+    ):
+        decision = _set_guard_context(
+            decision,
+            stale_level="warn",
+            reason="Harvest pre-check: proceeding with age-stale inventory (operator confirmed).",
+            decision_enum="allow",
+            reason_code="precheck_stale_proceed",
+            next_action="continue",
+            prompt_key="none",
+            scope_changed=scope_changed,
+            scope_hash_changed=scope_hash_changed,
+            packages_changed=False,
+            age_seconds=age_seconds,
+            package_delta=None,
+            package_delta_brief=None,
+        )
+        decision = _record_guard_policy(decision, "quick")
+        return _finish(True)
 
     if timestamp is None:
         status = "NONE"
@@ -220,7 +252,23 @@ def ensure_recent_inventory(
         package_delta_brief=None,
     )
 
-    print(status_messages.status(message.short, level="warn" if message.severity == "warn" else "info"))
+    recent_suppress = age_seconds is not None and age_seconds < INVENTORY_DELTA_SUPPRESS_SECONDS
+    condensed_recent = recent_suppress and message.severity != "warn"
+
+    if message.severity == "warn":
+        print(status_messages.status(message.short, level="warn"))
+    elif condensed_recent:
+        stamp = _format_snapshot_reference(snapshot_id, timestamp)
+        tail = f" ({stamp})" if stamp.strip() else ""
+        print(
+            status_messages.status(
+                f"Fresh inventory snapshot ({humanize_seconds(age_seconds or 0.0)} ago){tail}. "
+                "Proceeding with harvest.",
+                level="info",
+            )
+        )
+    else:
+        print(status_messages.status(message.short, level="info"))
     if delta_obj and delta_obj.changed_packages_count:
         snapshot_stamp = _format_snapshot_reference(snapshot_id, timestamp)
         current_count = metadata.get("current_package_count") if metadata else None
@@ -230,7 +278,12 @@ def ensure_recent_inventory(
             f"-{delta_obj.removed_count} ~{delta_obj.updated_count} "
             f"(total {delta_obj.changed_packages_count})."
         )
-        print(status_messages.status(delta_line, level="info"))
+        if condensed_recent:
+            material = delta_obj.removed_count > 0 or delta_obj.updated_count > 0
+            if material:
+                print(status_messages.status(delta_line, level="info"))
+        else:
+            print(status_messages.status(delta_line, level="info"))
         if (
             age_seconds is not None
             and age_seconds < INVENTORY_DELTA_SUPPRESS_SECONDS
@@ -260,12 +313,13 @@ def ensure_recent_inventory(
             except Exception as exc:
                 print(status_messages.status(f"Auto-sync failed: {exc}", level="warn"))
         if age_seconds is not None and age_seconds < INVENTORY_DELTA_SUPPRESS_SECONDS:
-            print(
-                status_messages.status(
-                    "Recent inventory snapshot detected; continuing to harvest with current inventory.",
-                    level="info",
+            if not condensed_recent:
+                print(
+                    status_messages.status(
+                        "Recent inventory snapshot detected; continuing to harvest with current inventory.",
+                        level="info",
+                    )
                 )
-            )
             decision = _record_guard_policy(decision, "quick")
             decision = replace(
                 decision,
@@ -275,7 +329,7 @@ def ensure_recent_inventory(
                 prompt_key="none",
             )
             return _finish(True)
-        print(status_messages.status("Refresh Inventory is recommended before Execute Harvest.", level="info"))
+        print(status_messages.status(inventory_cli_labels.HARVEST_HINT_REFRESH_FIRST, level="info"))
 
     options = ["1", "0"]
     labels = {"1": "Sync now (recommended)", "0": "Cancel"}
@@ -305,7 +359,7 @@ def ensure_recent_inventory(
         )
         return _finish(True)
     if choice == "0":
-        print(status_messages.status("Execute Harvest cancelled until Refresh Inventory is run.", level="warn"))
+        print(status_messages.status(inventory_cli_labels.HARVEST_CANCELLED_UNTIL_REFRESH, level="warn"))
         decision = _record_guard_policy(decision, None)
         decision = replace(
             decision,
@@ -322,12 +376,11 @@ def ensure_recent_inventory(
     if prompt_message:
         print(status_messages.status(prompt_message, level="warn"))
         if not prompt_utils.prompt_yes_no(
-            "Run Refresh Inventory before Execute Harvest?", default=False
+            inventory_cli_labels.PROMPT_RUN_REFRESH_BEFORE_HARVEST,
+            default=False,
         ):
             print(
-                status_messages.status(
-                    "Execute Harvest cancelled until Refresh Inventory is run.", level="warn"
-                )
+                status_messages.status(inventory_cli_labels.HARVEST_CANCELLED_UNTIL_REFRESH, level="warn")
             )
             decision = _record_guard_policy(decision, None)
             decision = replace(
@@ -439,9 +492,7 @@ def ensure_recent_inventory(
         print(status_messages.status(warning, level="warn"))
         if not prompt_utils.prompt_yes_no("Continue with inventory sync?", default=False):
             print(
-                status_messages.status(
-                    "Execute Harvest cancelled until Refresh Inventory is run.", level="warn"
-                )
+                status_messages.status(inventory_cli_labels.HARVEST_CANCELLED_UNTIL_REFRESH, level="warn")
             )
             decision = _record_guard_policy(decision, None)
             decision = replace(
@@ -459,8 +510,8 @@ def ensure_recent_inventory(
     decision = _record_guard_policy(decision, "refresh")
     decision = replace(
         decision,
-        reason="Refresh Inventory completed before Execute Harvest.",
-        guard_brief="Refresh Inventory completed before Execute Harvest.",
+        reason=inventory_cli_labels.SYNC_COMPLETED_GUARD_BRIEF,
+        guard_brief=inventory_cli_labels.SYNC_COMPLETED_GUARD_BRIEF,
         decision_enum="allow",
         reason_code="sync_completed",
         next_action="continue",

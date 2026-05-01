@@ -5,15 +5,23 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from scytaledroid.Database.db_core import db_config
 
 from scytaledroid.DeviceAnalysis import device_manager, inventory_meta
-from scytaledroid.DeviceAnalysis.inventory import progress, runner, snapshot_io, views
+from scytaledroid.DeviceAnalysis.device_analysis_settings import INVENTORY_STALE_SECONDS
+from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels
+from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 from scytaledroid.DeviceAnalysis.inventory.errors import InventoryCollectionError
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig
 from scytaledroid.DeviceAnalysis.runtime_flags import allow_inventory_fallbacks
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
+
+if TYPE_CHECKING:
+    from scytaledroid.DeviceAnalysis.inventory.runner import InventoryResult
 
 
 @dataclass
@@ -82,7 +90,7 @@ def run_full_sync(
     progress_sink: str = "cli",
     mode: str | None = None,
     allow_fallbacks: bool | None = None,
-) -> runner.InventoryResult:
+) -> InventoryResult:
     """
     High-level entry point for a full inventory sync.
     """
@@ -102,6 +110,8 @@ def run_full_sync(
     mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
     progress_cb = None
     if progress_sink == "cli":
+        from scytaledroid.DeviceAnalysis.inventory import progress
+
         progress.render_snapshot_block(
             meta,
             ui_prefs=ui_prefs,
@@ -133,7 +143,7 @@ def run_full_sync(
                 "previous_snapshot": getattr(meta, "snapshot_path", None) if meta else None,
                 "staleness_threshold": getattr(meta, "staleness_seconds", None)
                 if meta
-                else getattr(progress, "INVENTORY_STALE_SECONDS", None),
+                else INVENTORY_STALE_SECONDS,
             },
         )
     except Exception:
@@ -143,6 +153,8 @@ def run_full_sync(
     # the run output visually coherent (single panel).
 
     try:
+        from scytaledroid.DeviceAnalysis.inventory import runner
+
         result = runner.run_full_sync(
             serial=serial,
             filter_fn=None,
@@ -168,7 +180,20 @@ def run_full_sync(
         raise InventoryServiceError(msg) from exc
 
     if progress_sink == "cli":
+        from scytaledroid.DeviceAnalysis.inventory import views
+
         views.print_inventory_run_summary_from_result(result)
+        total_pkgs = int(getattr(result.stats, "total_packages", 0) or 0)
+        snapshot_id = getattr(result, "snapshot_id", None)
+        if total_pkgs > 0 and snapshot_id is None:
+            if db_config.db_enabled():
+                print(
+                    status_messages.status(inventory_cli_labels.DB_MIRROR_FAILED, level="warn")
+                )
+            else:
+                print(
+                    status_messages.status(inventory_cli_labels.DB_JSON_ONLY_EXPECTED, level="info")
+                )
         # Keep CLI output minimal; follow-on actions are driven by menu flow.
 
     # Emit structured run summary to logs for reproducibility.
@@ -199,6 +224,8 @@ def run_full_sync(
         summary_payload = {
             "event": log_events.RUN_END,
             "snapshot_path": str(getattr(result, "snapshot_path", "")),
+            "snapshot_id": getattr(result, "snapshot_id", None),
+            "inventory_db_mirror_ok": getattr(result, "snapshot_id", None) is not None,
             "packages": getattr(result.stats, "total_packages", None),
             "split_packages": getattr(result.stats, "split_packages", None),
             "delta_new": getattr(delta, "new_count", None) if delta else None,
@@ -235,7 +262,7 @@ def run_scoped_sync(
     progress_sink: str = "cli",
     mode: str | None = None,
     allow_fallbacks: bool | None = None,
-) -> runner.InventoryResult:
+) -> InventoryResult:
     """Run a scoped inventory sync for a small package set (filesystem-only)."""
 
     if not serial:
@@ -252,6 +279,8 @@ def run_scoped_sync(
 
     progress_cb = None
     if progress_sink == "cli":
+        from scytaledroid.DeviceAnalysis.inventory import progress
+
         # Reuse the snapshot block for consistent UX, but make it explicit that this is scoped.
         progress.render_snapshot_block(
             meta,
@@ -263,6 +292,8 @@ def run_scoped_sync(
         progress_cb = progress.make_cli_progress_printer(ui_prefs=ui_prefs)
 
     try:
+        from scytaledroid.DeviceAnalysis.inventory import runner
+
         result = runner.run_scoped_sync(
             serial=serial,
             package_allowlist={str(p).strip().lower() for p in packages if str(p).strip()},
@@ -285,5 +316,7 @@ def run_scoped_sync(
         raise InventoryServiceError(msg) from exc
 
     if progress_sink == "cli":
+        from scytaledroid.DeviceAnalysis.inventory import views
+
         views.print_inventory_run_summary_from_result(result)
     return result

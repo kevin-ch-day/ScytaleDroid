@@ -2,23 +2,10 @@
 
 from __future__ import annotations
 
+from scytaledroid.DeviceAnalysis.inventory.cli_labels import SUMMARY_BOX_TITLE
+from scytaledroid.DeviceAnalysis.inventory.progress import format_inventory_elapsed
 from scytaledroid.ui import formatter
 from scytaledroid.Utils.DisplayUtils import table_utils, text_blocks
-
-
-def _format_duration(seconds: float | None) -> str:
-    if seconds is None or seconds < 0:
-        return "--"
-    total_seconds = int(round(seconds))
-    minutes, secs = divmod(total_seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    parts = []
-    if hours:
-        parts.append(f"{hours}h")
-    if minutes or hours:
-        parts.append(f"{minutes:02d}m")
-    parts.append(f"{secs:02d}s")
-    return " ".join(parts)
 
 
 def _format_delta_text(
@@ -55,14 +42,14 @@ def render_sync_summary_box(result) -> None:
         if split_packages <= 0:
             split_packages = sum(1 for row in rows if int((row or {}).get("split_count") or 1) > 1)
 
-    formatter.print_header("Inventory Refresh Summary")
+    formatter.print_header(SUMMARY_BOX_TITLE)
     print(
         formatter.format_kv_block(
             "[RUN]",
             {
                 "Snapshot ID": str(getattr(result, "snapshot_id", None) if getattr(result, "snapshot_id", None) is not None else "—"),
                 "Packages": f"{total_packages}",
-                "Duration": _format_duration(elapsed_seconds),
+                "Duration": format_inventory_elapsed(elapsed_seconds, absent="--"),
             },
         )
     )

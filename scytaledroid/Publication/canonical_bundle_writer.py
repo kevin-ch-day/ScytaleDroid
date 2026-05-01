@@ -447,6 +447,7 @@ def write_canonical_publication_directory(
         try:
             snap_tables = snapshot_dir / "tables"
             risk_rows = _read_csv_rows(snap_tables / "risk_summary_per_group.csv")
+            contracts = load_publication_contracts(fail_closed=False)
             atomic_write_text(
                 internal_prov / "risk_scoring_group_summary.tex",
                 _render_risk_scoring_tabular_tex(

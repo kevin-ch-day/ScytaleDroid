@@ -46,16 +46,18 @@ def test_print_inventory_run_summary_from_result(capsys):
     }
     print_inventory_run_summary_from_result(result)
     out = colors.strip(capsys.readouterr().out)
-    assert "Inventory Refresh Summary" in out
+    assert "Refresh inventory · summary" in out
     assert "Snapshot ID" in out
     assert "11" in out
     assert re.search(r"Packages\s*:\s*2", out)
     assert re.search(r"Split APK packages\s*:\s*0", out)
-    assert "Duration" in out and "05s" in out
+    assert "Duration" in out and "5s" in out
     assert "Delta vs previous" in out
     assert "updated=0" in out
     assert "data/state/device/inventory.json" not in out
     assert "Retention: 5 kept (DB 5, FS 2)" in out
+    assert "Refresh inventory complete" in out and "snapshot 11" in out
+    assert "2 packages on this snapshot" in out
 
 
 def test_inventory_summary_field_order_is_stable(capsys):

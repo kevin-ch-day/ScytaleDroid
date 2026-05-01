@@ -574,7 +574,6 @@ def _render_scope_table(
     context: dict[str, object],
     default_rows: Sequence[InventoryRow],
 ) -> None:
-    mode_label = "root" if is_rooted else "non-root"
     print()
     print("----------------------------")
     print("Execute Harvest -- Status")

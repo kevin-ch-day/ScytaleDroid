@@ -4,19 +4,19 @@ from __future__ import annotations
 
 
 def humanize_seconds(seconds: float) -> str:
-    """Render durations with explicit labels (Days Hrs Mins)."""
+    """Compact age strings for prompts, guards, and dashboard metadata."""
 
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds} Secs"
-    minutes, sec = divmod(seconds, 60)
+    s = max(0, int(seconds))
+    if s < 60:
+        return f"{s}s"
+    minutes, sec = divmod(s, 60)
     if minutes < 60:
-        return f"{minutes} Mins {sec:02d} Secs"
+        return f"{minutes}m {sec:02d}s" if sec else f"{minutes}m"
     hours, minutes = divmod(minutes, 60)
     if hours < 24:
-        return f"{hours} Hrs {minutes:02d} Mins"
+        return f"{hours}h {minutes:02d}m" if minutes else f"{hours}h"
     days, hours = divmod(hours, 24)
-    return f"{days} Days {hours:02d} Hrs {minutes:02d} Mins"
+    return f"{days}d {hours:02d}h {minutes:02d}m"
 
 
 def coarse_time_range(seconds: float) -> str:
