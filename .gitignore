@@ -1,0 +1,63 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.venv
+
+# Test / coverage artifacts
+htmlcov/
+.coverage*
+pytest_cache/
+.pytest_cache/
+.mypy_cache/
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local runtime artifacts
+logs/
+output/
+.env
+.setup/
+data/state/
+data/watchlists/
+data/apks/
+data/device_apks/
+data/static_analysis/reports/
+data/static_analysis/baseline/
+data/static_analysis/dynamic_plan/
+data/audit/
+data/sessions/
+data/
+data/db/scytaledroid.sqlite
+/evidence/
+scripts/db/**
+!scripts/db/
+!scripts/db/*.sql
+*.log
+*.tmp
+*.bak
+
+# Generated permission catalog snapshots
+scytaledroid/Utils/AndroidPermCatalog/cache/*.json
+scytaledroid/Utils/AndroidPermCatalog/cache/*.csv
+
+# Misc
+.DS_Store
+
+# Prevent accidental large binaries
+*.rpm
+teamviewer*.rpm

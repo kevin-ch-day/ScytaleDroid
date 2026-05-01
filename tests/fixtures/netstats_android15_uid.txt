@@ -1,0 +1,2 @@
+uid=10234 iface=wlan0 set=DEFAULT rx_bytes=900 tx_bytes=1100
+uid=10234 iface=rmnet_data0 set=DEFAULT rx_bytes=100 tx_bytes=200

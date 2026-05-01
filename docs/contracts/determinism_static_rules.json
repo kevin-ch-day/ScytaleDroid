@@ -1,0 +1,19 @@
+{
+  "schema_version": "v1",
+  "compare_type": "static_analysis",
+  "allowed_diff_fields": [],
+  "table_coverage_lock": [
+    "static_analysis_runs",
+    "static_analysis_findings",
+    "static_permission_matrix",
+    "static_permission_risk",
+    "static_permission_risk_vnext",
+    "metrics",
+    "contributors",
+    "buckets",
+    "correlations",
+    "static_fileproviders",
+    "static_provider_acl",
+    "risk_scores"
+  ]
+}

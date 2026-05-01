@@ -1,0 +1,87 @@
+# Determinism Comparator Contract
+
+This contract defines the comparator artifact and pass/fail semantics for
+determinism gates.
+
+## Compare Types
+
+Current:
+
+1. `inventory_guard`
+2. `static_analysis`
+
+Planned (same schema):
+
+1. additional comparator modules beyond inventory/static
+
+## Pass/Fail Rule
+
+1. Strict equality for compared payloads.
+2. Only explicitly allowed diff fields may vary.
+3. Any disallowed diff -> `FAIL`.
+4. Any validation issue (missing required key fields, duplicate key rows) -> `FAIL`.
+
+## Allowed Diff Fields (Locked)
+
+Inventory comparator (`compare_type=inventory_guard`):
+
+1. `left.timestamp_utc`
+2. `right.timestamp_utc`
+3. `left.run_id`
+4. `right.run_id`
+
+Static comparator (`compare_type=static_analysis`):
+
+1. none (strict full payload equality)
+2. source of truth: `docs/contracts/determinism_static_rules.json`
+3. scope lock: `table_coverage_lock` in that rules file
+
+## Required JSON Artifact Fields
+
+Top-level fields:
+
+1. `tool_semver`
+2. `git_commit`
+3. `compare_type`
+4. `left`
+5. `right`
+6. `allowed_diff_fields`
+7. `result`
+8. `diffs`
+9. `rules`
+10. `waiver`
+
+`result` object:
+
+1. `pass` (boolean)
+2. `pass_raw` (boolean)
+2. `degraded` (boolean)
+3. `degraded_reasons` (list)
+4. `fail_reason` (nullable string)
+5. `validation_issues` (list)
+6. `diff_counts.total`
+7. `diff_counts.allowed`
+8. `diff_counts.disallowed`
+9. `waived` (boolean)
+
+`diffs[]` item:
+
+1. `path`
+2. `left`
+3. `right`
+4. `allowed`
+
+## Artifact Location
+
+Default local output:
+
+`output/audit/comparators/<compare_type>/<timestamp>/diff.json`
+
+## Notes
+
+1. Comparator must be key-based, not row-order based.
+2. Degraded mode is interactive-only and not enabled by default.
+3. Automation/nightly paths run strict mode only.
+4. Waivers are explicit file-based overrides (`--waiver`) with required fields:
+   `reason`, `scope`, `approver`, `expires_utc`.
+5. Waiver expiry is enforced at runtime; expired waivers are rejected.

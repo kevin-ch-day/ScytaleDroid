@@ -1,0 +1,7 @@
+{
+  "reason": "Explain intentional drift and why it is acceptable.",
+  "scope": "static_analysis",
+  "approver": "pm_name_or_id",
+  "expires_utc": "2099-12-31T23:59:59Z",
+  "reference": "Link to rationale doc or PR"
+}

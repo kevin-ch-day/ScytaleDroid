@@ -1,0 +1,346 @@
+"""Legacy bridge-table writer for compatibility persistence.
+
+This module writes the older compatibility tables such as:
+- `runs`
+- `metrics`
+- `buckets`
+- `findings`
+- `contributors`
+
+Phase 5 posture:
+- canonical static persistence is authoritative
+- bridge/compat writes are secondary export surfaces
+- this module is the direct bridge/compat writer surface
+
+OSS vNext posture:
+- DB is optional; when disabled, DB writer functions should not be invoked.
+- When DB is enabled, persistence is strict and fail-fast (exceptions propagate).
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from collections.abc import Mapping, Sequence
+from functools import cache
+from typing import Any
+
+from scytaledroid.Database.db_core import db_engine
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+REQUIRED_TABLES = (
+    "runs",
+    "metrics",
+    "buckets",
+    "findings",
+    "contributors",
+)
+
+
+def _is_transient_db_exc(exc: Exception) -> bool:
+    if isinstance(exc, db_engine.TransientDbError):
+        return True
+    text = str(exc).lower()
+    markers = ("transientdberror", "lost connection", "server has gone away", "(2013", "(2014")
+    return any(marker in text for marker in markers)
+
+
+def ensure_schema(*, raise_on_error: bool = False) -> bool:
+    """Verify required tables exist; schema creation is managed elsewhere."""
+
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name IN ({})
+            """.format(",".join(["%s"] * len(REQUIRED_TABLES))),
+            tuple(REQUIRED_TABLES),
+            fetch="all",
+        )
+        present = {r[0] for r in row or []}
+    except Exception as exc:
+        message = (
+            "Failed to verify persistence schema: "
+            f"{exc.__class__.__name__}: {exc}"
+        )
+        log.error(message, category="static_analysis")
+        if raise_on_error:
+            raise RuntimeError(message) from exc
+        return False
+
+    missing = [name for name in REQUIRED_TABLES if name not in present]
+    if missing:
+        message = (
+            "Required persistence tables are missing: "
+            f"{', '.join(missing)}. "
+            "Schema is managed by canonical schema tools; restore the DB snapshot "
+            "or run the canonical schema manifest."
+        )
+        log.error(message, category="static_analysis")
+        if raise_on_error:
+            raise RuntimeError(message)
+        return False
+    return True
+
+
+def create_run(
+    *,
+    package: str,
+    app_label: str | None,
+    version_code: int | None,
+    version_name: str | None,
+    target_sdk: int | None,
+    schema_version: str = "v1",
+    prefs_hash: str | None = None,
+    installer: str | None = None,
+    confidence: str | None = None,
+    session_stamp: str | None = None,
+    threat_profile: str = "Unknown",
+    env_profile: str = "consumer",
+) -> int | None:
+    try:
+        ensure_schema(raise_on_error=True)
+        run_id = core_q.run_sql(
+            (
+                "INSERT INTO runs (package, app_label, version_code, version_name, target_sdk, schema_version, ts, session_stamp, prefs_hash, installer, confidence, threat_profile, env_profile) "
+                "VALUES (%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP,%s,%s,%s,%s,%s,%s)"
+            ),
+            (
+                package,
+                app_label,
+                version_code,
+                version_name,
+                target_sdk,
+                schema_version,
+                session_stamp,
+                prefs_hash,
+                installer,
+                confidence,
+                threat_profile,
+                env_profile,
+            ),
+            return_lastrowid=True,
+        )
+        if not run_id:
+            raise RuntimeError(
+                "INSERT INTO runs returned no identifier; check database permissions or constraints."
+            )
+        return int(run_id)
+    except Exception as exc:
+        message = (
+            "Failed to create run row for package "
+            f"{package}: {exc.__class__.__name__}: {exc}"
+        )
+        log.error(message, category="static_analysis")
+        raise RuntimeError(message) from exc
+
+
+def write_metrics(
+    run_id: int,
+    entries: Mapping[str, tuple[float | None, str | None]],
+    module_id: str | None = None,
+    *,
+    static_run_id: int | None = None,
+) -> bool:
+    has_static = _has_column("metrics", "static_run_id")
+    try:
+        if static_run_id is None and has_static:
+            log.warning(
+                f"static_run_id missing for metrics; run_id={run_id} will be used without static linkage",
+                category="db",
+            )
+        for key, (num, text) in entries.items():
+            if num is not None and not math.isfinite(float(num)):
+                log.warning(
+                    f"Skipping metric with non-finite value (run_id={run_id}, key={key}, value={num})",
+                    category="db",
+                )
+                continue
+            if has_static:
+                core_q.run_sql(
+                    (
+                        "INSERT INTO metrics (run_id, static_run_id, feature_key, value_num, value_text, module_id) "
+                        "VALUES (%s,%s,%s,%s,%s,%s) "
+                        "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id), static_run_id=VALUES(static_run_id)"
+                    ),
+                    (run_id, static_run_id, key, num, text, module_id),
+                )
+            else:
+                core_q.run_sql(
+                    (
+                        "INSERT INTO metrics (run_id, feature_key, value_num, value_text, module_id) "
+                        "VALUES (%s,%s,%s,%s,%s) "
+                        "ON DUPLICATE KEY UPDATE value_num=VALUES(value_num), value_text=VALUES(value_text), module_id=VALUES(module_id)"
+                    ),
+                    (run_id, key, num, text, module_id),
+                )
+        return True
+    except Exception as exc:
+        log.error(
+            f"Failed to persist metrics for run_id={run_id} static_run_id={static_run_id}: {exc}",
+            category="db",
+        )
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
+
+
+def write_buckets(
+    run_id: int,
+    buckets: Mapping[str, tuple[float, float | None]],
+    *,
+    static_run_id: int | None = None,
+) -> bool:
+    has_static = _has_column("buckets", "static_run_id")
+    try:
+        if static_run_id is None and has_static:
+            log.warning(
+                f"static_run_id missing for buckets; run_id={run_id} will be used without static linkage",
+                category="db",
+            )
+        for name, (points, cap) in buckets.items():
+            if not math.isfinite(points):
+                log.warning(
+                    f"Skipping bucket with non-finite points (run_id={run_id}, bucket={name}, points={points})",
+                    category="db",
+                )
+                continue
+            if cap is not None and not math.isfinite(cap):
+                log.warning(
+                    f"Skipping bucket with non-finite cap (run_id={run_id}, bucket={name}, cap={cap})",
+                    category="db",
+                )
+                continue
+            if has_static:
+                core_q.run_sql(
+                    (
+                        "INSERT INTO buckets (run_id, static_run_id, bucket, points, cap) "
+                        "VALUES (%s,%s,%s,%s,%s)"
+                    ),
+                    (run_id, static_run_id, name, points, cap),
+                )
+            else:
+                core_q.run_sql(
+                    "INSERT INTO buckets (run_id, bucket, points, cap) VALUES (%s,%s,%s,%s)",
+                    (run_id, name, points, cap),
+                )
+        return True
+    except Exception as exc:
+        log.error(
+            f"Failed to persist buckets for run_id={run_id} static_run_id={static_run_id}: {exc}",
+            category="db",
+        )
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
+
+
+FindingRow = (
+    tuple[str, str, str, str, str | Mapping[str, Any]]
+    | tuple[str, str, str, str, str | Mapping[str, Any], str | None]
+    | Mapping[str, Any]
+)
+
+
+def write_findings(run_id: int, rows: Sequence[FindingRow]) -> bool:
+    try:
+        for row in rows:
+            if isinstance(row, Mapping):
+                severity = row.get("severity")
+                masvs = row.get("masvs")
+                cvss = row.get("cvss") or row.get("legacy_cvss")
+                kind = row.get("kind")
+                module_id = row.get("module_id")
+                evidence_payload = row.get("evidence")
+            else:
+                if len(row) == 6:
+                    severity, masvs, cvss, kind, evidence_payload, module_id = row
+                else:
+                    severity, masvs, cvss, kind, evidence_payload = row[:5]
+                    module_id = None
+            evidence = _serialise_evidence(evidence_payload, run_id=run_id)
+            if isinstance(evidence, str) and len(evidence) > 512:
+                log.warning(
+                    f"Truncating evidence payload for run_id={run_id} (len={len(evidence)})",
+                    category="db",
+                )
+                evidence = evidence[:509] + "..."
+            core_q.run_sql(
+                "INSERT INTO findings (run_id, severity, masvs, cvss, kind, evidence, module_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (run_id, severity, masvs, cvss, kind, evidence, module_id),
+            )
+        return True
+    except Exception as exc:
+        log.error(
+            f"Failed to persist findings for run_id={run_id}: {exc}",
+            category="db",
+        )
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
+
+
+def _serialise_evidence(payload: Any, *, run_id: int | None = None) -> str | None:
+    if payload is None:
+        return None
+    if isinstance(payload, str):
+        return payload
+    try:
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception as exc:
+        raw = repr(payload)
+        if len(raw) > 220:
+            raw = raw[:217] + "..."
+        sentinel = {
+            "_serialization_error": f"{exc.__class__.__name__}: {exc}",
+            "_serialization_type": payload.__class__.__name__,
+            "_raw_repr": raw,
+        }
+        log.warning(
+            f"Evidence serialization failed for run_id={run_id}: {exc.__class__.__name__}: {exc}",
+            category="db",
+            extra={"table": "findings", "column": "evidence", "run_id": run_id},
+        )
+        return json.dumps(sentinel, ensure_ascii=False)
+
+
+def write_contributors(run_id: int, rows: Sequence[tuple[str, float, str, int]]) -> bool:
+    try:
+        for feature, points, explanation, rank in rows:
+            core_q.run_sql(
+                "INSERT INTO contributors (run_id, feature, points, explanation, rank) VALUES (%s,%s,%s,%s,%s)",
+                (run_id, feature, points, explanation, rank),
+            )
+        return True
+    except Exception as exc:
+        log.error(f"Failed to persist contributors for run_id={run_id}: {exc}", category="db")
+        if _is_transient_db_exc(exc):
+            raise db_engine.TransientDbError(str(exc)) from exc
+        raise
+
+
+__all__ = [
+    "REQUIRED_TABLES",
+    "ensure_schema",
+    "create_run",
+    "write_metrics",
+    "write_buckets",
+    "write_findings",
+    "write_contributors",
+]
+
+
+@cache
+def _has_column(table: str, column: str) -> bool:
+    try:
+        row = core_q.run_sql(
+            f"SHOW COLUMNS FROM {table} LIKE %s",
+            (column,),
+            fetch="one",
+        )
+        return bool(row)
+    except Exception:
+        return False

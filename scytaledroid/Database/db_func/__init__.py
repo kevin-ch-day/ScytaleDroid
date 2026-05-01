@@ -1,0 +1,35 @@
+"""High-level database functions grouped by feature area."""
+
+from __future__ import annotations
+
+from .harvest import apk_repository, dynamic_loading, storage_surface
+from .permissions import (
+    permission_dicts,
+    permission_support,
+)
+from .static_analysis import (
+    risk_scores,
+    static_findings,
+    string_analysis,
+)
+
+# Re-export dataclass payloads for convenience
+ApkRecord = apk_repository.ApkRecord
+RiskScoreRecord = risk_scores.RiskScoreRecord
+StringSummaryRecord = string_analysis.StringSummaryRecord
+StringSample = string_analysis.StringSample
+
+__all__ = [
+    "apk_repository",
+    "dynamic_loading",
+    "storage_surface",
+    "permission_dicts",
+    "permission_support",
+    "risk_scores",
+    "static_findings",
+    "string_analysis",
+    "ApkRecord",
+    "RiskScoreRecord",
+    "StringSummaryRecord",
+    "StringSample",
+]

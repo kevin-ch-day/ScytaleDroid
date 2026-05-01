@@ -1,0 +1,318 @@
+# config/strings/noise.toml
+# Purpose: Suppress or downgrade static string evidence that is not exploitable by itself
+# (docs/spec URIs, metadata namespaces, license links, shader blog URLs, etc.)
+# while keeping an auditable record of what was suppressed and why.
+
+[meta]
+version = "1.2"
+description = "Noise suppression config for static string evidence (endpoints/http_cleartext)"
+notes = [
+  "Host matching defaults to eTLD+1 (registrable domain) unless a rule sets host_key=full_host.",
+  "Actions: suppress = drop from effective risk; downgrade = keep as Info; annotate = keep but tag.",
+  "Never suppress dynamic/runtime evidence; this policy only targets static string buckets.",
+]
+
+[enforcement]
+# Dry-run: if true, the loader evaluates rules but DOES NOT suppress/downgrade—only annotates with would_* tags.
+dry_run   = false
+log_level = "info"   # debug|info|warn
+
+[defaults]
+# How the loader should interpret host matches if not specified in a rule:
+host_key = "etld_plus_one"                 # options: etld_plus_one | full_host
+# Buckets where this policy applies (static-only):
+buckets  = ["endpoints", "http_cleartext"] # do NOT include dynamic buckets
+# Guardrail: never apply to runtime evidence buckets (engine should skip if seen)
+disallow_buckets = ["dynamic_endpoints", "runtime_contacts"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical host allow-lists
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Documentation/spec/reference sites (safe to appear in assets)
+[hosts.allow_doc]
+list = [
+  "w3.org",
+  "adobe.com",             # EXIF, Photoshop, TIFF namespaces
+  "apache.org",            # ASF license text
+  "android.com",           # includes schemas.android.com
+  "khronos.org",           # graphics specs
+  "bouncycastle.org",      # crypto docs
+  "slf4j.org",             # logging docs
+  "googlesource.com",      # source references
+  "lolengine.net",         # shader blog used in comments/examples
+  "purl.org",              # metadata namespaces
+  "microsoft.com",         # DRM/protocol docs
+  "bohemiancoding.com",    # Sketch metadata links
+  "ietf.org",              # RFCs
+  "iana.org",              # registries referenced in specs
+  "schema.org",            # schema metadata
+  "json-schema.org"        # schema metadata
+]
+
+# CDNs used strictly in doc/metadata contexts (not runtime telemetry)
+[hosts.allow_cdn_doc_full]         # full-host match only (safer than broad eTLD)
+list = [
+  "fonts.googleapis.com",
+  "fonts.gstatic.com",
+  "ajax.googleapis.com"
+]
+
+# Explicit full-host documentation sites that should NOT reduce other *.mozilla.org etc.
+[hosts.allow_doc_full]
+list = [
+  "developer.mozilla.org",
+  "ns.adobe.com"                    # explicit namespace host used in EXIF
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Known placeholder/dev literals
+# ─────────────────────────────────────────────────────────────────────────────
+
+[placeholders.hosts_exact]          # treat as development literals; not production endpoints
+list = [
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+  "0.1",
+  "example.com",
+  "webaddress.elided"
+]
+
+[placeholders.value_contains]       # substrings commonly found in templated/format strings
+list = [
+  "%s",       # sprintf fragments
+  "%d",
+  "{",        # templating braces (kept broad; pair with path/source context)
+  "}",
+  "${",       # variable interpolation
+  "%%"        # escaped percent
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Source/path context buckets
+# ─────────────────────────────────────────────────────────────────────────────
+
+[sources.doc_like_paths.prefix]     # common asset locations that carry doc/metadata strings
+list = [
+  "assets/filters/",                            # EXIF/metadata PNGs
+  "assets/fonts/",
+  "assets/compose.css",                         # Gmail compose css
+  "assets/pure_java_gpu_database-android_processed_manifest/",
+  "assets/shaders/",                            # GLSL shaders citing blog posts/specs
+  "assets/legal.html",
+  "res/raw/firebase_common_keep.xml",
+  "res/raw/firebase_crashlytics_keep.xml",
+  "res/raw/app_keep.xml",
+  "res/raw/keep.xml",
+  "res/raw/keep_cronet_api.xml",
+  "res/raw/places_keep.xml",
+  "res/raw/filter_resources.smf",               # seen in X/Twitter builds
+  "res/raw/cache_intl_",                        # compiled message catalogs with stray links
+  "res/raw/images_",                            # SVG/PNG assets with metadata namespaces
+  "res/drawable/",
+  "res/mipmap/"
+]
+
+# Exact filenames known to embed namespaces/links but not used for networking
+[sources.doc_like_paths.exact]
+list = [
+  "assets/pure_java_gpu_database-android_processed_manifest/AndroidManifest.xml"
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Noise dictionary (performance gate)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[noise]
+# Substrings that commonly indicate framework or resource noise.
+value_contains = [
+  "/res/",
+  "/assets/",
+  "/res/drawable",
+  "/res/layout",
+  "/res/xml",
+  "/res/raw",
+  "/res/mipmap",
+  "assets/flutter_assets",
+  "index.android.bundle",
+  ".bundle.map",
+  ".hbc",
+  "androidx",
+  "kotlin",
+  "protobuf",
+  "proto_",
+  "grpc",
+  "flutter",
+  "dart",
+  "react-native",
+  "reactnative",
+  "hermes",
+  "jsi",
+  "turbomodule",
+  "fabric",
+  "com/facebook/react",
+  "com/facebook/soloader",
+  "libflutter.so",
+  "libhermes.so",
+  "libreactnativejni.so",
+  "libreactnative.so",
+  "okhttp",
+  "okio",
+  "gson",
+  "guava",
+  "compose",
+  "buildconfig",
+  "classes.dex",
+  "fonts.gstatic.com",
+  "fonts.googleapis.com",
+  "cdnjs.cloudflare.com",
+  "googletagmanager.com",
+  "google-analytics.com",
+  "googlesyndication.com",
+  "doubleclick.net",
+  "gstatic.com",
+  "googleapis.com",
+]
+
+# Source prefixes that are almost always resource/framework noise.
+source_prefix = [
+  "res/",
+  "assets/",
+  "assets/flutter_assets/",
+  "assets/index.android.bundle",
+  "assets/index.android.bundle/",
+  "assets/reactnative/",
+  "lib/",
+  "kotlin/",
+  "androidx/",
+  "META-INF/services/",
+  "META-INF/maven/",
+  "META-INF/",
+]
+
+# Exact sources that should be treated as noise.
+source_exact = [
+  "resources.arsc",
+  "assets/index.android.bundle",
+  "assets/index.android.bundle.map",
+  "assets/index.android.bundle.packager.map",
+  "assets/index.android.bundle.hbc",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rules (top→bottom; first match wins)
+# Conditions are ANDed within each rule.
+# Actions:
+#   - suppress : exclude from “effective” risk; include in v_doc_policy_drift
+#   - downgrade: retain as Info (tagged); not counted in MASVS Network fails
+#   - annotate : keep as-is; add tag/note
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 0) Do not ever suppress runtime/dynamic evidence (guardrail)
+[[rules]]
+name                  = "never-touch-runtime"
+enabled               = true
+when.buckets_not_any  = ["dynamic_endpoints", "runtime_contacts"]  # engine should skip if bucket ∈ these
+then.action           = "annotate"
+then.tag              = "guardrail_runtime"
+then.note             = "Static-noise policy: runtime buckets are out-of-scope"
+
+# 1) Hard-suppress doc/reference hosts in static buckets (eTLD+1)
+[[rules]]
+name                  = "suppress-doc-hosts"
+enabled               = true
+when.buckets_any      = ["endpoints", "http_cleartext"]
+when.host_in_group    = "hosts.allow_doc"
+then.action           = "suppress"
+then.reason           = "policy_drift:doc_reference_host"
+
+# 2) Hard-suppress explicit full-host doc sites (stricter than eTLD+1)
+[[rules]]
+name                  = "suppress-doc-hosts-full"
+enabled               = true
+when.buckets_any      = ["endpoints", "http_cleartext"]
+when.host_in_group    = "hosts.allow_doc_full"
+when.host_key         = "full_host"
+then.action           = "suppress"
+then.reason           = "policy_drift:doc_reference_full_host"
+
+# 3) Suppress doc CDNs only when inside doc-like asset paths (and full-host match)
+[[rules]]
+name                  = "suppress-doc-cdn-in-doc-paths"
+enabled               = true
+when.buckets_any      = ["endpoints", "http_cleartext"]
+when.host_in_group    = "hosts.allow_cdn_doc_full"
+when.host_key         = "full_host"
+when.source_prefix_in = "sources.doc_like_paths.prefix"
+then.action           = "suppress"
+then.reason           = "policy_drift:doc_cdn_in_asset"
+
+# 4) Downgrade placeholders/dev literals to Info (keep visible for hygiene)
+[[rules]]
+name                  = "downgrade-placeholders-hosts"
+enabled               = true
+when.buckets_any      = ["endpoints", "http_cleartext"]
+when.host_in_group    = "placeholders.hosts_exact"
+then.action           = "downgrade"
+then.severity         = "info"
+then.tag              = "dev_placeholder_host"
+
+# 5) Suppress inline placeholder fragments ONLY when the source is doc-like
+[[rules]]
+name                      = "suppress-inline-placeholders-in-doc-assets"
+enabled                   = true
+when.buckets_any          = ["endpoints", "http_cleartext"]
+when.value_contains_group = "placeholders.value_contains"
+when.source_prefix_in     = "sources.doc_like_paths.prefix"
+then.action               = "suppress"
+then.reason               = "policy_drift:templated_doc_asset"
+
+# 6) If HTTP is used for doc/reference hosts within doc-like paths → suppress (metadata tolerance only)
+[[rules]]
+name                  = "suppress-http-doc-hosts-in-doc-paths"
+enabled               = true
+when.scheme           = "http"
+when.host_in_group    = "hosts.allow_doc"
+when.source_prefix_in = "sources.doc_like_paths.prefix"
+then.action           = "suppress"
+then.reason           = "policy_drift:http_in_metadata"
+
+# 7) Same for doc CDNs (http + full-host + doc path)
+[[rules]]
+name                  = "suppress-http-doc-cdn-in-doc-paths"
+enabled               = true
+when.scheme           = "http"
+when.host_in_group    = "hosts.allow_cdn_doc_full"
+when.host_key         = "full_host"
+when.source_prefix_in = "sources.doc_like_paths.prefix"
+then.action           = "suppress"
+then.reason           = "policy_drift:http_doc_cdn"
+
+# 8) Annotate format fragments that appear OUTSIDE doc-like paths (ask analysts to verify)
+[[rules]]
+name                      = "annotate-format-fragments-outside-doc"
+enabled                   = true
+when.buckets_any          = ["endpoints", "http_cleartext"]
+when.value_contains_group = "placeholders.value_contains"
+when.source_prefix_not_in = "sources.doc_like_paths.prefix"
+then.action               = "annotate"
+then.tag                  = "format_fragment_host"
+then.note                 = "Verify this is not assembling runtime endpoints"
+
+# 9) Safety net: never suppress if host is explicitly block-overridden (break-glass)
+[[rules]]
+name                  = "block-overrides-escape-hatch"
+enabled               = true
+when.host_in_group    = "hosts.block_overrides"
+then.action           = "annotate"
+then.tag              = "override_no_suppress"
+then.note             = "Host explicitly exempted from suppression rules"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Overrides / Break-glass
+# ─────────────────────────────────────────────────────────────────────────────
+[hosts.block_overrides]      # If any of these hosts appear, ignore all suppression above.
+list = [
+  # e.g., "telemetry.company-internal.com"
+]

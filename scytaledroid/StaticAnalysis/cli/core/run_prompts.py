@@ -1,0 +1,207 @@
+"""User prompt helpers for static analysis CLI."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import replace
+
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+
+from .models import RunParameters
+
+EVIDENCE_STEPS = (1, 2, 4)
+
+
+def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
+    """Collect advanced overrides for a run."""
+
+    params = base_params
+    print()
+    menu_utils.print_header("Advanced options", "Override defaults for this run")
+
+    table_utils.render_key_value_pairs(_summarise_params(params))
+    if not prompt_utils.prompt_yes_no("Modify advanced options?", default=False):
+        return params
+
+    evidence = prompt_int("Evidence lines", params.evidence_lines, choices=EVIDENCE_STEPS)
+    findings = prompt_int("Max findings/test", params.finding_limit, minimum=1)
+    entropy = prompt_float("Secrets sampler entropy ≥", params.secrets_entropy, minimum=0.0)
+    hits = prompt_int("Secrets sampler hits/bucket", params.secrets_hits_per_bucket, minimum=1)
+    scope_options = {"1": "resources-only", "2": "dex-only", "3": "both"}
+    scope_choice = prompt_choice(
+        "Secrets sampler scope",
+        scope_options,
+        default={
+            "resources-only": "1",
+            "dex-only": "2",
+            "both": "3",
+        }.get(params.secrets_scope_canonical, "3"),
+    )
+    secrets_scope = scope_options[scope_choice]
+
+    strings_mode = params.strings_mode
+    string_max_samples = params.string_max_samples
+    string_min_entropy = params.string_min_entropy
+    string_cleartext_only = params.string_cleartext_only
+    string_include_https_risk = params.string_include_https_risk
+    if params.profile == "strings":
+        strings_choice = prompt_choice(
+            "Strings mode",
+            {"1": "both", "2": "dex", "3": "resources"},
+            default={"both": "1", "dex": "2", "resources": "3"}.get(strings_mode, "1"),
+        )
+        strings_mode = {"1": "both", "2": "dex", "3": "resources"}[strings_choice]
+        string_max_samples = prompt_int("Max string samples (UI)", string_max_samples, minimum=1)
+        string_min_entropy = prompt_float("Min entropy threshold", string_min_entropy, minimum=0.0)
+        string_cleartext_only = prompt_utils.prompt_yes_no(
+            "Endpoints panel: show cleartext only",
+            default=string_cleartext_only,
+        )
+        string_include_https_risk = prompt_utils.prompt_yes_no(
+            "Count HTTPS endpoints towards network risk",
+            default=string_include_https_risk,
+        )
+
+    workers = prompt_utils.prompt_text(
+        "Workers",
+        default=params.workers,
+        required=False,
+        hint="Use 'auto' to match CPU count.",
+    )
+    reuse_cache = prompt_utils.prompt_yes_no("Reuse disk cache", default=params.reuse_cache)
+    log_level = prompt_choice("Log level", {"1": "INFO", "2": "DEBUG"}, default="1")
+    traces_raw = prompt_utils.prompt_text(
+        "Trace detectors",
+        default=",".join(params.trace_detectors) if params.trace_detectors else "",
+        required=False,
+        hint="Comma-separated detector IDs (optional).",
+    )
+    trace_detectors = tuple(token.strip() for token in traces_raw.split(",") if token.strip())
+    verbose_output = prompt_utils.prompt_yes_no("Verbose output", default=params.verbose_output)
+    artifact_detail = prompt_utils.prompt_yes_no(
+        "Artifact detail output",
+        default=params.artifact_detail,
+    )
+    dry_run = prompt_utils.prompt_yes_no("Dry-run (no persistence)", default=params.dry_run)
+    permission_refresh = prompt_utils.prompt_yes_no(
+        "Refresh permission snapshot after detector run",
+        default=params.permission_snapshot_refresh,
+    )
+
+    return replace(
+        params,
+        evidence_lines=evidence,
+        finding_limit=findings,
+        secrets_entropy=entropy,
+        secrets_hits_per_bucket=hits,
+        secrets_scope=secrets_scope,
+        strings_mode=strings_mode,
+        string_max_samples=string_max_samples,
+        string_min_entropy=string_min_entropy,
+        string_cleartext_only=string_cleartext_only,
+        string_include_https_risk=string_include_https_risk,
+        workers=workers or "auto",
+        reuse_cache=reuse_cache,
+        log_level="debug" if log_level == "2" else "info",
+        trace_detectors=trace_detectors,
+        dry_run=dry_run,
+        verbose_output=verbose_output,
+        artifact_detail=artifact_detail,
+        permission_snapshot_refresh=permission_refresh,
+    )
+
+
+def _summarise_params(params: RunParameters) -> tuple[tuple[str, object], ...]:
+    pairs: list[tuple[str, object]] = [
+        ("Profile", params.profile_label),
+        ("Scope", params.scope_label),
+        ("Evidence lines", params.evidence_lines),
+        ("Max findings/test", params.finding_limit),
+        ("Secrets entropy", params.secrets_entropy),
+        ("Secrets hits/bucket", params.secrets_hits_per_bucket),
+        ("Secrets scope", params.secrets_scope_label),
+    ]
+
+    if params.profile == "strings":
+        pairs.extend(
+            (
+                ("Strings mode", params.strings_mode),
+                ("String max samples", params.string_max_samples),
+                ("String min entropy", params.string_min_entropy),
+                ("Cleartext only", _format_bool(params.string_cleartext_only)),
+                (
+                    "HTTPS counts toward risk",
+                    _format_bool(params.string_include_https_risk),
+                ),
+            )
+        )
+
+    pairs.extend(
+        (
+            ("Workers", params.workers),
+            ("Reuse cache", _format_bool(params.reuse_cache)),
+            ("Log level", params.log_level.upper()),
+            ("Verbose output", _format_bool(params.verbose_output)),
+            ("Artifact detail output", _format_bool(params.artifact_detail)),
+            (
+                "Post-run permission refresh",
+                _format_bool(params.permission_snapshot_refresh),
+            ),
+            (
+                "Trace detectors",
+                ", ".join(params.trace_detectors) if params.trace_detectors else "—",
+            ),
+            ("Dry-run", _format_bool(params.dry_run)),
+        )
+    )
+
+    return tuple(pairs)
+
+
+def _format_bool(value: bool) -> str:
+    return "Yes" if value else "No"
+def prompt_int(label: str, default: int, *, choices: Sequence[int] | None = None, minimum: int = 1) -> int:
+    if choices:
+        print(f"{label} options: {', '.join(str(value) for value in choices)}")
+        default_index = next((idx + 1 for idx, value in enumerate(choices) if value == default), 1)
+        keys = [str(idx + 1) for idx in range(len(choices))]
+        choice = prompt_utils.get_choice(keys, default=str(default_index))
+        selected_index = int(choice) - 1
+        selected_index = max(0, min(selected_index, len(choices) - 1))
+        return choices[selected_index]
+
+    while True:
+        response = prompt_utils.prompt_text(label, default=str(default), required=False)
+        if not response.strip():
+            return max(minimum, default)
+        if response.isdigit():
+            return max(minimum, int(response))
+        print(status_messages.status("Invalid input. Please enter a number.", level="warn"))
+
+
+def prompt_float(label: str, default: float, *, minimum: float = 0.0) -> float:
+    while True:
+        response = prompt_utils.prompt_text(label, default=f"{default}", required=False)
+        if not response.strip():
+            return max(minimum, default)
+        try:
+            value = float(response)
+            return value if value >= minimum else minimum
+        except ValueError:
+            print(status_messages.status("Invalid number.", level="warn"))
+
+
+def prompt_choice(label: str, options: dict[str, str], *, default: str) -> str:
+    print(f"{label}:")
+    for key, text in options.items():
+        print(f"  {key}) {text}")
+    return prompt_utils.get_choice(list(options.keys()), default=default)
+
+
+__all__ = [
+    "EVIDENCE_STEPS",
+    "prompt_advanced_options",
+    "prompt_int",
+    "prompt_float",
+    "prompt_choice",
+]
