@@ -30,6 +30,7 @@ can reduce sprawl without breaking topic ownership.
 - `support`
   - [workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
   - [repo_ownership_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/repo_ownership_map.md)
+  - [cli_web_db_filesystem_boundary.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/cli_web_db_filesystem_boundary.md) — CLI vs Web vs DB vs filesystem roles (V1 posture)
   - active flag guidance is folded into `runbook.md`
 
 Notes:
@@ -63,6 +64,8 @@ Notes:
 - `support`
   - [static_analysis/static_analysis_data_model.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/static_analysis/static_analysis_data_model.md)
   - [workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
+  - [static_analysis_audit_runbook.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/static_analysis_audit_runbook.md)
+  - [static_analysis_workflow_audit_v1.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/static_analysis_workflow_audit_v1.md) — pipeline / string / split / persistence audit routing (AUDIT note; ticket driver)
 - `maintenance`
   - [phase5c_task_list.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/phase5c_task_list.md)
 
@@ -93,6 +96,7 @@ Notes:
 - `authority`
   - [database/contract_audit_v1_3.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/contract_audit_v1_3.md)
   - [database/ownership_matrix_v1_3.csv](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/ownership_matrix_v1_3.csv)
+  - [maintenance/database_governance_runbook.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_governance_runbook.md) — operational recovery, **`v_*`/`vw_*` naming contract**, repeatability, security posture
 - `support`
   - [database/schema_domain_inventory.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/schema_domain_inventory.md)
   - [database/derived_index.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/derived_index.md)

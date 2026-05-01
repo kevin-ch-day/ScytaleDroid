@@ -68,11 +68,12 @@ SELECT
   perms.is_custom
 FROM v_web_app_sessions sessions
 JOIN v_web_app_permissions perms
-  ON perms.package_name COLLATE utf8mb4_unicode_ci = sessions.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(perms.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
  AND perms.static_run_id = sessions.static_run_id
 WHERE sessions.session_preference_rank = 1
-  AND sessions.session_usability = 'usable_complete'
-  AND sessions.session_hidden_by_default = 0;
+  AND sessions.session_hidden_by_default = 0
+  AND UPPER(COALESCE(sessions.run_status, '')) = 'COMPLETED'
+  AND sessions.session_usability IN ('usable_complete', 'partial_rows');
 """
 
 __all__ = [

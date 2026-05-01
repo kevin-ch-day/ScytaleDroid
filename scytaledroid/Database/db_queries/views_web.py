@@ -42,25 +42,25 @@ SELECT
     ELSE 'catalog_only'
   END AS source_state
 FROM (
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
   FROM apps
   UNION
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
   FROM vw_static_risk_surfaces_latest
   UNION
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
   FROM vw_static_finding_surfaces_latest
 ) pkg
 LEFT JOIN apps a
-  ON a.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN android_app_categories cat
   ON cat.category_id = a.category_id
 LEFT JOIN android_app_profiles ap
   ON ap.profile_key = a.profile_key
 LEFT JOIN vw_static_risk_surfaces_latest latest_risk
-  ON latest_risk.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_risk.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN vw_static_finding_surfaces_latest latest_static
-  ON latest_static.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_static.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 -- Canonical preference contract:
 -- UPPER(COALESCE(sar2.status, '')) = 'COMPLETED'
 -- UPPER(COALESCE(sar2.run_class, '')) = 'CANONICAL'
@@ -90,10 +90,10 @@ LEFT JOIN (
     JOIN apps a3 ON a3.id = av3.app_id
     GROUP BY a3.package_name
   ) latest
-    ON latest.package_name COLLATE utf8mb4_unicode_ci = a2.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(a2.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND latest.preferred_id = sar2.id
 ) latest_static_run
-  ON latest_static_run.package_name_lc COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci;
+  ON CONVERT(latest_static_run.package_name_lc USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci;
 """
 
 CREATE_V_WEB_RUNTIME_RUN_INDEX = """
@@ -134,7 +134,8 @@ SELECT
   END AS static_link_state
 FROM dynamic_sessions ds
 LEFT JOIN apps a
-  ON a.package_name COLLATE utf8mb4_general_ci = ds.package_name COLLATE utf8mb4_general_ci
+  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
+     CONVERT(ds.package_name USING utf8mb4) COLLATE utf8mb4_general_ci
 LEFT JOIN dynamic_network_features nf
   ON nf.dynamic_run_id = ds.dynamic_run_id
 LEFT JOIN static_analysis_runs sar
@@ -153,10 +154,12 @@ LEFT JOIN (
     FROM analysis_risk_regime_summary
     GROUP BY package_name
   ) latest
-    ON latest.package_name COLLATE utf8mb4_general_ci = rr.package_name COLLATE utf8mb4_general_ci
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
+       CONVERT(rr.package_name USING utf8mb4) COLLATE utf8mb4_general_ci
    AND latest.max_created = rr.created_at_utc
 ) latest_regime
-  ON latest_regime.package_name COLLATE utf8mb4_general_ci = ds.package_name COLLATE utf8mb4_general_ci;
+  ON CONVERT(latest_regime.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
+     CONVERT(ds.package_name USING utf8mb4) COLLATE utf8mb4_general_ci;
 """
 
 CREATE_V_WEB_RUNTIME_RUN_DETAIL = """
@@ -202,7 +205,8 @@ SELECT
   END AS static_link_state
 FROM dynamic_sessions ds
 LEFT JOIN apps a
-  ON a.package_name COLLATE utf8mb4_general_ci = ds.package_name COLLATE utf8mb4_general_ci
+  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
+     CONVERT(ds.package_name USING utf8mb4) COLLATE utf8mb4_general_ci
 LEFT JOIN dynamic_network_features nf
   ON nf.dynamic_run_id = ds.dynamic_run_id
 LEFT JOIN static_analysis_runs sar
@@ -349,8 +353,8 @@ FROM (
     FROM static_string_summary
     GROUP BY package_name, session_stamp
   ) ss
-    ON ss.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-   AND ss.session_stamp COLLATE utf8mb4_unicode_ci = sar.session_stamp COLLATE utf8mb4_unicode_ci
+    ON CONVERT(ss.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   AND CONVERT(ss.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sar.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
   LEFT JOIN (
     SELECT static_run_id, COUNT(*) AS c
     FROM permission_audit_apps
@@ -500,6 +504,9 @@ FROM (
     COALESCE(audits.signature_count, 0) AS signature_count,
     COALESCE(audits.vendor_count, 0) AS vendor_count,
     COALESCE(links.link_rows, 0) AS link_rows,
+    sar.findings_runtime_total,
+    sar.findings_capped_total,
+    sar.findings_capped_by_detector_json,
     CASE
       WHEN UPPER(COALESCE(sar.status, '')) IN ('FAILED', 'ABORTED') THEN 'failed'
       WHEN UPPER(COALESCE(sar.status, '')) IN ('STARTED', 'RUNNING', 'SCANNED', 'PERSISTING')
@@ -559,8 +566,8 @@ FROM (
     FROM static_string_summary
     GROUP BY package_name, session_stamp
   ) sss
-    ON sss.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
-   AND sss.session_stamp COLLATE utf8mb4_unicode_ci = sar.session_stamp COLLATE utf8mb4_unicode_ci
+    ON CONVERT(sss.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   AND CONVERT(sss.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sar.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
   LEFT JOIN (
     SELECT
       pa.static_run_id,
@@ -603,6 +610,7 @@ SELECT
   latest.version_code,
   f.id AS finding_id,
   LOWER(COALESCE(f.severity, 'info')) AS severity,
+  COALESCE(NULLIF(TRIM(f.severity_raw), ''), f.severity) AS severity_raw,
   COALESCE(f.title, 'Untitled finding') AS title,
   COALESCE(f.category, 'Uncategorized') AS category,
   COALESCE(f.masvs_area, 'Unmapped') AS masvs_area,
@@ -612,7 +620,7 @@ SELECT
   f.created_at
 FROM vw_static_finding_surfaces_latest latest
 LEFT JOIN apps a
-  ON a.package_name COLLATE utf8mb4_unicode_ci = latest.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN android_app_profiles ap
   ON ap.profile_key = a.profile_key
 JOIN static_analysis_findings f
@@ -822,8 +830,8 @@ SELECT
   sfs.details AS findings_details
 FROM static_string_summary sss
 LEFT JOIN static_findings_summary sfs
-  ON sfs.package_name COLLATE utf8mb4_unicode_ci = sss.package_name COLLATE utf8mb4_unicode_ci
- AND sfs.session_stamp COLLATE utf8mb4_unicode_ci = sss.session_stamp COLLATE utf8mb4_unicode_ci;
+  ON CONVERT(sfs.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sss.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(sfs.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sss.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci;
 """
 
 CREATE_V_WEB_APP_STRING_SAMPLES = """
@@ -894,8 +902,8 @@ LEFT JOIN (
   FROM static_provider_acl
   GROUP BY package_name, session_stamp
 ) acl
-  ON acl.package_name COLLATE utf8mb4_unicode_ci = fp.package_name COLLATE utf8mb4_unicode_ci
- AND acl.session_stamp COLLATE utf8mb4_unicode_ci = fp.session_stamp COLLATE utf8mb4_unicode_ci
+  ON CONVERT(acl.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(fp.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(acl.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(fp.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
 GROUP BY fp.package_name, fp.session_stamp, acl.acl_rows;
 """
 
@@ -966,15 +974,15 @@ SELECT
   COALESCE(comps.acl_rows, 0) AS acl_rows
 FROM v_web_app_sessions sessions
 LEFT JOIN v_web_app_permission_summary perm
-  ON perm.package_name COLLATE utf8mb4_unicode_ci = sessions.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(perm.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
  AND perm.static_run_id = sessions.static_run_id
- AND perm.session_stamp COLLATE utf8mb4_unicode_ci = sessions.session_stamp COLLATE utf8mb4_unicode_ci
+ AND CONVERT(perm.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN v_web_app_string_summary strs
-  ON strs.package_name COLLATE utf8mb4_unicode_ci = sessions.package_name COLLATE utf8mb4_unicode_ci
- AND strs.session_stamp COLLATE utf8mb4_unicode_ci = sessions.session_stamp COLLATE utf8mb4_unicode_ci
+  ON CONVERT(strs.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(strs.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN v_web_app_component_summary comps
-  ON comps.package_name COLLATE utf8mb4_unicode_ci = sessions.package_name COLLATE utf8mb4_unicode_ci
- AND comps.session_stamp COLLATE utf8mb4_unicode_ci = sessions.session_stamp COLLATE utf8mb4_unicode_ci;
+  ON CONVERT(comps.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(comps.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci;
 """
 
 CREATE_V_WEB_STATIC_DYNAMIC_APP_SUMMARY = """
@@ -1059,28 +1067,28 @@ SELECT
     ELSE 'catalog_only'
   END AS summary_state
 FROM (
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name FROM apps
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM apps
   UNION
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name FROM vw_static_finding_surfaces_latest
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM vw_static_finding_surfaces_latest
   UNION
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name FROM vw_static_risk_surfaces_latest
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM vw_static_risk_surfaces_latest
   UNION
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name FROM dynamic_sessions
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM dynamic_sessions
   UNION
-  SELECT package_name COLLATE utf8mb4_general_ci AS package_name FROM analysis_risk_regime_summary
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM analysis_risk_regime_summary
 ) pkg
 LEFT JOIN apps a
-  ON a.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN android_app_categories cat
   ON cat.category_id = a.category_id
 LEFT JOIN android_app_profiles ap
   ON ap.profile_key = a.profile_key
 LEFT JOIN vw_latest_apk_per_package latest_apk
-  ON latest_apk.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_apk.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN vw_static_risk_surfaces_latest latest_risk
-  ON latest_risk.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_risk.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN vw_static_finding_surfaces_latest latest_static
-  ON latest_static.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_static.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 -- Canonical preference contract:
 -- UPPER(COALESCE(sar2.status, '')) = 'COMPLETED'
 -- UPPER(COALESCE(sar2.run_class, '')) = 'CANONICAL'
@@ -1110,10 +1118,10 @@ LEFT JOIN (
     JOIN apps a3 ON a3.id = av3.app_id
     GROUP BY a3.package_name
   ) latest
-    ON latest.package_name COLLATE utf8mb4_unicode_ci = a2.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(a2.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND latest.preferred_id = sar2.id
 ) latest_static_run
-  ON latest_static_run.package_name_lc COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_static_run.package_name_lc USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN (
   SELECT ds1.*
   FROM dynamic_sessions ds1
@@ -1122,18 +1130,18 @@ LEFT JOIN (
     FROM dynamic_sessions
     GROUP BY package_name
   ) latest
-    ON latest.package_name COLLATE utf8mb4_unicode_ci = ds1.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ds1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND latest.max_started = COALESCE(ds1.started_at_utc, ds1.created_at)
   JOIN (
     SELECT package_name, COALESCE(started_at_utc, created_at) AS started_marker, MAX(dynamic_run_id) AS max_run_id
     FROM dynamic_sessions
     GROUP BY package_name, COALESCE(started_at_utc, created_at)
   ) tie
-    ON tie.package_name COLLATE utf8mb4_unicode_ci = ds1.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(tie.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ds1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND tie.started_marker = COALESCE(ds1.started_at_utc, ds1.created_at)
    AND tie.max_run_id = ds1.dynamic_run_id
 ) latest_dynamic
-  ON latest_dynamic.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_dynamic.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN dynamic_network_features latest_nf
   ON latest_nf.dynamic_run_id = latest_dynamic.dynamic_run_id
 LEFT JOIN (
@@ -1148,7 +1156,7 @@ LEFT JOIN (
       ON nff.dynamic_run_id = dsf.dynamic_run_id
     GROUP BY dsf.package_name
   ) latest
-    ON latest.package_name COLLATE utf8mb4_unicode_ci = dsf1.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(dsf1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND latest.max_started = COALESCE(dsf1.started_at_utc, dsf1.created_at)
   JOIN (
     SELECT dsf.package_name, COALESCE(dsf.started_at_utc, dsf.created_at) AS started_marker, MAX(dsf.dynamic_run_id) AS max_run_id
@@ -1157,11 +1165,11 @@ LEFT JOIN (
       ON nff.dynamic_run_id = dsf.dynamic_run_id
     GROUP BY dsf.package_name, COALESCE(dsf.started_at_utc, dsf.created_at)
   ) tie
-    ON tie.package_name COLLATE utf8mb4_unicode_ci = dsf1.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(tie.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(dsf1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND tie.started_marker = COALESCE(dsf1.started_at_utc, dsf1.created_at)
    AND tie.max_run_id = dsf1.dynamic_run_id
 ) latest_feature_dynamic
-  ON latest_feature_dynamic.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(latest_feature_dynamic.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN dynamic_network_features latest_feature_nf
   ON latest_feature_nf.dynamic_run_id = latest_feature_dynamic.dynamic_run_id
 LEFT JOIN (
@@ -1172,10 +1180,10 @@ LEFT JOIN (
     FROM analysis_risk_regime_summary
     GROUP BY package_name
   ) latest
-    ON latest.package_name COLLATE utf8mb4_unicode_ci = rr.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(rr.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND latest.max_created = rr.created_at_utc
 ) latest_regime
-  ON latest_regime.package_name COLLATE utf8mb4_unicode_ci = pkg.package_name COLLATE utf8mb4_unicode_ci;
+  ON CONVERT(latest_regime.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci;
 """
 
 __all__ = [

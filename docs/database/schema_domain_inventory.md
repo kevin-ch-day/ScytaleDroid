@@ -27,6 +27,7 @@ The important complication is that the live schema is not one clean layer:
 
 - A canonical manifest defines the newer app/static/dynamic/analysis tables.
 - Web-facing read models are explicitly created as views.
+- Naming and operational recovery posture: see **`docs/maintenance/database_governance_runbook.md`** ( **`v_*` / `vw_*` reserved for views**; scripted posture/recreate under **`scripts/db/`** ).
 - Some CLI and reporting paths still rely on older compatibility tables such as
   `android_apk_repository`, `runs`, `buckets`, and `masvs_control_coverage`.
 - Inventory schema gates also expect harvest-path tables that are documented but

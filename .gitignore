@@ -44,9 +44,9 @@ data/sessions/
 data/
 data/db/scytaledroid.sqlite
 /evidence/
-scripts/db/**
-!scripts/db/
-!scripts/db/*.sql
+# Operational DB tooling (posture checks, view recreation helpers). Exclude ad-hoc local dumps only.
+scripts/db/local_*.sql
+scripts/db/*.local.sql
 *.log
 *.tmp
 *.bak
