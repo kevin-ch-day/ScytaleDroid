@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -88,6 +89,67 @@ def test_group_scope_skip_logs_once_per_session(monkeypatch):
     assert skip_logs == [
         "Skipping canonical singleton enforcement for group scope session_label=20260428-all-full"
     ]
+
+
+@pytest.mark.unit
+def test_finalize_persisted_writes_findings_reconciliation_sql():
+    captured: list[tuple[object, ...] | None] = []
+
+    def run_sql(sql: str, params=None, fetch=None):
+        sql_norm = " ".join(sql.split())
+        if "SELECT session_label FROM static_analysis_runs WHERE id=%s" in sql_norm:
+            return ("sess-1",)
+        if (
+            "UPDATE static_analysis_runs SET" in sql_norm
+            and "findings_runtime_total" in sql_norm
+            and fetch is None
+        ):
+            captured.append(params)
+            return None
+        return None
+
+    callbacks = StaticRunFinalizationCallbacks(
+        run_sql=run_sql,
+        export_dep_json=lambda *_a, **_k: None,
+        maybe_set_canonical_static_run=lambda **_k: None,
+        update_static_run_metadata=lambda *_a, **_k: None,
+        update_static_run_status=lambda **_k: None,
+        normalize_run_status=lambda status: str(status or "").upper(),
+    )
+    capped = {"ipc_components": 40}
+    outcome = SimpleNamespace(
+        persisted_findings=10,
+        runtime_findings=50,
+        findings_capped_total=40,
+        findings_capped_by_detector=capped,
+        canonical_failed=False,
+        errors=[],
+    )
+
+    finalize_persisted_static_run(
+        static_run_id=7701,
+        dry_run=False,
+        package_for_run="com.example",
+        session_stamp="sess-1",
+        scope_label="com.example",
+        run_package="com.example",
+        run_status="COMPLETED",
+        paper_grade_requested=False,
+        canonical_action=None,
+        persistence_failed=False,
+        outcome=outcome,
+        ended_at_utc=None,
+        abort_reason=None,
+        abort_signal=None,
+        callbacks=callbacks,
+    )
+
+    assert len(captured) == 1
+    params = captured[0]
+    assert params is not None
+    persisted, runtime, capped_n, capped_json, sid = params
+    assert persisted == 10 and runtime == 50 and capped_n == 40 and sid == 7701
+    assert capped_json == json.dumps({"ipc_components": 40}, sort_keys=True)
 
 
 @pytest.mark.unit

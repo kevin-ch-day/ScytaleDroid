@@ -458,6 +458,94 @@ def _run_diagnostics(json_mode: bool) -> None:
     run_diagnostics(json_mode=json_mode)
 
 
+def _open_devices_hub() -> None:
+    ensure_db_ready()
+    print_banner(show_clocks=False)
+    from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
+
+    devices_hub()
+
+
+def _run_device_cli(argv: list[str]) -> int:
+    from scytaledroid.DeviceAnalysis import device_manager
+    from scytaledroid.DeviceAnalysis.services import inventory_service
+    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
+
+    parser = argparse.ArgumentParser(
+        prog="python main.py device",
+        description="Device inventory and harvest entrypoints (non-interactive sync or interactive hub).",
+    )
+    subs = parser.add_subparsers(dest="cmd", required=True)
+
+    hub = subs.add_parser("hub", help="Open the interactive Device Inventory & Harvest hub.")
+    hub.set_defaults(handler="hub")
+
+    sync = subs.add_parser("inventory-sync", help="Run a full inventory snapshot sync without menus.")
+    sync.set_defaults(handler="inventory-sync")
+    sync.add_argument(
+        "--serial",
+        default=None,
+        help="ADB device serial (defaults to the configured active device).",
+    )
+    sync.add_argument(
+        "--mode",
+        default=None,
+        help="Inventory mode override (defaults to SCYTALEDROID_INVENTORY_MODE or baseline).",
+    )
+    sync.add_argument(
+        "--allow-fallbacks",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override rooted-device fallback policy for this sync.",
+    )
+
+    args = parser.parse_args(argv)
+    if getattr(args, "handler", "") == "hub":
+        try:
+            _open_devices_hub()
+        except KeyboardInterrupt:
+            status_messages.print_status("Device hub interrupted.", level="warn")
+            return 130
+        return 0
+
+    ensure_db_ready()
+    serial = args.serial or device_manager.get_active_serial()
+    if not serial:
+        sync.error(
+            "No serial: pass --serial or configure an active device via the launcher / device menus."
+        )
+    try:
+        inventory_workflow.run_inventory_sync(
+            serial,
+            ui_prefs=None,
+            progress_sink="cli",
+            mode=args.mode,
+            allow_fallbacks=args.allow_fallbacks,
+        )
+    except inventory_service.InventoryServiceError:
+        return 1
+    return 0
+
+
+def _run_harvest_cli(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python main.py harvest",
+        description="Harvest operator flows (delegates to the shared device hub today).",
+    )
+    subs = parser.add_subparsers(dest="cmd", required=True)
+    harvest_hub = subs.add_parser("hub", help="Open the interactive Device Inventory & Harvest hub.")
+    harvest_hub.set_defaults(handler="hub")
+    args = parser.parse_args(argv)
+    if getattr(args, "handler", "") != "hub":
+        parser.error("Unknown harvest command.")
+    try:
+        _open_devices_hub()
+    except KeyboardInterrupt:
+        status_messages.print_status("Harvest hub interrupted.", level="warn")
+        return 130
+    return 0
+
+
 def _run_db_maintenance(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="ScytaleDroid DB maintenance commands",
@@ -498,6 +586,10 @@ def _run_db_maintenance(argv: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "device":
+        return _run_device_cli(argv[1:])
+    if argv and argv[0] == "harvest":
+        return _run_harvest_cli(argv[1:])
     if argv and argv[0] == "static":
         from scytaledroid.StaticAnalysis.cli.flows import headless_run
 

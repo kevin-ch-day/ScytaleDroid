@@ -20,6 +20,9 @@ def test_apply_persistence_outcome_tolerates_partial_status_object() -> None:
         persisted_findings=5,
         string_samples_persisted=2,
         persistence_retry_count=None,
+        runtime_findings=9,
+        findings_capped_total=4,
+        findings_capped_by_detector={"d1": 4},
     )
 
     findings_delta, string_delta = apply_persistence_outcome(
@@ -32,6 +35,10 @@ def test_apply_persistence_outcome_tolerates_partial_status_object() -> None:
     assert app_result.static_run_id is None
     assert app_result.persistence_retry_count == 0
     assert app_result.persistence_db_disconnect is False
+    assert app_result.persistence_runtime_findings == 9
+    assert app_result.persistence_persisted_findings == 5
+    assert app_result.persistence_findings_capped_total == 4
+    assert app_result.persistence_findings_capped_by_detector == {"d1": 4}
 
 
 def test_collect_persistence_errors_tolerates_missing_success_flag() -> None:

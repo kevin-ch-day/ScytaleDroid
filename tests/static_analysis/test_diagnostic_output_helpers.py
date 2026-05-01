@@ -4,6 +4,8 @@ from datetime import UTC
 from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.execution import (
+    db_masvs_summary,
+    db_severity_table,
     db_verification,
     diagnostics,
     results_formatters,
@@ -147,8 +149,8 @@ def test_render_persistence_footer_prints_canonical_and_latest(monkeypatch, caps
             return [(1,)]
         if "select id, coalesce" in sql:
             return [
-                (719, "2026-02-05 00:00:00", 1),
-                (718, "2026-02-05 00:00:00", 0),
+                (719, "2026-02-05 00:00:00", 1, "COMPLETED", ""),
+                (718, "2026-02-05 00:00:00", 0, "COMPLETED", ""),
             ]
         if "select session_label" in sql:
             return ("static-tiktok-20260205",)
@@ -170,6 +172,7 @@ def test_render_persistence_footer_prints_canonical_and_latest(monkeypatch, caps
     assert "static_run_id=718" in out
     assert "latest" in out
     assert "static_run_id=719" in out
+    assert "static_run.status=COMPLETED" in out
 
 
 def test_render_db_masvs_summary_aggregates_all_static_ids(monkeypatch, capsys):
@@ -178,8 +181,7 @@ def test_render_db_masvs_summary_aggregates_all_static_ids(monkeypatch, capsys):
         session_stamp = "sess-agg"
 
     monkeypatch.setattr(output_prefs, "get_run_context", lambda: _Ctx())
-    monkeypatch.setattr(db_verification, "load_run_map", lambda *_a, **_k: {"apps": []})
-    monkeypatch.setattr(db_verification, "extract_static_run_ids", lambda *_a, **_k: [41, 40, 39])
+    monkeypatch.setattr(db_masvs_summary, "resolve_static_run_ids", lambda *_a, **_k: [41, 40, 39])
 
     calls = {"many": 0, "fallback": 0}
 
@@ -211,10 +213,11 @@ def test_render_db_masvs_summary_aggregates_all_static_ids(monkeypatch, capsys):
         calls["fallback"] += 1
         return None
 
-    monkeypatch.setattr(db_verification, "fetch_db_masvs_summary_static_many", _many)
-    monkeypatch.setattr(db_verification, "fetch_db_masvs_summary", _fallback)
+    monkeypatch.setattr(db_masvs_summary, "fetch_db_masvs_summary_static_many", _many)
+    monkeypatch.setattr(db_masvs_summary, "fetch_db_masvs_summary", _fallback)
+    monkeypatch.setattr(db_masvs_summary, "compact_success_output_enabled", lambda: False)
 
-    db_verification._render_db_masvs_summary()
+    db_masvs_summary.render_db_masvs_summary()
 
     out = capsys.readouterr().out
     assert "DB MASVS Summary (latest_static_run_id=41; aggregated_runs=3)" in out
@@ -225,9 +228,9 @@ def test_render_db_masvs_summary_aggregates_all_static_ids(monkeypatch, capsys):
 def test_render_db_severity_table_uses_canonical_target_sdk_lookup(monkeypatch):
     captured: list[tuple[list[str], list[list[str]]]] = []
 
-    monkeypatch.setattr(db_verification, "_resolve_static_run_ids", lambda *_args, **_kwargs: [42])
+    monkeypatch.setattr(db_severity_table, "resolve_static_run_ids", lambda *_args, **_kwargs: [42])
     monkeypatch.setattr(
-        db_verification,
+        db_severity_table,
         "_per_app_severity_from_findings",
         lambda *_args, **_kwargs: [("org.thoughtcrime.securesms", "High", 1)],
     )
@@ -238,14 +241,14 @@ def test_render_db_severity_table_uses_canonical_target_sdk_lookup(monkeypatch):
             return [{"package_name": "org.thoughtcrime.securesms", "target_sdk": 35}]
         raise AssertionError(f"unexpected SQL: {query}")
 
-    monkeypatch.setattr(db_verification.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(db_severity_table.core_q, "run_sql", fake_run_sql)
     monkeypatch.setattr(
-        db_verification.table_utils,
+        db_severity_table.table_utils,
         "render_table",
         lambda headers, rows, *args, **kwargs: captured.append((headers, rows)),
     )
 
-    assert db_verification._render_db_severity_table("sess") is True
+    assert db_severity_table.render_db_severity_table("sess") is True
     assert captured
     assert captured[0][1][0][2] == "35"
 
@@ -253,12 +256,12 @@ def test_render_db_severity_table_uses_canonical_target_sdk_lookup(monkeypatch):
 def test_render_db_severity_table_limits_large_output_and_exports(monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        db_verification,
-        "_resolve_static_run_ids",
+        db_severity_table,
+        "resolve_static_run_ids",
         lambda *_args, **_kwargs: [42],
     )
     monkeypatch.setattr(
-        db_verification,
+        db_severity_table,
         "_per_app_severity_from_findings",
         lambda *_args, **_kwargs: [
             (f"pkg.{idx:02d}", "High", idx) for idx in range(1, 26)
@@ -271,9 +274,9 @@ def test_render_db_severity_table_limits_large_output_and_exports(monkeypatch, t
             return [{"package_name": f"pkg.{idx:02d}", "target_sdk": 35} for idx in range(1, 26)]
         raise AssertionError(f"unexpected SQL: {query}")
 
-    monkeypatch.setattr(db_verification.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(db_severity_table.core_q, "run_sql", fake_run_sql)
 
-    assert db_verification._render_db_severity_table("sess") is True
+    assert db_severity_table.render_db_severity_table("sess") is True
     out = capsys.readouterr().out
     assert "top 20 of 25 packages" in out
     assert "Full normalized findings table saved:" in out

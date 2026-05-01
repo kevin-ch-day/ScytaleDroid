@@ -9,8 +9,14 @@ SECTION_HEADLINE = "Refresh inventory"
 FEEDBACK_ACTION = SECTION_HEADLINE
 ERROR_SECTION = SECTION_HEADLINE
 
+# Pre-run CLI panel (distinct from SECTION_HEADLINE to avoid repeating the menu title).
+SNAPSHOT_PANEL_HEADLINE = "Current snapshot · before run"
+
 SCOPE_MENU_SUBTITLE = "Full device (ADB) or profile packages only"
 PROFILE_MENU_SUBTITLE = "Choose profile"
+
+# Shown beside prior snapshot stats when opting into a slow full-device sync anyway.
+FULL_SYNC_WHILE_FRESH_PROMPT = "Snapshot already fresh ({age} · {packages}). Full device refresh anyway?"
 
 MENU_OPTION_FULL = "Full device (all packages)"
 MENU_OPTION_SCOPED = "Profile packages only (faster)"
@@ -24,9 +30,11 @@ RUN_START_CARD_FOOTER = (
 SUMMARY_BOX_TITLE = "Refresh inventory · summary"
 
 PROGRESS_FOOTER_TIP = (
-    "Next: ADB package dump → local snapshot files → optional DB app-definition sync. "
-    "(Live line · paths/metadata = APK install paths + pm-detail work completed per package.)"
+    "This run: ADB package inventory → snapshot JSON under data/state → optional DB sync for apps."
 )
+
+# Printed in the pre-run snapshot card when using non-root ADB fallback (not a separate WARN banner).
+NON_ROOT_POLICY_CARD_LINE = "Non-root paths (harvest/filtering may omit system APK paths)"
 
 # When full sync wrote JSON but device_inventory_snapshots / device_inventory did not get a row.
 DB_JSON_ONLY_EXPECTED = (

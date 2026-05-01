@@ -153,6 +153,9 @@ _DDL_STATEMENTS: list[str] = [
       abort_signal     VARCHAR(16)    DEFAULT NULL,
       profile          VARCHAR(32)    DEFAULT NULL,
       findings_total   INT UNSIGNED   NOT NULL DEFAULT 0,
+      findings_runtime_total INT UNSIGNED DEFAULT NULL,
+      findings_capped_total INT UNSIGNED DEFAULT NULL,
+      findings_capped_by_detector_json JSON DEFAULT NULL,
       detector_metrics JSON           DEFAULT NULL,
       repro_bundle     JSON           DEFAULT NULL,
       analysis_matrices JSON          DEFAULT NULL,
@@ -327,6 +330,12 @@ _DDL_STATEMENTS: list[str] = [
     ON static_analysis_runs (category);
     """,
     """
+    ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS findings_runtime_total INT UNSIGNED NULL,
+      ADD COLUMN IF NOT EXISTS findings_capped_total INT UNSIGNED NULL,
+      ADD COLUMN IF NOT EXISTS findings_capped_by_detector_json JSON DEFAULT NULL;
+    """,
+    """
     CREATE TABLE IF NOT EXISTS static_session_rollups (
       session_stamp VARCHAR(128) NOT NULL,
       scope_label   VARCHAR(191) NOT NULL DEFAULT '',
@@ -436,6 +445,7 @@ _DDL_STATEMENTS: list[str] = [
       finding_id  VARCHAR(128)    DEFAULT NULL,
       status      VARCHAR(32)     DEFAULT NULL,
       severity    VARCHAR(32)     DEFAULT NULL,
+      severity_raw VARCHAR(32)   DEFAULT NULL,
       category    VARCHAR(64)     DEFAULT NULL,
       title       VARCHAR(512)    DEFAULT NULL,
       tags        JSON            DEFAULT NULL,
@@ -467,11 +477,16 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS masvs_control VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS detector VARCHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS module VARCHAR(64) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS evidence_refs JSON DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS evidence_refs JSON DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS severity_raw VARCHAR(32) DEFAULT NULL;
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_static_findings_rule_severity
     ON static_analysis_findings (rule_id, severity, run_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_findings_run_detector
+    ON static_analysis_findings (run_id, detector);
     """,
     """
     CREATE TABLE IF NOT EXISTS static_fileproviders (

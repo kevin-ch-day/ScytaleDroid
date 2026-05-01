@@ -83,9 +83,15 @@ def publish_persisted_artifacts(
             if gov_detail and gov_detail != "governance_missing":
                 warning = f"Governance check failed: {gov_detail}"
                 print(status_messages.status(warning, level="warn"))
-            warning = "Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)"
-            print(status_messages.status(warning, level="warn"))
-            outcome.warnings.append(warning)
+            # Downgrade notice only — do not treat as persistence failure (core DB/handoff succeeded).
+            print(status_messages.status("Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)", level="warn"))
+            print(
+                status_messages.status(
+                    "Core persistence still applies; paper-grade extras need permission-intel "
+                    "(SCYTALEDROID_PERMISSION_INTEL_DB_* — or SCYTALEDROID_CANONICAL_GRADE=0).",
+                    level="info",
+                )
+            )
 
     manifest_evidence_path = write_manifest_evidence_fn(
         base_report,

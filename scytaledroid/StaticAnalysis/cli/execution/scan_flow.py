@@ -32,6 +32,7 @@ from .scan_identity_helpers import (
     _run_signature_sha256,
 )
 from .scan_progress_display import _PipelineProgress
+from .run_health import compute_app_final_status, compute_run_aggregate_status
 from .scan_report import (
     _append_resource_warning,
     _summarize_artifact,
@@ -222,6 +223,10 @@ def execute_scan(
 
     last_elapsed_for_progress: float | None = None
     if all_apps_compact_mode and total_apps > 0:
+        first_pkg = getattr(selection.groups[0], "package_name", None) if selection.groups else None
+        first_disp = (
+            display_name_map.get(str(first_pkg).lower(), None) if first_pkg else None
+        ) or first_pkg
         print(
             status_messages.status(
                 _format_compact_progress_text(
@@ -232,8 +237,8 @@ def execute_scan(
                     agg_checks=agg_checks,
                     elapsed_text="00:00",
                     eta_text="--",
-                    current_app_label=selection.groups[0].package_name if selection.groups else None,
-                    current_package_name=selection.groups[0].package_name if selection.groups else None,
+                    current_app_label=str(first_disp) if first_disp else None,
+                    current_package_name=str(first_pkg) if first_pkg else None,
                     recent_completions=[],
                 ),
                 level="info",
@@ -312,6 +317,7 @@ def execute_scan(
             if not params.dry_run and bool(getattr(params, "paper_grade_requested", True)):
                 failures.append(message)
                 log.warning(message, category="static")
+                app_result.final_status = "skipped"
                 results.append(app_result)
                 continue
             log.warning(message, category="static")
@@ -333,6 +339,7 @@ def execute_scan(
             message = f"No artifacts available for {group.package_name}; skipping."
             failures.append(message)
             log.warning(message, category="static")
+            app_result.final_status = "failed"
             continue
         if not params.dry_run and persistence_ready and not app_result.static_run_id:
             try:
@@ -528,6 +535,14 @@ def execute_scan(
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts
             app_summary = _summarize_app_pipeline(app_result)
+            pe_gate = bool(persistence_ready) and not params.dry_run
+            app_result.final_status = compute_app_final_status(
+                app_result,
+                persistence_enabled=pe_gate,
+                persist_attempted_this_run=pe_gate,
+            )
+            if isinstance(app_summary, dict):
+                app_summary["final_app_status"] = app_result.final_status
             metadata = {"pipeline_summary": app_summary} if app_summary else (
                 getattr(last_report_for_app, "metadata", {}) if last_report_for_app else None
             )
@@ -626,7 +641,16 @@ def execute_scan(
     abort_requested, abort_reason, abort_signal = _abort_state()
     if params.dry_run:
         failures = []
-    return RunOutcome(
+    pe_gate = bool(persistence_ready) and not params.dry_run
+    for pending in results:
+        if getattr(pending, "final_status", None):
+            continue
+        pending.final_status = compute_app_final_status(
+            pending,
+            persistence_enabled=pe_gate,
+            persist_attempted_this_run=pe_gate,
+        )
+    outcome = RunOutcome(
         results,
         started_at,
         finished_at,
@@ -641,6 +665,8 @@ def execute_scan(
         total_artifacts=total_artifacts,
         dry_run_skipped=dry_run_skipped,
     )
+    outcome.run_aggregate_status = compute_run_aggregate_status(outcome)
+    return outcome
 
 
 def _show_split_breakdown(run_ctx: StaticRunContext) -> bool:

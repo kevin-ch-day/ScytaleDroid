@@ -30,11 +30,6 @@ def test_sync_app_definitions_skips_numeric_only_package(monkeypatch) -> None:
 
 
 def test_render_snapshot_block_uses_labeled_lines_and_compact_non_root_warning(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(
-        progress,
-        "_FALLBACK_WARNED_KEYS",
-        set(),
-    )
     monkeypatch.setattr(progress.colors, "colors_enabled", lambda: False)
     monkeypatch.setattr(
         progress,
@@ -56,15 +51,15 @@ def test_render_snapshot_block_uses_labeled_lines_and_compact_non_root_warning(m
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "Refresh inventory" in out
+    assert "Current snapshot · before run" in out
     assert "Device       : ZY22JK89DR" in out
     assert "Previous snap: 26" in out
     assert "Inventory    : none" in out
     assert "Last sync    : never" in out
     assert "Packages     : —" in out
     assert "Mode         : baseline" in out
-    assert "Non-root collection active; harvest remains policy-filtered." in out
-    assert "Next: ADB package dump" in out
+    assert "Policy       : Non-root paths (harvest/filtering may omit system APK paths)" in out
+    assert "This run: ADB package inventory" in out
 
 
 def test_render_snapshot_block_formats_last_sync_age(monkeypatch, capsys) -> None:

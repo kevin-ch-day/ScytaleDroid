@@ -23,18 +23,20 @@ def _format_compact_progress_text(
     current_package_name: str | None = None,
     recent_completions: list[str] | None = None,
 ) -> str:
-    """Return the compact multi-line operator progress text.
+    """Return the compact multi-line operator progress text."""
 
-    Parameter current_package_name is kept for call-site compatibility.
-    """
-    del current_package_name
     lines: list[str] = []
 
     if current_app_label:
-        current_line = f"Current: {current_app_label}"
+        pkg = str(current_package_name or "").strip()
+        primary = current_app_label
+        if pkg and pkg.lower() not in primary.lower():
+            primary = f"{current_app_label} — {pkg}"
+        current_line = f"Working on: {primary}"
+        # apps_completed counts finished apps; while scanning, UI shows next/ active ordinal.
         if total_apps > 0:
-            current_app_number = min(apps_completed, total_apps)
-            current_line += f" ({current_app_number}/{total_apps})"
+            ordinal = min(max(apps_completed, 0) + 1, total_apps)
+            current_line += f" (app {ordinal}/{total_apps})"
         lines.append(current_line)
 
     lines.append(f"Progress: {artifacts_done}/{total_artifacts} artifacts")

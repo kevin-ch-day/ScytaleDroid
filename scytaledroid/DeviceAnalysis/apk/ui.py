@@ -444,18 +444,19 @@ def report_harvest_started(
     harvest_mode: str | None = None,
     delta_filter_applied: bool | None = None,
 ) -> None:
-    _ = policy_eligible  # schedule/blocked_policy already summarize policy surface for operators
+    _ = policy_eligible  # retained for API parity with planner stats; message uses scheduled/blocked counts
+    # "In plan" = rows in the harvest plan (evaluated). scheduled + policy_blocked + other skips = that total.
     if candidate_count != selected_count:
-        scope_frag = f"{selected_count}/{candidate_count} in scope"
+        plan_frag = f"{selected_count}/{candidate_count}"
     else:
-        scope_frag = f"{selected_count} in scope"
-    head = f"Harvest start · {scope_frag} · {scheduled} pull(s)"
+        plan_frag = str(selected_count)
+    head = f"Harvest start · {plan_frag} package(s) in plan · {scheduled} scheduled to pull"
     if blocked_policy:
-        head += f" · {blocked_policy} policy-blocked"
+        head += f" · {blocked_policy} blocked (non-root path policy)"
     if blocked_scope:
-        head += f" · {blocked_scope} scope-blocked"
+        head += f" · {blocked_scope} blocked (other)"
     print(status_messages.status(head, level="info"))
-    tail = f"Est. ~{artifacts} artifact file(s) · policy={policy}"
+    tail = f"Est. ~{artifacts} artifact path(s) for scheduled packages · policy={policy}"
     if harvest_mode:
         tail += f" · harvest_mode={harvest_mode}"
     if delta_filter_applied is not None:

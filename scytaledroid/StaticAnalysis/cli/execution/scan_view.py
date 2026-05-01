@@ -173,7 +173,10 @@ def render_app_start(
     if title and package_name and title != package_name:
         display = f"{title} ({package_name})"
     print(f"Scanning App: {display}")
-    print(f"Checks: {len(PIPELINE_STAGES)} stages · Profile: {profile_label}")
+    print(
+        f"Detector pipeline: {len(PIPELINE_STAGES)} ordered stages "
+        f"· analyzer profile={profile_label}"
+    )
 
 
 def render_resource_warnings(lines: Sequence[str], *, run_ctx: StaticRunContext) -> None:
@@ -267,7 +270,24 @@ def render_app_completion(
             or (elapsed_seconds or 0.0) >= 90.0
             or artifact_count > 20
         )
+
+        def _emit_large_artifact_split_notice() -> None:
+            if artifact_count < 15:
+                return
+            friendly = (label or pkg or "app").strip()
+            print(
+                status_messages.status(
+                    (
+                        f"Large split/artifact set detected: {friendly} has {artifact_count} APK artifacts. "
+                        "Detector pipeline runs per scanned APK row when splits are enabled; "
+                        "post-run analyse_string_payload summary is base-APK only."
+                    ),
+                    level="warn",
+                )
+            )
+
         if very_large_batch_mode:
+            _emit_large_artifact_split_notice()
             return elapsed
         if large_batch_mode:
             artifact_label = f"{artifact_count} APK{'s' if artifact_count != 1 else ''}"
@@ -278,6 +298,7 @@ def render_app_completion(
                 else:
                     header_only = label
             print(colors.apply(header_only, palette.banner_primary, bold=True))
+            _emit_large_artifact_split_notice()
             if pkg and label != pkg:
                 print(
                     status_messages.status(
@@ -293,10 +314,14 @@ def render_app_completion(
             if h_count or m_count:
                 compact_parts.append(f"high={h_count}")
                 compact_parts.append(f"med={m_count}")
+            final_row = summary.get("final_app_status") if isinstance(summary.get("final_app_status"), str) else ""
+            if final_row.strip():
+                compact_parts.append(f"status={final_row.strip()}")
             print(" | ".join(compact_parts))
             print()
         else:
             print(colors.apply(header_line, palette.banner_primary, bold=True))
+            _emit_large_artifact_split_notice()
             # Avoid redundant "Package:" line when the header already includes it.
             show_pkg = bool(pkg)
             if show_pkg and pkg:
@@ -323,7 +348,7 @@ def render_app_completion(
             print(
                 status_messages.status(
                     (
-                        f"Checks: ok={ok_count} warn={warn_count} "
+                        f"Pipeline stages: ok={ok_count} warn={warn_count} "
                         f"policy_fail={policy_fail_count} finding_fail={finding_fail_count} "
                         f"error={error_count} skipped={skipped_count}"
                     ),
@@ -332,6 +357,43 @@ def render_app_completion(
                     show_prefix=False,
                 )
             )
+            final_token = summary.get("final_app_status") if isinstance(summary.get("final_app_status"), str) else ""
+            if final_token.strip():
+                print(
+                    status_messages.status(
+                        f"Final app status: {final_token.strip()}",
+                        level="info",
+                        show_icon=False,
+                        show_prefix=False,
+                    )
+                )
+            skips_preview = summary.get("skipped_detectors")
+            if isinstance(skips_preview, Sequence) and not isinstance(skips_preview, (str, bytes)):
+                preview_lines = []
+                for entry in skips_preview:
+                    if not isinstance(entry, Mapping) or len(preview_lines) >= 4:
+                        break
+                    det = str(entry.get("detector") or entry.get("section") or "?").strip()
+                    rs = str(entry.get("reason") or "").strip()
+                    preview_lines.append(f"{det}: {rs}" if rs else det)
+                if preview_lines:
+                    print(
+                        status_messages.status(
+                            "Skipped detectors: " + " | ".join(preview_lines),
+                            level="info",
+                            show_icon=False,
+                            show_prefix=False,
+                        )
+                    )
+            if artifact_count > 1:
+                print(
+                    status_messages.status(
+                        "String rollup note: analyse_string_payload is base-APK only for this app row.",
+                        level="info",
+                        show_icon=False,
+                        show_prefix=False,
+                    )
+                )
             print(
                 status_messages.status(
                     findings_text,
@@ -353,14 +415,6 @@ def render_app_completion(
         )
         if show_slow_details:
             print(colors.apply("Slow: ", palette.hint, bold=True) + "; ".join(slow_parts))
-
-        outlier = artifact_count > 20
-        if outlier:
-            print("⚠ OUTLIER ARTIFACT COUNT")
-            print(
-                f"Artifacts: {artifact_count} (expected <= 20)   Time: {elapsed}   "
-                "High split artifact cardinality; inspect selection manifest (press D for selection details)."
-            )
 
         if error_count > 0 or (not large_batch_mode and fail_count > 0) or (p0 > 0 and not large_batch_mode) or (large_batch_mode and detail_needed):
             failing: list[str] = []
@@ -398,7 +452,7 @@ def render_app_completion(
             print()
         return elapsed
 
-    status_line = "Checks complete"
+    status_line = "Pipeline stages"
     if executed is not None and total is not None:
         status_line += f": {executed}/{total} executed"
     status_line += f" · ok={ok_count} warn={warn_count} policy_fail={policy_fail_count}"

@@ -21,6 +21,8 @@ from ...core.findings import SeverityLevel
 from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunParameters, ScopeSelection
+
+from .run_health import merge_skipped_detectors, rollup_parse_fallback_signals
 from .heartbeat_state import set_stage as _hb_set_stage
 
 
@@ -100,38 +102,41 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
     detector_executed = 0
     detector_skipped = 0
     total_duration_sec = 0.0
+    skipped_detector_rows_collect: list[Mapping[str, object]] = []
 
     for artifact in app_result.artifacts:
         report = artifact.report
         metadata = report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
         summary = metadata.get("pipeline_summary") if isinstance(metadata.get("pipeline_summary"), Mapping) else None
 
-        if not isinstance(summary, Mapping):
-            continue
+        if isinstance(summary, Mapping):
+            detector_total += int(summary.get("detector_total", 0) or 0)
+            detector_executed += int(summary.get("detector_executed", 0) or 0)
+            detector_skipped += int(summary.get("detector_skipped", 0) or 0)
+            total_duration_sec += float(summary.get("total_duration_sec", 0.0) or 0.0)
 
-        detector_total += int(summary.get("detector_total", 0) or 0)
-        detector_executed += int(summary.get("detector_executed", 0) or 0)
-        detector_skipped += int(summary.get("detector_skipped", 0) or 0)
-        total_duration_sec += float(summary.get("total_duration_sec", 0.0) or 0.0)
+            for key, value in (summary.get("status_counts") or {}).items():
+                status_counts[str(key)] += int(value or 0)
 
-        for key, value in (summary.get("status_counts") or {}).items():
-            status_counts[str(key)] += int(value or 0)
+            for key, value in (summary.get("severity_counts") or {}).items():
+                severity_counts[str(key)] += int(value or 0)
 
-        for key, value in (summary.get("severity_counts") or {}).items():
-            severity_counts[str(key)] += int(value or 0)
+            for key, target in (
+                ("policy_fail_detectors", policy_fail_detectors),
+                ("finding_fail_detectors", finding_fail_detectors),
+                ("error_detectors", error_detectors),
+            ):
+                payload = summary.get(key)
+                if isinstance(payload, list):
+                    target.extend([row for row in payload if isinstance(row, Mapping)])
 
-        for key, target in (
-            ("policy_fail_detectors", policy_fail_detectors),
-            ("finding_fail_detectors", finding_fail_detectors),
-            ("error_detectors", error_detectors),
-        ):
-            payload = summary.get(key)
+            payload = summary.get("slowest_detectors")
             if isinstance(payload, list):
-                target.extend([row for row in payload if isinstance(row, Mapping)])
+                slowest.extend([row for row in payload if isinstance(row, Mapping)])
 
-        payload = summary.get("slowest_detectors")
-        if isinstance(payload, list):
-            slowest.extend([row for row in payload if isinstance(row, Mapping)])
+            skips = summary.get("skipped_detectors")
+            if isinstance(skips, list):
+                skipped_detector_rows_collect.extend(row for row in skips if isinstance(row, Mapping))
 
     slowest_sorted = sorted(
         slowest,
@@ -142,6 +147,32 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
     policy_fail_count = len(policy_fail_detectors)
     finding_fail_count = len(finding_fail_detectors)
 
+    skipped_detectors_merged = merge_skipped_detectors(skipped_detector_rows_collect)
+
+    fallback_meta = rollup_parse_fallback_signals(app_result)
+
+    error_detector_events = len(error_detectors)
+
+    merged_error_detectors_seen: set[tuple[str, str]] = set()
+    dedup_errors: list[dict[str, object]] = []
+    for row in error_detectors:
+        if not isinstance(row, Mapping):
+            continue
+        detector = str(row.get("detector") or row.get("section") or "").strip()
+        reason = str(row.get("reason") or "").strip()
+        key = (detector, reason)
+        if key in merged_error_detectors_seen:
+            continue
+        merged_error_detectors_seen.add(key)
+        dedup_errors.append(dict(row))
+
+    detector_error_counts = Counter()
+    for row in error_detectors:
+        if not isinstance(row, Mapping):
+            continue
+        detector = str(row.get("detector") or row.get("section") or "?").strip() or "?"
+        detector_error_counts[detector] += 1
+
     return {
         "detector_total": detector_total,
         "detector_executed": detector_executed,
@@ -151,14 +182,23 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
         "severity_counts": {k: int(v) for k, v in severity_counts.items()},
         "policy_fail_count": policy_fail_count,
         "finding_fail_count": finding_fail_count,
-        "error_count": len(error_detectors),
+        "error_count": error_detector_events,
+        "detector_error_events": error_detector_events,
+        "detector_error_counts_by_id": dict(detector_error_counts),
         "policy_fail_detectors": policy_fail_detectors,
         "finding_fail_detectors": finding_fail_detectors,
-        "error_detectors": error_detectors,
+        "error_detectors": dedup_errors,
         "slowest_detectors": slowest_sorted[:3],
         "ok_count": int(status_counts.get("OK", 0)),
         "warn_count": int(status_counts.get("WARN", 0)),
         "fail_count": int(policy_fail_count + finding_fail_count),
+        "skipped_detectors": skipped_detectors_merged,
+        "skipped_detectors_raw_events": len(skipped_detector_rows_collect),
+        "skipped_detectors_unique_rows": len(skipped_detectors_merged),
+        "resource_fallback_used_artifacts": fallback_meta["resource_fallback_used_artifacts"],
+        "resource_bounds_warning_artifacts": fallback_meta["resource_bounds_warning_artifacts"],
+        "label_parse_signal_artifacts": fallback_meta["label_parse_signal_artifacts"],
+        "parse_fallback_events_est": fallback_meta["parse_fallback_events_est"],
     }
 
 

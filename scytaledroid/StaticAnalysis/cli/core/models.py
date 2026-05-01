@@ -249,6 +249,11 @@ class AppRunResult:
     persistence_exception_class: str | None = None
     persistence_transaction_state: str | None = None
     persistence_failure_stage: str | None = None
+    #: Last successful ``persist_run_summary`` finding counts for DB reconciliation / ``run_health``.
+    persistence_runtime_findings: int | None = None
+    persistence_persisted_findings: int | None = None
+    persistence_findings_capped_total: int | None = None
+    persistence_findings_capped_by_detector: dict[str, int] | None = None
     harvest_manifest_path: str | None = None
     harvest_capture_status: str | None = None
     harvest_persistence_status: str | None = None
@@ -259,6 +264,8 @@ class AppRunResult:
     exploratory_only: bool = False
     research_block_reasons: tuple[str, ...] = tuple()
     base_string_data: Mapping[str, object] | None = None
+    #: ``complete`` | ``partial`` | ``failed`` | ``skipped`` (set after per-app scan).
+    final_status: str | None = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()
@@ -303,6 +310,10 @@ class RunOutcome:
     dry_run_skipped: int = 0
     return_to_main_menu: bool = False
     deferred_diagnostics: dict[str, object] = field(default_factory=dict)
+    #: Session-level rollup of ``AppRunResult.final_status`` values (``complete``, ``partial``, ...).
+    run_aggregate_status: str | None = None
+    #: Absolute or relative path to ``run_health.json`` when emitted by the CLI finalize path.
+    run_health_json_path: str | None = None
 
     @property
     def duration_seconds(self) -> float:

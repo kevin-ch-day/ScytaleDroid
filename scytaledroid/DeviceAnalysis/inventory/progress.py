@@ -10,8 +10,9 @@ from scytaledroid.Utils.DisplayUtils.colors import ansi
 
 from scytaledroid.DeviceAnalysis.device_analysis_settings import INVENTORY_STALE_SECONDS
 from scytaledroid.DeviceAnalysis.inventory.cli_labels import (
+    NON_ROOT_POLICY_CARD_LINE,
     PROGRESS_FOOTER_TIP,
-    SECTION_HEADLINE,
+    SNAPSHOT_PANEL_HEADLINE,
 )
 
 
@@ -82,9 +83,9 @@ def format_inventory_elapsed(seconds: float | None, *, absent: str = "") -> str:
     if days > 0:
         return f"{days}d{hours:02d}h{mins:02d}m"
     if hours > 0:
-        return f"{hours}h{mins:02d}m{secs:02d}s"
+        return f"{hours}h {mins:02d}m {secs:02d}s"
     if mins > 0:
-        return f"{mins}m{secs:02d}s"
+        return f"{mins}m {secs:02d}s"
     return f"{secs}s"
 
 
@@ -328,8 +329,8 @@ def render_snapshot_block(
     device_text = (serial or "unknown").strip()
     prev_id = getattr(previous_meta, "snapshot_id", None) if previous_meta else None
 
-    # Compact header with deterministic field ordering.
-    print(text_blocks.headline(SECTION_HEADLINE, width=70))
+    # Compact header — not SECTION_HEADLINE, so we do not repeat the scope menu title.
+    print(text_blocks.headline(SNAPSHOT_PANEL_HEADLINE, width=70))
     if colors.colors_enabled():
         palette = colors.get_palette()
         def _style(line: str) -> str:
@@ -346,17 +347,8 @@ def render_snapshot_block(
     print(_style(f"Last sync    : {last_sync_line}"))
     print(_style(f"Packages     : {pkg_text}"))
     print(_style(f"Mode         : {mode_text}"))
-
     if allow_fallbacks is True:
-        warn_key = f"{device_text}|{mode_text}"
-        if warn_key not in _FALLBACK_WARNED_KEYS:
-            _FALLBACK_WARNED_KEYS.add(warn_key)
-            print(
-                status_messages.status(
-                    "Non-root collection active; harvest remains policy-filtered.",
-                    level="warn",
-                )
-            )
+        print(_style(f"Policy       : {NON_ROOT_POLICY_CARD_LINE}"))
     print(status_messages.status(PROGRESS_FOOTER_TIP, level="info"))
 
 
@@ -366,6 +358,3 @@ __all__ = [
     "mark_live_inventory_progress_done",
     "render_snapshot_block",
 ]
-
-
-_FALLBACK_WARNED_KEYS: set[str] = set()

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-from scytaledroid.StaticAnalysis.cli.execution import analytics, results, results_formatters
+from scytaledroid.StaticAnalysis.cli.execution import analytics, results, results_dedupe, results_formatters
 from scytaledroid.StaticAnalysis.cli.execution.view import DetailBuffer
 from scytaledroid.StaticAnalysis.cli.core.models import (
     AppRunResult,
@@ -31,7 +31,7 @@ def test_dedupe_profile_entries_removes_duplicate_packages():
         {"value": 5},
     ]
 
-    deduped = results._dedupe_profile_entries(entries)
+    deduped = results_dedupe.dedupe_profile_entries(entries)
 
     assert len(deduped) == 4  # pkg.alpha, Alias, pkg.beta, anonymous entry
     assert deduped[0]["value"] == 1

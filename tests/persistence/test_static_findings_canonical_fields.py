@@ -23,6 +23,7 @@ def test_persist_static_analysis_findings_writes_masvs_area_and_control_id(monke
                 "finding_id": "f-1",
                 "status": "OPEN",
                 "severity": "High",
+                "severity_raw": "Critical",
                 "category": "PLATFORM",
                 "title": "Exported activity without permission",
                 "tags": "{}",
@@ -44,12 +45,14 @@ def test_persist_static_analysis_findings_writes_masvs_area_and_control_id(monke
     params = recorded["params"]
     assert "masvs_area" in sql
     assert "masvs_control_id" in sql
+    assert "severity_raw" in sql
     assert params == [
         (
             99,
             "f-1",
             "OPEN",
             "High",
+            "Critical",
             "PLATFORM",
             "Exported activity without permission",
             "{}",
@@ -96,9 +99,9 @@ def test_build_findings_context_derives_control_summary_from_canonical_rows():
             },
         ],
         finding_rows=[
-            {"masvs": "PLATFORM"},
-            {"masvs": "NETWORK"},
-            {"masvs": None},
+            {"masvs": "PLATFORM", "severity": "Medium"},
+            {"masvs": "NETWORK", "severity": "Medium"},
+            {"masvs": None, "severity": "Info"},
         ],
         severity_counter=Counter({"Medium": 2, "Info": 1}),
     )

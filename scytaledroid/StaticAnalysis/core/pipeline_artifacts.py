@@ -80,6 +80,13 @@ def build_pipeline_trace(
                 if text and text not in notes:
                     notes.append(text)
 
+        if result.status is Badge.SKIPPED:
+            value = metrics.get("summary") if isinstance(metrics, Mapping) else None
+            if isinstance(value, str):
+                text = value.strip()
+                if text and text not in notes:
+                    notes.append(text)
+
         if notes:
             entry["notes"] = tuple(notes)
 
@@ -162,6 +169,7 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
             metrics_payload = _serialise_metrics(result.metrics)
             reason = _first_non_empty(
                 metrics_payload.get("skip_reason"),
+                metrics_payload.get("summary"),
                 metrics_payload.get("error"),
                 *(note.strip() for note in result.notes if isinstance(note, str)),
             )

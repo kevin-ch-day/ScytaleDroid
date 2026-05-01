@@ -314,7 +314,9 @@ def _render_attempt_history(session_label: str | None) -> None:
     try:
         rows = core_q.run_sql(
             """
-            SELECT id, COALESCE(run_started_utc, ended_at_utc, created_at) AS ts, is_canonical
+            SELECT id, COALESCE(run_started_utc, ended_at_utc, created_at) AS ts, is_canonical,
+                   COALESCE(NULLIF(status, ''), 'UNKNOWN') AS run_status,
+                   COALESCE(abort_reason, '') AS abort_reason
             FROM static_analysis_runs
             WHERE session_label=%s
             ORDER BY id DESC
@@ -349,6 +351,12 @@ def _render_attempt_history(session_label: str | None) -> None:
 
         canonical_flag = "canonical" if int(row[2] or 0) else "archived"
         print(f"  - {attempt_id} ({canonical_flag}) {timestamp}")
+        run_status = str(row[3] if len(row) > 3 else "").strip() or "UNKNOWN"
+        abort_reason = str(row[4] if len(row) > 4 else "").strip()
+        detail = f"static_run.status={run_status}"
+        if abort_reason:
+            detail += f" · abort_reason={abort_reason}"
+        print(f"    {detail}")
 
 
 def _compact_footer_ok(
@@ -720,7 +728,7 @@ def _render_persistence_footer(
             reason = (
                 f"missing canonical tables: {missing_preview}{backend_note}".strip()
                 if missing
-                else "see logs"
+                else "persist/export step reported errors (review warnings above)"
             )
             print(f"  {'status'.ljust(width)} : ERROR ({reason})")
     else:
