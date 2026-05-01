@@ -5,7 +5,10 @@ from scytaledroid.Database.db_queries import views
 
 def test_web_app_directory_prefers_completed_canonical_static_rows() -> None:
     sql = views.CREATE_V_WEB_APP_DIRECTORY
-    assert "SELECT package_name COLLATE utf8mb4_general_ci AS package_name\n  FROM apps\n  UNION" in sql
+    assert (
+        "SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name\n"
+        "  FROM apps\n  UNION" in sql
+    )
     assert "UPPER(COALESCE(sar2.status, '')) = 'COMPLETED'" in sql
     assert "UPPER(COALESCE(sar2.run_class, '')) = 'CANONICAL'" in sql
 

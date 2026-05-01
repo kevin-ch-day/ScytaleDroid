@@ -68,11 +68,11 @@ FROM (
     JOIN apps a2 ON a2.id = av2.app_id
     GROUP BY a2.package_name
   ) preferred
-    ON preferred.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(preferred.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND preferred.preferred_static_run_id = sar.id
 ) latest
 LEFT JOIN apps a
-  ON a.package_name COLLATE utf8mb4_unicode_ci = latest.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN risk_scores rs
   ON LOWER(CONVERT(rs.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
    = LOWER(CONVERT(latest.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
@@ -113,6 +113,10 @@ SELECT
   COALESCE(canonical.med, 0) AS canonical_med,
   COALESCE(canonical.low, 0) AS canonical_low,
   COALESCE(canonical.info, 0) AS canonical_info,
+  latest.run_findings_persisted_rowcount,
+  latest.findings_runtime_total,
+  latest.findings_capped_total,
+  latest.findings_capped_by_detector_json,
   'static_analysis_findings' AS canonical_surface,
   summary.summary_id AS summary_row_id,
   summary.summary_created_at,
@@ -129,6 +133,10 @@ FROM (
     sar.id AS static_run_id,
     sar.session_stamp,
     sar.session_label,
+    sar.findings_total AS run_findings_persisted_rowcount,
+    sar.findings_runtime_total,
+    sar.findings_capped_total,
+    sar.findings_capped_by_detector_json,
     a.package_name,
     av.version_name,
     av.version_code
@@ -155,11 +163,11 @@ FROM (
     JOIN apps a2 ON a2.id = av2.app_id
     GROUP BY a2.package_name
   ) preferred
-    ON preferred.package_name COLLATE utf8mb4_unicode_ci = a.package_name COLLATE utf8mb4_unicode_ci
+    ON CONVERT(preferred.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
    AND preferred.preferred_static_run_id = sar.id
 ) latest
 LEFT JOIN apps a
-  ON a.package_name COLLATE utf8mb4_unicode_ci = latest.package_name COLLATE utf8mb4_unicode_ci
+  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN (
   SELECT
     saf.run_id AS static_run_id,
