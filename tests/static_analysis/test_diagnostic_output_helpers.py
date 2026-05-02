@@ -406,6 +406,65 @@ def test_fetch_db_masvs_summary_prefers_linked_static_summary(monkeypatch):
     assert rows[0]["area"] == "PLATFORM"
 
 
+def test_fetch_db_masvs_summary_none_does_not_touch_legacy_without_env(monkeypatch):
+    def fake_run_sql(query, params=None, fetch=None, dictionary=False):
+        sql = " ".join(str(query).split()).lower()
+        if "from static_analysis_runs" in sql and "order by id desc limit 1" in sql:
+            return None
+        if "max(run_id)" in sql and "runs" in sql:
+            raise AssertionError("legacy runs table must not be queried without SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK")
+        raise AssertionError(f"unexpected SQL: {query}")
+
+    monkeypatch.delenv("SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK", raising=False)
+    monkeypatch.setattr(masvs_summary_report.core_q, "run_sql", fake_run_sql)
+
+    assert masvs_summary_report.fetch_db_masvs_summary(None) is None
+
+
+def test_render_persistence_footer_group_scope_ok_when_only_canonical_findings(monkeypatch, capsys):
+    """Legacy ``runs`` / ``findings`` / ``buckets`` / ``metrics`` may be empty; session still OK."""
+    audit = SimpleNamespace(
+        counts={},
+        is_group_scope=True,
+        run_id=123,
+        is_orphan=False,
+        static_run_id=999,
+    )
+
+    def fake_run_sql(query, params=None, fetch=None):
+        sql = " ".join(str(query).split()).lower()
+        if "select run_id from runs where session_stamp" in sql:
+            return []
+        if "static_analysis_findings f" in sql and "join static_analysis_runs sar" in sql:
+            return (2400,)
+        if "select snapshot_id from permission_audit_snapshots where snapshot_key" in sql:
+            return (1,)
+        if "select count(*) from permission_audit_snapshots where static_run_id in" in sql:
+            return (1,)
+        if "select count(distinct snapshot_id) from permission_audit_apps where static_run_id in" in sql:
+            return (1,)
+        if "select count(*) from permission_audit_apps where static_run_id in" in sql:
+            return (120,)
+        if "from static_string_sample_sets" in sql:
+            return None
+        if "select count(*) from" in sql:
+            return (10,)
+        return (0,)
+
+    monkeypatch.setattr(db_verification.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(db_verification, "_resolve_static_run_ids", lambda *_args, **_kwargs: list(range(100, 220)))
+    monkeypatch.setattr(db_verification, "collect_static_run_counts", lambda *_args, **_kwargs: audit)
+    monkeypatch.setattr(db_verification, "_table_has_column", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(db_verification, "compact_success_output_enabled", lambda: False)
+
+    db_verification._render_persistence_footer("20260502-all-full")
+    out = capsys.readouterr().out
+    assert "canonical_session_rows=2400" in out
+    assert "db_verification" in out
+    assert "ERROR (missing buckets, findings, metrics)" not in out
+    assert "OK (canonical static persistence)" in out or "OK (group scope)" in out
+
+
 def test_render_persistence_footer_derives_snapshot_count_from_permission_apps(monkeypatch, capsys):
     audit = SimpleNamespace(
         counts={},

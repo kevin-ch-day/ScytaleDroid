@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from contextvars import ContextVar
 from collections.abc import Sequence
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 
-from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.prompts import (
     InventoryDeltaSummary,
     describe_inventory_state,
 )
+from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels
 from scytaledroid.DeviceAnalysis.services import device_service, inventory_service
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_utils as log

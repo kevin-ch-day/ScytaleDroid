@@ -27,10 +27,10 @@ from scytaledroid.Publication.contract_inputs import (
     display_name_map_path,
     load_publication_contracts,
 )
-from scytaledroid.Utils.LatexUtils import render_tabular_only
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.IO.atomic_write import atomic_copyfile, atomic_write_text
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
+from scytaledroid.Utils.LatexUtils import render_tabular_only
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def _sha256_file(p: Path) -> str:

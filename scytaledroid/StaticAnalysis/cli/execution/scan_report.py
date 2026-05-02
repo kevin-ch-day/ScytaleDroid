@@ -21,9 +21,8 @@ from ...core.findings import SeverityLevel
 from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunParameters, ScopeSelection
-
-from .run_health import merge_skipped_detectors, rollup_parse_fallback_signals
 from .heartbeat_state import set_stage as _hb_set_stage
+from .run_health import merge_skipped_detectors, rollup_parse_fallback_signals
 
 
 def _append_resource_warning(

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from hashlib import sha256
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 
 from scytaledroid.Config import app_config

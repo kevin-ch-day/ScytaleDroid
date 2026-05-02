@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from scytaledroid.Utils.DisplayUtils import status_messages
-from .session_finalizer import finalize_session_run_map
 
 from ..core.models import RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
+from .session_finalizer import finalize_session_run_map
 
 
 @dataclass(frozen=True)
@@ -169,7 +169,11 @@ def run_post_summary_postprocessing(
                         parity_counts["skipped"] += 1
                     else:
                         parity_counts["changed"] += 1
-                    if index == 1 or index == total or index % 10 == 0:
+                    small_cohort = total <= 15
+                    parity_emit = index == 1 or index == total
+                    if not small_cohort:
+                        parity_emit = parity_emit or (index % 10 == 0)
+                    if parity_emit:
                         print(
                             status_messages.status(
                                 (

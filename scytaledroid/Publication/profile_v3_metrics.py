@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from scytaledroid.DynamicAnalysis.run_profile_norm import (
     RunProfileConflictError,
     phase_from_normalized_profile,

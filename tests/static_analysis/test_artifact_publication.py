@@ -114,6 +114,9 @@ def test_publish_persisted_artifacts_governance_downgrade_does_not_emit_persiste
     tmp_path: Path, capsys,
 ) -> None:
     """MISSING_GOVERNANCE is printed but must not land in warnings (avoids false persistence_failed)."""
+    import scytaledroid.StaticAnalysis.cli.execution.artifact_publication as ap
+
+    ap._GOVERNANCE_DOWNGRADE_SHOWN.clear()
     report_path = tmp_path / "report.json"
     report_path.write_text("{}", encoding="utf-8")
 
@@ -144,3 +147,43 @@ def test_publish_persisted_artifacts_governance_downgrade_does_not_emit_persiste
     assert "Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)" in out
     assert "Core persistence still applies" in out
     assert result.warnings == []
+
+
+def test_publish_persisted_artifacts_governance_banner_deduped_per_failure_key(
+    tmp_path: Path, capsys,
+) -> None:
+    import scytaledroid.StaticAnalysis.cli.execution.artifact_publication as ap
+
+    ap._GOVERNANCE_DOWNGRADE_SHOWN.clear()
+    report_path = tmp_path / "report.json"
+    report_path.write_text("{}", encoding="utf-8")
+    common = dict(
+        base_report=SimpleNamespace(metadata={}),
+        payload={},
+        static_run_id=1,
+        profile="full",
+        scope="group",
+        report_path=report_path,
+        paper_grade_requested=True,
+        required_paper_artifacts=("static_baseline_json",),
+        ended_at_utc="2026-05-01T00:00:00Z",
+        abort_signal=None,
+        write_baseline_json_fn=lambda *_a, **_k: tmp_path / "b1.json",
+        write_dynamic_plan_json_fn=lambda *_a, **_k: tmp_path / "p1.json",
+        governance_ready_fn=lambda: (
+            False,
+            "governance_query_failed:Dedicated permission-intel DB is not configured.",
+        ),
+        write_manifest_evidence_fn=lambda *_a, **_k: tmp_path / "m1.json",
+        build_artifact_registry_entries_fn=lambda **_k: [],
+        record_artifacts_fn=lambda *_k: None,
+        run_sql_fn=lambda *_a, **_k: [],
+        refresh_static_run_manifest_fn=lambda *_a, **_k: True,
+        finalize_static_run_fn=lambda **_k: None,
+    )
+
+    publish_persisted_artifacts(package_name="com.one.app", **common)
+    publish_persisted_artifacts(package_name="com.two.app", **common)
+    out = capsys.readouterr().out
+    assert out.count("Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)") == 1
+    assert out.count("Dedicated permission-intel DB is not configured") == 1

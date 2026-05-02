@@ -17,7 +17,6 @@ from typing import Any
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import MESSAGING_PACKAGES
 from scytaledroid.DynamicAnalysis.templates.category_map import category_for_package
 
-
 _CHAT_LIKE_BASELINE_PACKAGES = {
     "com.snapchat.android",
 }

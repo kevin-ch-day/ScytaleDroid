@@ -5,26 +5,34 @@ from __future__ import annotations
 import os
 import traceback
 
-from scytaledroid.Utils.DisplayUtils import error_panels, menu_utils, prompt_utils, status_messages, summary_cards
+from scytaledroid.Utils.DisplayUtils import (
+    error_panels,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    summary_cards,
+)
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
 from .menu_actions import (
-    fetch_tier1_status as fetch_tier1_status,
     fetch_publication_status,
     handle_cross_analysis_summary,
     handle_export_freeze_anchored_csvs,
     handle_generate_exploratory_risk_scoring,
-    handle_generate_publication_results_numbers,
-    handle_generate_profile_v3_phase2_exports,
     handle_generate_profile_v3_exports,
-    handle_profile_v3_integrity_gates,
-    handle_lint_profile_v2_bundle,
-    handle_generate_publication_scientific_qa,
+    handle_generate_profile_v3_phase2_exports,
     handle_generate_publication_pipeline_audit,
+    handle_generate_publication_results_numbers,
+    handle_generate_publication_scientific_qa,
+    handle_lint_profile_v2_bundle,
     handle_print_manuscript_snapshot,
+    handle_profile_v3_integrity_gates,
     handle_refresh_phase_e_bundle,
     handle_write_canonical_publication_bundle,
     view_saved_reports,
+)
+from .menu_actions import (
+    fetch_tier1_status as fetch_tier1_status,
 )
 
 

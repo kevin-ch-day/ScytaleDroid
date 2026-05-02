@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from collections.abc import Callable, Mapping
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
@@ -15,12 +15,12 @@ from scytaledroid.Utils.System import output_prefs
 
 from ...modules.permissions import collect_permissions_and_sdk
 from ...modules.permissions.audit import PermissionAuditAccumulator
+from ...persistence.reports import load_report
 from ...session import make_session_stamp, normalize_session_stamp
 from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.models import RunParameters, ScopeSelection
 from ..core.run_lifecycle import finalize_static_run
 from ..persistence.run_summary import create_static_run_ledger
-from ...persistence.reports import load_report
 from .permission_view import (
     render_compact_notice,
     render_permission_persist_failed,

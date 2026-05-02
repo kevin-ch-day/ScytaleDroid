@@ -230,87 +230,6 @@ def compute_cvss_base(rule_id: str | None) -> tuple[str | None, float | None, di
     return vector, score, meta
 
 
-def persist_findings(run_id: int, rows: Sequence[dict[str, Any]], *, static_run_id: int | None = None) -> bool:
-    """Persist normalized findings for a static run.
-
-    Both run_id and static_run_id are written where supported so newer schemas
-    can key by static_analysis_runs.id while reports still include run_id.
-    """
-    require_canonical_schema()
-    if not _has_column("findings", "static_run_id"):
-        log.error(
-            "static_run_id column missing for findings; run migrations.",
-            category="db",
-        )
-        return False
-    try:
-        if static_run_id is None:
-            log.error(
-                "static_run_id missing for findings; cannot persist normalized findings.",
-                category="db",
-            )
-            return False
-        core_q.run_sql(
-            "DELETE FROM findings WHERE run_id=%s OR static_run_id=%s",
-            (run_id, static_run_id),
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            f"Failed to prune findings for run_id={run_id}: {exc}",
-            category="static_analysis",
-        )
-    try:
-        for row in rows:
-            core_q.run_sql(
-                """
-                INSERT INTO findings (
-                    run_id, static_run_id, severity, masvs, cvss, kind, evidence, module_id,
-                    cvss_v40_b_score, cvss_v40_bt_score, cvss_v40_be_score, cvss_v40_bte_score,
-                    cvss_v40_b_vector, cvss_v40_bt_vector, cvss_v40_be_vector, cvss_v40_bte_vector,
-                    cvss_v40_meta, analyst_tag, evidence_path, evidence_offset, evidence_preview, rule_id
-                ) VALUES (
-                    %s,%s,%s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s,
-                    %s,%s,%s,%s,
-                    %s,%s,%s,%s,%s,%s
-                )
-                """,
-                (
-                    run_id,
-                    static_run_id,
-                    row.get("severity"),
-                    row.get("masvs"),
-                    row.get("cvss"),
-                    row.get("kind"),
-                    row.get("evidence"),
-                    row.get("module_id"),
-                    row.get("cvss_v40_b_score"),
-                    row.get("cvss_v40_bt_score"),
-                    row.get("cvss_v40_be_score"),
-                    row.get("cvss_v40_bte_score"),
-                    row.get("cvss_v40_b_vector"),
-                    row.get("cvss_v40_bt_vector"),
-                    row.get("cvss_v40_be_vector"),
-                    row.get("cvss_v40_bte_vector"),
-                    row.get("cvss_v40_meta"),
-                    None,
-                    row.get("evidence_path"),
-                    row.get("evidence_offset"),
-                    row.get("evidence_preview"),
-                    row.get("rule_id"),
-                ),
-            )
-        return True
-    except Exception as exc:  # pragma: no cover - defensive
-        message = (
-            f"Failed to persist findings for run_id={run_id} "
-            f"static_run_id={static_run_id}: {exc}"
-        )
-        log.error(message, category="db")
-        log.error(message, category="static_analysis")
-        return False
-
-
 def _has_column(_table: str, _column: str) -> bool:
     """Return True for canonical schema; kept for test overrides."""
     return True
@@ -348,7 +267,6 @@ __all__ = [
     "compute_cvss_base",
     "derive_masvs_tag",
     "extract_rule_hint",
-    "persist_findings",
     "persist_masvs_controls",
     "build_cvss_vector",
 ]

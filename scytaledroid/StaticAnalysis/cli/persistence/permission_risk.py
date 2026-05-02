@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Database.db_func.static_analysis import (
     risk_scores as risk_scores_db,
+)
+from scytaledroid.Database.db_func.static_analysis import (
     static_permission_risk as permission_risk_db,
 )
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .utils import canonical_decimal_text, first_text, require_canonical_schema

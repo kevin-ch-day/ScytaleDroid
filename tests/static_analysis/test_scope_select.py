@@ -55,7 +55,7 @@ def test_select_category_scope_keeps_newest_session(monkeypatch):
         "20251026-202635",
         "20251026-202635",
     ]
-    assert any("skipped 1 older capture" in message for message in logged)
+    assert any("1 older capture" in message and "excluded" in message.lower() for message in logged)
 
 
 @pytest.mark.unit

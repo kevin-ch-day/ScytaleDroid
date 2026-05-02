@@ -65,6 +65,21 @@ def _scalar_total(sql: str) -> int:
     return _safe_int(value)
 
 
+def _canonical_static_findings_session_rows(session_stamp: str) -> int:
+    """Count persisted canonical findings rows for all static runs in a session_stamp."""
+    if not session_stamp:
+        return 0
+    return _scalar_count(
+        """
+        SELECT COUNT(*)
+        FROM static_analysis_findings f
+        JOIN static_analysis_runs sar ON sar.id = f.run_id
+        WHERE sar.session_stamp = %s
+        """,
+        (session_stamp,),
+    )
+
+
 def _format_list(items: Sequence[str], *, limit: int = 5) -> str:
     if not items:
         return ""
@@ -241,7 +256,7 @@ def _status_from_audit(
     elif missing:
         status = "ERROR (missing " + ", ".join(sorted(missing)) + ")"
     else:
-        status = "OK (canonical tables populated)"
+        status = "OK (canonical static persistence)"
 
     if run_status == "FAILED" and (abort_reason or abort_signal):
         return "FAILED (counts may be partial)"
@@ -546,12 +561,15 @@ def _render_persistence_footer(
             tuple(scope_static_ids),
         )
 
+    canonical_finding_rows = _canonical_static_findings_session_rows(session_stamp)
+    # Legacy mirror tables (`findings`, `buckets`, `metrics`, `runs`) are optional once
+    # canonical persistence (`static_analysis_findings`) is populated for the session.
+    findings_evidence_ok = bool(findings) or canonical_finding_rows > 0
+
     required_counts = {
-        "findings": findings,
+        "findings": findings_evidence_ok,
         "static_string_summary": strings_summary,
         "static_string_samples": string_samples_raw,
-        "buckets": buckets,
-        "metrics": metrics,
     }
     missing = [name for name, value in required_counts.items() if not value]
 
@@ -620,15 +638,25 @@ def _render_persistence_footer(
     lines: list[tuple[str, str]] = [
         ("run_scope", scope_note),
         ("runs", f"this_run={run_count}  db_total={runs_total}"),
-        ("findings", f"this_run={findings}  db_total={findings_total}"),
+        (
+            "findings",
+            (
+                f"legacy_table_this_run={findings}  db_total_legacy={findings_total}"
+                + (
+                    f"  canonical_session_rows={canonical_finding_rows}"
+                    if canonical_finding_rows
+                    else ""
+                )
+            ).rstrip(),
+        ),
         ("baseline_summary_rows", f"this_run={findings_summary}  db_total={findings_summary_total}"),
         ("baseline_rule_hits", f"this_run={findings_detail}  db_total={findings_detail_total}"),
         ("static_string_summary", f"this_run={strings_summary}  db_total={strings_summary_total}"),
         ("static_string_samples", f"this_run={string_samples_raw}  db_total={string_samples_raw_total}"),
         ("static_string_selected", f"this_run={string_samples_selected}  db_total={string_samples_selected_total}"),
         ("string_sample_policy", f"version={selection_version or '—'}  policy={policy_version or '—'}"),
-        ("buckets", f"this_run={buckets}  db_total={buckets_total}"),
-        ("metrics", f"this_run={metrics}  db_total={metrics_total}"),
+        ("buckets", f"legacy_optional this_run={buckets}  db_total={buckets_total}"),
+        ("metrics", f"legacy_optional this_run={metrics}  db_total={metrics_total}"),
         ("permission_audit_snapshots", f"this_run={snapshot_count}  db_total={snapshot_total}"),
         ("permission_audit_apps", f"this_run={snapshot_apps}  db_total={snapshot_apps_total}"),
     ]
@@ -722,11 +750,11 @@ def _render_persistence_footer(
         missing_preview = _format_list(missing)
         backend_note = " (backend=sqlite)" if db_engine == "sqlite" else ""
         if missing and db_verification_ok:
-            reason = f"missing canonical tables: {missing_preview}{backend_note}".strip()
+            reason = f"missing required persistence rows: {missing_preview}{backend_note}".strip()
             print(f"  {'status'.ljust(width)} : WARN ({reason})")
         else:
             reason = (
-                f"missing canonical tables: {missing_preview}{backend_note}".strip()
+                f"missing required persistence rows: {missing_preview}{backend_note}".strip()
                 if missing
                 else "persist/export step reported errors (review warnings above)"
             )

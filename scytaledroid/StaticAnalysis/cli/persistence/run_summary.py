@@ -18,9 +18,8 @@ from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_func.static_analysis.persistence_failures import (
     record_static_persistence_failure,
 )
-from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
-from scytaledroid.Persistence import db_writer as _bridge_writer
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
 
@@ -29,33 +28,34 @@ from ...core.models import StaticAnalysisReport
 from ..core.cvss_v4 import apply_profiles
 from ..core.masvs_mapper import rule_to_area, rule_to_control, summarise_controls
 from ..core.rule_ids import derive_rule_id
-from .reports.evidence_report import normalize_evidence
 from . import assembly as _assembly
 from . import manifest_writer as _manifest_writer
 from . import run_writers as _run_writers
+from .contracts import normalize_run_status
 from .dep_export import export_dep_json
 from .finalization_flow import StaticRunFinalizationCallbacks, finalize_persisted_static_run
 from .findings_writer import (
     compute_cvss_base,
     derive_masvs_tag,
     extract_rule_hint,
-    persist_findings,
     persist_masvs_controls,
 )
-from .metrics_writer import compute_metrics_bundle, write_buckets, write_contributors, write_metrics
+from .metrics_writer import compute_metrics_bundle
 from .permission_matrix import persist_permission_matrix
 from .permission_risk import persist_permission_risk
+from .reports.evidence_report import normalize_evidence
 from .run_envelope import prepare_run_envelope
-from .contracts import normalize_run_status
+from .stage_writers import (
+    persist_metrics_and_sections_stage as _stage_persist_metrics_and_sections,
+)
+from .stage_writers import (
+    persist_permission_and_storage_stage as _stage_persist_permission_and_storage,
+)
 from .static_handoff import build_static_handoff, persist_static_handoff
 from .static_section_persistence import persist_static_sections_boundary
 from .static_sections import (
     coerce_severity_counts,
     persist_storage_surface_data,
-)
-from .stage_writers import (
-    persist_metrics_and_sections_stage as _stage_persist_metrics_and_sections,
-    persist_permission_and_storage_stage as _stage_persist_permission_and_storage,
 )
 from .transaction_flow import (
     PersistenceRetryPolicy,
@@ -72,13 +72,7 @@ from .utils import (
     truncate,
 )
 
-_COMPAT_PERSISTENCE_STAGES = frozenset({
-    "run.create",
-    "buckets.write",
-    "findings.write",
-    "metrics.write",
-    "contributors.write",
-})
+_COMPAT_PERSISTENCE_STAGES: frozenset[str] = frozenset()
 
 _JWT_LIKE_RE = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
 _AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
@@ -916,43 +910,6 @@ def _bootstrap_persistence_transaction(
             study_tag=run_context.study_tag,
         )
 
-    if run_id is None:
-        try:
-            run_id = _bridge_writer.create_run(
-                package=stage_context.package_for_run,
-                app_label=run_context.display_name,
-                version_code=run_context.version_code,
-                version_name=run_context.version_name,
-                target_sdk=run_context.target_sdk,
-                session_stamp=stage_context.session_stamp,
-                threat_profile=envelope.threat_profile,
-                env_profile=envelope.env_profile,
-            )
-        except Exception as exc:
-            outcome.compat_export_failed = True
-            outcome.compat_export_stage = "run.create"
-            log.warning(
-                (
-                    "Compat run export failed for "
-                    f"{stage_context.package_for_run}; continuing canonical persistence: {exc}"
-                ),
-                category="static_analysis",
-            )
-            run_id = None
-        if run_id is None and not outcome.compat_export_failed:
-            outcome.compat_export_failed = True
-            outcome.compat_export_stage = "run.create"
-            log.warning(
-                (
-                    "Compat run export returned no identifier for "
-                    f"{stage_context.package_for_run}; continuing canonical persistence."
-                ),
-                category="static_analysis",
-            )
-        elif run_id is not None:
-            created_run_id = True
-            outcome.compat_run_created = True
-
     return _TransactionBootstrapResult(
         run_id=int(run_id) if run_id is not None else None,
         static_run_id=int(static_run_id) if static_run_id is not None else None,
@@ -969,35 +926,18 @@ def _persist_findings_and_correlations_stage(
     findings_context: _PreparedFindingsPersistenceContext,
     raise_db_error,
 ) -> None:
-    if run_id is not None:
+    _ = run_id
+    if findings_context.finding_rows and static_run_id is not None:
         try:
-            ok = write_buckets(int(run_id), stage_context.metrics_bundle.buckets, static_run_id=static_run_id)
-        except Exception as exc:
-            raise_db_error("buckets.write", f"{exc.__class__.__name__}:{exc}")
-        if not ok:
-            raise_db_error("buckets.write", "returned_false")
-
-    if findings_context.finding_rows:
-        if run_id is not None and not persist_findings(
-            int(run_id),
-            findings_context.finding_rows,
-            static_run_id=static_run_id,
-        ):
-            raise_db_error(
-                "findings.write",
-                f"returned_false:run_id={run_id}:static_run_id={static_run_id}",
+            _persist_static_analysis_findings(
+                static_run_id=int(static_run_id),
+                rows=findings_context.canonical_finding_rows,
             )
-        if static_run_id is not None:
-            try:
-                _persist_static_analysis_findings(
-                    static_run_id=int(static_run_id),
-                    rows=findings_context.canonical_finding_rows,
-                )
-            except Exception as exc:
-                raise_db_error(
-                    "canonical_findings.write",
-                    f"{exc.__class__.__name__}:{exc}",
-                )
+        except Exception as exc:
+            raise_db_error(
+                "canonical_findings.write",
+                f"{exc.__class__.__name__}:{exc}",
+            )
 
     if static_run_id and findings_context.correlation_rows:
         try:
@@ -1050,8 +990,6 @@ def _persist_metrics_and_sections_stage(
         outcome=outcome,
         note_db_error=note_db_error,
         raise_db_error=raise_db_error,
-        write_metrics=write_metrics,
-        write_contributors=write_contributors,
         persist_static_sections_wrapper=_persist_static_sections_wrapper,
     )
 

@@ -14,6 +14,7 @@ import re
 import zlib
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
+
 from .allowlist import NoisePolicy
 from .bucketing.classifier import BucketDecision, classify
 from .constants import (

@@ -16,6 +16,8 @@ pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 def _disable_static_run_lock(monkeypatch):
     monkeypatch.setattr(run_dispatch, "_acquire_static_run_lock", lambda *_a, **_k: Path("/tmp/static.lock"))
     monkeypatch.setattr(run_dispatch, "_release_static_run_lock", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
 
 
 def test_launch_scan_flow_builds_run_map_after_render_persistence(monkeypatch) -> None:
@@ -34,7 +36,7 @@ def test_launch_scan_flow_builds_run_map_after_render_persistence(monkeypatch) -
         "run_map_built": False,
     }
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -170,7 +172,7 @@ def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypat
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -226,7 +228,7 @@ def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(m
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -283,7 +285,7 @@ def test_launch_scan_flow_aborted_skips_linkage_and_permission_refresh(monkeypat
         abort_signal="SIGINT",
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     calls = {"run_map": 0, "perm_refresh": 0, "blocked_reason": None, "footer": 0, "rollup": 0}
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
@@ -338,14 +340,13 @@ def test_launch_scan_flow_records_render_failure_and_skips_follow_on_postprocess
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch.logging_engine, "get_error_logger", lambda: _SilentLogger())
 
     calls = {"run_map": 0, "perm_refresh": 0, "blocked_reason": None}
@@ -399,7 +400,7 @@ def test_launch_scan_flow_run_map_failure_raises_in_strict_mode(monkeypatch) -> 
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -440,7 +441,7 @@ def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(mo
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -496,7 +497,7 @@ def test_launch_scan_flow_defers_persistence_footer_until_after_permission_refre
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
@@ -584,7 +585,7 @@ def test_launch_scan_flow_return_to_main_menu_still_runs_required_postprocessing
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)

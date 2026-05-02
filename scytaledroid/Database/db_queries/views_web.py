@@ -46,7 +46,7 @@ FROM (
   FROM apps
   UNION
   SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
-  FROM vw_static_risk_surfaces_latest
+  FROM v_static_risk_surfaces_v1
   UNION
   SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
   FROM vw_static_finding_surfaces_latest
@@ -57,7 +57,7 @@ LEFT JOIN android_app_categories cat
   ON cat.category_id = a.category_id
 LEFT JOIN android_app_profiles ap
   ON ap.profile_key = a.profile_key
-LEFT JOIN vw_static_risk_surfaces_latest latest_risk
+LEFT JOIN v_static_risk_surfaces_v1 latest_risk
   ON CONVERT(latest_risk.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN vw_static_finding_surfaces_latest latest_static
   ON CONVERT(latest_static.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
@@ -1071,7 +1071,7 @@ FROM (
   UNION
   SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM vw_static_finding_surfaces_latest
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM vw_static_risk_surfaces_latest
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM v_static_risk_surfaces_v1
   UNION
   SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM dynamic_sessions
   UNION
@@ -1085,7 +1085,7 @@ LEFT JOIN android_app_profiles ap
   ON ap.profile_key = a.profile_key
 LEFT JOIN vw_latest_apk_per_package latest_apk
   ON CONVERT(latest_apk.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
-LEFT JOIN vw_static_risk_surfaces_latest latest_risk
+LEFT JOIN v_static_risk_surfaces_v1 latest_risk
   ON CONVERT(latest_risk.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN vw_static_finding_surfaces_latest latest_static
   ON CONVERT(latest_static.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
@@ -1186,6 +1186,145 @@ LEFT JOIN (
   ON CONVERT(latest_regime.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci;
 """
 
+# Canonical MASVS matrix row for each app's preferred static_run_id (completed+canonical-first),
+# for Web and reporting consumers (`v_web_app_*`).
+CREATE_V_WEB_APP_MASVS_LATEST_V1 = """
+CREATE OR REPLACE VIEW v_web_app_masvs_latest_v1 AS
+SELECT m.*
+FROM v_static_masvs_matrix_v1 m
+JOIN (
+  SELECT
+    a2.package_name,
+    COALESCE(
+      MAX(CASE
+        WHEN UPPER(COALESCE(sar2.status, '')) = 'COMPLETED'
+         AND UPPER(COALESCE(sar2.run_class, '')) = 'CANONICAL'
+        THEN sar2.id
+      END),
+      MAX(CASE WHEN UPPER(COALESCE(sar2.status, '')) = 'COMPLETED' THEN sar2.id END),
+      MAX(sar2.id)
+    ) AS preferred_static_run_id
+  FROM static_analysis_runs sar2
+  JOIN app_versions av2 ON av2.id = sar2.app_version_id
+  JOIN apps a2 ON a2.id = av2.app_id
+  GROUP BY a2.package_name
+) pref
+  ON CONVERT(pref.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(m.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND pref.preferred_static_run_id = m.static_run_id;
+"""
+
+# Per-run static-to-dynamic readiness (handoff contract + heuristic). Uses ``v_static_handoff_v1`` for
+# the strict handoff-eligibility row (`handoff_row_present`).
+CREATE_V_WEB_APP_STATIC_HANDOFF_READINESS_V1 = """
+CREATE OR REPLACE VIEW v_web_app_static_handoff_readiness_v1 AS
+SELECT
+  sar.id AS static_run_id,
+  a.package_name,
+  sar.session_stamp,
+  sar.session_label,
+  COALESCE(sar.status, 'UNKNOWN') AS run_status,
+  sar.profile AS run_profile_key,
+  UPPER(TRIM(COALESCE(sar.run_class, ''))) AS run_class_uc,
+  CASE
+    WHEN UPPER(TRIM(COALESCE(sar.run_class, ''))) = 'CANONICAL' OR COALESCE(sar.is_canonical, 0) = 1
+      THEN 1
+    ELSE 0
+  END AS is_canonical,
+  sar.findings_total AS run_findings_total,
+  COALESCE(cf.findings_total, 0) AS canonical_findings_rowcount,
+  COALESCE(pm.permission_rows, 0) AS permission_rows,
+  sar.base_apk_sha256,
+  sar.artifact_set_hash,
+  sar.static_handoff_hash,
+  sar.static_handoff_json_path,
+  sar.identity_mode,
+  sar.masvs_mapping_hash,
+  CASE
+    WHEN h.static_run_id IS NOT NULL THEN 'yes'
+    ELSE 'no'
+  END AS handoff_row_present,
+  CASE
+    WHEN h.static_run_id IS NOT NULL
+         AND COALESCE(TRIM(sar.base_apk_sha256), '') <> ''
+         AND COALESCE(TRIM(sar.static_handoff_hash), '') <> ''
+         AND COALESCE(TRIM(sar.identity_mode), '') <> ''
+         AND UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
+      THEN 'yes'
+    WHEN h.static_run_id IS NOT NULL
+      THEN 'weak'
+    ELSE 'no'
+  END AS dynamic_ready_guess,
+  CASE
+    WHEN UPPER(COALESCE(sar.status, '')) IN ('FAILED', 'ABORTED') THEN 'failed'
+    WHEN UPPER(COALESCE(sar.status, '')) IN ('STARTED', 'RUNNING', 'SCANNED', 'PERSISTING')
+      AND COALESCE(cf.findings_total, 0) = 0
+      AND COALESCE(pm.permission_rows, 0) = 0
+      AND COALESCE(sss.string_rows, 0) = 0
+      AND COALESCE(audits.audit_rows, 0) = 0
+      THEN 'in_progress_no_rows'
+    WHEN UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
+      AND COALESCE(cf.findings_total, 0) > 0
+      AND COALESCE(pm.permission_rows, 0) > 0
+      AND COALESCE(sss.string_rows, 0) > 0
+      THEN 'usable_complete'
+    WHEN UPPER(COALESCE(sar.status, '')) = 'COMPLETED' THEN 'partial_rows'
+    ELSE 'partial_rows'
+  END AS session_usability
+FROM static_analysis_runs sar
+JOIN app_versions av ON av.id = sar.app_version_id
+JOIN apps a ON a.id = av.app_id
+LEFT JOIN (
+  SELECT
+    run_id,
+    COUNT(*) AS findings_total,
+    SUM(CASE WHEN LOWER(COALESCE(severity, '')) = 'high' THEN 1 ELSE 0 END) AS high,
+    SUM(CASE WHEN LOWER(COALESCE(severity, '')) = 'medium' THEN 1 ELSE 0 END) AS med,
+    SUM(CASE WHEN LOWER(COALESCE(severity, '')) = 'low' THEN 1 ELSE 0 END) AS low,
+    SUM(CASE WHEN LOWER(COALESCE(severity, '')) = 'info' THEN 1 ELSE 0 END) AS info
+  FROM static_analysis_findings
+  GROUP BY run_id
+) cf
+  ON cf.run_id = sar.id
+LEFT JOIN (
+  SELECT run_id, COUNT(*) AS permission_rows
+  FROM static_permission_matrix
+  GROUP BY run_id
+) pm
+  ON pm.run_id = sar.id
+LEFT JOIN (
+  SELECT
+    package_name,
+    session_stamp,
+    COUNT(*) AS string_rows,
+    MAX(high_entropy) AS high_entropy,
+    MAX(endpoints) AS endpoints
+  FROM static_string_summary
+  GROUP BY package_name, session_stamp
+) sss
+  ON CONVERT(sss.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(sss.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(sar.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+LEFT JOIN (
+  SELECT
+    pa.static_run_id,
+    COUNT(*) AS audit_rows,
+    MAX(pa.grade) AS grade,
+    MAX(pa.score_capped) AS score_capped,
+    MAX(pa.dangerous_count) AS dangerous_count,
+    MAX(pa.signature_count) AS signature_count,
+    MAX(pa.vendor_count) AS vendor_count,
+    MAX(pas.created_at) AS audit_created_at
+  FROM permission_audit_apps pa
+  JOIN permission_audit_snapshots pas ON pas.snapshot_id = pa.snapshot_id
+  GROUP BY pa.static_run_id
+) audits
+  ON audits.static_run_id = sar.id
+LEFT JOIN v_static_handoff_v1 h
+  ON h.static_run_id = sar.id;
+"""
+
 __all__ = [
     "CREATE_V_WEB_APP_DIRECTORY",
     "CREATE_V_WEB_RUNTIME_RUN_INDEX",
@@ -1202,4 +1341,6 @@ __all__ = [
     "CREATE_V_WEB_APP_COMPONENT_ACL",
     "CREATE_V_WEB_APP_REPORT_SUMMARY",
     "CREATE_V_WEB_STATIC_DYNAMIC_APP_SUMMARY",
+    "CREATE_V_WEB_APP_MASVS_LATEST_V1",
+    "CREATE_V_WEB_APP_STATIC_HANDOFF_READINESS_V1",
 ]

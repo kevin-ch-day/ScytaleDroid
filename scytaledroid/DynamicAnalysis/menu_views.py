@@ -9,7 +9,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
-from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, summary_cards
+from scytaledroid.Utils.DisplayUtils import status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
 
@@ -82,7 +82,7 @@ def render_dynamic_menu_overview() -> None:
         print(status_messages.status("Dynamic state overview unavailable.", level="warn"))
         return
 
-    capability = status_messages.status(
+    _ = status_messages.status(
         "ENABLED" if summary.can_freeze else "BLOCKED",
         level="success" if summary.can_freeze else "blocked",
         show_icon=False,

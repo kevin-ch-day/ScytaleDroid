@@ -54,6 +54,19 @@ _SIGNAL_TABLES: tuple[str, ...] = (
 MANAGED_TABLES: tuple[str, ...] = _REFERENCE_TABLES + _GOVERNANCE_TABLES + _SIGNAL_TABLES
 
 
+def is_permission_intel_configured() -> bool:
+    """Return True when ``SCYTALEDROID_PERMISSION_INTEL_DB_*`` resolves to a mysql/mariadb DSN.
+
+    This checks **configuration only** — not connectivity, grants, or governance row counts.
+    """
+
+    resolved, _src = db_config.resolve_db_config_from_root(_ROOT)
+    return resolved is not None
+
+
+permission_intel_db_available = is_permission_intel_configured
+
+
 def resolve_config() -> tuple[dict[str, Any], str, bool]:
     """Return config, source label, and whether compatibility fallback is active."""
 
@@ -452,6 +465,8 @@ def update_signal_catalog_row(payload: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "is_permission_intel_configured",
+    "permission_intel_db_available",
     "AOSP_DICT_TABLE",
     "COHORT_EXPECTATIONS_TABLE",
     "GOVERNANCE_ROWS_TABLE",

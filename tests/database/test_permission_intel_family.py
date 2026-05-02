@@ -20,6 +20,20 @@ def test_permission_intel_resolve_config_requires_dedicated_namespace(monkeypatc
         raise AssertionError("expected RuntimeError")
 
 
+def test_permission_intel_db_available_reflects_resolve(monkeypatch):
+    monkeypatch.setattr(permission_intel.db_config, "resolve_db_config_from_root", lambda _root: (None, None))
+    assert permission_intel.is_permission_intel_configured() is False
+    assert permission_intel.permission_intel_db_available() is False
+
+    monkeypatch.setattr(
+        permission_intel.db_config,
+        "resolve_db_config_from_root",
+        lambda _root: ({"engine": "mysql", "database": "android_permission_intel"}, "env:test"),
+    )
+    assert permission_intel.is_permission_intel_configured() is True
+    assert permission_intel.permission_intel_db_available() is True
+
+
 def test_permission_intel_resolve_config_uses_dedicated_namespace(monkeypatch):
     monkeypatch.setattr(
         permission_intel.db_config,

@@ -187,9 +187,11 @@ def test_render_app_completion_card_mode_for_profile_scope(capsys) -> None:
 
     out = capsys.readouterr().out
     assert "[1/12] Signal" in out
-    # Compact cards may render the package in the header line instead of as a separate "Package:" row.
-    assert "org.thoughtcrime.securesms" in out
-    assert "Artifacts: 1   Time: 00:03" in out
+    assert "Package: org.thoughtcrime.securesms" in out
+    assert "1 APK | 00:03 | warn=1 | fail=0 | high=0 | med=1" in out
+    assert "Artifacts: 1   Time: 00:03" not in out
+    assert "Pipeline stages:" not in out
+    assert "Skipped detectors:" not in out
 
 
 def test_render_app_completion_uses_dense_mode_for_persistence_test_batch(capsys) -> None:

@@ -5,31 +5,30 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_utils.menus import health_checks
-from scytaledroid.Database.db_utils.menus import query_runner
+from scytaledroid.Database.db_utils.menus import health_checks, query_runner
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
+from .action_groups.status_actions import write_db_schema_snapshot_audit
 from .menu_actions import (
     apply_canonical_schema_bootstrap,
     audit_static_risk_coverage,
-    backfill_permission_audit_snapshot_totals,
     backfill_app_version_target_sdks,
-    collapse_duplicate_app_versions,
+    backfill_permission_audit_snapshot_totals,
     backfill_static_permission_risk_vnext,
     backfill_static_run_findings_totals,
+    collapse_duplicate_app_versions,
     ensure_dynamic_tier_migrations,
     freeze_duplicate_permission_intel_tables,
     ingest_analysis_cohort_from_publication_bundle,
     maybe_clear_screen,
     purge_static_session_for_rerun,
     reconcile_static_session_artifacts,
-    run_inventory_determinism_comparator,
     refresh_static_dynamic_summary_cache,
+    run_inventory_determinism_comparator,
     seed_dataset_profile,
     show_connection_and_config,
     show_governance_snapshot_status,
-    write_db_schema_snapshot_audit,
     sync_contracts_to_db,
 )
 

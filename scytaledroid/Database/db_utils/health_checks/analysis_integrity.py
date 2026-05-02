@@ -54,8 +54,9 @@ class AnalysisIntegritySummary:
     missing_schema_objects: tuple[str, ...]
 
 
-REQUIRED_ANALYSIS_SCHEMA_OBJECTS = (
-    "analysis_dynamic_cohort_status",
+# analysis_dynamic_cohort_status is authored as CREATE TABLE — verify BASE TABLE explicitly.
+REQUIRED_ANALYSIS_TABLE_OBJECTS: tuple[str, ...] = ("analysis_dynamic_cohort_status",)
+REQUIRED_ANALYSIS_VIEW_OBJECTS: tuple[str, ...] = (
     "v_runtime_dynamic_cohort_status_v1",
     "v_paper_dynamic_cohort_v1",
     "v_web_app_directory",
@@ -65,11 +66,16 @@ REQUIRED_ANALYSIS_SCHEMA_OBJECTS = (
     "v_artifact_registry_integrity",
     "v_current_artifact_registry",
 )
+# Backward-compatible combined list (tuple order: base tables first, then views).
+REQUIRED_ANALYSIS_SCHEMA_OBJECTS: tuple[str, ...] = (
+    *REQUIRED_ANALYSIS_TABLE_OBJECTS,
+    *REQUIRED_ANALYSIS_VIEW_OBJECTS,
+)
 
 
 def _missing_schema_objects() -> tuple[str, ...]:
     missing: list[str] = []
-    for name in REQUIRED_ANALYSIS_SCHEMA_OBJECTS:
+    for name in REQUIRED_ANALYSIS_TABLE_OBJECTS:
         try:
             row = run_sql(
                 """
@@ -77,6 +83,24 @@ def _missing_schema_objects() -> tuple[str, ...]:
                 FROM information_schema.tables
                 WHERE table_schema = DATABASE()
                   AND table_name = %s
+                  AND table_type = 'BASE TABLE'
+                """,
+                (name,),
+                fetch="one",
+            )
+            if not row or int(row[0] or 0) == 0:
+                missing.append(name)
+        except Exception:
+            missing.append(name)
+    for name in REQUIRED_ANALYSIS_VIEW_OBJECTS:
+        try:
+            row = run_sql(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                  AND table_name = %s
+                  AND table_type = 'VIEW'
                 """,
                 (name,),
                 fetch="one",
@@ -451,5 +475,7 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
 __all__ = [
     "AnalysisIntegritySummary",
     "REQUIRED_ANALYSIS_SCHEMA_OBJECTS",
+    "REQUIRED_ANALYSIS_TABLE_OBJECTS",
+    "REQUIRED_ANALYSIS_VIEW_OBJECTS",
     "fetch_analysis_integrity_summary",
 ]

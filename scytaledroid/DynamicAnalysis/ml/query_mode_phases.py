@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
-from . import ml_parameters_operational as config
-from . import ml_parameters_profile as paper_config
 from .evidence_pack_ml_preflight import (
     RunInputs,
     compute_ml_preflight,
@@ -192,7 +191,6 @@ def prepare_group_training_inputs(
     - baseline gating and training-mode selection
     """
 
-    stats = GroupPreparationStats()
     runs = sorted(
         runs,
         key=lambda r: (

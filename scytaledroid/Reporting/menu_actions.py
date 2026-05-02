@@ -18,6 +18,7 @@ from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
     index_dynamic_evidence_packs_to_db,
 )
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+
 from .menu_actions_cross_analysis_helpers import compact_gap, compact_regime
 
 
@@ -1246,11 +1247,13 @@ def handle_print_manuscript_snapshot() -> None:
 def handle_refresh_phase_e_bundle() -> None:
     """Run ML over the frozen cohort and refresh publication artifacts inputs."""
 
-    from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
-        run_ml_on_evidence_packs,
-        _select_fig_b1_exemplar_from_existing_or_inputs,
+    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import (
+        write_phase_e_deliverables_bundle,
     )
-    from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_phase_e_deliverables_bundle
+    from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
+        _select_fig_b1_exemplar_from_existing_or_inputs,
+        run_ml_on_evidence_packs,
+    )
 
     archive_dir = Path(app_config.DATA_DIR) / "archive"
     freeze_path = archive_dir / "dataset_freeze.json"

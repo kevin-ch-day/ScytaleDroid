@@ -6,7 +6,6 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from scytaledroid.Persistence import db_writer as _bridge_writer
 from scytaledroid.StaticAnalysis.modules.permissions.permission_console_rendering import (
     _classify_permissions as _classify,
 )
@@ -389,35 +388,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
     )
 
 
-def write_buckets(
-    run_id: int,
-    payload: Mapping[str, tuple[float, float]],
-    *,
-    static_run_id: int | None = None,
-) -> bool:
-    require_canonical_schema()
-    return _bridge_writer.write_buckets(run_id, payload, static_run_id=static_run_id)
-
-
-def write_metrics(
-    run_id: int,
-    payload: Mapping[str, tuple[float, float | None]],
-    *,
-    static_run_id: int | None = None,
-) -> bool:
-    require_canonical_schema()
-    return _bridge_writer.write_metrics(run_id, payload, static_run_id=static_run_id)
-
-
-def write_contributors(run_id: int, rows: Sequence[tuple[str, float, str, int]]) -> bool:
-    require_canonical_schema()
-    return _bridge_writer.write_contributors(run_id, rows)
-
-
 __all__ = [
     "MetricsBundle",
     "compute_metrics_bundle",
-    "write_buckets",
-    "write_metrics",
-    "write_contributors",
 ]

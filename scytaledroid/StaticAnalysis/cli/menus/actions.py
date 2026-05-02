@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-import re
 from typing import Any
 
 from scytaledroid.Config import app_config
@@ -17,8 +17,24 @@ try:  # optional DB access (offline mode)
 except Exception:  # pragma: no cover - DB optional
     core_q = None
 
+from ..flows.profile_prior_session import format_audit_session_command
+from ...core.repository import load_display_name_map
 from ..commands.models import Command
 from ..core.models import RunParameters
+
+_LARGE_SPLIT_WARN_MIN_APK = 20
+_RUN_SETUP_LABEL_W = 18
+
+
+def _run_setup_kv(label: str, value: str) -> None:
+    print(f"{label:<{_RUN_SETUP_LABEL_W}} : {value}")
+
+
+def _selection_rule_display(rule: str | None) -> str:
+    s = (rule or "").strip()
+    if not s:
+        return ""
+    return s[0].lower() + s[1:]
 
 
 def _scope_token(params: RunParameters) -> str:
@@ -322,6 +338,8 @@ def prompt_run_setup(
         sum(1 for a in getattr(group, "artifacts", ()) or () if getattr(a, "is_split_member", False))
         for group in groups
     )
+    older_excluded = int(getattr(selection, "older_captures_excluded", 0) or 0)
+    selection_rule = getattr(selection, "selection_rule_summary", None)
     target = getattr(selection, "label", None) or "selected scope"
     if package_count == 1 and groups:
         group = groups[0]
@@ -335,42 +353,53 @@ def prompt_run_setup(
 
     print()
     menu_utils.print_section("Run Setup")
-    print(f"Target         : {target}")
-    print(f"Mode           : {params.profile_label}")
-    print(f"Packages       : {package_count}")
-    print(f"APK files      : {artifact_count} ({artifact_count - split_apk_total} base + {split_apk_total} split)")
-    scan_splits_note = (
-        "on (every APK row scanned)"
-        if bool(getattr(params, "scan_splits", True))
-        else "off (dataset-style runs may trim to base only when batch quiet)"
+    _run_setup_kv("Target", target)
+    _run_setup_kv("Mode", params.profile_label)
+    if selection_rule:
+        _run_setup_kv("Selection rule", _selection_rule_display(selection_rule))
+    _run_setup_kv("Packages", str(package_count))
+    _run_setup_kv("Harvest captures", str(package_count))
+    base_apk_total = artifact_count - split_apk_total
+    _run_setup_kv(
+        "APK files",
+        f"{artifact_count} ({base_apk_total} base + {split_apk_total} split)",
     )
-    print(f"Split APK scan : {scan_splits_note}")
-    if artifact_counts and max(artifact_counts) >= 15:
-        top = sorted(
+    if older_excluded > 0:
+        _run_setup_kv("Older captures", f"{older_excluded} excluded")
+    scan_splits_note = "on" if bool(getattr(params, "scan_splits", True)) else "off"
+    _run_setup_kv("Split APK scan", scan_splits_note)
+    if artifact_counts and max(artifact_counts) >= _LARGE_SPLIT_WARN_MIN_APK:
+        disp = load_display_name_map(groups)
+        heavy = sorted(
             (
-                (
-                    len(getattr(g, "artifacts", ()) or ()),
-                    str(getattr(g, "package_name", "") or "unknown"),
-                )
-                for g in groups
-            ),
-            reverse=True,
-        )[:3]
-        top_txt = ", ".join(f"{pkg} ({n} APK{'s' if n != 1 else ''})" for n, pkg in top)
-        print(status_messages.status(f"High-split apps: {top_txt}", level="warn"))
-    print(f"Session        : {session_stamp}")
+                len(getattr(g, "artifacts", ()) or ()),
+                str(getattr(g, "package_name", "") or "unknown"),
+                disp.get(str(getattr(g, "package_name", "") or "").lower(), ""),
+            )
+            for g in groups
+        )
+        heavy = [row for row in heavy if row[0] >= _LARGE_SPLIT_WARN_MIN_APK]
+        heavy.sort(key=lambda row: row[0], reverse=True)
+        top = heavy[:5]
+        parts = []
+        for n, pkg, label in top:
+            shown = label if label else pkg
+            parts.append(f"{shown} ({n} APK files)")
+        top_txt = "; ".join(parts)
+        _run_setup_kv("Large split apps", top_txt)
+    _run_setup_kv("Session", session_stamp)
     if has_existing:
-        existing = "found"
-        if canonical_id:
-            existing += f", canonical static_run_id={canonical_id}"
+        _run_setup_kv("Existing session", "found")
+        if canonical_id is not None:
+            _run_setup_kv("Canonical run", f"static_run_id={canonical_id}")
         elif attempts is not None:
-            existing += f", attempts={attempts}"
-        print(f"Existing run   : {existing}")
+            _run_setup_kv("Attempts", str(attempts))
     else:
-        print("Existing run   : none")
+        _run_setup_kv("Existing session", "none")
+    _run_setup_kv("Post-run audit", format_audit_session_command(session_stamp))
     print()
     if has_existing:
-        print("1) Replace existing session and run")
+        print("1) Replace this session and rerun")
         print("2) Use new session label")
     else:
         print("1) Run now")

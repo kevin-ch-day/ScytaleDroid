@@ -36,9 +36,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
-from scytaledroid.Utils.LatexUtils import LatexTableSpec, RawLatex, render_tabular_only, render_table_float
-from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_paths
+from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_paths  # noqa: E402
+from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance  # noqa: E402
+from scytaledroid.Utils.LatexUtils import (  # noqa: E402
+    LatexTableSpec,
+    RawLatex,
+    render_table_float,
+    render_tabular_only,
+)
 
 FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
@@ -679,7 +684,7 @@ def _write_publication_latex_tables(*, publication_results_payload: dict[str, ob
             rho = float("nan")
             pval = float("nan")
 
-    diffs = [(s - m) for s, m in zip(scripted, manual)]
+    diffs = [(s - m) for s, m in zip(scripted, manual, strict=True)]
     abs_diffs = [abs(d) for d in diffs]
     mean_abs = float(statistics.mean(abs_diffs)) if abs_diffs else float("nan")
     med_abs = float(statistics.median(abs_diffs)) if abs_diffs else float("nan")

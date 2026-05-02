@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 from scytaledroid.DeviceAnalysis.harvest import common as harvest_common
 
-
 Severity = Literal["error", "warning"]
 
 

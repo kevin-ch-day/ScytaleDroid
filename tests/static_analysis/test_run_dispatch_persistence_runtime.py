@@ -28,7 +28,7 @@ def test_launch_scan_flow_dry_run_skips_runtime_persistence(monkeypatch) -> None
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
@@ -36,6 +36,7 @@ def test_launch_scan_flow_dry_run_skips_runtime_persistence(monkeypatch) -> None
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
 
     def _unexpected_bootstrap(**_kwargs):
         raise AssertionError("dry-run must not bootstrap runtime persistence")
@@ -72,7 +73,7 @@ def test_launch_scan_flow_announces_postprocessing_boundary(monkeypatch, capsys)
         base_dir=Path("."),
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -82,6 +83,7 @@ def test_launch_scan_flow_announces_postprocessing_boundary(monkeypatch, capsys)
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
 
     params = RunParameters(
@@ -114,7 +116,7 @@ def test_launch_scan_flow_updates_heartbeat_phases(monkeypatch) -> None:
 
     phases: list[tuple[str, str | None, bool]] = []
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -124,6 +126,7 @@ def test_launch_scan_flow_updates_heartbeat_phases(monkeypatch) -> None:
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
@@ -176,7 +179,7 @@ def test_launch_scan_flow_emits_phase_logs(monkeypatch) -> None:
         def info(self, _message, *, extra=None):
             records.append(dict(extra or {}))
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -186,6 +189,7 @@ def test_launch_scan_flow_emits_phase_logs(monkeypatch) -> None:
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
@@ -223,7 +227,7 @@ def test_launch_scan_flow_emits_phase_logs(monkeypatch) -> None:
 
 
 def test_launch_scan_flow_blocks_when_another_static_run_is_active(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(
         run_dispatch,
         "_acquire_static_run_lock",
@@ -282,7 +286,7 @@ def test_launch_scan_flow_sigint_marks_aborting_and_logs_abort_event(monkeypatch
         handler(run_dispatch.signal.SIGINT, None)
         return outcome
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -292,6 +296,7 @@ def test_launch_scan_flow_sigint_marks_aborting_and_logs_abort_event(monkeypatch
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
@@ -352,7 +357,7 @@ def test_launch_scan_flow_run_end_uses_postprocessing_failure_status(monkeypatch
         outcome.persistence_failed = True
         outcome.failures.append("PERSISTENCE_ERROR")
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -363,6 +368,7 @@ def test_launch_scan_flow_run_end_uses_postprocessing_failure_status(monkeypatch
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
@@ -409,7 +415,7 @@ def test_launch_scan_flow_emits_persist_end_for_deferred_footer(monkeypatch) -> 
         def warning(self, _message, *, extra=None):
             records.append(dict(extra or {}))
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -419,6 +425,7 @@ def test_launch_scan_flow_emits_persist_end_for_deferred_footer(monkeypatch) -> 
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
@@ -470,7 +477,7 @@ def test_launch_scan_flow_marks_run_failed_when_session_finalization_is_incomple
         def warning(self, _message, *, extra=None):
             records.append(dict(extra or {}))
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
@@ -480,6 +487,7 @@ def test_launch_scan_flow_marks_run_failed_when_session_finalization_is_incomple
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
@@ -547,15 +555,17 @@ def test_persist_static_session_links_normalizes_package_name() -> None:
 
 
 def test_session_finalization_outputs_flags_incomplete_link_coverage(monkeypatch, tmp_path) -> None:
+    from scytaledroid.StaticAnalysis.cli.flows import run_session_map
+
     monkeypatch.setattr(run_dispatch.app_config, "DATA_DIR", str(tmp_path))
     session_dir = tmp_path / "sessions" / "sess-links"
     session_dir.mkdir(parents=True, exist_ok=True)
     (session_dir / "run_map.json").write_text('{"apps": []}', encoding="utf-8")
 
-    monkeypatch.setattr(run_dispatch, "_session_completed_run_count", lambda _stamp: 120)
+    monkeypatch.setattr(run_session_map, "_session_completed_run_count", lambda _stamp: 120)
     counts = iter([30, 30])
-    monkeypatch.setattr(run_dispatch, "_session_run_link_count", lambda _stamp: next(counts))
-    monkeypatch.setattr(run_dispatch, "_rebuild_session_run_map_from_db", lambda _stamp: None)
+    monkeypatch.setattr(run_session_map, "_session_run_link_count", lambda _stamp: next(counts))
+    monkeypatch.setattr(run_session_map, "_rebuild_session_run_map_from_db", lambda _stamp: None)
 
     issues = run_dispatch._ensure_session_finalization_outputs("sess-links")
 

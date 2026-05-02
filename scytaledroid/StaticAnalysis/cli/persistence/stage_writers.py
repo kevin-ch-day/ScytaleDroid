@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
-from typing import Any
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -107,26 +105,9 @@ def persist_metrics_and_sections_stage(
     outcome: object,
     note_db_error,
     raise_db_error,
-    write_metrics,
-    write_contributors,
     persist_static_sections_wrapper,
 ) -> None:
-    if run_id is not None:
-        try:
-            ok = write_metrics(int(run_id), metrics_context.metrics_payload, static_run_id=static_run_id)
-        except Exception as exc:
-            raise_db_error("metrics.write", f"{exc.__class__.__name__}:{exc}")
-        if not ok:
-            raise_db_error("metrics.write", f"returned_false:run_id={run_id}")
-
-        if stage_context.metrics_bundle.contributors:
-            try:
-                ok = write_contributors(int(run_id), stage_context.metrics_bundle.contributors)
-            except Exception as exc:
-                raise_db_error("contributors.write", f"{exc.__class__.__name__}:{exc}")
-            if not ok:
-                raise_db_error("contributors.write", f"returned_false:run_id={run_id}")
-
+    _ = (run_id, metrics_context)
     baseline_section = (
         stage_context.baseline_payload.get("baseline")
         if isinstance(stage_context.baseline_payload, Mapping)

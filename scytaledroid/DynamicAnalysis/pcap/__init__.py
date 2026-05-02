@@ -36,7 +36,12 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - import-time shim
 
         return {"OverlapConfig": OverlapConfig, "write_static_dynamic_overlap": write_static_dynamic_overlap}[name]
     if name in {"DatasetTrackerConfig", "load_dataset_tracker", "recompute_dataset_tracker", "update_dataset_tracker"}:
-        from .dataset_tracker import DatasetTrackerConfig, load_dataset_tracker, recompute_dataset_tracker, update_dataset_tracker
+        from .dataset_tracker import (
+            DatasetTrackerConfig,
+            load_dataset_tracker,
+            recompute_dataset_tracker,
+            update_dataset_tracker,
+        )
 
         return {
             "DatasetTrackerConfig": DatasetTrackerConfig,

@@ -306,4 +306,4 @@ if __name__ == "__main__":
             sys.stdout.close()
         except Exception:
             pass
-        raise SystemExit(0)
+        raise SystemExit(0) from None

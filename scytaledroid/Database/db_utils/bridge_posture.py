@@ -24,11 +24,8 @@ _BRIDGE_POSTURES: tuple[BridgeTablePosture, ...] = (
         table="runs",
         posture="compat_only_keep",
         owner="compatibility",
-        rationale="Still needed for compatibility linkage and reconciliation, but canonical run identity lives in static_analysis_runs.",
-        current_writers=(
-            "Persistence/db_writer.create_run",
-            "StaticAnalysis/cli/persistence/run_writers",
-        ),
+        rationale="Legacy mirror writers removed; table may retain historical rows. Canonical identity is static_analysis_runs.",
+        current_writers=(),
         current_readers=(
             "Database/db_utils/static_reconcile",
             "Database/db_utils/menu_actions.backfill_app_version_target_sdks",
@@ -40,8 +37,8 @@ _BRIDGE_POSTURES: tuple[BridgeTablePosture, ...] = (
         table="findings",
         posture="compat_mirror_review",
         owner="compatibility",
-        rationale="Canonical findings live in static_analysis_findings, but normalized compat findings are still written and audited.",
-        current_writers=("Persistence/db_writer.write_findings",),
+        rationale="Legacy findings mirror is no longer written; canonical store is static_analysis_findings. Table may hold historical rows.",
+        current_writers=(),
         current_readers=(
             "Database/db_utils/static_reconcile",
             "Database/db_utils/menus/query_runner",
@@ -51,8 +48,8 @@ _BRIDGE_POSTURES: tuple[BridgeTablePosture, ...] = (
         table="metrics",
         posture="compat_mirror_review",
         owner="compatibility",
-        rationale="Canonical metrics are still surfaced through compat rows for scoring/backfill and should shrink over time.",
-        current_writers=("Persistence/db_writer.write_metrics",),
+        rationale="Legacy metrics mirror is no longer written by static analysis.",
+        current_writers=(),
         current_readers=(
             "Database/db_utils/static_reconcile",
             "Database/db_utils/action_groups/risk_actions",
@@ -64,7 +61,7 @@ _BRIDGE_POSTURES: tuple[BridgeTablePosture, ...] = (
         posture="compat_mirror_review",
         owner="compatibility",
         rationale="Risk bucket rollups remain bridge-era artifacts and should stay secondary to canonical scoring/read models.",
-        current_writers=("Persistence/db_writer.write_buckets",),
+        current_writers=(),
         current_readers=(
             "Database/db_utils/static_reconcile",
             "Database/db_utils/menus/query_runner",
@@ -76,7 +73,7 @@ _BRIDGE_POSTURES: tuple[BridgeTablePosture, ...] = (
         posture="compat_mirror_review",
         owner="compatibility",
         rationale="Contributor rows remain useful for transitional diagnostics but are not a primary canonical contract.",
-        current_writers=("Persistence/db_writer.write_contributors",),
+        current_writers=(),
         current_readers=(
             "Database/db_utils/static_reconcile",
             "Database/db_utils/menus/health_checks",

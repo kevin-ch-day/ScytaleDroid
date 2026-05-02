@@ -10,6 +10,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.permission_intel_freeze import (
     freeze_operational_managed_tables,
 )
@@ -19,32 +20,55 @@ from scytaledroid.Database.db_utils.reset_static import (
 )
 from scytaledroid.Database.summary_surfaces import (
     STATIC_DYNAMIC_SUMMARY_CACHE,
+)
+from scytaledroid.Database.summary_surfaces import (
     refresh_static_dynamic_summary_cache as _refresh_static_dynamic_summary_cache,
 )
-from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+
 from .action_groups.risk_actions import (
     audit_static_risk_coverage as _audit_static_risk_coverage,
+)
+from .action_groups.risk_actions import (
     backfill_static_permission_risk_vnext as _backfill_static_permission_risk_vnext,
+)
+from .action_groups.risk_actions import (
     show_governance_snapshot_status as _show_governance_snapshot_status,
 )
 from .action_groups.schema_actions import (
     _ensure_db_ops_log_table as _schema_ensure_db_ops_log_table,
-    ensure_dynamic_gap_columns as _ensure_dynamic_gap_columns,
-    ensure_dynamic_netstats_rows_columns as _ensure_dynamic_netstats_rows_columns,
-    ensure_dynamic_network_quality_column as _ensure_dynamic_network_quality_column,
-    ensure_dynamic_pcap_columns as _ensure_dynamic_pcap_columns,
-    ensure_dynamic_sampling_duration_columns as _ensure_dynamic_sampling_duration_columns,
-    ensure_dynamic_tier_column as _ensure_dynamic_tier_column,
-    ensure_dynamic_tier_migrations as _ensure_dynamic_tier_migrations,
+)
+from .action_groups.schema_actions import (
     _log_db_op as _schema_log_db_op,
+)
+from .action_groups.schema_actions import (
+    ensure_dynamic_gap_columns as _ensure_dynamic_gap_columns,
+)
+from .action_groups.schema_actions import (
+    ensure_dynamic_netstats_rows_columns as _ensure_dynamic_netstats_rows_columns,
+)
+from .action_groups.schema_actions import (
+    ensure_dynamic_network_quality_column as _ensure_dynamic_network_quality_column,
+)
+from .action_groups.schema_actions import (
+    ensure_dynamic_pcap_columns as _ensure_dynamic_pcap_columns,
+)
+from .action_groups.schema_actions import (
+    ensure_dynamic_sampling_duration_columns as _ensure_dynamic_sampling_duration_columns,
+)
+from .action_groups.schema_actions import (
+    ensure_dynamic_tier_column as _ensure_dynamic_tier_column,
+)
+from .action_groups.schema_actions import (
+    ensure_dynamic_tier_migrations as _ensure_dynamic_tier_migrations,
+)
+from .action_groups.schema_actions import (
     log_db_op as _grouped_log_db_op,
 )
 from .action_groups.status_actions import (
     run_inventory_determinism_comparator,
     show_connection_and_config,
-    write_db_schema_snapshot_audit,
 )
 from .menu_actions_reconcile_helpers import (
     format_collation_preview,
@@ -156,8 +180,8 @@ def ingest_analysis_cohort_from_publication_bundle() -> None:
         print(status_messages.status("Using legacy bundle root fallback: output/paper", level="warn"))
 
     # Derive stable defaults from bundle provenance when available.
-    import json
     import hashlib
+    import json
 
     def _sha256_file(path: Path) -> str | None:
         try:
@@ -683,7 +707,10 @@ def sync_contracts_to_db() -> None:
     This is a post-freeze hygiene action to reduce drift from scattered JSON maps.
     It does not change any evidence packs or research outputs.
     """
-    from scytaledroid.Database.db_func.apps.app_labels import upsert_display_aliases, upsert_display_names
+    from scytaledroid.Database.db_func.apps.app_labels import (
+        upsert_display_aliases,
+        upsert_display_names,
+    )
     from scytaledroid.Database.db_func.apps.app_ordering import upsert_ordering
     from scytaledroid.Publication.contract_inputs import load_publication_contracts
 

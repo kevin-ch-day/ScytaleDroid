@@ -41,6 +41,7 @@ def run_query_menu() -> None:
             ("9", "Summary cache status"),
             ("10", "Harvested version gaps"),
             ("11", "Interrupted permission partials"),
+            ("12", "MASVS session summary (canonical view)"),
         )
         spec = menu_utils.MenuSpec(
             items=options,
@@ -74,6 +75,8 @@ def run_query_menu() -> None:
             show_harvested_version_gaps()
         elif choice == "11":
             show_interrupted_permission_partials()
+        elif choice == "12":
+            prompt_masvs_session_summary()
         elif choice == "0":
             break
 
@@ -686,10 +689,12 @@ def prompt_masvs_by_package() -> None:
     try:
         latest_runs = _run_read_only(
             """
-            SELECT package, MAX(run_id) AS run_id
-            FROM runs
-            GROUP BY package
-            ORDER BY MAX(run_id) DESC
+            SELECT a.package_name AS package, MAX(sar.id) AS static_run_id
+            FROM static_analysis_runs sar
+            INNER JOIN app_versions av ON av.id = sar.app_version_id
+            INNER JOIN apps a ON a.id = av.app_id
+            GROUP BY a.package_name
+            ORDER BY MAX(sar.id) DESC
             LIMIT 10
             """,
             fetch="all",
@@ -700,9 +705,9 @@ def prompt_masvs_by_package() -> None:
 
     default_package = latest_runs[0]["package"] if latest_runs else ""
     if latest_runs:
-        print("Recent packages:")
+        print("Recent packages (canonical static_analysis_runs):")
         for entry in latest_runs:
-            print(f"  - {entry['package']} (run_id={entry['run_id']})")
+            print(f"  - {entry['package']} (latest static_run_id={entry['static_run_id']})")
         print()
 
     package = prompt_utils.prompt_text(
@@ -713,7 +718,7 @@ def prompt_masvs_by_package() -> None:
     if not package:
         package = default_package
     if not package:
-        print(status_messages.status("No package provided and no runs found.", level="warn"))
+        print(status_messages.status("No package provided and no canonical runs found.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return
 
@@ -806,12 +811,12 @@ def prompt_masvs_overview() -> None:
     top_notes: list[str] = []
 
     for area in areas:
-        fail = warn = passed = 0
+        fail = warn = passed = no_data = 0
         total_high = total_medium = 0
         top_package = None
         top_counts = (0, 0)
         for package, data in matrix.items():
-            status = data["status"].get(area, "PASS")
+            status = data["status"].get(area, "NO DATA")
             counts = data["counts"].get(area, {"high": 0, "medium": 0})
             high = counts.get("high", 0)
             medium = counts.get("medium", 0)
@@ -821,6 +826,8 @@ def prompt_masvs_overview() -> None:
                 fail += 1
             elif status == "WARN":
                 warn += 1
+            elif status == "NO DATA":
+                no_data += 1
             else:
                 passed += 1
             key_counts = (high, medium)
@@ -834,6 +841,7 @@ def prompt_masvs_overview() -> None:
                 str(fail),
                 str(warn),
                 str(passed),
+                str(no_data),
                 str(total_high),
                 str(total_medium),
             ]
@@ -843,13 +851,68 @@ def prompt_masvs_overview() -> None:
                 f"{area.title():<9} top package: {top_package} (high={top_counts[0]}, medium={top_counts[1]})"
             )
 
-    headers = ["Area", "Fail", "Warn", "Pass", "High total", "Medium total"]
+    headers = ["Area", "Fail", "Warn", "Pass", "No data", "High total", "Medium total"]
     table_utils.render_table(headers, summary_rows)
     if top_notes:
         print()
         print("Top offenders per area:")
         for line in top_notes:
             print(f"  {line}")
+    prompt_utils.press_enter_to_continue()
+
+
+def prompt_masvs_session_summary() -> None:
+    """Cohort-level MASVS rollup from ``v_static_masvs_session_summary_v1``."""
+    print()
+    menu_utils.print_section("MASVS session summary (canonical view)")
+    default_ss = ""
+    try:
+        stamp_row = _run_read_only(
+            "SELECT session_stamp FROM static_analysis_runs ORDER BY id DESC LIMIT 1",
+            fetch="one",
+            dictionary=True,
+        )
+        if stamp_row:
+            default_ss = str(stamp_row.get("session_stamp") or "").strip()
+    except Exception:
+        pass
+
+    session_stamp = prompt_utils.prompt_text(
+        "session_stamp (blank = latest static run)",
+        default=default_ss,
+        required=False,
+    ).strip()
+    if not session_stamp:
+        session_stamp = default_ss
+    if not session_stamp:
+        print(status_messages.status("No session_stamp available.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    row = _run_read_only(
+        """
+        SELECT *
+        FROM v_static_masvs_session_summary_v1
+        WHERE session_stamp = %s
+        """,
+        (session_stamp,),
+        fetch="one",
+        dictionary=True,
+    )
+    print()
+    print(f"session_stamp: {session_stamp}")
+    if not row:
+        print(
+            status_messages.status(
+                "No row in v_static_masvs_session_summary_v1 — deploy views or confirm session.",
+                level="warn",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    metrics = [(str(k), v if v is not None else "—") for k, v in sorted(row.items())]
+    menu_utils.print_metrics(metrics)
     prompt_utils.press_enter_to_continue()
 
 
@@ -923,39 +986,44 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         "static_string_selected_samples",
         "static_string_sample_sets",
     }
-    canonical = [
-        ("findings (normalized)", "findings"),
-        ("static_findings (baseline)", "static_findings"),
+
+    def _rows_for(spec: list[tuple[str, str]]) -> list[list[str]]:
+        out: list[list[str]] = []
+        for label, key in spec:
+            count, status = audit.counts.get(key, (None, "SKIP"))
+            if key in optional_tables and (str(status).startswith("SKIP") or count in (None, 0)):
+                status = "SKIP (optional)"
+            out.append([label, str(count or 0), status])
+        return out
+
+    canonical_spec = [
+        ("static_analysis_runs", "static_analysis_runs"),
+        ("Findings (normalized)", "findings"),
+        ("Static findings (baseline)", "static_findings"),
         ("static_findings_summary", "static_findings_summary"),
         ("static_string_summary", "static_string_summary"),
         ("static_string_samples", "static_string_samples"),
         ("static_string_selected_samples (optional)", "static_string_selected_samples"),
         ("static_string_sample_sets (optional)", "static_string_sample_sets"),
-        ("Risk buckets", "buckets"),
-        ("Metrics", "metrics"),
+        ("static_permission_matrix", "static_permission_matrix"),
         ("Permission audit snapshots", "permission_audit_snapshots"),
         ("Permission audit apps", "permission_audit_apps"),
     ]
-
-    rows = []
-    for label, key in canonical:
-        count, status = audit.counts.get(key, (None, "SKIP"))
-        if key in optional_tables and (status.startswith("SKIP") or count in (None, 0)):
-            status = "SKIP (optional)"
-        rows.append([label, str(count or 0), status])
-
-    table_utils.render_table(["Table", "Rows", "Status"], rows)
+    print()
+    menu_utils.print_section("Canonical persistence")
+    table_utils.render_table(["Table", "Rows", "Status"], _rows_for(canonical_spec))
 
     required = (
         "findings",
         "static_string_summary",
         "static_string_samples",
-        "buckets",
-        "metrics",
         "permission_audit_snapshots",
         "permission_audit_apps",
     )
-    missing = [name for name in required if not audit.counts.get(name) or not audit.counts[name][0]]
+    missing = []
+    for name in required:
+        if not audit.counts.get(name) or not audit.counts[name][0]:
+            missing.append(name)
     if audit.is_group_scope:
         if missing:
             status_line = f"DB verification: ERROR (missing {', '.join(sorted(missing))} for session={resolved})"
@@ -1028,6 +1096,7 @@ __all__ = [
     "prompt_harvest_for_package",
     "prompt_masvs_by_package",
     "prompt_masvs_overview",
+    "prompt_masvs_session_summary",
     "prompt_persistence_audit",
     "render_session_digest",
 ]

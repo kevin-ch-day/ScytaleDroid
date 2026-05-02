@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -19,18 +18,19 @@ from scytaledroid.Utils.DisplayUtils import (
     status_messages,
     summary_cards,
 )
-from scytaledroid.Utils.LoggingUtils import logging_events
-from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils import logging_engine, logging_events
 
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
 from ..core.run_context import StaticRunContext
 from ..core.run_lifecycle import finalize_static_run
-from ..persistence.run_summary import refresh_static_run_manifest
-from ..persistence.run_summary import persist_run_summary, update_static_run_status
+from ..persistence.run_summary import (
+    persist_run_summary,
+    refresh_static_run_manifest,
+    update_static_run_status,
+)
 from ..persistence.run_writers import export_dep_snapshot
-
 from ..views.view_renderers import render_app_result
 from .analytics import (
     _build_permission_profile,
@@ -44,13 +44,13 @@ from .analytics import (
     _render_cross_app_insights,
     _render_post_run_views,
 )
+from .artifact_publication import publish_persisted_artifacts
 from .artifacts import (
     build_artifact_registry_entries,
     update_static_aliases,
     write_baseline_json_artifact,
     write_manifest_evidence,
 )
-from .artifact_publication import publish_persisted_artifacts
 from .db_verification import (
     _render_db_masvs_summary,
     _render_db_severity_table,
@@ -66,17 +66,14 @@ from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
 from .plan import build_dynamic_plan_artifact
 from .results_dedupe import dedupe_profile_entries
 from .results_formatters import _format_highlight_tokens
+from .results_persist import _build_ingest_payload, _persist_cohort_rollup
 from .results_persistence import (
     apply_persistence_outcome,
     collect_persistence_errors,
     merge_persistence_metadata,
 )
-from .results_persist import _build_ingest_payload, _persist_cohort_rollup
 from .results_sections import (
     render_artifact_completeness,
-    render_export_all_tables_section,
-    render_permission_snapshot_summary_section,
-    render_persistence_audit_summary_section,
     render_post_run_diagnostics_menu,
     render_session_meta_details,
     render_static_interpretation_footer,
@@ -92,9 +89,11 @@ from .view import DetailBuffer
 @dataclass(frozen=True, slots=True)
 class RunResultsSessionMeta:
     session_label: str | None
+    session_stamp: str | None
     attempts: int | None
     canonical_id: int | None
     latest_id: int | None
+    first_static_run_id: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,10 +128,11 @@ def _first_int(*values: object) -> int | None:
 
 
 def _is_large_compact_batch(params: RunParameters, outcome: RunOutcome) -> bool:
+    """Dense summary/persistence UX for multi-app profile or all-apps cohorts (non-verbose)."""
     return bool(
         not params.verbose_output
         and params.scope in {"all", "profile"}
-        and len(outcome.results) > 20
+        and len(outcome.results) >= 8
     )
 
 
@@ -350,14 +350,17 @@ def _load_run_results_session_meta(
     if not session_label or params.dry_run:
         return RunResultsSessionMeta(
             session_label=session_label,
+            session_stamp=params.session_stamp,
             attempts=None,
             canonical_id=None,
             latest_id=None,
+            first_static_run_id=None,
         )
 
     attempts: int | None = None
     canonical_id: int | None = None
     latest_id: int | None = None
+    first_static_run_id: int | None = None
     try:
         row = core_q.run_sql(
             "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s",
@@ -397,11 +400,26 @@ def _load_run_results_session_meta(
         latest_id = int(row[0]) if row and row[0] is not None else None
     except Exception:
         latest_id = None
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT MIN(id)
+            FROM static_analysis_runs
+            WHERE session_label=%s
+            """,
+            (session_label,),
+            fetch="one",
+        )
+        first_static_run_id = int(row[0]) if row and row[0] is not None else None
+    except Exception:
+        first_static_run_id = None
     return RunResultsSessionMeta(
         session_label=session_label,
+        session_stamp=params.session_stamp,
         attempts=attempts,
         canonical_id=canonical_id,
         latest_id=latest_id,
+        first_static_run_id=first_static_run_id,
     )
 
 
@@ -834,21 +852,6 @@ def _render_run_results_impl(
     report_reference_count = 0
     persistence_ready = bool(params.persistence_ready)
     persist_enabled = (not params.dry_run) and persistence_ready
-    total_apps = max(1, len(outcome.results))
-    default_failfast_threshold = min(3, total_apps)
-    try:
-        missing_runid_failfast_threshold = max(
-            1,
-            int(
-                os.environ.get(
-                    "SCYTALEDROID_STATIC_RUNID_FAILFAST_THRESHOLD",
-                    str(default_failfast_threshold),
-                )
-            ),
-        )
-    except Exception:
-        missing_runid_failfast_threshold = default_failfast_threshold
-    consecutive_missing_run_ids = 0
     compact_mode = not params.verbose_output
     if not persistence_ready and not params.dry_run:
         print(
@@ -858,7 +861,8 @@ def _render_run_results_impl(
             )
         )
     total_results = len(outcome.results)
-    detailed_finalization_logs = total_results <= 20
+    # Per-app finalization lines are noisy for medium cohorts; keep them for very small runs only.
+    detailed_finalization_logs = total_results <= 5
     checkpoint_stride = 10 if total_results >= 50 else 5
     persistence_started_monotonic = time.monotonic()
     if persist_enabled:
@@ -1205,8 +1209,6 @@ def _render_run_results_impl(
             if "PERSISTENCE_ERROR" not in outcome.failures:
                 outcome.failures.append("PERSISTENCE_ERROR")
             break
-        elif persist_enabled:
-            consecutive_missing_run_ids = 0
         if persist_enabled and app_result.static_run_id:
             publication = publish_persisted_artifacts(
                 base_report=base_report,
@@ -1674,6 +1676,10 @@ def _render_run_results_impl(
                 trend_deltas=trend_deltas,
                 persist_enabled=persist_enabled,
                 compact_mode=compact_mode,
+                render_db_severity_table_fn=_render_db_severity_table,
+                render_post_run_views_fn=_render_post_run_views,
+                render_db_masvs_summary_fn=_render_db_masvs_summary,
+                render_cross_app_insights_fn=_render_cross_app_insights,
             )
 
     if persistence_errors and not params.dry_run:
@@ -1703,8 +1709,8 @@ def _render_run_results_impl(
         from .run_health import (
             attach_run_health_outputs_on_document,
             build_run_health_document,
-            compact_run_health_stdout_line,
             compute_run_aggregate_status,
+            format_run_health_stdout_lines,
             reconcile_app_final_status_after_persistence,
             sanitize_session_stamp_for_filename,
             write_run_health_json,
@@ -1737,7 +1743,8 @@ def _render_run_results_impl(
         quiet_batch_out = isinstance(run_ctx, StaticRunContext) and run_ctx.quiet and run_ctx.batch
         if not quiet_batch_out:
             print()
-            print(status_messages.status(compact_run_health_stdout_line(health_doc), level="info"))
+            for hl in format_run_health_stdout_lines(health_doc):
+                print(status_messages.status(hl, level="info"))
 
     if outcome.aborted:
         completed = outcome.completed_artifacts
@@ -1809,6 +1816,10 @@ def prompt_deferred_post_run_diagnostics(outcome: RunOutcome, params: RunParamet
         trend_deltas=payload.get("trend_deltas", []),
         persist_enabled=bool(payload.get("persist_enabled", False)),
         compact_mode=bool(payload.get("compact_mode", False)),
+        render_db_severity_table_fn=_render_db_severity_table,
+        render_post_run_views_fn=_render_post_run_views,
+        render_db_masvs_summary_fn=_render_db_masvs_summary,
+        render_cross_app_insights_fn=_render_cross_app_insights,
     )
     outcome.deferred_diagnostics = {}
 

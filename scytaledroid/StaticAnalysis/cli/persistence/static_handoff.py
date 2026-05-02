@@ -6,11 +6,10 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
-from scytaledroid.StaticAnalysis.core import StaticAnalysisReport
-from scytaledroid.StaticAnalysis.cli.core import masvs_mapper
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.StaticAnalysis.cli.core import masvs_mapper
+from scytaledroid.StaticAnalysis.core import StaticAnalysisReport
 
 
 def _as_bool(value: object) -> bool | None:

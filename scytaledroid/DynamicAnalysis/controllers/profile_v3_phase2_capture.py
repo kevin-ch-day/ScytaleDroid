@@ -12,18 +12,19 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.plan_selection import ensure_plan_or_error, print_plan_selection_banner
+from scytaledroid.DynamicAnalysis.plan_selection import (
+    ensure_plan_or_error,
+    print_plan_selection_banner,
+)
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
 from scytaledroid.DynamicAnalysis.services.observer_service import select_observers
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
-
 
 _STABILIZATION_WAIT_S = 10
 

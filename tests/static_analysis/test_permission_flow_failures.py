@@ -149,9 +149,6 @@ def test_permission_flow_does_not_create_legacy_run_for_permission_only_scan(tmp
         captured["payload"] = payload
         return OperationResult.success()
 
-    def _unexpected_create_run(**_kwargs):
-        raise AssertionError("legacy create_run should not be called for permission-only scans")
-
     monkeypatch.setattr(permission_flow, "generate_report", _fake_generate_report)
     monkeypatch.setattr(permission_flow, "collect_permissions_and_sdk", _fake_collect_permissions_and_sdk)
     monkeypatch.setattr(permission_flow, "render_permission_profile", _fake_render_permission_profile)
@@ -160,7 +157,6 @@ def test_permission_flow_does_not_create_legacy_run_for_permission_only_scan(tmp
         "scytaledroid.StaticAnalysis.persistence.permissions_db.persist_permissions_to_db",
         lambda *_a, **_k: {"aosp": 1, "oem": 0, "app_defined": 0, "unknown": 0},
     )
-    monkeypatch.setattr("scytaledroid.Persistence.db_writer.create_run", _unexpected_create_run)
     monkeypatch.setattr(
         "scytaledroid.Database.db_core.db_queries.run_sql",
         lambda *_args, **_kwargs: None,

@@ -98,14 +98,13 @@ def _verify_required_schema(*, dialect: str) -> None:
     if dialect != "mysql":
         return
     # Minimal invariant set. This should only expand over time.
-    required_tables = [
+    required_base_tables = [
         "schema_version",
         "apps",
         "android_app_categories",
         "android_app_profiles",
         "android_app_publishers",
         "android_publisher_prefix_rules",
-        "v_static_handoff_v1",
         "dynamic_sessions",
         "app_display_orderings",
         "app_display_aliases",
@@ -119,6 +118,9 @@ def _verify_required_schema(*, dialect: str) -> None:
         "analysis_static_exposure",
         "analysis_risk_regime_summary",
         "analysis_dynamic_cohort_status",
+    ]
+    required_views = [
+        "v_static_handoff_v1",
         "v_runtime_dynamic_cohort_status_v1",
         "v_paper_dynamic_cohort_v1",
         "v_web_app_directory",
@@ -128,20 +130,47 @@ def _verify_required_schema(*, dialect: str) -> None:
         "v_current_artifact_registry",
     ]
     missing: list[str] = []
-    for t in required_tables:
+
+    def _present_base(name: str) -> bool:
         try:
             row = run_sql(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-                (t,),
+                """
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                  AND table_name = %s
+                  AND table_type = 'BASE TABLE'
+                """,
+                (name,),
                 fetch="one",
             )
-            ok = bool(row and int(row[0]) > 0)
+            return bool(row and int(row[0]) > 0)
         except Exception:
-            ok = False
-        if not ok:
+            return False
+
+    def _present_view(name: str) -> bool:
+        try:
+            row = run_sql(
+                """
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                  AND table_name = %s
+                  AND table_type = 'VIEW'
+                """,
+                (name,),
+                fetch="one",
+            )
+            return bool(row and int(row[0]) > 0)
+        except Exception:
+            return False
+
+    for t in required_base_tables:
+        if not _present_base(t):
             missing.append(t)
+    for v in required_views:
+        if not _present_view(v):
+            missing.append(v)
     if missing:
-        raise RuntimeError(f"Schema bootstrap incomplete; missing tables: {missing}")
+        raise RuntimeError(f"Schema bootstrap incomplete; missing base tables/views: {missing}")
 
     # Required columns for operator/runtime workflows (kept minimal).
     required_columns: dict[str, list[str]] = {

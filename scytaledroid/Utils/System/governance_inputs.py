@@ -7,7 +7,6 @@ readiness. It is filesystem-canonical; the DB is a mirror/query layer.
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 
 from scytaledroid.Database.db_core import permission_intel as intel_db

@@ -186,7 +186,9 @@ def load_options(config: object, *, pull_mode: str) -> HarvestOptions:
     write_db_cfg = bool(getattr(config, "HARVEST_WRITE_DB", True))
     db_enabled = False
     try:
-        from scytaledroid.Database.db_core import db_config as core_db_config  # local import (optional DB)
+        from scytaledroid.Database.db_core import (
+            db_config as core_db_config,  # local import (optional DB)
+        )
 
         db_enabled = bool(core_db_config.db_enabled())
     except Exception:

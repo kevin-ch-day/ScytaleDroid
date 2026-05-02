@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
-from scytaledroid.Database.db_core import database_session
-from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_core import database_session, run_sql
 from scytaledroid.Database.db_queries.analysis.schema import (
     CREATE_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE,
 )

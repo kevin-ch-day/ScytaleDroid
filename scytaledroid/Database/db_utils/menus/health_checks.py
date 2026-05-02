@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import UTC, datetime
-from pathlib import Path
 
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core import run_sql
@@ -19,31 +17,19 @@ from ..health_checks.analysis_integrity import fetch_analysis_integrity_summary
 from ..health_checks.inventory_checks import run_inventory_snapshot_checks
 from ..health_checks.summary import fetch_health_summary
 from ..menu_actions import log_db_op
-from ..reset_static import (
-    HARVEST_TABLES,
-    PROTECTED_TABLES,
-    STATIC_ANALYSIS_TABLES,
-    reset_static_analysis_data,
-)
-from .health_checks_permission import render_scoring_checks
-from .health_checks_inventory import run_inventory_health_check
-from .health_checks_bridge import (
-    fetch_netstats_missing_summary,
-    fetch_network_quality_rollup,
-    fetch_pcap_audit_counts,
-)
 from .health_checks_analysis_overview import (
     count_evidence_integrity_issues,
     fetch_evidence_integrity_issues,
     load_feature_health_report,
     load_feature_health_status,
 )
-from .health_checks_table_helpers import (
-    count_tables,
-    print_table_counts,
-    print_table_list,
-    table_exists,
+from .health_checks_bridge import (
+    fetch_netstats_missing_summary,
+    fetch_network_quality_rollup,
+    fetch_pcap_audit_counts,
 )
+from .health_checks_inventory import run_inventory_health_check
+from .health_checks_permission import render_scoring_checks
 from .health_checks_pipeline import (
     fetch_pcap_backfill_candidates,
     load_pcap_summary_fields,
@@ -56,6 +42,9 @@ from .health_checks_static import (
     fetch_findings_detail,
     fetch_string_summary_detail,
     render_integrity_checks,
+)
+from .health_checks_table_helpers import (
+    table_exists,
 )
 from .sql_helpers import coerce_datetime, scalar
 

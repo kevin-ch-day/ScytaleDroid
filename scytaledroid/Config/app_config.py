@@ -22,6 +22,7 @@ DYNAMIC_TARGET_DURATION_S = 180
 # Default can be overridden at process start via SCYTALEDROID_MIN_PCAP_BYTES.
 # Env is read at import time (entrypoint default) and must not be read mid-run.
 import os  # noqa: E402
+
 from scytaledroid.Utils.System.runtime_mode import resolve_runtime_mode  # noqa: E402
 
 STATIC_HTML_MODE = str(os.getenv("SCYTALEDROID_STATIC_HTML_MODE", "latest")).strip().lower()

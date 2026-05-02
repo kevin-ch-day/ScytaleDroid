@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TypeAlias
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.static_reconcile import reconcile_static_session
 
-AuditSummary: TypeAlias = dict[str, object]
-Row: TypeAlias = Sequence[object]
+type AuditSummary = dict[str, object]
+type Row = Sequence[object]
 
 
 def _summary_section(summary: AuditSummary, key: str) -> AuditSummary:

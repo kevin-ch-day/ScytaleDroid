@@ -8,7 +8,6 @@ from datetime import datetime
 
 from . import logging_engine
 
-
 _CATEGORY_ALIASES = {
     "api": "application",
     "db": "database",

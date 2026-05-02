@@ -22,12 +22,12 @@ from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages as _load_dataset_packages,
 )
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
+from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.menu_views import (
     build_dynamic_menu_sections,
     render_dynamic_menu_overview,
 )
-from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.services.observer_service import (
     select_observers as _service_select_observers,
@@ -241,8 +241,8 @@ def _print_profile_v3_capture_runbook() -> None:
     menu_utils.print_header("Structural Cohort Capture Runbook", "archived scripted flow")
     # Keep the runbook aligned with strict-manifest enforcement.
     try:
-        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
         from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
 
         min_windows = int(MIN_WINDOWS_PER_RUN)
         min_pcap_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
@@ -291,7 +291,6 @@ def _run_profile_v3_guided_phase2_capture() -> None:
     import csv
     import io
     from contextlib import redirect_stdout
-    from datetime import UTC, datetime
 
     from scytaledroid.DynamicAnalysis.services.profile_v3_capture_status_service import (
         main as capture_status_main,
@@ -393,7 +392,11 @@ def _run_profile_v3_guided_phase2_capture() -> None:
     if not accept_manual:
         try:
             import json as _json
-            from scytaledroid.DynamicAnalysis.run_profile_norm import normalize_run_profile as _nrp, resolve_run_profile_from_manifest as _rrp
+
+            from scytaledroid.DynamicAnalysis.run_profile_norm import normalize_run_profile as _nrp
+            from scytaledroid.DynamicAnalysis.run_profile_norm import (
+                resolve_run_profile_from_manifest as _rrp,
+            )
 
             evidence_root = repo_root / "output" / "evidence" / "dynamic"
             manual_seen = 0
@@ -519,7 +522,6 @@ def _run_profile_v3_guided_phase2_capture() -> None:
         if len(pkg_disp) > 40:
             pkg_disp = pkg_disp[:18] + "..." + pkg_disp[-18:]
         idle_ok = r.get("idle_runs_eligible") or "0"
-        idle_gap = r.get("idle_runs_eligible_gap") or "0"
         idle_disp = str(idle_ok)
         if str(idle_target).strip() not in {"", "1"}:
             try:
@@ -549,7 +551,9 @@ def _run_profile_v3_guided_phase2_capture() -> None:
 
     # Only remaining action here: select an app row number to capture.
     # Re-use the table above (avoid duplicating the list).
-    from scytaledroid.DynamicAnalysis.controllers.profile_v3_phase2_capture import run_profile_v3_capture_menu
+    from scytaledroid.DynamicAnalysis.controllers.profile_v3_phase2_capture import (
+        run_profile_v3_capture_menu,
+    )
 
     print()
     print("Select App To Run:")
@@ -999,10 +1003,10 @@ def _run_freeze_readiness_audit() -> None:
 
 
 def _run_state_summary() -> None:
+    from scytaledroid.DynamicAnalysis.menu_reports import run_state_summary_report
     from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
         run_freeze_readiness_audit,
     )
-    from scytaledroid.DynamicAnalysis.menu_reports import run_state_summary_report
     from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_state_summary
 
     summary = run_freeze_readiness_audit()

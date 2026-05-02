@@ -13,8 +13,8 @@ from typing import Any
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
-from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
+from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
 from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import (
     check_session_uniqueness as _check_session_uniqueness,
@@ -22,12 +22,11 @@ from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import (
 from scytaledroid.StaticAnalysis.core.repository import (
     ArtifactGroup,
     RepositoryArtifact,
-    group_artifacts,
     _load_metadata,
+    group_artifacts,
 )
 from scytaledroid.StaticAnalysis.session import normalize_session_stamp
 from scytaledroid.Utils.System import output_prefs
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def _artifact_group_from_path(apk_path: Path) -> ArtifactGroup:

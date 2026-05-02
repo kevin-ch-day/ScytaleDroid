@@ -14,20 +14,25 @@ from .static_analysis_menu_helpers import (
     apply_command_overrides,
     ask_run_controls,
     collect_view_options,
-    confirm_reset,
     describe_last_selection,
     prompt_run_setup,
-    prompt_session_label,
-    render_run_preflight,
     render_reset_outcome,
     render_version_diff,
     resolve_last_selection,
 )
 from .static_analysis_menu_ops import (
     choose_all_scope_variant as _choose_all_scope_variant,
+)
+from .static_analysis_menu_ops import (
     choose_run_profile as _choose_run_profile,
+)
+from .static_analysis_menu_ops import (
     distinct_package_count as _distinct_package_count,
+)
+from .static_analysis_menu_ops import (
     latest_scope_for_all as _latest_scope_for_all,
+)
+from .static_analysis_menu_ops import (
     search_app_scope as _search_app_scope,
 )
 
@@ -37,8 +42,8 @@ if TYPE_CHECKING:
 
 
 def _run_command_for_selection(
-    command: "Command",
-    selection: "ScopeSelection",
+    command: Command,
+    selection: ScopeSelection,
     *,
     analysis_root,
     persistence_gate_status,
@@ -153,7 +158,9 @@ def static_analysis_menu() -> None:
     from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
     from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
     from scytaledroid.StaticAnalysis.cli.flows.selection import select_category_scope
-    from scytaledroid.StaticAnalysis.cli.persistence.reports.session_diagnostics import render_static_diagnostics_menu
+    from scytaledroid.StaticAnalysis.cli.persistence.reports.session_diagnostics import (
+        render_static_diagnostics_menu,
+    )
     from scytaledroid.StaticAnalysis.core.repository import group_artifacts
     from scytaledroid.StaticAnalysis.services import static_service
 
@@ -176,7 +183,7 @@ def static_analysis_menu() -> None:
             return False, f"{message_static}{detail}"
         return True, None
 
-    def _dispatch_run(command: "Command", selection: "ScopeSelection") -> None:
+    def _dispatch_run(command: Command, selection: ScopeSelection) -> None:
         _run_command_for_selection(
             command,
             selection,

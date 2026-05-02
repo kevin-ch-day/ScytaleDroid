@@ -18,7 +18,7 @@ from typing import Any
 
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
-from scytaledroid.Persistence import db_writer
+_LEGACY_MIRROR_TABLES = ("runs", "metrics", "buckets", "findings", "contributors")
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 
@@ -132,7 +132,7 @@ def generate_snapshot() -> dict[str, Any]:
     engine = DatabaseEngine().as_reader()
     try:
         engine.fetch_one("SELECT 1")
-        required_tables = ["schema_version", *db_writer.REQUIRED_TABLES]
+        required_tables = ["schema_version", *_LEGACY_MIRROR_TABLES]
         table_rows = engine.fetch_all(
             """
             SELECT table_name, table_type, table_rows

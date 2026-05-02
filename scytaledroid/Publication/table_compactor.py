@@ -11,7 +11,12 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from scytaledroid.Utils.LatexUtils import LatexTableSpec, RawLatex, render_tabular_only, render_table_float
+from scytaledroid.Utils.LatexUtils import (
+    LatexTableSpec,
+    RawLatex,
+    render_table_float,
+    render_tabular_only,
+)
 
 
 @dataclass(frozen=True)
