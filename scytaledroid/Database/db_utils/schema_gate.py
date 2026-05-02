@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from scytaledroid.Database.db_core import permission_intel as intel_db
-from scytaledroid.Database.db_core.permission_intel import MANAGED_TABLES
-
 import re
 from collections.abc import Mapping, Sequence
 
 from scytaledroid.Database.db_core import db_config
+from scytaledroid.Database.db_core import permission_intel as intel_db
+from scytaledroid.Database.db_core.permission_intel import MANAGED_TABLES
 from scytaledroid.Database.db_utils import diagnostics
 
 MIN_SCHEMA_VERSION = "0.2.6"
@@ -130,22 +129,20 @@ def inventory_schema_gate() -> tuple[bool, str, str]:
 
 
 def static_schema_gate() -> tuple[bool, str, str]:
+    """Gate for CLI static persistence: canonical tables + operational handoff view.
+
+    Legacy tables such as ``runs``, ``metrics``, ``buckets``, and ``findings`` are no
+    longer required here; compat writers may warn or skip when those objects are absent.
+    """
     required_tables = [
         "static_analysis_runs",
+        "static_analysis_findings",
+        "static_permission_matrix",
+        "static_string_summary",
+        "static_string_samples",
         "static_session_run_links",
         "static_session_rollups",
         "v_static_handoff_v1",
-        "findings",
-        "static_permission_matrix",
-        "static_permission_risk_vnext",
-        "risk_scores",
-        "static_findings",
-        "static_findings_summary",
-        "static_string_samples",
-        "static_string_selected_samples",
-        "static_string_sample_sets",
-        "static_string_summary",
-        "static_correlation_results",
     ]
     required_columns = {
         "static_analysis_runs": [
@@ -153,6 +150,8 @@ def static_schema_gate() -> tuple[bool, str, str]:
             "app_version_id",
             "session_stamp",
             "session_label",
+            "scope_label",
+            "status",
             "base_apk_sha256",
             "identity_mode",
             "identity_conflict_flag",
@@ -162,8 +161,39 @@ def static_schema_gate() -> tuple[bool, str, str]:
             "run_class",
             "non_canonical_reasons",
         ],
+        "static_analysis_findings": [
+            "run_id",
+            "finding_id",
+            "status",
+            "severity",
+            "severity_raw",
+            "category",
+            "title",
+            "tags",
+            "evidence",
+            "fix",
+            "rule_id",
+            "cvss_score",
+            "masvs_area",
+            "masvs_control_id",
+            "masvs_control",
+            "detector",
+            "module",
+            "evidence_refs",
+        ],
         "static_session_run_links": ["session_stamp", "package_name", "static_run_id"],
-        "findings": ["static_run_id"],
+        "static_session_rollups": [
+            "session_stamp",
+            "scope_label",
+            "apps_total",
+            "completed",
+            "failed",
+            "aborted",
+            "running",
+        ],
+        "static_string_summary": ["package_name", "session_stamp", "scope_label", "static_run_id"],
+        "static_string_samples": ["summary_id", "static_run_id", "bucket"],
+        "static_permission_matrix": ["run_id"],
     }
     return check_module_schema(
         "Static Analysis",

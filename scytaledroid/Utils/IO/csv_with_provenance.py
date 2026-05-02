@@ -15,9 +15,10 @@ This module is the single canonical reader/writer for that format. Do not reimpl
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 @dataclass(frozen=True)

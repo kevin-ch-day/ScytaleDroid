@@ -9,9 +9,8 @@ constraints. This module ensures those reference rows exist so operational flows
 
 from __future__ import annotations
 
-from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_core import run_sql
-
+from scytaledroid.Database.db_core.db_config import DB_CONFIG
 
 _DEFAULT_PUBLISHERS: dict[str, tuple[str, str, int]] = {
     "UNKNOWN": ("Unknown", "Default placeholder publisher key", 999),

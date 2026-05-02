@@ -18,6 +18,7 @@ from ..core.run_context import StaticRunContext
 from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
+from .run_health import compute_app_final_status, compute_run_aggregate_status
 from .scan_formatters import (
     _artifact_label,
     _format_compact_progress_text,
@@ -32,14 +33,14 @@ from .scan_identity_helpers import (
     _run_signature_sha256,
 )
 from .scan_progress_display import _PipelineProgress
-from .run_health import compute_app_final_status, compute_run_aggregate_status
 from .scan_report import (
     _append_resource_warning,
-    _summarize_artifact,
     _summarize_app_pipeline,
+    _summarize_artifact,
     build_analysis_config,
     generate_report,
 )
+from .cohort_scan_notes import emit_post_scan_cohort_notes
 from .scan_view import (
     format_recent_completion_line,
     is_compact_card_mode,
@@ -666,6 +667,7 @@ def execute_scan(
         dry_run_skipped=dry_run_skipped,
     )
     outcome.run_aggregate_status = compute_run_aggregate_status(outcome)
+    emit_post_scan_cohort_notes(outcome, params, run_ctx=run_ctx)
     return outcome
 
 

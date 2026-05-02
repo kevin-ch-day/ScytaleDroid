@@ -152,7 +152,7 @@ def compare_manifest(
     if not isinstance(artifacts, list):
         artifacts = []
 
-    for idx, entry in enumerate(artifacts):
+    for _idx, entry in enumerate(artifacts):
         if not isinstance(entry, dict):
             continue
         rel_path = str(entry.get("path") or "").strip()

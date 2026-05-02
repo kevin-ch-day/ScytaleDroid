@@ -10,6 +10,9 @@ from typing import Any
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 
+# Long batch runs call publication once per app; avoid repeating the same governance banner.
+_GOVERNANCE_DOWNGRADE_SHOWN: set[str] = set()
+
 
 @dataclass(slots=True)
 class ArtifactPublicationResult:
@@ -80,18 +83,27 @@ def publish_persisted_artifacts(
         if not gov_ready:
             grade = "EXPERIMENTAL"
             grade_reasons.append("MISSING_GOVERNANCE")
-            if gov_detail and gov_detail != "governance_missing":
+            banner_key = gov_detail if gov_detail else "MISSING_GOVERNANCE"
+            first_banner = banner_key not in _GOVERNANCE_DOWNGRADE_SHOWN
+            if first_banner:
+                _GOVERNANCE_DOWNGRADE_SHOWN.add(banner_key)
+            if (
+                first_banner
+                and gov_detail
+                and gov_detail != "governance_missing"
+            ):
                 warning = f"Governance check failed: {gov_detail}"
                 print(status_messages.status(warning, level="warn"))
-            # Downgrade notice only — do not treat as persistence failure (core DB/handoff succeeded).
-            print(status_messages.status("Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)", level="warn"))
-            print(
-                status_messages.status(
-                    "Core persistence still applies; paper-grade extras need permission-intel "
-                    "(SCYTALEDROID_PERMISSION_INTEL_DB_* — or SCYTALEDROID_CANONICAL_GRADE=0).",
-                    level="info",
+            if first_banner:
+                # Downgrade notice — do not treat as persistence failure (core DB/handoff succeeded).
+                print(status_messages.status("Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)", level="warn"))
+                print(
+                    status_messages.status(
+                        "Core persistence still applies; paper-grade extras need permission-intel "
+                        "(SCYTALEDROID_PERMISSION_INTEL_DB_* — or SCYTALEDROID_CANONICAL_GRADE=0).",
+                        level="info",
+                    )
                 )
-            )
 
     manifest_evidence_path = write_manifest_evidence_fn(
         base_report,

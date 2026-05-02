@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils.package_utils import resolve_package_identity

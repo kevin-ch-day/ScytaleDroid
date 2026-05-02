@@ -27,15 +27,17 @@ from scytaledroid.DynamicAnalysis.core.static_context import (
     compute_static_context,
 )
 from scytaledroid.DynamicAnalysis.core.target_manager import TargetManager
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
-from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.freeze_contract import (
     FREEZE_CONTRACT_VERSION as FREEZE_MODE_CONTRACT_VERSION,
+)
+from scytaledroid.DynamicAnalysis.freeze_contract import (
     build_freeze_contract_snapshot,
     freeze_contract_hash,
 )
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
+from scytaledroid.DynamicAnalysis.monitor import RunMonitor, RunMonitorConfig
+from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle
 from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     MIN_WINDOWS_PER_RUN,
@@ -764,7 +766,9 @@ class DynamicRunOrchestrator:
                 want_check = True
 
             if want_check:
-                from scytaledroid.DynamicAnalysis.utils.v3_postrun_check import validate_run_dir_for_profile_v3
+                from scytaledroid.DynamicAnalysis.utils.v3_postrun_check import (
+                    validate_run_dir_for_profile_v3,
+                )
 
                 derive_attempted = False
                 derive_ok = False
@@ -775,7 +779,9 @@ class DynamicRunOrchestrator:
                 if v3_scenario and strict:
                     derive_attempted = True
                     try:
-                        from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import derive_profile_v3_ml_for_package
+                        from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import (
+                            derive_profile_v3_ml_for_package,
+                        )
 
                         # Best-effort retry: PCAP file finalization can lag by a moment after
                         # observers stop. Retry avoids spurious "missing_window_scores_csv".

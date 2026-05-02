@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
+
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import harvest, inventory
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.apk import delta, planner, ui
-from scytaledroid.DeviceAnalysis.apk.harvest_inventory_reload import reload_harvest_inventory_after_sync
+from scytaledroid.DeviceAnalysis.apk.harvest_inventory_reload import (
+    reload_harvest_inventory_after_sync,
+)
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution, SnapshotContext
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     get_last_guard_decision,

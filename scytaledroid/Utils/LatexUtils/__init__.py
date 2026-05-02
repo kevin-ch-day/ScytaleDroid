@@ -12,8 +12,8 @@ from .escape import RawLatex, latex_escape_text
 from .labels import latex_labelify
 from .tables import (
     LatexTableSpec,
-    render_tabular_only,
     render_table_float,
+    render_tabular_only,
 )
 
 __all__ = [

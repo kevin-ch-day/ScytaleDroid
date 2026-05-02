@@ -22,6 +22,10 @@ class ScopeSelection:
     scope: str
     label: str
     groups: tuple[ArtifactGroup, ...]
+    #: Captures skipped when choosing newest harvest per package (profile/all flows).
+    older_captures_excluded: int = 0
+    #: Short operator-facing rule, e.g. newest capture per package.
+    selection_rule_summary: str | None = None
 
 
 def _env_flag(name: str, default: bool) -> bool:

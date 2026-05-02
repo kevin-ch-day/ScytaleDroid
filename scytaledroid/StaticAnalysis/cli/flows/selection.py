@@ -21,8 +21,170 @@ from ...core.repository import (
     load_profile_map,
 )
 from ..core.models import ScopeSelection
+from .profile_prior_session import (
+    PriorProfileSessionSnapshot,
+    fetch_prior_profile_session_snapshot,
+    format_audit_session_command,
+)
 
 _INACTIVE_PROFILE_LABELS = frozenset({"Profile v3 Structural Cohort"})
+
+_DEFAULT_CAPTURE_RULE = "Newest harvest capture per package"
+_LARGE_SPLIT_APK_THRESHOLD = 20  # flag outlier workload before run setup
+# Future selection modes (longitudinal / per-app capture / base-only / completeness filters)
+# should extend ScopeSelection metadata and this module without renaming operator-visible harvest terms.
+
+
+def _apk_totals(groups: Sequence[ArtifactGroup]) -> tuple[int, int, int]:
+    """Return (total_apk_files, base_count, split_count)."""
+
+    total = 0
+    splits = 0
+    for group in groups:
+        for artifact in group.artifacts:
+            total += 1
+            if getattr(artifact, "is_split_member", False):
+                splits += 1
+    return total, total - splits, splits
+
+
+def _skipped_count_map(skipped_details: Sequence[tuple[str, str, int]]) -> dict[str, int]:
+    return {pkg: count for pkg, _stamp, count in skipped_details}
+
+
+def _format_version_line(group: ArtifactGroup) -> str:
+    base = group.base_artifact
+    if base is None:
+        return "—"
+    meta = base.metadata if isinstance(base.metadata, dict) else {}
+    name = meta.get("version_name")
+    code = meta.get("version_code")
+    parts: list[str] = []
+    if isinstance(name, str) and name.strip():
+        parts.append(name.strip())
+    if code is not None and str(code).strip():
+        parts.append(f"({code})")
+    return " ".join(parts) if parts else "—"
+
+
+def _format_capture_time(group: ArtifactGroup) -> str:
+    stamp = group.session_stamp or ""
+    if stamp.strip():
+        return stamp.strip()
+    base = group.base_artifact
+    if base is None:
+        return "unknown"
+    meta = base.metadata if isinstance(base.metadata, dict) else {}
+    for key in ("captured_at_utc", "snapshot_captured_at", "harvest_completed_at"):
+        raw = meta.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()[:32]
+    return "unknown"
+
+
+def _base_sha_prefix(group: ArtifactGroup) -> str:
+    base = group.base_artifact
+    if base is None:
+        return "—"
+    sha = getattr(base, "sha256", None) or (
+        base.metadata.get("sha256") if isinstance(base.metadata, dict) else None
+    )
+    if isinstance(sha, str) and len(sha) >= 16:
+        return f"{sha[:16]}…"
+    if isinstance(sha, str) and sha.strip():
+        return f"{sha.strip()[:16]}…"
+    return "—"
+
+
+def _capture_status_word(group: ArtifactGroup) -> str:
+    if group.base_artifact is None:
+        return "missing base"
+    splits = sum(1 for a in group.artifacts if getattr(a, "is_split_member", False))
+    reasons = group.harvest_non_canonical_reasons
+    if reasons:
+        return "partial / " + ", ".join(reasons[:3])
+    if splits >= 15:
+        return "complete (split-heavy)"
+    return "complete"
+
+
+def _rule_display(rule_line: str) -> str:
+    s = (rule_line or "").strip()
+    if not s:
+        return ""
+    return s[0].lower() + s[1:]
+
+
+def _print_workload_summary_lines(
+    *,
+    profile_title: str,
+    scoped: Sequence[ArtifactGroup],
+    older_excluded: int,
+    rule_line: str,
+) -> None:
+    n_pkg = len(scoped)
+    n_cap = len(scoped)
+    total, base_n, split_n = _apk_totals(scoped)
+    label_w = 18
+    pad = "  "
+    print(f"Profile: {profile_title}")
+    print(f"Rule   : {_rule_display(rule_line)}")
+    print()
+    print("Selected for this run")
+    print(f"{pad}{'Packages':<{label_w}}: {n_pkg}")
+    print(f"{pad}{'Harvest captures':<{label_w}}: {n_cap}")
+    print(f"{pad}{'APK files':<{label_w}}: {total} total ({base_n} base + {split_n} split)")
+    if older_excluded > 0:
+        print(
+            f"{pad}{'Older captures':<{label_w}}: {older_excluded} excluded; "
+            "retained for comparison/longitudinal analysis"
+        )
+    else:
+        print(f"{pad}{'Older captures':<{label_w}}: none excluded")
+    print(f"{pad}{'Split scan':<{label_w}}: on for Full analysis")
+
+
+def _print_research_workflow_block() -> None:
+    print()
+    print("Research workflow")
+    print("  Static scan writes canonical DB rows and handoff records.")
+    print("  After run, audit with scripts/db/audit_static_session.py.")
+    print("  Dynamic planning can use v_static_handoff_v1 when handoff rows are present.")
+
+
+def _print_prior_profile_session_snapshot(snapshot: PriorProfileSessionSnapshot | None) -> None:
+    if snapshot is None:
+        return
+    lw = 24
+    pad = "  "
+    print()
+    print(f"{pad}{'Previous static session':<{lw}}: {snapshot.session_stamp}")
+    print(f"{pad}{'Static runs':<{lw}}: {snapshot.static_runs}")
+    print(f"{pad}{'Findings':<{lw}}: {snapshot.findings_count}")
+    print(f"{pad}{'Permissions':<{lw}}: {snapshot.permissions_count}")
+    print(f"{pad}{'Handoff rows':<{lw}}: {snapshot.handoff_rows}")
+    ready, total = snapshot.dynamic_ready
+    print(f"{pad}{'Dynamic-ready apps':<{lw}}: {ready}/{total}")
+    print(f"{pad}{'Audit (latest cohort)':<{lw}}: {format_audit_session_command(snapshot.session_stamp)}")
+
+
+def _maybe_print_large_split_warnings(scoped: Sequence[ArtifactGroup], display_map: dict[str, str]) -> None:
+    outliers: list[tuple[str, str, int, int, int]] = []
+    for group in scoped:
+        total = len(group.artifacts)
+        splits = sum(1 for a in group.artifacts if getattr(a, "is_split_member", False))
+        base_n = total - splits
+        if total < _LARGE_SPLIT_APK_THRESHOLD:
+            continue
+        pkg = group.package_name
+        label = display_map.get(pkg.lower()) or pkg
+        outliers.append((label, pkg, total, base_n, splits))
+    if not outliers:
+        return
+    print()
+    print("Large split workload")
+    for label, _pkg, total, base_n, splits in sorted(outliers, key=lambda row: row[2], reverse=True):
+        print(f"  {label} — {total} APK files ({base_n} base + {splits} split)")
 
 
 def format_scope_target(selection: ScopeSelection) -> str:
@@ -55,9 +217,16 @@ def _select_all_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     if not groups:
         return ScopeSelection("all", "All apps", tuple())
     grouped, scoped, skipped_details = _collapse_latest_by_package(groups)
+    older_excluded = sum(count for _, _, count in skipped_details)
     _maybe_prompt_selection_details(grouped, scoped, skipped_details)
 
-    return ScopeSelection("all", "All apps", scoped)
+    return ScopeSelection(
+        "all",
+        "All apps",
+        scoped,
+        older_captures_excluded=older_excluded,
+        selection_rule_summary=_DEFAULT_CAPTURE_RULE,
+    )
 
 
 def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
@@ -99,11 +268,17 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         newest = scoped[0]
         stamp = newest.session_stamp or "undated"
         message = (
-            f"Selected newest artifact set for {package_name} (session {stamp}); "
-            f"skipped {skipped} older capture{'s' if skipped != 1 else ''}."
+            f"Selected newest harvest capture for {package_name} (session {stamp}); "
+            f"excluded {skipped} older capture{'s' if skipped != 1 else ''} from this run."
         )
         print(status_messages.status(message, level="info"))
-    return ScopeSelection("app", selection_label, scoped)
+    return ScopeSelection(
+        "app",
+        selection_label,
+        scoped,
+        older_captures_excluded=skipped,
+        selection_rule_summary="Newest harvest capture for selected package",
+    )
 
 
 def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
@@ -120,16 +295,8 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     print()
     menu_utils.print_header(
         "Static Analysis · Select Profile",
-        "Profiles group harvested apps into analysis cohorts.",
-    )
-    print()
-    print("Default selection rule:")
-    print("  For each package, the newest harvest capture is selected.")
-    print("  Older captures remain stored but are excluded from this run.")
-    print()
-    print(
-        "Artifact counts shown after selection refer to APK files in the selected newest capture, "
-        "including base APKs and split APKs."
+        "Profiles are package cohorts. Runs use the newest harvest per app (base + split APKs); "
+        "the next screen summarizes workload.",
     )
     print()
     rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
@@ -168,24 +335,44 @@ def resolve_profile_scope(
         == category_name
     )
     grouped, scoped, skipped_details = _collapse_latest_by_package(scoped_all)
+    older_excluded = sum(count for _, _, count in skipped_details)
     _maybe_prompt_selection_details(grouped, scoped, skipped_details)
 
     if scoped:
+        display_map = load_display_name_map(scoped)
         print()
         menu_utils.print_header(
-            "Static Analysis · Apps in profile",
-            f"{category_name} — newest capture per package below",
+            "Static Analysis · Profile Workload",
+            "Review cohort counts and APK workload before Run Setup.",
         )
+        _print_workload_summary_lines(
+            profile_title=category_name,
+            scoped=scoped,
+            older_excluded=older_excluded,
+            rule_line=_DEFAULT_CAPTURE_RULE,
+        )
+        _print_research_workflow_block()
+        cohort_packages = frozenset(
+            g.package_name.strip().lower()
+            for g in scoped
+            if str(getattr(g, "package_name", "") or "").strip()
+        )
+        _print_prior_profile_session_snapshot(
+            fetch_prior_profile_session_snapshot(category_name, cohort_packages)
+        )
+        print()
         _render_profile_selection_table(scoped)
-        print(
-            status_messages.status(
-                "Each row is one captured app; APK counts include base + split members when splits were harvested. "
-                "Full preset scans split rows unless you turn split scans off in Run Options.",
-                level="info",
-                show_icon=False,
-            )
-        )
-    return ScopeSelection("profile", category_name, scoped)
+        _maybe_print_large_split_warnings(scoped, display_map)
+        print()
+        print("Note: Full analysis scans each selected APK file when split scan is on.")
+        print("Use Run Options for base-only or reduced workload.")
+    return ScopeSelection(
+        "profile",
+        category_name,
+        scoped,
+        older_captures_excluded=older_excluded,
+        selection_rule_summary=_DEFAULT_CAPTURE_RULE,
+    )
 
 
 def _render_profile_selection_table(
@@ -217,18 +404,18 @@ def _render_profile_selection_table(
     # Operator UX: for paper cohorts (<= ~30 apps), show the full list to avoid
     # confusion ("Showing 15 of 21") and extra prompts mid-demo.
     if len(rows) <= 30:
-        table_utils.render_table(["App", "Package", "APKs (detail)"], rows)
+        table_utils.render_table(["App", "Package", "APK files"], rows)
         return
 
     max_rows = 15
-    table_utils.render_table(["App", "Package", "APKs (detail)"], rows[:max_rows])
+    table_utils.render_table(["App", "Package", "APK files"], rows[:max_rows])
     print(f"Showing {max_rows} of {len(rows)} apps.")
     response = prompt_utils.prompt_text(
         "Press L to list all, or Enter to continue",
         required=False,
     ).strip().lower()
     if response == "l":
-        table_utils.render_table(["App", "Package", "APKs (detail)"], rows)
+        table_utils.render_table(["App", "Package", "APK files"], rows)
         _ = prompt_utils.prompt_text("Press Enter to continue", required=False)
 
 
@@ -268,10 +455,10 @@ def _maybe_prompt_selection_details(
     total_packages = len(skipped_details)
     total_skipped = sum(count for _, _, count in skipped_details)
     summary = (
-        f"Selected newest artifact sets for {total_packages} package"
-        f"{'s' if total_packages != 1 else ''} with multiple captures; "
-        f"skipped {total_skipped} older capture"
-        f"{'s' if total_skipped != 1 else ''}."
+        f"Selected newest harvest capture for each of {total_packages} package"
+        f"{'s' if total_packages != 1 else ''}. "
+        f"Excluded {total_skipped} older capture{'s' if total_skipped != 1 else ''} from this run "
+        "(older captures remain stored for comparison)."
     )
     print(status_messages.status(summary, level="info"))
     response = prompt_utils.prompt_text(
@@ -370,45 +557,48 @@ def _render_selection_details(
     skipped_details: Sequence[tuple[str, str, int]],
 ) -> None:
     print()
-    print("Selection details")
+    print("Selection details (per package)")
     print("-" * 80)
-    selected_by_package: dict[str, list[ArtifactGroup]] = {}
+    skipped_map = _skipped_count_map(skipped_details)
+    display_map = load_display_name_map(selected)
+
+    lines: list[tuple[str, str, ArtifactGroup]] = []
     for group in selected:
-        selected_by_package.setdefault(group.package_name, []).append(group)
+        pkg = group.package_name
+        label = display_map.get(pkg.lower()) or pkg
+        lines.append((label.lower(), label, group))
+    lines.sort(key=lambda row: row[0])
 
-    rows: list[tuple[str, int, dict[str, int], int]] = []
-    for package, package_groups in grouped.items():
-        selected_groups = selected_by_package.get(package, [])
-        selected_artifacts = sum(len(group.artifacts) for group in selected_groups)
-        if selected_artifacts <= 0:
-            continue
-        capture_counts: dict[str, int] = {}
-        for group in package_groups:
-            capture = str(group.capture_id or group.session_stamp or "unknown")
-            capture_counts[capture] = capture_counts.get(capture, 0) + len(group.artifacts)
-        skipped = len(package_groups) - len(selected_groups)
-        rows.append((package, selected_artifacts, capture_counts, skipped))
-
-    rows.sort(key=lambda row: row[1], reverse=True)
-    top_rows = rows[:10]
-    if top_rows:
-        print("Top packages by selected artifact count:")
-        for package, count, capture_counts, skipped in top_rows:
-            capture_text = ", ".join(f"{key}={value}" for key, value in sorted(capture_counts.items()))
-            suffix = f" | skipped_old={skipped}" if skipped > 0 else ""
-            print(f"- {package}: {count} (capture_id: {capture_text}){suffix}")
-    else:
-        print("- No package selection rows available.")
+    for _sort_key, label, group in lines:
+        pkg = group.package_name
+        total = len(group.artifacts)
+        splits = sum(1 for a in group.artifacts if getattr(a, "is_split_member", False))
+        base_n = total - splits
+        apk_breakdown = f"{total} ({base_n} base + {splits} split)" if splits else str(total)
+        older = skipped_map.get(pkg, 0)
+        print(f"{label}")
+        print(f"  Package             : {pkg}")
+        print(f"  Selected capture    : {_format_capture_time(group)}")
+        print(f"  Version             : {_format_version_line(group)}")
+        print(f"  APK files           : {apk_breakdown}")
+        print(f"  Base SHA-256 prefix : {_base_sha_prefix(group)}")
+        print(
+            f"  Older captures      : {older} excluded from this run"
+            if older
+            else "  Older captures      : none excluded"
+        )
+        print(f"  Capture status      : {_capture_status_word(group)}")
+        print()
 
     total_packages = len(skipped_details)
     total_skipped = sum(count for _, _, count in skipped_details)
     if total_skipped > 0:
         print(
-            f"Old captures skipped: {total_skipped} across {total_packages} package"
-            f"{'s' if total_packages != 1 else ''}"
+            f"Summary: {total_skipped} older capture{'s' if total_skipped != 1 else ''} excluded "
+            f"across {total_packages} package{'s' if total_packages != 1 else ''}."
         )
     else:
-        print("Old captures skipped: none")
+        print("Summary: no older captures excluded (one capture per package in scope).")
 
 
 def _group_recency_key(group: ArtifactGroup) -> tuple[int, str, float]:

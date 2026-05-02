@@ -188,7 +188,12 @@ def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) 
 
     out = capsys.readouterr().out
     assert "Run Setup" in out
-    assert "Existing run   : found, canonical static_run_id=1832" in out
+    assert "Post-run audit" in out
+    assert "audit_static_session.py" in out
+    assert "Existing session" in out
+    assert "Canonical run" in out
+    assert "static_run_id=1832" in out
+    assert "Replace this session and rerun" in out
     assert "Session reset" not in out
     assert action == "run"
     assert effective.canonical_action == "replace"

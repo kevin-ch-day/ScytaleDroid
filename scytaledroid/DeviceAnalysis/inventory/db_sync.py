@@ -9,8 +9,8 @@ from scytaledroid.Database.db_func.harvest.apk_repository import (
     ensure_app_definition,
 )
 from scytaledroid.Database.db_utils.package_utils import is_invalid_package_name
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.DeviceAnalysis.inventory.package_collection import PackageRow
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def sync_app_definitions(rows: Sequence[PackageRow]) -> int:

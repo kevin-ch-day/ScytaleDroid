@@ -9,8 +9,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from . import common
 from ..services import artifact_store
+from . import common
 
 
 @dataclass(slots=True)

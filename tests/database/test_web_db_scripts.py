@@ -24,6 +24,22 @@ def test_recreate_web_consumer_views_dry_run_list() -> None:
     )
     assert proc.returncode == 0
     assert "v_web_app_directory" in proc.stdout
+    assert "v_static_handoff_v1" in proc.stdout
+
+
+def test_recreate_web_consumer_views_layer_web_dry_run() -> None:
+    script = REPO_ROOT / "scripts/db/recreate_web_consumer_views.py"
+    proc = subprocess.run(
+        [sys.executable, str(script), "recreate", "--dry-run", "--layer", "web"],
+        cwd=str(REPO_ROOT),
+        env={**__import__("os").environ, "PYTHONPATH": str(REPO_ROOT)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0
+    assert "v_web_app_directory" in proc.stdout
+    assert "DDL order (web," in proc.stdout
 
 
 def test_check_schema_posture_sql_exists() -> None:
@@ -31,6 +47,8 @@ def test_check_schema_posture_sql_exists() -> None:
     assert sql.exists()
     body = sql.read_text(encoding="utf-8")
     assert "information_schema.TABLES" in body
+    assert "REGEXP '^v_.*'" in body
+    assert "analysis_dynamic_cohort_status" in body
 
 
 def test_smoke_shell_script_readable() -> None:

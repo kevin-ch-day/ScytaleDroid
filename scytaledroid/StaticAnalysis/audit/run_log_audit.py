@@ -7,9 +7,9 @@ stay in ``Database.db_scripts.static_run_audit`` for MariaDB-backed runs.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 import re
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config

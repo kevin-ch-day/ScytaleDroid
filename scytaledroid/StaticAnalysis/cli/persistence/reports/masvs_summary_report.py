@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 
@@ -13,6 +14,17 @@ from scytaledroid.StaticAnalysis.analytics.masvs_quality import (
 from ...core.cvss_v4 import parse_vector, score_vector, severity_band
 
 _AREA_ORDER = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
+
+
+def _legacy_masvs_db_fallback_enabled() -> bool:
+    """Allow ``runs`` / legacy ``findings`` when resolving ``fetch_db_masvs_summary(None)``."""
+
+    return os.environ.get("SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _masvs_area_case_sql(column: str, *, fallback_sql: str | None = None) -> str:
@@ -27,6 +39,15 @@ def _masvs_area_case_sql(column: str, *, fallback_sql: str | None = None) -> str
                 ELSE {fallback}
               END
     """.strip()
+
+
+def _masvs_mapped_predicate_sql(alias: str = "saf") -> str:
+    """SQL fragment: finding has any MASVS tag (matches ``v_static_masvs_matrix_v1``)."""
+    return (
+        f"(NULLIF(TRIM(COALESCE({alias}.masvs_area, '')), '') IS NOT NULL "
+        f"OR NULLIF(TRIM(COALESCE({alias}.masvs_control, '')), '') IS NOT NULL "
+        f"OR NULLIF(TRIM(COALESCE({alias}.masvs_control_id, '')), '') IS NOT NULL)"
+    )
 
 
 def _empty_area(area: str) -> dict[str, object]:
@@ -281,6 +302,17 @@ def _build_summary(
 def fetch_db_masvs_summary(run_id: int | None = None) -> tuple[int, list[dict[str, object | None]]] | None:
     try:
         if run_id is None:
+            canon = core_q.run_sql(
+                "SELECT id FROM static_analysis_runs ORDER BY id DESC LIMIT 1",
+                fetch="one",
+            )
+            if canon and canon[0] is not None:
+                sid = int(canon[0])
+                summary = fetch_db_masvs_summary_static_many([sid])
+                if summary is not None:
+                    return sid, summary[1]
+            if not _legacy_masvs_db_fallback_enabled():
+                return None
             row = core_q.run_sql("SELECT MAX(run_id) FROM runs", fetch="one")
             if not row or not row[0]:
                 return None
@@ -548,6 +580,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
     placeholders = ",".join(["%s"] * len(run_ids))
     params = tuple(run_ids)
     area_case = _masvs_area_case_sql("COALESCE(saf.masvs_area, saf.masvs_control)", fallback_sql="'OTHER'")
+    mapped_sql = _masvs_mapped_predicate_sql("saf")
     try:
         rows = core_q.run_sql(
             f"""
@@ -560,6 +593,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
               SUM(CASE WHEN LOWER(COALESCE(saf.severity, '')) = 'info' THEN 1 ELSE 0 END) AS info
             FROM static_analysis_findings saf
             WHERE saf.run_id IN ({placeholders})
+              AND {mapped_sql}
             GROUP BY saf.run_id, masvs
             ORDER BY saf.run_id
             """,
@@ -578,7 +612,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
               COUNT(*) AS occurrences
             FROM static_analysis_findings saf
             WHERE saf.run_id IN ({placeholders})
-              AND NULLIF(TRIM(COALESCE(saf.masvs_control, '')), '') IS NOT NULL
+              AND {mapped_sql}
             GROUP BY saf.run_id, masvs, saf.severity, identifier
             ORDER BY
               saf.run_id,
@@ -599,7 +633,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
         except Exception:
             package = None
         area = (row.get("masvs") or "").upper()
-        if not package or not area:
+        if not package or not area or area not in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
             continue
         severity = str(row.get("severity") or "")
         identifier = row.get("identifier") or row.get("kind") or "unknown"
@@ -621,7 +655,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
         except Exception:
             package = None
         area = (row.get("masvs") or "").upper()
-        if not package or not area:
+        if not package or not area or area not in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
             continue
         entry = matrix.setdefault(
             package,
@@ -660,7 +694,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
         passed = 0
         for area in areas:
             if area not in statuses:
-                statuses[area] = "PASS"
+                statuses[area] = "NO DATA"
             if statuses[area] == "PASS":
                 passed += 1
         data["pass_rate"] = int(round((passed / len(areas)) * 100))
@@ -670,10 +704,10 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
             continue
         matrix[package] = {
             "run_id": int(entry.get("static_run_id") or 0),
-            "status": {area: "PASS" for area in areas},
+            "status": {area: "NO DATA" for area in areas},
             "counts": {area: {"high": 0, "medium": 0, "low": 0, "info": 0} for area in areas},
             "top": {area: {"high": None, "medium": None} for area in areas},
-            "pass_rate": 100,
+            "pass_rate": 0,
         }
 
     def _first_text(*values: object | None) -> str | None:

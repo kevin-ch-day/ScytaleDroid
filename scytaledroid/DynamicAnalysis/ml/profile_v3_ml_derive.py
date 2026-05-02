@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as config
 from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import (

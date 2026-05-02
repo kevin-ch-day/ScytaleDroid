@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.DeviceAnalysis.inventory import db_sync, package_collection, snapshot_io
 from scytaledroid.DeviceAnalysis.modes.inventory import InventoryConfig, InventoryMode
-from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 

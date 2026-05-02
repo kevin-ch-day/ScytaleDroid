@@ -104,11 +104,12 @@ Avoid sharing one super-user across app + analyst + migration.
 | Path | Purpose |
 | --- | --- |
 | **`scripts/db/README.md`** | Short operator command sequence |
-| **`scripts/db/check_schema_posture.sql`** | Read-only probes (wrong table types under `v_`/`vw_`, utf8 posture hints) |
-| **`scripts/db/recreate_web_consumer_views.py`** | `posture`, `counts`, guarded `recreate` (optional alters / drop / view chain) |
+| **`scripts/db/check_schema_posture.sql`** | Read-only probes (expected **VIEW** names, any `v_*`/`vw_*` **BASE TABLE** violations, **`analysis_dynamic_cohort_status`** type, utf8 posture hints) |
+| **`scripts/db/recreate_web_consumer_views.py`** | `posture`, **`semantic`** (source-vs-Web-view coherence), `counts`, guarded **`recreate`** with **`--layer full`/`manifest`/`web`** |
+| **`scripts/db/view_repair_support.py`** | Helpers: manifest-ordered DDL + supplementary + web extension merge (used by the Python **`recreate`**) |
 | **`scripts/db/smoke_web_db.sh`** | Wraps **`ScytaleDroid-Web/scripts/sd_web_db_smoke.php`** PDO smoke |
 
-Destructive recreate requires **`--confirm`**. Always **backup before drop**.
+Destructive **`recreate`** steps require **`--confirm`**. Drops of non-empty **`v_*`/`vw_*`** **BASE TABLE** stubs additionally require **`--allow-drop-nonempty-tables`** with **`--confirm`**. Always **backup before drop**.
 
 ---
 
@@ -118,11 +119,12 @@ Minimum bar after recovery:
 
 ```bash
 PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py posture
+PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py semantic
 PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py counts
 SCYTALEDROID_WEB_ROOT=… ./scripts/db/smoke_web_db.sh
 ```
 
-**Smoke today** verifies “**SQL executes**”; row-count deltas are environmental. Over time extend smoke with **semantic gates** (“findings_total vs directory non-zero coherence”) tracked as follow-up engineering work.
+**PDO smoke** verifies “**SQL executes**”. **`semantic`** verifies **baseline counts print** plus **logical coherence** (e.g. `static_analysis_findings` non-empty but `v_web_app_findings` empty → exit **1**) so dashboards cannot silently regress.
 
 Suggested **mental model** vs zeros:
 
@@ -144,11 +146,13 @@ Source of definitions: **`scytaledroid/Database/db_queries/canonical/schema.py`*
 
 ---
 
-## 7. Authoritative consumer views recreated (representative chain)
+## 7. Authoritative views recreated (layers)
 
-Executed in **`recreate_web_consumer_views.py`** (longest-handle names first when dropping stubs):
+- **`--layer full`** (default): views from **`ordered_schema_statements()`** in manifest order (admin/bridge/static/dynamic/reporting names such as **`v_run_overview`**, **`v_static_handoff_v1`**, cohort and artifact registry views), **plus** supplementary reporting views (`vw_dynload_hotspots`, `v_masvs_matrix`, …) when absent from the manifest, **plus** the **Web consumer extension** chain.
+- **`--layer manifest`**: manifest-only (no web extension; use when Web DDL is applied elsewhere).
+- **`--layer web`**: Web consumer stack only (legacy / targeted repair).
 
- **`vw_latest_apk_per_package`**, **`vw_latest_permission_risk`**, **`vw_permission_audit_latest`**, **`vw_static_{risk,finding}_surfaces_latest`**, **`v_web_static_session_health`**, **`v_web_app_{sessions,permissions,permission_summary,findings,string_* ,components,component_*}`**, **`v_web_permission_intel_current`**, **`v_web_app_report_summary`**, **`v_web_app_directory`**, **`v_web_static_dynamic_app_summary`**, **`v_web_runtime_{run_index,run_detail}`**
+Representative **Web** tail (after manifest chain): **`vw_latest_apk_per_package`**, **`vw_*_permission_*`**, **`vw_static_{risk,finding}_surfaces_latest`**, **`v_web_*`**, **`v_web_runtime_{run_index,run_detail}`**.
 
 ---
 

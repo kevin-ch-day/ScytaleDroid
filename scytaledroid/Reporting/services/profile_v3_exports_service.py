@@ -23,7 +23,6 @@ import argparse
 import csv
 import json
 import math
-import os
 import sys
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -36,19 +35,21 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
-
+from scytaledroid.Publication.profile_v3_contract import lint_profile_v3_bundle  # noqa: E402
 from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
     ENGINE_IFOREST,
-    ProfileV3Error,
     compute_profile_v3_per_app,
     env_allow_multi_model,
     inspect_run_inputs,
     load_profile_v3_catalog,
     load_profile_v3_manifest,
 )
-from scytaledroid.Utils.LatexUtils import LatexTableSpec, RawLatex, render_tabular_only, render_table_float  # noqa: E402
-from scytaledroid.Publication.profile_v3_contract import lint_profile_v3_bundle  # noqa: E402
-
+from scytaledroid.Utils.LatexUtils import (  # noqa: E402
+    LatexTableSpec,
+    RawLatex,
+    render_table_float,
+    render_tabular_only,
+)
 
 EXPECTED_PAPER_GRADE_COHORT_SIZE = 21
 

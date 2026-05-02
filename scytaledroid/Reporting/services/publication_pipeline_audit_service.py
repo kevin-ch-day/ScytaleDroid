@@ -25,7 +25,7 @@ def _publication_root() -> Path:
 
 
 def _write_legacy_aliases() -> bool:
-    return str((os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "")).strip().lower() in {
+    return str(os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "").strip().lower() in {
         "1",
         "true",
         "yes",

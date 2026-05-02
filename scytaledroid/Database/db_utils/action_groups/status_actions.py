@@ -8,16 +8,15 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_config
-from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_utils import schema_gate
-from scytaledroid.Database.db_utils.permission_intel_freeze import (
-    list_operational_managed_tables,
-)
+from scytaledroid.Database.db_core import permission_intel as intel_db
+from scytaledroid.Database.db_utils import diagnostics, schema_gate
 from scytaledroid.Database.db_utils.bridge_posture import (
     bridge_posture_summary,
     list_bridge_postures,
+)
+from scytaledroid.Database.db_utils.permission_intel_freeze import (
+    list_operational_managed_tables,
 )
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.version_utils import get_git_commit

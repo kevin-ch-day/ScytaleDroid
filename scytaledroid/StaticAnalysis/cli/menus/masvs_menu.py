@@ -349,6 +349,8 @@ def render_masvs_matrix_menu() -> None:
                 )
                 text = _clip(f"PASS {descriptor}", 50)
                 return colors.apply(text, colors.style("success"), bold=True)
+            if status == "NO DATA":
+                return colors.apply(_clip("NO DATA (no mapped findings)", 50), colors.style("muted"), bold=False)
             return status
 
         if any(status == "FAIL" for status in statuses.values()):
@@ -358,11 +360,11 @@ def render_masvs_matrix_menu() -> None:
         aggregate_pass += pass_rate
         pass_rates.append(pass_rate)
         for area in area_pass_totals:
-            if statuses.get(area, "PASS") == "PASS":
+            if statuses.get(area) == "PASS":
                 area_pass_totals[area] += 1
         score = 0.0
         for area in areas:
-            status = statuses.get(area, "PASS")
+            status = statuses.get(area, "NO DATA")
             if status == "PASS":
                 score += 1.0
             elif status == "WARN":
@@ -448,12 +450,14 @@ def render_masvs_matrix_menu() -> None:
                     return colors.apply(label, colors.style("warning"), bold=True)
                 if label == "PASS":
                     return colors.apply(label, colors.style("success"), bold=True)
+                if label == "NO DATA":
+                    return colors.apply(label, colors.style("muted"), bold=False)
                 return label
 
             detail_rows: list[list[str]] = []
             for area in areas:
                 counts = count_map.get(area, {"high": 0, "medium": 0, "low": 0, "info": 0})
-                status = status_map.get(area, "PASS")
+                status = status_map.get(area, "NO DATA")
                 top_entry = top_map.get(area, {})
                 descriptor = ""
                 if status == "FAIL":
@@ -468,6 +472,8 @@ def render_masvs_matrix_menu() -> None:
                         descriptor = f"Medium — {descriptor}"
                     else:
                         descriptor = "Medium finding present"
+                elif status == "NO DATA":
+                    descriptor = "No MASVS-mapped findings in this area"
                 else:
                     total_ctrls = (
                         counts.get("high", 0)
@@ -510,7 +516,11 @@ def render_masvs_matrix_menu() -> None:
             if meta_bits:
                 print(status_messages.status(" | ".join(meta_bits), level="info"))
             package_score = sum(
-                1.0 if status_map.get(area, "PASS") == "PASS" else 0.5 if status_map.get(area) == "WARN" else 0.0
+                1.0
+                if status_map.get(area) == "PASS"
+                else 0.5
+                if status_map.get(area) == "WARN"
+                else 0.0
                 for area in areas
             )
             package_pass_rate = data.get("pass_rate", 0)

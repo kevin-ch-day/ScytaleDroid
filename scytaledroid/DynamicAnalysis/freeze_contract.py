@@ -23,7 +23,6 @@ from scytaledroid.DynamicAnalysis.templates.category_map import (
     mapping_version,
 )
 
-
 FREEZE_CONTRACT_VERSION = "v1"
 
 

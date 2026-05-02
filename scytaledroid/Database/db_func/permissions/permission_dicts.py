@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ...db_core import permission_intel as intel_db
+
+
 @dataclass(frozen=True)
 class VendorHint:
     vendor_id: int

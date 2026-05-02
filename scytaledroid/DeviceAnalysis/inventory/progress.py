@@ -5,16 +5,14 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime
 
-from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
-from scytaledroid.Utils.DisplayUtils.colors import ansi
-
 from scytaledroid.DeviceAnalysis.device_analysis_settings import INVENTORY_STALE_SECONDS
 from scytaledroid.DeviceAnalysis.inventory.cli_labels import (
     NON_ROOT_POLICY_CARD_LINE,
     PROGRESS_FOOTER_TIP,
     SNAPSHOT_PANEL_HEADLINE,
 )
-
+from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
+from scytaledroid.Utils.DisplayUtils.colors import ansi
 
 # Live redraw uses CR/carriage tricks; Ctrl+C leaves the cursor mid-line unless we tidy up.
 _LIVE_INVENTORY_TTY_ACTIVE: bool = False

@@ -112,6 +112,9 @@ def _patch_common(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_governance_missing_blocks_publish(monkeypatch, tmp_path, capsys):
+    import scytaledroid.StaticAnalysis.cli.execution.artifact_publication as artifact_publication
+
+    artifact_publication._GOVERNANCE_DOWNGRADE_SHOWN.clear()
     _patch_common(monkeypatch, tmp_path)
 
     baseline_path = tmp_path / "baseline.json"
@@ -150,6 +153,9 @@ def test_governance_missing_blocks_publish(monkeypatch, tmp_path, capsys):
 
 
 def test_governance_present_allows_publish(monkeypatch, tmp_path, capsys):
+    import scytaledroid.StaticAnalysis.cli.execution.artifact_publication as artifact_publication
+
+    artifact_publication._GOVERNANCE_DOWNGRADE_SHOWN.clear()
     _patch_common(monkeypatch, tmp_path)
 
     baseline_path = tmp_path / "baseline.json"

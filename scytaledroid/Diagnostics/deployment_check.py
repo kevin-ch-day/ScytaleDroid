@@ -38,13 +38,8 @@ def _read_os_release() -> dict[str, str]:
 
 
 def _python_check() -> CheckLine | None:
-    if sys.version_info >= (3, 11):
-        return CheckLine("ok", "python", sys.version.split()[0])
-    return CheckLine(
-        "fail",
-        "python",
-        f"need 3.11+ (have {sys.version.split()[0]})",
-    )
+    # Runtime is 3.13+ (see ``pyproject.toml`` / Ruff target); avoid dead branches for older Pythons.
+    return CheckLine("ok", "python", sys.version.split()[0])
 
 
 def _fedora_check() -> CheckLine:

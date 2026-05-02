@@ -19,22 +19,23 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
+from scytaledroid.DynamicAnalysis.core.freeze_identity import (
+    FREEZE_DATASET_HASH_ALGORITHM,
+    derive_freeze_dataset_identity,
+)
 from scytaledroid.DynamicAnalysis.freeze_contract import (
     FREEZE_CONTRACT_VERSION as FREEZE_MODE_CONTRACT_VERSION,
+)
+from scytaledroid.DynamicAnalysis.freeze_contract import (
     build_freeze_contract_snapshot,
     freeze_contract_hash,
 )
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
-)
-from scytaledroid.DynamicAnalysis.core.freeze_identity import (
-    FREEZE_DATASET_HASH_ALGORITHM,
-    FREEZE_DATASET_IDENTITY_VERSION,
-    derive_freeze_dataset_identity,
 )
 
 
@@ -296,12 +297,12 @@ def build_dataset_freeze_manifest(
         expected_bucket_by_run_id.update({rid: "interactive" for rid in inter})
 
         # Track paper-eligible extras not selected by deterministic rank.
-        for c in base_cands[int(config.baseline_required):]:
+        for _c in base_cands[int(config.baseline_required):]:
             app_counts = excluded_reason_counts_by_app[pkg]
             app_counts["EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK"] = (
                 int(app_counts.get("EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK", 0)) + 1
             )
-        for c in inter_cands[int(config.interactive_required):]:
+        for _c in inter_cands[int(config.interactive_required):]:
             app_counts = excluded_reason_counts_by_app[pkg]
             app_counts["EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK"] = (
                 int(app_counts.get("EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK", 0)) + 1
@@ -392,7 +393,7 @@ def build_dataset_freeze_manifest(
                     else 1
                 )
             except Exception:
-                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
+                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}") from None
             plan_schema_versions.add(plan_schema_version)
             plan_paper_contract_versions.add(int(plan_paper_contract_version))
 

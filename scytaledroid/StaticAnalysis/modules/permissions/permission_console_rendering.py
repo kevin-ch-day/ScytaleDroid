@@ -5,14 +5,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from scytaledroid.StaticAnalysis.risk.permission import (
+    permission_risk_grade,
+    permission_risk_score_detail,
+)
+
 from .analysis.capability_signal_classifier import (
     _GROUP_ORDER,
     compute_group_strengths,
     iter_group_hits,
-)
-from scytaledroid.StaticAnalysis.risk.permission import (
-    permission_risk_grade,
-    permission_risk_score_detail,
 )
 from .permission_manifest_extract import _format_permission, collect_permissions_and_sdk
 from .permission_matrix_view import render_permission_matrix

@@ -140,20 +140,48 @@ def render_session_meta_details(session_meta: object) -> None:
     attempts = getattr(session_meta, "attempts", None)
     canonical_id = getattr(session_meta, "canonical_id", None)
     latest_id = getattr(session_meta, "latest_id", None)
+    first_id = getattr(session_meta, "first_static_run_id", None)
+    stamp = getattr(session_meta, "session_stamp", None) or getattr(session_meta, "session_label", None)
 
     if not (attempts is not None or canonical_id is not None or latest_id is not None):
         return
 
     if compact_success_output_enabled():
+        cohort = attempts is not None and attempts > 1
+        if cohort:
+            print("Session identity (cohort / profile scope):")
+            print(f"  Session stamp        : {stamp or 'n/a'}")
+            print(
+                "  Static run rows      : "
+                f"{attempts} (one MariaDB static_analysis_runs row per app in this session)"
+            )
+            if first_id is not None:
+                print(f"  First static_run_id  : {first_id}")
+            if latest_id is not None:
+                print(f"  Latest static_run_id : {latest_id}")
+            if canonical_id is not None:
+                print(
+                    "  Canonical baseline id: "
+                    f"{canonical_id} (paper-grade baseline marker when present)"
+                )
+            print(
+                "  Note                 : latest/canonical ids label rows in static_analysis_runs, "
+                "not a single “group run” surrogate key."
+            )
+            print()
+            return
+
         parts: list[str] = []
+        if stamp:
+            parts.append(f"session_stamp={stamp}")
         if latest_id is not None:
             parts.append(f"latest_static_run_id={latest_id}")
         if canonical_id is not None:
             parts.append(f"canonical_static_run_id={canonical_id}")
         if attempts is not None:
-            parts.append(f"apps_attempted={attempts}")
+            parts.append(f"static_run_rows={attempts}")
         if parts:
-            print("Run Identity: " + " | ".join(parts))
+            print("Run identity: " + " | ".join(parts))
             print()
         return
 
@@ -231,6 +259,24 @@ def _mapping_section(payload: Mapping[str, object], key: str) -> Mapping[str, ob
     return section if isinstance(section, Mapping) else {}
 
 
+def _permission_snapshot_prevalence_sequences(payload: Mapping[str, object]) -> tuple[Sequence[object], Sequence[object]]:
+    """Resolve permission/signal prevalence lists from snapshot JSON.
+
+    Current snapshots nest under ``permission_prevalence``; older artifacts may
+    use top-level ``permissions`` / ``signals``.
+    """
+
+    def _as_sequence(obj: object) -> Sequence[object]:
+        if isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray)):
+            return obj
+        return ()
+
+    nested = payload.get("permission_prevalence")
+    if isinstance(nested, Mapping):
+        return _as_sequence(nested.get("permissions")), _as_sequence(nested.get("signals"))
+    return _as_sequence(payload.get("permissions")), _as_sequence(payload.get("signals"))
+
+
 def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
     path = _resolve_persistence_audit_path(session_stamp)
     if path is None:
@@ -246,10 +292,8 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
     summary = _mapping_section(payload, "summary")
     outcome_summary = _mapping_section(summary, "outcome")
     canonical = _mapping_section(summary, "canonical")
-    bridge = _mapping_section(summary, "bridge")
     reconciliation = _mapping_section(summary, "reconciliation")
     reports = _mapping_section(summary, "reports")
-
     print()
     _print_heading("Persistence audit summary")
     print(f"Artifact : {path}")
@@ -265,35 +309,36 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
             f"compat_export_failed={bool(outcome_summary.get('compat_export_failed', False))}"
         )
         if compat_stage:
-            print(f"Compat   : stage={compat_stage}")
+            print(f"Compat stage (export): {compat_stage}")
 
     if canonical:
         statuses = canonical.get("run_statuses") or {}
-        print(f"Canonical: statuses={statuses} findings={canonical.get('findings', 0)}")
-        print(
-            "           "
-            f"permission_matrix={canonical.get('permission_matrix', 0)} "
-            f"permission_risk={canonical.get('permission_risk', 0)} "
-            f"handoff_paths={canonical.get('handoff_paths', 0)}"
-        )
+        print()
+        _print_heading("Canonical persistence", underline="-")
+        print(f"  Run statuses      : {statuses}")
+        print(f"  Findings (rows)   : {canonical.get('findings', 0)}")
+        print(f"  Permission matrix : {canonical.get('permission_matrix', 0)}")
+        print(f"  Permission risk   : {canonical.get('permission_risk', 0)}")
+        print(f"  Static handoff    : {canonical.get('handoff_paths', 0)} path(s) recorded")
 
-    if bridge:
-        metrics_packages = bridge.get("metrics_packages", bridge.get("secondary_compat_mirror_packages", 0))
-        buckets_packages = bridge.get("buckets_packages", bridge.get("secondary_compat_mirror_packages", 0))
-        contributors_packages = bridge.get("contributors_packages", bridge.get("secondary_compat_mirror_packages", 0))
-        print(
-            "Compat   : "
-            f"runs={bridge.get('runs', 0)} risk_scores={bridge.get('risk_scores', 0)} "
-            f"metrics={metrics_packages} buckets={buckets_packages} contributors={contributors_packages}"
-        )
+    print()
+    _print_heading("Legacy mirror (removed)", underline="-")
+    print("  Static analysis no longer writes runs/metrics/buckets/legacy findings.")
+    print("  Historical audit JSON may still list mirror counts from older pipeline versions.")
 
     if reports:
-        print(
-            "Reports  : "
-            f"json={reports.get('json_report_paths', 0)} "
-            f"latest={reports.get('latest_json_paths', 0)} "
-            f"archive={reports.get('archive_json_paths', 0)}"
-        )
+        archive_n = _safe_int(reports.get("archive_json_paths"))
+        print()
+        _print_heading("Reports (paths recorded on artifacts)", underline="-")
+        print(f"  JSON paths total  : {reports.get('json_report_paths', 0)}")
+        print(f"  Under latest/     : {reports.get('latest_json_paths', 0)}")
+        print(f"  Under archive/    : {archive_n}")
+        if archive_n == 0:
+            print(
+                "  Note              : outcomes usually record the latest/ JSON path; archive/ may still exist "
+                "on disk when SCYTALEDROID_STATIC_REPORT_JSON_MODE is archive or both. "
+                "Each JSON filename is keyed by SHA-256, so split APK reports do not overwrite one another."
+            )
 
     if reconciliation:
         gap_items = [
@@ -310,10 +355,13 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
             for key, label in gap_items
             if _safe_int(reconciliation.get(key, 0)) > 0
         ]
+        print()
         print("Gaps     : " + (", ".join(active_gaps) if active_gaps else "none"))
     else:
+        print()
         print("Gaps     : none")
 
+    print()
     print("Note     : Compatibility counts are secondary checks; canonical rows remain authoritative.")
 
 
@@ -330,11 +378,10 @@ def render_permission_snapshot_summary_section(session_stamp: str | None) -> Non
         return
 
     inventory = _mapping_section(payload, "inventory")
-    permissions = payload.get("permissions") if isinstance(payload.get("permissions"), Sequence) else []
-    signals = payload.get("signals") if isinstance(payload.get("signals"), Sequence) else []
+    permissions, signals = _permission_snapshot_prevalence_sequences(payload)
 
     print()
-    _print_heading("Permission snapshot")
+    _print_heading("Permission audit snapshot (prevalence catalog)")
     print(f"Artifact : {path}")
     print(
         "Apps     : "
@@ -347,8 +394,12 @@ def render_permission_snapshot_summary_section(session_stamp: str | None) -> Non
         if preview:
             print(f"Cohorts  : {preview}")
 
-    print(f"Permissions tracked: {len(permissions)}")
-    print(f"Signals tracked    : {len(signals)}")
+    print(f"Distinct permission names (session rollup) : {len(permissions)}")
+    print(f"Distinct signal names (session rollup)     : {len(signals)}")
+    print(
+        "Note: These counts summarize unique permission/signal names in the permission-audit JSON "
+        "(prevalence rollup), not MariaDB permission_matrix row counts. For DB rows, see the persistence audit."
+    )
 
 
 def render_export_all_tables_section(session_stamp: str | None) -> None:
@@ -370,6 +421,159 @@ def render_export_all_tables_section(session_stamp: str | None) -> None:
     print(f"Static HTML reports     : {report_latest}")
 
 
+def _print_post_run_diagnostics_header(outcome: RunOutcome, params: RunParameters, *, persist_enabled: bool) -> None:
+    stamp = str(params.session_stamp or "").strip()
+    packages = [str(getattr(a, "package_name", "") or "").strip() for a in outcome.results]
+    packages = [p for p in packages if p]
+    if len(packages) == 1:
+        pkg_line = packages[0]
+    elif packages:
+        pkg_line = f"{len(packages)} packages"
+    else:
+        pkg_line = "n/a"
+
+    run_ids = [
+        int(a.static_run_id)
+        for a in outcome.results
+        if getattr(a, "static_run_id", None) is not None
+    ]
+    if len(run_ids) == 1:
+        rid = str(run_ids[0])
+    elif run_ids:
+        rid = ", ".join(str(r) for r in run_ids[:4]) + ("…" if len(run_ids) > 4 else "")
+    else:
+        rid = "n/a"
+
+    db_line = "enabled" if persist_enabled else "skipped"
+    gov = "paper-grade requested" if getattr(params, "paper_grade_requested", False) else "experimental path"
+    overall = getattr(outcome, "run_aggregate_status", None) or "unknown"
+
+    print(f"Post-run diagnostics — {stamp or 'session'} | static_run_id={rid}")
+    print(f"Session        : {stamp or 'n/a'}")
+    print(f"Package        : {pkg_line}")
+    print(f"Static run ID  : {rid}")
+    print(f"DB persistence : {db_line}")
+    print(f"Governance     : {gov}")
+    print(f"Overall health : {overall}")
+
+
+def render_db_verification_sql_section(
+    *,
+    static_run_id: int | None,
+    session_stamp: str | None,
+    package_name: str | None,
+    cohort_multi_app: bool = False,
+    example_static_run_id: int | None = None,
+) -> None:
+    print()
+    _print_heading("DB verification SQL")
+    stamp = str(session_stamp or "").strip()
+    pkg = str(package_name or "").strip()
+    print("Paste into your MariaDB analyst shell (adjust catalog/database if needed).")
+    print()
+    if cohort_multi_app and stamp:
+        ex = int(example_static_run_id or static_run_id or 0)
+        print(f"-- Group / profile session session_stamp={stamp!r}")
+        print("-- Verify cohort-wide counts (join through static_analysis_runs).")
+        print()
+        print(f"SELECT COUNT(*) AS static_run_rows FROM static_analysis_runs WHERE session_stamp={stamp!r};")
+        print(
+            "SELECT COUNT(*) AS findings_rows FROM static_analysis_findings f "
+            "JOIN static_analysis_runs r ON r.id = f.run_id "
+            f"WHERE r.session_stamp={stamp!r};"
+        )
+        print(
+            "SELECT COUNT(*) AS perm_matrix_rows FROM static_permission_matrix m "
+            "JOIN static_analysis_runs r ON r.id = m.run_id "
+            f"WHERE r.session_stamp={stamp!r};"
+        )
+        print(f"SELECT * FROM static_session_rollups WHERE session_stamp={stamp!r} LIMIT 5;")
+        print(
+            "SELECT static_run_id, package_name, session_stamp, status FROM v_web_app_sessions "
+            f"WHERE session_stamp={stamp!r} LIMIT 25;"
+        )
+        print()
+        if ex > 0:
+            print(f"-- Example single-app drill-down (static_run_id={ex})")
+            print(f"SELECT * FROM static_analysis_runs WHERE id = {ex};")
+            print(f"SELECT COUNT(*) AS c FROM static_analysis_findings WHERE run_id = {ex};")
+            print(f"SELECT COUNT(*) AS c FROM static_permission_matrix WHERE run_id = {ex};")
+            print(f"SELECT COUNT(*) AS c FROM static_string_summary WHERE static_run_id = {ex};")
+            print(f"SELECT * FROM v_static_handoff_v1 WHERE static_run_id = {ex};")
+        print()
+        print(
+            "Note: normalized findings use run_id → static_analysis_runs.id. "
+            "v_web_app_sessions filters may hide superseded rows."
+        )
+        return
+
+    if static_run_id is None:
+        print(status_messages.status("No static_run_id on this outcome — check session linkage / run_health.json.", level="warn"))
+        return
+
+    sid = int(static_run_id)
+    print(f"-- Context: session_stamp={stamp!r} package={pkg!r} static_run_id={sid}")
+    print()
+    print(f"SELECT * FROM static_analysis_runs WHERE id = {sid};")
+    print(f"SELECT COUNT(*) AS c FROM static_analysis_findings WHERE run_id = {sid};")
+    print(f"SELECT COUNT(*) AS c FROM static_permission_matrix WHERE run_id = {sid};")
+    print(f"SELECT COUNT(*) AS c FROM static_string_summary WHERE static_run_id = {sid};")
+    print(f"SELECT COUNT(*) AS c FROM static_session_run_links WHERE static_run_id = {sid};")
+    print(f"SELECT * FROM v_static_handoff_v1 WHERE static_run_id = {sid};")
+    print(
+        "SELECT static_run_id, package_name, session_stamp, status FROM v_web_app_sessions "
+        f"WHERE static_run_id = {sid};"
+    )
+    print(f"SELECT COUNT(*) AS c FROM v_web_app_findings WHERE static_run_id = {sid};")
+    print(f"SELECT COUNT(*) AS c FROM v_web_app_permissions WHERE static_run_id = {sid};")
+    print(f"SELECT * FROM v_web_app_findings WHERE static_run_id = {sid} LIMIT 20;")
+    print()
+    print(
+        "Note: v_web_app_* views may filter or dedupe (for example latest-by-package). "
+        "Compare counts to canonical static_analysis_* tables if numbers diverge."
+    )
+
+
+def render_static_handoff_diagnostic_section(*, static_run_id: int | None, package_name: str | None) -> None:
+    print()
+    _print_heading("Static-to-dynamic handoff")
+    pkg = str(package_name or "").strip() or "n/a"
+    print(f"package_name    : {pkg}")
+    if static_run_id is None:
+        print(status_messages.status("No static_run_id — cannot query v_static_handoff_v1.", level="warn"))
+        return
+
+    sid = int(static_run_id)
+    print(f"static_run_id   : {sid}")
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+
+        rows = core_q.run_sql(
+            "SELECT * FROM v_static_handoff_v1 WHERE static_run_id = %s LIMIT 3",
+            (sid,),
+            fetch="all_dict",
+        )
+    except Exception as exc:
+        print(status_messages.status(f"Database query failed (is MariaDB configured?): {exc}", level="warn"))
+        return
+
+    if not rows:
+        print(
+            "No rows in v_static_handoff_v1 for this static_run_id. "
+            "The view requires COMPLETED runs with handoff hashes populated — "
+            "check static_analysis_runs.status and static_handoff_json_path."
+        )
+        return
+
+    row = rows[0]
+    print(f"static_handoff_hash   : {row.get('static_handoff_hash')}")
+    print(f"handoff JSON path     : {row.get('static_handoff_json_path')}")
+    print(f"artifact_set_hash     : {row.get('artifact_set_hash')}")
+    print(f"base_apk_sha256       : {row.get('base_apk_sha256')}")
+    print(f"identity_mode         : {row.get('identity_mode')}")
+    print("Dynamic readiness      : see handoff JSON + dynamic plan artifacts for linkage.")
+
+
 def render_post_run_diagnostics_menu(
     *,
     outcome: RunOutcome,
@@ -388,17 +592,31 @@ def render_post_run_diagnostics_menu(
     render_db_masvs_summary_fn,
     render_cross_app_insights_fn,
 ) -> None:
+    first_pkg = ""
+    if outcome.results:
+        first_pkg = str(getattr(outcome.results[0], "package_name", "") or "").strip()
+    primary_run_id = None
+    for app in outcome.results:
+        rid = getattr(app, "static_run_id", None)
+        if rid is not None:
+            primary_run_id = int(rid)
+            break
+
     while True:
         print()
-        _print_heading("Post-run diagnostics")
-        print("1) Normalized findings by package")
+        _print_post_run_diagnostics_header(outcome, params, persist_enabled=persist_enabled)
+        print()
+        _print_heading("Menu")
+        print("1) Findings summary (normalized)")
         print("2) Permission matrix")
         print("3) MASVS matrix")
         print("4) Static risk scores")
         print("5) Aggregate insights")
-        print("6) Persistence audit summary")
-        print("7) Permission snapshot")
-        print("8) Export all tables")
+        print("6) Persistence audit")
+        print("7) Permission audit snapshot (prevalence)")
+        print("8) Static-to-dynamic handoff")
+        print("9) DB verification SQL")
+        print("10) Export paths")
         print("0) Back")
 
         choice = prompt_utils.prompt_text("Choice", default="0", required=False).strip()
@@ -461,6 +679,28 @@ def render_post_run_diagnostics_menu(
             render_permission_snapshot_summary_section(params.session_stamp)
 
         elif choice == "8":
+            render_static_handoff_diagnostic_section(
+                static_run_id=primary_run_id,
+                package_name=first_pkg or None,
+            )
+
+        elif choice == "9":
+            cohort_multi = len(outcome.results) > 1
+            example_sid = primary_run_id
+            if cohort_multi and outcome.results:
+                last = outcome.results[-1]
+                rid = getattr(last, "static_run_id", None)
+                if rid is not None:
+                    example_sid = int(rid)
+            render_db_verification_sql_section(
+                static_run_id=primary_run_id,
+                session_stamp=params.session_stamp,
+                package_name=first_pkg or None,
+                cohort_multi_app=cohort_multi,
+                example_static_run_id=example_sid,
+            )
+
+        elif choice == "10":
             render_export_all_tables_section(params.session_stamp)
 
         else:

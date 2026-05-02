@@ -11,7 +11,6 @@ from statistics import mean
 from typing import Any
 
 import pymysql
-
 from scytaledroid.StaticAnalysis.modules.permissions.analysis.tokens import (
     classify_flagged_normal,
     is_scored_flagged_normal,

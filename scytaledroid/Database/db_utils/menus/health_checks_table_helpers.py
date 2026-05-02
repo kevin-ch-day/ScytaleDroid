@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import textwrap
-from collections.abc import Sequence
-from typing import Callable
+from collections.abc import Callable, Sequence
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Utils.DisplayUtils import menu_utils, table_utils

@@ -9,6 +9,7 @@ from scytaledroid.Utils.DisplayUtils import colors, status_messages
 from ...core.detector_runner import PIPELINE_STAGES
 from ..core.models import RunParameters
 from ..core.run_context import StaticRunContext
+from .cohort_scan_notes import suppress_per_app_cohort_echoes
 from .scan_progress_display import _format_elapsed
 
 
@@ -233,6 +234,9 @@ def render_app_completion(
     if card_mode:
         palette = colors.get_palette()
         large_batch_mode = bool((app_total or 0) >= 50 or (_is_validation_scope(params) and (app_total or 0) >= 10))
+        # Multi-app profile/all runs (2+) use the same dense card as large cohorts to avoid
+        # repeating pipeline/skipped-placeholder/string-rollup blocks per app.
+        compact_completion = bool(large_batch_mode or (app_total or 0) >= 2)
         very_large_batch_mode = bool((app_total or 0) >= 100)
         label = (app_title or package_name or "").strip() or str(package_name or "<unknown>")
         pkg = str(package_name or "").strip()
@@ -289,7 +293,7 @@ def render_app_completion(
         if very_large_batch_mode:
             _emit_large_artifact_split_notice()
             return elapsed
-        if large_batch_mode:
+        if compact_completion:
             artifact_label = f"{artifact_count} APK{'s' if artifact_count != 1 else ''}"
             header_only = header_line
             if pkg and label and label != pkg:
@@ -319,7 +323,7 @@ def render_app_completion(
                 compact_parts.append(f"status={final_row.strip()}")
             print(" | ".join(compact_parts))
             print()
-        else:
+        if not compact_completion:
             print(colors.apply(header_line, palette.banner_primary, bold=True))
             _emit_large_artifact_split_notice()
             # Avoid redundant "Package:" line when the header already includes it.
@@ -368,6 +372,8 @@ def render_app_completion(
                     )
                 )
             skips_preview = summary.get("skipped_detectors")
+            if suppress_per_app_cohort_echoes(params, app_total):
+                skips_preview = None
             if isinstance(skips_preview, Sequence) and not isinstance(skips_preview, (str, bytes)):
                 preview_lines = []
                 for entry in skips_preview:
@@ -385,7 +391,7 @@ def render_app_completion(
                             show_prefix=False,
                         )
                     )
-            if artifact_count > 1:
+            if artifact_count > 1 and not suppress_per_app_cohort_echoes(params, app_total):
                 print(
                     status_messages.status(
                         "String rollup note: analyse_string_payload is base-APK only for this app row.",
@@ -408,7 +414,7 @@ def render_app_completion(
         show_slow_details = bool(
             slow_parts
             and (
-                not large_batch_mode
+                not compact_completion
                 or params.verbose_output
                 or max_slow >= 10.0
             )
@@ -416,7 +422,7 @@ def render_app_completion(
         if show_slow_details:
             print(colors.apply("Slow: ", palette.hint, bold=True) + "; ".join(slow_parts))
 
-        if error_count > 0 or (not large_batch_mode and fail_count > 0) or (p0 > 0 and not large_batch_mode) or (large_batch_mode and detail_needed):
+        if error_count > 0 or (not compact_completion and fail_count > 0) or (p0 > 0 and not compact_completion) or (compact_completion and detail_needed):
             failing: list[str] = []
             error_parts = _error_detector_parts(summary.get("error_detectors"), limit=3)
             for key in ("finding_fail_detectors", "policy_fail_detectors"):
@@ -438,7 +444,7 @@ def render_app_completion(
                         show_prefix=False,
                     )
                 )
-            if failing and (not large_batch_mode or params.verbose_output):
+            if failing and (not compact_completion or params.verbose_output):
                 print(
                     status_messages.status(
                         "Policy/finding fails: " + ", ".join(failing[:4]),
@@ -447,8 +453,8 @@ def render_app_completion(
                         show_prefix=False,
                     )
                 )
-        # Keep regular cards visually separated; large batch mode stays dense.
-        if not large_batch_mode:
+        # Keep regular cards visually separated; compact multi-app cards stay dense.
+        if not compact_completion:
             print()
         return elapsed
 

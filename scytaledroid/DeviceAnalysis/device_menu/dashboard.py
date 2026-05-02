@@ -15,8 +15,7 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
-from scytaledroid.DeviceAnalysis.services import artifact_store
-from scytaledroid.DeviceAnalysis.services import device_service
+from scytaledroid.DeviceAnalysis.services import artifact_store, device_service
 from scytaledroid.Utils.DisplayUtils import (
     colors,
     error_panels,

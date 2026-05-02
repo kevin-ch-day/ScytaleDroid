@@ -18,14 +18,14 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (
-    effective_min_pcap_bytes_for_phase,
-    effective_min_windows_per_run,
-)
 from scytaledroid.DynamicAnalysis.run_profile_norm import (
     normalize_run_profile,
     phase_from_normalized_profile,
     resolve_run_profile_from_manifest,
+)
+from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (
+    effective_min_pcap_bytes_for_phase,
+    effective_min_windows_per_run,
 )
 
 

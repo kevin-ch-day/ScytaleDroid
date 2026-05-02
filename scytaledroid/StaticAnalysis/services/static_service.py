@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
-from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import check_session_uniqueness
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec_detailed
+from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import check_session_uniqueness
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _RUN_LOCK = threading.Lock()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -482,10 +483,13 @@ def test_render_persistence_audit_summary_section_displays_reconciliation(monkey
     assert "Persistence audit summary" in out
     assert "Schema   : v2" in out
     assert "Outcome  : canonical_failed=False persistence_failed=False compat_export_failed=True" in out
-    assert "Compat   : stage=run.create" in out
-    assert "Canonical: statuses={'COMPLETED': 120} findings=3368" in out
-    assert "Compat   : runs=120 risk_scores=120 metrics=120 buckets=120 contributors=120" in out
-    assert "Reports  : json=120 latest=120 archive=120" in out
+    assert "Compat stage (export): run.create" in out
+    assert "Canonical persistence" in out
+    assert "Run statuses      : {'COMPLETED': 120}" in out
+    assert "Findings (rows)   : 3368" in out
+    assert "Legacy mirror (removed)" in out
+    assert "Reports (paths recorded on artifacts)" in out
+    assert "Under archive/    : 120" in out
     assert "Gaps     : none" in out
 
 
@@ -516,6 +520,71 @@ def test_render_export_all_tables_section_lists_known_paths(monkeypatch, capsys,
     assert "Persistence audit       : output/audit/persistence/sess-export_persistence_audit.json" in out
     assert "Permission snapshot     : data/audit/perm-audit_app_sess-export/snapshot.json" in out
     assert "Selection manifest" not in out
+
+
+@pytest.mark.unit
+def test_render_permission_snapshot_summary_uses_nested_permission_prevalence(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    session = "sess-nested"
+    snapshot_path = tmp_path / "data" / "audit" / "perm-audit_app_sess-nested" / "snapshot.json"
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "inventory": {
+                    "apps_total": 1,
+                    "apps_in_scope": 1,
+                    "cohort_counts": {"User": 1},
+                },
+                "permission_prevalence": {
+                    "permissions": [
+                        {"name": "android.permission.CAMERA"},
+                        {"name": "android.permission.RECORD_AUDIO"},
+                    ],
+                    "signals": [{"name": "overlay_risk"}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from scytaledroid.StaticAnalysis.cli.execution.results_sections import (
+        render_permission_snapshot_summary_section,
+    )
+
+    render_permission_snapshot_summary_section(session)
+
+    out = capsys.readouterr().out
+    assert "Distinct permission names (session rollup) : 2" in out
+    assert "Distinct signal names (session rollup)     : 1" in out
+
+
+@pytest.mark.unit
+def test_render_permission_snapshot_summary_legacy_top_level_keys(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    session = "sess-legacy"
+    snapshot_path = tmp_path / "data" / "audit" / "perm-audit_app_sess-legacy" / "snapshot.json"
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "inventory": {"apps_total": 1, "apps_in_scope": 1},
+                "permissions": [{"name": "android.permission.READ_CONTACTS"}],
+                "signals": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from scytaledroid.StaticAnalysis.cli.execution.results_sections import (
+        render_permission_snapshot_summary_section,
+    )
+
+    render_permission_snapshot_summary_section(session)
+
+    out = capsys.readouterr().out
+    assert "Distinct permission names (session rollup) : 1" in out
+    assert "Distinct signal names (session rollup)     : 0" in out
 
 
 @pytest.mark.unit
@@ -571,6 +640,8 @@ def test_build_run_results_view_model_resolves_session_and_grade(monkeypatch, tm
         sql = " ".join(str(query).split()).lower()
         if "count(*) from static_analysis_runs" in sql:
             return (3,)
+        if "min(id)" in sql and "static_analysis_runs" in sql:
+            return (700,)
         if "where session_label=%s and is_canonical=1" in sql:
             return (718,)
         if "where session_label=%s" in sql and "order by id desc" in sql:
@@ -606,6 +677,7 @@ def test_build_run_results_view_model_resolves_session_and_grade(monkeypatch, tm
     assert view_model.session_meta.attempts == 3
     assert view_model.session_meta.canonical_id == 718
     assert view_model.session_meta.latest_id == 719
+    assert view_model.session_meta.first_static_run_id == 700
     assert "Result set: Experimental" in str(view_model.footer)
     assert "persistence gate failed" in str(view_model.footer)
     assert "run failures present" in str(view_model.footer)

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,20 +24,17 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
-
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN  # noqa: E402
 from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
     normalize_run_profile,
     phase_from_normalized_profile,
     resolve_run_profile_from_manifest,
 )
-
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN  # noqa: E402
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config  # noqa: E402
 from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (  # noqa: E402
     effective_min_pcap_bytes_idle,
     effective_min_pcap_bytes_scripted,
 )
+from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
 
 
 def _sha256_file(path: Path) -> str:
@@ -389,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Version consistency (paper-grade default).
     by_pkg: dict[str, set[str]] = {}
-    for rid, meta in include_meta.items():
+    for _rid, meta in include_meta.items():
         pkg = str(meta.get("package") or "")
         vc = str(meta.get("version_code") or "")
         if not vc:
@@ -403,7 +399,7 @@ def main(argv: list[str] | None = None) -> int:
     # Strict: require full catalog coverage with idle>=1 and scripted_interaction>=1 per package.
     if strict and catalog_pkgs is not None:
         per_pkg: dict[str, dict[str, int]] = {pkg: {"idle": 0, "scripted": 0, "manual": 0} for pkg in catalog_pkgs}
-        for rid, meta in include_meta.items():
+        for _rid, meta in include_meta.items():
             pkg = str(meta.get("package") or "").strip()
             if pkg not in per_pkg:
                 continue
@@ -499,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
             payload_cat = _rjson(cat_path)
             cat_pkgs = [str(k).strip() for k in payload_cat.keys() if str(k).strip()]
             by_pkg_phase: dict[str, dict[str, int]] = {pkg: {"idle": 0, "interactive": 0, "manual": 0} for pkg in cat_pkgs}
-            for rid, meta in include_meta.items():
+            for _rid, meta in include_meta.items():
                 pkg = str(meta.get("package") or "").strip()
                 if pkg not in by_pkg_phase:
                     continue

@@ -18,8 +18,8 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
-from scytaledroid.DynamicAnalysis.core.target_manager import extract_version_code_from_dump
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
+from scytaledroid.DynamicAnalysis.core.target_manager import extract_version_code_from_dump
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     MESSAGING_PACKAGES,
     load_dataset_packages,

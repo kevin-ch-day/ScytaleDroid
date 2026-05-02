@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-from ..core.analysis_profiles import run_modules_for_profile
 from ...core.detector_runner import PIPELINE_STAGES
+from ..core.analysis_profiles import run_modules_for_profile
 
 if TYPE_CHECKING:
     from ..commands.models import Command
@@ -27,7 +27,7 @@ def distinct_package_count(groups: tuple) -> int:
     )
 
 
-def latest_scope_for_all(groups: tuple) -> "ScopeSelection":
+def latest_scope_for_all(groups: tuple) -> ScopeSelection:
     from ..core.models import ScopeSelection
     from ..flows.selection import select_latest_groups
 
@@ -48,7 +48,7 @@ def latest_scope_for_all(groups: tuple) -> "ScopeSelection":
     return ScopeSelection("all", "All harvested apps", tuple(selected))
 
 
-def choose_all_scope_variant(selection: "ScopeSelection") -> "ScopeSelection | None":
+def choose_all_scope_variant(selection: ScopeSelection) -> ScopeSelection | None:
     from ..core.models import ScopeSelection
 
     total = len(selection.groups)
@@ -80,10 +80,10 @@ def choose_all_scope_variant(selection: "ScopeSelection") -> "ScopeSelection | N
     )
 
 
-def search_app_scope(groups: tuple) -> "ScopeSelection | None":
+def search_app_scope(groups: tuple) -> ScopeSelection | None:
+    from ...core.repository import list_packages
     from ..core.models import ScopeSelection
     from ..flows.selection import select_latest_groups
-    from ...core.repository import list_packages
 
     packages = list_packages(groups)
     if not packages:
@@ -168,7 +168,7 @@ def search_app_scope(groups: tuple) -> "ScopeSelection | None":
     return ScopeSelection("app", label, scoped)
 
 
-def emit_selected_preset_summary(command: "Command") -> None:
+def emit_selected_preset_summary(command: Command) -> None:
     """Summarize analyzer/pipeline sizing after a preset is chosen."""
     profile = str(command.profile or "full").lower()
     cid = str(getattr(command, "id", "") or "").upper()
@@ -193,7 +193,7 @@ def emit_selected_preset_summary(command: "Command") -> None:
     )
 
 
-def choose_run_profile() -> "Command | None":
+def choose_run_profile() -> Command | None:
     from ..commands import get_command
     from ..commands.models import Command
 

@@ -6,8 +6,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core import db_engine
+from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -495,16 +495,8 @@ def create_static_run_ledger(
             session_label=session_label,
             canonical_reason=canonical_reason,
         )
-    try:
-        core_q.run_sql(
-            """
-            INSERT INTO runs (session_stamp, package_name, scope_label, profile, static_run_id)
-            VALUES (%s,%s,%s,%s,%s)
-            """,
-            (session_stamp, package_name, scope_label, profile, static_run_id),
-        )
-    except Exception:
-        pass
+    # Canonical static persistence uses static_analysis_runs (+ session link/rollup tables).
+    # Legacy `runs` mirrored rows caused schema drift (e.g. package vs package_name); do not INSERT here.
     return static_run_id
 
 

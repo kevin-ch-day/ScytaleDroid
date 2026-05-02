@@ -8,16 +8,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
-from scytaledroid.DeviceAnalysis.services import artifact_store
 
-from . import common
-from . import package_contract
-from . import package_refresh
+from . import common, package_contract, package_refresh
 from .common import (
     DedupeTracker,
     HarvestOptions,
@@ -200,7 +198,9 @@ def execute_harvest(
         # Import DB repositories only when DB writes are enabled. This keeps harvest usable
         # on clean machines where DB deps/connectors/migrations may be absent.
         try:
-            from scytaledroid.Database.db_func.harvest import apk_repository as repo  # local import (optional DB)
+            from scytaledroid.Database.db_func.harvest import (
+                apk_repository as repo,  # local import (optional DB)
+            )
 
             db_repo = repo
         except Exception as exc:

@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from scytaledroid.Database.db_core import db_config
-
 from scytaledroid.DeviceAnalysis import device_manager, inventory_meta
 from scytaledroid.DeviceAnalysis.device_analysis_settings import INVENTORY_STALE_SECONDS
 from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels

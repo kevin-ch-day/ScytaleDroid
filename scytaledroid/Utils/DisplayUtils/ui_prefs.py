@@ -95,7 +95,7 @@ def get_theme() -> str:
 def set_theme(name: str) -> str:
     from . import colors
 
-    palette = colors.set_palette_by_name(name)
+    _ = colors.set_palette_by_name(name)
     resolved = colors.current_palette_name()
     _PREFS.theme_name = resolved
     return resolved

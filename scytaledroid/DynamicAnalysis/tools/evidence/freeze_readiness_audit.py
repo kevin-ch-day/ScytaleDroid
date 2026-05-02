@@ -5,8 +5,8 @@ This is a pre-freeze operator check that surfaces contract drift quickly.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 import json
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,11 +16,13 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     load_dataset_packages,
 )
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+    MIN_WINDOWS_PER_RUN,
+    DatasetTrackerConfig,
+    load_dataset_tracker,
+)
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
     inspect_canonical_freeze,

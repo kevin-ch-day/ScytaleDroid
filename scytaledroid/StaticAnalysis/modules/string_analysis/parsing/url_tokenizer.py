@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+
 from ..constants import ENDPOINT_PATTERN
 from .punctuation import strip_wrap_punct
 from .urlsafe import safe_urlsplit

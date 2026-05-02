@@ -6,12 +6,12 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 
 from scytaledroid.DeviceAnalysis import harvest, inventory
-from scytaledroid.DeviceAnalysis.inventory.cli_labels import BANNER_REFRESH_REQUIRED
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import (
     coerce_float,
     humanize_seconds,
 )
+from scytaledroid.DeviceAnalysis.inventory.cli_labels import BANNER_REFRESH_REQUIRED
 from scytaledroid.Utils.DisplayUtils import error_panels, menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 

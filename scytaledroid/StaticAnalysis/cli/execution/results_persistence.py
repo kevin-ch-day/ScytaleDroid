@@ -94,30 +94,14 @@ def apply_persistence_outcome(
         )
         normalized_findings_delta = int(getattr(outcome_status, "persisted_findings", 0) or 0)
         string_samples_delta = int(getattr(outcome_status, "string_samples_persisted", 0) or 0)
-        setattr(
-            app_result,
-            "persistence_runtime_findings",
-            int(getattr(outcome_status, "runtime_findings", 0) or 0),
-        )
-        setattr(
-            app_result,
-            "persistence_persisted_findings",
-            normalized_findings_delta,
-        )
-        setattr(
-            app_result,
-            "persistence_findings_capped_total",
-            int(getattr(outcome_status, "findings_capped_total", 0) or 0),
-        )
+        app_result.persistence_runtime_findings = int(getattr(outcome_status, "runtime_findings", 0) or 0)
+        app_result.persistence_persisted_findings = normalized_findings_delta
+        app_result.persistence_findings_capped_total = int(getattr(outcome_status, "findings_capped_total", 0) or 0)
         capped_map = getattr(outcome_status, "findings_capped_by_detector", None)
         if isinstance(capped_map, Mapping):
-            setattr(
-                app_result,
-                "persistence_findings_capped_by_detector",
-                {str(k): int(v) for k, v in cast(Mapping[Any, Any], capped_map).items()},
-            )
+            app_result.persistence_findings_capped_by_detector = {str(k): int(v) for k, v in cast(Mapping[Any, Any], capped_map).items()}
         else:
-            setattr(app_result, "persistence_findings_capped_by_detector", {})
+            app_result.persistence_findings_capped_by_detector = {}
     return normalized_findings_delta, string_samples_delta
 
 

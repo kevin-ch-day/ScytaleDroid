@@ -29,8 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.Utils.LatexUtils import RawLatex, render_tabular_only
-from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
+from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance  # noqa: E402
+from scytaledroid.Utils.LatexUtils import RawLatex, render_tabular_only  # noqa: E402
 
 PUB_ROOT = REPO_ROOT / "output" / "publication"
 PUBLICATION_RESULTS = PUB_ROOT / "manifests" / "publication_results_v1.json"

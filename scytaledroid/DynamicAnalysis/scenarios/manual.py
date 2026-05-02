@@ -18,8 +18,6 @@ from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     SNAPCHAT_TEMPLATE_HINTS,
-)
-from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     V3_BASELINE_REPRO_TIPS,
     V3_SCRIPTED_REPRO_TIPS,
 )

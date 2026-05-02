@@ -13,7 +13,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-
 TRUTHY = {"1", "true", "yes", "on", "y"}
 
 
@@ -99,7 +98,7 @@ class PaperModeContext:
         strict_arg: bool = False,
         fail_on_dirty_arg: bool = False,
         pinned_snapshot: str | None = None,
-    ) -> "PaperModeContext":
+    ) -> PaperModeContext:
         strict = bool(strict_arg) or truthy_env("SCYTALEDROID_PAPER_STRICT", default=False)
         fail_on_dirty = bool(fail_on_dirty_arg) or truthy_env("SCYTALEDROID_FAIL_ON_DIRTY", default=False)
         commit = git_commit(repo_root)

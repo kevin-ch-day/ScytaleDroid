@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import scipy.stats
-
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_paths
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
@@ -47,7 +46,7 @@ def _i(x: str) -> int:
 
 
 def _write_legacy_aliases() -> bool:
-    return str((os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "")).strip().lower() in {
+    return str(os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -195,7 +194,7 @@ def generate_results_numbers() -> dict[str, Path]:
                 f"- Windows/run (mean): {res.windows_per_run_mean:.2f}",
                 "",
                 "## Baseline Stability (IF primary)",
-                f"- metric: RDI (fraction of windows flagged vs baseline-derived threshold)",
+                "- metric: RDI (fraction of windows flagged vs baseline-derived threshold)",
                 f"- mu_baseline (IF idle mean RDI): {res.if_idle_mean:.3f}",
                 f"- sigma_baseline (IF idle sd, sample across apps): {res.if_idle_sd_sample:.3f}",
                 "",

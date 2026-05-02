@@ -9,7 +9,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 

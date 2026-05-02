@@ -178,7 +178,7 @@ def build_snapshot_freeze_manifest(
             try:
                 plan_paper_contract_version = int(plan.get("paper_contract_version"))
             except Exception:
-                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}")
+                raise RuntimeError(f"FREEZE_MISSING_SCHEMA_VERSION:{rid}") from None
             plan_schema_versions.add(plan_schema_version)
             plan_paper_contract_versions.add(int(plan_paper_contract_version))
         run_identity = plan.get("run_identity") if isinstance(plan.get("run_identity"), dict) else {}

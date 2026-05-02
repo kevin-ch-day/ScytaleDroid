@@ -6,7 +6,6 @@ import csv
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.DisplayUtils import status_messages, table_utils

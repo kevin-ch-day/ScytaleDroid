@@ -23,8 +23,8 @@ import pymysql
 from pymysql import err
 from pymysql.cursors import Cursor, DictCursor
 
-from .db_config import DB_CONFIG
 from . import db_config
+from .db_config import DB_CONFIG
 
 try:  # pragma: no cover - logging configuration may be unavailable in tests
     from scytaledroid.Utils.LoggingUtils import logging_engine as _logging_engine

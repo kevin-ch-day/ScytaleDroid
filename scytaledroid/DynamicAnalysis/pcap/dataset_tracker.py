@@ -12,8 +12,8 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_for_run
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 

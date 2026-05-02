@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
+
 from .constants import HTTP_URL_PATTERN
 from .extractor import IndexedString, StringIndex
 from .parsing.urlsafe import safe_urlsplit

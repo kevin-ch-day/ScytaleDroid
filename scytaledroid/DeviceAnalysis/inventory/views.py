@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels, snapshot_io
+from scytaledroid.DeviceAnalysis.inventory import cli_labels as inventory_cli_labels
+from scytaledroid.DeviceAnalysis.inventory import snapshot_io
 from scytaledroid.DeviceAnalysis.inventory.cli_labels import (
     RUN_START_CARD_FOOTER,
     RUN_START_HEADER,

@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 FREEZE_DATASET_IDENTITY_VERSION = 1
 FREEZE_DATASET_HASH_ALGORITHM = "sha256"
 

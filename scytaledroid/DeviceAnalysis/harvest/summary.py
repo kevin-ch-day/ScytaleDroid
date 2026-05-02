@@ -8,7 +8,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import status_messages, text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -23,8 +22,8 @@ from .models import (
     PullResult,
     ScopeSelection,
 )
-from .views import render_harvest_summary_structured, render_scope_overview
 from .summary_format_helpers import compact_label, count_phrase, format_card_line
+from .views import render_harvest_summary_structured, render_scope_overview
 
 _EXCLUSION_LABELS = {
     "family_excluded": "Family excluded (com.android./com.motorola. not Play)",
