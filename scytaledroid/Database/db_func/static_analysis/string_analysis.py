@@ -15,6 +15,7 @@ from pathlib import Path
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import database_session, db_config, run_sql, run_sql_many
+from ...db_core.schema_introspection import table_exists as _information_schema_table_exists
 from ...db_queries.static_analysis import string_analysis as queries
 
 _ENGINE = str(db_config.DB_CONFIG.get("engine", "")).strip().lower()
@@ -226,21 +227,14 @@ def ensure_tables() -> bool:
         except Exception:
             return False
     else:
-        ok = True
-        for name in (
+        names = (
             "static_string_summary",
             "static_string_samples",
             "static_string_selected_samples",
             "static_string_sample_sets",
             "doc_hosts",
-        ):
-            row = run_sql(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-                (name,),
-                fetch="one",
-            )
-            present = bool(row and int(row[0]) > 0)
-            ok = ok and present
+        )
+        ok = all(_information_schema_table_exists(name) for name in names)
     if not ok:
         log.warning(
             "string analysis tables missing; load a DB snapshot or apply migrations.",
