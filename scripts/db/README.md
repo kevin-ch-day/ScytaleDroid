@@ -71,6 +71,12 @@ PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py counts
    `PYTHONPATH=. python scripts/db/check_permission_intel.py`  
    Use **`SCYTALEDROID_PERMISSION_INTEL_DB_PASSWD`** (or `…_URL`), not `…_PASS` — see script header.
 
+11. **S2-P1A readiness (read-only, optional):**  
+   `PYTHONPATH=. python scripts/db/audit_permission_intel_queue_compatibility.py`  
+   `PYTHONPATH=. python scripts/db/audit_static_permission_observation_linkage.py`  
+   Or bundle: `./scripts/db/run_permission_intel_scytale_s2_readiness_audit.sh`  
+   Narrative: `docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md`.
+
 ## Cohort static session audit
 
 After a profile/cohort static run, verify canonical row counts and Web/read views for one `session_stamp`:
@@ -93,6 +99,9 @@ PYTHONPATH=. python scripts/db/audit_static_session.py --session 20260502-rda-ca
 | `recreate_web_consumer_views.py` | Posture / semantic smoke / counts; guarded **`recreate`** (`--layer` full, manifest, or web). |
 | `view_repair_support.py` | Helpers; ordered DDL for full vs manifest vs web-only sequences (scripts package). |
 | `check_permission_intel.py` | Env/connectivity + governance row counts for **`SCYTALEDROID_PERMISSION_INTEL_DB_*`**. |
+| `audit_permission_intel_queue_compatibility.py` | Read-only PI queue report (`aosp` vs legacy `aosp_promote`, Scytale rows, apply-outcome dry check). |
+| `audit_static_permission_observation_linkage.py` | Read-only core DB: matrix → run SHA-256 / versions / `apk_id`. |
+| `run_permission_intel_scytale_s2_readiness_audit.sh` | Bundles intel check + audits + targeted pytest (best-effort if DB unset). |
 | `audit_static_session.py` | Cohort audit: canonical tables + `v_web_*` + handoff + legacy-table counts (informational); prints copyable SQL. |
 | `smoke_web_db.sh` | Wraps **`ScytaleDroid-Web/scripts/sd_web_db_smoke.php`** (PDO read smoke). |
 

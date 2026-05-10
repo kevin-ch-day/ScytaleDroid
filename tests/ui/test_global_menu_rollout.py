@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import importlib
+from dataclasses import fields
 from types import SimpleNamespace
 
 import pytest
+
+from scytaledroid.Database.db_utils.health_checks.analysis_integrity import AnalysisIntegritySummary
 
 
 pytestmark = [pytest.mark.ui_contract]
@@ -223,6 +226,13 @@ def test_query_runner_latest_session_snapshot_uses_canonical_run_headers(monkeyp
 def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     from scytaledroid.Database.db_utils.menus import health_checks as menu_module
 
+    kw = {f.name: None for f in fields(AnalysisIntegritySummary)}
+    kw["static_dynamic_summary_source"] = "stub"
+    kw["legacy_non_utf8_package_tables"] = ()
+    kw["missing_schema_objects"] = ()
+    analysis_stub = AnalysisIntegritySummary(**kw)
+
+    monkeypatch.setattr(menu_module, "fetch_analysis_integrity_summary", lambda: analysis_stub)
     monkeypatch.setattr(
         menu_module,
         "fetch_health_summary",
@@ -241,6 +251,13 @@ def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     )
     monkeypatch.setattr(menu_module, "_column_exists", lambda *_a, **_k: False)
     monkeypatch.setattr(menu_module, "scalar", lambda *_a, **_k: 1)
+    monkeypatch.setattr(menu_module.intel_db, "is_permission_intel_configured", lambda: True)
+    monkeypatch.setattr(
+        menu_module.intel_db,
+        "describe_target",
+        lambda: {"database": "pi_db", "source": "env"},
+    )
+    monkeypatch.setattr(menu_module, "list_operational_managed_tables", lambda: [])
     monkeypatch.setattr(menu_module.intel_db, "governance_snapshot_count", lambda: 1)
     monkeypatch.setattr(menu_module.intel_db, "governance_row_count", lambda: 1828)
     monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)

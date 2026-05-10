@@ -36,7 +36,7 @@ def test_insert_queue_defaults_optional_placeholders(monkeypatch) -> None:
     )
 
     assert captured["permission_string"] == "android.permission.TEST"
-    assert captured["queue_action"] == "aosp_promote"
+    assert captured["queue_action"] == "aosp"
     assert "proposed_bucket" in captured and captured["proposed_bucket"] is None
     assert "proposed_classification" in captured and captured["proposed_classification"] is None
     assert "status" in captured and captured["status"] == "queued"
@@ -67,5 +67,6 @@ def test_persist_declared_permissions_enqueues_aosp_missing_without_bucket(monke
     assert len(unknown_calls) == 1
     assert len(queue_calls) == 1
     assert queue_calls[0]["permission_string"] == "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION"
+    assert queue_calls[0].get("queue_action") == "aosp"
     assert "proposed_bucket" in queue_calls[0] and queue_calls[0]["proposed_bucket"] is None
     assert "proposed_classification" in queue_calls[0] and queue_calls[0]["proposed_classification"] is None
