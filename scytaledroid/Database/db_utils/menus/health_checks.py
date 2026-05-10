@@ -11,6 +11,7 @@ from scytaledroid.Database.db_utils.permission_intel_freeze import (
     list_operational_managed_tables,
 )
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..health_checks import fetch_latest_run, fetch_latest_session
 from ..health_checks.analysis_integrity import fetch_analysis_integrity_summary
@@ -47,6 +48,18 @@ from .health_checks_table_helpers import (
     table_exists,
 )
 from .sql_helpers import coerce_datetime, scalar
+
+
+def _pi_health_short_reason(exc: BaseException, *, max_len: int = 120) -> str:
+    text = f"{type(exc).__name__}: {exc}"
+    return text if len(text) <= max_len else f"{text[: max_len - 3]}..."
+
+
+def _pi_health_log_subcheck_failure(subcheck: str, exc: BaseException) -> None:
+    log.debug(
+        f"DB health summary sub-check failed ({subcheck}): {exc}",
+        category="db",
+    )
 
 
 def _column_exists(table: str, column: str) -> bool:
@@ -151,16 +164,56 @@ def run_health_summary() -> None:
         print("audit evidence fields  : not tracked")
 
     menu_utils.print_section("Governance snapshot")
-    try:
-        gov_headers = intel_db.governance_snapshot_count()
-        gov_rows = intel_db.governance_row_count()
-        target = intel_db.describe_target()
-        duplicates = list_operational_managed_tables()
-    except Exception:
-        gov_headers = None
-        gov_rows = None
-        target = {}
-        duplicates = []
+
+    gov_headers: int | None = None
+    gov_rows: int | None = None
+    target: dict[str, object] = {}
+    duplicates: list[dict[str, object]] = []
+    pi_status_line: str | None = None
+
+    if not intel_db.is_permission_intel_configured():
+        pi_status_line = "Permission Intel        : SKIPPED — DSN not configured"
+        try:
+            duplicates = list_operational_managed_tables()
+        except Exception as exc:
+            _pi_health_log_subcheck_failure("operational_duplicate_scan", exc)
+            duplicates = []
+    else:
+        target_err: str | None = None
+        gov_err: str | None = None
+        try:
+            target = intel_db.describe_target()
+        except Exception as exc:
+            _pi_health_log_subcheck_failure("permission_intel_target", exc)
+            target = {}
+            target_err = _pi_health_short_reason(exc)
+
+        try:
+            gov_headers = intel_db.governance_snapshot_count()
+            gov_rows = intel_db.governance_row_count()
+        except Exception as exc:
+            _pi_health_log_subcheck_failure("permission_intel_governance_counts", exc)
+            gov_headers = None
+            gov_rows = None
+            gov_err = _pi_health_short_reason(exc)
+
+        if target_err or gov_err:
+            parts: list[str] = []
+            if target_err:
+                parts.append(f"target: {target_err}")
+            if gov_err:
+                parts.append(f"governance: {gov_err}")
+            pi_status_line = "Permission Intel        : ERROR — " + "; ".join(parts)
+
+        try:
+            duplicates = list_operational_managed_tables()
+        except Exception as exc:
+            _pi_health_log_subcheck_failure("operational_duplicate_scan", exc)
+            duplicates = []
+
+    if pi_status_line:
+        print(pi_status_line)
+
     menu_utils.print_metrics(
         [
             ("snapshots", gov_headers if gov_headers is not None else "—"),

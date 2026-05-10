@@ -251,6 +251,14 @@ def permissions_schema_gate() -> tuple[bool, str, str]:
     if not ok:
         return ok, msg, detail
 
+    if not intel_db.is_permission_intel_configured():
+        return (
+            True,
+            "OK_SKIPPED",
+            "Permission Intel DSN not configured; core DB permission cohort tables checked; "
+            "PI catalog/governance table presence not assessed.",
+        )
+
     missing_managed = [table for table in MANAGED_TABLES if not intel_db.intel_table_exists(table)]
     if missing_managed:
         return (

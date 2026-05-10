@@ -2,8 +2,9 @@
 """Operational SQL VIEW maintenance (Web + manifest + canonical reporting surfaces).
 
 Connection (see ``scripts/db/README.md``):
-  SCYTALEDROID_DB_HOST, SCYTALEDROID_DB_PORT, SCYTALEDROID_DB_USER,
-  SCYTALEDROID_DB_PASSWD (canonical; SCYTALEDROID_DB_PASS legacy), SCYTALEDROID_DB_NAME
+  Prefer resolving through ``scytaledroid.Database.db_core.db_config`` so
+  ``SCYTALEDROID_DB_URL`` (or composed ``SCYTALEDROID_DB_*`` parts) matches the CLI.
+  Legacy fallback: ``SCYTALEDROID_DB_HOST`` / ``DB_USER`` / ``DB_NAME``, etc.
 
 Commands:
   posture    — all v_/vw_ BASE TABLE violations, expected VIEW types, columns, utf8 sample
@@ -33,6 +34,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.Database.db_core import db_config
+
 from scripts.db.view_repair_support import (
     EXPECTED_VIEW_OBJECTS,
     REQUIRED_COLUMNS,
@@ -50,22 +53,43 @@ def _connect():
             "pymysql is required. Install dev/runtime deps or: pip install pymysql"
         ) from e
 
-    host = os.environ.get("SCYTALEDROID_DB_HOST", "localhost")
-    port = int(os.environ.get("SCYTALEDROID_DB_PORT", "3306"))
-    user = os.environ.get("SCYTALEDROID_DB_USER") or os.environ.get("MYSQL_USER")
-    password = (
-        os.environ.get("SCYTALEDROID_DB_PASSWD")
+    cfg = db_config.DB_CONFIG
+    engine = str(cfg.get("engine", "")).lower()
+    host = cfg.get("host") or os.environ.get("SCYTALEDROID_DB_HOST", "localhost")
+    port = int(cfg.get("port") or os.environ.get("SCYTALEDROID_DB_PORT", "3306"))
+    user = (
+        str(cfg.get("user") or "")
+        .strip()
+        or (os.environ.get("SCYTALEDROID_DB_USER") or os.environ.get("MYSQL_USER") or "").strip()
+    )
+    password = str(
+        cfg.get("password")
+        or os.environ.get("SCYTALEDROID_DB_PASSWD")
         or os.environ.get("SCYTALEDROID_DB_PASS")
         or os.environ.get("MYSQL_PASSWORD", "")
+        or ""
     )
-    database = os.environ.get("SCYTALEDROID_DB_NAME") or os.environ.get("MYSQL_DATABASE")
-    if not user or not database:
+    database = str(
+        cfg.get("database")
+        or os.environ.get("SCYTALEDROID_DB_NAME")
+        or os.environ.get("MYSQL_DATABASE")
+        or ""
+    ).strip()
+
+    if engine == "disabled":
         sys.stderr.write(
-            "Set SCYTALEDROID_DB_USER and SCYTALEDROID_DB_NAME (and password) in the environment.\n"
+            "Database is disabled in db_config. Set SCYTALEDROID_DB_URL (or SCYTALEDROID_DB_NAME/USER/…).\n"
         )
         sys.exit(2)
+    if not user or not database:
+        sys.stderr.write(
+            "Operational MySQL/MariaDB not resolved. Set SCYTALEDROID_DB_URL or "
+            "SCYTALEDROID_DB_* parts (same namespace as ./run.sh), then retry.\n"
+        )
+        sys.exit(2)
+
     return pymysql.connect(
-        host=host,
+        host=str(host),
         port=port,
         user=user,
         password=password,

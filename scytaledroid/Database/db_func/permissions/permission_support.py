@@ -9,6 +9,7 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import permission_intel as intel_db
 from ...db_core import run_sql
+from ...db_core.schema_introspection import table_exists as app_table_exists
 
 _ALLOWED_BANDS = {"critical", "high", "medium", "low", "none"}
 _ALLOWED_STAGES = {"declared", "runtime", "policy"}
@@ -110,15 +111,7 @@ def _normalize_stage(value: object) -> str:
 
 
 def _table_exists(table: str) -> bool:
-    try:
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            (table,),
-            fetch="one",
-        )
-        return bool(row and int(row[0]) > 0)
-    except Exception:
-        return False
+    return app_table_exists(table)
 
 
 def _intel_table_exists(table: str) -> bool:

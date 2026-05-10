@@ -134,6 +134,10 @@ def upsert_unknown(payload: Mapping[str, object]) -> None:
 
 def insert_queue(payload: Mapping[str, object]) -> None:
     params = dict(payload)
+    # Erebus queue-apply maps ``aosp`` via class_action_map; ``aosp_promote`` is not recognized.
+    qa = str(params.get("queue_action") or "").strip().lower()
+    if qa == "aosp_promote":
+        params["queue_action"] = "aosp"
     now = _utc_now()
     params.setdefault("proposed_bucket", None)
     params.setdefault("proposed_classification", None)

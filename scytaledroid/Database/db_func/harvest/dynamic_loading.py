@@ -7,23 +7,14 @@ from collections.abc import Iterable, Mapping
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
+from ...db_core.schema_introspection import table_exists
 from ...db_queries.harvest import dynamic_loading as q
 
 
 def ensure_tables() -> bool:
     try:
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            ("static_dynload_events",),
-            fetch="one",
-        )
-        ok_dyn = bool(row and int(row[0]) > 0)
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            ("static_reflection_calls",),
-            fetch="one",
-        )
-        ok_ref = bool(row and int(row[0]) > 0)
+        ok_dyn = table_exists("static_dynload_events")
+        ok_ref = table_exists("static_reflection_calls")
         if not (ok_dyn and ok_ref):
             log.warning(
                 "dynamic loading tables missing; load a DB snapshot or apply migrations.",

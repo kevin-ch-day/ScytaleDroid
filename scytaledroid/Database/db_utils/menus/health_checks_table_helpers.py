@@ -5,7 +5,7 @@ from __future__ import annotations
 import textwrap
 from collections.abc import Callable, Sequence
 
-from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_core.schema_introspection import table_exists as core_table_exists
 from scytaledroid.Utils.DisplayUtils import menu_utils, table_utils
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
@@ -38,20 +38,7 @@ def print_table_counts(title: str, counts: dict[str, int]) -> None:
 
 
 def table_exists(table: str) -> bool:
-    try:
-        row = run_sql(
-            """
-            SELECT COUNT(*)
-            FROM information_schema.tables
-            WHERE table_schema = DATABASE()
-              AND table_name = %s
-            """,
-            (table,),
-            fetch="one",
-        )
-    except Exception:
-        return False
-    return bool(row and row[0])
+    return core_table_exists(table)
 
 
 def print_wrapped_table_block(tables: Sequence[str], width: int | None = None) -> None:
