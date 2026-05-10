@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..db_core import run_sql
+from ..db_core.schema_introspection import table_exists
 from .package_utils import normalize_package_name
 
 
@@ -34,16 +35,10 @@ _FALLBACK_RULES: Sequence[PublisherRule] = (
 
 
 def _publisher_rules_table_exists() -> bool:
-    try:
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            ("android_publisher_prefix_rules",),
-            fetch="one",
-            query_name="publishers.table_exists",
-        )
-        return bool(row and int(row[0]) > 0)
-    except Exception:
-        return False
+    return table_exists(
+        "android_publisher_prefix_rules",
+        query_name="publishers.table_exists",
+    )
 
 
 def load_publisher_rules() -> list[PublisherRule]:

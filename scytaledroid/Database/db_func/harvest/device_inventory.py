@@ -9,6 +9,7 @@ from datetime import datetime
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql, run_sql_many
+from ...db_core.schema_introspection import table_exists
 from ...db_queries.harvest import device_inventory as queries
 from ...db_utils.package_utils import is_suspicious_package_name, normalize_package_name
 
@@ -21,18 +22,8 @@ def ensure_tables() -> bool:
     if _TABLES_READY:
         return True
     try:
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            ("device_inventory_snapshots",),
-            fetch="one",
-        )
-        ok_snap = bool(row and int(row[0]) > 0)
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            ("device_inventory",),
-            fetch="one",
-        )
-        ok_inv = bool(row and int(row[0]) > 0)
+        ok_snap = table_exists("device_inventory_snapshots")
+        ok_inv = table_exists("device_inventory")
         if not (ok_snap and ok_inv):
             log.warning(
                 "device_inventory tables missing; load a DB snapshot or apply migrations.",

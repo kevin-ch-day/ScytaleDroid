@@ -72,42 +72,43 @@ REQUIRED_ANALYSIS_SCHEMA_OBJECTS: tuple[str, ...] = (
     *REQUIRED_ANALYSIS_VIEW_OBJECTS,
 )
 
+# Shared predicate for duplicate-app-version health metrics (avoid drift between group count vs row-sum).
+_SQL_APP_VERSION_CODE_DUP_BASE = """
+              FROM app_versions
+              WHERE version_code IS NOT NULL
+              GROUP BY app_id, version_code
+              HAVING COUNT(*) > 1"""
+
+
+def _information_schema_object_present(table_name: str, *, table_type: str) -> bool:
+    """
+    True when DATABASE() has the named information_schema.tables row.
+    False on missing row, zero count, or query failure (treated like missing for integrity surfacing).
+    """
+    try:
+        row = run_sql(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = %s
+              AND table_type = %s
+            """,
+            (table_name, table_type),
+            fetch="one",
+        )
+        return bool(row and int(row[0] or 0) != 0)
+    except Exception:
+        return False
+
 
 def _missing_schema_objects() -> tuple[str, ...]:
     missing: list[str] = []
     for name in REQUIRED_ANALYSIS_TABLE_OBJECTS:
-        try:
-            row = run_sql(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.tables
-                WHERE table_schema = DATABASE()
-                  AND table_name = %s
-                  AND table_type = 'BASE TABLE'
-                """,
-                (name,),
-                fetch="one",
-            )
-            if not row or int(row[0] or 0) == 0:
-                missing.append(name)
-        except Exception:
+        if not _information_schema_object_present(name, table_type="BASE TABLE"):
             missing.append(name)
     for name in REQUIRED_ANALYSIS_VIEW_OBJECTS:
-        try:
-            row = run_sql(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.tables
-                WHERE table_schema = DATABASE()
-                  AND table_name = %s
-                  AND table_type = 'VIEW'
-                """,
-                (name,),
-                fetch="one",
-            )
-            if not row or int(row[0] or 0) == 0:
-                missing.append(name)
-        except Exception:
+        if not _information_schema_object_present(name, table_type="VIEW"):
             missing.append(name)
     return tuple(missing)
 
@@ -346,26 +347,20 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
             """
         ),
         duplicate_app_version_code_groups=scalar(
-            """
+            f"""
             SELECT COUNT(*)
             FROM (
               SELECT app_id, version_code
-              FROM app_versions
-              WHERE version_code IS NOT NULL
-              GROUP BY app_id, version_code
-              HAVING COUNT(*) > 1
+              {_SQL_APP_VERSION_CODE_DUP_BASE}
             ) x
             """
         ),
         duplicate_app_version_rows=scalar(
-            """
+            f"""
             SELECT COALESCE(SUM(x.c), 0)
             FROM (
               SELECT COUNT(*) AS c
-              FROM app_versions
-              WHERE version_code IS NOT NULL
-              GROUP BY app_id, version_code
-              HAVING COUNT(*) > 1
+              {_SQL_APP_VERSION_CODE_DUP_BASE}
             ) x
             """
         ),
