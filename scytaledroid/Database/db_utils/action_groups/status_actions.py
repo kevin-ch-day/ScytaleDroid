@@ -19,7 +19,152 @@ from scytaledroid.Database.db_utils.permission_intel_freeze import (
     list_operational_managed_tables,
 )
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
+
+_DUPLICATE_SCAN_FAILED_USER_HINT = "Operational duplicate scan failed; see debug logs."
+_PI_TARGET_SNAPSHOT_FAILED_DETAIL = "Permission Intel target inspection failed; see debug logs."
+
+
+def _snapshot_subcheck_short_reason(exc: BaseException, *, max_len: int = 200) -> str:
+    text = f"{type(exc).__name__}: {exc}"
+    return text if len(text) <= max_len else f"{text[: max_len - 3]}..."
+
+
+def _bridge_posture_snapshot_block() -> tuple[dict[str, object], str | None]:
+    """Collect bridge posture for schema snapshot; never raises."""
+
+    try:
+        summary = bridge_posture_summary()
+        tables = [
+            {
+                "table": row.table,
+                "posture": row.posture,
+                "owner": row.owner,
+                "rationale": row.rationale,
+                "current_writers": list(row.current_writers),
+                "current_readers": list(row.current_readers),
+            }
+            for row in list_bridge_postures()
+        ]
+        return {"summary": summary, "tables": tables}, None
+    except Exception as exc:
+        log.debug(
+            f"DB schema snapshot sub-check failed (bridge_posture): "
+            f"{type(exc).__name__}: {exc}",
+            category="db",
+        )
+        return {"summary": {}, "tables": []}, _snapshot_subcheck_short_reason(exc)
+
+
+def _snapshot_operational_duplicates() -> tuple[list[dict[str, object]], str | None]:
+    """Return duplicate-table rows for JSON snapshot; never raises."""
+
+    try:
+        return list_operational_managed_tables(), None
+    except Exception as exc:
+        log.debug(
+            f"DB schema snapshot sub-check failed (operational_duplicate_scan): "
+            f"{type(exc).__name__}: {exc}",
+            category="db",
+        )
+        return [], _DUPLICATE_SCAN_FAILED_USER_HINT
+
+
+def _fetch_operational_inventory_for_menu() -> tuple[list[dict[str, object]] | None, BaseException | None]:
+    """Load duplicate-table inventory for Database Configuration menu; returns (rows, error)."""
+
+    try:
+        return list_operational_managed_tables(), None
+    except Exception as exc:
+        log.debug(
+            f"show_connection_and_config operational_duplicate_scan failed: "
+            f"{type(exc).__name__}: {exc}",
+            category="db",
+        )
+        return None, exc
+
+
+def _permission_intel_snapshot_block() -> dict[str, object]:
+    """Build the permission_intel section for schema snapshots without crashing when PI is unset."""
+
+    if not intel_db.is_permission_intel_configured():
+        dups, dup_warn = _snapshot_operational_duplicates()
+        block: dict[str, object] = {
+            "configured": False,
+            "target": None,
+            "detail": "Permission Intel DSN not configured; PI target and governance checks skipped.",
+            "operational_duplicates": dups,
+        }
+        if dup_warn:
+            block["operational_duplicate_scan_warning"] = dup_warn
+        return block
+
+    try:
+        target = intel_db.describe_target()
+    except Exception as exc:
+        log.debug(
+            f"DB schema snapshot sub-check failed (permission_intel_target): "
+            f"{type(exc).__name__}: {exc}",
+            category="db",
+        )
+        dups, dup_warn = _snapshot_operational_duplicates()
+        err_block: dict[str, object] = {
+            "configured": True,
+            "target": None,
+            "status": "error",
+            "detail": _PI_TARGET_SNAPSHOT_FAILED_DETAIL,
+            "operational_duplicates": dups,
+        }
+        if dup_warn:
+            err_block["operational_duplicate_scan_warning"] = dup_warn
+        return err_block
+
+    dups, dup_warn = _snapshot_operational_duplicates()
+    out: dict[str, object] = {
+        "target": target,
+        "operational_duplicates": dups,
+    }
+    if dup_warn:
+        out["operational_duplicate_scan_warning"] = dup_warn
+    return out
+
+
+def _print_operational_duplicate_menu_section(
+    inventory: list[dict[str, object]] | None,
+    *,
+    inventory_error: BaseException | None,
+) -> None:
+    """Print duplicate-managed-table metrics or a single operator hint."""
+
+    if inventory is not None:
+        duplicate_present = [row for row in inventory if row["exists"]]
+        duplicate_rows = sum(int(row["row_count"] or 0) for row in duplicate_present)
+        menu_utils.print_metrics(
+            [
+                ("Dup tables in main DB", len(duplicate_present)),
+                ("Dup rows in main DB", duplicate_rows),
+            ]
+        )
+        if duplicate_present:
+            print(
+                "Duplicate tables: "
+                + ", ".join(f"{row['table']}={row['row_count']}" for row in duplicate_present[:6])
+                + (" ..." if len(duplicate_present) > 6 else "")
+            )
+        return
+
+    detail = (
+        f"{type(inventory_error).__name__}: {inventory_error}"
+        if inventory_error is not None
+        else "unknown error"
+    )
+    print(
+        status_messages.status(
+            f"Operational duplicate scan unavailable (core DB): {detail}",
+            level="warn",
+        )
+    )
 
 
 def show_connection_and_config() -> None:
@@ -55,29 +200,35 @@ def show_connection_and_config() -> None:
     print()
 
     menu_utils.print_section("Permission-intel target")
-    try:
-        target = intel_db.describe_target()
-        inventory = list_operational_managed_tables()
-        duplicate_present = [row for row in inventory if row["exists"]]
-        duplicate_rows = sum(int(row["row_count"] or 0) for row in duplicate_present)
-        menu_utils.print_metrics(
-            [
-                ("Compat mode", "YES" if target["compatibility_mode"] else "NO"),
-                ("Target DB", str(target.get("database") or "<unknown>")),
-                ("Target host", str(target.get("host") or "<unknown>")),
-                ("Config via", str(target.get("source") or "<unknown>")),
-                ("Dup tables in main DB", len(duplicate_present)),
-                ("Dup rows in main DB", duplicate_rows),
-            ]
-        )
-        if duplicate_present:
-            print(
-                "Duplicate tables: "
-                + ", ".join(f"{row['table']}={row['row_count']}" for row in duplicate_present[:6])
-                + (" ..." if len(duplicate_present) > 6 else "")
+    inventory, inventory_error = _fetch_operational_inventory_for_menu()
+
+    if not intel_db.is_permission_intel_configured():
+        print("Permission Intel        : SKIPPED — DSN not configured")
+        _print_operational_duplicate_menu_section(inventory, inventory_error=inventory_error)
+    else:
+        target: dict[str, object] | None = None
+        try:
+            target = intel_db.describe_target()
+        except Exception as exc:
+            log.debug(
+                f"show_connection_and_config permission_intel_target failed: "
+                f"{type(exc).__name__}: {exc}",
+                category="db",
             )
-    except Exception as exc:
-        print(status_messages.status(f"Unable to inspect permission-intel target: {exc}", level="warn"))
+            print("Permission Intel        : ERROR — unable to inspect target")
+
+        if target is not None:
+            menu_utils.print_metrics(
+                [
+                    ("Compat mode", "YES" if target["compatibility_mode"] else "NO"),
+                    ("Target DB", str(target.get("database") or "<unknown>")),
+                    ("Target host", str(target.get("host") or "<unknown>")),
+                    ("Config via", str(target.get("source") or "<unknown>")),
+                ]
+            )
+            _print_operational_duplicate_menu_section(inventory, inventory_error=inventory_error)
+        else:
+            _print_operational_duplicate_menu_section(inventory, inventory_error=inventory_error)
     print()
 
     menu_utils.print_section("Bridge posture")
@@ -179,27 +330,14 @@ def write_db_schema_snapshot_audit() -> None:
             "dynamic_schema_gate": schema_gate.dynamic_schema_gate(),
             "permissions_schema_gate": schema_gate.permissions_schema_gate(),
         },
-        "permission_intel": {
-            "target": intel_db.describe_target(),
-            "operational_duplicates": list_operational_managed_tables(),
-        },
-        "bridge_posture": {
-            "summary": bridge_posture_summary(),
-            "tables": [
-                {
-                    "table": row.table,
-                    "posture": row.posture,
-                    "owner": row.owner,
-                    "rationale": row.rationale,
-                    "current_writers": list(row.current_writers),
-                    "current_readers": list(row.current_readers),
-                }
-                for row in list_bridge_postures()
-            ],
-        },
+        "permission_intel": _permission_intel_snapshot_block(),
         "tables": {},
         "tables_error": None,
     }
+    bridge_body, bridge_err = _bridge_posture_snapshot_block()
+    snapshot["bridge_posture"] = bridge_body
+    if bridge_err:
+        snapshot["bridge_posture_error"] = bridge_err
 
     try:
         table_names = diagnostics.list_tables()

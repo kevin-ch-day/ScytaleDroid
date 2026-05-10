@@ -7,23 +7,14 @@ from collections.abc import Iterable, Mapping
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
+from ...db_core.schema_introspection import table_exists
 from ...db_queries.harvest import storage_surface as q
 
 
 def ensure_tables() -> bool:
     try:
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            ("static_fileproviders",),
-            fetch="one",
-        )
-        ok_fp = bool(row and int(row[0]) > 0)
-        row = run_sql(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-            ("static_provider_acl",),
-            fetch="one",
-        )
-        ok_acl = bool(row and int(row[0]) > 0)
+        ok_fp = table_exists("static_fileproviders")
+        ok_acl = table_exists("static_provider_acl")
         if not (ok_fp and ok_acl):
             log.warning(
                 "storage surface tables missing; load a DB snapshot or apply migrations.",

@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
+from ...db_core.schema_introspection import table_exists
 from ...db_queries.permissions import taxonomy as queries
 
 
@@ -14,12 +15,7 @@ def ensure_tables() -> bool:
     """Ensure taxonomy tables exist. Legacy map/override tables are deprecated."""
     ok = True
     name = "perm_groups"
-    row = run_sql(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
-        (name,),
-        fetch="one",
-    )
-    present = bool(row and int(row[0]) > 0)
+    present = table_exists(name)
     ok = ok and present
     if not present:
         log.warning(

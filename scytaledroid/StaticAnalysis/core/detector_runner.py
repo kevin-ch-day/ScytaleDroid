@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from time import perf_counter
+
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..detectors.base import BaseDetector
 from ..detectors.components import IpcExposureDetector
@@ -39,6 +42,27 @@ class PipelineStage:
 
     def instantiate(self) -> BaseDetector:
         return self.detector_cls()
+
+
+def _safe_emit_progress(emit: Callable[..., object] | None, payload: dict[str, object]) -> None:
+    """Observers must never take down the detector pipeline."""
+
+    if emit is None:
+        return
+    try:
+        emit(payload)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        ctx_parts: list[str] = []
+        for key in ("event", "detector_id", "section_key", "stage_index", "status"):
+            if key in payload:
+                ctx_parts.append(f"{key}={payload[key]!r}")
+        ctx = ", ".join(ctx_parts) if ctx_parts else "event=<missing>"
+        extra = {k: payload[k] for k in ("event", "detector_id", "section_key", "stage_index", "status") if k in payload}
+        log.debug(
+            f"Stage observer emit failed ({ctx}): {exc}",
+            category="static_analysis",
+            extra=extra or None,
+        )
 
 
 PIPELINE_STAGES: tuple[PipelineStage, ...] = (
@@ -78,18 +102,16 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
         context.intermediate_results = tuple(results)
         detector = stage.instantiate()
         if emit:
-            try:
-                emit(
-                    {
-                        "event": "stage_start",
-                        "stage_index": len(results) + 1,
-                        "stage_total": len(PIPELINE_STAGES),
-                        "section_key": stage.section_key,
-                        "detector_id": detector.detector_id,
-                    }
-                )
-            except Exception:
-                pass
+            _safe_emit_progress(
+                emit,
+                {
+                    "event": "stage_start",
+                    "stage_index": len(results) + 1,
+                    "stage_total": len(PIPELINE_STAGES),
+                    "section_key": stage.section_key,
+                    "detector_id": detector.detector_id,
+                },
+            )
 
         if enabled and detector.detector_id.lower() not in enabled:
             reason = "disabled by custom selection"
@@ -97,63 +119,57 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                 _build_skipped_result(detector, stage.section_key, reason)
             )
             if emit:
-                try:
-                    emit(
-                        {
-                            "event": "stage_end",
-                            "stage_index": len(results),
-                            "stage_total": len(PIPELINE_STAGES),
-                            "section_key": stage.section_key,
-                            "detector_id": detector.detector_id,
-                            "status": "skipped",
-                            "duration_sec": 0.0,
-                            "note": reason,
-                        }
-                    )
-                except Exception:
-                    pass
+                _safe_emit_progress(
+                    emit,
+                    {
+                        "event": "stage_end",
+                        "stage_index": len(results),
+                        "stage_total": len(PIPELINE_STAGES),
+                        "section_key": stage.section_key,
+                        "detector_id": detector.detector_id,
+                        "status": "skipped",
+                        "duration_sec": 0.0,
+                        "note": reason,
+                    },
+                )
             continue
 
         if profile == "quick" and not stage.include_in_quick:
             reason = "skipped by quick profile"
             results.append(_build_skipped_result(detector, stage.section_key, reason))
             if emit:
-                try:
-                    emit(
-                        {
-                            "event": "stage_end",
-                            "stage_index": len(results),
-                            "stage_total": len(PIPELINE_STAGES),
-                            "section_key": stage.section_key,
-                            "detector_id": detector.detector_id,
-                            "status": "skipped",
-                            "duration_sec": 0.0,
-                            "note": reason,
-                        }
-                    )
-                except Exception:
-                    pass
+                _safe_emit_progress(
+                    emit,
+                    {
+                        "event": "stage_end",
+                        "stage_index": len(results),
+                        "stage_total": len(PIPELINE_STAGES),
+                        "section_key": stage.section_key,
+                        "detector_id": detector.detector_id,
+                        "status": "skipped",
+                        "duration_sec": 0.0,
+                        "note": reason,
+                    },
+                )
             continue
 
         if not detector.applies_to_profile(context.config.profile):
             reason = f"disabled for profile {context.config.profile}"
             results.append(_build_skipped_result(detector, stage.section_key, reason))
             if emit:
-                try:
-                    emit(
-                        {
-                            "event": "stage_end",
-                            "stage_index": len(results),
-                            "stage_total": len(PIPELINE_STAGES),
-                            "section_key": stage.section_key,
-                            "detector_id": detector.detector_id,
-                            "status": "skipped",
-                            "duration_sec": 0.0,
-                            "note": reason,
-                        }
-                    )
-                except Exception:
-                    pass
+                _safe_emit_progress(
+                    emit,
+                    {
+                        "event": "stage_end",
+                        "stage_index": len(results),
+                        "stage_total": len(PIPELINE_STAGES),
+                        "section_key": stage.section_key,
+                        "detector_id": detector.detector_id,
+                        "status": "skipped",
+                        "duration_sec": 0.0,
+                        "note": reason,
+                    },
+                )
             continue
 
         started = perf_counter()
@@ -171,21 +187,19 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                 )
             )
             if emit:
-                try:
-                    emit(
-                        {
-                            "event": "stage_end",
-                            "stage_index": len(results),
-                            "stage_total": len(PIPELINE_STAGES),
-                            "section_key": stage.section_key,
-                            "detector_id": detector.detector_id,
-                            "status": "ERROR",
-                            "duration_sec": float(duration),
-                            "note": f"detector failed: {exc}",
-                        }
-                    )
-                except Exception:
-                    pass
+                _safe_emit_progress(
+                    emit,
+                    {
+                        "event": "stage_end",
+                        "stage_index": len(results),
+                        "stage_total": len(PIPELINE_STAGES),
+                        "section_key": stage.section_key,
+                        "detector_id": detector.detector_id,
+                        "status": "ERROR",
+                        "duration_sec": float(duration),
+                        "note": f"detector failed: {exc}",
+                    },
+                )
             continue
 
         if not isinstance(result, DetectorResult):
@@ -198,21 +212,19 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                 )
             )
             if emit:
-                try:
-                    emit(
-                        {
-                            "event": "stage_end",
-                            "stage_index": len(results),
-                            "stage_total": len(PIPELINE_STAGES),
-                            "section_key": stage.section_key,
-                            "detector_id": detector.detector_id,
-                            "status": "ERROR",
-                            "duration_sec": float(duration),
-                            "note": "detector returned invalid result",
-                        }
-                    )
-                except Exception:
-                    pass
+                _safe_emit_progress(
+                    emit,
+                    {
+                        "event": "stage_end",
+                        "stage_index": len(results),
+                        "stage_total": len(PIPELINE_STAGES),
+                        "section_key": stage.section_key,
+                        "detector_id": detector.detector_id,
+                        "status": "ERROR",
+                        "duration_sec": float(duration),
+                        "note": "detector returned invalid result",
+                    },
+                )
             continue
 
         updates: dict[str, object] = {}
@@ -227,20 +239,18 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
 
         results.append(result)
         if emit:
-            try:
-                emit(
-                    {
-                        "event": "stage_end",
-                        "stage_index": len(results),
-                        "stage_total": len(PIPELINE_STAGES),
-                        "section_key": stage.section_key,
-                        "detector_id": detector.detector_id,
-                        "status": str(result.status),
-                        "duration_sec": float(getattr(result, "duration_sec", duration) or 0.0),
-                    }
-                )
-            except Exception:
-                pass
+            _safe_emit_progress(
+                emit,
+                {
+                    "event": "stage_end",
+                    "stage_index": len(results),
+                    "stage_total": len(PIPELINE_STAGES),
+                    "section_key": stage.section_key,
+                    "detector_id": detector.detector_id,
+                    "status": str(result.status),
+                    "duration_sec": float(getattr(result, "duration_sec", duration) or 0.0),
+                },
+            )
 
     context.intermediate_results = tuple(results)
 
