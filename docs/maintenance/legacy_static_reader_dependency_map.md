@@ -55,6 +55,12 @@ rg 'INSERT INTO (runs|findings|metrics|buckets|contributors)\b' scytaledroid --g
 
 ---
 
+## 2.1 Shared diagnostic helpers (bounded)
+
+- **`scytaledroid/Database/db_utils/legacy_static_mirror_diagnostics.py`** — read-only presence + legacy ``findings`` / ``runs`` count helpers used by ``scripts/db/audit_static_session.py`` and ``scripts/db/session_static_health.py``. **Not** canonical truth; do not call from writers. Call-site guardrails: ``legacy_mirror_helper_wiring_report.md``.
+
+---
+
 ## 3. Per-table dependency map
 
 Legend for **Class**:

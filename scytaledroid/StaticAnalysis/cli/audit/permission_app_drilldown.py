@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
 
 from .permission_session_insights import _classify_matrix_risk_skew
@@ -21,21 +22,6 @@ def _scalar(sql: str, params: tuple[object, ...]) -> Any:
     if not row:
         return None
     return row[0]
-
-
-def _table_exists(name: str) -> bool:
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT COUNT(*) FROM information_schema.tables
-            WHERE table_schema = DATABASE() AND table_name = %s
-            """,
-            (name,),
-            fetch="one",
-        )
-        return bool(row and int(row[0] or 0) > 0)
-    except Exception:
-        return False
 
 
 def _resolve_run(
@@ -281,7 +267,7 @@ def fetch_permission_app_drilldown(
             report_note = f"report_load_failed:{exc.__class__.__name__}"
 
     risk_score_row = None
-    if _table_exists("risk_scores"):
+    if diagnostics.check_required_tables(["risk_scores"]).get("risk_scores"):
         try:
             sc = str(run.get("scope_label") or "")
             row = core_q.run_sql(

@@ -18,6 +18,12 @@ This note frames how ScytaleDroid separates **run evidence** (core DB) from **di
 | **Core (operational static)** | Analyst catalog (e.g. `scytaledroid_core_prod`) | `SCYTALEDROID_DB_*` / `SCYTALEDROID_DB_URL` | Runs, findings, `static_permission_matrix`, `static_permission_risk_vnext`, audit snapshots, persistence failures. |
 | **Permission Intel** | `android_permission_intel` (expected) | `SCYTALEDROID_PERMISSION_INTEL_DB_*` or `_URL` | Dictionary + governance tables/views (not static scan results). |
 
+### Core DB: `risk_scores` vs static schema gate
+
+- **`static_permission_matrix`** and **`static_permission_risk_vnext`** are canonical **run evidence** for permissions (facts + per-permission risk detail).
+- **`risk_scores`** is a **persisted rollup** (session/package summary) on the **same analyst core** catalog. It supports menus, health checks, and reporting; it is **not** part of `schema_gate.static_schema_gate()`. Treat **empty or missing `risk_scores`** as a **rollup / deployment signal**, not as proof that canonical findings or matrix persistence violated the gate.
+- **Legacy `metrics` / `buckets` / `contributors`** remain **mirror / reconcile** surfaces only (`AGENTS.md`, `legacy_static_reader_dependency_map.md`).
+
 ## Deduplication (matrix + vnext)
 
 **Rule:** **first-seen spelling wins** for the matrix; later keys that match the same **lowercase** canonical name are skipped. **`static_permission_risk_vnext`** uses the same logical dedupe (one lowercase row per permission).

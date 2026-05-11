@@ -12,6 +12,9 @@ from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_utils import diagnostics, schema_gate
+from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
+    LEGACY_MIRROR_TABLES_SNAPSHOT,
+)
 from scytaledroid.Database.db_utils.bridge_posture import (
     bridge_posture_summary,
     list_bridge_postures,
@@ -27,24 +30,24 @@ _DUPLICATE_SCAN_FAILED_USER_HINT = "Operational duplicate scan failed; see debug
 _PI_TARGET_SNAPSHOT_FAILED_DETAIL = "Permission Intel target inspection failed; see debug logs."
 
 # --- DB schema snapshot (write_db_schema_snapshot_audit) table policy -----------------
-# Required static = canonical / operational surfaces aligned with schema_gate.static_schema_gate
-# (legacy base table ``findings`` is intentionally excluded).
+# ``required_tables.static`` in the snapshot JSON: canonical static surfaces expected to exist
+# for a healthy analyst catalog. Includes every base table/view from ``schema_gate.static_schema_gate``
+# plus ``risk_scores`` (run-level scoring; used operationally but not part of that gate's table list).
+# Legacy base table ``findings`` is part of ``LEGACY_MIRROR_TABLES_SNAPSHOT`` (``DB_SNAPSHOT_LEGACY_MIRROR_TABLES``).
 DB_SNAPSHOT_REQUIRED_STATIC_TABLES: tuple[str, ...] = (
     "static_analysis_runs",
+    "static_analysis_findings",
+    "static_permission_matrix",
+    "static_string_summary",
+    "static_string_samples",
     "static_session_run_links",
     "static_session_rollups",
-    "static_permission_matrix",
+    "v_static_handoff_v1",
     "risk_scores",
 )
 
 # Legacy mirror / compatibility five — information_schema presence only; not required for health.
-DB_SNAPSHOT_LEGACY_MIRROR_TABLES: tuple[str, ...] = (
-    "runs",
-    "findings",
-    "metrics",
-    "buckets",
-    "contributors",
-)
+DB_SNAPSHOT_LEGACY_MIRROR_TABLES: tuple[str, ...] = LEGACY_MIRROR_TABLES_SNAPSHOT
 
 DB_SCHEMA_SNAPSHOT_LEGACY_MIRROR_META: dict[str, str] = {
     "role": "legacy_mirror_compatibility_optional",

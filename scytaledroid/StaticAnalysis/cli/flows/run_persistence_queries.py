@@ -1,4 +1,13 @@
-"""Database query helpers for static persistence audit summaries."""
+"""Database query helpers for static persistence audit summaries.
+
+Session identifiers (read carefully):
+
+- **Canonical SAR** rows on ``static_analysis_runs`` are filtered by ``session_label`` in this module
+  (see ``_canonical_direct_counts``, ``_static_run_status_counts``, ``reconcile_static_session``).
+- **Legacy mirror** ``runs`` / compat package probes use ``runs.session_stamp`` (and
+  ``risk_scores.session_stamp``) with the same string in typical CLI flows where the stamp and label
+  match; when they diverge, only the canonical path is guaranteed correct here.
+"""
 
 from __future__ import annotations
 
@@ -65,8 +74,8 @@ def _preview(values: set[str], *, limit: int = 10) -> list[str]:
     return sorted(values)[:limit]
 
 
-def _static_run_status_counts(session_stamp: str) -> dict[str, int]:
-    """Return static run status counts for a session label."""
+def _static_run_status_counts(session_label: str) -> dict[str, int]:
+    """Return static run status counts for ``static_analysis_runs.session_label``."""
     status_rows = _rows(
         """
         SELECT status, COUNT(*)
@@ -74,7 +83,7 @@ def _static_run_status_counts(session_stamp: str) -> dict[str, int]:
         WHERE session_label=%s
         GROUP BY status
         """,
-        (session_stamp,),
+        (session_label,),
     )
 
     status_counts: dict[str, int] = {}
@@ -88,10 +97,10 @@ def _static_run_status_counts(session_stamp: str) -> dict[str, int]:
     return status_counts
 
 
-def _apply_reconcile_summary(summary: AuditSummary, session_stamp: str) -> None:
+def _apply_reconcile_summary(summary: AuditSummary, session_label: str) -> None:
     """Overlay canonical reconciliation results onto an audit summary."""
     try:
-        reconcile = reconcile_static_session(session_stamp)
+        reconcile = reconcile_static_session(session_label)
     except Exception as exc:
         summary["reconciliation_error"] = str(exc)
         return
@@ -143,17 +152,17 @@ def _apply_reconcile_summary(summary: AuditSummary, session_stamp: str) -> None:
     }
 
 
-def _canonical_direct_counts(session_stamp: str) -> AuditSummary:
-    """Return direct-table canonical audit counts."""
+def _canonical_direct_counts(session_label: str) -> AuditSummary:
+    """Return direct-table canonical audit counts scoped by ``static_analysis_runs.session_label``."""
     return {
-        "run_statuses": _static_run_status_counts(session_stamp),
+        "run_statuses": _static_run_status_counts(session_label),
         "baseline_runs": _scalar_count(
             """
             SELECT COUNT(*)
             FROM static_analysis_runs
             WHERE session_label=%s AND is_canonical=1
             """,
-            (session_stamp,),
+            (session_label,),
         ),
         "handoff_paths": _scalar_count(
             """
@@ -162,31 +171,34 @@ def _canonical_direct_counts(session_stamp: str) -> AuditSummary:
             WHERE session_label=%s
               AND static_handoff_json_path IS NOT NULL
             """,
-            (session_stamp,),
+            (session_label,),
         ),
         "findings": _scalar_count(
             """
             SELECT COUNT(*)
-            FROM static_analysis_findings
-            WHERE session_label=%s
+            FROM static_analysis_findings f
+            INNER JOIN static_analysis_runs sar ON sar.id = f.run_id
+            WHERE sar.session_label=%s
             """,
-            (session_stamp,),
+            (session_label,),
         ),
         "permission_matrix": _scalar_count(
             """
             SELECT COUNT(*)
-            FROM static_permission_matrix
-            WHERE session_stamp=%s
+            FROM static_permission_matrix spm
+            INNER JOIN static_analysis_runs sar ON sar.id = spm.run_id
+            WHERE sar.session_label=%s
             """,
-            (session_stamp,),
+            (session_label,),
         ),
         "permission_risk": _scalar_count(
             """
             SELECT COUNT(*)
-            FROM static_permission_risk_vnext
-            WHERE session_stamp=%s
+            FROM static_permission_risk_vnext pr
+            INNER JOIN static_analysis_runs sar ON sar.id = pr.run_id
+            WHERE sar.session_label=%s
             """,
-            (session_stamp,),
+            (session_label,),
         ),
         "findings_summary_packages": _row_count(
             """
@@ -194,7 +206,7 @@ def _canonical_direct_counts(session_stamp: str) -> AuditSummary:
             FROM static_findings_summary
             WHERE session_label=%s
             """,
-            (session_stamp,),
+            (session_label,),
         ),
         "string_summary_packages": _row_count(
             """
@@ -202,13 +214,13 @@ def _canonical_direct_counts(session_stamp: str) -> AuditSummary:
             FROM static_string_summary
             WHERE session_label=%s
             """,
-            (session_stamp,),
+            (session_label,),
         ),
     }
 
 
-def _secondary_compat_package_rows(session_stamp: str) -> tuple[list[Row], list[Row], list[Row], list[Row]]:
-    """Return package rows mirrored into secondary compatibility tables."""
+def _secondary_compat_package_rows(runs_session_stamp: str) -> tuple[list[Row], list[Row], list[Row], list[Row]]:
+    """Return package rows mirrored into secondary compatibility tables (``runs.session_stamp``)."""
     findings_rows = _rows(
         """
         SELECT DISTINCT lr.package
@@ -216,7 +228,7 @@ def _secondary_compat_package_rows(session_stamp: str) -> tuple[list[Row], list[
         JOIN runs lr ON lr.run_id = f.run_id
         WHERE lr.session_stamp=%s
         """,
-        (session_stamp,),
+        (runs_session_stamp,),
     )
     metrics_rows = _rows(
         """
@@ -225,7 +237,7 @@ def _secondary_compat_package_rows(session_stamp: str) -> tuple[list[Row], list[
         JOIN runs lr ON lr.run_id = m.run_id
         WHERE lr.session_stamp=%s
         """,
-        (session_stamp,),
+        (runs_session_stamp,),
     )
     buckets_rows = _rows(
         """
@@ -234,7 +246,7 @@ def _secondary_compat_package_rows(session_stamp: str) -> tuple[list[Row], list[
         JOIN runs lr ON lr.run_id = b.run_id
         WHERE lr.session_stamp=%s
         """,
-        (session_stamp,),
+        (runs_session_stamp,),
     )
     contributors_rows = _rows(
         """
@@ -243,16 +255,20 @@ def _secondary_compat_package_rows(session_stamp: str) -> tuple[list[Row], list[
         JOIN runs lr ON lr.run_id = c.run_id
         WHERE lr.session_stamp=%s
         """,
-        (session_stamp,),
+        (runs_session_stamp,),
     )
 
     return findings_rows, metrics_rows, buckets_rows, contributors_rows
 
 
-def _bridge_direct_counts(session_stamp: str) -> AuditSummary:
-    """Return direct-table bridge/compat audit counts."""
+def _bridge_direct_counts(*, session_label: str, runs_session_stamp: str) -> AuditSummary:
+    """Return direct-table bridge/compat audit counts.
+
+    ``session_label`` keys ``static_session_*`` link/rollup rows. ``runs_session_stamp`` keys legacy
+    ``runs`` / compat mirror probes (often the same string as ``session_label`` in CLI flows).
+    """
     findings_rows, metrics_rows, buckets_rows, contributors_rows = _secondary_compat_package_rows(
-        session_stamp
+        runs_session_stamp
     )
 
     return {
@@ -262,7 +278,7 @@ def _bridge_direct_counts(session_stamp: str) -> AuditSummary:
             FROM runs
             WHERE session_stamp=%s
             """,
-            (session_stamp,),
+            (runs_session_stamp,),
         ),
         "risk_scores": _row_count(
             """
@@ -270,7 +286,7 @@ def _bridge_direct_counts(session_stamp: str) -> AuditSummary:
             FROM risk_scores
             WHERE session_stamp=%s
             """,
-            (session_stamp,),
+            (runs_session_stamp,),
         ),
         "secondary_compat_mirror_packages": max(
             len(findings_rows),
@@ -287,7 +303,7 @@ def _bridge_direct_counts(session_stamp: str) -> AuditSummary:
             FROM static_session_run_links
             WHERE session_label=%s
             """,
-            (session_stamp,),
+            (session_label,),
         ),
         "session_rollups": _scalar_count(
             """
@@ -295,20 +311,27 @@ def _bridge_direct_counts(session_stamp: str) -> AuditSummary:
             FROM static_session_rollups
             WHERE session_label=%s
             """,
-            (session_stamp,),
+            (session_label,),
         ),
     }
 
 
-def _apply_direct_summary_fallback(summary: AuditSummary, session_stamp: str) -> None:
-    """Populate audit summary directly from tables when reconciliation is unavailable."""
+def _apply_direct_summary_fallback(summary: AuditSummary, session_label: str) -> None:
+    """Populate audit summary directly from tables when reconciliation is unavailable.
+
+    ``session_label`` is the canonical static session selector (``static_analysis_runs.session_label``).
+    Legacy bridge counts reuse the same string as ``runs.session_stamp`` / ``risk_scores.session_stamp``;
+    if your deployment separates label from stamp, pass reconciled data instead of relying on this fallback.
+    """
     try:
         canonical = _summary_section(summary, "canonical")
-        canonical.update(_canonical_direct_counts(session_stamp))
+        canonical.update(_canonical_direct_counts(session_label))
         summary["canonical"] = canonical
 
         bridge = _summary_section(summary, "bridge")
-        bridge.update(_bridge_direct_counts(session_stamp))
+        bridge.update(
+            _bridge_direct_counts(session_label=session_label, runs_session_stamp=session_label)
+        )
         summary["bridge"] = bridge
 
     except Exception:

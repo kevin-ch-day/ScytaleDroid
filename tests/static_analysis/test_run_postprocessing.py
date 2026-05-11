@@ -120,6 +120,7 @@ def test_run_post_summary_postprocessing_uses_session_finalizer(monkeypatch) -> 
         {
             "persistence_ready": True,
             "session_stamp": "sess-1",
+            "session_label": None,
             "run_map_overwrite": False,
             "strict_persistence": False,
             "permission_snapshot_refresh": False,
@@ -145,3 +146,59 @@ def test_run_post_summary_postprocessing_uses_session_finalizer(monkeypatch) -> 
     )
 
     assert calls == ["finalize"]
+
+
+def test_run_post_summary_postprocessing_invokes_evidence_manifest_when_run_map_present(monkeypatch) -> None:
+    manifest_calls: list[dict] = []
+
+    def _capture(**kwargs):
+        manifest_calls.append(kwargs)
+        return None
+
+    monkeypatch.setattr(postprocessing, "write_session_evidence_manifest_phase1", _capture)
+    monkeypatch.setattr(
+        postprocessing,
+        "finalize_session_run_map",
+        lambda *_a, **_k: type(
+            "R",
+            (),
+            {"run_map": {"session_stamp": "sess-1", "apps": [{"package": "com.example.app", "static_run_id": 7}]}},
+        )(),
+    )
+
+    outcome = _make_outcome(AppRunResult(package_name="com.example.app", category="Test", static_run_id=7))
+    params = type(
+        "Params",
+        (),
+        {
+            "persistence_ready": True,
+            "session_stamp": "sess-1",
+            "session_label": "sess-1",
+            "run_map_overwrite": False,
+            "strict_persistence": False,
+            "permission_snapshot_refresh": False,
+            "profile": "full",
+        },
+    )()
+    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    run_ctx = type("RunCtx", (), {})()
+
+    postprocessing.run_post_summary_postprocessing(
+        outcome=outcome,
+        params=params,
+        selection=selection,
+        run_ctx=run_ctx,
+        summary_render_failed=False,
+        required_fields=("pipeline_version",),
+        emit_postprocessing_step=lambda *_a, **_k: None,
+        build_session_run_map=lambda *_a, **_k: None,
+        validate_run_map=lambda *_a, **_k: None,
+        persist_session_run_links=lambda *_a, **_k: None,
+        emit_missing_run_ids_artifact=lambda **_k: None,
+        execute_permission_scan=lambda *_a, **_k: None,
+    )
+
+    assert len(manifest_calls) == 1
+    assert manifest_calls[0]["session_stamp"] == "sess-1"
+    assert manifest_calls[0]["session_label"] == "sess-1"
+    assert manifest_calls[0]["run_map"]["session_stamp"] == "sess-1"

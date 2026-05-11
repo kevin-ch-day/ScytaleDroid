@@ -10,28 +10,21 @@ it is removed and recreated as a view.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _DEP_VIEW_NAME = "v_dep_static_profile"
 
-
-def _table_exists(name: str) -> bool:
-    """Return True when a table or view exists in the current database."""
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT COUNT(*)
-            FROM information_schema.tables
-            WHERE table_schema = DATABASE()
-              AND table_name = %s
-            """,
-            (name,),
-            fetch="one",
-        )
-        return bool(row and row[0])
-    except Exception:
-        return False
+# Optional DEP view sources (presence via ``diagnostics.check_required_tables``).
+_DEP_OPTIONAL_SOURCES: tuple[str, ...] = (
+    "metrics",
+    "masvs_control_coverage",
+    "static_permission_matrix",
+    "risk_scores",
+)
 
 
 def _object_type(name: str) -> str | None:
@@ -83,8 +76,8 @@ def _drop_stale_dep_object() -> None:
     core_q.run_sql(f"DROP VIEW IF EXISTS {_DEP_VIEW_NAME}")
 
 
-def _metrics_join() -> str:
-    if _table_exists("metrics"):
+def _metrics_join(presence: Mapping[str, bool]) -> str:
+    if presence.get("metrics"):
         return """
 LEFT JOIN (
   SELECT
@@ -111,8 +104,8 @@ LEFT JOIN (
 """
 
 
-def _masvs_join() -> str:
-    if _table_exists("masvs_control_coverage"):
+def _masvs_join(presence: Mapping[str, bool]) -> str:
+    if presence.get("masvs_control_coverage"):
         return """
 LEFT JOIN (
   SELECT
@@ -163,8 +156,8 @@ LEFT JOIN (
 """
 
 
-def _risk_join() -> str:
-    if _table_exists("risk_scores"):
+def _risk_join(presence: Mapping[str, bool]) -> str:
+    if presence.get("risk_scores"):
         return """
 LEFT JOIN risk_scores rs
   ON rs.package_name COLLATE utf8mb4_general_ci = a.package_name COLLATE utf8mb4_general_ci
@@ -236,10 +229,10 @@ SELECT
 FROM static_analysis_runs sar
 JOIN app_versions av ON av.id = sar.app_version_id
 JOIN apps a ON a.id = av.app_id
-{_metrics_join()}
-{_masvs_join()}
-{_perms_join()}
-{_risk_join()}
+{_metrics_join(presence)}
+{_masvs_join(presence)}
+{_perms_join(presence)}
+{_risk_join(presence)}
 """
 
 

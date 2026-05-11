@@ -10,6 +10,7 @@ from scytaledroid.Utils.DisplayUtils import status_messages
 
 from ..core.models import RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
+from ..persistence.evidence_manifest_writer import write_session_evidence_manifest_phase1
 from .session_finalizer import finalize_session_run_map
 
 
@@ -116,6 +117,13 @@ def run_post_summary_postprocessing(
                 )
                 run_map = result.run_map
                 run_map_built = bool(result.run_map)
+                if run_map_built and run_map:
+                    write_session_evidence_manifest_phase1(
+                        session_stamp=params.session_stamp,
+                        session_label=params.session_label,
+                        run_map=run_map,
+                        outcome=outcome,
+                    )
             except Exception as exc:
                 if params.strict_persistence:
                     raise RuntimeError(

@@ -20,6 +20,9 @@ from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
+    LEGACY_MIRROR_TABLES_AUDIT,
+)
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 from .db_masvs_summary import render_db_masvs_summary as _render_db_masvs_summary
@@ -473,9 +476,10 @@ def _render_persistence_footer(
     """
     canonical_failures = canonical_failures or []
 
-    legacy_mirror_tables = ("runs", "buckets", "metrics", "findings")
     try:
-        legacy_mirror_presence = diagnostics.check_required_tables(list(legacy_mirror_tables))
+        legacy_mirror_presence = diagnostics.check_required_tables(
+            list(LEGACY_MIRROR_TABLES_AUDIT)
+        )
     except Exception:
         legacy_mirror_presence = {}
 

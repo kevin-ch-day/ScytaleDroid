@@ -145,7 +145,7 @@ def show_active_static_session_status() -> None:
                 _fmt_downstream(downstream["legacy_runs"]),
             ),
             (
-                "risk_scores (rollup bridge, same session)",
+                "risk_scores (session rollup on core DB; not legacy metrics)",
                 _fmt_downstream(downstream["legacy_risk"]),
             ),
         ]

@@ -34,7 +34,8 @@ Python scripts use **`pymysql`** and expect:
 | `SCYTALEDROID_DB_HOST` | default `localhost` |
 | `SCYTALEDROID_DB_PORT` | default `3306` |
 | `SCYTALEDROID_DB_USER` | required |
-| `SCYTALEDROID_DB_PASSWD` | optional in dev, empty string allowed (matches app `db_config`; **`SCYTALEDROID_DB_PASS` accepted as legacy**) |
+| `SCYTALEDROID_DB_PASSWD` | optional in dev, empty string allowed (**canonical**; matches app `db_config.py`). |
+| `SCYTALEDROID_DB_PASS` | **Legacy only:** some standalone `scripts/db/*.py` helpers accept this name for compatibility; **the main application reads `SCYTALEDROID_DB_PASSWD` only** (see `AGENTS.md`). Prefer `PASSWD` everywhere. |
 | `SCYTALEDROID_DB_NAME` | required |
 
 Run from repo root so imports resolve:
