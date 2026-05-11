@@ -12,6 +12,16 @@ from ..core.run_context import StaticRunContext
 from .cohort_scan_notes import suppress_per_app_cohort_echoes
 from .scan_progress_display import _format_elapsed
 
+# One combined split-heavy brief per execute_scan (reset from scan_flow).
+_SPLIT_HEAVY_BRIEF_EMITTED: bool = False
+
+
+def reset_split_heavy_session_notice() -> None:
+    """Reset the once-per-run split-heavy operator notice (call from execute_scan start)."""
+
+    global _SPLIT_HEAVY_BRIEF_EMITTED
+    _SPLIT_HEAVY_BRIEF_EMITTED = False
+
 
 def is_compact_card_mode(params: RunParameters) -> bool:
     """Compact cards are used for multi-app scopes in non-verbose mode."""
@@ -286,26 +296,23 @@ def render_app_completion(
             or artifact_count > 20
         )
 
-        split_notice_emitted = {"v": False}
-
         def _emit_large_artifact_split_notice() -> None:
-            if artifact_count < 15 or split_notice_emitted["v"]:
+            global _SPLIT_HEAVY_BRIEF_EMITTED
+            if artifact_count < 15 or _SPLIT_HEAVY_BRIEF_EMITTED:
                 return
-            split_notice_emitted["v"] = True
+            _SPLIT_HEAVY_BRIEF_EMITTED = True
             friendly = (label or pkg or "app").strip()
             print()
-            print(status_messages.status(f"Split-heavy app: {friendly} ({artifact_count} APK artifacts)", level="warn"))
             print(
                 status_messages.status(
-                    "Impact: static detectors run across scanned split/base APK rows when split scan is ON.",
-                    level="info",
-                    show_icon=False,
-                    show_prefix=False,
+                    f"Split-heavy app: {friendly} — {artifact_count} APK artifacts",
+                    level="warn",
                 )
             )
             print(
                 status_messages.status(
-                    "Impact: post-run string payload rollup (analyse_string_payload) is base-APK only for now.",
+                    "Impact: detectors scan base and split APK rows when split scan is on; "
+                    "string payload rollup after the run is base-APK only for now.",
                     level="info",
                     show_icon=False,
                     show_prefix=False,
@@ -565,6 +572,7 @@ def render_app_completion(
 __all__ = [
     "format_compact_completion_line",
     "is_compact_card_mode",
+    "reset_split_heavy_session_notice",
     "show_copy_markers",
     "render_app_completion",
     "render_app_start",

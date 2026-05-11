@@ -7,6 +7,7 @@ easier to test and evolve independently.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils import schema_gate
@@ -81,10 +82,10 @@ def _emit_primary_db_and_schema(params: RunParameters) -> None:
         )
 
 
-def _emit_research_grade_block(params: RunParameters) -> None:
+def _emit_research_readiness_block(params: RunParameters) -> None:
     """Governance / paper-grade lines (does not gate core scan execution)."""
 
-    print_section("Research grade")
+    print_section("Research readiness")
     paper = bool(getattr(params, "paper_grade_requested", True))
     intel_label = "unknown"
     try:
@@ -101,7 +102,7 @@ def _emit_research_grade_block(params: RunParameters) -> None:
     else:
         if not intel_db.is_permission_intel_configured():
             intel_label = "missing"
-            print(status_messages.status("Permission Intel: MISSING", level="info"))
+            print(status_messages.status("Permission Intel: not configured", level="info"))
         else:
             try:
                 gov_ok, gov_detail = governance_ready()
@@ -109,7 +110,7 @@ def _emit_research_grade_block(params: RunParameters) -> None:
                 intel_label = "query_failed"
                 print(
                     status_messages.status(
-                        f"Permission Intel: query_failed — {exc}",
+                        f"Permission Intel: query failed — {exc}",
                         level="warn",
                     )
                 )
@@ -126,7 +127,7 @@ def _emit_research_grade_block(params: RunParameters) -> None:
                     intel_label = "governance_missing"
                     print(
                         status_messages.status(
-                            "Permission Intel: configured — governance_missing (load governance snapshots)",
+                            "Permission Intel: configured — governance snapshots not loaded",
                             level="info",
                         )
                     )
@@ -139,7 +140,10 @@ def _emit_research_grade_block(params: RunParameters) -> None:
                         )
                     )
 
-    impact = "Impact: Core scan and DB persistence can continue."
+    impact = (
+        "Impact: Core scan and DB persistence continue. "
+        "Paper-grade / governance-complete evidence requires Permission Intel readiness."
+    )
     if not paper:
         print(
             status_messages.status(
@@ -160,13 +164,18 @@ def _emit_research_grade_block(params: RunParameters) -> None:
         print(status_messages.status("Run grade: PAPER-GRADE READY", level="info"))
         print(
             status_messages.status(
-                "Blocking: nothing here - Permission Intel does not gate core scanning or DB persistence.",
+                "Core scan: allowed — Permission Intel does not gate detectors or persistence.",
                 level="info",
             )
         )
         return
 
-    print(status_messages.status("Run grade: EXPERIMENTAL", level="info"))
+    print(
+        status_messages.status(
+            "Run grade: EXPERIMENTAL (research readiness — governance signals incomplete)",
+            level="info",
+        )
+    )
     print(status_messages.status(impact, level="info"))
     if intel_label == "missing":
         print(
@@ -251,11 +260,34 @@ def _emit_output_paths_and_split(params: RunParameters, base_dir: Path) -> None:
     )
 
 
+def _emit_run_context_preflight(params: RunParameters, selection: Any | None) -> None:
+    """Session / scope / preset snapshot (mirrors progress Run context; counts optional)."""
+
+    print_section("Run context")
+    session = (getattr(params, "session_stamp", None) or "")
+    session = str(session).strip() or "(unspecified)"
+    print(status_messages.status(f"Session: {session}", level="info"))
+    scope = getattr(params, "scope_label", None) or getattr(params, "scope", None) or ""
+    scope = str(scope).strip() or "—"
+    print(status_messages.status(f"Scope: {scope}", level="info"))
+    preset = str(getattr(params, "profile_label", None) or getattr(params, "profile", "") or "—").strip()
+    print(status_messages.status(f"Preset: {preset}", level="info"))
+    workers = str(getattr(params, "workers", None) or "auto").strip()
+    print(status_messages.status(f"Workers: {workers}", level="info"))
+    groups = tuple(getattr(selection, "groups", ()) or ()) if selection is not None else ()
+    if groups:
+        n_pkg = len(groups)
+        n_apk = sum(len(getattr(g, "artifacts", ()) or ()) for g in groups)
+        print(status_messages.status(f"Packages in this run: {n_pkg}", level="info"))
+        print(status_messages.status(f"APK files in this run: {n_apk}", level="info"))
+
+
 def emit_static_run_preflight_summary(
     params: RunParameters,
     *,
     frozen_ctx: StaticRunContext,
     base_dir: Path,
+    selection: Any | None = None,
 ) -> None:
     """One consolidated operator-facing block before ``execute_scan`` (real runs only)."""
 
@@ -267,11 +299,12 @@ def emit_static_run_preflight_summary(
     print()
     print(status_messages.step("Static run preflight", label="Static Analysis"))
 
-    print_section("Core execution")
+    print_section("Core readiness")
     _emit_primary_db_and_schema(params)
     _emit_db_persistence_preflight(params)
     _emit_output_paths_and_split(params, base_dir)
-    _emit_research_grade_block(params)
+    _emit_research_readiness_block(params)
+    _emit_run_context_preflight(params, selection)
     print()
 
 

@@ -57,12 +57,14 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
     assert "harvested and stored locally" in out
     assert "does not query the live device inventory" in out
     assert "Harvested library" in out
-    assert "Packages          : 1" in out
-    assert "Harvest captures  : 1" in out
-    assert "Capture meaning" in out
+    assert "Library total     : 1 package · 1 captures · 1 APK files (all captures)" in out
+    assert "Default run       : newest capture per package · 1 APK files" in out
+    assert "Capture meaning" not in out
     assert "Profile vs pipeline" not in out
-    assert "Run scope" in out
-    assert "Analyze all harvested apps" in out
+    assert "Run" in out
+    assert "Customize" in out
+    assert "Analyze all apps — full analysis" in out
+    assert "choose size & preset" in out
     assert "Analyze by profile" in out
     assert "Analyze one app" in out
     assert "Re-analyze last app" in out
@@ -188,8 +190,10 @@ def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) 
 
     out = capsys.readouterr().out
     assert "Run Setup" in out
+    assert "Scope" in out and "Preset" in out
+    assert "Full — 9 modules, 20 detector stages" in out
     assert "Post-run audit" in out
-    assert "audit_static_session.py" in out
+    assert "PYTHONPATH=. python scripts/db/audit_static_session.py" in out
     assert "Existing session" in out
     assert "Canonical run" in out
     assert "static_run_id=1832" in out
@@ -283,7 +287,8 @@ def test_static_menu_renders_library_size_not_internal_state(monkeypatch, capsys
     menu_module.static_analysis_menu()
 
     out = capsys.readouterr().out
-    assert "Harvest captures  : 2" in out
+    assert "Library total     : 1 package · 2 captures · 2 APK files (all captures)" in out
+    assert "Default run       : newest capture per package · 1 APK files" in out
     assert "Capture sessions" not in out
     assert "Target groups" not in out
     assert "Primary Actions" not in out

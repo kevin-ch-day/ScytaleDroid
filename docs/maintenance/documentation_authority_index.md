@@ -69,16 +69,17 @@ Notes:
   - [static_analysis_workflow_audit_v1.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/static_analysis_workflow_audit_v1.md) — pipeline / string / split / persistence audit routing (AUDIT note; ticket driver)
 - `maintenance`
   - [phase5c_task_list.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/phase5c_task_list.md)
-  - [legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — **file/function-level** map of legacy-five readers; Phase 2 retirement ordering; `metrics.run_id` ambiguity; **§8** follow-up (indirect `table_counts`, permission health `contributors`; CSV drift if it reappears) (planning; not runtime truth)
+  - [legacy_static_deprecation_playbook.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_deprecation_playbook.md) — phased legacy-five retirement; **Appendix A** = relabel/migrate/Web-grep buckets (merged Wave W1)
+  - [legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — **file/function-level** map of legacy-five readers; Phase 2 retirement ordering; `metrics.run_id` ambiguity; **§2.1.1** mirror-helper wiring (merged Wave W1); **§8** follow-up (planning; not runtime truth)
   - [legacy_static_tables_consumer_audit.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_tables_consumer_audit.md) — **index**: legacy five scope, INSERT grep baseline, classification legend; per-table detail → dependency map §3
   - [legacy_static_phase2a_policy_alignment_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_phase2a_policy_alignment_plan.md) — **completed** Phase 2A record + verification commands (stub; full narrative in git history)
   - [session_identity_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/session_identity_contract.md) — `session_stamp` vs `session_label`, `static_run_id` vs legacy `runs.run_id`, canonical join rules, forbidden SQL patterns
   - [session_static_health_hygiene_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/session_static_health_hygiene_plan.md) — align `session_static_health.py` with canonical-first / legacy-optional (planned; script not changed in slice)
-  - [next_pass_docs_policy_implementation_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/next_pass_docs_policy_implementation_plan.md) — checklist for this docs/policy batch and doc/code drift notes
   - [evidence_run_manifest_spec.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/evidence_run_manifest_spec.md) — design-only run-root evidence manifest (no writer yet)
   - [pi_erebus_operational_boundary.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/pi_erebus_operational_boundary.md) — PI vs Erebus ownership and pre-`obs_sample` blockers
   - [fast_implementation_backlog_lanes.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/fast_implementation_backlog_lanes.md) — Lane 1/2/3 batching + standard verification commands
-  - [legacy_mirror_helper_wiring_report.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_mirror_helper_wiring_report.md) — where `legacy_static_mirror_diagnostics` may / may not replace local SQL
+- `historical`
+  - [archive/next_pass_docs_policy_implementation_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/archive/next_pass_docs_policy_implementation_plan.md) — **completed** 2026-05-09 docs/policy slice checklist (archived; see [archive/README.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/archive/README.md))
 
 Notes:
 - use this cluster for static pipeline semantics, persistence flow, and data-shape questions
@@ -111,6 +112,9 @@ Notes:
 - `support`
   - [database/schema_domain_inventory.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/schema_domain_inventory.md)
   - [database/derived_index.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/derived_index.md)
+  - [maintenance/database_cleanup_audit_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_cleanup_audit_plan.md) — read-only audit SQL pack; interrupted-session drill queries
+  - [maintenance/database_schema_cleanup_design.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_schema_cleanup_design.md) — phased schema cleanup, `static_analysis_sessions`, Web SOT, prune/collation strategy
+  - [maintenance/database_target_schema_v2.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_target_schema_v2.md) — **target** domain model, sessions center, run identity v2, permission observations/rollup, v2 Web views, migration phases 0–7
   - [maintenance/repo_ownership_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/repo_ownership_map.md)
 
 Notes:
@@ -214,9 +218,10 @@ Notes:
   - [maintenance/repo_ownership_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/repo_ownership_map.md)
   - [maintenance/workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
 - `maintenance`
-  - [maintenance/housekeeping.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/housekeeping.md)
+  - [maintenance/housekeeping.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/housekeeping.md) — workspace/logs cadence; **refactor tier order** (merged Wave W1)
   - [maintenance/logs_operator_hygiene_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/logs_operator_hygiene_plan.md) — **P1/P2** logs layout vs code, naming collisions, optional future `logs health` spec (not P0)
-  - [maintenance/legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — legacy static five: readers, false positives, retirement order, §8 edge cases (planning)
+  - [maintenance/legacy_static_deprecation_playbook.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_deprecation_playbook.md) — phased legacy-five retirement + Appendix A compatibility buckets
+  - [maintenance/legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — legacy static five: readers, false positives, retirement order, §2.1.1 mirror wiring, §8 edge cases (planning)
   - [maintenance/legacy_static_tables_consumer_audit.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_tables_consumer_audit.md) — legacy five index (pointers to map + playbook + Web deep dive)
 
 Notes:

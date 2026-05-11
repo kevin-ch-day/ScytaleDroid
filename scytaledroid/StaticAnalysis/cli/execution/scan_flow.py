@@ -24,6 +24,7 @@ from .scan_formatters import (
     _format_compact_progress_text,
     _load_v3_catalog_label_overrides,
     format_duration,
+    format_elapsed_for_progress,
     format_scan_progress_single_line,
 )
 from .scan_identity_helpers import (
@@ -48,6 +49,7 @@ from .scan_view import (
     render_app_completion,
     render_app_start,
     render_resource_warnings,
+    reset_split_heavy_session_notice,
     show_copy_markers,
 )
 from .string_analysis_payload import analyse_string_payload
@@ -154,6 +156,7 @@ def execute_scan(
     _abort_requested = False
     _abort_reason = None
     _abort_signal = None
+    reset_split_heavy_session_notice()
 
     started_at = datetime.now(UTC)
     results: list[AppRunResult] = []
@@ -242,6 +245,7 @@ def execute_scan(
         )
         return eta_text, eta_preliminary
 
+    split_heavy_progress_note_printed = False
     if all_apps_compact_mode and total_apps > 0:
         first_pkg = getattr(selection.groups[0], "package_name", None) if selection.groups else None
         first_disp = (
@@ -255,7 +259,7 @@ def execute_scan(
                     artifacts_done=0,
                     total_artifacts=total_artifacts,
                     agg_checks=agg_checks,
-                    elapsed_text="0 ms",
+                    elapsed_text=format_elapsed_for_progress(0.0),
                     eta_text="--",
                     current_app_label=str(first_disp) if first_disp else None,
                     current_package_name=str(first_pkg) if first_pkg else None,
@@ -275,12 +279,14 @@ def execute_scan(
                 level="info",
             )
         )
-        print(
-            status_messages.status(
-                "Progress note: one split-heavy app may advance many APK artifacts.",
-                level="info",
+        if total_artifacts > 0 and not split_heavy_progress_note_printed:
+            print(
+                status_messages.status(
+                    "Note: split-heavy packages advance APK counts faster than package progress.",
+                    level="info",
+                )
             )
-        )
+            split_heavy_progress_note_printed = True
     for app_index, group in enumerate(selection.groups, start=1):
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         harvest_research_usable, harvest_block_reasons = _apply_harvest_contract(app_result, group)
@@ -555,6 +561,7 @@ def execute_scan(
                 now_mono = time.monotonic()
                 last_report_mono = now_mono
                 last_report_package = group.package_name
+                last_report_app_display = str(display_name or group.package_name or "").strip() or None
                 if summary.saved_path:
                     archive_reports_written += 1
                 if all_apps_compact_mode and total_artifacts > 0:
@@ -577,6 +584,7 @@ def execute_scan(
                                     agg_checks=agg_checks,
                                     last_report_seconds_ago=pulse_last_age,
                                     last_report_package=last_report_package,
+                                    last_report_app_label=last_report_app_display,
                                     eta_text=eta_pulse,
                                     activity="starting" if last_report_mono is None else "active",
                                     archive_reports_written=archive_reports_written,
@@ -694,7 +702,7 @@ def execute_scan(
                     artifacts_done=completed_artifacts,
                     total_artifacts=total_artifacts,
                     agg_checks=agg_checks,
-                    elapsed_text=format_duration(float(elapsed)),
+                    elapsed_text=format_elapsed_for_progress(float(elapsed)),
                     eta_text=eta_text,
                     current_app_label=str(next_label) if next_label else None,
                     current_package_name=str(next_pkg) if next_pkg else None,
@@ -708,7 +716,7 @@ def execute_scan(
                     scope_display=compact_scope_display,
                     workers_display=str(params.workers),
                     dry_run=bool(params.dry_run),
-                    include_legend=True,
+                    include_legend=False,
                     include_run_context=False,
                 )
                 print(status_messages.status(progress_text, level="info"))
@@ -741,6 +749,7 @@ def execute_scan(
                             agg_checks=agg_checks,
                             last_report_seconds_ago=last_secs,
                             last_report_package=last_report_package,
+                            last_report_app_label=last_report_app_display,
                             eta_text=eta_text,
                             activity="active",
                             archive_reports_written=archive_reports_written,

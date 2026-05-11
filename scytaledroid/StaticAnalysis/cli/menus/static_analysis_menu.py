@@ -222,12 +222,19 @@ def static_analysis_menu() -> None:
         menu_utils.print_hint("This does not query the live device inventory.")
 
         pkgs = _distinct_package_count(groups)
+        apk_files_total = sum(len(getattr(g, "artifacts", ()) or ()) for g in groups)
+        pkg_noun = "package" if pkgs == 1 else "packages"
+        latest_menu_scope = _latest_scope_for_all(groups)
+        default_run_apks = sum(len(getattr(g, "artifacts", ()) or ()) for g in latest_menu_scope.groups)
         print()
         menu_utils.print_section("Harvested library")
-        print(f"  Packages          : {pkgs}")
-        print(f"  Harvest captures  : {len(groups)}")
-        print("  Capture meaning   : one package/version harvested in one session;")
-        print("                      may include a base APK plus split APKs.")
+        print(
+            f"  Library total     : {pkgs} {pkg_noun} · {len(groups)} captures · "
+            f"{apk_files_total} APK files (all captures)"
+        )
+        print(
+            f"  Default run       : newest capture per package · {default_run_apks} APK files"
+        )
 
         persistence_ready, persistence_detail = _persistence_gate_status()
         if not persistence_ready:
@@ -244,11 +251,13 @@ def static_analysis_menu() -> None:
                 )
             )
 
-        menu_utils.print_section("Run scope")
-        print("  1) Analyze all harvested apps")
+        menu_utils.print_section("Run")
+        print("  1) Analyze all apps — full analysis")
         print("  2) Analyze by profile")
         print("  3) Analyze one app")
         print("  4) Re-analyze last app")
+        menu_utils.print_section("Customize")
+        print("  A) Advanced all-app run — choose size & preset")
 
         menu_utils.print_section("Review")
         print("  5) View previous static runs")
@@ -260,7 +269,7 @@ def static_analysis_menu() -> None:
         print("0) Back")
 
         choice = prompt_utils.get_choice(
-            ["1", "2", "3", "4", "5", "6", "D", "L", "0"],
+            ["1", "A", "2", "3", "4", "5", "6", "D", "L", "0"],
             default="1",
             casefold=True,
         )
@@ -312,6 +321,20 @@ def static_analysis_menu() -> None:
 
         selection: ScopeSelection | None
         if choice == "1":
+            selection = _latest_scope_for_all(groups)
+            if not selection.groups:
+                print(status_messages.status("No APK targets were resolved for that scope.", level="warn"))
+                prompt_utils.press_enter_to_continue()
+                continue
+            command = get_command("1")
+            if command is None:
+                print(status_messages.status("Full analysis command is not registered.", level="error"))
+                prompt_utils.press_enter_to_continue()
+                continue
+            _dispatch_run(command, selection)
+            continue
+
+        if choice.lower() == "a":
             selection = _latest_scope_for_all(groups)
             selection = _choose_all_scope_variant(selection)
             if selection is None:

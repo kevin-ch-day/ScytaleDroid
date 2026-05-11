@@ -113,7 +113,7 @@ def test_publish_persisted_artifacts_prepares_required_artifacts_before_validati
 def test_publish_persisted_artifacts_governance_downgrade_does_not_emit_persistence_warnings(
     tmp_path: Path, capsys,
 ) -> None:
-    """MISSING_GOVERNANCE is printed but must not land in warnings (avoids false persistence_failed)."""
+    """Governance downgrade banner prints; must not land in warnings (avoids false persistence_failed)."""
     import scytaledroid.StaticAnalysis.cli.execution.artifact_publication as ap
 
     ap._GOVERNANCE_DOWNGRADE_SHOWN.clear()
@@ -144,7 +144,7 @@ def test_publish_persisted_artifacts_governance_downgrade_does_not_emit_persiste
     )
 
     out = capsys.readouterr().out
-    assert "Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)" in out
+    assert "Run grade: EXPERIMENTAL (paper-grade governance not ready)" in out
     assert "Core persistence still applies" in out
     assert result.warnings == []
 
@@ -185,5 +185,5 @@ def test_publish_persisted_artifacts_governance_banner_deduped_per_failure_key(
     publish_persisted_artifacts(package_name="com.one.app", **common)
     publish_persisted_artifacts(package_name="com.two.app", **common)
     out = capsys.readouterr().out
-    assert out.count("Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)") == 1
+    assert out.count("Run grade: EXPERIMENTAL (paper-grade governance not ready)") == 1
     assert out.count("Dedicated permission-intel DB is not configured") == 1

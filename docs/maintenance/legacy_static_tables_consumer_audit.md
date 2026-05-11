@@ -29,7 +29,7 @@ rg 'INSERT INTO (runs|findings|metrics|buckets|contributors)\b' scytaledroid --g
 | **File/function call sites**, false positives, `metrics.run_id` split, §8 gaps | [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) |
 | **Phased retirement**, gates, what not to do | [legacy_static_deprecation_playbook.md](legacy_static_deprecation_playbook.md) |
 | **Web repo** SQL, `diag.php`, alias `findings`, single legacy `runs` diagnostic | [legacy_static_tables_web_deep_dive.md](legacy_static_tables_web_deep_dive.md) |
-| **Relabel / UX sequencing** (no schema) | [legacy_static_table_compatibility_reduction_plan.md](legacy_static_table_compatibility_reduction_plan.md) |
+| **Relabel / UX sequencing** (no schema) | [legacy_static_deprecation_playbook.md — Appendix A](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix) |
 | **Phase 2A completion** (snapshot, CSV, bridge metadata) | [legacy_static_phase2a_policy_alignment_plan.md](legacy_static_phase2a_policy_alignment_plan.md) |
 
 ---

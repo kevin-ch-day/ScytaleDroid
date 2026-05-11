@@ -25,5 +25,5 @@ def render_run_start(
     print("───────────────")
     print(f"{profile_label} | workers={workers_desc} | profile_modules={detector_count}")
     if target_value and target_value != "All apps":
-        print(f"Target: {target_value}")
+        print(f"Scope: {target_value}")
     print()

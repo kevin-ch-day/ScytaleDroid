@@ -35,19 +35,6 @@ _LARGE_SPLIT_APK_THRESHOLD = 20  # flag outlier workload before run setup
 # should extend ScopeSelection metadata and this module without renaming operator-visible harvest terms.
 
 
-def _apk_totals(groups: Sequence[ArtifactGroup]) -> tuple[int, int, int]:
-    """Return (total_apk_files, base_count, split_count)."""
-
-    total = 0
-    splits = 0
-    for group in groups:
-        for artifact in group.artifacts:
-            total += 1
-            if getattr(artifact, "is_split_member", False):
-                splits += 1
-    return total, total - splits, splits
-
-
 def _skipped_count_map(skipped_details: Sequence[tuple[str, str, int]]) -> dict[str, int]:
     return {pkg: count for pkg, _stamp, count in skipped_details}
 
@@ -122,26 +109,14 @@ def _print_workload_summary_lines(
     older_excluded: int,
     rule_line: str,
 ) -> None:
-    n_pkg = len(scoped)
-    n_cap = len(scoped)
-    total, base_n, split_n = _apk_totals(scoped)
-    label_w = 18
-    pad = "  "
     print(f"Profile: {profile_title}")
     print(f"Rule   : {_rule_display(rule_line)}")
-    print()
-    print("Selected for this run")
-    print(f"{pad}{'Packages':<{label_w}}: {n_pkg}")
-    print(f"{pad}{'Harvest captures':<{label_w}}: {n_cap}")
-    print(f"{pad}{'APK files':<{label_w}}: {total} total ({base_n} base + {split_n} split)")
     if older_excluded > 0:
         print(
-            f"{pad}{'Older captures':<{label_w}}: {older_excluded} excluded; "
-            "retained for comparison/longitudinal analysis"
+            f"Older captures excluded from this run: {older_excluded} "
+            "(other captures remain in the library for comparison)"
         )
-    else:
-        print(f"{pad}{'Older captures':<{label_w}}: none excluded")
-    print(f"{pad}{'Split scan':<{label_w}}: on for Full analysis")
+    print("Final package and APK counts are shown in Run Setup.")
 
 
 def _print_research_workflow_block() -> None:
@@ -343,7 +318,7 @@ def resolve_profile_scope(
         print()
         menu_utils.print_header(
             "Static Analysis · Profile Workload",
-            "Review cohort counts and APK workload before Run Setup.",
+            "Review the cohort list; final package and APK totals are in Run Setup.",
         )
         _print_workload_summary_lines(
             profile_title=category_name,
@@ -364,8 +339,8 @@ def resolve_profile_scope(
         _render_profile_selection_table(scoped)
         _maybe_print_large_split_warnings(scoped, display_map)
         print()
-        print("Note: Full analysis scans each selected APK file when split scan is on.")
-        print("Use Run Options for base-only or reduced workload.")
+        print("Workload depends on the preset and split scan settings; Run Setup shows the final counts.")
+        print("Use Advanced / edit run options (from Run Setup) for base-only or reduced workload.")
     return ScopeSelection(
         "profile",
         category_name,

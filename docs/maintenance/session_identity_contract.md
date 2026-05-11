@@ -66,4 +66,4 @@ When **`session_label` ≠ `session_stamp`** on SAR (edge flows, retries, or too
 
 - `docs/maintenance/legacy_static_reader_dependency_map.md` — reader inventory; **`metrics.run_id`** warning.
 - `docs/maintenance/session_static_health_hygiene_plan.md` — aligning `session_static_health.py` with this contract (planned).
-- `docs/maintenance/next_pass_docs_policy_implementation_plan.md` — rollout checklist for this policy slice.
+- `docs/maintenance/archive/next_pass_docs_policy_implementation_plan.md` — archived rollout checklist for the 2026-05-09 policy slice (documentation Wave W1).

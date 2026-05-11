@@ -295,7 +295,7 @@ PYTHONPATH=. python scripts/db/static_schema_audit.py --json
 
 **Explicit non-goals:** no DDL, no `DROP`, no `ALTER`, no Permission Intel DSN queries in this script (core catalog only; use `check_permission_intel.py` for Intel).
 
-**Legacy five — code consumers:** authoritative per-table map in `docs/maintenance/legacy_static_reader_dependency_map.md` §3; short index + baseline grep in `docs/maintenance/legacy_static_tables_consumer_audit.md`. Web impact: `docs/maintenance/legacy_static_tables_web_deep_dive.md`. **Reduction plan (labels / gating / migration sequencing, still no DDL):** `docs/maintenance/legacy_static_table_compatibility_reduction_plan.md`.
+**Legacy five — code consumers:** authoritative per-table map in `docs/maintenance/legacy_static_reader_dependency_map.md` §3; short index + baseline grep in `docs/maintenance/legacy_static_tables_consumer_audit.md`. Web impact: `docs/maintenance/legacy_static_tables_web_deep_dive.md`. **Reduction plan (labels / gating / migration sequencing, still no DDL):** [legacy_static_deprecation_playbook.md — Appendix A](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix).
 
 ---
 

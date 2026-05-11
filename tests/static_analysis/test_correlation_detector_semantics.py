@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.core.findings import Badge
+from scytaledroid.StaticAnalysis.detectors.correlation import splits
 from scytaledroid.StaticAnalysis.detectors.correlation.detector import CorrelationDetector
 from scytaledroid.StaticAnalysis.detectors.correlation.models import (
     DiffBundle,
     NetworkDiff,
     NetworkSnapshot,
 )
+from scytaledroid.StaticAnalysis.persistence.reports import StoredReport
 
 
 def _dummy_snapshot() -> NetworkSnapshot:
@@ -106,3 +109,53 @@ def test_correlation_exception_is_error(monkeypatch):
     result = CorrelationDetector().run(ctx)
     assert result.status is Badge.ERROR
     assert "error" in (result.metrics or {})
+
+
+# =============================================================================
+# Former tests/static_analysis/test_split_correlation_capture_boundary.py
+# =============================================================================
+
+
+@dataclass
+class _SplitCaptureFakeManifest:
+    package_name: str
+
+
+@dataclass
+class _SplitCaptureFakeReport:
+    metadata: dict[str, object]
+    hashes: dict[str, str]
+    manifest: _SplitCaptureFakeManifest
+
+
+def _split_capture_stored(*, package: str, capture: str, split: int, sha: str) -> StoredReport:
+    report = _SplitCaptureFakeReport(
+        metadata={
+            "package_name": package,
+            "session_stamp": capture,
+            "split_group_id": split,
+        },
+        hashes={"sha256": sha},
+        manifest=_SplitCaptureFakeManifest(package_name=package),
+    )
+    return StoredReport(path=Path(f"/tmp/{sha}.json"), report=report)  # type: ignore[arg-type]
+
+
+def test_collect_related_reports_is_capture_bounded(monkeypatch) -> None:
+    reports = [
+        _split_capture_stored(package="com.example.app", capture="20260216", split=72, sha="same-capture"),
+        _split_capture_stored(package="com.example.app", capture="20260215", split=72, sha="old-capture"),
+        _split_capture_stored(package="com.other.app", capture="20260216", split=72, sha="other-package"),
+    ]
+    monkeypatch.setattr(splits, "list_reports", lambda: reports)
+
+    related = splits._collect_related_reports(  # noqa: SLF001 - intentional contract test
+        context=None,  # type: ignore[arg-type]
+        split_id="72",
+        current_sha="current-sha",
+        package_name="com.example.app",
+        capture_id="20260216",
+    )
+
+    assert len(related) == 1
+    assert related[0].report.hashes["sha256"] == "same-capture"

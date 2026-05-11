@@ -112,7 +112,7 @@ Several PHP pages use **`$runs`** or English “runs” for **dynamic** session 
 ## 9. Relation to Python maintenance docs
 
 - Python reader inventory: **`legacy_static_reader_dependency_map.md`** §3 (+ **§8** edge cases). Short entry + baseline grep: **`legacy_static_tables_consumer_audit.md`** (index).
-- Relabel / migrate sequencing: **`legacy_static_table_compatibility_reduction_plan.md`**
+- Relabel / migrate sequencing: **[legacy_static_deprecation_playbook.md — Appendix A](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix)**
 - This file: **how** the Web layer is structured so greps are interpreted correctly.
 
 No Web or Python code was changed to produce this note.

@@ -377,14 +377,15 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
     assert "Run context" in text
     assert "Session: 20260510-all-full" in text
     assert "Workers: 8" in text
-    assert "App: Switch Access" in text
+    assert "Preset: Full" in text
+    assert "Display name: Switch Access" in text
     assert "com.google.android.accessibility.switchaccess" in text
-    assert "App progress: 28 / 120 packages" in text  # ordinal = apps completed + active app
-    assert "Current package: com.google.android.accessibility.switchaccess" in text
-    assert "Artifact progress: 106 / 459 APKs" in text
+    assert "Package progress: 28 / 120 selected" in text  # ordinal = apps completed + active app
+    assert "Package: com.google.android.accessibility.switchaccess" in text
+    assert "APK artifact progress: 106 / 459 completed" in text
     assert "Elapsed: 24m 18s" in text
     assert "ETA: ~1h 12m" in text
-    assert "Detector warnings: 312" in text
+    assert "Warnings: 312" in text
     assert "Policy/finding failures: 51" in text
     assert "Execution errors: 0 (none - no analyzer/pipeline exceptions)" in text
     assert "Last saved report: com.example.pkg, 3s ago" in text

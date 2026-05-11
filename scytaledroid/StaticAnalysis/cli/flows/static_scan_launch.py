@@ -301,12 +301,17 @@ def launch_scan_flow_resolved(
         print(f"pipeline_version={pipeline_version or '—'}  run_signature_version={run_sig_version}")
         if params.session_stamp:
             print(
-                f"Session: {params.session_stamp}  Profile: {params.profile_label}  "
+                f"Session: {params.session_stamp}  Preset: {params.profile_label}  "
                 f"Scope: {params.scope_label or params.scope}"
             )
         print()
     _dispatch._emit_db_preflight_lock_warning(params=params, run_ctx=frozen_ctx)
-    _dispatch._emit_static_run_preflight_summary(params, frozen_ctx=frozen_ctx, base_dir=base_dir)
+    _dispatch._emit_static_run_preflight_summary(
+        params,
+        frozen_ctx=frozen_ctx,
+        base_dir=base_dir,
+        selection=selection,
+    )
     outcome: RunOutcome | None = None
     run_status: str | None = None
     abort_reason: str | None = None

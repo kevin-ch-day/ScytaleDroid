@@ -11,4 +11,4 @@ def test_render_run_start(capsys):
     out = capsys.readouterr().out
     assert "Static Analysis" in out
     assert "full_forensic | workers=auto (8) | profile_modules=2" in out
-    assert 'Target: App "Example" (com.example.app)' in out
+    assert 'Scope: App "Example" (com.example.app)' in out
