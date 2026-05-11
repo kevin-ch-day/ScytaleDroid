@@ -19,7 +19,7 @@
 # Legacy-five INSERT baseline — must stay zero hits in scytaledroid/
 rg 'INSERT INTO (runs|findings|metrics|buckets|contributors)\b' scytaledroid --glob '*.py'
 
-pytest tests/db_utils/test_status_actions_snapshot_bridge.py tests/database/test_schema_gate_static.py tests/database/test_bridge_posture.py -q
+pytest tests/db_utils/test_status_actions_snapshot_and_digest_contracts.py tests/database/test_schema_gate_static.py tests/database/test_bridge_posture.py -q
 
 python -m py_compile scytaledroid/Database/db_utils/action_groups/status_actions.py scytaledroid/Database/db_utils/bridge_posture.py
 ```

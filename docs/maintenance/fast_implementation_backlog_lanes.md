@@ -19,7 +19,7 @@
 
 | ID | Lane | Task | Files | Behavior change | Risk | Tests | Rollback | Now vs gated |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B‑script‑1 | 1+2 | Session static health canonical/legacy policy | `scripts/db/session_static_health.py`, tests | Stricter exit 1 on canonical errors; legacy SKIP/INFO | Low | `tests/scripts/test_session_static_health_legacy_display.py` | Revert script | **Done** |
+| B‑script‑1 | 1+2 | Session static health canonical/legacy policy | `scripts/db/session_static_health.py`, tests | Stricter exit 1 on canonical errors; legacy SKIP/INFO | Low | `tests/scripts/test_cli_script_smoke.py` (legacy display section) | Revert script | **Done** |
 | A‑risk‑1 | 1 | Risk scoring operator wording | `health_checks_permission.py`, `query_runner.py`, docs already aligned | Labels/hints only | Very low | Manual / existing suites | Revert strings | **This batch** |
 | C‑audit‑1 | 1 | Audit script section vocabulary | `audit_static_session.py` | stdout titles only | Very low | `py_compile`, smoke | Revert strings | **This batch** |
 | B‑helper‑1 | 2 | Legacy mirror diagnostic helpers | `legacy_static_mirror_diagnostics.py`, `audit_static_session.py`, `session_static_health.py` | Same SQL, centralized | Low | New unit tests | Revert import + inline | **Done** |
