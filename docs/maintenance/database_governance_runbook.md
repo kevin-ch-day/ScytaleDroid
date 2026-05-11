@@ -54,7 +54,7 @@ Fleet **`v_web_permission_intel_current`** was effectively limited to **`usable_
 
 - **`v_web_permission_intel_current`** semantics and related Web SQL aligned with fleet usefulness vs session honesty.
 
-- **Tests updated** (`tests/database/test_web_view_static_preference.py`) so CI matches real DDL intent.
+- **Tests updated** (web view SQL contracts live under `tests/database/test_database_view_package_and_deploy_contracts.py`) so CI matches real DDL intent.
 
 ---
 
