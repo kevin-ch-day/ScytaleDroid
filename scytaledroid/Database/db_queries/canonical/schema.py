@@ -336,6 +336,69 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS findings_capped_by_detector_json JSON DEFAULT NULL;
     """,
     """
+    CREATE TABLE IF NOT EXISTS static_analysis_sessions (
+      static_session_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      session_stamp VARCHAR(128) NOT NULL,
+      scope_label VARCHAR(191) NOT NULL DEFAULT '',
+      session_label VARCHAR(191) DEFAULT NULL,
+      session_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+      session_disposition VARCHAR(64) NOT NULL DEFAULT 'unknown_needs_review',
+      disposition_confidence VARCHAR(16) NOT NULL DEFAULT 'medium',
+      total_run_count INT UNSIGNED NOT NULL DEFAULT 0,
+      completed_run_count INT UNSIGNED NOT NULL DEFAULT 0,
+      failed_run_count INT UNSIGNED NOT NULL DEFAULT 0,
+      interrupted_run_count INT UNSIGNED NOT NULL DEFAULT 0,
+      persist_error_run_count INT UNSIGNED NOT NULL DEFAULT 0,
+      missing_artifacts_run_count INT UNSIGNED NOT NULL DEFAULT 0,
+      total_findings_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      total_permission_matrix_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      total_permission_risk_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      total_string_summary_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      total_string_sample_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      session_link_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      rollup_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      persistence_failure_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      web_visibility_default VARCHAR(16) NOT NULL DEFAULT 'operator',
+      cleanup_status VARCHAR(32) NOT NULL DEFAULT 'none',
+      superseded_by_session_id BIGINT UNSIGNED DEFAULT NULL,
+      tool_semver VARCHAR(32) DEFAULT NULL,
+      tool_git_commit VARCHAR(40) DEFAULT NULL,
+      schema_version VARCHAR(32) DEFAULT NULL,
+      first_created_at DATETIME DEFAULT NULL,
+      last_ended_at DATETIME DEFAULT NULL,
+      refreshed_at_utc TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+      created_at_utc TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (static_session_id),
+      UNIQUE KEY ux_static_session_natural (session_stamp, scope_label),
+      KEY ix_static_session_disposition (session_disposition, web_visibility_default),
+      KEY ix_static_session_cleanup (cleanup_status),
+      KEY ix_static_session_stamp (session_stamp),
+      CONSTRAINT fk_static_session_superseded
+        FOREIGN KEY (superseded_by_session_id)
+        REFERENCES static_analysis_sessions(static_session_id)
+        ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS static_session_disposition_history (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      static_session_id BIGINT UNSIGNED NOT NULL,
+      from_disposition VARCHAR(64) DEFAULT NULL,
+      to_disposition VARCHAR(64) NOT NULL,
+      reason VARCHAR(512) DEFAULT NULL,
+      actor VARCHAR(128) NOT NULL DEFAULT 'manual_sql',
+      detail_json LONGTEXT DEFAULT NULL,
+      created_at_utc TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY ix_sess_disp_hist_session (static_session_id, created_at_utc),
+      CONSTRAINT fk_sess_disp_hist_session
+        FOREIGN KEY (static_session_id)
+        REFERENCES static_analysis_sessions(static_session_id)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    """,
+    """
     CREATE TABLE IF NOT EXISTS static_session_rollups (
       session_stamp VARCHAR(128) NOT NULL,
       scope_label   VARCHAR(191) NOT NULL DEFAULT '',
