@@ -1,10 +1,12 @@
 # ScytaleDroid target database schema (V2) — domain model and migration design
 
-**Status:** normative **target** design — **not implemented**.  
+**Status:** normative **target** design — **session header tables implemented** in `canonical/schema.py` (and on some catalogs in production); run FKs, v2 views, and permission split remain **planned**.  
 **Intent:** MariaDB becomes the **primary query surface** for Web and operators for static (and bounded dynamic) truth; JSON and filesystem paths remain **evidence and reproducibility**, not the authoritative catalog.  
 **Supersedes as architecture direction:** patch-level notes in [database_schema_cleanup_design.md](database_schema_cleanup_design.md) remain useful for near-term tactics; **this document** defines the **better schema** end state and migration spine.
 
 **Constraints for all phases until explicitly approved:** no fake repair of broken historical sessions; no detector semantic changes as part of schema work (persistence/normalization layers may change); destructive SQL only in late phases with backup, preview, and verify.
+
+**Repo parity:** The DDL for **`static_analysis_sessions`** and **`static_session_disposition_history`** matching the first production deploy is now in `scytaledroid/Database/db_queries/canonical/schema.py` (`ordered_schema_statements` / `schema_manifest`). See **Appendix A0** for differences vs the older illustrative sketches in Appendix A.
 
 ---
 
@@ -321,7 +323,8 @@ Existing `v_web_app_sessions` / `v_web_app_findings` remain during transition; W
 
 1. `static_session_run_links.package_name` and related text columns.  
 2. `masvs_control_coverage` text columns.  
-3. Any `VARCHAR` on **`latin1_swedish_ci`** in `information_schema` export for this catalog.
+3. Any `VARCHAR` on **`latin1_swedish_ci`** in `information_schema` export for this catalog.  
+4. **`static_string_summary.session_stamp`** is **`VARCHAR(64)`** while `static_analysis_runs.session_stamp` is **`VARCHAR(128)`** — widen summary (and any matching indexes) in a collation phase if stamps can exceed 64 characters or joins truncate silently.
 
 ### 8.3 Identifiers
 
@@ -334,9 +337,9 @@ Existing `v_web_app_sessions` / `v_web_app_findings` remain during transition; W
 
 | Phase | Name | Content |
 | --- | --- | --- |
-| **0** | Backup + read-only audit | Full dump; inventory views/tables; disposition histograms from current data. |
+| **0** | Backup + read-only audit | Full dump; inventory views/tables; disposition histograms from current data. Use `scripts/db/sql/audit_information_schema_static_relationships.sql` plus [database_static_child_table_join_map.md](database_static_child_table_join_map.md) before writing prune/footprint SQL. |
 | **1** | Additive schema | `static_analysis_sessions`, `static_session_disposition_history`, `static_apk_artifact_sets`; add nullable FK columns on `static_analysis_runs`; **no** deletes. |
-| **2** | Honest backfill | Populate `static_analysis_sessions` from `GROUP BY session_stamp, scope_label`; set disposition from facts (interrupt vs persist_error); **do not** mark broken April data as completed. |
+| **2** | Honest backfill | Populate `static_analysis_sessions` from `GROUP BY session_stamp, scope_label`; set disposition from facts (interrupt vs persist_error); **do not** mark broken April data as completed. **Operator SQL pack:** `scripts/db/sql/session_summary_from_static_analysis_runs.sql` (preview `SELECT`, optional child-count CTE, commented `INSERT … ON DUPLICATE KEY UPDATE`). |
 | **3** | v2 views | Create `v_static_session_health_v2`, `v_static_run_identity_v2`, `v_web_static_session_index_v2`, findings/permissions v2 — read-only for Web until cutover. |
 | **4** | Permission observation + rollup | New tables; dual-write or backfill from matrix; switch writers; retire old unique collision path. |
 | **5** | Export / prune | Broken and superseded sessions per policy; PREVIEW/VERIFY scripts. |
@@ -362,9 +365,17 @@ Existing `v_web_app_sessions` / `v_web_app_findings` remain during transition; W
 
 ---
 
+## Appendix A0 — As-deployed session tables (authoritative in repo)
+
+These match **`scytaledroid_core_prod`** manual DDL and **`canonical/schema.py`** (utf8mb4 **general_ci**; `disposition_confidence` as **VARCHAR(16)**; `detail_json` as **LONGTEXT**; `actor` default **`manual_sql`**; aggregate counters including **`total_run_count`**, **`missing_artifacts_run_count`**, matrix/risk/sample row totals, **`persistence_failure_rows`**, **`rollup_rows`**; timestamps **`first_created_at`**, **`last_ended_at`**, **`refreshed_at_utc`**, **`created_at_utc`**).
+
+Planned later columns from Section 2 (paper-grade flags, `expected_package_count`, harvest FKs) remain **future `ADD COLUMN`** migrations — do not require them for backfill v1.
+
+---
+
 ## Appendix A — Proposed DDL sketches (illustrative)
 
-> **Note:** Syntax may need MariaDB version tweaks; indexes are indicative; review with `schema_manifest.py` ordering and FK dependency graph.
+> **Note:** Appendix A sketches are **superseded for the two session tables** by Appendix A0 / `canonical/schema.py`. Remaining sketches (apk sets, permission observations) are still illustrative. Syntax may need MariaDB version tweaks; indexes are indicative; review with `schema_manifest.py` ordering and FK dependency graph.
 
 ### A.1 `static_analysis_sessions`
 
@@ -594,3 +605,4 @@ HAVING c > 1;
 | Date | Action |
 | --- | --- |
 | 2026-05-09 | Initial target schema V2 proposal. |
+| 2026-05-09 | Appendix A0: production-aligned `static_analysis_sessions` + `static_session_disposition_history` DDL added to `canonical/schema.py`; `reset_static` + `static_schema_audit` catalog updates. |

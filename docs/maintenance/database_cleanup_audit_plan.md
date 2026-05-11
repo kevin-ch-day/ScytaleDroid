@@ -1,6 +1,7 @@
 # Database cleanup / audit plan (read-only phase)
 
-**Design proposal (phased schema + Web SOT):** [database_schema_cleanup_design.md](database_schema_cleanup_design.md).
+**Design proposal (phased schema + Web SOT):** [database_schema_cleanup_design.md](database_schema_cleanup_design.md).  
+**Static child-table joins / audit SQL (avoid guessed `run_id` vs `static_run_id`):** [database_static_child_table_join_map.md](database_static_child_table_join_map.md), `scripts/db/sql/audit_information_schema_static_relationships.sql`.
 
 **Scope:** Operational analyst MariaDB (core / results catalog) — *not* the separate Permission Intel dictionary DB unless noted.  
 **Constraints (this document):** No `DROP` / `DELETE` / `TRUNCATE` / `ALTER`. No migrations. No Web repo edits. Treat production data as valuable until lineage is proven.  

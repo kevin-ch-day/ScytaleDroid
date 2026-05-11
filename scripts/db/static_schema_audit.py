@@ -147,6 +147,20 @@ AUDIT_PROFILES: dict[str, dict[str, str]] = {
         "readers_hint": "menus, audits",
         "notes": "schema_gate required.",
     },
+    "static_analysis_sessions": {
+        "classification": "canonical_keep",
+        "owner_domain": "StaticAnalysis",
+        "writers_hint": "session summary backfill / hygiene jobs (planned); manual DDL on some catalogs",
+        "readers_hint": "Web v2 session index (planned); session hygiene scripts",
+        "notes": "One row per (session_stamp, scope_label); aggregates + disposition; not in static_schema_gate yet.",
+    },
+    "static_session_disposition_history": {
+        "classification": "canonical_keep",
+        "owner_domain": "StaticAnalysis",
+        "writers_hint": "disposition changes / operator overrides (planned)",
+        "readers_hint": "audit, hygiene reports",
+        "notes": "FK to static_analysis_sessions ON DELETE CASCADE.",
+    },
     "static_persistence_failures": {
         "classification": "canonical_keep",
         "owner_domain": "StaticAnalysis",

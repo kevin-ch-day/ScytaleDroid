@@ -40,6 +40,8 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
     "static_session_rollups",
     "static_session_run_links",
     "static_analysis_runs",
+    "static_session_disposition_history",
+    "static_analysis_sessions",
     # Run-level persistence
     "metrics",
     "buckets",

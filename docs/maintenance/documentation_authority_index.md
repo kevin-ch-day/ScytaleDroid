@@ -115,6 +115,7 @@ Notes:
   - [maintenance/database_cleanup_audit_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_cleanup_audit_plan.md) — read-only audit SQL pack; interrupted-session drill queries
   - [maintenance/database_schema_cleanup_design.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_schema_cleanup_design.md) — phased schema cleanup, `static_analysis_sessions`, Web SOT, prune/collation strategy
   - [maintenance/database_target_schema_v2.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_target_schema_v2.md) — **target** domain model, sessions center, run identity v2, permission observations/rollup, v2 Web views, migration phases 0–7
+  - [maintenance/database_static_child_table_join_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_static_child_table_join_map.md) — canonical vs legacy FK patterns (`run_id` vs `static_run_id`), COALESCE trap, session-scoped SQL audit pack pointers
   - [maintenance/repo_ownership_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/repo_ownership_map.md)
 
 Notes:
