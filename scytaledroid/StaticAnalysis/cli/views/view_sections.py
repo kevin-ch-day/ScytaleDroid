@@ -139,12 +139,6 @@ def render_sections(
     return lines
 
 
-def render_stub_sections() -> list[str]:
-    """Return placeholder lines for every analysis section."""
-
-    return []
-
-
 def extract_integrity_profiles(
     report: StaticAnalysisReport,
 ) -> tuple[
@@ -825,6 +819,5 @@ __all__ = [
     "SECTION_TITLES",
     "format_badge",
     "render_sections",
-    "render_stub_sections",
     "extract_integrity_profiles",
 ]

@@ -9,6 +9,7 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
 from scytaledroid.Database.summary_surfaces import static_dynamic_summary_cache_status
 from scytaledroid.StaticAnalysis.cli.persistence.reports.masvs_summary_report import (
@@ -111,6 +112,12 @@ def show_active_static_session_status() -> None:
     session_stamp = str(session.get("session_stamp") or "").strip()
     archive_count = _archive_report_count(session_stamp)
     downstream = _session_downstream_counts(session_stamp)
+
+    def _fmt_downstream(value: int | None) -> str:
+        if value is None:
+            return "— (table absent or query skipped)"
+        return str(value)
+
     menu_utils.print_metrics(
         [
             ("Session", session_stamp or "—"),
@@ -124,9 +131,23 @@ def show_active_static_session_status() -> None:
     print()
     menu_utils.print_metrics(
         [
-            ("Session links", downstream["session_links"]),
-            ("Findings summary", downstream["findings_summary"]),
-            ("String summary", downstream["string_summary"]),
+            ("Session links", _fmt_downstream(downstream["session_links"])),
+            ("Findings summary", _fmt_downstream(downstream["findings_summary"])),
+            ("String summary", _fmt_downstream(downstream["string_summary"])),
+        ]
+    )
+    print()
+    menu_utils.print_section("Legacy compatibility (informational, not canonical)")
+    menu_utils.print_metrics(
+        [
+            (
+                "Legacy `runs` table (session rows)",
+                _fmt_downstream(downstream["legacy_runs"]),
+            ),
+            (
+                "risk_scores (rollup bridge, same session)",
+                _fmt_downstream(downstream["legacy_risk"]),
+            ),
         ]
     )
     prompt_utils.press_enter_to_continue()
@@ -658,17 +679,38 @@ def _archive_report_count(session_stamp: str) -> int:
         return 0
 
 
-def _session_downstream_counts(session_stamp: str) -> dict[str, int]:
-    counts = {
-        "session_links": 0,
-        "legacy_risk": 0,
-        "legacy_runs": 0,
-        "findings_summary": 0,
-        "string_summary": 0,
-    }
-    if not session_stamp:
-        return counts
+def _session_downstream_counts(session_stamp: str) -> dict[str, int | None]:
+    """Session-scoped row counts for digest lines.
 
+    Skips ``SELECT COUNT(*)`` against optional tables when
+    ``diagnostics.check_required_tables`` reports they are absent (canonical-only
+    catalogs). Returns ``None`` for skipped/failed probes so the UI prints ``—``.
+    """
+
+    keys = ("session_links", "legacy_risk", "legacy_runs", "findings_summary", "string_summary")
+    zeroes: dict[str, int | None] = {k: 0 for k in keys}
+    if not session_stamp:
+        return zeroes
+
+    physical = (
+        "static_session_run_links",
+        "risk_scores",
+        "runs",
+        "static_findings_summary",
+        "static_string_summary",
+    )
+    try:
+        presence = diagnostics.check_required_tables(list(physical))
+    except Exception:
+        presence = {}
+
+    table_for_key = {
+        "session_links": "static_session_run_links",
+        "legacy_risk": "risk_scores",
+        "legacy_runs": "runs",
+        "findings_summary": "static_findings_summary",
+        "string_summary": "static_string_summary",
+    }
     queries = {
         "session_links": "SELECT COUNT(*) FROM static_session_run_links WHERE session_stamp=%s",
         "legacy_risk": "SELECT COUNT(*) FROM risk_scores WHERE session_stamp=%s",
@@ -676,10 +718,22 @@ def _session_downstream_counts(session_stamp: str) -> dict[str, int]:
         "findings_summary": "SELECT COUNT(*) FROM static_findings_summary WHERE session_stamp=%s",
         "string_summary": "SELECT COUNT(*) FROM static_string_summary WHERE session_stamp=%s",
     }
+
+    counts: dict[str, int | None] = {k: None for k in keys}
     for key, sql in queries.items():
-        row = _run_read_only(sql, (session_stamp,), fetch="one")
+        tbl = table_for_key[key]
+        if presence and not presence.get(tbl):
+            counts[key] = None
+            continue
+        try:
+            row = _run_read_only(sql, (session_stamp,), fetch="one")
+        except Exception:
+            counts[key] = None
+            continue
         if row:
             counts[key] = int(row[0] or 0)
+        else:
+            counts[key] = None
     return counts
 
 
@@ -963,6 +1017,23 @@ def prompt_persistence_audit() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+# Session verification digest (`render_session_digest`): required table keys into
+# ``collect_static_run_counts`` ``audit.counts`` — canonical findings, not legacy ``findings``.
+SESSION_DIGEST_REQUIRED_SINGLE_TABLES: tuple[str, ...] = (
+    "static_analysis_findings",
+    "static_string_summary",
+    "static_string_samples",
+    "permission_audit_snapshots",
+    "permission_audit_apps",
+)
+SESSION_DIGEST_REQUIRED_GROUP_TABLES: tuple[str, ...] = (
+    "static_string_summary",
+    "static_string_samples",
+    "permission_audit_snapshots",
+    "permission_audit_apps",
+)
+
+
 def render_session_digest(session_stamp: str | None, *, header: str | None = None) -> None:
     resolved = session_stamp or _latest_session_stamp()
     if not resolved:
@@ -980,7 +1051,12 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     if audit.is_group_scope:
         print(status_messages.status("Group scope detected; per-package mapping not applicable.", level="info"))
     if audit.is_orphan:
-        print(status_messages.status("Orphan static run (runs row missing).", level="warn"))
+        print(
+            status_messages.status(
+                "Orphan static run (legacy `runs` mirror row missing for session linkage).",
+                level="warn",
+            )
+        )
 
     optional_tables = {
         "static_string_selected_samples",
@@ -999,7 +1075,6 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     canonical_spec = [
         ("static_analysis_runs", "static_analysis_runs"),
         ("Findings (canonical)", "static_analysis_findings"),
-        ("Findings (legacy)", "findings"),
         ("Static findings (baseline)", "static_findings"),
         ("static_findings_summary", "static_findings_summary"),
         ("static_string_summary", "static_string_summary"),
@@ -1010,23 +1085,21 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         ("Permission audit snapshots", "permission_audit_snapshots"),
         ("Permission audit apps", "permission_audit_apps"),
     ]
+    legacy_mirror_spec = [
+        (
+            "findings (legacy mirror table, optional)",
+            "findings",
+        ),
+    ]
     print()
     menu_utils.print_section("Canonical persistence")
     table_utils.render_table(["Table", "Rows", "Status"], _rows_for(canonical_spec))
+    print()
+    menu_utils.print_section("Legacy mirror (compatibility — historical; not canonical static truth)")
+    table_utils.render_table(["Table", "Rows", "Status"], _rows_for(legacy_mirror_spec))
 
-    required_single = (
-        "findings",
-        "static_string_summary",
-        "static_string_samples",
-        "permission_audit_snapshots",
-        "permission_audit_apps",
-    )
-    required_group_session = (
-        "static_string_summary",
-        "static_string_samples",
-        "permission_audit_snapshots",
-        "permission_audit_apps",
-    )
+    required_single = SESSION_DIGEST_REQUIRED_SINGLE_TABLES
+    required_group_session = SESSION_DIGEST_REQUIRED_GROUP_TABLES
     missing = []
     if audit.is_group_scope:
         for name in required_group_session:
@@ -1185,4 +1258,6 @@ __all__ = [
     "prompt_masvs_session_summary",
     "prompt_persistence_audit",
     "render_session_digest",
+    "SESSION_DIGEST_REQUIRED_GROUP_TABLES",
+    "SESSION_DIGEST_REQUIRED_SINGLE_TABLES",
 ]

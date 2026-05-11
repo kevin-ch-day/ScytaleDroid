@@ -14,6 +14,19 @@ from scytaledroid.Database.db_scripts import static_run_audit
 from scytaledroid.StaticAnalysis.cli.persistence.reports import masvs_summary_report
 from scytaledroid.Utils.System import output_prefs
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_db_verification_legacy_mirror_presence(monkeypatch):
+    """``db_verification`` gates legacy SQL on ``diagnostics.check_required_tables``."""
+
+    monkeypatch.setattr(
+        db_verification.diagnostics,
+        "check_required_tables",
+        lambda names: {str(n): True for n in names},
+    )
+
 
 def test_hash_prefix_short_value():
     assert results_formatters._hash_prefix("abcd") == "abcd"
@@ -459,7 +472,7 @@ def test_render_persistence_footer_group_scope_ok_when_only_canonical_findings(m
 
     db_verification._render_persistence_footer("20260502-all-full")
     out = capsys.readouterr().out
-    assert "canonical_session_rows=2400" in out
+    assert "canonical_static_findings_session_rows=2400" in out
     assert "db_verification" in out
     assert "ERROR (missing buckets, findings, metrics)" not in out
     assert "OK (canonical static persistence)" in out or "OK (group scope)" in out
@@ -501,6 +514,51 @@ def test_render_persistence_footer_derives_snapshot_count_from_permission_apps(m
     out = capsys.readouterr().out
     assert "permission_audit_snapshots" in out
     assert "this_run=4" in out
+
+
+def test_render_persistence_footer_legacy_catalog_n_a_when_mirror_tables_absent(monkeypatch, capsys):
+    """Full-catalog legacy totals are skipped when mirror tables are not deployed."""
+    monkeypatch.setattr(
+        db_verification.diagnostics,
+        "check_required_tables",
+        lambda names: {str(n): False for n in names},
+    )
+    audit = SimpleNamespace(
+        counts={},
+        is_group_scope=True,
+        run_id=None,
+        is_orphan=False,
+        static_run_id=1,
+    )
+
+    def fake_run_sql(query, params=None, fetch=None):
+        sql = " ".join(str(query).split()).lower()
+        if "static_analysis_findings f" in sql and "join static_analysis_runs sar" in sql:
+            return (5,)
+        if "select snapshot_id from permission_audit_snapshots where snapshot_key" in sql:
+            return None
+        if "select count(*) from permission_audit_snapshots where static_run_id in" in sql:
+            return (0,)
+        if "select count(distinct snapshot_id) from permission_audit_apps where static_run_id in" in sql:
+            return (0,)
+        if "select count(*) from permission_audit_apps where static_run_id in" in sql:
+            return (0,)
+        if "from static_string_sample_sets" in sql:
+            return None
+        if "select count(*) from" in sql:
+            return (0,)
+        return (0,)
+
+    monkeypatch.setattr(db_verification.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(db_verification, "_resolve_static_run_ids", lambda *_args, **_kwargs: [1])
+    monkeypatch.setattr(db_verification, "collect_static_run_counts", lambda *_args, **_kwargs: audit)
+    monkeypatch.setattr(db_verification, "_table_has_column", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(db_verification, "compact_success_output_enabled", lambda: False)
+
+    db_verification._render_persistence_footer("sess-no-legacy")
+    out = capsys.readouterr().out
+    assert out.count("n/a (table absent)") >= 4
+    assert "canonical_static_findings_session_rows=5" in out
 
 
 def test_render_persistence_footer_explains_interrupted_permission_contract(monkeypatch, capsys):

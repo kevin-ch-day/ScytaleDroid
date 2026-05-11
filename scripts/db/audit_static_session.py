@@ -88,11 +88,15 @@ def main() -> int:
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
         from scytaledroid.Database.db_scripts import view_deploy_remediation as vdr
+        from scytaledroid.Database.db_utils import diagnostics
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 1
 
     run_sql = core_q.run_sql
+    legacy_mirror_presence = diagnostics.check_required_tables(
+        ["runs", "metrics", "buckets", "findings"]
+    )
     lit = _sql_literal(session)
     bridge_on = False  # legacy Persistence/db_writer mirror removed
 
@@ -296,47 +300,70 @@ def main() -> int:
 
     # --- Compatibility bridge (legacy mirror)
     legacy_rows: list[tuple[str, int | None, str]] = []
-    lr, st = _safe_scalar(
-        run_sql,
-        "SELECT COUNT(*) FROM runs WHERE session_stamp=%s",
-        (session,),
-    )
-    legacy_rows.append(("runs (legacy mirror)", lr, st))
+    runs_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get("runs", True)
 
-    lm, st = _safe_scalar(
-        run_sql,
-        """
-        SELECT COUNT(*) FROM metrics m
-        INNER JOIN runs r ON r.run_id = m.run_id
-        WHERE r.session_stamp=%s
-        """,
-        (session,),
-    )
-    legacy_rows.append(("metrics (legacy mirror)", lm, st))
+    if not runs_mirror_present:
+        legacy_rows.append(("runs (legacy mirror)", None, "SKIP (table absent)"))
+        legacy_rows.append(("metrics (legacy mirror)", None, "SKIP (requires runs mirror)"))
+        legacy_rows.append(("buckets (legacy mirror)", None, "SKIP (requires runs mirror)"))
+    else:
+        lr, st = _safe_scalar(
+            run_sql,
+            "SELECT COUNT(*) FROM runs WHERE session_stamp=%s",
+            (session,),
+        )
+        legacy_rows.append(("runs (legacy mirror)", lr, st))
 
-    lb, st = _safe_scalar(
-        run_sql,
-        """
-        SELECT COUNT(*) FROM buckets b
-        INNER JOIN runs r ON r.run_id = b.run_id
-        WHERE r.session_stamp=%s
-        """,
-        (session,),
-    )
-    legacy_rows.append(("buckets (legacy mirror)", lb, st))
+        metrics_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get(
+            "metrics", True
+        )
+        if not metrics_mirror_present:
+            legacy_rows.append(("metrics (legacy mirror)", None, "SKIP (table absent)"))
+        else:
+            lm, st = _safe_scalar(
+                run_sql,
+                """
+                SELECT COUNT(*) FROM metrics m
+                INNER JOIN runs r ON r.run_id = m.run_id
+                WHERE r.session_stamp=%s
+                """,
+                (session,),
+            )
+            legacy_rows.append(("metrics (legacy mirror)", lm, st))
 
-    lf, st = _safe_scalar(
-        run_sql,
-        """
-        SELECT COUNT(*) FROM findings f
-        WHERE f.static_run_id IN (SELECT id FROM static_analysis_runs WHERE session_stamp=%s)
-        """,
-        (session,),
-    )
-    legacy_rows.append(("findings (legacy mirror)", lf, st))
+        buckets_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get(
+            "buckets", True
+        )
+        if not buckets_mirror_present:
+            legacy_rows.append(("buckets (legacy mirror)", None, "SKIP (table absent)"))
+        else:
+            lb, st = _safe_scalar(
+                run_sql,
+                """
+                SELECT COUNT(*) FROM buckets b
+                INNER JOIN runs r ON r.run_id = b.run_id
+                WHERE r.session_stamp=%s
+                """,
+                (session,),
+            )
+            legacy_rows.append(("buckets (legacy mirror)", lb, st))
 
-    legacy_note = "historical rows only (mirror writers removed)"
-    _print_table(f"Legacy mirror tables ({legacy_note})", legacy_rows)
+    findings_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get("findings", True)
+    if not findings_mirror_present:
+        legacy_rows.append(("findings (legacy mirror)", None, "SKIP (table absent)"))
+    else:
+        lf, st = _safe_scalar(
+            run_sql,
+            """
+            SELECT COUNT(*) FROM findings f
+            WHERE f.static_run_id IN (SELECT id FROM static_analysis_runs WHERE session_stamp=%s)
+            """,
+            (session,),
+        )
+        legacy_rows.append(("findings (legacy mirror)", lf, st))
+
+    legacy_note = "historical rows only (mirror writers removed); not canonical static truth"
+    _print_table(f"Legacy mirror tables — compatibility ({legacy_note})", legacy_rows)
 
     # --- Interpretation
     print()

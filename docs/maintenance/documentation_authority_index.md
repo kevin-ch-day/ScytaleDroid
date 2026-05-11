@@ -69,6 +69,9 @@ Notes:
   - [static_analysis_workflow_audit_v1.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/static_analysis_workflow_audit_v1.md) — pipeline / string / split / persistence audit routing (AUDIT note; ticket driver)
 - `maintenance`
   - [phase5c_task_list.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/phase5c_task_list.md)
+  - [legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — **file/function-level** map of legacy-five readers; Phase 2 retirement ordering; `metrics.run_id` ambiguity; **§8** follow-up (indirect `table_counts`, permission health `contributors`; CSV drift if it reappears) (planning; not runtime truth)
+  - [legacy_static_tables_consumer_audit.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_tables_consumer_audit.md) — **index**: legacy five scope, INSERT grep baseline, classification legend; per-table detail → dependency map §3
+  - [legacy_static_phase2a_policy_alignment_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_phase2a_policy_alignment_plan.md) — **completed** Phase 2A record + verification commands (stub; full narrative in git history)
 
 Notes:
 - use this cluster for static pipeline semantics, persistence flow, and data-shape questions
@@ -113,6 +116,7 @@ Notes:
   - [database/permission_split_execution_phases.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/permission_split_execution_phases.md)
 - `support`
   - [maintenance/phase5c_task_list.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/phase5c_task_list.md)
+  - [database/permission_intel_schema_drift_erebus_vs_scytaledroid.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/permission_intel_schema_drift_erebus_vs_scytaledroid.md) — Erebus vs Scytale PI drift; **§0** Permission Intel vs Erebus **catalog / DSN** mental model
 - `historical`
   - older split/cutover phase notes were consolidated into the active phase docs
 
@@ -204,6 +208,9 @@ Notes:
   - [maintenance/workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
 - `maintenance`
   - [maintenance/housekeeping.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/housekeeping.md)
+  - [maintenance/logs_operator_hygiene_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/logs_operator_hygiene_plan.md) — **P1/P2** logs layout vs code, naming collisions, optional future `logs health` spec (not P0)
+  - [maintenance/legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — legacy static five: readers, false positives, retirement order, §8 edge cases (planning)
+  - [maintenance/legacy_static_tables_consumer_audit.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_tables_consumer_audit.md) — legacy five index (pointers to map + playbook + Web deep dive)
 
 Notes:
 - this cluster is valuable for current routing and cleanup work

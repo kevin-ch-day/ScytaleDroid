@@ -211,6 +211,7 @@ Run **broader or full-suite** checks only after the relevant slices pass, or whe
 - Passing **`--help`** as the “URL” argument to `run_mariadb.sh` — use **`./run_mariadb.sh --help`** (first token) for launcher help.
 - Expecting the long **`[COPY] harvest`** line on-screen by default — it is **log-only** unless **`SCYTALEDROID_HARVEST_COPY_LINE=1`** is set (see `.env.example`).
 - **`OperationResult` partial** (`apk_harvest_summary_failed`): pull finished but `render_harvest_summary` blew up — artifacts/receipt paths in `context` are still valid; inspect **logs**.
+- Treating **`output/audit/db/latest.json`** **`tables.*.row_count`** as exact **`COUNT(*)`** by default — the DB menu schema snapshot uses **`information_schema.tables.TABLE_ROWS`** (fast InnoDB estimate) unless **`SCYTALEDROID_DB_SCHEMA_SNAPSHOT_EXACT_TABLE_COUNTS=1`** (see `.env.example`).
 
 ## Completion checklist (for agents and PR authors)
 

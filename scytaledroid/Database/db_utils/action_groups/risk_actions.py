@@ -1,4 +1,10 @@
-"""Risk, coverage, and governance actions for Database Tools."""
+"""Risk, coverage, and governance actions for Database Tools.
+
+``metrics`` joins in this module use ``metrics.run_id = static_analysis_runs.id``
+(canonical static run primary key), **not** legacy ``runs.run_id``. The
+``metrics`` table is still a legacy-named **bridge** surface for feature rows;
+retirement is tracked with other legacy-five work in the maintenance playbook.
+"""
 
 from __future__ import annotations
 

@@ -199,6 +199,10 @@ class StaticSessionReconcileSummary:
     missing_secondary_compat_mirror_count: int = 0
     bridge_only_runs: set[str] = field(default_factory=set)
     bridge_only_risk_scores: set[str] = field(default_factory=set)
+    # Distinct completed packages with rows in each legacy mirror table (union drives secondary_compat above).
+    legacy_metrics_mirror_packages: int = 0
+    legacy_buckets_mirror_packages: int = 0
+    legacy_contributors_mirror_packages: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -237,6 +241,9 @@ class StaticSessionReconcileSummary:
                     "compat_runs_packages": self.legacy_runs_packages,
                     "compat_risk_packages": self.legacy_risk_packages,
                     "secondary_compat_mirror_packages": self.secondary_compat_mirror_packages,
+                    "legacy_metrics_mirror_packages": self.legacy_metrics_mirror_packages,
+                    "legacy_buckets_mirror_packages": self.legacy_buckets_mirror_packages,
+                    "legacy_contributors_mirror_packages": self.legacy_contributors_mirror_packages,
                 },
             },
             "packages": {
@@ -486,6 +493,9 @@ def reconcile_static_session(session_label: str | None = None) -> StaticSessionR
         cache_stale=cache_stale,
         package_collations=package_collations,
         collation_risks=collation_risks,
+        legacy_metrics_mirror_packages=len(legacy_metrics_packages),
+        legacy_buckets_mirror_packages=len(legacy_buckets_packages),
+        legacy_contributors_mirror_packages=len(legacy_contributors_packages),
     )
 
 

@@ -31,7 +31,7 @@ from ..persistence.run_summary import (
     update_static_run_status,
 )
 from ..persistence.run_writers import export_dep_snapshot
-from ..views.view_renderers import render_app_result
+from ..views.renderers.summary_render import render_app_result
 from .analytics import (
     _build_permission_profile,
     _build_static_risk_row,

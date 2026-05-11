@@ -8,7 +8,7 @@ from pathlib import Path
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.System import output_prefs
 
-from ..views.view_renderers import build_dynamic_plan, write_dynamic_plan_json
+from ..views.renderers.dynamic_plan import build_dynamic_plan, write_dynamic_plan_json
 
 
 def build_dynamic_plan_artifact(

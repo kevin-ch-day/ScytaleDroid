@@ -413,7 +413,7 @@ Permission-intel vs core DB boundaries: `docs/maintenance/permission_intelligenc
 - persistence audit JSON
 - permission parity snapshots
 - verification digest and reconciliation output
-- logs under `logs/`
+- logs under `logs/` — operator hygiene / doc↔code parity: `docs/maintenance/logs_operator_hygiene_plan.md` (**P1/P2**, not architecture P0)
 
 ### Downstream consumers
 
@@ -434,6 +434,7 @@ Permission-intel vs core DB boundaries: `docs/maintenance/permission_intelligenc
   - inspect persistence audit artifact
   - verify DB digest and session health summary
   - read-only session artifact audit: `PYTHONPATH=. python scripts/static_analysis/run_artifact_map.py --session <session_stamp> [--include-harvest-receipt-linkage]` — semantics in `docs/maintenance/static_run_artifact_lifecycle.md`
+  - read-only **core DB** table/view inventory: `PYTHONPATH=. python scripts/db/static_schema_audit.py` — plan in `docs/maintenance/static_database_schema_audit_plan.md`; legacy five reader map in `docs/maintenance/legacy_static_reader_dependency_map.md` §3, index in `docs/maintenance/legacy_static_tables_consumer_audit.md`
 
 ### Common Codex risk
 

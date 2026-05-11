@@ -203,6 +203,53 @@ def table_counts(table_names: list[str]) -> dict[str, int | None]:
     return counts
 
 
+def approximate_table_row_counts() -> dict[str, int | None]:
+    """Return ``{table_name: row_estimate}`` using ``information_schema.TABLES``.
+
+    On MariaDB/MySQL, ``TABLE_ROWS`` is an **estimate** for InnoDB base tables
+    (exact after a recent ``ANALYZE TABLE``). This uses **one** catalog query
+    instead of issuing ``SELECT COUNT(*)`` once per table, which is expensive on
+    large schemas.
+
+    View rows often report ``NULL`` for ``TABLE_ROWS``; those are preserved as
+    ``None`` in the mapping.
+
+    Returns an empty dict when the engine is not MySQL/MariaDB or on any
+    failure (callers may fall back to :func:`table_counts`).
+    """
+
+    out: dict[str, int | None] = {}
+    try:
+        with _connected_engine(reuse_connection=False) as engine:
+            if getattr(engine, "_dialect", "sqlite") != "mysql":
+                return out
+            rows = engine.fetch_all(
+                """
+                SELECT TABLE_NAME, TABLE_ROWS, TABLE_TYPE
+                FROM information_schema.tables
+                WHERE TABLE_SCHEMA = DATABASE()
+                ORDER BY TABLE_NAME
+                """
+            )
+    except Exception as exc:  # pragma: no cover - relies on external MySQL
+        print(f"[DB_UTILS] approximate_table_row_counts failed: {exc}")
+        return out
+
+    for row in rows or []:
+        if not row or len(row) < 2:
+            continue
+        name = str(row[0])
+        raw_rows = row[1]
+        if raw_rows is None:
+            out[name] = None
+        else:
+            try:
+                out[name] = int(raw_rows)
+            except (TypeError, ValueError):
+                out[name] = None
+    return out
+
+
 def get_table_columns(table_name: str) -> list[str] | None:
     """Return column names for *table_name* or ``None`` if inspection fails."""
 
@@ -441,6 +488,7 @@ __all__ = [
     "check_required_tables",
     "list_tables",
     "table_counts",
+    "approximate_table_row_counts",
     "get_table_columns",
     "compare_columns",
     "build_table_snapshot",

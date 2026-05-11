@@ -158,7 +158,7 @@ Each detector owns a specific concern area and returns a `DetectorResult` meetin
 - **permissions:** Permission‑first analytics, DB‑aware protection mapping,
   capability grouping, and tunable risk scoring.
   - Analysis helpers:
-    - `modules/permissions/analysis/capability_signal_classifier.py` — LOC/CAM/MIC/… signals
+    - `modules/permissions/analysis/signals.py` — LOC/CAM/MIC/… capability grouping signals
     - `modules/permissions/analysis/risk_scoring_engine.py` — risk score (3 decimals) + grade (A–F)
   - Renderers:
     - `modules/permissions/permission_console_rendering.py::render_permission_postcard` — postcard (Risk bar, Score/Grade, High‑signal, Footprint table)

@@ -323,8 +323,8 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
 
     print()
     _print_heading("Legacy mirror (removed)", underline="-")
-    print("  Static analysis no longer writes runs/metrics/buckets/legacy findings.")
-    print("  Historical audit JSON may still list mirror counts from older pipeline versions.")
+    print("  Static analysis no longer INSERTs into legacy runs/metrics/buckets/legacy findings/contributors.")
+    print("  Reconcile-driven audit JSON lists per-table mirror package counts when DB reconciliation ran.")
 
     if reports:
         archive_n = _safe_int(reports.get("archive_json_paths"))

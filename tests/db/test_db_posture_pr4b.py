@@ -20,6 +20,24 @@ def test_db_schema_snapshot_when_disabled_does_not_connect(monkeypatch) -> None:
     assert "note" in snapshot
 
 
+def test_db_schema_snapshot_markdown_splits_legacy_presence() -> None:
+    md = db_schema_snapshot._render_markdown(
+        {
+            "timestamp_utc": "t",
+            "db_enabled": True,
+            "required_tables": {"schema_version": True},
+            "legacy_mirror_table_presence": {"runs": True, "findings": False},
+            "optional_columns": [],
+            "schema_version_history": [],
+            "tables": [],
+        }
+    )
+    assert "## required_tables" in md
+    assert "## legacy_mirror_table_presence" in md
+    assert "Informational only" in md
+    assert "`findings`" in md and "**missing**" in md
+
+
 def test_sqlite_db_url_rejected_outside_pytest(monkeypatch) -> None:
     # db_config forces SQLite defaults under pytest to avoid touching real DBs.
     # This test exercises the explicit DB_URL parsing path by calling the internal loader.
