@@ -83,7 +83,7 @@ def summarize_execution_signals_for_app(
     if errs > 0:
         drivers.append(f"detector_errors={errs}")
     if fails > 0:
-        drivers.append(f"detector_failures={fails}")
+        drivers.append(f"policy_failures={fails}")
     if warns > 0:
         drivers.append(f"detector_warnings={warns}")
     if parse_use > 0:
@@ -98,6 +98,7 @@ def summarize_execution_signals_for_app(
         "counts": {
             "detector_warnings": warns,
             "detector_failures": fails,
+            "policy_failures": fails,
             "detector_errors": errs,
             "parse_fallback_events_est": parse_use,
             "artifacts_discovered": disc,

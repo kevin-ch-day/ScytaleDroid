@@ -152,7 +152,14 @@ def run_post_summary_postprocessing(
                         extra={"applications": len(outcome.results or [])},
                     )
                 emit_postprocessing_step("Permission snapshot parity", run_ctx=run_ctx)
-                parity_counts = {"changed": 0, "skipped": 0}
+                print(
+                    status_messages.status(
+                        "Note: reused_saved_report counts apps where parity reused an existing on-disk "
+                        "static analysis report for permissions; it does not mean analysis was skipped.",
+                        level="info",
+                    )
+                )
+                parity_counts = {"changed": 0, "reused_saved_report": 0}
 
                 def _parity_progress(payload: Mapping[str, object]) -> None:
                     try:
@@ -166,7 +173,7 @@ def run_post_summary_postprocessing(
                     app_label = str(payload.get("app_label") or package_name or "")
                     report_source = str(payload.get("report_source") or "")
                     if report_source == "saved_report":
-                        parity_counts["skipped"] += 1
+                        parity_counts["reused_saved_report"] += 1
                     else:
                         parity_counts["changed"] += 1
                     small_cohort = total <= 15
@@ -179,7 +186,9 @@ def run_post_summary_postprocessing(
                                 (
                                     f"Parity: {index}/{total} app(s) | "
                                     f"changed={parity_counts['changed']} "
-                                    f"skipped={parity_counts['skipped']} | {app_label}"
+                                    f"reused_saved_report={parity_counts['reused_saved_report']} "
+                                    "errors=0 | "
+                                    f"{app_label}"
                                 ),
                                 level="info",
                             )
@@ -211,34 +220,36 @@ def run_post_summary_postprocessing(
                 )
                 refreshed_apps = None
                 snapshot_path = None
+                summary_bits: list[str] = []
+                audit_persist_failed = False
                 if isinstance(refresh_summary, dict):
                     refreshed_apps = refresh_summary.get("persisted_apps")
                     snapshot_path = refresh_summary.get("snapshot_path")
                     refreshed_processed = refresh_summary.get("processed_apps")
+                    audit_persist_failed = bool(refresh_summary.get("audit_persist_failed"))
                     if refreshed_processed is not None:
-                        summary_bits = [f"{refreshed_processed} app(s)"]
-                    else:
-                        summary_bits = []
-                else:
-                    summary_bits = []
+                        summary_bits.append(f"{refreshed_processed} app(s)")
                 if refreshed_apps is not None:
                     summary_bits.append(f"{refreshed_apps} apps")
                 if snapshot_path:
                     summary_bits.append(f"output={snapshot_path}")
-                summary_suffix = " | ".join(summary_bits) if summary_bits else "completed"
+                summary_suffix = " | ".join(summary_bits) if summary_bits else ""
+                checked = parity_counts["changed"] + parity_counts["reused_saved_report"]
+                err_fin = int(audit_persist_failed)
+                out_display = snapshot_path or "(not returned; see persistence audit/logs)"
+                print(status_messages.status("Permission snapshot parity complete:", level="info"))
                 print(
                     status_messages.status(
                         (
-                            "Permission snapshot parity complete: "
-                            f"checked={parity_counts['changed'] + parity_counts['skipped']} "
-                            f"changed={parity_counts['changed']} "
-                            f"skipped={parity_counts['skipped']} "
-                            f"errors=0"
-                            + (f" | {summary_suffix}" if summary_suffix else "")
+                            f"  checked={checked} changed={parity_counts['changed']} "
+                            f"reused_saved_report={parity_counts['reused_saved_report']} errors={err_fin}"
                         ),
                         level="info",
                     )
                 )
+                print(status_messages.status(f"  output={out_display}", level="info"))
+                if summary_suffix:
+                    print(status_messages.status(f"  detail: {summary_suffix}", level="info"))
                 if emit_phase_transition is not None:
                     emit_phase_transition(
                         phase="permission_snapshot_parity",
@@ -248,6 +259,9 @@ def run_post_summary_postprocessing(
                             "processed_apps": refresh_summary.get("processed_apps") if isinstance(refresh_summary, dict) else None,
                             "persisted_apps": refresh_summary.get("persisted_apps") if isinstance(refresh_summary, dict) else None,
                             "snapshot_path": snapshot_path,
+                            "parity_changed": parity_counts["changed"],
+                            "parity_reused_saved_report": parity_counts["reused_saved_report"],
+                            "parity_errors": err_fin,
                         },
                     )
             except Exception as exc:

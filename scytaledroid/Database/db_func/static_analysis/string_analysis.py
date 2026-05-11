@@ -611,10 +611,8 @@ def replace_samples_full(
                 category="db",
             )
             log.debug(
-                "String sample insert failed for summary_id=%s static_run_id=%s payload_keys=%s",
-                summary_id,
-                static_run_id,
-                list(samples.keys()),
+                f"String sample insert failed for summary_id={summary_id} "
+                f"static_run_id={static_run_id} payload_keys={list(samples.keys())!r}",
                 category="db",
             )
         except Exception:

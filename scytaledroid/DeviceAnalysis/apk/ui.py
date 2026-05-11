@@ -25,6 +25,41 @@ def is_harvest_simple_mode() -> bool:
     }
 
 
+def _describe_harvest_policy(policy: str, *, is_rooted: bool) -> str:
+    """Short operator-facing policy line (planner stats / path gates)."""
+
+    token = (policy or "").strip().lower()
+    if token in {"", "none"}:
+        return "root · no non-root path gate on this plan" if is_rooted else "paths per scope"
+    if "non_root" in token or token == "non_root_paths":
+        return "non-root paths (system/vendor APK paths not harvested)"
+    return policy
+
+
+def _harvest_plan_kv_lines(
+    *,
+    selection_label: str,
+    selected_count: int,
+    scheduled_packages: int,
+    blocked_policy: int,
+    blocked_scope: int,
+    scheduled_files: int,
+    policy: str,
+    is_rooted: bool,
+) -> list[str]:
+    w = 22
+    lines = [
+        f"{'Scope':<{w}} : {selection_label}",
+        f"{'Inventory scope':<{w}} : {selected_count} package(s)",
+        f"{'Eligible to pull':<{w}} : {scheduled_packages} package(s)",
+        f"{'Blocked by policy':<{w}} : {blocked_policy} package(s)",
+        f"{'Blocked by scope rules':<{w}} : {blocked_scope} package(s)",
+        f"{'Policy':<{w}} : {_describe_harvest_policy(policy, is_rooted=is_rooted)}",
+        f"{'Estimated artifacts':<{w}} : ~{scheduled_files} APK path(s) (not app count; splits included)",
+    ]
+    return lines
+
+
 def make_progress_callback(action_label: str) -> Callable[[dict[str, object]], bool]:
     last_reported = 0.0
 
@@ -115,7 +150,7 @@ def run_scope_refresh(serial: str, packages: Sequence[object]) -> bool:
     return True
 
 
-def render_plan_overview(resolution: PlanResolution) -> None:
+def render_plan_overview(resolution: PlanResolution, *, is_rooted: bool = False) -> None:
     selection = resolution.selection
     stats = resolution.stats
     print()
@@ -145,19 +180,25 @@ def render_plan_overview(resolution: PlanResolution) -> None:
     scheduled_files = int(stats["scheduled_files"])
     policy_blocked = int(stats["policy_blocked"])
     policy = str(stats["policy"])
-    eligible_policy = max(scheduled_packages + policy_blocked, 0)
     blocked_scope = max(blocked_packages - policy_blocked, 0)
     if is_harvest_simple_mode():
         return
 
     print("APK Harvest Plan")
     print("-" * 86)
-    print(
-        f"Scope={selection.label} | inventoried={candidate_count} | in_scope={selected_count} | "
-        f"with_paths={eligible_policy} | policy_eligible={scheduled_packages} | "
-        f"blocked_policy={policy_blocked} | blocked_scope={blocked_scope} | "
-        f"blocked_total={blocked_packages} | files≈{scheduled_files} | policy={policy}"
-    )
+    for line in _harvest_plan_kv_lines(
+        selection_label=str(selection.label),
+        selected_count=int(selected_count),
+        scheduled_packages=scheduled_packages,
+        blocked_policy=policy_blocked,
+        blocked_scope=blocked_scope,
+        scheduled_files=scheduled_files,
+        policy=policy,
+        is_rooted=is_rooted,
+    ):
+        print(line)
+    if int(candidate_count) != int(selected_count):
+        print(f"{'Inventory (device)':22} : {int(candidate_count)} package(s) (pre-scope / pre-delta context)")
     if delta_line:
         print(delta_line)
     focus = selection.metadata.get("sample_names") or []
@@ -433,6 +474,7 @@ def report_using_existing_snapshot() -> None:
 
 def report_harvest_started(
     *,
+    selection_label: str,
     candidate_count: int,
     selected_count: int,
     policy_eligible: int,
@@ -443,25 +485,36 @@ def report_harvest_started(
     policy: str,
     harvest_mode: str | None = None,
     delta_filter_applied: bool | None = None,
+    is_rooted: bool = False,
 ) -> None:
     _ = policy_eligible  # retained for API parity with planner stats; message uses scheduled/blocked counts
-    # "In plan" = rows in the harvest plan (evaluated). scheduled + policy_blocked + other skips = that total.
+    print()
+    print(status_messages.status("Harvest start", level="info"))
+    for line in _harvest_plan_kv_lines(
+        selection_label=str(selection_label).strip() or "(unknown scope)",
+        selected_count=int(selected_count),
+        scheduled_packages=int(scheduled),
+        blocked_policy=int(blocked_policy),
+        blocked_scope=int(blocked_scope),
+        scheduled_files=int(artifacts),
+        policy=str(policy),
+        is_rooted=is_rooted,
+    ):
+        print(status_messages.status(line, level="info"))
     if candidate_count != selected_count:
-        plan_frag = f"{selected_count}/{candidate_count}"
-    else:
-        plan_frag = str(selected_count)
-    head = f"Harvest start · {plan_frag} package(s) in plan · {scheduled} scheduled to pull"
-    if blocked_policy:
-        head += f" · {blocked_policy} blocked (non-root path policy)"
-    if blocked_scope:
-        head += f" · {blocked_scope} blocked (other)"
-    print(status_messages.status(head, level="info"))
-    tail = f"Est. ~{artifacts} artifact path(s) for scheduled packages · policy={policy}"
+        print(
+            status_messages.status(
+                f"{'Inventory (device)':22} : {int(candidate_count)} package(s) (pre-scope / pre-delta context)",
+                level="info",
+            )
+        )
+    tail_bits = []
     if harvest_mode:
-        tail += f" · harvest_mode={harvest_mode}"
+        tail_bits.append(f"harvest_mode={harvest_mode}")
     if delta_filter_applied is not None:
-        tail += f" · delta={'on' if delta_filter_applied else 'off'}"
-    print(status_messages.status(tail, level="info"))
+        tail_bits.append(f"delta={'on' if delta_filter_applied else 'off'}")
+    if tail_bits:
+        print(status_messages.status(" · ".join(tail_bits), level="info"))
 
 
 def pause_after_preview() -> None:

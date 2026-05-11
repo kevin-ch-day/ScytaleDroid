@@ -131,7 +131,7 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
                 "package_name": "com.foo.app",
                 "final_status": "partial",
                 "execution_signals": {
-                    "drivers": ["detector_warnings=3", "detector_failures=1"],
+                    "drivers": ["detector_warnings=3", "policy_failures=1"],
                     "counts": {},
                 },
             }
@@ -180,10 +180,13 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     body = "\n".join(lines)
     assert "Execution        : complete" in body
     assert "Detector result  :" in body
-    assert "warnings=3" in body and "finding_failures=1" in body
-    assert "execution_errors=0" in body
+    assert "detector_warnings=3" in body
+    assert "policy_failures=1" in body
+    assert "execution_errors=0 (none - not analyzer crashes)" in body
     assert "Overall health   : partial" in body
     assert "pipeline_token=warnings_and_policy_failures" in body
+    assert "Operator note    :" in body
+    assert "Overall health is 'partial'" in body
 
 
 def test_build_run_health_document_includes_string_summary_note() -> None:

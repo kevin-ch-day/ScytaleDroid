@@ -120,14 +120,17 @@ def format_compact_completion_line(
     else:
         high = int(app_summary.get("high_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
         med = int(app_summary.get("medium_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
+    err = int(app_summary.get("error_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
     parts = [
-        f"[{app_index}/{app_total}] {label}"
-        , f"{artifact_count} APK{'s' if artifact_count != 1 else ''}"
-        , _format_elapsed(elapsed_seconds or 0.0)
-        , f"warn={warn} fail={fail}"
+        f"[{app_index}/{app_total}] {label}",
+        f"{artifact_count} APK{'s' if artifact_count != 1 else ''}",
+        _format_elapsed(elapsed_seconds or 0.0),
+        f"detector_warnings={warn}",
+        f"policy_failures={fail}",
+        f"execution_errors={err}",
+        f"high={high}",
+        f"medium={med}",
     ]
-    if high or med:
-        parts.append(f"high={high} med={med}")
     return " | ".join(parts)
 
 
@@ -147,12 +150,13 @@ def format_recent_completion_line(
     if isinstance(severity_counts, Mapping):
         high = int(app_summary.get("high_count", severity_counts.get("P1", 0)) or 0)
         med = int(app_summary.get("medium_count", severity_counts.get("P2", 0)) or 0)
-    parts = [f"#{app_index}", label, _format_elapsed(elapsed_seconds or 0.0), f"w{warn}", f"f{fail}"]
-    if high:
-        parts.append(f"h{high}")
-    if med:
-        parts.append(f"m{med}")
-    return " ".join(parts)
+    else:
+        high = int(app_summary.get("high_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
+        med = int(app_summary.get("medium_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
+    return (
+        f"#{app_index} {label} {_format_elapsed(elapsed_seconds or 0.0)} "
+        f"warnings={warn} policy_failures={fail} high={high} medium={med}"
+    )
 
 
 def render_app_start(
@@ -263,10 +267,17 @@ def render_app_completion(
         l_count = int((summary.get("severity_counts") or {}).get("P3", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
         i_count = int((summary.get("severity_counts") or {}).get("P4", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
         note = int((summary.get("severity_counts") or {}).get("NOTE", 0) if isinstance(summary.get("severity_counts"), Mapping) else 0)
-        findings_text = (
-            f"Findings: C:{c_count} H:{h_count} M:{m_count} "
-            f"L:{l_count} I:{i_count} Note:{note}"
-        )
+        if params.verbose_output:
+            findings_text = (
+                "Findings (severity buckets): "
+                f"critical/P0={c_count} high/P1={h_count} medium/P2={m_count} "
+                f"low/P3={l_count} informational/P4={i_count} notes={note}"
+            )
+        else:
+            findings_text = (
+                f"Findings: C:{c_count} H:{h_count} M:{m_count} "
+                f"L:{l_count} I:{i_count} Note:{note}"
+            )
         detail_needed = bool(
             error_count > 0
             or fail_count >= 3
@@ -275,18 +286,29 @@ def render_app_completion(
             or artifact_count > 20
         )
 
+        split_notice_emitted = {"v": False}
+
         def _emit_large_artifact_split_notice() -> None:
-            if artifact_count < 15:
+            if artifact_count < 15 or split_notice_emitted["v"]:
                 return
+            split_notice_emitted["v"] = True
             friendly = (label or pkg or "app").strip()
+            print()
+            print(status_messages.status(f"Split-heavy app: {friendly} ({artifact_count} APK artifacts)", level="warn"))
             print(
                 status_messages.status(
-                    (
-                        f"Large split/artifact set detected: {friendly} has {artifact_count} APK artifacts. "
-                        "Detector pipeline runs per scanned APK row when splits are enabled; "
-                        "post-run analyse_string_payload summary is base-APK only."
-                    ),
-                    level="warn",
+                    "Impact: static detectors run across scanned split/base APK rows when split scan is ON.",
+                    level="info",
+                    show_icon=False,
+                    show_prefix=False,
+                )
+            )
+            print(
+                status_messages.status(
+                    "Impact: post-run string payload rollup (analyse_string_payload) is base-APK only for now.",
+                    level="info",
+                    show_icon=False,
+                    show_prefix=False,
                 )
             )
 
@@ -312,12 +334,16 @@ def render_app_completion(
                         show_prefix=False,
                     )
                 )
-            compact_parts = [artifact_label, elapsed, f"warn={warn_count}", f"fail={fail_count}"]
-            if error_count:
-                compact_parts.append(f"err={error_count}")
+            compact_parts = [
+                artifact_label,
+                elapsed,
+                f"detector_warnings={warn_count}",
+                f"policy_failures={fail_count}",
+                f"execution_errors={error_count}",
+            ]
             if h_count or m_count:
                 compact_parts.append(f"high={h_count}")
-                compact_parts.append(f"med={m_count}")
+                compact_parts.append(f"medium={m_count}")
             final_row = summary.get("final_app_status") if isinstance(summary.get("final_app_status"), str) else ""
             if final_row.strip():
                 compact_parts.append(f"status={final_row.strip()}")
@@ -352,9 +378,9 @@ def render_app_completion(
             print(
                 status_messages.status(
                     (
-                        f"Pipeline stages: ok={ok_count} warn={warn_count} "
-                        f"policy_fail={policy_fail_count} finding_fail={finding_fail_count} "
-                        f"error={error_count} skipped={skipped_count}"
+                        f"Pipeline stages: ok={ok_count} detector_warnings={warn_count} "
+                        f"policy_failures={fail_count} execution_errors={error_count} "
+                        f"detector_stages_skipped={skipped_count}"
                     ),
                     level="info",
                     show_icon=False,
@@ -447,7 +473,7 @@ def render_app_completion(
             if failing and (not compact_completion or params.verbose_output):
                 print(
                     status_messages.status(
-                        "Policy/finding fails: " + ", ".join(failing[:4]),
+                        "Policy/finding gate failures: " + ", ".join(failing[:4]),
                         level="warn",
                         show_icon=False,
                         show_prefix=False,
@@ -517,7 +543,7 @@ def render_app_completion(
                 continue
             det = entry.get("detector") or "unknown"
             reason = entry.get("reason") or "unspecified"
-            print(status_messages.status(f"Detector error: {det} — {reason}", level="warn"))
+            print(status_messages.status(f"Detector error: {det} - {reason}", level="warn"))
 
     severity_counts = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), Mapping) else {}
     if severity_counts:
@@ -525,7 +551,10 @@ def render_app_completion(
         p1 = int(severity_counts.get("P1", 0) or 0)
         p2 = int(severity_counts.get("P2", 0) or 0)
         note = int(severity_counts.get("NOTE", 0) or 0)
-        print(f"Findings: P0={p0} P1={p1} P2={p2} Note={note}")
+        print(
+            "Findings (severity buckets): "
+            f"critical/P0={p0} high/P1={p1} medium/P2={p2} notes={note}"
+        )
 
     slow_parts = _slow_detector_parts(summary.get("slowest_detectors"), limit=3)
     if slow_parts:

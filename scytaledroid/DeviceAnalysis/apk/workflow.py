@@ -490,7 +490,7 @@ def resolve_harvest_plan(
             verbose=False,
             guard_metadata=guard_metadata,
         )
-        ui.render_plan_overview(preview_resolution)
+        ui.render_plan_overview(preview_resolution, is_rooted=is_rooted)
 
         if noninteractive:
             pull_mode = "inventory"
@@ -598,6 +598,7 @@ def resolve_harvest_plan(
                     if not pkg.skip_reason
                 )
                 ui.report_harvest_started(
+                    selection_label=str(active_selection.label),
                     candidate_count=candidate_count,
                     selected_count=selected_count,
                     policy_eligible=eligible,
@@ -608,6 +609,7 @@ def resolve_harvest_plan(
                     policy=str(stats["policy"]),
                     harvest_mode=(str(active_selection.metadata.get("harvest_mode") or "").strip() or harvest_mode),
                     delta_filter_applied=bool(active_selection.metadata.get("delta_filter_applied")) if summary else None,
+                    is_rooted=is_rooted,
                 )
             return planner.build_plan(
                 active_selection,

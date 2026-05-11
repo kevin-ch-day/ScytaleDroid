@@ -1,16 +1,22 @@
 # CLI Persistence Layout
 
-The CLI persistence pipeline now lives under `scytaledroid/StaticAnalysis/cli/persistence/`.
+The CLI persistence pipeline lives under `scytaledroid/StaticAnalysis/cli/persistence/`.
 
-- `run_summary.py`: orchestrates the overall run persistence (`persist_run_summary`). It coordinates detector findings, metrics, static baselines, permission risk, and storage surface persistence.
-- `permission_risk.py`: writes the `static_permission_risk` snapshot using the metrics bundle. It supports metadata/baseline hash fallbacks and adds metrics entries.
-- `static_sections.py`: handles baseline (`static_findings*`) and string summary persistence plus storage surface module execution.
-- `utils.py`: shared helpers (`truncate`, `first_text`, `safe_int`, severity normalization).
-- Existing writers (`findings_writer.py`, `metrics_writer.py`, `static_findings_writer.py`, `strings_writer.py`) continue to focus on their specific tables.
+- **`run_summary.py`** — Orchestrates overall run persistence (`persist_run_summary`, `PersistenceOutcome`). Coordinates findings, metrics, baselines, permission matrix/risk, storage surface, handoff, and transaction retries.
+- **`stage_writers.py`** — Wires MASVS, storage surface, **`persist_permission_matrix`**, and **`persist_permission_risk`** using report `detector_metrics.permissions_profile`.
+- **`transaction_flow.py`** — Single DB transaction around staged writers; failure stage names feed run-health / audit.
+- **`permission_matrix.py` / `permission_risk.py`** — Canonical `static_permission_matrix` and `static_permission_risk_vnext` writers (shared dedupe rule).
+- **`static_sections.py`** — Baseline (`static_findings*`) and string summary persistence.
+- **`utils.py`** — Shared helpers (`truncate`, `first_text`, `safe_int`, severity normalization).
+- Other writers: `findings_writer.py`, `metrics_writer.py`, `static_findings_writer.py`, `strings_writer.py`, etc.
 
-`scytaledroid/StaticAnalysis/cli/db_persist.py` now simply re-exports `persist_run_summary` and `PersistenceOutcome` for backward compatibility.
+**Canonical imports (no separate re-export module):** application code should import from  
+`scytaledroid.StaticAnalysis.cli.persistence.run_summary` (e.g. `persist_run_summary`, `PersistenceOutcome`).  
+`scytaledroid.StaticAnalysis.cli.execution.results` already uses that path.
 
-Integration tests cover the pipeline end-to-end (`tests/integration/test_persist_run_summary.py`), and new unit tests under `tests/persistence/` target helper modules.
+**Related but separate:** `scytaledroid/StaticAnalysis/persistence/` holds report file I/O (`save_report`, `load_report`, …) and **`ingest`** helpers used by the CLI — not the DB transaction pipeline above.
+
+Integration tests: `tests/integration/test_persist_run_summary.py` (opt-in DB). Unit tests: `tests/persistence/`.
 
 ## Running persistence tests locally
 

@@ -67,3 +67,9 @@ def test_write_receipts_use_stable_paths(tmp_path: Path, monkeypatch) -> None:
     assert upload_path == tmp_path / "data" / "receipts" / "upload" / "upload-1.json"
     assert harvest_path.exists()
     assert upload_path.exists()
+
+
+def test_safe_filesystem_slug_sanitizes_like_receipt_paths() -> None:
+    assert artifact_store.safe_filesystem_slug("com.example.app") == "com.example.app"
+    assert artifact_store.safe_filesystem_slug("weird/name!") == "weird-name"
+    assert artifact_store.safe_filesystem_slug("  trim  ") == "trim"

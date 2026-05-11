@@ -1130,15 +1130,15 @@ def _print_progress_line(
         if recent_reason:
             skip_hint = f" (latest_skip={recent_reason})"
     pct = (100 * package_index) // package_total if package_total else 0
-    line = f"Progress {package_index}/{package_total} ({pct}%)"
+    line = f"Pulls: {package_index}/{package_total} ({pct}%)"
     if partial_count or err_count or drifted_count:
         line += (
-            f" · clean={clean_count} partial={partial_count} failed={err_count} drifted={drifted_count}"
+            f" · status=mixed (clean={clean_count} partial={partial_count} failed={err_count} drifted={drifted_count})"
         )
     else:
-        line += " · pulls OK"
+        line += " · status=OK"
     if blocked_total > 0:
-        line += f" · preflight {min(skipped_seen, blocked_total)}/{blocked_total}"
+        line += f" · blocked-preflight={min(skipped_seen, blocked_total)}/{blocked_total} reviewed"
     elif skipped_seen > 0:
         line += f" · skipped={skipped_seen}"
     line += skip_hint

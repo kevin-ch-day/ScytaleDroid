@@ -974,7 +974,7 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
         print(status_messages.status("No static_analysis_runs row found for session.", level="warn"))
         return
 
-    title = header or f"Verification digest — {resolved} (static_run_id={audit.static_run_id})"
+    title = header or f"Verification digest - {resolved} (static_run_id={audit.static_run_id})"
     print()
     menu_utils.print_section(title)
     if audit.is_group_scope:
@@ -998,7 +998,8 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
 
     canonical_spec = [
         ("static_analysis_runs", "static_analysis_runs"),
-        ("Findings (normalized)", "findings"),
+        ("Findings (canonical)", "static_analysis_findings"),
+        ("Findings (legacy)", "findings"),
         ("Static findings (baseline)", "static_findings"),
         ("static_findings_summary", "static_findings_summary"),
         ("static_string_summary", "static_string_summary"),
@@ -1013,22 +1014,107 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     menu_utils.print_section("Canonical persistence")
     table_utils.render_table(["Table", "Rows", "Status"], _rows_for(canonical_spec))
 
-    required = (
+    required_single = (
         "findings",
         "static_string_summary",
         "static_string_samples",
         "permission_audit_snapshots",
         "permission_audit_apps",
     )
+    required_group_session = (
+        "static_string_summary",
+        "static_string_samples",
+        "permission_audit_snapshots",
+        "permission_audit_apps",
+    )
     missing = []
-    for name in required:
-        if not audit.counts.get(name) or not audit.counts[name][0]:
-            missing.append(name)
     if audit.is_group_scope:
-        if missing:
-            status_line = f"DB verification: ERROR (missing {', '.join(sorted(missing))} for session={resolved})"
+        for name in required_group_session:
+            if not audit.counts.get(name) or not audit.counts[name][0]:
+                missing.append(name)
+    else:
+        for name in required_single:
+            if not audit.counts.get(name) or not audit.counts[name][0]:
+                missing.append(name)
+
+    if audit.is_group_scope and audit.group_verification:
+        gv = audit.group_verification
+        print()
+        menu_utils.print_section("Group session verification")
+        gv_lines = [
+            ("completed_runs", str(gv.completed_total)),
+            ("failed_terminal_runs", str(gv.failed_total)),
+            ("started_runs", str(gv.started_total)),
+            ("status", gv.overall),
+        ]
+        menu_utils.print_metrics(gv_lines)
+        for note in gv.notes:
+            print(status_messages.status(note, level="info"))
+        if gv.completed_missing_findings_summary:
+            preview = ", ".join(str(x) for x in gv.completed_missing_findings_summary[:8])
+            more = len(gv.completed_missing_findings_summary) - 8
+            tail = f" (+{more} more)" if more > 0 else ""
+            print(
+                status_messages.status(
+                    f"COMPLETED runs missing static_findings_summary: {preview}{tail}",
+                    level="error",
+                )
+            )
+        if gv.completed_missing_string_summary:
+            preview = ", ".join(str(x) for x in gv.completed_missing_string_summary[:8])
+            more = len(gv.completed_missing_string_summary) - 8
+            tail = f" (+{more} more)" if more > 0 else ""
+            print(
+                status_messages.status(
+                    f"COMPLETED runs missing static_string_summary: {preview}{tail}",
+                    level="error",
+                )
+            )
+        if gv.failed_nonterminal:
+            preview = ", ".join(str(x) for x in gv.failed_nonterminal[:8])
+            more = len(gv.failed_nonterminal) - 8
+            tail = f" (+{more} more)" if more > 0 else ""
+            print(
+                status_messages.status(
+                    f"FAILED/unknown runs without ended_at_utc (non-terminal): {preview}{tail}",
+                    level="error",
+                )
+            )
+
+    if audit.is_group_scope:
+        gv = audit.group_verification
+        if gv and gv.overall == "ERROR":
+            parts = []
+            if missing:
+                parts.append(f"missing aggregates: {', '.join(sorted(missing))}")
+            if gv.completed_missing_findings_summary:
+                parts.append(
+                    f"missing static_findings_summary for {len(gv.completed_missing_findings_summary)} COMPLETED run(s)"
+                )
+            if gv.completed_missing_string_summary:
+                parts.append(
+                    f"missing static_string_summary for {len(gv.completed_missing_string_summary)} COMPLETED run(s)"
+                )
+            if gv.failed_nonterminal:
+                parts.append(f"{len(gv.failed_nonterminal)} non-terminal FAILED run(s)")
+            detail = "; ".join(parts) if parts else "group verification failed"
+            status_line = f"DB verification: ERROR ({detail}; session={resolved})"
+        elif missing:
+            status_line = (
+                f"DB verification: ERROR (missing session aggregates: {', '.join(sorted(missing))} "
+                f"for session={resolved})"
+            )
+        elif gv and gv.overall == "PARTIAL":
+            status_line = (
+                "DB verification: PARTIAL (group session: COMPLETED apps checked for summary rows; "
+                f"failed/started runs excluded from those checks; session={resolved})"
+            )
+        elif not gv:
+            status_line = (
+                f"DB verification: SKIPPED (group session verification unavailable; session={resolved})"
+            )
         else:
-            status_line = "DB verification: OK (group scope; run_id not required)"
+            status_line = f"DB verification: OK (group session; session={resolved})"
     elif audit.run_id is None:
         status_line = "DB verification: SKIPPED (run_id missing)"
     elif missing:

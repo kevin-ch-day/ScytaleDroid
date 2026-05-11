@@ -70,7 +70,7 @@ def test_render_scope_overview(capsys):
     render_scope_overview(selection=selection, plan=plan, is_rooted=False, include_system_partitions=False)
     out = capsys.readouterr().out
     assert "APK Harvest · RUN START" in out
-    assert "Harvest Scope" in out
+    assert "Harvest plan" in out
     assert "Test Scope" in out
 
 

@@ -282,21 +282,26 @@ def render_plan_summary(
 ) -> None:
     """Present a concise overview of the planned harvest prior to execution."""
 
+    in_inventory = len(plan.packages)
     scheduled_packages = sum(1 for pkg in plan.packages if not pkg.skip_reason)
     blocked_packages = sum(1 for pkg in plan.packages if pkg.skip_reason)
+    policy_blocked = sum(1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root")
+    scope_blocked = max(blocked_packages - policy_blocked, 0)
     scheduled_files = sum(len(pkg.artifacts) for pkg in plan.packages if not pkg.skip_reason)
-    blocked_text = f" (blocked {blocked_packages})" if blocked_packages else ""
     card_lines = [
-        f"Scope    : {selection.label}",
-        f"Packages : {scheduled_packages}{blocked_text}",
-        f"Artifacts: ~{scheduled_files}",
+        f"Scope              : {selection.label}",
+        f"Inventory scope    : {in_inventory} packages",
+        f"Eligible to pull   : {scheduled_packages} packages",
+        f"Blocked by policy  : {policy_blocked} packages",
+        f"Blocked by scope   : {scope_blocked} packages",
+        f"Est. artifacts     : ~{scheduled_files} APK paths (splits separate)",
     ]
 
     if plan.policy_filtered:
         policy_details = _format_policy_details(plan.policy_filtered)
-        card_lines.append(f"Policy   : {policy_details}")
+        card_lines.append(f"Path policy detail : {policy_details}")
     if not include_system_partitions and not is_rooted:
-        card_lines.append("Policy   : System/vendor filtered (non-root)")
+        card_lines.append("Device policy      : non-root (system/vendor paths blocked)")
 
     if show_boxed:
         print()
@@ -1039,14 +1044,15 @@ def _operator_harvest_finish_line(report: HarvestRunReport, *, run_id: str | Non
     parts = [
         f"Harvest finished ({report.status})",
         f"scope={scope}",
-        f"pulled {m.executed_packages}/{m.total_packages} packages",
+        f"pulled {m.executed_packages} eligible package(s) under policy",
+        f"{m.total_packages} package row(s) in this harvest plan",
     ]
     if run_id:
         parts.append(f"run_id={run_id}")
     if m.blocked_packages:
-        parts.append(f"skipped {m.blocked_packages} (preflight/policy)")
+        parts.append(f"policy-blocked {m.blocked_packages} (skipped before pull)")
     if m.planned_artifacts:
-        parts.append(f"artifacts {m.artifacts_written}/{m.planned_artifacts} written")
+        parts.append(f"artifacts {m.artifacts_written}/{m.planned_artifacts} written (APK paths, splits count separately)")
     return " · ".join(parts)
 
 

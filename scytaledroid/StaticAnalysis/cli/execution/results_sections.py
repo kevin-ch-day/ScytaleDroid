@@ -448,7 +448,7 @@ def _print_post_run_diagnostics_header(outcome: RunOutcome, params: RunParameter
     gov = "paper-grade requested" if getattr(params, "paper_grade_requested", False) else "experimental path"
     overall = getattr(outcome, "run_aggregate_status", None) or "unknown"
 
-    print(f"Post-run diagnostics — {stamp or 'session'} | static_run_id={rid}")
+    print(f"Post-run diagnostics - {stamp or 'session'} | static_run_id={rid}")
     print(f"Session        : {stamp or 'n/a'}")
     print(f"Package        : {pkg_line}")
     print(f"Static run ID  : {rid}")
@@ -508,7 +508,7 @@ def render_db_verification_sql_section(
         return
 
     if static_run_id is None:
-        print(status_messages.status("No static_run_id on this outcome — check session linkage / run_health.json.", level="warn"))
+        print(status_messages.status("No static_run_id on this outcome - check session linkage / run_health.json.", level="warn"))
         return
 
     sid = int(static_run_id)
@@ -540,7 +540,7 @@ def render_static_handoff_diagnostic_section(*, static_run_id: int | None, packa
     pkg = str(package_name or "").strip() or "n/a"
     print(f"package_name    : {pkg}")
     if static_run_id is None:
-        print(status_messages.status("No static_run_id — cannot query v_static_handoff_v1.", level="warn"))
+        print(status_messages.status("No static_run_id - cannot query v_static_handoff_v1.", level="warn"))
         return
 
     sid = int(static_run_id)
@@ -560,7 +560,7 @@ def render_static_handoff_diagnostic_section(*, static_run_id: int | None, packa
     if not rows:
         print(
             "No rows in v_static_handoff_v1 for this static_run_id. "
-            "The view requires COMPLETED runs with handoff hashes populated — "
+            "The view requires COMPLETED runs with handoff hashes populated - "
             "check static_analysis_runs.status and static_handoff_json_path."
         )
         return

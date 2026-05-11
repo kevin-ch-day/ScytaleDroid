@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping
 
 from scytaledroid.Database.db_func.static_analysis import (
@@ -27,8 +28,7 @@ def _ensure_risk_scores_table() -> bool:
         _RISK_SCORES_TABLE_READY = bool(risk_scores_db.ensure_table())
     except Exception as exc:  # pragma: no cover - defensive
         log.debug(
-            "risk_scores table unavailable: %s",
-            exc,
+            f"risk_scores table unavailable: {exc}",
             category="static_analysis",
         )
         _RISK_SCORES_TABLE_READY = False
@@ -69,19 +69,22 @@ def _persist_permission_risk_vnext(
     run_id: int,
     risk_score_text: str,
     permission_profiles: Mapping[str, Mapping[str, object]],
-) -> None:
+) -> list[dict[str, str]]:
+    """Upsert vnext rows; return structured warnings (e.g. duplicate canonical permissions)."""
+
     if not _ensure_permission_vnext_table():
         raise RuntimeError("static_permission_risk_vnext table unavailable")
+    warnings: list[dict[str, str]] = []
     seen_permission_names: set[str] = set()
+    duplicate_examples: dict[str, list[str]] = defaultdict(list)
     for permission_name, profile in permission_profiles.items():
         perm = str(permission_name or "").strip()
         if not perm:
             continue
         canonical_perm = perm.lower()
         if canonical_perm in seen_permission_names:
-            raise RuntimeError(
-                f"PERSIST_VALIDATION_FAIL: duplicate permission_name after canonicalization ({canonical_perm})"
-            )
+            duplicate_examples[canonical_perm].append(perm)
+            continue
         seen_permission_names.add(canonical_perm)
         risk_class, rationale_code = _risk_class_and_reason(profile)
         permission_risk_db.upsert_vnext(
@@ -93,6 +96,27 @@ def _persist_permission_risk_vnext(
                 "rationale_code": rationale_code,
             }
         )
+    for canonical_perm in sorted(duplicate_examples):
+        examples = duplicate_examples[canonical_perm]
+        sample = examples[:5]
+        log.warning(
+            (
+                f"Skipped {len(examples)} duplicate permission entries after canonicalization "
+                f"({canonical_perm}); manifest/detector emitted multiple keys — keeping first profile "
+                f"(examples: {sample})"
+            ),
+            category="static_analysis",
+        )
+        warnings.append(
+            {
+                "warning_code": "duplicate_permission_skipped",
+                "canonical_permission_name": canonical_perm,
+                "duplicates_skipped_count": str(len(examples)),
+                "duplicate_examples": ",".join(examples[:8]),
+                "message": "kept first profile; skipped duplicates after canonicalization",
+            }
+        )
+    return warnings
 
 
 def persist_permission_risk(
@@ -106,7 +130,7 @@ def persist_permission_risk(
     metrics_bundle: object,
     baseline_payload: Mapping[str, object],
     permission_profiles: Mapping[str, Mapping[str, object]] | None = None,
-) -> None:
+) -> list[dict[str, str]]:
     if static_run_id is None:
         raise RuntimeError("permission_risk.write requires static_run_id")
     require_canonical_schema()
@@ -168,13 +192,14 @@ def persist_permission_risk(
 
     profiles = permission_profiles if isinstance(permission_profiles, Mapping) else {}
     try:
-        _persist_permission_risk_vnext(
+        vnext_warnings = _persist_permission_risk_vnext(
             run_id=int(static_run_id),
             risk_score_text=str(risk_score),
             permission_profiles=profiles,
         )
     except Exception as exc:
         raise RuntimeError(f"static_permission_risk_vnext upsert failed: {exc}") from exc
+    return vnext_warnings
 
 
 __all__ = ["persist_permission_risk"]

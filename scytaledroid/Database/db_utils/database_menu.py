@@ -10,6 +10,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .action_groups.status_actions import write_db_schema_snapshot_audit
+from .permission_intel_readiness import prompt_permission_intel_readiness
 from .menu_actions import (
     apply_canonical_schema_bootstrap,
     audit_static_risk_coverage,
@@ -110,7 +111,8 @@ def database_menu() -> None:
         "6": query_runner.run_query_menu,
         "7": run_inventory_determinism_comparator,
         "8": write_db_schema_snapshot_audit,
-        "9": _maintenance_menu,
+        "9": prompt_permission_intel_readiness,
+        "10": _maintenance_menu,
     }
 
     options: list[MenuOption] = [
@@ -122,7 +124,8 @@ def database_menu() -> None:
         MenuOption("6", "Curated SQL queries"),
         MenuOption("7", "Inventory determinism comparator"),
         MenuOption("8", "Schema snapshot audit"),
-        MenuOption("9", "Maintenance, repair, and migrations"),
+        MenuOption("9", "Permission Intel readiness (SCYTALEDROID_PERMISSION_INTEL_DB_*)"),
+        MenuOption("10", "Maintenance, repair, and migrations"),
     ]
 
     while True:

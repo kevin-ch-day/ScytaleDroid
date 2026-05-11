@@ -251,8 +251,14 @@ class AppRunResult:
     persistence_retry_count: int = 0
     persistence_db_disconnect: bool = False
     persistence_exception_class: str | None = None
+    persistence_exception_message: str | None = None
+    persistence_sql_errno: int | None = None
+    persistence_sqlstate: str | None = None
+    persistence_failing_table: str | None = None
+    persistence_writer: str | None = None
     persistence_transaction_state: str | None = None
     persistence_failure_stage: str | None = None
+    persistence_warnings: list[dict[str, str]] = field(default_factory=list)
     #: Last successful ``persist_run_summary`` finding counts for DB reconciliation / ``run_health``.
     persistence_runtime_findings: int | None = None
     persistence_persisted_findings: int | None = None

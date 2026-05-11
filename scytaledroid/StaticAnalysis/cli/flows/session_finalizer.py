@@ -12,6 +12,7 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils.package_utils import resolve_package_identity
+from scytaledroid.Database.db_utils.sql_exception_context import infer_failing_table
 from scytaledroid.StaticAnalysis.cli.core.models import RunOutcome
 from scytaledroid.Utils.DisplayUtils import status_messages
 
@@ -270,6 +271,23 @@ def emit_persistence_audit_artifact(
                     return int(match.group(1))
                 except Exception:
                     pass
+            match = re.search(r"\((\d{4,5})\)", line)
+            if match:
+                try:
+                    return int(match.group(1))
+                except Exception:
+                    pass
+        return None
+
+    def _parse_transaction_failure_message(lines: list[str]) -> str | None:
+        pat = re.compile(
+            r"Static persistence transaction failed for [^:]+:\s*(.+?)\s*\(retry_count=",
+            re.DOTALL,
+        )
+        for line in lines:
+            m = pat.search(line)
+            if m:
+                return m.group(1).strip()
         return None
 
     def _extract_transaction_state(lines: list[str]) -> str | None:
@@ -351,6 +369,22 @@ def emit_persistence_audit_artifact(
         exc_class = getattr(app, "persistence_exception_class", None)
         if not exc_class and db_disconnect:
             exc_class = "TransientDbError"
+        exc_message = getattr(app, "persistence_exception_message", None) or _parse_transaction_failure_message(
+            package_failures
+        )
+        sql_errno = getattr(app, "persistence_sql_errno", None)
+        if sql_errno is None:
+            sql_errno = _extract_errno(package_failures)
+        sqlstate = getattr(app, "persistence_sqlstate", None)
+        failing_table = getattr(app, "persistence_failing_table", None)
+        writer_fn = getattr(app, "persistence_writer", None) or getattr(
+            app, "persistence_failure_stage", None
+        )
+        if not failing_table and exc_message:
+            failing_table = infer_failing_table(
+                exception_message=str(exc_message),
+                failure_stage=str(writer_fn) if writer_fn else None,
+            )
         stage = getattr(app, "persistence_failure_stage", None) or _extract_stage(
             classification, package_failures
         )
@@ -373,16 +407,22 @@ def emit_persistence_audit_artifact(
             report_storage_mode = "missing"
         rows.append(
             {
+                "session_stamp": stamp,
                 "package_name": package,
                 "static_run_id": static_run_id,
                 "missing_static_run_id": package in missing_set or static_run_id is None,
                 "db_disconnect": db_disconnect,
                 "db_lock_wait": bool(db_lock_wait),
-                "errno": errno,
+                "errno": sql_errno if sql_errno is not None else errno,
+                "sqlstate": sqlstate,
                 "retry_count": retry_count,
                 "classification": classification,
                 "stage": stage,
                 "exception_class": exc_class,
+                "exception_message": exc_message,
+                "failing_table": failing_table,
+                "writer_function": writer_fn,
+                "scan_final_status": getattr(app, "final_status", None),
                 "transaction_state": tx_state,
                 "identity_error_reason": getattr(app, "identity_error_reason", None),
                 "persisted_artifacts": int(getattr(app, "persisted_artifacts", 0) or 0),
@@ -391,6 +431,7 @@ def emit_persistence_audit_artifact(
                 "artifact_reports": len(report_paths),
                 "base_report_path": base_report_path,
                 "report_storage_mode": report_storage_mode,
+                "persistence_warnings": list(getattr(app, "persistence_warnings", []) or []),
             }
         )
 

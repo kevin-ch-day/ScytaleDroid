@@ -28,24 +28,43 @@ def render_scope_overview(
 ) -> None:
     """Print a concise scope overview before execution."""
 
+    in_inventory = len(plan.packages)
     scheduled_packages = sum(1 for pkg in plan.packages if not pkg.skip_reason)
     blocked_packages = sum(1 for pkg in plan.packages if pkg.skip_reason)
+    policy_blocked = sum(1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root")
+    scope_blocked = max(blocked_packages - policy_blocked, 0)
     scheduled_files = sum(len(pkg.artifacts) for pkg in plan.packages if not pkg.skip_reason)
-    blocked_text = f" (blocked {blocked_packages})" if blocked_packages else ""
 
     formatter.print_header("APK Harvest · RUN START")
+    if include_system_partitions and is_rooted:
+        policy_desc = "root · system/vendor paths may be included for this scope"
+    elif is_rooted:
+        policy_desc = "root · plan follows scope path rules"
+    else:
+        policy_desc = "non-root paths (system/vendor APK paths not harvested)"
+
     print(
         summary_cards.format_summary_card(
-            "Harvest Scope",
+            "Harvest plan",
             [
                 summary_cards.summary_item("Scope", selection.label, value_style="accent"),
-                summary_cards.summary_item("Packages", f"{scheduled_packages}{blocked_text}", value_style="info"),
-                summary_cards.summary_item("Artifacts", f"~{scheduled_files}", value_style="accent"),
+                summary_cards.summary_item("Inventory scope", f"{in_inventory} packages", value_style="info"),
+                summary_cards.summary_item("Eligible to pull", f"{scheduled_packages} packages", value_style="success"),
+                summary_cards.summary_item("Blocked by policy", f"{policy_blocked} packages", value_style="warning"),
+                summary_cards.summary_item("Blocked by scope rules", f"{scope_blocked} packages", value_style="warning"),
+                summary_cards.summary_item("Policy", policy_desc, value_style="info"),
+                summary_cards.summary_item("Estimated artifacts", f"~{scheduled_files} APK paths", value_style="accent"),
             ],
-            footer="Harvest execution will use the current inventory-derived scope.",
+            footer="Artifact counts are APK paths (splits count separately), not app counts.",
         )
     )
     print()
+
+    if not is_rooted:
+        menu_utils.print_hint(
+            "Non-root: inventory may list packages that cannot be pulled; they stay inventoried but are blocked from harvest.",
+        )
+        print()
 
     if plan.policy_filtered:
         print("[RESULT] Filtered by policy:")

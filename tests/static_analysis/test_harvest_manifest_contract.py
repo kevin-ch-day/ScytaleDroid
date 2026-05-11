@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution import scan_flow
+from scytaledroid.StaticAnalysis.cli.execution.scan_formatters import _format_compact_progress_text
 from scytaledroid.StaticAnalysis.cli.persistence import run_summary
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 
@@ -347,7 +348,7 @@ def test_execute_scan_compact_mode_omits_copy_marker_by_default(monkeypatch, tmp
 
 
 def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
-    text = scan_flow._format_compact_progress_text(
+    text = _format_compact_progress_text(
         apps_completed=27,
         total_apps=120,
         artifacts_done=106,
@@ -358,20 +359,37 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
         current_app_label="Switch Access",
         current_package_name="com.google.android.accessibility.switchaccess",
         recent_completions=[
-            "#22 Foo 00:19 w3 f1 h1 m2",
-            "#23 Bar 00:12 w1 f0 m1",
-            "#24 Newsmax 00:32 w4 f0 m1",
+            "#22 Foo 00:19 warnings=3 policy_failures=1 high=1 medium=2",
+            "#23 Bar 00:12 warnings=1 policy_failures=0 high=0 medium=1",
+            "#24 Newsmax 00:32 warnings=4 policy_failures=0 high=0 medium=1",
         ],
+        last_report_seconds_ago=3,
+        last_report_package="com.example.pkg",
+        archive_reports_written=106,
+        eta_preliminary=False,
+        session_display="20260510-all-full",
+        profile_display="Full",
+        scope_display="all - All apps",
+        workers_display="8",
+        include_legend=False,
     )
 
-    assert "Working on: Switch Access" in text
+    assert "Run context" in text
+    assert "Session: 20260510-all-full" in text
+    assert "Workers: 8" in text
+    assert "App: Switch Access" in text
     assert "com.google.android.accessibility.switchaccess" in text
-    assert "(app 28/120)" in text  # ordinal = apps completed + active app
-    assert "Package:" not in text
-    assert "Progress: 106/459 artifacts" in text
-    assert "elapsed 24m 18s" in text
-    assert "ETA ~1h 12m" in text
-    assert "warn=312 fail=51 error=0" in text
-    assert "Recent:" in text
-    assert "#23 Bar 00:12 w1 f0 m1" in text
-    assert "#24 Newsmax 00:32 w4 f0 m1" in text
+    assert "App progress: 28 / 120 packages" in text  # ordinal = apps completed + active app
+    assert "Current package: com.google.android.accessibility.switchaccess" in text
+    assert "Artifact progress: 106 / 459 APKs" in text
+    assert "Elapsed: 24m 18s" in text
+    assert "ETA: ~1h 12m" in text
+    assert "Detector warnings: 312" in text
+    assert "Policy/finding failures: 51" in text
+    assert "Execution errors: 0 (none - no analyzer/pipeline exceptions)" in text
+    assert "Last saved report: com.example.pkg, 3s ago" in text
+    assert "Persisted JSON reports this session: 106/459" in text
+    assert "Legend:" not in text
+    assert "Recent apps" in text
+    assert "#23 Bar 00:12 warnings=1 policy_failures=0 high=0 medium=1" in text
+    assert "#24 Newsmax 00:32 warnings=4 policy_failures=0 high=0 medium=1" in text

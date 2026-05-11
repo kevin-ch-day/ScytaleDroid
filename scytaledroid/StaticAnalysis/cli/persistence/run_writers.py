@@ -623,6 +623,14 @@ def _maybe_set_canonical_static_run(
         raise
 
 
+def _abort_reason_for_terminal_status(*, canonical_status: str, abort_reason: str | None) -> str | None:
+    if canonical_status.upper() != "FAILED":
+        return abort_reason
+    if abort_reason is not None and str(abort_reason).strip():
+        return abort_reason
+    return "unspecified_failure"
+
+
 def update_static_run_status(
     *,
     static_run_id: int,
@@ -634,6 +642,10 @@ def update_static_run_status(
     now = _utc_now_dbstr()
     ended_at = _normalize_datetime_value(ended_at_utc) or now
     canonical_status = normalize_run_status(status)
+    persisted_abort = _abort_reason_for_terminal_status(
+        canonical_status=canonical_status,
+        abort_reason=abort_reason,
+    )
     try:
         run_sql_write(
             """
@@ -644,7 +656,7 @@ def update_static_run_status(
                 abort_signal=%s
             WHERE id=%s
             """,
-            (canonical_status, ended_at, abort_reason, abort_signal, static_run_id),
+            (canonical_status, ended_at, persisted_abort, abort_signal, static_run_id),
         )
     except Exception as exc:
         log.warning(
@@ -664,6 +676,10 @@ def finalize_open_static_runs(
     now = _utc_now_dbstr()
     normalized_ended_at = _normalize_datetime_value(ended_at_utc) or now
     canonical_status = normalize_run_status(status)
+    persisted_abort = _abort_reason_for_terminal_status(
+        canonical_status=canonical_status,
+        abort_reason=abort_reason,
+    )
 
     # DB wrapper does not expose rowcount; compute a deterministic delta.
     try:
@@ -676,7 +692,7 @@ def finalize_open_static_runs(
     except Exception:
         before = 0
 
-    params: list[object] = [canonical_status, normalized_ended_at, abort_reason, abort_signal]
+    params: list[object] = [canonical_status, normalized_ended_at, persisted_abort, abort_signal]
     sql = """
         UPDATE static_analysis_runs
         SET status=%s, ended_at_utc=%s, abort_reason=%s, abort_signal=%s

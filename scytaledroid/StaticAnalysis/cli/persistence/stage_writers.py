@@ -19,6 +19,7 @@ def persist_permission_and_storage_stage(
     persist_permission_matrix,
     persist_permission_risk,
     safe_int,
+    outcome: object | None = None,
 ) -> None:
     if run_id is not None and getattr(findings_context, "control_summary", None):
         try:
@@ -54,12 +55,8 @@ def persist_permission_and_storage_stage(
         apk_identifier = safe_int(metadata_map.get("apkId"))
     if apk_identifier is None:
         apk_identifier = safe_int(metadata_map.get("android_apk_id")) if metadata_map else None
-    if apk_identifier is None:
-        apk_identifier = (
-            int(static_run_id)
-            if static_run_id is not None
-            else (int(run_id) if run_id is not None else None)
-        )
+    # Do not substitute static_run_id / run_id for apk_id — they are different identities and
+    # confuse linkage audits (android_apk_repository joins). Leave NULL when metadata has no APK id.
 
     permission_profiles_map: Mapping[str, Mapping[str, object]] | None = None
     detector_metrics = getattr(stage_context.base_report, "detector_metrics", None)
@@ -80,17 +77,24 @@ def persist_permission_and_storage_stage(
     except Exception as exc:
         raise_db_error("permission_matrix.write", f"{exc.__class__.__name__}:{exc}")
     try:
-        persist_permission_risk(
-            run_id=int(run_id) if run_id is not None else None,
-            static_run_id=int(static_run_id) if static_run_id is not None else None,
-            report=stage_context.base_report,
-            package_name=stage_context.package_for_run,
-            session_stamp=stage_context.session_stamp,
-            scope_label=stage_context.scope_label,
-            metrics_bundle=stage_context.metrics_bundle,
-            baseline_payload=stage_context.baseline_payload,
-            permission_profiles=permission_profiles_map,
+        perm_warns = list(
+            persist_permission_risk(
+                run_id=int(run_id) if run_id is not None else None,
+                static_run_id=int(static_run_id) if static_run_id is not None else None,
+                report=stage_context.base_report,
+                package_name=stage_context.package_for_run,
+                session_stamp=stage_context.session_stamp,
+                scope_label=stage_context.scope_label,
+                metrics_bundle=stage_context.metrics_bundle,
+                baseline_payload=stage_context.baseline_payload,
+                permission_profiles=permission_profiles_map,
+            )
+            or []
         )
+        if outcome is not None and perm_warns:
+            bucket = getattr(outcome, "persistence_warnings", None)
+            if bucket is not None:
+                bucket.extend(perm_warns)
     except Exception as exc:
         raise_db_error("permission_risk.write", f"{exc.__class__.__name__}:{exc}")
 

@@ -169,6 +169,15 @@ def _safe_name(value: str) -> str:
     return cleaned or "item"
 
 
+def safe_filesystem_slug(value: str) -> str:
+    """Stable filesystem/receipt segment (harvest session dirs, receipt filenames, run labels).
+
+    Scripts and tools should call this instead of reimplementing sanitisation rules.
+    """
+
+    return _safe_name(value)
+
+
 __all__ = [
     "analysis_apk_root",
     "apk_store_root",
@@ -181,6 +190,7 @@ __all__ = [
     "harvest_receipt_path",
     "materialize_apk",
     "repo_relative_path",
+    "safe_filesystem_slug",
     "receipts_root",
     "store_root",
     "upload_inbox_root",

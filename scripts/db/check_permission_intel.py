@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Validate Permission Intel DB env + connectivity + governance snapshot rows.
 
-Uses the same resolution rules as ``scytaledroid.Database.db_core.permission_intel``:
+Expected catalog (typical): **android_permission_intel**. Uses the same resolution rules as
+``scytaledroid.Database.db_core.permission_intel``:
   - ``SCYTALEDROID_PERMISSION_INTEL_DB_URL`` (mysql/mariadb DSN), or
   - ``SCYTALEDROID_PERMISSION_INTEL_DB_NAME``, ``USER``, ``PASSWD``, ``HOST``, ``PORT``
 
@@ -36,7 +37,7 @@ def _main() -> int:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {e}\n")
         return 2
 
-    print("# Operational DB (SCYTALEDROID_DB_*) — optional quick ping")
+    print("# Operational DB (SCYTALEDROID_DB_*) - optional quick ping")
     try:
         if db_diag.check_connection():
             ver = db_diag.get_schema_version()

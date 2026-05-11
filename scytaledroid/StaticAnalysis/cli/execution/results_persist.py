@@ -86,7 +86,12 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
     level = "info"
     print(
         status_messages.status(
-            f"Session history (attempt rollup): Apps {total} | Completed {completed} | Failed {failed} | Started {running}",
+            (
+                f"Session history (DB rollup): static_analysis_runs rows matching this session="
+                f"{total} | COMPLETED={completed} | FAILED={failed} | "
+                f"still_STARTED_or_RUNNING={running} "
+                "(non-terminal status rows only; usually 0 after the cohort finishes cleanly)"
+            ),
             level=level,
         )
     )

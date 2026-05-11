@@ -12,6 +12,8 @@ ABORT_REASONS = {
     "adb_error",
     "user_abort",
     "config_error",
+    # Written when status is FAILED but upper layers passed no reason (improves DB forensics).
+    "unspecified_failure",
 }
 
 _ALIASES = {

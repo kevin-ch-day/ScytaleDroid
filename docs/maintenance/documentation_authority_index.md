@@ -63,6 +63,7 @@ Notes:
   - [persistence.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/persistence.md)
 - `support`
   - [static_analysis/static_analysis_data_model.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/static_analysis/static_analysis_data_model.md)
+  - [permission_intelligence_pipeline.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/permission_intelligence_pipeline.md) — core DB vs Permission Intel, matrix vs vnext, operator commands
   - [workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
   - [static_analysis_audit_runbook.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/static_analysis_audit_runbook.md)
   - [static_analysis_workflow_audit_v1.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/static_analysis_workflow_audit_v1.md) — pipeline / string / split / persistence audit routing (AUDIT note; ticket driver)
