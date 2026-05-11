@@ -72,6 +72,13 @@ Notes:
   - [legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — **file/function-level** map of legacy-five readers; Phase 2 retirement ordering; `metrics.run_id` ambiguity; **§8** follow-up (indirect `table_counts`, permission health `contributors`; CSV drift if it reappears) (planning; not runtime truth)
   - [legacy_static_tables_consumer_audit.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_tables_consumer_audit.md) — **index**: legacy five scope, INSERT grep baseline, classification legend; per-table detail → dependency map §3
   - [legacy_static_phase2a_policy_alignment_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_phase2a_policy_alignment_plan.md) — **completed** Phase 2A record + verification commands (stub; full narrative in git history)
+  - [session_identity_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/session_identity_contract.md) — `session_stamp` vs `session_label`, `static_run_id` vs legacy `runs.run_id`, canonical join rules, forbidden SQL patterns
+  - [session_static_health_hygiene_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/session_static_health_hygiene_plan.md) — align `session_static_health.py` with canonical-first / legacy-optional (planned; script not changed in slice)
+  - [next_pass_docs_policy_implementation_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/next_pass_docs_policy_implementation_plan.md) — checklist for this docs/policy batch and doc/code drift notes
+  - [evidence_run_manifest_spec.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/evidence_run_manifest_spec.md) — design-only run-root evidence manifest (no writer yet)
+  - [pi_erebus_operational_boundary.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/pi_erebus_operational_boundary.md) — PI vs Erebus ownership and pre-`obs_sample` blockers
+  - [fast_implementation_backlog_lanes.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/fast_implementation_backlog_lanes.md) — Lane 1/2/3 batching + standard verification commands
+  - [legacy_mirror_helper_wiring_report.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_mirror_helper_wiring_report.md) — where `legacy_static_mirror_diagnostics` may / may not replace local SQL
 
 Notes:
 - use this cluster for static pipeline semantics, persistence flow, and data-shape questions

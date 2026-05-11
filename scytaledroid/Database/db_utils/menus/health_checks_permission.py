@@ -97,15 +97,19 @@ def render_scoring_checks(
         print_status_line("warn", "grade distribution", detail="no snapshots available")
 
     optional_tables = {
-        "contributors": "wire risk contributors emit",
-        "risk_scores": "run-level canonical risk source",
-        "static_permission_risk_vnext": "run-aware permission-level risk rows",
+        "contributors": "legacy mirror / compat (optional; empty normal in canonical-only)",
+        "risk_scores": "session rollup summary on core DB (not static_schema_gate); empty can be normal",
+        "static_permission_risk_vnext": "canonical run-scoped permission risk detail (matrix sibling)",
     }
     for table, hint in optional_tables.items():
         count = scalar(f"SELECT COUNT(*) FROM {table}")
         if count:
             level = "ok"
-        elif table in {"risk_scores", "static_permission_risk_vnext"}:
+        elif table in {
+            "contributors",
+            "risk_scores",
+            "static_permission_risk_vnext",
+        }:
             level = "info"
         else:
             level = "warn"

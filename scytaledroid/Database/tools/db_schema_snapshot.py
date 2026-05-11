@@ -23,12 +23,13 @@ from typing import Any
 
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
+from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
+    LEGACY_MIRROR_TABLES_SNAPSHOT,
+)
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 # Catalog bootstrap: must exist on a migrated analyst DB.
 _SCHEMA_REQUIRED_TABLES: tuple[str, ...] = ("schema_version",)
-# Legacy static mirror tables (optional; missing is normal when only canonical writers run).
-_LEGACY_MIRROR_TABLES: tuple[str, ...] = ("runs", "metrics", "buckets", "findings", "contributors")
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,7 @@ def generate_snapshot() -> dict[str, Any]:
         present_tables = {str(r[0]) for r in table_rows if r and r[0]}
         snapshot["required_tables"] = {name: (name in present_tables) for name in required_tables}
         snapshot["legacy_mirror_table_presence"] = {
-            name: (name in present_tables) for name in _LEGACY_MIRROR_TABLES
+            name: (name in present_tables) for name in LEGACY_MIRROR_TABLES_SNAPSHOT
         }
 
         snapshot["tables"] = [

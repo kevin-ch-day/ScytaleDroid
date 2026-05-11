@@ -37,58 +37,58 @@ def _main() -> int:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {e}\n")
         return 2
 
-    print("# Operational DB (SCYTALEDROID_DB_*) - optional quick ping")
+    print("# OPTIONAL — Core analyst DB quick ping (SCYTALEDROID_DB_*)")
     try:
         if db_diag.check_connection():
             ver = db_diag.get_schema_version()
-            print(f"  main_db: OK (schema_version={ver or 'unknown'})")
+            print(f"  INFO main_db: OK (schema_version={ver or 'unknown'})")
         else:
-            print("  main_db: connection failed (check SCYTALEDROID_DB_*)")
+            print("  WARN main_db: connection failed (check SCYTALEDROID_DB_*)")
     except Exception as exc:
-        print(f"  main_db: ERROR {exc}")
+        print(f"  ERROR main_db: {exc}")
 
-    print("# Permission Intel configuration")
+    print("# PERMISSION INTEL — configuration (dictionary catalog; not static scan results)")
     url_set = bool((os.environ.get("SCYTALEDROID_PERMISSION_INTEL_DB_URL") or "").strip())
     name_set = bool((os.environ.get("SCYTALEDROID_PERMISSION_INTEL_DB_NAME") or "").strip())
     if url_set and name_set:
         print(
-            "  note: both SCYTALEDROID_PERMISSION_INTEL_DB_URL and …_NAME are set; "
+            "  INFO note: both SCYTALEDROID_PERMISSION_INTEL_DB_URL and …_NAME are set; "
             "db_config uses the URL when non-empty (piecemeal HOST/USER/PASSWD are ignored)."
         )
 
     if not intel_db.is_permission_intel_configured():
-        print("  permission_intel_db: NOT CONFIGURED")
+        print("  ERROR permission_intel_db: NOT CONFIGURED")
         print(
-            "  hint: set SCYTALEDROID_PERMISSION_INTEL_DB_URL "
+            "  INFO hint: set SCYTALEDROID_PERMISSION_INTEL_DB_URL "
             "or SCYTALEDROID_PERMISSION_INTEL_DB_NAME/USER/PASSWD/HOST/PORT"
         )
-        print("  paper_grade_ready: no (CLI cannot resolve intel DSN)")
+        print("  INFO paper_grade_ready: no (CLI cannot resolve intel DSN)")
         return 1
 
     try:
         summary = intel_db.describe_target()
-        print(f"  permission_intel_db: configured ({summary.get('source')})")
+        print(f"  INFO permission_intel_db: configured ({summary.get('source')})")
         print(
-            f"  target: host={summary.get('host')} port={summary.get('port')} "
+            f"  INFO target: host={summary.get('host')} port={summary.get('port')} "
             f"database={summary.get('database')} user={summary.get('user')}"
         )
     except Exception as exc:
-        print(f"  permission_intel_db: describe_target ERROR {exc}")
+        print(f"  ERROR permission_intel_db: describe_target failed: {exc}")
         return 1
 
-    print("# Managed tables (existence)")
+    print("# PERMISSION INTEL — managed tables (existence; CANONICAL for this catalog)")
     missing_tables: list[str] = []
     for table in intel_db.MANAGED_TABLES:
         try:
             ok = intel_db.intel_table_exists(table)
-            print(f"  {'OK' if ok else 'MISSING':7}  {table}")
+            print(f"  {'OK' if ok else 'ERROR MISSING':16}  {table}")
             if not ok:
                 missing_tables.append(table)
         except Exception as exc:
-            print(f"  ERROR   {table} ({exc})")
+            print(f"  ERROR            {table} ({exc})")
             missing_tables.append(table)
 
-    print("# Dictionary / governance row counts")
+    print("# PERMISSION INTEL — dictionary / governance row counts (DERIVED / operational)")
     try:
         aosp = intel_db.run_sql(
             f"SELECT COUNT(*) FROM {intel_db.AOSP_DICT_TABLE}",
@@ -116,29 +116,29 @@ def _main() -> int:
         )
         gov_snaps = intel_db.governance_snapshot_count()
         gov_rows = intel_db.governance_row_count()
-        print(f"  aosp_dict_rows: {int(aosp[0] or 0) if aosp else 0}")
-        print(f"  oem_dict_rows: {int(oem[0] or 0) if oem else 0}")
-        print(f"  unknown_dict_rows: {int(unk[0] or 0) if unk else 0}")
-        print(f"  queue_rows: {int(que[0] or 0) if que else 0}")
-        print(f"  governance_snapshots: {gov_snaps}")
-        print(f"  governance_snapshot_rows: {gov_rows}")
+        print(f"  INFO aosp_dict_rows: {int(aosp[0] or 0) if aosp else 0}")
+        print(f"  INFO oem_dict_rows: {int(oem[0] or 0) if oem else 0}")
+        print(f"  INFO unknown_dict_rows: {int(unk[0] or 0) if unk else 0}")
+        print(f"  INFO queue_rows: {int(que[0] or 0) if que else 0}")
+        print(f"  INFO governance_snapshots: {gov_snaps}")
+        print(f"  INFO governance_snapshot_rows: {gov_rows}")
     except Exception as exc:
-        print(f"  counts: ERROR {exc}")
-        print("  paper_grade_ready: no (query failed)")
+        print(f"  ERROR counts: {exc}")
+        print("  INFO paper_grade_ready: no (query failed)")
         return 1
 
     ok_gov, gov_detail = governance_ready()
-    print("# Paper-grade governance gate (same as static CLI)")
-    print(f"  governance_ready: {ok_gov} ({gov_detail or 'ok'})")
-    print(f"  paper_grade_ready: {'yes' if ok_gov else 'no'}")
+    print("# OPTIONAL — paper-grade governance gate (same signal as static CLI)")
+    print(f"  INFO governance_ready: {ok_gov} ({gov_detail or 'ok'})")
+    print(f"  INFO paper_grade_ready: {'yes' if ok_gov else 'no'}")
     if not ok_gov and gov_detail == "governance_missing":
         print(
-            "  note: load governance CSV into permission_governance_snapshots / "
+            "  INFO note: load governance CSV into permission_governance_snapshots / "
             "permission_governance_snapshot_rows (see Utils/System/governance_inputs.py)."
         )
 
     if missing_tables:
-        print(f"# WARNING: missing tables: {', '.join(missing_tables)}")
+        print(f"# ERROR: managed Permission Intel tables missing: {', '.join(missing_tables)}")
         return 1
 
     # Exit 2 when configured but paper-grade governance rows are absent (operator reminder).

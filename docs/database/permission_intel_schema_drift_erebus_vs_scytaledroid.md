@@ -13,6 +13,8 @@
 - **ScytaleDroid Permission Intel** targets the MariaDB catalog **`android_permission_intel`** (via `SCYTALEDROID_PERMISSION_INTEL_DB_*` / URL).
 - **Erebus** uses **`EREBUS_*`** (or project-specific) env vars and its **own** database catalog. The two are **not** interchangeable in documentation, env files, or mental models — wrong DSNs produce confusing “missing governance” failures.
 
+**Ownership memo (who does what):** see **`docs/maintenance/pi_erebus_operational_boundary.md`** — static results vs PI dictionary, queue/unknown writes Scytale may emit, and blockers before broader **`obs_sample`** writes.
+
 **Operational open points** (conventions, not blockers for this drift doc): whether both catalogs ever live on one MariaDB **server** as two database names; how governance CSV / snapshot imports land in `android_permission_intel` for paper-grade checks vs Erebus provenance (`source_system` on governance rows).
 
 ---

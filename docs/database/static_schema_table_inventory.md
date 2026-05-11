@@ -13,9 +13,13 @@ Operator reference: how persistent static-analysis objects are classified in thi
 | `static_session_rollups` | **canonical** | Per-session aggregates (completed/failed/etc.). |
 | `v_static_handoff_v1` | **view** | Operational read-model over static pipeline outputs. |
 | `apps`, `app_versions`, `schema_version`, … | **reference** | Shared catalogs; not static-only but required for SAR FKs. |
-| `runs` | **legacy candidate** | Older run registry (`package`, …); **not** mirrored from static ledger for new writes. Optional compat INSERTs may exist elsewhere (`Persistence/db_writer`) until removed. |
-| `metrics`, `buckets`, `findings` | **legacy candidate** | Legacy metric/finding buckets keyed by legacy `runs.id`; may still receive writes when compat `run_id` path is active—treat as **removable** once that path is dropped. |
+| `runs` | **legacy candidate** | Older run registry (`package`, …). Static analysis **no longer writes** this table; rows are historical or from older toolchains. Diagnostic readers and reset/admin paths may still touch it. |
+| `metrics`, `buckets`, `findings`, `contributors` | **legacy mirror / bridge** | Legacy mirror family keyed by legacy `runs` / compat paths; reconcile, diagnostics, optional dep views (`legacy_static_reader_dependency_map.md`, **`metrics.run_id` duality**). **Canonical static persistence** uses `static_analysis_*` only; empty or stale mirror tables are normal when only canonical writers are in use. |
 | `static_findings`, `static_findings_summary` | **legacy candidate** | Superseded by `static_analysis_findings` for canonical SAR persistence. |
-| `static_permission_risk_vnext`, `risk_scores`, `static_correlation_results`, … | **derived / bridge** | Analytics and correlation surfaces; classify per `docs/database/schema_domain_inventory.md`. |
+| `static_permission_risk_vnext` | **canonical** | Run-scoped permission risk detail (one deduped permission key per row); written with the matrix in the static transaction. |
+| `risk_scores` | **canonical (rollup)** | Session/package **rollup** persisted on the analyst core catalog for menus, audits, and reporting. **Not** part of `schema_gate.static_schema_gate()`; empty or missing rollups do **not** imply the static schema gate failed. May still appear in **DB schema snapshot** `required_tables.static` as a deployment completeness signal—see `docs/maintenance/next_pass_docs_policy_implementation_plan.md`. |
+| `static_correlation_results`, … | **derived / bridge** | Other analytics surfaces; classify per `docs/database/schema_domain_inventory.md`. |
 
-Preflight for **persisted full static runs** uses `schema_gate.static_schema_gate()` (**canonical tables + `v_static_handoff_v1` + required columns**)—see `scytaledroid/Database/db_utils/schema_gate.py`.
+Preflight for **persisted full static runs** uses `schema_gate.static_schema_gate()` (**canonical tables + `v_static_handoff_v1` + required columns**)—see `scytaledroid/Database/db_utils/schema_gate.py`. That gate is **orthogonal** to whether `risk_scores` rows exist for the session.
+
+**Session scope:** canonical child tables join through `static_analysis_runs.id`; do not filter child tables by nonexistent `session_label` / `session_stamp` columns—see `docs/maintenance/session_identity_contract.md`.

@@ -24,10 +24,20 @@ import argparse
 import json
 import re
 import sys
+from pathlib import Path
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_repo_root_s = str(_REPO_ROOT)
+if _repo_root_s not in sys.path:
+    sys.path.insert(0, _repo_root_s)
+
+from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
+    LEGACY_MIRROR_TABLES_SNAPSHOT,
+)
+
 # Base tables treated as legacy for dependency warnings + empty/stale heuristics.
-LEGACY_TABLE_NAMES = frozenset({"runs", "findings", "metrics", "buckets", "contributors", "correlations"})
+LEGACY_TABLE_NAMES = frozenset(LEGACY_MIRROR_TABLES_SNAPSHOT) | {"correlations"}
 _VIEW_BTICK = re.compile(r"`([^`]+)`")
 
 # Curated catalogue: name -> metadata (see static_database_schema_audit_plan.md)
@@ -622,6 +632,20 @@ def _build_report_rows(
     return rows_out, warnings, meta_out
 
 
+def _operator_vocab_for_classification(classification: str | None) -> str:
+    """Map internal catalogue token to operator-facing bucket (stdout only)."""
+    c = (classification or "").strip()
+    if c == "canonical_keep":
+        return "CANONICAL"
+    if c == "derived_keep":
+        return "DERIVED"
+    if c == "bridge_compat":
+        return "OPTIONAL (bridge compat)"
+    if c == "legacy_freeze" or c.startswith("legacy"):
+        return "LEGACY MIRROR"
+    return c or "—"
+
+
 def _print_human(
     rows: list[dict[str, Any]],
     warnings: list[str],
@@ -634,9 +658,14 @@ def _print_human(
     print(f"  view_dependency_engine (views): {audit_meta.get('view_dependency_engine')}")
     print(f"  schema_object_count: {audit_meta.get('schema_object_count')}")
     print()
+    print("Operator vocabulary (stdout hints; JSON ``classification`` unchanged):")
+    print("  CANONICAL | DERIVED | OPTIONAL | LEGACY MIRROR — see ``operator_bucket`` per object.")
+    print("  WARN / ERROR — see warnings block or status_tags / row_count_note.")
+    print()
     for row in rows:
         print(f"{row.get('name')} [{row.get('object_type')}]")
         print(f"  classification   : {row.get('classification')}")
+        print(f"  operator_bucket  : {_operator_vocab_for_classification(str(row.get('classification') or ''))}")
         tags = row.get("status_tags") or []
         if tags:
             print(f"  status_tags      : {', '.join(str(t) for t in tags)}")
@@ -659,16 +688,16 @@ def _print_human(
                 print("  view_dependencies: (none resolved)")
             leg = row.get("view_dependency_legacy_hits") or []
             if leg:
-                print(f"  legacy_via_view  : {', '.join(leg)}")
+                print(f"  legacy_via_view  : LEGACY MIRROR via view deps: {', '.join(leg)}")
         print(f"  writers_hint     : {row.get('writers_hint')}")
         print(f"  readers_hint     : {row.get('readers_hint')}")
         if row.get("notes"):
             print(f"  notes            : {row.get('notes')}")
         print()
     if warnings:
-        print("Warnings:")
+        print("WARN — catalogue / dependency review:")
         for w in warnings:
-            print(f"  - {w}")
+            print(f"  - WARN: {w}")
 
 
 def main() -> int:

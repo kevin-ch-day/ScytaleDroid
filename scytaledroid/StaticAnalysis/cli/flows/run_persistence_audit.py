@@ -119,7 +119,7 @@ def _apply_outcome_status_fallback(summary: dict[str, object], outcome: RunOutco
 def _build_persistence_audit_summary(
     *,
     outcome: RunOutcome,
-    session_stamp: str,
+    session_label: str,
 ) -> dict[str, object]:
     """Summarize canonical, bridge, and report coverage for persistence audits."""
     expected_packages = _expected_packages(outcome)
@@ -130,10 +130,10 @@ def _build_persistence_audit_summary(
         report_paths=report_paths,
     )
 
-    _apply_reconcile_summary(summary, session_stamp)
+    _apply_reconcile_summary(summary, session_label)
 
     if not _has_run_statuses(summary):
-        _apply_direct_summary_fallback(summary, session_stamp)
+        _apply_direct_summary_fallback(summary, session_label)
 
     if not _has_run_statuses(summary):
         _apply_outcome_status_fallback(summary, outcome)
@@ -156,7 +156,7 @@ def _emit_missing_run_ids_artifact(
         db_schema_version=db_diagnostics.get_schema_version() or "<unknown>",
         build_summary=lambda current_outcome, stamp: _build_persistence_audit_summary(
             outcome=current_outcome,
-            session_stamp=stamp,
+            session_label=stamp,
         ),
         lock_health_snapshot=db_diagnostics.get_lock_health_snapshot,
         output_dir="output",

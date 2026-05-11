@@ -88,15 +88,17 @@ def main() -> int:
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
         from scytaledroid.Database.db_scripts import view_deploy_remediation as vdr
-        from scytaledroid.Database.db_utils import diagnostics
+        from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
+            legacy_findings_count_via_static_run_id,
+            legacy_mirror_table_presence_audit,
+            legacy_runs_count_by_session_stamp,
+        )
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 1
 
     run_sql = core_q.run_sql
-    legacy_mirror_presence = diagnostics.check_required_tables(
-        ["runs", "metrics", "buckets", "findings"]
-    )
+    legacy_mirror_presence = legacy_mirror_table_presence_audit()
     lit = _sql_literal(session)
     bridge_on = False  # legacy Persistence/db_writer mirror removed
 
@@ -181,7 +183,7 @@ def main() -> int:
     )
     canonical_rows.append(("static_session_rollups", c, st))
 
-    _print_table("Canonical persistence", canonical_rows)
+    _print_table("CANONICAL — core static tables (session-scoped)", canonical_rows)
 
     # --- Canonical MASVS (requires v_static_masvs_* views deployed)
     mc_m, st_m = _safe_scalar(
@@ -193,7 +195,7 @@ def main() -> int:
         (session,),
     )
     print()
-    print("Canonical MASVS (matrix rows for this session)")
+    print("CANONICAL — MASVS matrix rows (view-backed)")
     print("-" * 56)
     label_mm = "v_static_masvs_matrix_v1 rows"
     c_mm = "—" if mc_m is None else str(mc_m)
@@ -218,7 +220,7 @@ def main() -> int:
         print(f"  v_static_masvs_session_summary_v1: unavailable ({exc.__class__.__name__})")
     else:
         print()
-        print("Canonical MASVS (session summary)")
+        print("CANONICAL — MASVS session summary (view-backed)")
         print("-" * 56)
         if masvs_summary and isinstance(masvs_summary, dict):
             key_w = 40
@@ -250,7 +252,7 @@ def main() -> int:
     )
     perm_rows.append(("permission_audit_apps", c, st))
 
-    _print_table("Permission audit / parity", perm_rows)
+    _print_table("CANONICAL / OPTIONAL — permission audit & parity", perm_rows)
 
     # --- Derived / Web read views (session or static_run_id scoped)
     view_rows: list[tuple[str, int | None, str]] = []
@@ -282,7 +284,7 @@ def main() -> int:
     )
     view_rows.append(("v_web_app_findings *", c, st))
 
-    _print_table("Derived / Web read views", view_rows)
+    _print_table("CANONICAL / DERIVED — Web read-model views", view_rows)
 
     # --- Static-to-dynamic handoff (strict filters inside view)
     handoff_rows: list[tuple[str, int | None, str]] = []
@@ -296,7 +298,7 @@ def main() -> int:
         (session,),
     )
     handoff_rows.append(("v_static_handoff_v1 **", c, st))
-    _print_table("Static-to-dynamic handoff", handoff_rows)
+    _print_table("CANONICAL — static-to-dynamic handoff", handoff_rows)
 
     # --- Compatibility bridge (legacy mirror)
     legacy_rows: list[tuple[str, int | None, str]] = []
@@ -307,11 +309,7 @@ def main() -> int:
         legacy_rows.append(("metrics (legacy mirror)", None, "SKIP (requires runs mirror)"))
         legacy_rows.append(("buckets (legacy mirror)", None, "SKIP (requires runs mirror)"))
     else:
-        lr, st = _safe_scalar(
-            run_sql,
-            "SELECT COUNT(*) FROM runs WHERE session_stamp=%s",
-            (session,),
-        )
+        lr, st = legacy_runs_count_by_session_stamp(run_sql, session)
         legacy_rows.append(("runs (legacy mirror)", lr, st))
 
         metrics_mirror_present = (not legacy_mirror_presence) or legacy_mirror_presence.get(
@@ -352,18 +350,11 @@ def main() -> int:
     if not findings_mirror_present:
         legacy_rows.append(("findings (legacy mirror)", None, "SKIP (table absent)"))
     else:
-        lf, st = _safe_scalar(
-            run_sql,
-            """
-            SELECT COUNT(*) FROM findings f
-            WHERE f.static_run_id IN (SELECT id FROM static_analysis_runs WHERE session_stamp=%s)
-            """,
-            (session,),
-        )
+        lf, st = legacy_findings_count_via_static_run_id(run_sql, session)
         legacy_rows.append(("findings (legacy mirror)", lf, st))
 
     legacy_note = "historical rows only (mirror writers removed); not canonical static truth"
-    _print_table(f"Legacy mirror tables — compatibility ({legacy_note})", legacy_rows)
+    _print_table(f"LEGACY MIRROR — compatibility ({legacy_note})", legacy_rows)
 
     # --- Interpretation
     print()

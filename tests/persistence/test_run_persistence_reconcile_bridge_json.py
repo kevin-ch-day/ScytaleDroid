@@ -38,7 +38,7 @@ def test_apply_reconcile_summary_maps_distinct_legacy_mirror_package_counts(monk
     )
     monkeypatch.setattr(
         "scytaledroid.StaticAnalysis.cli.flows.run_persistence_queries.reconcile_static_session",
-        lambda _session_stamp: fake_reconcile,
+        lambda _session_label: fake_reconcile,
     )
 
     outcome = SimpleNamespace(
