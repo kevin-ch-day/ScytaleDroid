@@ -50,8 +50,10 @@ def test_render_run_preflight_shows_session_strategy_and_retention(capsys):
     actions.render_run_preflight(params, selection, command, reset_mode="session")
     out = capsys.readouterr().out
     assert "Run preflight" in out
-    assert "Session label   : 20260428-all-full-rerun1" in out
-    assert "Packages        : 2" in out
-    assert "Artifacts est.  : 3" in out
-    assert "Mode            : Full | workers=auto" in out
-    assert "Reset           : session" in out
+    assert "Scope              : All harvested apps" in out
+    assert "Preset             : Full — 9 modules, 20 detector stages" in out
+    assert "Packages           : 2" in out
+    assert "APK files          : 3 (3 base + 0 split)" in out
+    assert "Session            : 20260428-all-full-rerun1" in out
+    assert "Split APK scan     : on" in out
+    assert "Reset              : session" in out

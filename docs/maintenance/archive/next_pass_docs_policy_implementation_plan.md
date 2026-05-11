@@ -1,5 +1,6 @@
 # Next pass — docs / policy implementation plan (controlled slice)
 
+**Archived:** moved from `docs/maintenance/next_pass_docs_policy_implementation_plan.md` (documentation Wave W1).  
 **Date:** 2026-05-09  
 **Scope:** documentation and policy alignment only — **no** application logic, schema, Web repo, `metrics` migration, `risk_actions`, `views_bridge`, or reset changes in this slice.
 
@@ -25,7 +26,7 @@
 | `docs/maintenance/session_static_health_hygiene_plan.md` | **Create** | Docs-only |
 | `docs/maintenance/evidence_run_manifest_spec.md` | **Create** | Docs-only |
 | `docs/maintenance/pi_erebus_operational_boundary.md` | **Create** | Docs-only |
-| `docs/maintenance/next_pass_docs_policy_implementation_plan.md` | **Create** | Docs-only |
+| `docs/maintenance/archive/next_pass_docs_policy_implementation_plan.md` | **Archive** (this file) | Docs-only |
 | `docs/maintenance/documentation_authority_index.md` | **Update** (index entries) | Docs-only |
 | `docs/database/static_schema_table_inventory.md` | **Update** (risk surfaces) | Docs-only |
 | `docs/persistence.md` | **Update** (risk rollup paragraph) | Docs-only |

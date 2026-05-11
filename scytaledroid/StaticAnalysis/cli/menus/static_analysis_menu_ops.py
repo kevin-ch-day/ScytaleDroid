@@ -202,7 +202,7 @@ def choose_run_profile() -> Command | None:
     print("1) Full analysis")
     print("2) Fast analysis")
     print("3) Persistence test")
-    print("4) Advanced profiles")
+    print("4) Custom detector profile")
     print("0) Back")
     choice = prompt_utils.get_choice(["1", "2", "3", "4", "0"], default="1", casefold=True)
     if choice == "0":
@@ -228,7 +228,7 @@ def choose_run_profile() -> Command | None:
         return persisted
 
     print()
-    menu_utils.print_section("Advanced Profiles")
+    menu_utils.print_section("Custom detector profile")
     print("1) Metadata smoke")
     print("2) Permission audit")
     print("3) Strings and secrets")

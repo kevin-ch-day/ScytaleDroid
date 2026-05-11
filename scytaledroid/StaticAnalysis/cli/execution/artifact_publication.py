@@ -96,7 +96,12 @@ def publish_persisted_artifacts(
                 print(status_messages.status(warning, level="warn"))
             if first_banner:
                 # Downgrade notice — do not treat as persistence failure (core DB/handoff succeeded).
-                print(status_messages.status("Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)", level="warn"))
+                print(
+                    status_messages.status(
+                        "Run grade: EXPERIMENTAL (paper-grade governance not ready)",
+                        level="warn",
+                    )
+                )
                 print(
                     status_messages.status(
                         "Core persistence still applies; paper-grade extras need permission-intel "

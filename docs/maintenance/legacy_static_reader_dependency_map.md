@@ -57,7 +57,53 @@ rg 'INSERT INTO (runs|findings|metrics|buckets|contributors)\b' scytaledroid --g
 
 ## 2.1 Shared diagnostic helpers (bounded)
 
-- **`scytaledroid/Database/db_utils/legacy_static_mirror_diagnostics.py`** — read-only presence + legacy ``findings`` / ``runs`` count helpers used by ``scripts/db/audit_static_session.py`` and ``scripts/db/session_static_health.py``. **Not** canonical truth; do not call from writers. Call-site guardrails: ``legacy_mirror_helper_wiring_report.md``.
+- **`scytaledroid/Database/db_utils/legacy_static_mirror_diagnostics.py`** — read-only presence + legacy ``findings`` / ``runs`` count helpers used by ``scripts/db/audit_static_session.py`` and ``scripts/db/session_static_health.py``. **Not** canonical truth; do not call from writers. **Call-site guardrails:** see **§2.1.1** (merged from the former `legacy_mirror_helper_wiring_report.md`, documentation Wave W1).
+
+### 2.1.1 Legacy mirror helper wiring (merged report)
+
+*Source: former `docs/maintenance/legacy_mirror_helper_wiring_report.md` (2026-05-09). Lane 2 planning — which call sites can share helpers **without** changing semantics. **Do not** use for `metrics.run_id` ambiguity zones without per-query review.*
+
+#### Helpers today
+
+| Helper | SQL / role |
+| --- | --- |
+| `legacy_mirror_table_presence_audit()` | `runs`, `metrics`, `buckets`, `findings` presence |
+| `legacy_mirror_runs_findings_presence()` | `runs` + `findings` presence |
+| `legacy_runs_count_by_session_stamp()` | `SELECT COUNT(*) FROM runs WHERE session_stamp=%s` |
+| `legacy_findings_count_via_runs_session_stamp()` | Legacy `findings` ⋈ `runs` on `session_stamp` |
+| `legacy_findings_count_via_static_run_id()` | Legacy `findings.static_run_id` ∈ SAR ids for `session_stamp` |
+
+#### Wired in this repo
+
+- `scripts/db/audit_static_session.py` — presence + all three count shapes where applicable (`runs` row uses `legacy_runs_count_by_session_stamp`).
+- `scripts/db/session_static_health.py` — runs/findings presence + runs-join findings count.
+
+#### `scripts/db/audit_static_session.py` — metrics / buckets
+
+**Stay local:** joined queries `metrics` ⋈ `runs`, `buckets` ⋈ `runs` differ from helper SQL; no shared helper until a parameterized `legacy_mirror_count_via_runs(table, ...)` is designed and tested.
+
+#### `scytaledroid/StaticAnalysis/cli/execution/db_verification.py`
+
+**Stay local:**
+
+- Legacy totals use `_legacy_mirror_catalog_total` + `SELECT COUNT(*) FROM \`table\`` (full catalog), **not** session-scoped mirror counts.
+- Session-scoped legacy row counts use `_count_by_run("findings"|"metrics"|…)` with **dynamic** table/column choice (`static_run_id` vs legacy `run_id`) — different semantics from both findings helpers.
+- **Do not** route `metrics` through new helpers without classifying **`metrics.run_id`** space per **this doc §6**.
+
+#### `scytaledroid/Database/db_utils/menus/query_runner.py`
+
+**Stay local (for now):**
+
+- `_session_downstream_counts` uses `_run_read_only(...)` with a different call signature than `core_q.run_sql`; SQL for `runs` matches **`legacy_runs_count_by_session_stamp`** text but wiring would need a thin adapter (`lambda sql, params, **_: _run_read_only(sql, params, fetch="one")`) — **defer** to avoid coupling scripts helpers to menu DB session layer in the same batch.
+- Digest SQL for legacy **`findings`** (if any) uses **session-scoped keys** tied to digest contract — compare line-by-line before deduping.
+
+#### Safe future additions (bounded)
+
+- `legacy_metrics_count_via_runs_session_stamp` **only** if the SQL is **identical** to audit’s metrics block and call sites agree on **`runs.run_id`** join semantics (not `metrics.run_id` = SAR id paths).
+
+#### Related (planning)
+
+- [fast_implementation_backlog_lanes.md](fast_implementation_backlog_lanes.md) — Lane 2 batch notes.
 
 ---
 
@@ -335,7 +381,7 @@ Second-pass checks against greps, `static_database_schema_audit_plan.md`, `legac
 - [legacy_static_phase2a_policy_alignment_plan.md](legacy_static_phase2a_policy_alignment_plan.md) — **completed** policy record + verification commands (stub).
 - [legacy_static_tables_consumer_audit.md](legacy_static_tables_consumer_audit.md) — **index page** (baseline grep + pointers); per-table matrices live in **this doc §3**.
 - [static_database_schema_audit_plan.md](static_database_schema_audit_plan.md) — schema inventory semantics.
-- [legacy_static_table_compatibility_reduction_plan.md](legacy_static_table_compatibility_reduction_plan.md) — relabel vs migrate buckets.
+- [legacy_static_deprecation_playbook.md](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix) — relabel vs migrate buckets (**Appendix A**, merged from the former reduction plan doc).
 
 **Re-verify command (legacy SQL in Python):**
 

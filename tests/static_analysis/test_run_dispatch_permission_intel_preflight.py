@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
 
@@ -93,8 +94,8 @@ def test_static_preflight_runs_when_canonical_grade_off(
     )
     out = capsys.readouterr().out
     assert "Static run preflight" in out
-    assert "Core execution" in out
-    assert "Research grade" in out
+    assert "Core readiness" in out
+    assert "Research readiness" in out
     assert "Run grade: EXPERIMENTAL" in out
     assert "SCYTALEDROID_CANONICAL_GRADE=0" in out
     assert "DB persistence: ON" in out
@@ -157,9 +158,9 @@ def test_preflight_warns_when_intel_not_configured(
         base_dir=Path("."),
     )
     out = capsys.readouterr().out
-    assert "Permission Intel: MISSING" in out
+    assert "Permission Intel: not configured" in out
     assert "Run grade: EXPERIMENTAL" in out
-    assert "Impact: Core scan and DB persistence can continue." in out
+    assert "Paper-grade / governance-complete evidence requires Permission Intel readiness." in out
     assert "SCYTALEDROID_PERMISSION_INTEL_DB_" in out
 
 
@@ -185,7 +186,7 @@ def test_preflight_ok_when_governance_ready(
     out = capsys.readouterr().out
     assert "Permission Intel: OK" in out
     assert "Run grade: PAPER-GRADE READY" in out
-    assert "Blocking: nothing here" in out
+    assert "Core scan: allowed" in out
 
 
 def test_preflight_governance_missing_message(
@@ -208,7 +209,7 @@ def test_preflight_governance_missing_message(
         base_dir=Path("."),
     )
     out = capsys.readouterr().out
-    assert "governance_missing" in out
+    assert "snapshots not loaded" in out
 
 
 def test_preflight_warns_other_governance_detail(
@@ -258,5 +259,28 @@ def test_preflight_handles_governance_exception(
         base_dir=Path("."),
     )
     out = capsys.readouterr().out
-    assert "query_failed" in out
+    assert "query failed" in out.lower()
     assert "boom" in out
+
+
+def test_preflight_run_context_includes_package_and_apk_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _preflight_no_primary_db: None,
+) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.permission_intel.is_permission_intel_configured",
+        lambda: False,
+    )
+    group = SimpleNamespace(artifacts=("base.apk", "split.apk"))
+    selection = ScopeSelection("all", "All harvested apps", (group,))
+    run_dispatch._emit_static_run_preflight_summary(
+        _base_params(scope="all", scope_label="All harvested apps"),
+        frozen_ctx=_ctx(),
+        base_dir=Path("."),
+        selection=selection,
+    )
+    out = capsys.readouterr().out
+    assert "Run context" in out
+    assert "Packages in this run: 1" in out
+    assert "APK files in this run: 2" in out

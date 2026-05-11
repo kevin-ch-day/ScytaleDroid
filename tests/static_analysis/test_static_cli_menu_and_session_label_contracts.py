@@ -1,7 +1,75 @@
 from __future__ import annotations
 
+from scytaledroid.StaticAnalysis.cli.commands import COMMANDS, get_command, iter_commands
+from scytaledroid.StaticAnalysis.cli.commands.models import SelectionMode
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.menus import actions
+from scytaledroid.StaticAnalysis.core import repository
+
+
+# =============================================================================
+# Former tests/static_analysis/test_command_registry.py
+# =============================================================================
+
+
+def test_command_registry_contains_only_scan_commands_with_unique_ids():
+    ids = [cmd.id for cmd in COMMANDS]
+
+    assert len(ids) == len(set(ids))
+    assert {cmd.kind for cmd in COMMANDS} == {"scan", "readonly"}
+
+
+def test_static_menu_command_layout_reflects_pruned_contract():
+    commands = tuple(iter_commands("scan"))
+    by_id = {cmd.id: cmd for cmd in commands}
+
+    assert set(by_id) == {"1", "2", "3", "4"}
+    assert by_id["4"].section == "history"
+    assert by_id["4"].selection_mode is SelectionMode.DIFF_LAST
+    drilldown = get_command("D")
+    assert drilldown is not None
+    assert drilldown.kind == "readonly"
+    assert drilldown.section == "tools"
+    assert get_command("5") is None
+    assert get_command("6") is None
+
+
+# =============================================================================
+# Former tests/static_analysis/test_run_controls_prompt.py
+# =============================================================================
+
+
+def test_ask_run_controls_supports_advanced_options(monkeypatch) -> None:
+    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *_a, **_k: "2")
+
+    assert actions.ask_run_controls() == "advanced"
+
+
+def test_ask_run_controls_defaults_to_run(monkeypatch) -> None:
+    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *_a, **_k: "1")
+
+    assert actions.ask_run_controls() == "run"
+
+
+# =============================================================================
+# Former tests/static_analysis/test_profile_label_normalization.py
+# =============================================================================
+
+
+def test_normalise_profile_label_strips_legacy_paper_suffix() -> None:
+    assert (
+        repository._normalise_profile_label("Research Dataset Alpha (Paper #12)")
+        == "Research Dataset Alpha"
+    )
+
+
+def test_normalise_profile_label_keeps_non_legacy_label() -> None:
+    assert repository._normalise_profile_label("Messaging") == "Messaging"
+
+
+# =============================================================================
+# Former tests/static_analysis/test_session_label_suggestions.py
+# =============================================================================
 
 
 def test_suggest_session_label_for_profile_scope():
@@ -128,3 +196,18 @@ def test_prompt_session_label_defaults_to_append_for_smoke_batch(monkeypatch, tm
     assert seen["strategy_default"] == "2"
     assert updated.canonical_action == "append"
     assert updated.session_stamp == "20260428-all-smoke10-full-11"
+
+
+# =============================================================================
+# Former tests/static_analysis/test_strict_selection_determinism.py
+# =============================================================================
+
+
+def test_strict_disables_multi_group_latest_selection(monkeypatch):
+    # Even if an operator sets the env var, strict/paper mode must force deterministic selection.
+    monkeypatch.setenv("SCYTALEDROID_STATIC_ALLOW_MULTI_GROUPS", "1")
+    monkeypatch.setenv("SCYTALEDROID_PAPER_STRICT", "1")
+
+    from scytaledroid.StaticAnalysis.cli.flows import selection as sel
+
+    assert sel._allow_multiple_latest() is False

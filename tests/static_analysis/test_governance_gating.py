@@ -148,7 +148,7 @@ def test_governance_missing_blocks_publish(monkeypatch, tmp_path, capsys):
     results.render_run_results(outcome, params)
 
     out = capsys.readouterr().out
-    assert "Run grade: EXPERIMENTAL (MISSING_GOVERNANCE)" in out
+    assert "Run grade: EXPERIMENTAL (paper-grade governance not ready)" in out
     assert manifest_calls == []
 
 

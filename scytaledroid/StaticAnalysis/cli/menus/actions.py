@@ -17,10 +17,12 @@ try:  # optional DB access (offline mode)
 except Exception:  # pragma: no cover - DB optional
     core_q = None
 
-from ..flows.profile_prior_session import format_audit_session_command
+from ...core.detector_runner import PIPELINE_STAGES
 from ...core.repository import load_display_name_map
+from ..core.analysis_profiles import run_modules_for_profile
 from ..commands.models import Command
 from ..core.models import RunParameters
+from ..flows.profile_prior_session import format_audit_session_command
 
 _LARGE_SPLIT_WARN_MIN_APK = 20
 _RUN_SETUP_LABEL_W = 18
@@ -28,6 +30,22 @@ _RUN_SETUP_LABEL_W = 18
 
 def _run_setup_kv(label: str, value: str) -> None:
     print(f"{label:<{_RUN_SETUP_LABEL_W}} : {value}")
+
+
+def _compact_preset_summary_for_run_setup(params: RunParameters, command: Command) -> str:
+    """Single-line preset summary for Run Setup (matches prior preset screen semantics)."""
+    profile = str(command.profile or "full").lower()
+    cid = str(getattr(command, "id", "") or "").upper()
+    stages = len(PIPELINE_STAGES)
+    if cid == "T":
+        mod_count = len(run_modules_for_profile(profile))
+        return f"Persistence test — {mod_count} modules, {stages} detector stages"
+    if profile in {"full", "lightweight"}:
+        mod_count = len(run_modules_for_profile(profile))
+        label = "Full" if profile == "full" else "Fast"
+        return f"{label} — {mod_count} modules, {stages} detector stages"
+    title = (command.title or profile or "Custom").strip()
+    return f"{title} — up to {stages} detector stages (profile may skip stages)"
 
 
 def _selection_rule_display(rule: str | None) -> str:
@@ -131,21 +149,32 @@ def render_run_preflight(
     groups = tuple(getattr(selection, "groups", ()) or ())
     package_count = len(groups)
     artifact_count = sum(len(getattr(group, "artifacts", ()) or ()) for group in groups)
+    split_apk_total = sum(
+        sum(1 for a in getattr(group, "artifacts", ()) or () if getattr(a, "is_split_member", False))
+        for group in groups
+    )
+    base_apk_total = artifact_count - split_apk_total
+    target = getattr(selection, "label", None) or "selected scope"
     print()
     menu_utils.print_section("Run preflight")
-    print(f"Session label   : {params.session_stamp or 'unspecified'}")
-    print(f"Packages        : {package_count}")
-    print(f"Artifacts est.  : {artifact_count}")
+    _run_setup_kv("Scope", str(target))
+    preset = _compact_preset_summary_for_run_setup(params, command)
     workers = str(params.workers or "auto")
-    if workers == "auto":
-        mode = f"{params.profile_label} | workers=auto"
-    else:
-        mode = f"{params.profile_label} | workers={workers}"
-    print(f"Mode            : {mode}")
+    if workers != "auto":
+        preset = f"{preset} | workers={workers}"
+    _run_setup_kv("Preset", preset)
+    _run_setup_kv("Packages", str(package_count))
+    _run_setup_kv(
+        "APK files",
+        f"{artifact_count} ({base_apk_total} base + {split_apk_total} split)",
+    )
+    _run_setup_kv("Session", str(params.session_stamp or "unspecified"))
+    scan_splits_note = "on" if bool(getattr(params, "scan_splits", True)) else "off"
+    _run_setup_kv("Split APK scan", scan_splits_note)
     if reset_mode == "session":
-        print("Reset           : session")
+        _run_setup_kv("Reset", "session")
     elif reset_mode:
-        print(f"Reset           : {reset_mode}")
+        _run_setup_kv("Reset", str(reset_mode))
 
 
 def confirm_reset(session_label: str | None = None) -> str | None:
@@ -353,12 +382,11 @@ def prompt_run_setup(
 
     print()
     menu_utils.print_section("Run Setup")
-    _run_setup_kv("Target", target)
-    _run_setup_kv("Mode", params.profile_label)
+    _run_setup_kv("Scope", target)
+    _run_setup_kv("Preset", _compact_preset_summary_for_run_setup(params, command))
     if selection_rule:
         _run_setup_kv("Selection rule", _selection_rule_display(selection_rule))
     _run_setup_kv("Packages", str(package_count))
-    _run_setup_kv("Harvest captures", str(package_count))
     base_apk_total = artifact_count - split_apk_total
     _run_setup_kv(
         "APK files",
@@ -396,7 +424,8 @@ def prompt_run_setup(
             _run_setup_kv("Attempts", str(attempts))
     else:
         _run_setup_kv("Existing session", "none")
-    _run_setup_kv("Post-run audit", format_audit_session_command(session_stamp))
+    _run_setup_kv("Post-run audit", "after run completes")
+    _run_setup_kv("Audit command", format_audit_session_command(session_stamp))
     print()
     if has_existing:
         print("1) Replace this session and rerun")
@@ -404,7 +433,7 @@ def prompt_run_setup(
     else:
         print("1) Run now")
         print("2) Use new session label")
-    print("3) Change options")
+    print("3) Advanced / edit run options")
     print("0) Cancel")
     choice = prompt_utils.get_choice(["1", "2", "3", "0"], default="1", prompt="Choice [1]: ")
     if choice == "0":
@@ -421,12 +450,12 @@ def prompt_run_setup(
 
 
 def ask_run_controls() -> str:
-    """Prompt for a compact run/test control choice."""
+    """Prompt for a compact dry-run / read-only run confirmation."""
 
     print()
-    menu_utils.print_section("Run Options")
+    menu_utils.print_section("Confirm run")
     print("1) Run now")
-    print("2) Test options")
+    print("2) Advanced / edit run options")
     print("0) Back")
     choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Choice [1]: ")
     if choice == "0":

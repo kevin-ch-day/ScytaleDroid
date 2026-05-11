@@ -15,18 +15,21 @@ def test_compact_progress_shows_first_app_as_one_of_total() -> None:
         artifacts_done=0,
         total_artifacts=98,
         agg_checks=Counter({"warn": 0, "fail": 0, "error": 0}),
-        elapsed_text="0 ms",
+        elapsed_text="starting",
         eta_text="--",
         current_app_label="Facebook",
         current_package_name="com.facebook.katana",
     )
     assert "Run context" in text
+    assert "Preset:" in text
     assert "Packages in run: 12" in text
     assert "APKs in run: 98" in text
-    assert "App progress: 1 / 12 packages" in text
+    assert "Package progress: 1 / 12 selected" in text
     assert "com.facebook.katana" in text
-    assert "App: Facebook" in text
-    assert "Current package: com.facebook.katana" in text
+    assert "Display name: Facebook" in text
+    assert "Package: com.facebook.katana" in text
+    assert "APK artifact progress: 0 / 98 completed" in text
+    assert "Elapsed: starting" in text
     assert "Legend:" in text
 
 
@@ -46,7 +49,7 @@ def test_compact_progress_omits_run_context_when_disabled() -> None:
     )
     assert "Run context" not in text
     assert "Session:" not in text
-    assert "Current app" in text
+    assert "Current package" in text
     assert "Findings so far" in text
 
 
@@ -60,16 +63,36 @@ def test_single_line_progress_matches_operator_shape() -> None:
         current_package_name="com.facebook.katana",
         agg_checks=Counter({"warn": 351, "fail": 57, "error": 0}),
         last_report_seconds_ago=3,
-        last_report_package="com.expedia.bookings",
+        last_report_package="com.facebook.katana",
+        last_report_app_label="Facebook",
         eta_text="52m",
         archive_reports_written=115,
     )
-    assert "[31/144 apps | 115/531 APKs]" in line
-    assert "Facebook" in line
-    assert "detector_warnings=351" in line
-    assert "policy_failures=57" in line
-    assert "execution_errors=0" in line
-    assert "com.expedia.bookings" in line
+    assert "Progress: packages 31/144 · APKs 115/531 · ETA ~52m" in line
+    assert "Current: Facebook (com.facebook.katana)" in line
+    assert "Last artifact save: 3s ago" in line
+    assert "Reports 115/531" in line
+    assert "Findings: Warnings=351 · Policy/finding failures=57 · Execution errors=0" in line
+
+
+def test_single_line_progress_labels_last_save_when_cursor_advanced() -> None:
+    line = format_scan_progress_single_line(
+        apps_completed=2,
+        total_apps=144,
+        artifacts_done=5,
+        total_artifacts=531,
+        current_app_label="Adobe Acrobat",
+        current_package_name="com.adobe.reader",
+        agg_checks=Counter({"warn": 13, "fail": 2, "error": 0}),
+        last_report_seconds_ago=7,
+        last_report_package="bbc.mobile.news.ww",
+        last_report_app_label="BBC News",
+        eta_text="1h 3m",
+        archive_reports_written=5,
+    )
+    assert "Current: Adobe Acrobat (com.adobe.reader)" in line
+    assert "Last save: BBC News (bbc.mobile.news.ww) · 7s ago" in line
+    assert "Progress: packages 2/144 · APKs 5/531" in line
 
 
 def test_compact_progress_after_one_app_completed_shows_second_ordinal() -> None:
@@ -84,5 +107,5 @@ def test_compact_progress_after_one_app_completed_shows_second_ordinal() -> None
         current_app_label="Messenger",
         current_package_name="com.facebook.orca",
     )
-    assert "App progress: 2 / 12 packages" in text
+    assert "Package progress: 2 / 12 selected" in text
     assert "Legend:" in text

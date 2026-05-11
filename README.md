@@ -178,9 +178,9 @@ Corpus tables (from canonical DB snapshot boundary):
 python scripts/static_analysis/static_baseline_tables.py --db-target "mysql://user:pass@localhost:3306/scytaledroid_db_dev" --out-dir output/audit/static_baseline --formats csv json
 ```
 
-Baseline contracts:
+Baseline and determinism contracts (closest authority to the baseline audit scripts above):
 
-- `docs/static_baseline_contract.md`
+- `docs/contracts/determinism_comparator.md` — strict analytical diff / comparator contract used with `determinism_gate.py`
 - `docs/risk_scoring_contract.md`
 
 ### Work with standalone APKs
