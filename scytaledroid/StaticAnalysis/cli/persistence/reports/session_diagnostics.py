@@ -6,6 +6,9 @@ from collections.abc import Callable
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.menus import query_runner
+from scytaledroid.StaticAnalysis.cli.audit.post_run_session_summary import (
+    prompt_post_run_session_summary,
+)
 from scytaledroid.Database.db_utils.menus.sql_helpers import coerce_datetime
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
@@ -94,7 +97,7 @@ def _render_static_run_detail(row: dict[str, object]) -> None:
 def _browse_recent_static_runs(*, search: str | None = None) -> None:
     rows = _fetch_recent_static_runs(limit=15, search=search)
     print()
-    menu_utils.print_section("Recent Static Runs" if not search else f"Recent Static Runs — {search}")
+    menu_utils.print_section("Recent Static Runs" if not search else f"Recent Static Runs - {search}")
     if not rows:
         print(status_messages.status("No static runs found.", level="warn"))
         prompt_utils.press_enter_to_continue()
@@ -322,6 +325,7 @@ def render_static_diagnostics_menu() -> None:
             "7": "Latest static coverage",
             "8": "Active static session",
             "9": "Summary cache status",
+            "10": "Post-run session summary (persistence audit + DB)",
         }
         menu_utils.print_menu(options, padding=True, show_exit=True)
         choice = prompt_utils.get_choice(list(options.keys()) + ["0"])
@@ -346,6 +350,8 @@ def render_static_diagnostics_menu() -> None:
             query_runner.show_active_static_session_status()
         elif choice == "9":
             query_runner.show_summary_cache_status()
+        elif choice == "10":
+            prompt_post_run_session_summary()
 
 
 __all__ = ["render_static_diagnostics_menu"]

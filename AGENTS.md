@@ -38,10 +38,10 @@ If **`SCYTALEDROID_*_DB_URL`** (or equivalent full URL vars) is set, it **overri
 
 ## Permission Intel model
 
-**`android_permission_intel`** is a shared permission **dictionary and governance** database. It is **not** where static analysis **results** live.
+**`android_permission_intel`** is the **Permission Intel** MariaDB catalog (dictionary + governance tables). ScytaleDroid reaches it **only** through **`SCYTALEDROID_PERMISSION_INTEL_DB_*`** (or full URL). It is **not** where static analysis **results** live.
 
 - Static findings and runs belong in the analyst **core / results** catalog (e.g. **`scytaledroid_core_prod`** in typical installs — match your DSN).
-- Erebus / VirusTotal enrichment should use the same Permission Intel dictionary/governance source where applicable.
+- **Erebus** uses **separate** database configuration (**`EREBUS_*`** env vars, different catalog). Do not conflate Erebus’s DB with **`android_permission_intel`** unless your deployment intentionally colocates schemas; keep prefixes and DSNs clear per tool. VirusTotal / enrichment flows should still consume the **same governance semantics** as your Intel catalog when you need comparable labels.
 
 **Operational checks**
 

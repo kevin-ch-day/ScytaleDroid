@@ -275,14 +275,37 @@ def test_format_persistence_progress_text_is_operator_focused() -> None:
         elapsed_text="24m 18s",
         eta_text="1h 12m",
         persistence_error_count=0,
+        include_phase_banner=True,
     )
 
-    assert "Persisting app: Switch Access" in text
+    assert "DB persistence phase" in text
+    assert "Writing now: Switch Access" in text
     assert "Package: com.google.android.accessibility.switchaccess" in text
-    assert "Progress: 31/120 app(s)" in text
-    assert "Elapsed : 24m 18s" in text
-    assert "ETA     : ~1h 12m" in text
-    assert "Health  : persistence_errors=0" in text
+    assert "Package write progress: 31 / 120" in text
+    assert "Elapsed: 24m 18s" in text
+    assert "ETA: ~1h 12m" in text
+    assert "Persistence errors: 0 (none - DB write phase healthy so far)" in text
+
+
+@pytest.mark.unit
+def test_format_persistence_progress_text_checkpoint_omits_repeated_banner() -> None:
+    text = results._format_persistence_progress_text(
+        index=11,
+        total_results=120,
+        package_name="com.example.pkg",
+        app_label=None,
+        elapsed_text="1 min 2 secs",
+        eta_text="5 secs",
+        persistence_error_count=0,
+        include_phase_banner=False,
+    )
+
+    assert "DB persistence phase" not in text
+    assert "Writing now: com.example.pkg" in text
+    assert "Package write progress: 11 / 120" in text
+    assert "Elapsed: 1 min 2 secs" in text
+    assert "ETA: ~5 secs" in text
+    assert "Persistence errors: 0 (none - DB write phase healthy so far)" in text
 
 
 @pytest.mark.unit

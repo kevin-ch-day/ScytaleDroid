@@ -1,4 +1,9 @@
-"""High-level static analysis run persistence pipeline."""
+"""Canonical static run persistence: ``persist_run_summary`` and ``PersistenceOutcome``.
+
+DB work runs inside ``transaction_flow.execute_persistence_transaction``; permission matrix
+and ``static_permission_risk_vnext`` are invoked from ``stage_writers``. Layout: ``docs/persistence.md``;
+workflow routing: ``docs/maintenance/workflow_entrypoint_map.md``.
+"""
 
 from __future__ import annotations
 
@@ -163,10 +168,17 @@ class PersistenceOutcome:
     persistence_retry_count: int = 0
     persistence_db_disconnect: bool = False
     persistence_exception_class: str | None = None
+    persistence_exception_message: str | None = None
+    persistence_sql_errno: int | None = None
+    persistence_sqlstate: str | None = None
+    persistence_failing_table: str | None = None
+    persistence_writer: str | None = None
     persistence_transaction_state: str | None = None
     persistence_failure_stage: str | None = None
     static_handoff_hash: str | None = None
     errors: list[str] = field(default_factory=list)
+    #: Non-fatal persistence notes (e.g. duplicate permission rows skipped); echoed in audit JSON.
+    persistence_warnings: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -955,6 +967,7 @@ def _persist_permission_and_storage_stage(
     stage_context: _PersistenceStageContext,
     findings_context: _PreparedFindingsPersistenceContext,
     raise_db_error,
+    outcome: PersistenceOutcome | None = None,
 ) -> None:
     _stage_persist_permission_and_storage(
         run_id=run_id,
@@ -967,6 +980,7 @@ def _persist_permission_and_storage_stage(
         persist_permission_matrix=persist_permission_matrix,
         persist_permission_risk=persist_permission_risk,
         safe_int=safe_int,
+        outcome=outcome,
     )
 
 

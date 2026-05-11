@@ -342,7 +342,7 @@ def test_persist_permission_risk_vnext_canonicalizes_permission_name(monkeypatch
     assert rows[0][1] == "android.permission.camera"
 
 
-def test_persist_permission_risk_vnext_rejects_duplicate_after_canonicalization(monkeypatch):
+def test_persist_permission_risk_vnext_skips_duplicate_after_canonicalization(monkeypatch):
     session = "20250101-000016"
     report = DummyReport({"apk_id": 604, "sha256": "44" * 32})
     bundle = _bundle(1, 0, 0, 1.234, "B")
@@ -360,18 +360,25 @@ def test_persist_permission_risk_vnext_rejects_duplicate_after_canonicalization(
                 ]
             )
 
-    with pytest.raises(RuntimeError, match="duplicate permission_name after canonicalization"):
-        persist_permission_risk(
-            run_id=16,
-            static_run_id=16,
-            report=report,
-            package_name="com.example.dupe",
-            session_stamp=session,
-            scope_label="Test",
-            metrics_bundle=bundle,
-            baseline_payload={},
-            permission_profiles=_DupProfiles(),
-        )
+    warns = persist_permission_risk(
+        run_id=16,
+        static_run_id=16,
+        report=report,
+        package_name="com.example.dupe",
+        session_stamp=session,
+        scope_label="Test",
+        metrics_bundle=bundle,
+        baseline_payload={},
+        permission_profiles=_DupProfiles(),
+    )
+    assert len(warns) == 1
+    assert warns[0].get("warning_code") == "duplicate_permission_skipped"
+    assert warns[0].get("canonical_permission_name") == "android.permission.camera"
+    assert warns[0].get("duplicates_skipped_count") == "1"
+    assert "android.permission.camera" in (warns[0].get("duplicate_examples") or "")
+    rows = _fetch_spr_vnext()
+    assert len(rows) == 1
+    assert rows[0][1] == "android.permission.camera"
 
 
 def test_vnext_permission_risk_keeps_cross_run_rows(monkeypatch):
@@ -447,3 +454,112 @@ def test_persist_permission_risk_requires_static_run_id():
             metrics_bundle=bundle,
             baseline_payload={},
         )
+
+
+def test_persist_permission_risk_skips_empty_and_whitespace_only_keys(monkeypatch):
+    session = "20250101-empty-perm"
+    report = DummyReport({"apk_id": 902, "sha256": "aa" * 32})
+    bundle = _bundle(0, 0, 0, 1.0, "A")
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_risk._ensure_permission_vnext_table",
+        lambda: True,
+    )
+    profiles = {
+        "": {"is_runtime_dangerous": True},
+        "   ": {"is_runtime_dangerous": True},
+        "android.permission.NORMAL": {"is_runtime_dangerous": False},
+    }
+    warns = persist_permission_risk(
+        run_id=902,
+        static_run_id=902,
+        report=report,
+        package_name="com.example.emptykeys",
+        session_stamp=session,
+        scope_label="Test",
+        metrics_bundle=bundle,
+        baseline_payload={},
+        permission_profiles=profiles,
+    )
+    assert warns == []
+    rows = _fetch_spr_vnext()
+    assert len(rows) == 1
+    assert rows[0][1] == "android.permission.normal"
+
+
+def test_persist_permission_risk_custom_permission_mixed_case_duplicates(monkeypatch):
+    """App-defined permission: same logical perm, different casing → one vnext row + warning."""
+    session = "20250101-custom-dup"
+    report = DummyReport({"apk_id": 903, "sha256": "bb" * 32})
+    bundle = _bundle(0, 0, 0, 1.0, "A")
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_risk._ensure_permission_vnext_table",
+        lambda: True,
+    )
+    profiles = {
+        "com.example.app.permission.READ_STUFF": {"is_custom": True, "guard_strength": "unknown"},
+        "com.example.app.permission.read_stuff": {"is_custom": True, "guard_strength": "strong"},
+    }
+    warns = persist_permission_risk(
+        run_id=903,
+        static_run_id=903,
+        report=report,
+        package_name="com.example.app",
+        session_stamp=session,
+        scope_label="Test",
+        metrics_bundle=bundle,
+        baseline_payload={},
+        permission_profiles=profiles,
+    )
+    assert len(warns) == 1
+    assert warns[0]["warning_code"] == "duplicate_permission_skipped"
+    assert warns[0]["canonical_permission_name"] == "com.example.app.permission.read_stuff"
+    assert warns[0]["duplicates_skipped_count"] == "1"
+    rows = _fetch_spr_vnext()
+    assert len(rows) == 1
+    assert rows[0][1] == "com.example.app.permission.read_stuff"
+
+
+def test_biometric_duplicate_canonicalization_one_row_and_warnings(monkeypatch):
+    """USE_BIOMETRIC / use_biometric / mixed case → one vnext row + duplicate warnings."""
+    from scytaledroid.Database.db_core import db_queries as core_q
+
+    session = "20250101-biometric-dup"
+    report = DummyReport({"apk_id": 901, "sha256": "99" * 32})
+    bundle = _bundle(1, 0, 0, 2.0, "B")
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_risk._ensure_permission_vnext_table",
+        lambda: True,
+    )
+
+    profiles = {
+        "android.permission.USE_BIOMETRIC": {"is_runtime_dangerous": True, "guard_strength": "weak"},
+        "android.permission.use_biometric": {"is_runtime_dangerous": False, "guard_strength": "strong"},
+        "  Android.Permission.Use_Biometric  ": {"is_runtime_dangerous": False},
+    }
+
+    warns = persist_permission_risk(
+        run_id=901,
+        static_run_id=901,
+        report=report,
+        package_name="com.example.biometric.dup",
+        session_stamp=session,
+        scope_label="Test",
+        metrics_bundle=bundle,
+        baseline_payload={},
+        permission_profiles=profiles,
+    )
+    assert len(warns) == 1
+    assert warns[0].get("warning_code") == "duplicate_permission_skipped"
+    assert warns[0].get("canonical_permission_name") == "android.permission.use_biometric"
+    assert warns[0].get("duplicates_skipped_count") == "2"
+    ex = warns[0].get("duplicate_examples") or ""
+    assert "use_biometric" in ex.lower()
+
+    rows = core_q.run_sql(
+        "SELECT permission_name, risk_class FROM static_permission_risk_vnext WHERE run_id=%s",
+        (901,),
+        fetch="all",
+    )
+    assert len(rows) == 1
+    assert rows[0][0] == "android.permission.use_biometric"
+    assert rows[0][1] == "HIGH"

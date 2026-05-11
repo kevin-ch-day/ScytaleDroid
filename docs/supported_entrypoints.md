@@ -46,6 +46,7 @@ operator conveniences rather than application-owned logic:
 - `scripts/operator/run_profile_v2_demo.sh` (prints `EXPORT PASS` / `LINT PASS`)
 - `scripts/operator/run_profile_v3_demo.sh` (prints `EXPORT PASS` / `LINT PASS`)
 - `scripts/profile_tools/profile_v3_integrity_gates.py` (one-screen PASS/FAIL summary; v3 paper gate runner)
+- `scripts/static_analysis/run_artifact_map.py` (read-only static session artifact audit; contract in `docs/maintenance/static_run_artifact_lifecycle.md`)
 
 ## Not supported (best-effort)
 

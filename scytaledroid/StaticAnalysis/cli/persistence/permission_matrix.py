@@ -43,7 +43,16 @@ def persist_permission_matrix(
     """Persist permission profile metadata when available."""
 
     require_canonical_schema()
-    if static_run_id is None or not matrix_db.ensure_table():
+    if static_run_id is None:
+        return
+    if not matrix_db.ensure_table():
+        if permission_profiles:
+            log.warning(
+                "static_permission_matrix table missing or unreachable; matrix rows not persisted "
+                f"(package={package_name} static_run_id={static_run_id}). "
+                "Permission risk / vnext may still persist — expect matrix↔vnext skew until schema is fixed.",
+                category="static_analysis",
+            )
         return
 
     if not permission_profiles:
@@ -51,8 +60,22 @@ def persist_permission_matrix(
         return
 
     rows: list[dict[str, object]] = []
+    seen_canonical: set[str] = set()
     for name, profile in permission_profiles.items():
         try:
+            raw_perm = str(name or "").strip()
+            if not raw_perm:
+                continue
+            canon_key = raw_perm.lower()
+            if canon_key in seen_canonical:
+                log.debug(
+                    f"Skipping duplicate static_permission_matrix row after canonicalization ({canon_key}) "
+                    f"for {package_name}",
+                    category="static_analysis",
+                )
+                continue
+            seen_canonical.add(canon_key)
+
             tokens = profile.get("tokens") if isinstance(profile, Mapping) else None
             token_payload: str | None = None
             if isinstance(tokens, (list, tuple)):
@@ -62,7 +85,7 @@ def persist_permission_matrix(
 
             guard_strength = profile.get("guard_strength")
             if guard_strength is None:
-                guard_strength = _catalog_guardStrength(name)
+                guard_strength = _catalog_guardStrength(raw_perm)
 
             declared_in = profile.get("declared_in") if isinstance(profile, Mapping) else None
 
@@ -102,8 +125,8 @@ def persist_permission_matrix(
                 "run_id": int(static_run_id),
                 "apk_id": apk_id,
                 "package_name": package_name,
-                "permission_name": name,
-                "source": profile.get("source") if isinstance(profile, Mapping) else _coerce_source(name),
+                "permission_name": raw_perm,
+                "source": profile.get("source") if isinstance(profile, Mapping) else _coerce_source(raw_perm),
                 "protection": profile.get("protection") if isinstance(profile, Mapping) else None,
                 "guard_strength": guard_strength,
                 "declared_in": declared_in,
@@ -121,7 +144,7 @@ def persist_permission_matrix(
             rows.append(row)
         except Exception as exc:  # pragma: no cover - defensive
             log.debug(
-                f"Skipping permission matrix row for {package_name}:{name}: {exc}",
+                f"Skipping permission matrix row for {package_name}:{name!r}: {exc}",
                 category="static_analysis",
             )
 
@@ -132,6 +155,7 @@ def persist_permission_matrix(
             f"Failed to persist permission matrix for {package_name}: {exc}",
             category="static_analysis",
         )
+        raise
 
 
 __all__ = ["persist_permission_matrix"]

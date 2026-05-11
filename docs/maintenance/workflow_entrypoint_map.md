@@ -215,13 +215,12 @@ operator routing does not require a second overlapping workflow doc.
   - `static_session_rollups`
   - `static_session_run_links`
   - `static_persistence_failures`
-- Legacy/compat bridge writes still touched during finalization:
-  - `runs`
-  - `findings`
-  - `metrics`
-  - `buckets`
-  - `contributors`
-  - `risk_scores`
+- Auxiliary / rollup (still written by the modern static pipeline where enabled):
+  - `risk_scores` (permission summary rollup; distinct from legacy metric buckets)
+- Legacy tables (`runs`, legacy `findings`, `metrics`, `buckets`, `contributors`, …):
+  - May contain **historical** rows only; the canonical static pipeline targets **`static_analysis_*`** (see `AGENTS.md`).
+  - **Do not** treat empty or stale legacy rows as a failed scan when canonical tables populated.
+  - Optional env-gated compat elsewhere is out of scope for this workflow map—grep before asserting dual-writes.
 
 ### Generated artifacts
 
@@ -274,7 +273,7 @@ operator routing does not require a second overlapping workflow doc.
 
 ### DB surfaces touched
 
-- Same static canonical and bridge persistence families as “all apps”
+- Same **canonical static persistence surfaces** as “all apps” (no separate compat contract)
 - Additional scope/profile metadata reads from:
   - `apps`
   - `android_app_profiles`
@@ -323,7 +322,7 @@ operator routing does not require a second overlapping workflow doc.
 
 ### DB surfaces touched
 
-- Same canonical and bridge persistence families as the other static scan flows
+- Same **canonical** static persistence surfaces as the other static scan flows
 - Narrower package/artifact lookup reads through repository/library surfaces
 
 ### Generated artifacts
@@ -367,12 +366,17 @@ operator routing does not require a second overlapping workflow doc.
 
 ### Primary modules
 
-- `scytaledroid/StaticAnalysis/cli/persistence/run_summary.py`
-- `scytaledroid/StaticAnalysis/cli/execution/results_persistence.py`
+- `scytaledroid/StaticAnalysis/cli/persistence/run_summary.py` — `persist_run_summary` orchestration
+- `scytaledroid/StaticAnalysis/cli/persistence/transaction_flow.py` — DB transaction + retry
+- `scytaledroid/StaticAnalysis/cli/persistence/stage_writers.py` — permission matrix/risk, MASVS, storage surface
+- `scytaledroid/StaticAnalysis/cli/persistence/permission_matrix.py` / `permission_risk.py`
+- `scytaledroid/StaticAnalysis/cli/execution/results.py` — invokes persistence after scan
+- `scytaledroid/StaticAnalysis/cli/execution/results_persistence.py` — error surfacing helpers
 - `scytaledroid/StaticAnalysis/cli/flows/run_dispatch.py`
-- `scytaledroid/StaticAnalysis/cli/persistence/permission_risk.py`
 - `scytaledroid/Database/db_utils/static_reconcile.py`
 - `scytaledroid/Database/summary_surfaces.py`
+
+Permission-intel vs core DB boundaries: `docs/maintenance/permission_intelligence_pipeline.md`.
 
 ### DB surfaces touched
 
@@ -398,13 +402,10 @@ operator routing does not require a second overlapping workflow doc.
 - Derived/read-model refreshes:
   - `v_web_*` consumers indirectly
   - summary cache refresh surfaces
-- Legacy/compatibility surfaces still touched:
-  - `runs`
-  - `findings`
-  - `metrics`
-  - `buckets`
-  - `contributors`
-  - `risk_scores`
+- Auxiliary rollups:
+  - `risk_scores` (permission score row; not the legacy `metrics`/`buckets` model)
+- Legacy tables (`runs`, legacy `findings`, `metrics`, `buckets`, `contributors`, …):
+  - **Not** the canonical write target for new static runs; may be empty or historical (see `AGENTS.md`).
 
 ### Generated artifacts
 
@@ -432,6 +433,7 @@ operator routing does not require a second overlapping workflow doc.
   - full static run
   - inspect persistence audit artifact
   - verify DB digest and session health summary
+  - read-only session artifact audit: `PYTHONPATH=. python scripts/static_analysis/run_artifact_map.py --session <session_stamp> [--include-harvest-receipt-linkage]` — semantics in `docs/maintenance/static_run_artifact_lifecycle.md`
 
 ### Common Codex risk
 
@@ -463,7 +465,7 @@ separate persistence contract.
 - Primary modules:
   - same family as one-app static flow
 - DB surfaces touched:
-  - same canonical and compat persistence families as one-app static analysis
+  - same **canonical** persistence surfaces as one-app static analysis
 - Common Codex risk:
   - treating this as a special persistence path; it is only a convenience launcher
 
@@ -483,6 +485,25 @@ separate persistence contract.
   - app triage, version review, later research/drift analysis
 - Common Codex risk:
   - confusing historical library groups with distinct analyzed versions/builds
+
+### Session artifact map (read-only audit)
+
+- Purpose:
+  - correlate one static **`session_stamp`** across selection JSON, archive JSON, log `report.saved` paths, DB projection, permission-audit dirs, and optional harvest / harvest-receipt linkage (canonical store vs `device_apks` pull paths)
+- Operator entrypoint:
+  - `PYTHONPATH=. python scripts/static_analysis/run_artifact_map.py --session <session_stamp> [--json] [--write-report] [--include-harvest-linkage] [--include-harvest-receipt-linkage]`
+- Primary modules:
+  - `scripts/static_analysis/run_artifact_map.py` (read-only; does not move or delete artifacts)
+- DB surfaces touched:
+  - optional reads when DSN enabled (same static summary queries as other audit tooling); `--no-db` skips SQL
+- Generated artifacts:
+  - optional `output/audit/run_artifacts/<session>_artifact_map.json` when `--write-report` is used
+- Downstream consumers:
+  - operator forensics, CI gates (`tests/gates/test_run_artifact_map_*.py`), lifecycle documentation
+- Documentation:
+  - `docs/maintenance/static_run_artifact_lifecycle.md` (§20, §20.1)
+- Common Codex risk:
+  - expecting harvest receipt directory name to equal static **`session_stamp`**; linkage prefers stamp dir, then **`capture_id`**, then scans all harvest session subdirs (see script output **`receipt_session_resolution`**)
 
 ### Single APK drilldown / previous-run review
 

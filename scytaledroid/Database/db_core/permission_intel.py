@@ -222,6 +222,21 @@ def intel_table_exists(table: str) -> bool:
     return bool(row and int(row[0] or 0) > 0)
 
 
+def probe_dictionary_read_access() -> bool:
+    """Return True when the AOSP dictionary table answers a trivial ``SELECT COUNT(*)``."""
+
+    try:
+        row = run_sql(
+            f"SELECT COUNT(*) FROM {AOSP_DICT_TABLE}",
+            fetch="one",
+            query_name="permission_intel.probe_dictionary_read_access",
+            read_only=True,
+        )
+        return bool(row and row[0] is not None)
+    except Exception:
+        return False
+
+
 def fetch_aosp_permission_catalog_rows() -> list[tuple[object, object, object, object]]:
     """Return raw AOSP permission catalog rows from the permission-intel source."""
 
@@ -492,6 +507,7 @@ __all__ = [
     "insert_permission_queue",
     "insert_signal_catalog_row",
     "intel_table_exists",
+    "probe_dictionary_read_access",
     "latest_governance_loaded_at",
     "latest_governance_snapshot",
     "resolve_config",

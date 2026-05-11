@@ -24,6 +24,7 @@ from .scan_formatters import (
     _format_compact_progress_text,
     _load_v3_catalog_label_overrides,
     format_duration,
+    format_scan_progress_single_line,
 )
 from .scan_identity_helpers import (
     _artifact_manifest_sha256,
@@ -184,9 +185,14 @@ def execute_scan(
     all_apps_compact_mode = compact_mode
     apps_completed = 0
     banner_last_emit = time.monotonic()
+    last_activity_pulse = time.monotonic()
+    last_report_mono: float | None = None
+    last_report_package: str | None = None
+    archive_reports_written = 0
     agg_checks: Counter[str] = Counter()
-    agg_artifacts_done = 0
     recent_completions: deque[str] = deque(maxlen=3)
+    compact_session_display = (params.session_label or params.session_stamp or "").strip() or None
+    compact_scope_display = f"{params.scope} - {selection.label}"
     config_hash = _compute_config_hash(params)
     pipeline_version = getattr(params, "analysis_version", None)
     persistence_ready = bool(getattr(params, "persistence_ready", True))
@@ -223,6 +229,19 @@ def execute_scan(
             pass
 
     last_elapsed_for_progress: float | None = None
+
+    def _eta_snapshot(now_mono: float) -> tuple[str, bool]:
+        elapsed = max(0.0, now_mono - progress._start)  # noqa: SLF001
+        art_rate = (completed_artifacts / elapsed) if elapsed > 0 and completed_artifacts > 0 else 0.0
+        remaining_art = max(0, total_artifacts - completed_artifacts)
+        eta_sec = int(round((remaining_art / art_rate), 0)) if art_rate > 0 else -1
+        eta_text = format_duration(float(eta_sec)) if eta_sec >= 0 else "--"
+        eta_preliminary = bool(
+            total_artifacts > 0
+            and (completed_artifacts == 0 or (completed_artifacts / total_artifacts) < 0.10)
+        )
+        return eta_text, eta_preliminary
+
     if all_apps_compact_mode and total_apps > 0:
         first_pkg = getattr(selection.groups[0], "package_name", None) if selection.groups else None
         first_disp = (
@@ -236,12 +255,29 @@ def execute_scan(
                     artifacts_done=0,
                     total_artifacts=total_artifacts,
                     agg_checks=agg_checks,
-                    elapsed_text="00:00",
+                    elapsed_text="0 ms",
                     eta_text="--",
                     current_app_label=str(first_disp) if first_disp else None,
                     current_package_name=str(first_pkg) if first_pkg else None,
                     recent_completions=[],
+                    last_report_seconds_ago=None,
+                    last_report_package=None,
+                    archive_reports_written=0,
+                    eta_preliminary=bool(total_artifacts > 0),
+                    session_display=compact_session_display,
+                    profile_display=params.profile_label,
+                    scope_display=compact_scope_display,
+                    workers_display=str(params.workers),
+                    dry_run=bool(params.dry_run),
+                    include_legend=True,
+                    include_run_context=True,
                 ),
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                "Progress note: one split-heavy app may advance many APK artifacts.",
                 level="info",
             )
         )
@@ -516,6 +552,39 @@ def execute_scan(
                     _hb_set_stage(f"scan:{artifact_label}", done=artifact_index, total=len(artifacts))
                 except Exception:
                     pass
+                now_mono = time.monotonic()
+                last_report_mono = now_mono
+                last_report_package = group.package_name
+                if summary.saved_path:
+                    archive_reports_written += 1
+                if all_apps_compact_mode and total_artifacts > 0:
+                    pulse_iv = 30.0
+                    if now_mono - last_activity_pulse >= pulse_iv:
+                        eta_pulse, _ = _eta_snapshot(now_mono)
+                        apps_done_pulse = max(0, app_index - 1)
+                        pulse_last_age = (
+                            max(0, int(now_mono - last_report_mono)) if last_report_mono is not None else None
+                        )
+                        print(
+                            status_messages.status(
+                                format_scan_progress_single_line(
+                                    apps_completed=apps_done_pulse,
+                                    total_apps=total_apps,
+                                    artifacts_done=completed_artifacts,
+                                    total_artifacts=total_artifacts,
+                                    current_app_label=str(display_name) if display_name else None,
+                                    current_package_name=group.package_name,
+                                    agg_checks=agg_checks,
+                                    last_report_seconds_ago=pulse_last_age,
+                                    last_report_package=last_report_package,
+                                    eta_text=eta_pulse,
+                                    activity="starting" if last_report_mono is None else "active",
+                                    archive_reports_written=archive_reports_written,
+                                ),
+                                level="info",
+                            )
+                        )
+                        last_activity_pulse = now_mono
             if warning_lines:
                 progress.flush_line()
                 render_resource_warnings(warning_lines, run_ctx=run_ctx)
@@ -583,22 +652,21 @@ def execute_scan(
                             f"label='{(display_name or group.package_name)}' "
                             f"artifacts={artifact_count} "
                             f"time_s={round(float(app_result.duration_seconds or 0.0), 3)} "
-                            f"ok={ok} warn={warn} fail={fail} error={err}"
+                            f"ok={ok} detector_warnings={warn} policy_failures={fail} execution_errors={err}"
                         ),
                         level="info",
                     )
                 )
             progress.app_complete(artifact_count, app_result.duration_seconds or 0.0)
             apps_completed += 1
-            agg_artifacts_done += int(app_result.executed_artifacts or 0)
             if app_summary:
                 agg_checks["ok"] += int(app_summary.get("ok_count", 0) or 0)
                 agg_checks["warn"] += int(app_summary.get("warn_count", 0) or 0)
                 agg_checks["fail"] += int(app_summary.get("fail_count", 0) or 0)
                 agg_checks["error"] += int(app_summary.get("error_count", 0) or 0)
             now = time.monotonic()
-            progress_stride = 15 if total_apps >= 50 else 10
-            banner_interval_s = 60.0 if total_apps >= 50 else 30.0
+            progress_stride = 10
+            banner_interval_s = 300.0
             should_emit_banner = (
                 apps_completed == total_apps
                 or apps_completed % progress_stride == 0
@@ -606,10 +674,11 @@ def execute_scan(
             )
             if all_apps_compact_mode and should_emit_banner and total_apps > 0:
                 elapsed = max(0.0, now - progress._start)  # noqa: SLF001 - local progress clock reuse
-                apps_per_sec = (apps_completed / elapsed) if elapsed > 0 else 0.0
-                remaining_apps = max(0, total_apps - apps_completed)
-                eta_sec = int(round((remaining_apps / apps_per_sec), 0)) if apps_per_sec > 0 else -1
-                eta_text = format_duration(float(eta_sec)) if eta_sec >= 0 else "--"
+                eta_text, eta_preliminary = _eta_snapshot(now)
+                if last_report_mono is not None:
+                    last_secs = max(0, int(now - last_report_mono))
+                else:
+                    last_secs = None
                 next_group = selection.groups[app_index] if app_index < total_apps else None
                 next_pkg = getattr(next_group, "package_name", None) if next_group is not None else None
                 next_label = next_pkg
@@ -622,7 +691,7 @@ def execute_scan(
                 progress_text = _format_compact_progress_text(
                     apps_completed=apps_completed,
                     total_apps=total_apps,
-                    artifacts_done=agg_artifacts_done,
+                    artifacts_done=completed_artifacts,
                     total_artifacts=total_artifacts,
                     agg_checks=agg_checks,
                     elapsed_text=format_duration(float(elapsed)),
@@ -630,9 +699,56 @@ def execute_scan(
                     current_app_label=str(next_label) if next_label else None,
                     current_package_name=str(next_pkg) if next_pkg else None,
                     recent_completions=list(recent_completions),
+                    last_report_seconds_ago=last_secs,
+                    last_report_package=last_report_package,
+                    archive_reports_written=archive_reports_written,
+                    eta_preliminary=eta_preliminary,
+                    session_display=compact_session_display,
+                    profile_display=params.profile_label,
+                    scope_display=compact_scope_display,
+                    workers_display=str(params.workers),
+                    dry_run=bool(params.dry_run),
+                    include_legend=True,
+                    include_run_context=False,
                 )
                 print(status_messages.status(progress_text, level="info"))
                 banner_last_emit = now
+                last_activity_pulse = now
+            elif all_apps_compact_mode and total_apps > 0 and apps_completed < total_apps:
+                eta_text, _ = _eta_snapshot(now)
+                if last_report_mono is not None:
+                    last_secs = max(0, int(now - last_report_mono))
+                else:
+                    last_secs = None
+                next_group = selection.groups[apps_completed]
+                next_pkg = getattr(next_group, "package_name", None)
+                next_label = next_pkg
+                if next_pkg:
+                    next_label = (
+                        v3_label_overrides.get(str(next_pkg).lower())
+                        or display_name_map.get(str(next_pkg).lower())
+                        or next_pkg
+                    )
+                print(
+                    status_messages.status(
+                        format_scan_progress_single_line(
+                            apps_completed=apps_completed,
+                            total_apps=total_apps,
+                            artifacts_done=completed_artifacts,
+                            total_artifacts=total_artifacts,
+                            current_app_label=str(next_label) if next_label else None,
+                            current_package_name=str(next_pkg) if next_pkg else None,
+                            agg_checks=agg_checks,
+                            last_report_seconds_ago=last_secs,
+                            last_report_package=last_report_package,
+                            eta_text=eta_text,
+                            activity="active",
+                            archive_reports_written=archive_reports_written,
+                        ),
+                        level="info",
+                    )
+                )
+                last_activity_pulse = now
         if _abort_state()[0]:
             break
 

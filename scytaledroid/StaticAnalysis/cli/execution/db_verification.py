@@ -245,7 +245,31 @@ def _status_from_audit(
     if not audit:
         return None
 
-    if audit.is_group_scope:
+    gv = getattr(audit, "group_verification", None)
+
+    if audit.is_group_scope and gv is not None:
+        if gv.overall == "ERROR":
+            bits: list[str] = []
+            if missing:
+                bits.append("missing " + ", ".join(sorted(missing)))
+            if gv.completed_missing_findings_summary:
+                bits.append(
+                    f"completed missing static_findings_summary ({len(gv.completed_missing_findings_summary)} run(s))"
+                )
+            if gv.completed_missing_string_summary:
+                bits.append(
+                    f"completed missing static_string_summary ({len(gv.completed_missing_string_summary)} run(s))"
+                )
+            if gv.failed_nonterminal:
+                bits.append(f"non-terminal FAILED ({len(gv.failed_nonterminal)} run(s))")
+            status = "ERROR (" + ("; ".join(bits) if bits else "group verification") + ")"
+        elif missing:
+            status = "ERROR (missing " + ", ".join(sorted(missing)) + ")"
+        elif gv.overall == "PARTIAL":
+            status = "PARTIAL (group session; completed summaries OK; failed/in-progress excluded)"
+        else:
+            status = "OK (group scope)"
+    elif audit.is_group_scope:
         status = (
             "OK (group scope)"
             if not missing
@@ -382,16 +406,37 @@ def _compact_footer_ok(
     static_run_ids: Sequence[int],
     audit,
     db_verification_status: str | None,
+    legacy_runs_rows_for_session: int,
 ) -> None:
     print()
     print(f"Diagnostics: OK for session {session_stamp}")
 
-    run_part = ",".join(str(r) for r in latest_run_ids) if latest_run_ids else "<none>"
-    static_part = ",".join(str(r) for r in latest_static_run_ids) if latest_static_run_ids else "<none>"
-    print(f"run_id={run_part} static_run_id={static_part}")
+    latest_legacy = ",".join(str(r) for r in latest_run_ids) if latest_run_ids else ""
+    latest_static = latest_static_run_ids[-1] if latest_static_run_ids else None
+    cohort = bool(audit and audit.is_group_scope)
 
-    if audit and audit.is_group_scope:
-        print(f"scope=group runs={len(latest_run_ids)} static_runs={len(static_run_ids)}")
+    if cohort:
+        if not latest_legacy:
+            legacy_expl = "none (expected when legacy runs mirror is empty for this session)"
+        else:
+            legacy_expl = latest_legacy
+        drill = (
+            f"; example static_run_id for SQL drill-down={latest_static}"
+            if latest_static is not None
+            else ""
+        )
+        print(
+            f"Cohort DB linkage: legacy runs.run_id token={legacy_expl}; "
+            f"static_analysis_runs rows this session={len(static_run_ids)}{drill}"
+        )
+        print(
+            f"scope=group legacy_runs_rows={legacy_runs_rows_for_session} "
+            f"static_analysis_run_rows={len(static_run_ids)}"
+        )
+    else:
+        run_part = latest_legacy if latest_legacy else "<none>"
+        static_part = ",".join(str(r) for r in latest_static_run_ids) if latest_static_run_ids else "<none>"
+        print(f"run_id={run_part} static_run_id={static_part}")
 
     if db_verification_status:
         print(f"db_verification={db_verification_status}")
@@ -606,6 +651,7 @@ def _render_persistence_footer(
             static_run_ids=static_run_ids,
             audit=audit,
             db_verification_status=db_verification_status,
+            legacy_runs_rows_for_session=len(run_ids),
         )
         return
 
@@ -728,7 +774,7 @@ def _render_persistence_footer(
 
     if run_status == "FAILED" and (abort_reason or abort_signal):
         reason_token = abort_reason or abort_signal or "SIGINT"
-        print(f"  {'status'.ljust(width)} : FAILED ({reason_token}) — counts may be partial")
+        print(f"  {'status'.ljust(width)} : FAILED ({reason_token}) - counts may be partial")
     elif audit and audit.run_id is None and not audit.is_group_scope:
         if audit.is_orphan:
             print(f"  {'status'.ljust(width)} : WARN (orphan run_id missing)")
@@ -745,6 +791,39 @@ def _render_persistence_footer(
         print(
             f"  {'status'.ljust(width)} : "
             f"WARN (canonical checks failed: {_format_list(audit_error_tables)})"
+        )
+    elif (
+        audit
+        and audit.is_group_scope
+        and (gv := getattr(audit, "group_verification", None))
+        and gv.overall == "ERROR"
+    ):
+        bits: list[str] = []
+        if gv.completed_missing_findings_summary:
+            bits.append(
+                f"{len(gv.completed_missing_findings_summary)} COMPLETED missing static_findings_summary"
+            )
+        if gv.completed_missing_string_summary:
+            bits.append(
+                f"{len(gv.completed_missing_string_summary)} COMPLETED missing static_string_summary"
+            )
+        if gv.failed_nonterminal:
+            bits.append(f"{len(gv.failed_nonterminal)} non-terminal FAILED")
+        if missing:
+            bits.append(f"missing: {_format_list(missing)}")
+        print(
+            f"  {'status'.ljust(width)} : ERROR (group verification: {'; '.join(bits) or 'failed'})"
+        )
+    elif (
+        audit
+        and audit.is_group_scope
+        and (gv2 := getattr(audit, "group_verification", None))
+        and gv2.overall == "PARTIAL"
+        and not had_errors
+        and not missing
+    ):
+        print(
+            f"  {'status'.ljust(width)} : PARTIAL (group session; completed summary checks OK)"
         )
     elif had_errors or missing:
         missing_preview = _format_list(missing)

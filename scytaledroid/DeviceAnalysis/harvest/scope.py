@@ -25,6 +25,19 @@ from .watchlists import Watchlist
 
 _LAST_SCOPE: ScopeSelection | None = None
 
+# Menu label for the all-inventory scope (still filtered by non-root path policy when not rooted).
+FULL_INVENTORY_POLICY_FILTERED_LABEL = "Full inventory, policy-filtered"
+
+_DASH = "—"
+
+
+def _rows_pullable_under_path_policy(rows: Sequence[InventoryRow], *, is_rooted: bool) -> list[InventoryRow]:
+    """Rows that have at least one APK path harvestable under current root/policy (pre-plan)."""
+
+    if is_rooted:
+        return list(rows)
+    return [row for row in rows if any(rules.is_user_path(path) for path in row.apk_paths)]
+
 
 def _load_latest_scoped_inventory_packages(*, device_serial: str, scope_id: str) -> list[dict[str, object]] | None:
     """Best-effort: load latest scoped inventory snapshot packages for *scope_id*.
@@ -382,7 +395,8 @@ def select_package_scope(
             label: str,
             *,
             packages: int | None = None,
-            files: int | None = None,
+            pullable: int | str | None = None,
+            files: int | str | None = None,
             note: str | None = None,
             handler: Callable[[], ScopeSelection | None] | None = None,
             entries: list[dict[str, object]] = entries,
@@ -391,13 +405,14 @@ def select_package_scope(
             # Keep the menu readable on narrow terminals: truncate long notes (profiles lists,
             # blocked explanations, etc.).
             note_text = str(note or "").strip()
-            if note_text and len(note_text) > 64:
-                note_text = note_text[:61].rstrip() + "..."
+            if note_text and len(note_text) > 72:
+                note_text = note_text[:69].rstrip() + "..."
             entries.append(
                 {
                     "key": key,
                     "label": label,
                     "packages": packages,
+                    "pullable": pullable,
                     "files": files,
                     "note": note_text,
                 }
@@ -423,44 +438,69 @@ def select_package_scope(
                 if getattr(row, "package_name", None)
             }
         )
+        inv_total = len(rows)
+        default_pkg = context["default_counts"].get("packages")
+        default_files = context["default_counts"].get("files")
+        google_pkg = context["google_exceptions"].get("packages")
+        google_files = context["google_exceptions"].get("files")
+        pullable_full = _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)
+        blocked_full = max(inv_total - len(pullable_full), 0)
+        full_pullable_files = estimated_files(pullable_full)
+        profile_note = (
+            f"{profile_scope_count} active profile{'s' if profile_scope_count != 1 else ''}"
+            if profile_scope_count
+            else "none available"
+        )
         _add_entry(
             "1",
             "App profile",
-            packages=profile_scope_packages if profile_scope_packages else None,
-            note=f"{profile_scope_count} active" if profile_scope_count else "none available",
+            packages=inv_total,
+            pullable=_DASH,
+            files=_DASH,
+            note=profile_note,
             handler=lambda: _scope_profiles(rows, allow, device_serial=device_serial, is_rooted=is_rooted),
         )
 
         _add_entry(
             "2",
             "Play & user apps",
-            packages=context["default_counts"].get("packages"),
-            files=context["default_counts"].get("files"),
+            packages=default_pkg,
+            pullable=default_pkg if isinstance(default_pkg, int) else None,
+            files=default_files,
             note="default",
             handler=lambda: _scope_default(rows, allow),
         )
         _add_entry(
             "3",
             "Google allow-list",
-            packages=context["google_exceptions"].get("packages"),
-            files=context["google_exceptions"].get("files"),
+            packages=google_pkg,
+            pullable=google_pkg if isinstance(google_pkg, int) else None,
+            files=google_files,
             note="allow-list",
             handler=lambda: _scope_google_allowlist(rows, allow),
         )
+        full_note = (
+            f"{blocked_full} blocked by non-root policy"
+            if (not is_rooted and blocked_full)
+            else ("root device · full paths" if is_rooted else None)
+        )
         _add_entry(
             "4",
-            "Everything",
-            packages=context["everything"].get("packages"),
-            files=context["everything"].get("files"),
-            note="policy-filtered" if not is_rooted else None,
+            FULL_INVENTORY_POLICY_FILTERED_LABEL,
+            packages=inv_total,
+            pullable=len(pullable_full),
+            files=full_pullable_files,
+            note=full_note,
             handler=lambda: ScopeSelection(
-                label="Everything",
+                label=FULL_INVENTORY_POLICY_FILTERED_LABEL,
                 packages=list(rows),
                 kind="everything",
                 metadata={
-                    "estimated_files": context["everything"].get("files", 0),
+                    "estimated_files": full_pullable_files,
                     "candidate_count": len(rows),
                     "selected_count": len(rows),
+                    "pullable_count": len(pullable_full),
+                    "policy_blocked_inventory": blocked_full,
                     # Default to delta-filter for huge scopes unless the operator overrides it.
                     # The workflow will prompt for delta-vs-full-refresh when a delta summary exists.
                     "policy": "non_root_paths" if not is_rooted else "none",
@@ -468,17 +508,29 @@ def select_package_scope(
             ),
         )
 
-        headers = ["#", "Scope", "Packages", "Est.Files", "Notes"]
+        headers = ["#", "Scope", "Packages", "Pullable", "Est.Files", "Notes"]
         table_rows = []
         for entry in entries:
             key = str(entry["key"])
             label = entry["label"]
             packages = entry.get("packages")
+            pullable = entry.get("pullable")
             files = entry.get("files")
             note = entry.get("note") or ""
             pkg_cell = packages if isinstance(packages, int) else ""
-            files_cell = f"~{files}" if isinstance(files, int) and files else ""
-            table_rows.append([key, label, pkg_cell, files_cell, note])
+            if isinstance(pullable, int):
+                pull_cell = str(pullable)
+            elif isinstance(pullable, str) and pullable.strip():
+                pull_cell = pullable
+            else:
+                pull_cell = ""
+            if isinstance(files, int) and files:
+                files_cell = f"~{files}"
+            elif isinstance(files, str) and files.strip():
+                files_cell = files
+            else:
+                files_cell = ""
+            table_rows.append([key, label, pkg_cell, pull_cell, files_cell, note])
 
         table_utils.render_table(headers, table_rows, compact=True)
         print("0 back")
@@ -576,17 +628,27 @@ def _render_scope_table(
 ) -> None:
     print()
     print("----------------------------")
-    print("Execute Harvest -- Status")
+    print("Execute Harvest — inventory vs pull policy")
     print("----------------------------")
     candidates = len(rows)
-    eligible = candidates if is_rooted else sum(
-        1 for row in rows if any(rules.is_user_path(path) for path in row.apk_paths)
-    )
+    pullable_rows = _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)
+    eligible = len(pullable_rows)
     blocked = max(candidates - eligible, 0)
-    policy = "none" if is_rooted else "non_root_paths"
-    print(f"App candidates : {candidates}")
-    print(f"Policy eligible: {eligible} (blocked {blocked})")
-    print(f"Policy         : {policy}")
+    policy = "none (root)" if is_rooted else "non-root paths"
+    est_artifacts = estimated_files(pullable_rows)
+    print(f"Inventory scope      : {candidates} package(s)")
+    print(f"Eligible to pull     : {eligible} package(s)")
+    print(f"Blocked by policy    : {blocked} package(s)")
+    print(f"Policy               : {policy}")
+    print(f"Estimated artifacts  : ~{est_artifacts} APK path(s) (splits count as separate paths)")
+    if not is_rooted:
+        print(
+            status_messages.status(
+                "Non-root: inventory may include packages whose APK paths cannot be harvested on this device. "
+                "They remain inventoried but are blocked from pull.",
+                level="info",
+            )
+        )
     print("-" * 86)
 
 
@@ -948,10 +1010,10 @@ def _print_scope_overview(
                 "Android/Google/Motorola",
             ),
             (
-                "Everything",
+                FULL_INVENTORY_POLICY_FILTERED_LABEL,
                 str(len(rows)),
-                _format_count(context["everything"], "files", prefix="~"),
-                "Full inventory",
+                _format_count({"files": estimated_files(_rows_pullable_under_path_policy(rows, is_rooted=is_rooted))}, "files", prefix="~"),
+                "Policy still applies",
             ),
         ]
     )
@@ -974,7 +1036,8 @@ def _print_scope_overview(
                 print(status_messages.status(f"  • {bit}", level="info"))
     if not is_rooted:
         menu_utils.print_hint(
-            "System/vendor partitions require root; they are filtered automatically.",
+            "Non-root: inventory may include packages whose APK paths cannot be harvested here; "
+            "they stay inventoried but are blocked from pull.",
             icon="⚠",
         )
 

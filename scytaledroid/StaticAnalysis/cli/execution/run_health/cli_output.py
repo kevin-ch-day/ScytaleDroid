@@ -54,10 +54,11 @@ def compact_run_health_stdout_line(doc: Mapping[str, object]) -> str:
         path = str(outp.get("run_health_json_relative") or outp.get("run_health_json_abs") or "")
 
     return (
-        f"Run health: overall={doc.get('final_run_status')} "
-        f'apps="complete {roll.get("apps_complete_final")} / partial {roll.get("apps_partial_final")} / '
-        f'failed {roll.get("apps_failed_final")}" '
-        f"path={path}"
+        f"Run health (compact): final_run_status={doc.get('final_run_status')} "
+        f"| apps_complete={roll.get('apps_complete_final')} "
+        f"apps_finding_partial={roll.get('apps_partial_final')} "
+        f"apps_failed={roll.get('apps_failed_final')} "
+        f"| run_health_json={path}"
     )
 
 
@@ -74,7 +75,7 @@ def _detector_result_operator_label(
             return "execution errors and pipeline warnings/failures"
         return "detector execution errors"
     if not token or token == "ok":
-        return "ok (no policy/finding failures, no warn-stage issues)"
+        return "ok (no WARN-stage issues and no policy/finding gate failures)"
     mapping = {
         "warnings": "warnings (detector warn-stage only)",
         "policy_failures": "policy and finding gate failures",
@@ -104,7 +105,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         path = str(outp.get("run_health_json_relative") or outp.get("run_health_json_abs") or "")
 
     lines: list[str] = [
-        f"Run health{(' — ' + path) if path else ''}:",
+        f"Run health{(' - ' + path) if path else ''}:",
     ]
     if not sr:
         lines.append(compact_run_health_stdout_line(doc))
@@ -131,8 +132,9 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             f"Execution        : {exec_label} (workflow={exec_workflow})",
             (
                 "Detector result  : "
-                f"{det_human} | warnings={det_warn} finding_failures={det_fail} "
+                f"{det_human} | detector_warnings={det_warn} policy_failures={det_fail} "
                 f"execution_errors={det_exec}"
+                + (" (none - not analyzer crashes)" if det_exec == 0 else "")
             ),
             (
                 "DB persistence   : "
@@ -140,7 +142,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             ),
             (
                 "Governance       : "
-                f"{sr.get('governance_grade')} — {gov_r}"
+                f"{sr.get('governance_grade')} - {gov_r}"
             ),
             f"Overall health   : {doc.get('final_run_status')}",
             (
@@ -154,10 +156,13 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
     if (
         str(doc.get("final_run_status") or "") == "partial"
         and det_exec == 0
-        and (det_fail > 0 or det_warn > 0)
+        and exec_workflow == "complete"
+        and str(sr.get("db_persistence_status") or "") in {"ok", "partial"}
     ):
         lines.append(
-            "Note: partial means warn/policy-finding stages fired — not that scans or DB writes failed."
+            "Operator note    : Overall health is 'partial' because detector warnings and/or policy-finding "
+            "gates fired. Workflow and DB persistence still completed; execution_errors=0 means no "
+            "analyzer/pipeline crashes."
         )
 
     apps = doc.get("apps") if isinstance(doc.get("apps"), list) else []

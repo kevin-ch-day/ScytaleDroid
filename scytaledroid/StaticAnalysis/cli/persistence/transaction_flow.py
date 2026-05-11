@@ -8,6 +8,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from scytaledroid.Database.db_utils.sql_exception_context import (
+    extract_sql_exception_context,
+    infer_failing_table,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -118,6 +122,7 @@ def execute_persistence_transaction(
                         stage_context=stage_context,
                         findings_context=findings_context,
                         raise_db_error=raise_db_error,
+                        outcome=outcome,
                     )
 
                     callbacks.persist_metrics_and_sections_stage(
@@ -151,6 +156,18 @@ def execute_persistence_transaction(
             outcome.persistence_db_disconnect = bool(db_disconnect)
             outcome.persistence_exception_class = exc.__class__.__name__
             outcome.persistence_failure_stage = failure_stage
+            sql_ctx = extract_sql_exception_context(exc)
+            errno_val = sql_ctx.get("errno")
+            outcome.persistence_sql_errno = int(errno_val) if isinstance(errno_val, int) else None
+            st_val = sql_ctx.get("sqlstate")
+            outcome.persistence_sqlstate = str(st_val) if st_val else None
+            msg_val = sql_ctx.get("message")
+            outcome.persistence_exception_message = str(msg_val) if msg_val is not None else str(exc)
+            outcome.persistence_writer = str(failure_stage) if failure_stage else None
+            outcome.persistence_failing_table = infer_failing_table(
+                exception_message=outcome.persistence_exception_message,
+                failure_stage=failure_stage,
+            )
             compat_stage_names = getattr(stage_context, "compat_stage_names", None)
             if compat_stage_names is None:
                 compat_stage_names = getattr(callbacks.bootstrap_persistence_transaction, "__globals__", {}).get(

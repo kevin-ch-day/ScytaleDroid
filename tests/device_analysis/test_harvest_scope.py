@@ -158,4 +158,6 @@ def test_select_package_scope_menu_dedupes_profile_package_count(monkeypatch) ->
 
     assert selection is not None
     app_profile_row = next(row for row in captured_rows["rows"] if str(row[1]) == "App profile")
-    assert app_profile_row[2] == 2
+    assert app_profile_row[2] == 2  # Packages = device inventory rows
+    assert app_profile_row[3] == scope._DASH  # Pullable unknown until a profile is chosen
+    assert app_profile_row[4] == scope._DASH

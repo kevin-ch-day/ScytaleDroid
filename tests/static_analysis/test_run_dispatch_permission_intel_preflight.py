@@ -93,9 +93,12 @@ def test_static_preflight_runs_when_canonical_grade_off(
     )
     out = capsys.readouterr().out
     assert "Static run preflight" in out
-    assert "Paper-grade: experimental (SCYTALEDROID_CANONICAL_GRADE=0)" in out
-    assert "DB persistence: enabled" in out
-    assert "mirror removed" in out.lower()
+    assert "Core execution" in out
+    assert "Research grade" in out
+    assert "Run grade: EXPERIMENTAL" in out
+    assert "SCYTALEDROID_CANONICAL_GRADE=0" in out
+    assert "DB persistence: ON" in out
+    assert "Legacy mirrors" in out
     assert "Split scan:" in out
 
 
@@ -115,7 +118,7 @@ def test_static_preflight_notes_legacy_mirror_removed(
         base_dir=Path("."),
     )
     out = capsys.readouterr().out
-    assert "legacy" in out.lower() and "mirror removed" in out.lower()
+    assert "legacy mirrors" in out.lower()
 
 
 def test_static_preflight_shows_persistence_skipped(
@@ -154,8 +157,10 @@ def test_preflight_warns_when_intel_not_configured(
         base_dir=Path("."),
     )
     out = capsys.readouterr().out
-    assert "Permission Intel: missing" in out
-    assert "SCYTALEDROID_CANONICAL_GRADE=0" in out
+    assert "Permission Intel: MISSING" in out
+    assert "Run grade: EXPERIMENTAL" in out
+    assert "Impact: Core scan and DB persistence can continue." in out
+    assert "SCYTALEDROID_PERMISSION_INTEL_DB_" in out
 
 
 def test_preflight_ok_when_governance_ready(
@@ -179,8 +184,8 @@ def test_preflight_ok_when_governance_ready(
     )
     out = capsys.readouterr().out
     assert "Permission Intel: OK" in out
-    assert "paper-grade ready" in out
-    assert "Paper-grade: ready" in out
+    assert "Run grade: PAPER-GRADE READY" in out
+    assert "Blocking: nothing here" in out
 
 
 def test_preflight_governance_missing_message(

@@ -70,6 +70,7 @@ from .results_persist import _build_ingest_payload, _persist_cohort_rollup
 from .results_persistence import (
     apply_persistence_outcome,
     collect_persistence_errors,
+    format_persistence_failure_detail,
     merge_persistence_metadata,
 )
 from .results_sections import (
@@ -169,17 +170,39 @@ def _format_persistence_progress_text(
     elapsed_text: str,
     eta_text: str,
     persistence_error_count: int,
+    include_phase_banner: bool = True,
 ) -> str:
     current = app_label or package_name
-    lines = [f"Persisting app: {current}"]
+    lines: list[str] = []
+    if include_phase_banner:
+        lines.extend(
+            [
+                "DB persistence phase (scan finished; writing DB/evidence rows per package)",
+                "-" * 60,
+            ]
+        )
+    lines.append(f"Writing now: {current}")
     if package_name and package_name.strip() != current.strip():
         lines.append(f"Package: {package_name}")
+    eta_raw = str(eta_text or "").strip()
+    if eta_raw in {"", "--"}:
+        eta_disp = "not available yet"
+    else:
+        eta_disp = f"~{eta_raw}" if not eta_raw.startswith("~") else eta_raw
+    pct = ""
+    if total_results > 0:
+        pct = f" ({int(round((index / total_results) * 100))}%)"
     lines.extend(
         [
-        f"Progress: {index}/{total_results} app(s)",
-        f"Elapsed : {elapsed_text}",
-        f"ETA     : ~{eta_text}",
-        f"Health  : persistence_errors={persistence_error_count}",
+            f"Package write progress: {index} / {total_results}{pct}",
+            f"Elapsed: {elapsed_text}",
+            f"ETA: {eta_disp} (from recent write rate; stabilizes mid-run)",
+            f"Persistence errors: {persistence_error_count}"
+            + (
+                " (none - DB write phase healthy so far)"
+                if persistence_error_count == 0
+                else " (see prior lines / persistence audit)"
+            ),
         ]
     )
     return "\n".join(lines)
@@ -212,12 +235,15 @@ def _render_compact_persistence_summary(
         f"plan={plan_written_count} "
         f"report={report_reference_count}"
     )
+    persist_err_ct = len(list(dict.fromkeys(str(x) for x in persistence_errors)))
+    canon_err_ct = len(list(dict.fromkeys(str(x) for x in canonical_failures if x)))
+    compat_err_ct = len(list(dict.fromkeys(str(x) for x in compat_export_errors if x)))
     print(
-        "Status  : "
-        f"{run_status} "
-        f"(persistence_errors={len(list(dict.fromkeys(str(x) for x in persistence_errors)))} "
-        f"canonical_failures={len(list(dict.fromkeys(str(x) for x in canonical_failures if x)) )} "
-        f"compat_export_errors={len(list(dict.fromkeys(str(x) for x in compat_export_errors if x)) )})"
+        (
+            "Status  : "
+            f"{run_status} | persistence_errors={persist_err_ct} | "
+            f"canonical_failures={canon_err_ct} | compat_export_errors={compat_err_ct}"
+        )
     )
     print("Details : Database tools / Web view for full diagnostics")
 
@@ -898,6 +924,7 @@ def _render_run_results_impl(
                                 persistence_error_count=len(
                                     list(dict.fromkeys(str(x) for x in persistence_errors))
                                 ),
+                                include_phase_banner=bool(index == 1),
                             ),
                             level="info",
                         )
@@ -1052,6 +1079,21 @@ def _render_run_results_impl(
                 )
                 normalized_findings_total += findings_delta
                 string_samples_persisted_total += sample_delta
+                if outcome_status and outcome_status.success:
+                    perm_warns = getattr(app_result, "persistence_warnings", []) or []
+                    dup_n = sum(
+                        1
+                        for w in perm_warns
+                        if str(w.get("warning_code") or "") == "duplicate_permission_skipped"
+                    )
+                    if dup_n:
+                        print(
+                            status_messages.status(
+                                f"Persistence note: skipped {dup_n} duplicate permission line(s) "
+                                f"after canonicalization (details in persistence audit JSON).",
+                                level="info",
+                            )
+                        )
                 _emit_static_persistence_event(
                     event=logging_events.PERSIST_APP,
                     message="Static persistence app finalized",
@@ -1105,11 +1147,34 @@ def _render_run_results_impl(
                         if compat_errs and not persist_errs and not canon_errs
                         else "persistence error"
                     )
-                    warning = (
-                        f"Aborting post-processing: {issue_label} "
-                        f"(package={app_result.package_name})."
+                    detail = format_persistence_failure_detail(
+                        package_name=app_result.package_name,
+                        session_stamp=params.session_stamp,
+                        static_run_id=app_result.static_run_id,
+                        outcome_status=outcome_status,
+                        issue_label=issue_label,
                     )
-                    print(status_messages.status(warning, level="error"))
+                    print(
+                        status_messages.status(
+                            f"Aborting post-processing: {issue_label} "
+                            f"(package={app_result.package_name}).",
+                            level="error",
+                        )
+                    )
+                    for line in detail.splitlines():
+                        print(status_messages.status(line, level="error"))
+                    logging_engine.get_error_logger().error(
+                        "Static persistence aborted",
+                        extra=logging_engine.ensure_trace(
+                            {
+                                "event": "static.persistence_abort",
+                                "detail": detail,
+                                "package": app_result.package_name,
+                                "session_stamp": params.session_stamp,
+                                "static_run_id": app_result.static_run_id,
+                            }
+                        ),
+                    )
                     if "PERSISTENCE_ERROR" not in outcome.failures:
                         outcome.failures.append("PERSISTENCE_ERROR")
                     break
@@ -1156,6 +1221,18 @@ def _render_run_results_impl(
                     f"(package={app_result.package_name})."
                 )
                 print(status_messages.status(failfast, level="error"))
+                exc_detail = "\n".join(
+                    [
+                        f"persistence_stage=persist_run_summary_exception",
+                        f"package_name={app_result.package_name}",
+                        f"session_stamp={params.session_stamp or '—'}",
+                        f"static_run_id={app_result.static_run_id or '—'}",
+                        f"exception_class={exc.__class__.__name__}",
+                        f"exception_message={exc!s}",
+                    ]
+                )
+                for line in exc_detail.splitlines():
+                    print(status_messages.status(line, level="error"))
                 if "PERSISTENCE_ERROR" not in outcome.failures:
                     outcome.failures.append("PERSISTENCE_ERROR")
                 break

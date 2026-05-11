@@ -611,10 +611,20 @@ def _render_compact_status(
         f"{_styled_count_phrase(pkg_count, 'pkgs', tone='accent')} · "
         f"{colors.apply(f'{age_display} ago', colors.style('muted'))}"
     )
+    harvest_token = "none" if harvested_count in (None, 0) else str(harvested_count)
+    harvest_styled = colors.apply(
+        harvest_token,
+        colors.style("success" if harvested_count not in (None, 0) else "muted"),
+        bold=True,
+    )
+    pullable_txt = _format_summary_value(pipeline.get("policy_eligible"))
+    pol_txt = _format_summary_value(blocked_policy)
+    sc_txt = _format_summary_value(blocked_scope)
     har_part = (
-        f"{_styled_count_phrase(harvested_count, 'hv', tone='success')} · "
-        f"{_styled_count_phrase(blocked_policy, 'pol', tone='blocked')} · "
-        f"{_styled_count_phrase(blocked_scope, 'sc', tone='warning')}"
+        f"{colors.apply('Harvest', palette.muted, bold=True)} {harvest_styled} · "
+        f"{colors.apply('pullable', palette.muted)} {pullable_txt} · "
+        f"{colors.apply('policy-blocked', palette.muted)} {pol_txt} · "
+        f"{colors.apply('scope-blocked', palette.muted)} {sc_txt}"
     )
 
     print()

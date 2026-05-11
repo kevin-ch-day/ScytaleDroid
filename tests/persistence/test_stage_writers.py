@@ -21,6 +21,10 @@ def test_persist_permission_and_storage_stage_handles_missing_metadata_map() -> 
     )
     findings_context = SimpleNamespace(control_summary=None, total_findings=0, control_entry_count=0)
 
+    def _fake_risk(**kwargs):
+        calls.setdefault("risk", kwargs)
+        return []
+
     persist_permission_and_storage_stage(
         run_id=99,
         static_run_id=None,
@@ -30,12 +34,41 @@ def test_persist_permission_and_storage_stage_handles_missing_metadata_map() -> 
         persist_masvs_controls=lambda *_a, **_k: None,
         persist_storage_surface_data=lambda *_a, **_k: None,
         persist_permission_matrix=lambda **kwargs: calls.setdefault("matrix", kwargs),
-        persist_permission_risk=lambda **kwargs: calls.setdefault("risk", kwargs),
+        persist_permission_risk=_fake_risk,
         safe_int=lambda value: int(value) if value is not None else None,
     )
 
-    assert calls["matrix"]["apk_id"] == 99
+    assert calls["matrix"]["apk_id"] is None
     assert calls["risk"]["run_id"] == 99
+
+
+def test_persist_permission_and_storage_stage_passes_apk_id_from_metadata() -> None:
+    calls: dict[str, object] = {}
+
+    stage_context = SimpleNamespace(
+        package_for_run="com.example.app",
+        base_report=SimpleNamespace(detector_metrics={}),
+        session_stamp="sess-1",
+        scope_label="all",
+        metadata_map={"apk_id": 555},
+        metrics_bundle=SimpleNamespace(contributors=[]),
+        baseline_payload={},
+    )
+    findings_context = SimpleNamespace(control_summary=None, total_findings=0, control_entry_count=0)
+
+    persist_permission_and_storage_stage(
+        run_id=99,
+        static_run_id=100,
+        stage_context=stage_context,
+        findings_context=findings_context,
+        raise_db_error=lambda stage, message: (_ for _ in ()).throw(AssertionError(f"{stage}:{message}")),
+        persist_masvs_controls=lambda *_a, **_k: None,
+        persist_storage_surface_data=lambda *_a, **_k: None,
+        persist_permission_matrix=lambda **kwargs: calls.setdefault("matrix", kwargs),
+        persist_permission_risk=lambda **_k: [],
+        safe_int=lambda value: int(value) if value is not None else None,
+    )
+    assert calls["matrix"]["apk_id"] == 555
 
 
 def test_persist_metrics_and_sections_stage_writes_static_sections_only() -> None:

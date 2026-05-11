@@ -13,6 +13,7 @@ from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.DisplayUtils.menu_utils import print_section
 
 
 def check_static_persistence_readiness(params: RunParameters) -> tuple[bool, str, str]:
@@ -80,31 +81,27 @@ def _emit_primary_db_and_schema(params: RunParameters) -> None:
         )
 
 
-def _emit_permission_intel_and_grade(params: RunParameters) -> None:
-    """Print Intel / paper-grade lines."""
+def _emit_research_grade_block(params: RunParameters) -> None:
+    """Governance / paper-grade lines (does not gate core scan execution)."""
 
+    print_section("Research grade")
     paper = bool(getattr(params, "paper_grade_requested", True))
     intel_label = "unknown"
     try:
         from scytaledroid.Database.db_core import permission_intel as intel_db
         from scytaledroid.StaticAnalysis.cli.execution.pipeline import governance_ready
     except Exception as exc:  # pragma: no cover - import guard
+        intel_label = "query_failed"
         print(
             status_messages.status(
                 f"Permission Intel: import failed ({exc}).",
                 level="warn",
             )
         )
-        intel_label = "query_failed"
     else:
         if not intel_db.is_permission_intel_configured():
             intel_label = "missing"
-            print(
-                status_messages.status(
-                    "Permission Intel: missing — run will be EXPERIMENTAL unless SCYTALEDROID_CANONICAL_GRADE=0.",
-                    level="warn",
-                )
-            )
+            print(status_messages.status("Permission Intel: MISSING", level="info"))
         else:
             try:
                 gov_ok, gov_detail = governance_ready()
@@ -121,7 +118,7 @@ def _emit_permission_intel_and_grade(params: RunParameters) -> None:
                     intel_label = "ok"
                     print(
                         status_messages.status(
-                            "Permission Intel: OK — governance snapshot rows present; paper-grade ready.",
+                            "Permission Intel: OK (governance snapshot rows present)",
                             level="info",
                         )
                     )
@@ -129,9 +126,8 @@ def _emit_permission_intel_and_grade(params: RunParameters) -> None:
                     intel_label = "governance_missing"
                     print(
                         status_messages.status(
-                            "Permission Intel: configured but governance_missing — load governance snapshots "
-                            "before paper-grade runs.",
-                            level="warn",
+                            "Permission Intel: configured — governance_missing (load governance snapshots)",
+                            level="info",
                         )
                     )
                 else:
@@ -143,20 +139,61 @@ def _emit_permission_intel_and_grade(params: RunParameters) -> None:
                         )
                     )
 
-    if paper:
-        if intel_label == "ok":
-            print(status_messages.status("Paper-grade: ready", level="info"))
-        else:
-            print(
-                status_messages.status(
-                    "Paper-grade: experimental (intel/governance not satisfied for canonical grade)",
-                    level="warn",
-                )
+    impact = "Impact: Core scan and DB persistence can continue."
+    if not paper:
+        print(
+            status_messages.status(
+                "Run grade: EXPERIMENTAL (paper-grade not requested — SCYTALEDROID_CANONICAL_GRADE=0)",
+                level="info",
             )
+        )
+        print(status_messages.status(impact, level="info"))
+        print(
+            status_messages.status(
+                "Action: Enable canonical grade and configure Permission Intel for paper-grade output.",
+                level="info",
+            )
+        )
+        return
+
+    if intel_label == "ok":
+        print(status_messages.status("Run grade: PAPER-GRADE READY", level="info"))
+        print(
+            status_messages.status(
+                "Blocking: nothing here - Permission Intel does not gate core scanning or DB persistence.",
+                level="info",
+            )
+        )
+        return
+
+    print(status_messages.status("Run grade: EXPERIMENTAL", level="info"))
+    print(status_messages.status(impact, level="info"))
+    if intel_label == "missing":
+        print(
+            status_messages.status(
+                "Action: Configure SCYTALEDROID_PERMISSION_INTEL_DB_* (and governance snapshots) "
+                "for paper-grade runs.",
+                level="info",
+            )
+        )
+    elif intel_label == "governance_missing":
+        print(
+            status_messages.status(
+                "Action: Load Permission Intel governance snapshots before paper-grade runs.",
+                level="info",
+            )
+        )
+    elif intel_label == "query_failed":
+        print(
+            status_messages.status(
+                "Action: Fix Permission Intel connectivity/queries, then re-check governance readiness.",
+                level="info",
+            )
+        )
     else:
         print(
             status_messages.status(
-                "Paper-grade: experimental (SCYTALEDROID_CANONICAL_GRADE=0)",
+                "Action: Resolve Permission Intel / governance readiness before paper-grade runs.",
                 level="info",
             )
         )
@@ -166,7 +203,7 @@ def _emit_db_persistence_preflight(params: RunParameters) -> None:
     if getattr(params, "persistence_ready", True):
         print(
             status_messages.status(
-                "DB persistence: enabled (session writes to MariaDB when configured)",
+                "DB persistence: ON (session writes to MariaDB when configured)",
                 level="info",
             )
         )
@@ -178,12 +215,7 @@ def _emit_db_persistence_preflight(params: RunParameters) -> None:
             )
         )
 
-    print(
-        status_messages.status(
-            "Canonical static writes only (legacy runs/metrics/buckets mirror removed).",
-            level="info",
-        )
-    )
+    print(status_messages.status("Legacy mirrors: OFF (canonical static writes only)", level="info"))
 
 
 def _emit_output_paths_and_split(params: RunParameters, base_dir: Path) -> None:
@@ -201,7 +233,7 @@ def _emit_output_paths_and_split(params: RunParameters, base_dir: Path) -> None:
             first_err = str(exc)
             break
     if write_ok:
-        print(status_messages.status("Output paths: writable", level="info"))
+        print(status_messages.status("Output paths: OK (writable)", level="info"))
     else:
         print(
             status_messages.status(
@@ -213,7 +245,7 @@ def _emit_output_paths_and_split(params: RunParameters, base_dir: Path) -> None:
     split_on = bool(getattr(params, "scan_splits", True))
     print(
         status_messages.status(
-            f"Split scan: {'on' if split_on else 'off'}",
+            f"Split scan: {'ON' if split_on else 'OFF'}",
             level="info",
         )
     )
@@ -235,10 +267,11 @@ def emit_static_run_preflight_summary(
     print()
     print(status_messages.step("Static run preflight", label="Static Analysis"))
 
+    print_section("Core execution")
     _emit_primary_db_and_schema(params)
-    _emit_permission_intel_and_grade(params)
     _emit_db_persistence_preflight(params)
     _emit_output_paths_and_split(params, base_dir)
+    _emit_research_grade_block(params)
     print()
 
 

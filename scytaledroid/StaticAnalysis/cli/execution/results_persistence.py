@@ -86,6 +86,13 @@ def apply_persistence_outcome(
         app_result.persistence_exception_class = getattr(
             outcome_status, "persistence_exception_class", None
         )
+        app_result.persistence_exception_message = getattr(
+            outcome_status, "persistence_exception_message", None
+        )
+        app_result.persistence_sql_errno = getattr(outcome_status, "persistence_sql_errno", None)
+        app_result.persistence_sqlstate = getattr(outcome_status, "persistence_sqlstate", None)
+        app_result.persistence_failing_table = getattr(outcome_status, "persistence_failing_table", None)
+        app_result.persistence_writer = getattr(outcome_status, "persistence_writer", None)
         app_result.persistence_transaction_state = getattr(
             outcome_status, "persistence_transaction_state", None
         )
@@ -102,7 +109,71 @@ def apply_persistence_outcome(
             app_result.persistence_findings_capped_by_detector = {str(k): int(v) for k, v in cast(Mapping[Any, Any], capped_map).items()}
         else:
             app_result.persistence_findings_capped_by_detector = {}
+        pw = getattr(outcome_status, "persistence_warnings", None) or []
+        if pw:
+            app_result.persistence_warnings.extend(list(pw))
     return normalized_findings_delta, string_samples_delta
+
+
+def format_persistence_failure_detail(
+    *,
+    package_name: str,
+    session_stamp: str | None,
+    static_run_id: int | None,
+    outcome_status: object | None,
+    issue_label: str,
+) -> str:
+    """
+    Operator-facing multi-line detail for persistence aborts (stdout + logs).
+
+    Keeps Permission Intel / governance messages separate — only persistence outcome fields here.
+    """
+
+    lines: list[str] = [
+        f"persistence_stage={issue_label}",
+        f"package_name={package_name}",
+        f"session_stamp={session_stamp or '—'}",
+        f"static_run_id={static_run_id or '—'}",
+    ]
+    if outcome_status is None:
+        return "\n".join(lines)
+    stage = getattr(outcome_status, "persistence_failure_stage", None)
+    if stage:
+        lines.append(f"persistence_failure_stage={stage}")
+    exc_cls = getattr(outcome_status, "persistence_exception_class", None)
+    if exc_cls:
+        lines.append(f"persistence_exception_class={exc_cls}")
+    exc_msg = getattr(outcome_status, "persistence_exception_message", None)
+    if exc_msg:
+        lines.append(f"persistence_exception_message={exc_msg}")
+    sql_errno = getattr(outcome_status, "persistence_sql_errno", None)
+    if sql_errno is not None:
+        lines.append(f"persistence_sql_errno={sql_errno}")
+    sqlstate = getattr(outcome_status, "persistence_sqlstate", None)
+    if sqlstate:
+        lines.append(f"persistence_sqlstate={sqlstate}")
+    fail_tbl = getattr(outcome_status, "persistence_failing_table", None)
+    if fail_tbl:
+        lines.append(f"persistence_failing_table={fail_tbl}")
+    writer = getattr(outcome_status, "persistence_writer", None)
+    if writer:
+        lines.append(f"persistence_writer={writer}")
+    tx_state = getattr(outcome_status, "persistence_transaction_state", None)
+    if tx_state:
+        lines.append(f"persistence_transaction_state={tx_state}")
+    if bool(getattr(outcome_status, "compat_export_failed", False)):
+        ces = getattr(outcome_status, "compat_export_stage", None)
+        if ces:
+            lines.append(f"compat_export_stage={ces}")
+    errs = getattr(outcome_status, "errors", None) or []
+    for i, err in enumerate(errs):
+        lines.append(f"persistence_error[{i}]={err}")
+    if getattr(outcome_status, "persistence_db_disconnect", False):
+        lines.append("persistence_db_disconnect=1")
+    retry = getattr(outcome_status, "persistence_retry_count", None)
+    if retry is not None and int(retry) > 0:
+        lines.append(f"persistence_retry_count={retry}")
+    return "\n".join(lines)
 
 
 def collect_persistence_errors(
@@ -128,5 +199,6 @@ def collect_persistence_errors(
 __all__ = [
     "apply_persistence_outcome",
     "collect_persistence_errors",
+    "format_persistence_failure_detail",
     "merge_persistence_metadata",
 ]
