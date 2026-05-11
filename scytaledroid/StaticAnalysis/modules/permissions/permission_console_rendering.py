@@ -10,11 +10,7 @@ from scytaledroid.StaticAnalysis.risk.permission import (
     permission_risk_score_detail,
 )
 
-from .analysis.capability_signal_classifier import (
-    _GROUP_ORDER,
-    compute_group_strengths,
-    iter_group_hits,
-)
+from .analysis.signals import _GROUP_ORDER, compute_group_strengths, iter_group_hits
 from .permission_manifest_extract import _format_permission, collect_permissions_and_sdk
 from .permission_matrix_view import render_permission_matrix
 from .permission_protection_lookup import _fetch_protections

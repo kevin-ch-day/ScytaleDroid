@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scytaledroid.Utils.DisplayUtils import status_messages
 
-from ..views.view_renderers import write_baseline_json
+from ..views.renderers.dynamic_plan import write_baseline_json
 
 
 def write_baseline_json_artifact(

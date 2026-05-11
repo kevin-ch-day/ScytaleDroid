@@ -19,6 +19,7 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 from .db_masvs_summary import render_db_masvs_summary as _render_db_masvs_summary
@@ -63,6 +64,20 @@ def _scalar_total(sql: str) -> int:
 
     value = row[0] if not isinstance(row, dict) else next(iter(row.values()), 0)
     return _safe_int(value)
+
+
+def _legacy_mirror_catalog_total(table: str, *, presence: Mapping[str, bool]) -> int | None:
+    """Full-table ``COUNT(*)`` for a legacy mirror table, or ``None`` when the table is absent."""
+
+    if presence and table in presence and not presence[table]:
+        return None
+    return _scalar_total(f"SELECT COUNT(*) FROM `{table}`")
+
+
+def _fmt_catalog_total(value: int | None) -> str:
+    if value is None:
+        return "n/a (table absent)"
+    return str(value)
 
 
 def _canonical_static_findings_session_rows(session_stamp: str) -> int:
@@ -426,11 +441,11 @@ def _compact_footer_ok(
             else ""
         )
         print(
-            f"Cohort DB linkage: legacy runs.run_id token={legacy_expl}; "
+            f"Cohort DB linkage: legacy `runs` mirror run_id token={legacy_expl}; "
             f"static_analysis_runs rows this session={len(static_run_ids)}{drill}"
         )
         print(
-            f"scope=group legacy_runs_rows={legacy_runs_rows_for_session} "
+            f"scope=group legacy_runs_table_rows={legacy_runs_rows_for_session} "
             f"static_analysis_run_rows={len(static_run_ids)}"
         )
     else:
@@ -458,14 +473,27 @@ def _render_persistence_footer(
     """
     canonical_failures = canonical_failures or []
 
+    legacy_mirror_tables = ("runs", "buckets", "metrics", "findings")
     try:
-        run_rows = core_q.run_sql(
-            "SELECT run_id FROM runs WHERE session_stamp = %s",
-            (session_stamp,),
-            fetch="all",
-        ) or []
+        legacy_mirror_presence = diagnostics.check_required_tables(list(legacy_mirror_tables))
     except Exception:
-        return
+        legacy_mirror_presence = {}
+
+    run_rows: list[tuple[object, ...] | list[object]] = []
+    if legacy_mirror_presence and not legacy_mirror_presence.get("runs"):
+        run_rows = []
+    else:
+        try:
+            run_rows = (
+                core_q.run_sql(
+                    "SELECT run_id FROM runs WHERE session_stamp = %s",
+                    (session_stamp,),
+                    fetch="all",
+                )
+                or []
+            )
+        except Exception:
+            run_rows = []
 
     run_ids = sorted(int(row[0]) for row in run_rows if row and row[0] is not None)
     latest_run_ids = run_ids[-1:] if run_ids else []
@@ -655,10 +683,10 @@ def _render_persistence_footer(
         )
         return
 
-    runs_total = _scalar_total("SELECT COUNT(*) FROM runs")
-    buckets_total = _scalar_total("SELECT COUNT(*) FROM buckets")
-    metrics_total = _scalar_total("SELECT COUNT(*) FROM metrics")
-    findings_total = _scalar_total("SELECT COUNT(*) FROM findings")
+    runs_total = _legacy_mirror_catalog_total("runs", presence=legacy_mirror_presence)
+    buckets_total = _legacy_mirror_catalog_total("buckets", presence=legacy_mirror_presence)
+    metrics_total = _legacy_mirror_catalog_total("metrics", presence=legacy_mirror_presence)
+    findings_total = _legacy_mirror_catalog_total("findings", presence=legacy_mirror_presence)
     strings_summary_total = _scalar_total("SELECT COUNT(*) FROM static_string_summary")
     string_samples_raw_total = _scalar_total("SELECT COUNT(*) FROM static_string_samples")
     string_samples_selected_total = _scalar_total("SELECT COUNT(*) FROM static_string_selected_samples")
@@ -683,13 +711,16 @@ def _render_persistence_footer(
 
     lines: list[tuple[str, str]] = [
         ("run_scope", scope_note),
-        ("runs", f"this_run={run_count}  db_total={runs_total}"),
         (
-            "findings",
+            "legacy_runs_table",
+            f"session_rows={run_count}  db_total_all_sessions={_fmt_catalog_total(runs_total)}  (not canonical; historical)",
+        ),
+        (
+            "legacy_findings_table",
             (
-                f"legacy_table_this_run={findings}  db_total_legacy={findings_total}"
+                f"session_rows={findings}  db_total_all_sessions={_fmt_catalog_total(findings_total)}"
                 + (
-                    f"  canonical_session_rows={canonical_finding_rows}"
+                    f"  canonical_static_findings_session_rows={canonical_finding_rows}"
                     if canonical_finding_rows
                     else ""
                 )
@@ -701,8 +732,14 @@ def _render_persistence_footer(
         ("static_string_samples", f"this_run={string_samples_raw}  db_total={string_samples_raw_total}"),
         ("static_string_selected", f"this_run={string_samples_selected}  db_total={string_samples_selected_total}"),
         ("string_sample_policy", f"version={selection_version or '—'}  policy={policy_version or '—'}"),
-        ("buckets", f"legacy_optional this_run={buckets}  db_total={buckets_total}"),
-        ("metrics", f"legacy_optional this_run={metrics}  db_total={metrics_total}"),
+        (
+            "legacy_buckets_table",
+            f"session_rows={buckets}  db_total_all_sessions={_fmt_catalog_total(buckets_total)}  (optional mirror)",
+        ),
+        (
+            "legacy_metrics_table",
+            f"session_rows={metrics}  db_total_all_sessions={_fmt_catalog_total(metrics_total)}  (optional mirror)",
+        ),
         ("permission_audit_snapshots", f"this_run={snapshot_count}  db_total={snapshot_total}"),
         ("permission_audit_apps", f"this_run={snapshot_apps}  db_total={snapshot_apps_total}"),
     ]

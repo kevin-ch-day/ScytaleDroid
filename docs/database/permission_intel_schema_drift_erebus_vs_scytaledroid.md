@@ -8,6 +8,15 @@
 
 ---
 
+## 0. Deployment mental model (Permission Intel vs Erebus)
+
+- **ScytaleDroid Permission Intel** targets the MariaDB catalog **`android_permission_intel`** (via `SCYTALEDROID_PERMISSION_INTEL_DB_*` / URL).
+- **Erebus** uses **`EREBUS_*`** (or project-specific) env vars and its **own** database catalog. The two are **not** interchangeable in documentation, env files, or mental models — wrong DSNs produce confusing “missing governance” failures.
+
+**Operational open points** (conventions, not blockers for this drift doc): whether both catalogs ever live on one MariaDB **server** as two database names; how governance CSV / snapshot imports land in `android_permission_intel` for paper-grade checks vs Erebus provenance (`source_system` on governance rows).
+
+---
+
 ## 1. Reference DDL snapshot vs live brownfield
 
 `android_permissions_schema.sql` is a **greenfield snapshot**. Erebus production writers **introspect** live columns for:

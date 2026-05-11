@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+# ``findings`` / ``buckets`` / ``metrics`` / ``contributors`` below are legacy mirror names kept in
+# the scientific UoW envelope for observability and transaction bookkeeping. Current static writers
+# do not INSERT into those tables (``AGENTS.md``); retire names only after reader removal — see
+# ``docs/maintenance/legacy_static_deprecation_playbook.md``.
+
 SCIENTIFIC_UOW_TABLES = frozenset(
     {
         # Identity/dimension rows that may be created while resolving run identity.

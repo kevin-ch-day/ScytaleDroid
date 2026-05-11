@@ -35,22 +35,29 @@ only. Do not rely on retention as a correctness mechanism for paper-grade runs.
 
 `Utils → Show log directories` prints the resolved paths for each subsystem. By
 default logs live under `./logs/` with paired human-readable and JSONL streams
-so you can tail text locally or feed structured events to tooling:
+(where configured) so you can tail text locally or feed structured events to tooling.
+
+**Source of truth:** `scytaledroid/Utils/LoggingUtils/logging_engine.py` (`LOG_CONFIGS`). If this table disagrees with code, code wins — see `docs/maintenance/logs_operator_hygiene_plan.md`.
 
 | Category         | Human readable          | Structured JSONL               |
 |------------------|-------------------------|--------------------------------|
 | Application      | `app.log`               | `app.jsonl`                    |
-| Database         | —                       | `db.jsonl`                     |
+| Database         | `db.log`                | `db.jsonl`                     |
 | Device analysis  | `device_analysis.log`   | `device_analysis.jsonl`        |
+| Harvest (global) | `harvest.log`           | `harvest.jsonl`                |
 | Static analysis  | `static_analysis.log`   | `static_analysis.jsonl`        |
 | Dynamic analysis | `dynamic_analysis.log`  | `dynamic_analysis.jsonl`       |
-| Metrics          | —                       | `metrics.jsonl`                |
+| Metrics          | —                       | `metrics.jsonl` *(logger category “metrics”; not legacy SQL `metrics` table)* |
 | Error funnel     | `error.log`             | —                              |
 | Audit trail      | `audit.log`             | `audit.jsonl`                  |
 
-Harvest runs also emit dedicated JSONL files under
-`logs/harvest/<timestamp>_run-<id>.jsonl` so you can review a single device
-session without combing through global logs.
+**Rotation:** handlers use size-based rotation with **gzip** on rollover — expect sibling **`*.gz`** files next to active logs (default **10 MiB** per file, **14** backups per category unless changed in code).
+
+**Harvest per-run files** (in addition to global `harvest.log` / `harvest.jsonl`): under `logs/harvest/`, files named `<timestamp>_run-<slug>.jsonl` **and** paired `<timestamp>_run-<slug>.log` (see `create_harvest_run_logger`).
+
+**Third-party debug:** androguard deep logs may land under `logs/third_party/` (e.g. `androguard.<run_id>.log`) when verbosity demands it — not the same channels as the table above.
+
+**Script vocabulary:** some operator scripts glob `logs/harvest_runs/` — treat **`logs/harvest/`** as the canonical per-run directory; path aliases vary by script age.
 
 The same helper also reminds operators where device state and static-analysis
 report directories live so they can inspect or archive them manually when

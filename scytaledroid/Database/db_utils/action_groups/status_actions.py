@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,36 @@ from scytaledroid.Utils.version_utils import get_git_commit
 
 _DUPLICATE_SCAN_FAILED_USER_HINT = "Operational duplicate scan failed; see debug logs."
 _PI_TARGET_SNAPSHOT_FAILED_DETAIL = "Permission Intel target inspection failed; see debug logs."
+
+# --- DB schema snapshot (write_db_schema_snapshot_audit) table policy -----------------
+# Required static = canonical / operational surfaces aligned with schema_gate.static_schema_gate
+# (legacy base table ``findings`` is intentionally excluded).
+DB_SNAPSHOT_REQUIRED_STATIC_TABLES: tuple[str, ...] = (
+    "static_analysis_runs",
+    "static_session_run_links",
+    "static_session_rollups",
+    "static_permission_matrix",
+    "risk_scores",
+)
+
+# Legacy mirror / compatibility five — information_schema presence only; not required for health.
+DB_SNAPSHOT_LEGACY_MIRROR_TABLES: tuple[str, ...] = (
+    "runs",
+    "findings",
+    "metrics",
+    "buckets",
+    "contributors",
+)
+
+DB_SCHEMA_SNAPSHOT_LEGACY_MIRROR_META: dict[str, str] = {
+    "role": "legacy_mirror_compatibility_optional",
+    "interpretation": (
+        "Presence flags only (information_schema). These objects are legacy mirror / compatibility "
+        "tables, not canonical static truth. Missing tables are normal for canonical-only deployments. "
+        "Judge static health using gates.static_schema_gate and required_tables.static, not "
+        "legacy_mirror_table_presence."
+    ),
+}
 
 
 def _snapshot_subcheck_short_reason(exc: BaseException, *, max_len: int = 200) -> str:
@@ -304,16 +335,7 @@ def write_db_schema_snapshot_audit() -> None:
                     "harvest_storage_roots",
                 ]
             ),
-            "static": diagnostics.check_required_tables(
-                [
-                    "static_analysis_runs",
-                    "static_session_run_links",
-                    "static_session_rollups",
-                    "findings",
-                    "static_permission_matrix",
-                    "risk_scores",
-                ]
-            ),
+            "static": diagnostics.check_required_tables(list(DB_SNAPSHOT_REQUIRED_STATIC_TABLES)),
             "dynamic": diagnostics.check_required_tables(
                 [
                     "dynamic_sessions",
@@ -323,6 +345,10 @@ def write_db_schema_snapshot_audit() -> None:
                 ]
             ),
         },
+        "legacy_mirror_table_presence": diagnostics.check_required_tables(
+            list(DB_SNAPSHOT_LEGACY_MIRROR_TABLES)
+        ),
+        "legacy_mirror_table_presence_meta": dict(DB_SCHEMA_SNAPSHOT_LEGACY_MIRROR_META),
         "gates": {
             "base_schema_gate": schema_gate.check_base_schema(),
             "inventory_schema_gate": schema_gate.inventory_schema_gate(),
@@ -340,11 +366,39 @@ def write_db_schema_snapshot_audit() -> None:
         snapshot["bridge_posture_error"] = bridge_err
 
     try:
-        table_names = diagnostics.list_tables()
-        counts = diagnostics.table_counts(table_names)
-        snapshot["tables"] = {
-            name: {"row_count": counts.get(name)} for name in table_names
-        }
+        use_exact = str(
+            os.environ.get("SCYTALEDROID_DB_SCHEMA_SNAPSHOT_EXACT_TABLE_COUNTS") or ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if use_exact:
+            table_names = diagnostics.list_tables()
+            counts = diagnostics.table_counts(table_names)
+            snapshot["tables"] = {
+                name: {"row_count": counts.get(name)} for name in table_names
+            }
+            snapshot["tables_row_count_note"] = (
+                "exact: SELECT COUNT(*) per table (SCYTALEDROID_DB_SCHEMA_SNAPSHOT_EXACT_TABLE_COUNTS=1)."
+            )
+        else:
+            approx = diagnostics.approximate_table_row_counts()
+            if approx:
+                snapshot["tables"] = {
+                    name: {"row_count": approx.get(name)} for name in sorted(approx.keys())
+                }
+                snapshot["tables_row_count_note"] = (
+                    "approximate: information_schema.tables.TABLE_ROWS (InnoDB estimate; NULL for many "
+                    "VIEW rows). Set SCYTALEDROID_DB_SCHEMA_SNAPSHOT_EXACT_TABLE_COUNTS=1 for exact "
+                    "COUNT(*) per table."
+                )
+            else:
+                table_names = diagnostics.list_tables()
+                counts = diagnostics.table_counts(table_names)
+                snapshot["tables"] = {
+                    name: {"row_count": counts.get(name)} for name in table_names
+                }
+                snapshot["tables_row_count_note"] = (
+                    "exact: SELECT COUNT(*) per table (fallback when information_schema estimate "
+                    "read returned no rows or failed)."
+                )
         try:
             rows = core_q.run_sql(
                 "SELECT version, applied_at_utc, note FROM schema_version ORDER BY applied_at_utc ASC",
@@ -363,6 +417,13 @@ def write_db_schema_snapshot_audit() -> None:
 
     print(status_messages.status("DB schema snapshot written.", level="success"))
     print(f"  {out_path}")
+    print(
+        status_messages.status(
+            "legacy_mirror_table_presence (JSON): optional legacy five — missing is normal for "
+            "canonical-only catalogs; see legacy_mirror_table_presence_meta.",
+            level="info",
+        )
+    )
     prompt_utils.press_enter_to_continue()
 
 

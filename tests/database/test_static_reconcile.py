@@ -92,6 +92,9 @@ def test_reconcile_static_session_summarizes_missing_packages(tmp_path: Path, mo
     assert summary.cache_stale is True
     assert summary.package_collations["runs.package"] == "utf8mb4_general_ci"
     assert any(risk.startswith("mixed_package_collations=") for risk in summary.collation_risks)
+    assert summary.legacy_metrics_mirror_packages == 1
+    assert summary.legacy_buckets_mirror_packages == 1
+    assert summary.legacy_contributors_mirror_packages == 1
 
 
 def test_repair_session_run_links_inserts_missing_rows(monkeypatch) -> None:

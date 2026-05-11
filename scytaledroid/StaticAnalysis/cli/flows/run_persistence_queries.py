@@ -119,9 +119,9 @@ def _apply_reconcile_summary(summary: AuditSummary, session_stamp: str) -> None:
         "runs": reconcile.legacy_runs_packages,
         "risk_scores": reconcile.legacy_risk_packages,
         "secondary_compat_mirror_packages": reconcile.secondary_compat_mirror_packages,
-        "metrics_packages": reconcile.secondary_compat_mirror_packages,
-        "buckets_packages": reconcile.secondary_compat_mirror_packages,
-        "contributors_packages": reconcile.secondary_compat_mirror_packages,
+        "metrics_packages": reconcile.legacy_metrics_mirror_packages,
+        "buckets_packages": reconcile.legacy_buckets_mirror_packages,
+        "contributors_packages": reconcile.legacy_contributors_mirror_packages,
         "session_links": reconcile.session_run_links,
         "session_rollups": reconcile.session_rollups,
     }

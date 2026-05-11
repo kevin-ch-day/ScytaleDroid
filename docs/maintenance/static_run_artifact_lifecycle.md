@@ -443,6 +443,8 @@ The JSON and human report include **`receipt_session_resolution`** (which rule a
 
 Remaining backlog ideas: surface `STATIC_HTML_MODE` / `STATIC_REPORT_JSON_MODE` and **`base_dir`** for run health; optionally count **`output/reports/static/archive/<session>/**/*.html`** when present.
 
+**Core DB schema audit (read-only):** `docs/maintenance/static_database_schema_audit_plan.md` and `PYTHONPATH=. python scripts/db/static_schema_audit.py` — classifies canonical vs legacy tables/views in the **analyst core** catalog (no DDL; Permission Intel catalog is a separate DSN). **Pause expanding `run_artifact_map.py`** until the DB audit pass stabilizes classifications and view dependency warnings.
+
 ---
 
 ## Top-down audit checklist (filesystem)

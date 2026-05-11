@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from scytaledroid.Database.summary_surfaces import (
 )
 from scytaledroid.Database.tools.bootstrap import bootstrap_database
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .action_groups.risk_actions import (
     audit_static_risk_coverage as _audit_static_risk_coverage,
@@ -313,10 +315,30 @@ def apply_canonical_schema_bootstrap(*, prompt_user: bool = True) -> bool:
 
 
 def _schema_snapshot() -> dict[str, object]:
-    tables = diagnostics.list_tables()
-    columns = {table: set(diagnostics.get_table_columns(table) or []) for table in tables}
-    indexes = {table: _fetch_index_signatures(table) for table in tables}
-    return {"tables": set(tables), "columns": columns, "indexes": indexes}
+    """Capture table/column/index shapes for bootstrap before/after diffs.
+
+    MySQL/MariaDB: two ``information_schema`` catalog reads + ``SHOW TABLES``
+    inside a single session (avoids per-table ``SHOW INDEX`` / column probes).
+    Other engines or failures: legacy per-table path.
+    """
+
+    try:
+        with database_session(reuse_connection=False) as engine:
+            if getattr(engine, "_dialect", "sqlite") != "mysql":
+                raise RuntimeError("non-mysql dialect")
+            return _schema_snapshot_mysql_fast(engine)
+    except Exception as exc:
+        log.warning(
+            (
+                "schema snapshot bulk read failed; falling back to per-table introspection "
+                f"({type(exc).__name__}: {exc})"
+            ),
+            category="database",
+        )
+        tables = diagnostics.list_tables()
+        columns = {table: set(diagnostics.get_table_columns(table) or []) for table in tables}
+        indexes = {table: _fetch_index_signatures(table) for table in tables}
+        return {"tables": set(tables), "columns": columns, "indexes": indexes}
 
 
 def _drop_legacy_string_run_id_columns() -> None:
@@ -453,6 +475,88 @@ def _fetch_index_signatures(table: str) -> set[str]:
         unique = "unique" if entry["unique"] else "non_unique"
         signatures.add(f"{name}|{unique}|{','.join(columns)}")
     return signatures
+
+
+def _index_signatures_from_statistics_rows(
+    rows: Sequence[tuple[object, ...]],
+) -> dict[str, set[str]]:
+    """Build ``table -> index signature`` sets matching :func:`_fetch_index_signatures` strings.
+
+    Expects rows shaped like
+    ``(TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME)`` from
+    ``information_schema.STATISTICS``.
+    """
+
+    columns_by: dict[tuple[str, str], dict[int, str]] = {}
+    unique_by: dict[tuple[str, str], bool] = {}
+
+    for row in rows or ():
+        if not row or len(row) < 5:
+            continue
+        table = str(row[0])
+        idx_name = str(row[1])
+        non_unique = int(row[2] or 0)
+        seq = int(row[3] or 0)
+        col = str(row[4])
+        if not col:
+            continue
+        key = (table, idx_name)
+        prev = unique_by.get(key)
+        is_unique_segment = non_unique == 0
+        if prev is None:
+            unique_by[key] = is_unique_segment
+        else:
+            unique_by[key] = prev and is_unique_segment
+        columns_by.setdefault(key, {})[seq] = col
+
+    out: dict[str, set[str]] = {}
+    for key, cols in columns_by.items():
+        table, idx_name = key
+        ordered = [cols[s] for s in sorted(cols)]
+        unique = "unique" if unique_by.get(key, False) else "non_unique"
+        sig = f"{idx_name}|{unique}|{','.join(ordered)}"
+        out.setdefault(table, set()).add(sig)
+    return out
+
+
+def _schema_snapshot_mysql_fast(engine: object) -> dict[str, object]:
+    """One ``SHOW TABLES`` + two ``information_schema`` reads (vs per-table introspection)."""
+
+    trows = engine.fetch_all("SHOW TABLES") or []
+    table_names = sorted(str(r[0]) for r in trows if r and r[0])
+    allowed = set(table_names)
+    columns: dict[str, set[str]] = {t: set() for t in table_names}
+
+    col_rows = engine.fetch_all(
+        """
+        SELECT TABLE_NAME, COLUMN_NAME
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+        ORDER BY TABLE_NAME, ORDINAL_POSITION
+        """
+    ) or []
+    for row in col_rows:
+        if not row or len(row) < 2:
+            continue
+        t, c = str(row[0]), str(row[1])
+        if t not in allowed:
+            continue
+        columns[t].add(c)
+
+    stat_rows = engine.fetch_all(
+        """
+        SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+        ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+        """
+    ) or []
+    filtered = [tuple(r) for r in stat_rows if r and str(r[0]) in allowed]
+    indexes = _index_signatures_from_statistics_rows(filtered)
+    for t in allowed:
+        indexes.setdefault(t, set())
+
+    return {"tables": allowed, "columns": columns, "indexes": indexes}
 
 
 def _render_schema_bootstrap_summary(

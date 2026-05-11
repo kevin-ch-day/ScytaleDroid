@@ -150,6 +150,8 @@ Immediate bridge tasks:
 - continue reducing reporting dependence on `findings`/`metrics`/`buckets`/
   `contributors`
 - keep `risk_scores` explicitly framed as derived, not canonical
+- use [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) as the **planning** source for legacy-five **reader** locations, INSERT/absence confirmation, false positives, and reader-retirement order before code changes
+- reconcile **documentation drift:** `ownership_matrix_v1_3.csv` still marks some legacy-five rows as actively written by persistence — contradicts current Python `INSERT` grep and `AGENTS.md`; track cleanup against dependency map **§8.4**
 
 ### 3. Score Audit / Explanation
 
@@ -224,4 +226,13 @@ Tasks:
 4. tighten app report one more pass to summary-only
 5. improve Run Health explanations and filtering
 6. keep narrowing `static_reconcile.py` and enforce bridge freeze posture
+
+## Operator hygiene backlog (parallel — **P1 / P2**, not Phase 5C gate)
+
+These items improve operator clarity and workspace hygiene **without** blocking Phase 5C acceptance.
+
+| Priority | Item | Notes |
+| --- | --- | --- |
+| **P1** | Logs doc ↔ code parity | `housekeeping.md` aligned to `LOG_CONFIGS`; full mismatch list and evidence taxonomy in `logs_operator_hygiene_plan.md` |
+| **P2** | Read-only `logs health` report | Spec only in `logs_operator_hygiene_plan.md` §6 — total size, by subdir/category, `.gz` stats, stale file flags; **no auto-delete** |
 

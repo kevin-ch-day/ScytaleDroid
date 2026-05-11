@@ -3,6 +3,11 @@
 This is an operator/audit convenience for OSS vNext. The filesystem remains the
 canonical source of truth; DB is an optional mirror/query layer.
 
+``required_tables`` covers bootstrap objects (e.g. ``schema_version``). Legacy
+static mirror tables are reported separately under ``legacy_mirror_table_presence``
+so missing legacy tables do not imply a broken catalog when only canonical
+writers are in use.
+
 The report is intentionally best-effort and does not mutate the database.
 """
 
@@ -18,8 +23,12 @@ from typing import Any
 
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
-_LEGACY_MIRROR_TABLES = ("runs", "metrics", "buckets", "findings", "contributors")
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+# Catalog bootstrap: must exist on a migrated analyst DB.
+_SCHEMA_REQUIRED_TABLES: tuple[str, ...] = ("schema_version",)
+# Legacy static mirror tables (optional; missing is normal when only canonical writers run).
+_LEGACY_MIRROR_TABLES: tuple[str, ...] = ("runs", "metrics", "buckets", "findings", "contributors")
 
 
 @dataclass(frozen=True)
@@ -80,6 +89,18 @@ def _render_markdown(snapshot: dict[str, Any]) -> str:
         lines.append("- status: **OK**")
     lines.append("")
 
+    legacy_presence = snapshot.get("legacy_mirror_table_presence") or {}
+    if legacy_presence:
+        lines.append("## legacy_mirror_table_presence")
+        lines.append(
+            "- **Informational only:** empty/missing legacy mirror tables are normal when "
+            "only canonical static writers are deployed (see `AGENTS.md`)."
+        )
+        for name in sorted(legacy_presence.keys()):
+            ok = legacy_presence.get(name)
+            lines.append(f"- `{name}`: **{'present' if ok else 'missing'}**")
+        lines.append("")
+
     optional_cols = snapshot.get("optional_columns") or []
     if optional_cols:
         lines.append("## optional_columns")
@@ -132,7 +153,7 @@ def generate_snapshot() -> dict[str, Any]:
     engine = DatabaseEngine().as_reader()
     try:
         engine.fetch_one("SELECT 1")
-        required_tables = ["schema_version", *_LEGACY_MIRROR_TABLES]
+        required_tables = list(_SCHEMA_REQUIRED_TABLES)
         table_rows = engine.fetch_all(
             """
             SELECT table_name, table_type, table_rows
@@ -143,6 +164,9 @@ def generate_snapshot() -> dict[str, Any]:
         ) or []
         present_tables = {str(r[0]) for r in table_rows if r and r[0]}
         snapshot["required_tables"] = {name: (name in present_tables) for name in required_tables}
+        snapshot["legacy_mirror_table_presence"] = {
+            name: (name in present_tables) for name in _LEGACY_MIRROR_TABLES
+        }
 
         snapshot["tables"] = [
             {

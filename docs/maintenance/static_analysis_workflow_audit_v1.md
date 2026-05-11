@@ -206,8 +206,8 @@ Emit one **JSON artifact** under `output/audit/static/` (name TBD), written at e
 
 1. **Done / adjacent:** stale lock reclaim; persistence audit JSON; **`StaticAnalysis.audit`** log tail CLI; governance warning not marking **`persistence_failed`**.
 2. **Quick wins (low risk):** Extend **`_summarize_app_pipeline`** to aggregate **`skipped_detectors`** + counts of resource fallbacks per app; print one **RUN_HEALTH** stdout line when `SCYTALEDROID_STATIC_RUN_HEALTH_SUMMARY=1`.
-3. **Artifact:** Emit **`output/audit/static/<session>_run_health.json`** from **`RunOutcome` + merged pipeline summaries + string snippet stats** (no schema migration).
-4. **Status field:** Add **`final_status`** on `AppRunResult` (computed in **`scan_flow`** end-of-app block) + persist into static run manifest or JSON sidecar only (DB column = later ADR).
+3. **Done (artifact):** Session **`run_health.json`** is emitted from **`RunOutcome`** + pipeline summaries (see `run_health/document.py`); tighten schema vs §8 when contracts change.
+4. **Done (status field):** **`final_status`** on **`AppRunResult`** is computed in **`scan_flow`** / **`run_health/status.py`**; DB column persistence remains a later ADR if needed.
 5. **String intelligence block:** Dedicated reducer over **`base_string_data`** keys (`counts`, `noise_counts`, `structured`, warnings) documented in **`docs/static_analysis/string_intelligence_explore.md`** alignment.
 6. **Split transparency:** When **`discovered_artifacts > N`**, require explicit CLI banner “scanning **K** APKs incl. splits; strings from **base** only” unless future multi-APK strings.
 
@@ -217,12 +217,12 @@ Emit one **JSON artifact** under `output/audit/static/` (name TBD), written at e
 
 Use this doc to open tickets with **file:function** anchors:
 
-- [ ] **`scan_report._summarize_app_pipeline`** — merge `skipped_deticators`, fallback flags.
-- [ ] **`scan_flow.execute_scan`** — compute **`final_status`**, propagate to **`RunOutcome.deferred_diagnostics`**.
+- [ ] **`scan_report._summarize_app_pipeline`** — merge **`skipped_detectors`**, fallback flags.
+- [x] **`scan_flow.execute_scan` / `run_health`** — **`final_status`** on apps; session rollup and **`RunOutcome.deferred_diagnostics`** populated from **`results.py`** finalize path (revisit only if semantics drift).
 - [ ] **`string_analysis_payload` / results render** — surface string failure + counts in compact summary.
 - [ ] **`core/pipeline.py` / `pipeline_artifacts`** — ensure parse fallback counts hit **`pipeline_summary`** or sibling metadata field.
 - [ ] **`db_masvs_summary.render_db_masvs_summary`** — replace bare **`except`** with logged one-liner + optional CLI warn.
-- [ ] **Persisted JSON artifact** — `run_health.json` schema v1 aligned with §8.
+- [x] **Persisted JSON artifact** — **`run_health.json`** emitted; keep schema aligned with §8 when fields evolve.
 
 ---
 

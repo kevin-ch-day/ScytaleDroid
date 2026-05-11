@@ -109,6 +109,11 @@ def test_query_runner_active_static_session_renders_compact_status(monkeypatch, 
     (archive_dir / "b.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(menu_module.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        menu_module.diagnostics,
+        "check_required_tables",
+        lambda tables: {t: True for t in tables},
+    )
 
     def _run_read_only(sql, params=(), fetch=None, dictionary=False, **_kwargs):
         if "WHERE UPPER(COALESCE(status, '')) = 'STARTED'" in sql:
@@ -142,8 +147,37 @@ def test_query_runner_active_static_session_renders_compact_status(monkeypatch, 
     assert "Active static session" in out
     assert captured[0][0] == ("Session", "sess-1")
     assert ("Archive reports", 2) in captured[0]
-    assert ("Session links", 0) in captured[1]
-    assert ("Findings summary", 0) in captured[1]
+    assert ("Session links", "0") in captured[1]
+    assert ("Findings summary", "0") in captured[1]
+
+
+def test_session_downstream_counts_skips_legacy_runs_when_table_absent(monkeypatch):
+    from scytaledroid.Database.db_utils.menus import query_runner as menu_module
+
+    def _presence(tables):
+        return {t: (t != "runs") for t in tables}
+
+    monkeypatch.setattr(menu_module.diagnostics, "check_required_tables", _presence)
+
+    def _run_read_only(sql, params=(), fetch=None, dictionary=False, **_kwargs):
+        if "FROM runs" in sql:
+            raise AssertionError("runs COUNT should be skipped when table absent")
+        if "FROM static_session_run_links" in sql:
+            return (2,)
+        if "FROM risk_scores" in sql:
+            return (1,)
+        if "FROM static_findings_summary" in sql:
+            return (0,)
+        if "FROM static_string_summary" in sql:
+            return (0,)
+        raise AssertionError(sql)
+
+    monkeypatch.setattr(menu_module, "_run_read_only", _run_read_only)
+
+    out = menu_module._session_downstream_counts("sess-x")
+    assert out["legacy_runs"] is None
+    assert out["session_links"] == 2
+    assert out["legacy_risk"] == 1
 
 
 def test_query_runner_package_lineage_uses_canonical_run_headers(monkeypatch, capsys):
