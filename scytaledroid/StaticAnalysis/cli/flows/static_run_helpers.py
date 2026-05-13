@@ -17,6 +17,12 @@ def modules_for_run(params: RunParameters) -> tuple[str, ...]:
 
 
 def resolve_workers(value: str | int) -> int:
+    """Resolve worker count for operator display and future parallel hooks.
+
+    Today the static APK pipeline runs detectors sequentially inside each artifact;
+    this value is **not** yet threaded into ``analyze_apk`` / ``run_detector_pipeline``.
+    """
+
     if isinstance(value, int):
         return max(1, value)
     text = (value or "").strip().lower()

@@ -1101,46 +1101,44 @@ def _print_progress_line(
 ) -> None:
     if not _quiet_mode() and not force:
         return
-    clean_count = int(stats.get("packages_clean", 0))
     partial_count = int(stats.get("packages_partial", 0))
     err_count = int(stats.get("packages_failed", 0))
     drifted_count = int(stats.get("packages_drifted", 0))
     skipped_seen = int(stats.get("packages_skipped", 0))
     blocked_total = max(int(stats.get("packages_total", 0)) - int(package_total), 0)
     package_index = min(package_index, package_total)
-    skip_hint = ""
-    if result.preflight_reason:
-        skip_hint = f" (latest_preflight={result.preflight_reason})"
-    elif result.skipped:
-        # Avoid misleading "latest_skip" when the package still wrote artifacts and the
-        # skip reason is a non-fatal DB mirror note.
-        non_fatal = {
-            "app_definition_failed",
-            "split_group_failed",
-            "apk_record_failed",
-            "artifact_path_failed",
-            "source_path_failed",
-        }
-        recent_reason = ""
-        for r in result.skipped:
-            if r in non_fatal and result.ok:
-                continue
-            recent_reason = str(r)
-            break
-        if recent_reason:
-            skip_hint = f" (latest_skip={recent_reason})"
     pct = (100 * package_index) // package_total if package_total else 0
-    line = f"Pulls: {package_index}/{package_total} ({pct}%)"
-    if partial_count or err_count or drifted_count:
-        line += (
-            f" · status=mixed (clean={clean_count} partial={partial_count} failed={err_count} drifted={drifted_count})"
-        )
-    else:
-        line += " · status=OK"
+    line = f"Harvest: {package_index}/{package_total} pulled ({pct}%)"
     if blocked_total > 0:
-        line += f" · blocked-preflight={min(skipped_seen, blocked_total)}/{blocked_total} reviewed"
+        line += f" · blocked reviewed {min(skipped_seen, blocked_total)}/{blocked_total}"
     elif skipped_seen > 0:
-        line += f" · skipped={skipped_seen}"
+        line += f" · skipped {skipped_seen}"
+    if err_count or drifted_count:
+        line += f" · issues (failed={err_count} drifted={drifted_count} partial={partial_count})"
+    elif partial_count:
+        line += " · mixed"
+    else:
+        line += " · OK"
+    skip_hint = ""
+    if force and (result.preflight_reason or (err_count or drifted_count)):
+        if result.preflight_reason:
+            skip_hint = f" · preflight={result.preflight_reason}"
+        elif result.skipped:
+            non_fatal = {
+                "app_definition_failed",
+                "split_group_failed",
+                "apk_record_failed",
+                "artifact_path_failed",
+                "source_path_failed",
+            }
+            recent_reason = ""
+            for r in result.skipped:
+                if r in non_fatal and result.ok:
+                    continue
+                recent_reason = str(r)
+                break
+            if recent_reason:
+                skip_hint = f" · skip={recent_reason}"
     line += skip_hint
     level = "error" if err_count or drifted_count else "info"
     print(status_messages.status(line, level=level))

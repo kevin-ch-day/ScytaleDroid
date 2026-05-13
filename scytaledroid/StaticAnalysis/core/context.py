@@ -42,6 +42,8 @@ class AnalysisConfig:
     analysis_version: str = "2.0.0-alpha"
     enabled_detectors: Sequence[str | None] = None
     enable_string_index: bool = True
+    #: When false, string indexing skips ``res`` table strings (dex/assets only; faster on large APKs).
+    string_index_include_resources: bool = True
     secrets_sampler: SecretsSamplerConfig | None = None
 
 

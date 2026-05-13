@@ -324,6 +324,11 @@ class RunOutcome:
     run_aggregate_status: str | None = None
     #: Absolute or relative path to ``run_health.json`` when emitted by the CLI finalize path.
     run_health_json_path: str | None = None
+    #: Session-level diagnostics (e.g. artifact phase wall times, worker budget) for tooling / logs.
+    #: Typical keys: ``artifact_phase_timings_s`` (``analyze_apk_wall_s``, ``persist_wall_s``),
+    #: ``resolved_worker_budget``, ``artifact_concurrency_cap`` (peak parallel ``analyze_apk`` workers in the session; 1 when fully serial),
+    #: ``post_run_grain`` (compact DB + archive counters when the post-run grain summary runs).
+    session_metrics: dict[str, object] = field(default_factory=dict)
 
     @property
     def duration_seconds(self) -> float:

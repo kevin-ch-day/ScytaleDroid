@@ -627,9 +627,8 @@ def _render_scope_table(
     default_rows: Sequence[InventoryRow],
 ) -> None:
     print()
-    print("----------------------------")
-    print("Execute Harvest — inventory vs pull policy")
-    print("----------------------------")
+    print("Execute harvest — inventory vs pull policy")
+    print("-" * 86)
     candidates = len(rows)
     pullable_rows = _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)
     eligible = len(pullable_rows)
@@ -641,11 +640,10 @@ def _render_scope_table(
     print(f"Blocked by policy    : {blocked} package(s)")
     print(f"Policy               : {policy}")
     print(f"Estimated artifacts  : ~{est_artifacts} APK path(s) (splits count as separate paths)")
-    if not is_rooted:
+    if not is_rooted and blocked > 0:
         print(
             status_messages.status(
-                "Non-root: inventory may include packages whose APK paths cannot be harvested on this device. "
-                "They remain inventoried but are blocked from pull.",
+                "Non-root: system/vendor APK paths stay inventoried but are not pulled.",
                 level="info",
             )
         )

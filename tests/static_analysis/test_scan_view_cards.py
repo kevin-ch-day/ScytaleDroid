@@ -55,7 +55,8 @@ def test_render_app_completion_card_mode_dedupes_slowest_detectors(capsys) -> No
     assert "Package: bbc.mobile.news.ww" in out
     assert "[2/111] BBC News  (bbc.mobile.news.ww)" not in out
     assert (
-        "4 APKs | 00:37 | detector_warnings=3 | policy_failures=3 | execution_errors=0 | high=2 | medium=3"
+        "4 APKs | 00:37 | detector_warnings=3 | policy_gate_failures=1 | finding_gate_failures=2 | "
+        "gate_failures_total=3 | execution_errors=0 | high=2 | medium=3"
         in out
     )
     assert "Slow:" in out
@@ -143,13 +144,20 @@ def test_format_compact_completion_line_is_dashboard_friendly() -> None:
         package_name="com.dropbox.android",
         artifact_count=3,
         elapsed_seconds=21.0,
-        app_summary={"warn_count": 2, "fail_count": 1, "high_count": 1, "medium_count": 2},
+        app_summary={
+            "warn_count": 2,
+            "policy_fail_count": 1,
+            "finding_fail_count": 0,
+            "fail_count": 1,
+            "high_count": 1,
+            "medium_count": 2,
+        },
     )
 
     assert (
         line
-        == "[7/120] Dropbox | 3 APKs | 00:21 | detector_warnings=2 | policy_failures=1 | "
-        "execution_errors=0 | high=1 | medium=2"
+        == "[7/120] Dropbox | 3 APKs | 00:21 | detector_warnings=2 | policy_gate_failures=1 | "
+        "finding_gate_failures=0 | gate_failures_total=1 | execution_errors=0 | high=1 | medium=2"
     )
 
 
@@ -159,10 +167,16 @@ def test_format_recent_completion_line_is_compact() -> None:
         app_title="Dropbox",
         package_name="com.dropbox.android",
         elapsed_seconds=21.0,
-        app_summary={"warn_count": 2, "fail_count": 1, "severity_counts": {"P1": 1, "P2": 2}},
+        app_summary={
+            "warn_count": 2,
+            "policy_fail_count": 0,
+            "finding_fail_count": 1,
+            "fail_count": 1,
+            "severity_counts": {"P1": 1, "P2": 2},
+        },
     )
 
-    assert line == "#7 Dropbox 00:21 warnings=2 policy_failures=1 high=1 medium=2"
+    assert line == "#7 Dropbox 00:21 warnings=2 policy_gates=0 finding_gates=1 gates_total=1 high=1 medium=2"
 
 
 def test_render_app_completion_card_mode_for_profile_scope(capsys) -> None:
@@ -196,7 +210,8 @@ def test_render_app_completion_card_mode_for_profile_scope(capsys) -> None:
     assert "[1/12] Signal" in out
     assert "Package: org.thoughtcrime.securesms" in out
     assert (
-        "1 APK | 00:03 | detector_warnings=1 | policy_failures=0 | execution_errors=0 | high=0 | medium=1"
+        "1 APK | 00:03 | detector_warnings=1 | policy_gate_failures=0 | finding_gate_failures=0 | "
+        "gate_failures_total=0 | execution_errors=0 | high=0 | medium=1"
         in out
     )
     assert "Artifacts: 1   Time: 00:03" not in out
@@ -237,7 +252,8 @@ def test_render_app_completion_uses_dense_mode_for_persistence_test_batch(capsys
     assert "[2/10] BBC News" in out
     assert "Package: bbc.mobile.news.ww" in out
     assert (
-        "4 APKs | 00:26 | detector_warnings=4 | policy_failures=2 | execution_errors=0 | high=12 | medium=4"
+        "4 APKs | 00:26 | detector_warnings=4 | policy_gate_failures=1 | finding_gate_failures=1 | "
+        "gate_failures_total=2 | execution_errors=0 | high=12 | medium=4"
         in out
     )
     assert "Artifacts: 4   Time: 00:26" not in out

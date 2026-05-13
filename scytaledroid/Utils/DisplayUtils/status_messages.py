@@ -75,7 +75,8 @@ def status(
         icon = None
     token_parts: list[str] = []
     if icon:
-        token_parts.append(colors.apply(icon, colors.style("hint")))
+        # Match icon tint to severity so status rows read faster than a uniform muted glyph.
+        token_parts.append(_apply(icon, styles[0], bold=True))
     if show_prefix:
         token_parts.append(_apply(prefix_text, styles[0], bold=True))
     token_parts.append(formatted_message)

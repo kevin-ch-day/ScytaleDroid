@@ -177,8 +177,30 @@ def format_audit_session_command(session_stamp: str) -> str:
     return f"PYTHONPATH=. python scripts/db/audit_static_session.py --session {stamp}"
 
 
+def format_grain_integrity_session_command(
+    session_stamp: str,
+    *,
+    scope_label: str | None = None,
+    count_archive: bool = True,
+    aggregate_json: bool = False,
+    with_display_labels: bool = False,
+) -> str:
+    """Copy/paste grain/integrity CLI (repo root); complements :func:`format_audit_session_command`."""
+
+    from scytaledroid.Database.db_utils.static_session_grain_integrity import format_grain_integrity_cli_command
+
+    return format_grain_integrity_cli_command(
+        session_stamp,
+        scope_label=scope_label,
+        count_archive=count_archive,
+        aggregate_json=aggregate_json,
+        with_display_labels=with_display_labels,
+    )
+
+
 __all__ = [
     "PriorProfileSessionSnapshot",
     "fetch_prior_profile_session_snapshot",
     "format_audit_session_command",
+    "format_grain_integrity_session_command",
 ]

@@ -210,8 +210,9 @@ def render_plan_overview(resolution: PlanResolution, *, is_rooted: bool = False)
 
 
 def prompt_plan_action(resolution: PlanResolution) -> str:
-    print("1) Execute Harvest (default) - download APK splits + metadata")
-    print("2) Preview plan          - dry run (list only)")
+    _ = resolution  # reserved for future plan-aware prompts
+    print("1) Execute harvest")
+    print("2) Preview plan")
     print("0) Cancel")
     choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Select: ")
     if choice == "1":
@@ -487,24 +488,26 @@ def report_harvest_started(
     delta_filter_applied: bool | None = None,
     is_rooted: bool = False,
 ) -> None:
-    _ = policy_eligible  # retained for API parity with planner stats; message uses scheduled/blocked counts
-    print()
-    print(status_messages.status("Harvest start", level="info"))
-    for line in _harvest_plan_kv_lines(
-        selection_label=str(selection_label).strip() or "(unknown scope)",
-        selected_count=int(selected_count),
-        scheduled_packages=int(scheduled),
-        blocked_policy=int(blocked_policy),
-        blocked_scope=int(blocked_scope),
-        scheduled_files=int(artifacts),
-        policy=str(policy),
-        is_rooted=is_rooted,
-    ):
-        print(status_messages.status(line, level="info"))
+    _ = (
+        policy_eligible,
+        policy,
+        is_rooted,
+        blocked_policy,
+        blocked_scope,
+        selected_count,
+    )  # API parity / future diagnostics; scope table + summary already showed counts & policy.
+    sel = str(selection_label).strip() or "(unknown scope)"
+    # One short line: inventory math and non-root policy note already printed above.
+    print(
+        status_messages.status(
+            f"Harvest start: {sel} · pulling {int(scheduled)} packages · ~{int(artifacts)} APK paths",
+            level="info",
+        )
+    )
     if candidate_count != selected_count:
         print(
             status_messages.status(
-                f"{'Inventory (device)':22} : {int(candidate_count)} package(s) (pre-scope / pre-delta context)",
+                f"Inventory (device): {int(candidate_count)} package(s) (pre-scope / pre-delta context)",
                 level="info",
             )
         )

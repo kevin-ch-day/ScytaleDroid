@@ -732,12 +732,11 @@ def load_display_name_map(groups: Sequence[ArtifactGroup]) -> dict[str, str]:
     try:
         rows = run_sql(
             (
-                "SELECT package_name, display_name "
-                f"FROM apps WHERE package_name IN ({placeholders})"
+                "SELECT package_name, display_name FROM apps "
+                f"WHERE LOWER(TRIM(package_name)) IN ({placeholders})"
             ),
             tuple(packages),
-            fetch="all",
-            dictionary=True,
+            fetch="all_dict",
         )
     except Exception:
         return {}

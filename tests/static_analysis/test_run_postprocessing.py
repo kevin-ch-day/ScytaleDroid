@@ -202,3 +202,63 @@ def test_run_post_summary_postprocessing_invokes_evidence_manifest_when_run_map_
     assert manifest_calls[0]["session_stamp"] == "sess-1"
     assert manifest_calls[0]["session_label"] == "sess-1"
     assert manifest_calls[0]["run_map"]["session_stamp"] == "sess-1"
+
+
+def test_run_post_summary_postprocessing_hints_persistence_audit_when_linkage_blocked(capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        postprocessing,
+        "finalize_session_run_map",
+        lambda *_a, **_k: type("Result", (), {"run_map": None})(),
+    )
+
+    outcome = _make_outcome(
+        AppRunResult(package_name="com.example.app", category="Test", static_run_id=None),
+    )
+    params = type(
+        "Params",
+        (),
+        {
+            "persistence_ready": True,
+            "session_stamp": "sess-gated",
+            "session_label": None,
+            "run_map_overwrite": False,
+            "strict_persistence": False,
+            "permission_snapshot_refresh": False,
+            "profile": "full",
+        },
+    )()
+    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    run_ctx = type("RunCtx", (), {})()
+
+    postprocessing.run_post_summary_postprocessing(
+        outcome=outcome,
+        params=params,
+        selection=selection,
+        run_ctx=run_ctx,
+        summary_render_failed=False,
+        required_fields=("pipeline_version",),
+        emit_postprocessing_step=lambda *_a, **_k: None,
+        build_session_run_map=lambda *_a, **_k: None,
+        validate_run_map=lambda *_a, **_k: None,
+        persist_session_run_links=lambda *_a, **_k: None,
+        emit_missing_run_ids_artifact=lambda **_k: None,
+        execute_permission_scan=lambda *_a, **_k: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "persistence audit JSON still writes" in out
+
+
+def test_format_permission_parity_completion_detail_collapses_equal_counts() -> None:
+    line, path = postprocessing._format_permission_parity_completion_detail(
+        {"processed_apps": 144, "persisted_apps": 144, "snapshot_path": "/tmp/snap.json"}
+    )
+    assert line == "apps in snapshot=144"
+    assert path == "/tmp/snap.json"
+
+
+def test_format_permission_parity_completion_detail_splits_mismatched_counts() -> None:
+    line, _path = postprocessing._format_permission_parity_completion_detail(
+        {"processed_apps": 10, "persisted_apps": 8, "snapshot_path": None}
+    )
+    assert line == "processed=10 apps · permission_table_writes=8 apps"

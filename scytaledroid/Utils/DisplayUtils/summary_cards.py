@@ -170,7 +170,10 @@ def format_summary_card(
             highest_alert = highest_alert or "high"
 
     lines: list[str] = []
-    title_text = colors.apply(title.strip(), primary_style, bold=True)
+    rail = ""
+    if colors.colors_enabled() and not ascii_ui:
+        rail = colors.apply("▍ ", colors.style("accent"), bold=True)
+    title_text = f"{rail}{colors.apply(title.strip(), primary_style, bold=True)}"
     lines.append(title_text)
     if subtitle:
         lines.append(colors.apply(subtitle.strip(), secondary_style))

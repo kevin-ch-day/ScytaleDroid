@@ -6,11 +6,15 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from scytaledroid.Database.db_utils.menus.static_session_diagnostics_menu import (
+    post_run_db_checks_submenu,
+)
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
 from ..core.models import RunOutcome, RunParameters
 from .output_mode import compact_success_output_enabled
+from .scan_formatters import _detector_posture_readable, _workflow_completion_token
 
 
 def _format_counter_value(value: object) -> str:
@@ -333,6 +337,13 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
         print(f"  JSON paths total  : {reports.get('json_report_paths', 0)}")
         print(f"  Under latest/     : {reports.get('latest_json_paths', 0)}")
         print(f"  Under archive/    : {archive_n}")
+        print(
+            "  Path semantics    : these counts are paths *recorded on artifact outcomes* (dedupe storage is "
+            "typically under data/static_analysis/reports/latest/<sha>.json). That is not the same filesystem "
+            "tree as the grain report's optional count of *.json under "
+            "data/static_analysis/reports/archive/<session_stamp>/ (session archive when archive/both mode "
+            "writes there). Expect latest-path totals and per-session archive file counts to differ."
+        )
         if archive_n == 0:
             print(
                 "  Note              : outcomes usually record the latest/ JSON path; archive/ may still exist "
@@ -447,6 +458,8 @@ def _print_post_run_diagnostics_header(outcome: RunOutcome, params: RunParameter
     db_line = "enabled" if persist_enabled else "skipped"
     gov = "paper-grade requested" if getattr(params, "paper_grade_requested", False) else "experimental path"
     overall = getattr(outcome, "run_aggregate_status", None) or "unknown"
+    workflow = _workflow_completion_token(outcome)
+    posture_h = _detector_posture_readable(str(overall))
 
     print(f"Post-run diagnostics - {stamp or 'session'} | static_run_id={rid}")
     print(f"Session        : {stamp or 'n/a'}")
@@ -454,7 +467,13 @@ def _print_post_run_diagnostics_header(outcome: RunOutcome, params: RunParameter
     print(f"Static run ID  : {rid}")
     print(f"DB persistence : {db_line}")
     print(f"Governance     : {gov}")
-    print(f"Overall health : {overall}")
+    print(f"Run completion : {workflow}")
+    print(f"Detector posture: {posture_h}")
+    if stamp and persist_enabled:
+        print(
+            "DB checks      : menu 11 (session health / grain / rollout) · "
+            "Database Tools 12 for full diagnostics"
+        )
 
 
 def render_db_verification_sql_section(
@@ -617,6 +636,7 @@ def render_post_run_diagnostics_menu(
         print("8) Static-to-dynamic handoff")
         print("9) DB verification SQL")
         print("10) Export paths")
+        print("11) DB-backed session checks (read-only)")
         print("0) Back")
 
         choice = prompt_utils.prompt_text("Choice", default="0", required=False).strip()
@@ -702,6 +722,12 @@ def render_post_run_diagnostics_menu(
 
         elif choice == "10":
             render_export_all_tables_section(params.session_stamp)
+
+        elif choice == "11":
+            post_run_db_checks_submenu(
+                session_stamp=params.session_stamp,
+                persist_enabled=persist_enabled,
+            )
 
         else:
             print(status_messages.status("Invalid selection.", level="warn"))

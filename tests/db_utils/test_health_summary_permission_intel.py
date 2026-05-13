@@ -122,9 +122,11 @@ def test_health_summary_duplicate_scan_failure_keeps_governance_metrics(monkeypa
         "list_operational_managed_tables",
         lambda: (_ for _ in ()).throw(RuntimeError("core duplicate scan failed")),
     )
+    monkeypatch.setattr(menu_module, "governance_ready", lambda: (True, "ok"))
 
     menu_module.run_health_summary()
     out = capsys.readouterr().out
     assert "Permission Intel        : ERROR" not in out
     assert str(snap) in out
     assert str(rows) in out
+    assert "governance_ready (static CLI / paper-grade gate): True" in out

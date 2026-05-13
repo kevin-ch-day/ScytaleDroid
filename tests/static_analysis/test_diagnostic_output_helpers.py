@@ -155,6 +155,25 @@ def test_diagnostic_summary_populates_runid_for_db_lookup(monkeypatch):
     assert rows[0][-1] == "sig"
 
 
+def test_diagnostics_operator_display_label_prefers_db_over_package_shaped_harvest() -> None:
+    from types import SimpleNamespace
+
+    pkg = "com.curated.example"
+
+    class _App:
+        package_name = pkg
+        app_label = pkg
+
+        def base_report(self):
+            return SimpleNamespace(
+                metadata={"app_label": pkg},
+                manifest=SimpleNamespace(app_label=pkg),
+            )
+
+    db = {pkg.lower(): "Curated Store Title"}
+    assert diagnostics._diagnostics_operator_display_label(_App(), db_display_names=db) == "Curated Store Title"
+
+
 def test_render_persistence_footer_prints_canonical_and_latest(monkeypatch, capsys):
     def fake_run_sql(query, params=None, fetch=None):
         sql = " ".join(str(query).split()).lower()
@@ -296,6 +315,13 @@ def test_render_db_severity_table_limits_large_output_and_exports(monkeypatch, t
     assert (tmp_path / "output" / "tables" / "sess_normalized_findings.csv").exists()
 
 
+def test_masvs_matrix_pillar_case_sql_maps_aux_categories() -> None:
+    sql = masvs_summary_report._masvs_matrix_pillar_case_sql("COALESCE(saf.masvs_area, saf.masvs_control)")
+    assert "CRYPTO" in sql
+    assert "RESILIENCE" in sql
+    assert "PLATFORM" in sql
+
+
 def test_fetch_masvs_matrix_prefers_canonical_latest_runs(monkeypatch):
     def fake_run_sql(query, params=None, fetch=None, dictionary=False):
         sql = " ".join(str(query).split()).lower()
@@ -383,7 +409,37 @@ def test_fetch_db_masvs_summary_static_many_prefers_canonical_findings(monkeypat
     assert crypto["cvss"]["worst_score"] == 5.0
 
 
-def test_fetch_db_masvs_summary_prefers_linked_static_summary(monkeypatch):
+def test_fetch_db_masvs_summary_explicit_static_run_uses_canonical_without_legacy_env(monkeypatch):
+    calls = {"static": 0}
+
+    def fake_static(ids):
+        calls["static"] += 1
+        assert ids == [77]
+        return (
+            77,
+            [
+                {
+                    "area": "PLATFORM",
+                    "high": 0,
+                    "medium": 1,
+                    "low": 0,
+                    "info": 0,
+                    "cvss": {"worst_score": 8.0},
+                    "quality": {"coverage_status": "ok"},
+                }
+            ],
+        )
+
+    monkeypatch.delenv("SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK", raising=False)
+    monkeypatch.setattr(masvs_summary_report, "fetch_db_masvs_summary_static_many", fake_static)
+
+    resolved, rows = masvs_summary_report.fetch_db_masvs_summary(77)
+    assert resolved == 77
+    assert calls["static"] == 1
+    assert rows[0]["area"] == "PLATFORM"
+
+
+def test_fetch_db_masvs_summary_legacy_session_uses_findings_when_env_enabled(monkeypatch):
     calls = {"static": 0}
 
     def fake_run_sql(query, params=None, fetch=None, dictionary=False):
@@ -410,6 +466,7 @@ def test_fetch_db_masvs_summary_prefers_linked_static_summary(monkeypatch):
             ],
         )
 
+    monkeypatch.setenv("SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK", "1")
     monkeypatch.setattr(masvs_summary_report.core_q, "run_sql", fake_run_sql)
     monkeypatch.setattr(masvs_summary_report, "fetch_db_masvs_summary_static_many", fake_static)
 

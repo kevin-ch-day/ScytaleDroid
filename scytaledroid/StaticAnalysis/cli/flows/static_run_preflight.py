@@ -2,6 +2,14 @@
 
 Extracted from ``run_dispatch`` so orchestration stays thin and this surface is
 easier to test and evolve independently.
+
+Preflight body lines are mostly plain text (no ``[INFO]`` ribbons) so the block reads as
+a compact checklist; **blocking** conditions use ``status_messages`` **error** rows
+(primary DB connect failure, schema gate failure, output paths not writable).
+**Degraded** but usually non-blocking Intel / persistence lines use **warn** rows when
+plain text would be too quiet (Intel import/query failures, governance check errors,
+DB persistence skipped). Explicit degraded wording (e.g. ``not configured``,
+``EXPERIMENTAL``, ``snapshots not loaded``) stays plain.
 """
 
 from __future__ import annotations
@@ -15,6 +23,18 @@ from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import print_section
+
+
+def _preflight_plain(msg: str) -> None:
+    print(msg)
+
+
+def _preflight_warn_row(msg: str) -> None:
+    print(status_messages.status(msg, level="warn"))
+
+
+def _preflight_error_row(msg: str) -> None:
+    print(status_messages.status(msg, level="error"))
 
 
 def check_static_persistence_readiness(params: RunParameters) -> tuple[bool, str, str]:
@@ -35,18 +55,10 @@ def _emit_primary_db_and_schema(params: RunParameters) -> None:
     from scytaledroid.Database.db_core import db_config as _dbc
 
     if not _dbc.db_enabled():
-        print(
-            status_messages.status(
-                "Primary DB: not configured (filesystem-only; set SCYTALEDROID_DB_* for MariaDB)",
-                level="warn",
-            )
+        _preflight_plain(
+            "Primary DB: not configured (filesystem-only; set SCYTALEDROID_DB_* for MariaDB)"
         )
-        print(
-            status_messages.status(
-                "Static schema gate: skipped (no MariaDB backend)",
-                level="info",
-            )
-        )
+        _preflight_plain("Static schema gate: skipped (no MariaDB backend)")
         return
 
     primary_ok = False
@@ -60,171 +72,104 @@ def _emit_primary_db_and_schema(params: RunParameters) -> None:
     except Exception:
         primary_ok = False
     if primary_ok:
-        print(status_messages.status("Primary DB: OK", level="info"))
+        _preflight_plain("Primary DB: OK")
     else:
-        print(
-            status_messages.status(
-                "Primary DB: failed (cannot connect — check SCYTALEDROID_DB_URL or *_NAME/USER/PASSWD/HOST/PORT)",
-                level="warn",
-            )
+        _preflight_error_row(
+            "Primary DB: ERROR — cannot connect (check SCYTALEDROID_DB_URL or "
+            "*_NAME/USER/PASSWD/HOST/PORT)"
         )
 
     gate_ok, gate_msg, gate_detail = check_static_persistence_readiness(params)
     if gate_ok:
-        print(status_messages.status("Static schema gate: OK", level="info"))
+        _preflight_plain("Static schema gate: OK")
     else:
         tail = f" — {gate_detail.strip()}" if (gate_detail or "").strip() else ""
-        print(
-            status_messages.status(
-                f"Static schema gate: failed — {gate_msg}{tail}",
-                level="warn",
-            )
-        )
+        _preflight_error_row(f"Static schema gate: ERROR — {gate_msg}{tail}")
 
 
-def _emit_research_readiness_block(params: RunParameters) -> None:
-    """Governance / paper-grade lines (does not gate core scan execution)."""
+def _emit_intel_and_run_grade_lines(params: RunParameters) -> None:
+    """Permission Intel + paper-grade messaging (does not gate core scan execution)."""
 
-    print_section("Research readiness")
+    from scytaledroid.StaticAnalysis.cli.intel_gate import evaluate_intel_for_preflight
+
     paper = bool(getattr(params, "paper_grade_requested", True))
-    intel_label = "unknown"
-    try:
-        from scytaledroid.Database.db_core import permission_intel as intel_db
-        from scytaledroid.StaticAnalysis.cli.execution.pipeline import governance_ready
-    except Exception as exc:  # pragma: no cover - import guard
-        intel_label = "query_failed"
-        print(
-            status_messages.status(
-                f"Permission Intel: import failed ({exc}).",
-                level="warn",
-            )
+    ev = evaluate_intel_for_preflight()
+    intel_label = ev.label
+
+    if ev.governance_query_exc is not None:
+        _preflight_warn_row(
+            f"Permission Intel: WARN — query failed — {ev.governance_query_exc}"
         )
+    elif intel_label == "missing":
+        _preflight_plain("Permission Intel: not configured")
+    elif intel_label == "ok":
+        _preflight_plain("Permission Intel: OK (governance snapshot rows present)")
+    elif intel_label == "governance_missing":
+        _preflight_plain("Permission Intel: configured — governance snapshots not loaded")
     else:
-        if not intel_db.is_permission_intel_configured():
-            intel_label = "missing"
-            print(status_messages.status("Permission Intel: not configured", level="info"))
-        else:
-            try:
-                gov_ok, gov_detail = governance_ready()
-            except Exception as exc:
-                intel_label = "query_failed"
-                print(
-                    status_messages.status(
-                        f"Permission Intel: query failed — {exc}",
-                        level="warn",
-                    )
-                )
-            else:
-                if gov_ok:
-                    intel_label = "ok"
-                    print(
-                        status_messages.status(
-                            "Permission Intel: OK (governance snapshot rows present)",
-                            level="info",
-                        )
-                    )
-                elif gov_detail == "governance_missing":
-                    intel_label = "governance_missing"
-                    print(
-                        status_messages.status(
-                            "Permission Intel: configured — governance snapshots not loaded",
-                            level="info",
-                        )
-                    )
-                else:
-                    intel_label = "query_failed"
-                    print(
-                        status_messages.status(
-                            f"Permission Intel: governance check not satisfied ({gov_detail}).",
-                            level="warn",
-                        )
-                    )
+        _preflight_warn_row(
+            f"Permission Intel: WARN — governance check not satisfied ({ev.governance_detail})."
+        )
 
     impact = (
         "Impact: Core scan and DB persistence continue. "
         "Paper-grade / governance-complete evidence requires Permission Intel readiness."
     )
+    short_impact = (
+        "Core scan + DB persist proceed; paper-grade needs Permission Intel + governance snapshots."
+    )
+    verbose = bool(getattr(params, "verbose_output", False))
+
     if not paper:
-        print(
-            status_messages.status(
-                "Run grade: EXPERIMENTAL (paper-grade not requested — SCYTALEDROID_CANONICAL_GRADE=0)",
-                level="info",
-            )
+        _preflight_plain(
+            "Run grade: EXPERIMENTAL (paper-grade not requested — SCYTALEDROID_CANONICAL_GRADE=0). "
+            + (impact if verbose else short_impact)
         )
-        print(status_messages.status(impact, level="info"))
-        print(
-            status_messages.status(
-                "Action: Enable canonical grade and configure Permission Intel for paper-grade output.",
-                level="info",
-            )
+        _preflight_plain(
+            "Next: SCYTALEDROID_CANONICAL_GRADE=1 and Permission Intel when you want paper-grade output."
         )
         return
 
     if intel_label == "ok":
-        print(status_messages.status("Run grade: PAPER-GRADE READY", level="info"))
-        print(
-            status_messages.status(
-                "Core scan: allowed — Permission Intel does not gate detectors or persistence.",
-                level="info",
-            )
+        _preflight_plain(
+            "Run grade: PAPER-GRADE READY — Permission Intel + governance snapshots OK; "
+            "Intel does not gate detectors or persistence."
         )
         return
 
-    print(
-        status_messages.status(
-            "Run grade: EXPERIMENTAL (research readiness — governance signals incomplete)",
-            level="info",
-        )
+    # Paper requested; Intel path not paper-ready (Intel line was printed above).
+    tail_by_intel = {
+        "missing": (
+            "Paper-grade: configure SCYTALEDROID_PERMISSION_INTEL_DB_* and load governance snapshots."
+        ),
+        "governance_missing": (
+            "Paper-grade: load Permission Intel governance snapshots (Intel is already reachable)."
+        ),
+        "query_failed": (
+            "Paper-grade: fix Permission Intel connectivity or governance queries, then re-check readiness."
+        ),
+    }
+    tail = tail_by_intel.get(
+        intel_label,
+        "Paper-grade: resolve Permission Intel / governance readiness before claiming paper output.",
     )
-    print(status_messages.status(impact, level="info"))
-    if intel_label == "missing":
-        print(
-            status_messages.status(
-                "Action: Configure SCYTALEDROID_PERMISSION_INTEL_DB_* (and governance snapshots) "
-                "for paper-grade runs.",
-                level="info",
-            )
-        )
-    elif intel_label == "governance_missing":
-        print(
-            status_messages.status(
-                "Action: Load Permission Intel governance snapshots before paper-grade runs.",
-                level="info",
-            )
-        )
-    elif intel_label == "query_failed":
-        print(
-            status_messages.status(
-                "Action: Fix Permission Intel connectivity/queries, then re-check governance readiness.",
-                level="info",
-            )
-        )
-    else:
-        print(
-            status_messages.status(
-                "Action: Resolve Permission Intel / governance readiness before paper-grade runs.",
-                level="info",
-            )
-        )
+    _preflight_plain(
+        "Run grade: EXPERIMENTAL (research readiness — governance signals incomplete for paper-grade). "
+        + (impact if verbose else short_impact)
+    )
+    _preflight_plain(tail)
 
 
 def _emit_db_persistence_preflight(params: RunParameters) -> None:
     if getattr(params, "persistence_ready", True):
-        print(
-            status_messages.status(
-                "DB persistence: ON (session writes to MariaDB when configured)",
-                level="info",
-            )
-        )
+        _preflight_plain("DB persistence: ON (session writes to MariaDB when configured)")
     else:
-        print(
-            status_messages.status(
-                "DB persistence: skipped (SCYTALEDROID_PERSISTENCE_READY=0 — filesystem/report outputs only)",
-                level="warn",
-            )
+        _preflight_warn_row(
+            "DB persistence: WARN — skipped (SCYTALEDROID_PERSISTENCE_READY=0 — "
+            "filesystem/report outputs only; session static rows will not be written)"
         )
 
-    print(status_messages.status("Legacy mirrors: OFF (canonical static writes only)", level="info"))
+    _preflight_plain("Legacy mirrors: OFF (canonical static writes only)")
 
 
 def _emit_output_paths_and_split(params: RunParameters, base_dir: Path) -> None:
@@ -242,44 +187,35 @@ def _emit_output_paths_and_split(params: RunParameters, base_dir: Path) -> None:
             first_err = str(exc)
             break
     if write_ok:
-        print(status_messages.status("Output paths: OK (writable)", level="info"))
+        _preflight_plain("Output paths: OK (writable)")
     else:
-        print(
-            status_messages.status(
-                f"Output paths: failed ({first_err or 'unknown error'})",
-                level="warn",
-            )
+        _preflight_error_row(
+            f"Output paths: ERROR — not writable ({first_err or 'unknown error'})"
         )
 
     split_on = bool(getattr(params, "scan_splits", True))
-    print(
-        status_messages.status(
-            f"Split scan: {'ON' if split_on else 'OFF'}",
-            level="info",
-        )
-    )
+    _preflight_plain(f"Split scan: {'ON' if split_on else 'OFF'}")
 
 
 def _emit_run_context_preflight(params: RunParameters, selection: Any | None) -> None:
     """Session / scope / preset snapshot (mirrors progress Run context; counts optional)."""
 
-    print_section("Run context")
     session = (getattr(params, "session_stamp", None) or "")
     session = str(session).strip() or "(unspecified)"
-    print(status_messages.status(f"Session: {session}", level="info"))
+    _preflight_plain(f"Session: {session}")
     scope = getattr(params, "scope_label", None) or getattr(params, "scope", None) or ""
     scope = str(scope).strip() or "—"
-    print(status_messages.status(f"Scope: {scope}", level="info"))
+    _preflight_plain(f"Scope: {scope}")
     preset = str(getattr(params, "profile_label", None) or getattr(params, "profile", "") or "—").strip()
-    print(status_messages.status(f"Preset: {preset}", level="info"))
+    _preflight_plain(f"Preset: {preset}")
     workers = str(getattr(params, "workers", None) or "auto").strip()
-    print(status_messages.status(f"Workers: {workers}", level="info"))
+    _preflight_plain(f"Workers: {workers}")
     groups = tuple(getattr(selection, "groups", ()) or ()) if selection is not None else ()
     if groups:
         n_pkg = len(groups)
         n_apk = sum(len(getattr(g, "artifacts", ()) or ()) for g in groups)
-        print(status_messages.status(f"Packages in this run: {n_pkg}", level="info"))
-        print(status_messages.status(f"APK files in this run: {n_apk}", level="info"))
+        _preflight_plain(f"Packages in this run: {n_pkg}")
+        _preflight_plain(f"APK files in this run: {n_apk}")
 
 
 def emit_static_run_preflight_summary(
@@ -297,15 +233,53 @@ def emit_static_run_preflight_summary(
         return
 
     print()
-    print(status_messages.step("Static run preflight", label="Static Analysis"))
+    print("Static Analysis ▶ Static run preflight")
+    print()
 
     print_section("Core readiness")
     _emit_primary_db_and_schema(params)
     _emit_db_persistence_preflight(params)
     _emit_output_paths_and_split(params, base_dir)
-    _emit_research_readiness_block(params)
+    _emit_intel_and_run_grade_lines(params)
+    print()
+
+    print_section("Run context")
     _emit_run_context_preflight(params, selection)
     print()
+
+    print_section("Catalog & labels")
+    _emit_catalog_display_labels(selection)
+    print()
+
+    print_section("After this run")
+    _preflight_plain(
+        "Read-only DB checks: Post-run diagnostics → 11 (DB-backed session checks); "
+        "Database Tools → 12 (session health, grain, artifact registry, static_session_id rollout verify)."
+    )
+    print()
+
+
+def _emit_catalog_display_labels(selection: Any | None) -> None:
+    """``apps.display_name`` coverage for this run's packages (read-only; no CSV apply)."""
+
+    if selection is None:
+        _preflight_plain("Display labels: skipped (no selection)")
+        return
+    groups = tuple(getattr(selection, "groups", ()) or ())
+    if not groups:
+        _preflight_plain("Display labels: skipped (empty selection)")
+        return
+    try:
+        from scytaledroid.Database.db_utils.catalog.app_display_label_preflight import (
+            format_apps_display_name_hygiene_line,
+        )
+
+        line = format_apps_display_name_hygiene_line(groups)
+    except Exception as exc:
+        _preflight_warn_row(f"Display labels: WARN — {exc}")
+        return
+    if line:
+        _preflight_plain(line)
 
 
 __all__ = [

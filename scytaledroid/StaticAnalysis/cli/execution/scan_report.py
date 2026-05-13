@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import Counter
 from collections.abc import Mapping, MutableMapping
 from datetime import UTC, datetime
@@ -17,7 +18,7 @@ from ...core import (
     StaticAnalysisReport,
     analyze_apk,
 )
-from ...core.findings import SeverityLevel
+from ...core.findings import Badge, DetectorResult, SeverityLevel
 from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunParameters, ScopeSelection
@@ -88,8 +89,56 @@ def _append_resource_warning(
     return inline_lines
 
 
+_BADGE_PIPELINE_RANK: dict[str, int] = {
+    Badge.SKIPPED.value: 0,
+    Badge.OK.value: 1,
+    Badge.INFO.value: 2,
+    Badge.WARN.value: 3,
+    Badge.FAIL.value: 4,
+    Badge.ERROR.value: 5,
+}
+
+
+def _rollup_status_counts_per_detector(app_result: AppRunResult) -> Counter[str] | None:
+    """Merge detector badges across split artifacts using worst status per ``detector_id``.
+
+    Summing per-artifact ``pipeline_summary.status_counts`` double-counts the same logical
+    detector across base + split APKs; this roll-up matches operator mental model for
+    package-level progress and reduces inflated WARN totals.
+    """
+
+    worst_by_detector: dict[str, Badge] = {}
+    saw_any = False
+    for artifact in app_result.artifacts:
+        report = getattr(artifact, "report", None)
+        if report is None:
+            continue
+        for result in getattr(report, "detector_results", ()) or ():
+            if not isinstance(result, DetectorResult):
+                continue
+            saw_any = True
+            det = str(result.detector_id or result.section_key or "").strip() or "unknown"
+            st = result.status
+            prev = worst_by_detector.get(det)
+            if prev is None or _BADGE_PIPELINE_RANK.get(st.value, -1) > _BADGE_PIPELINE_RANK.get(
+                prev.value, -1
+            ):
+                worst_by_detector[det] = st
+    if not saw_any:
+        return None
+    out: Counter[str] = Counter()
+    for badge in worst_by_detector.values():
+        out[badge.value] += 1
+    return out
+
+
 def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
-    """Summarize detector status and timing metadata across all artifacts for one app."""
+    """Summarize detector status and timing metadata across all artifacts for one app.
+
+    ``status_counts`` / ``warn_count`` / ``ok_count`` use **worst badge per ``detector_id``**
+    across base + split APKs when ``detector_results`` are present, so session roll-ups are not
+    inflated by split repetition. Policy/finding gate rows are deduped per detector/section pair.
+    """
     status_counts: Counter[str] = Counter()
     severity_counts: Counter[str] = Counter()
     policy_fail_detectors: list[dict[str, object]] = []
@@ -102,6 +151,8 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
     detector_skipped = 0
     total_duration_sec = 0.0
     skipped_detector_rows_collect: list[Mapping[str, object]] = []
+    policy_fail_keys: set[tuple[str, str]] = set()
+    finding_fail_keys: set[tuple[str, str]] = set()
 
     for artifact in app_result.artifacts:
         report = artifact.report
@@ -114,20 +165,38 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
             detector_skipped += int(summary.get("detector_skipped", 0) or 0)
             total_duration_sec += float(summary.get("total_duration_sec", 0.0) or 0.0)
 
-            for key, value in (summary.get("status_counts") or {}).items():
-                status_counts[str(key)] += int(value or 0)
-
             for key, value in (summary.get("severity_counts") or {}).items():
                 severity_counts[str(key)] += int(value or 0)
 
-            for key, target in (
-                ("policy_fail_detectors", policy_fail_detectors),
-                ("finding_fail_detectors", finding_fail_detectors),
-                ("error_detectors", error_detectors),
-            ):
-                payload = summary.get(key)
-                if isinstance(payload, list):
-                    target.extend([row for row in payload if isinstance(row, Mapping)])
+            payload_policy = summary.get("policy_fail_detectors")
+            if isinstance(payload_policy, list):
+                for row in payload_policy:
+                    if not isinstance(row, Mapping):
+                        continue
+                    det = str(row.get("detector") or "").strip()
+                    sec = str(row.get("section") or "").strip()
+                    key_t = (det, sec)
+                    if key_t in policy_fail_keys:
+                        continue
+                    policy_fail_keys.add(key_t)
+                    policy_fail_detectors.append(dict(row))
+
+            payload_finding = summary.get("finding_fail_detectors")
+            if isinstance(payload_finding, list):
+                for row in payload_finding:
+                    if not isinstance(row, Mapping):
+                        continue
+                    det = str(row.get("detector") or "").strip()
+                    sec = str(row.get("section") or "").strip()
+                    key_t = (det, sec)
+                    if key_t in finding_fail_keys:
+                        continue
+                    finding_fail_keys.add(key_t)
+                    finding_fail_detectors.append(dict(row))
+
+            payload_err = summary.get("error_detectors")
+            if isinstance(payload_err, list):
+                error_detectors.extend(row for row in payload_err if isinstance(row, Mapping))
 
             payload = summary.get("slowest_detectors")
             if isinstance(payload, list):
@@ -136,6 +205,19 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
             skips = summary.get("skipped_detectors")
             if isinstance(skips, list):
                 skipped_detector_rows_collect.extend(row for row in skips if isinstance(row, Mapping))
+
+    rolled = _rollup_status_counts_per_detector(app_result)
+    if rolled is not None:
+        status_counts = rolled
+    else:
+        for artifact in app_result.artifacts:
+            report = artifact.report
+            metadata = report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
+            summary = metadata.get("pipeline_summary") if isinstance(metadata.get("pipeline_summary"), Mapping) else None
+            if not isinstance(summary, Mapping):
+                continue
+            for key, value in (summary.get("status_counts") or {}).items():
+                status_counts[str(key)] += int(value or 0)
 
     slowest_sorted = sorted(
         slowest,
@@ -150,8 +232,6 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
 
     fallback_meta = rollup_parse_fallback_signals(app_result)
 
-    error_detector_events = len(error_detectors)
-
     merged_error_detectors_seen: set[tuple[str, str]] = set()
     dedup_errors: list[dict[str, object]] = []
     for row in error_detectors:
@@ -165,10 +245,10 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
         merged_error_detectors_seen.add(key)
         dedup_errors.append(dict(row))
 
+    error_detector_events = len(dedup_errors)
+
     detector_error_counts = Counter()
-    for row in error_detectors:
-        if not isinstance(row, Mapping):
-            continue
+    for row in dedup_errors:
         detector = str(row.get("detector") or row.get("section") or "?").strip() or "?"
         detector_error_counts[detector] += 1
 
@@ -208,14 +288,26 @@ def _execute_single_artifact(
     base_dir: Path,
     *,
     extra_metadata: Mapping[str, object] | None = None,
+    phase_timing_sink: MutableMapping[str, float] | None = None,
+    precomputed_report: StaticAnalysisReport | None = None,
 ):
     """Run analysis for a single APK artifact and return report plus scan summary."""
-    report, json_path, error, skipped = generate_report(
-        artifact,
-        base_dir,
-        params,
-        extra_metadata=extra_metadata,
-    )
+
+    if precomputed_report is not None:
+        report, json_path, error, skipped = finish_report_after_analysis(
+            precomputed_report,
+            params,
+            base_dir,
+            phase_timing_sink=phase_timing_sink,
+        )
+    else:
+        report, json_path, error, skipped = generate_report(
+            artifact,
+            base_dir,
+            params,
+            extra_metadata=extra_metadata,
+            phase_timing_sink=phase_timing_sink,
+        )
 
     if skipped:
         return None, None, tuple(), error, True
@@ -265,15 +357,15 @@ def _summarize_artifact(
     )
 
 
-def generate_report(
+def build_scan_report_metadata_payload(
     artifact,
-    base_dir: Path,
     params: RunParameters,
     *,
     extra_metadata: Mapping[str, object] | None = None,
-):
-    """Generate and optionally persist one static analysis report."""
-    metadata_payload: MutableMapping[str, object] = dict(artifact.metadata)
+) -> dict[str, object]:
+    """Merge artifact + run metadata used by ``analyze_apk`` (shared with pool workers)."""
+
+    metadata_payload: dict[str, object] = dict(artifact.metadata)
 
     metadata_payload["run_profile"] = params.profile
     metadata_payload["run_scope"] = params.scope
@@ -300,6 +392,82 @@ def generate_report(
                 if value is not None
             }
         )
+
+    return metadata_payload
+
+
+def finish_report_after_analysis(
+    report: StaticAnalysisReport,
+    params: RunParameters,
+    base_dir: Path,
+    *,
+    phase_timing_sink: MutableMapping[str, float] | None = None,
+):
+    """Persist (or skip) after ``analyze_apk`` — mirrors :func:`generate_report` post-analyze branches."""
+
+    if params.dry_run:
+        try:
+            _hb_set_stage("dry_run:not_persisted")
+        except Exception:
+            pass
+
+        return report, None, "dry-run (not persisted)", True
+
+    persistence_ready = bool(getattr(params, "persistence_ready", True))
+
+    if not persistence_ready:
+        try:
+            _hb_set_stage("persist:skipped")
+        except Exception:
+            pass
+
+        return report, None, None, False
+
+    try:
+        try:
+            _hb_set_stage("persist:save_report")
+        except Exception:
+            pass
+
+        t1 = time.monotonic()
+        saved_paths = save_report(report)
+        if phase_timing_sink is not None:
+            phase_timing_sink["persist_wall_s"] = phase_timing_sink.get("persist_wall_s", 0.0) + (
+                time.monotonic() - t1
+            )
+
+        try:
+            _hb_set_stage("persist:done")
+        except Exception:
+            pass
+
+        return report, saved_paths.json_path, None, False
+
+    except ReportStorageError as exc:
+        log.error(str(exc), category="static_analysis")
+
+        try:
+            _hb_set_stage("error:persist")
+        except Exception:
+            pass
+
+        return report, None, str(exc), False
+
+
+def generate_report(
+    artifact,
+    base_dir: Path,
+    params: RunParameters,
+    *,
+    extra_metadata: Mapping[str, object] | None = None,
+    phase_timing_sink: MutableMapping[str, float] | None = None,
+):
+    """Generate and optionally persist one static analysis report."""
+    metadata_payload = build_scan_report_metadata_payload(
+        artifact,
+        params,
+        extra_metadata=extra_metadata,
+    )
 
     def _stage_observer(evt: object) -> None:
         """Expose detector stage progress to heartbeat state without printing."""
@@ -330,6 +498,7 @@ def generate_report(
         except Exception:
             pass
 
+        t0 = time.monotonic()
         report = analyze_apk(
             artifact.path,
             metadata=metadata_payload,
@@ -337,6 +506,10 @@ def generate_report(
             config=build_analysis_config(params),
             stage_observer=stage_observer,
         )
+        if phase_timing_sink is not None:
+            phase_timing_sink["analyze_apk_wall_s"] = phase_timing_sink.get("analyze_apk_wall_s", 0.0) + (
+                time.monotonic() - t0
+            )
 
     except StaticAnalysisError as exc:
         try:
@@ -346,48 +519,12 @@ def generate_report(
 
         return None, None, str(exc), True
 
-    if params.dry_run:
-        try:
-            _hb_set_stage("dry_run:not_persisted")
-        except Exception:
-            pass
-
-        return report, None, "dry-run (not persisted)", True
-
-    persistence_ready = bool(getattr(params, "persistence_ready", True))
-
-    if not persistence_ready:
-        try:
-            _hb_set_stage("persist:skipped")
-        except Exception:
-            pass
-
-        return report, None, None, False
-
-    try:
-        try:
-            _hb_set_stage("persist:save_report")
-        except Exception:
-            pass
-
-        saved_paths = save_report(report)
-
-        try:
-            _hb_set_stage("persist:done")
-        except Exception:
-            pass
-
-        return report, saved_paths.json_path, None, False
-
-    except ReportStorageError as exc:
-        log.error(str(exc), category="static_analysis")
-
-        try:
-            _hb_set_stage("error:persist")
-        except Exception:
-            pass
-
-        return report, None, str(exc), False
+    return finish_report_after_analysis(
+        report,
+        params,
+        base_dir,
+        phase_timing_sink=phase_timing_sink,
+    )
 
 
 def build_analysis_config(params: RunParameters) -> AnalysisConfig:
@@ -409,6 +546,8 @@ def build_analysis_config(params: RunParameters) -> AnalysisConfig:
     profile = profile_map.get(params.profile, "full")
     enabled_detectors = _map_tests_to_detectors(params)
     enable_string_index = params.profile not in {"metadata", "permissions"}
+    # Quick pipeline presets skip ARSC resource strings unless the operator picked the strings preset.
+    string_index_include_resources = profile == "full" or params.profile == "strings"
 
     sampler = SecretsSamplerConfig(
         entropy_threshold=max(0.0, float(params.secrets_entropy)),
@@ -421,6 +560,7 @@ def build_analysis_config(params: RunParameters) -> AnalysisConfig:
         verbosity=params.log_level,
         enabled_detectors=enabled_detectors or None,
         enable_string_index=enable_string_index,
+        string_index_include_resources=string_index_include_resources,
         secrets_sampler=sampler,
     )
 

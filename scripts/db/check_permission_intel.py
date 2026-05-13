@@ -31,7 +31,7 @@ def _main() -> int:
 
     try:
         from scytaledroid.Database.db_core import permission_intel as intel_db
-        from scytaledroid.StaticAnalysis.cli.execution.pipeline import governance_ready
+        from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
         from scytaledroid.Database.db_utils import diagnostics as db_diag
     except ImportError as e:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {e}\n")
@@ -87,6 +87,14 @@ def _main() -> int:
         except Exception as exc:
             print(f"  ERROR            {table} ({exc})")
             missing_tables.append(table)
+
+    if not missing_tables:
+        print("# PERMISSION INTEL — dictionary read probe (DB menu / static readiness use same probe)")
+        try:
+            probe_ok = intel_db.probe_dictionary_read_access()
+            print(f"  INFO dictionary_select: {'OK' if probe_ok else 'FAILED (AOSP dict unreadable)'}")
+        except Exception as exc:
+            print(f"  ERROR dictionary_select: probe failed ({exc})")
 
     print("# PERMISSION INTEL — dictionary / governance row counts (DERIVED / operational)")
     try:

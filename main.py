@@ -9,7 +9,7 @@ from collections.abc import Callable
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
+from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -173,7 +173,7 @@ def main_menu() -> None:
 
         if choice == "0":
             log.info("Application shutting down", category="application")
-            print("Exiting ScytaleDroid.")
+            print(status_messages.status("Exiting ScytaleDroid.", level="info"))
             break
 
         if choice.lower() == "h" and status_snapshot.get("allow_copy_freeze_hash"):
@@ -251,8 +251,8 @@ def _handle_copy_freeze_hash(snapshot: dict[str, object]) -> None:
     if ok:
         print(status_messages.status("Copied freeze hash to clipboard.", level="success"))
     else:
-        print(status_messages.status("Clipboard copy unavailable; full freeze hash:", level="info"))
-        print(freeze_hash)
+            print(status_messages.status("Clipboard copy unavailable; full freeze hash:", level="info"))
+            print(colors.apply(freeze_hash, colors.get_palette().muted))
     prompt_utils.press_enter_to_continue()
 
 

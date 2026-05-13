@@ -15,7 +15,7 @@ def infer_session_governance_snapshot(params: RunParameters) -> dict[str, object
         return {"governance_grade": grade, "governance_reason": reason}
     try:
         from scytaledroid.Database.db_core import permission_intel as intel_db
-        from scytaledroid.StaticAnalysis.cli.execution.pipeline import governance_ready
+        from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
 
         if not intel_db.is_permission_intel_configured():
             reason = "missing_permission_intel"

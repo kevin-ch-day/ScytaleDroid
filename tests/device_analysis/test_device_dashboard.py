@@ -56,7 +56,9 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     assert "Motorola" in out and "Android 15" in out and "Physical" in out and "NON-ROOT" in out
     assert "Inv" in out and "Har" in out and "Ev" in out
     assert "546 pkgs" in out and "14h 39m ago" in out
-    assert "117 hv" in out and "411 pol" in out and "18 sc" in out
+    # Compact pipeline strip: word labels (operator-readable) vs legacy "117 hv" tokens
+    assert "117" in out and "411" in out and "18" in out
+    assert "pullable" in out and "policy-blocked" in out and "scope-blocked" in out
     assert "OK @ 26" in out
     assert "Next: static analysis (menu 2)" in out
     assert "Device Capability" not in out

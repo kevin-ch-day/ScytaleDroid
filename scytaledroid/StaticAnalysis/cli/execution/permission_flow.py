@@ -21,6 +21,10 @@ from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.models import RunParameters, ScopeSelection
 from ..core.run_lifecycle import finalize_static_run
 from ..persistence.run_summary import create_static_run_ledger
+from .operator_display_label import (
+    build_operator_label_metadata_from_report,
+    resolve_operator_app_label,
+)
 from .permission_view import (
     render_compact_notice,
     render_permission_persist_failed,
@@ -28,6 +32,7 @@ from .permission_view import (
     render_permission_profile,
 )
 from .scan_flow import generate_report
+from .scan_formatters import _load_v3_catalog_label_overrides
 from .static_run_map import load_run_map, validate_run_map
 
 
@@ -153,6 +158,7 @@ def execute_permission_scan(
 
     last_report = None
     last_category = None
+    last_operator_label: str | None = None
     audit_persist_failed = False
     persisted_counts_total: dict[str, int] = {}
     persisted_apps = 0
@@ -164,6 +170,20 @@ def execute_permission_scan(
     if compact_output:
         if not output_prefs.effective_batch() and not silent_output:
             render_compact_notice()
+
+    label_db: dict[str, str] = {}
+    label_v3: dict[str, str] = {}
+    if scope_groups:
+        try:
+            from ...core.repository import load_display_name_map
+
+            label_db = load_display_name_map(scope_groups)
+        except Exception:
+            label_db = {}
+        try:
+            label_v3 = _load_v3_catalog_label_overrides(selection)
+        except Exception:
+            label_v3 = {}
 
     for idx, group in enumerate(scope_groups, start=1):
         artifacts = group.artifacts
@@ -210,9 +230,21 @@ def execute_permission_scan(
             manifest_label = getattr(report.manifest, "app_label", None) if report else None
         except Exception:
             manifest_label = None
+        meta_for_label = build_operator_label_metadata_from_report(report)
+        operator_label = (
+            resolve_operator_app_label(
+                group.package_name,
+                meta_for_label,
+                label_v3,
+                label_db,
+            )
+            or (str(manifest_label).strip() if manifest_label else "")
+            or group.package_name
+        )
+        last_operator_label = operator_label
         profile = render_permission_profile(
             package_name=group.package_name,
-            app_label=manifest_label or group.package_name,
+            app_label=operator_label,
             permissions=permissions,
             defined=defined,
             sdk=sdk,
@@ -268,7 +300,7 @@ def execute_permission_scan(
         }
         accumulator.add_app(
             package=group.package_name,
-            label=group.package_name,
+            label=operator_label,
             cohort=group.category,
             sdk=sdk or {},
             counts=counts,
@@ -285,7 +317,7 @@ def execute_permission_scan(
                         "index": idx,
                         "total": len(scope_groups),
                         "package_name": group.package_name,
-                        "app_label": manifest_label or group.package_name,
+                        "app_label": operator_label,
                         "report_source": report_source,
                     }
                 )
@@ -389,7 +421,8 @@ def execute_permission_scan(
                     scope_label=params.scope_label or selection.label,
                     category=last_category,
                     profile=params.profile_label,
-                    display_name=getattr(manifest, "app_label", None) if manifest else None,
+                    display_name=last_operator_label
+                    or (getattr(manifest, "app_label", None) if manifest else None),
                     version_name=getattr(manifest, "version_name", None) if manifest else None,
                     version_code=getattr(manifest, "version_code", None) if manifest else None,
                     min_sdk=getattr(manifest, "min_sdk", None) if manifest else None,

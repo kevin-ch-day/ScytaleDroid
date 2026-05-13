@@ -95,6 +95,10 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
     assert approx["findings_runtime_total"] == 100
     assert approx["findings_capped_total"] == 25
     assert isinstance(approx.get("findings_capped_by_detector_json"), dict)
+    assert doc.get("post_run_grain_present") is False
+    assert doc.get("post_run_merge_status") == "pending"
+    assert doc.get("run_health_revision") == 1
+    assert doc.get("post_run_grain_merged_at_utc") is None
 
 
 def test_format_run_health_stdout_lines_partial_app_hints() -> None:
@@ -183,10 +187,11 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "detector_warnings=3" in body
     assert "policy_failures=1" in body
     assert "execution_errors=0 (none - not analyzer crashes)" in body
-    assert "Overall health   : partial" in body
+    assert "Run completion   : COMPLETE" in body
+    assert "Detector posture : PARTIAL" in body
     assert "pipeline_token=warnings_and_policy_failures" in body
     assert "Operator note    :" in body
-    assert "Overall health is 'partial'" in body
+    assert "Detector posture / session rollup is 'partial'" in body
 
 
 def test_build_run_health_document_includes_string_summary_note() -> None:

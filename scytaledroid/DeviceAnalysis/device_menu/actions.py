@@ -68,13 +68,7 @@ def _print_harvest_success_menu_feedback(result_context: Mapping[str, object] | 
 
     ctx = dict(result_context or {})
     if harvest_pkg.is_harvest_simple_mode():
-        print()
-        print(
-            status_messages.status(
-                "Harvest session closed · menus: 8) Browse harvested APKs · 3) Inventory & harvest details",
-                level="info",
-            )
-        )
+        # Simple-mode transcript already ends with harvest summary paths; skip extra menu echo.
         return
 
     harvested = ctx.get("packages", "—")

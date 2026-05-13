@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 import sys
@@ -45,6 +46,22 @@ from .models import (
 from .pipeline_artifacts import assemble_pipeline_artifacts
 from .resource_fallback import merge_metadata, open_apk_with_fallback
 from .results_builder import make_detector_result
+
+# Last non-debug verbosity passed to ``configure_third_party_loggers`` (``None`` = debug or cold).
+_apk_non_debug_log_verbosity: str | None = None
+
+
+def _next_apk_logger_reconfigure(
+    verbosity: str, last_non_debug: str | None
+) -> tuple[bool, str | None]:
+    """Return whether to call ``configure_third_party_loggers`` and the next ``last_non_debug`` value."""
+
+    if verbosity == "debug":
+        return True, None
+    if last_non_debug != verbosity:
+        return True, verbosity
+    return False, last_non_debug
+
 
 # -----------------------
 # Small, focused helpers
@@ -172,7 +189,10 @@ def _load_apk_safely(apk_path: Path, meta: dict) -> APK:
     return fallback.apk
 
 
-def _resolve_toolchain_versions() -> Mapping[str, str]:
+@functools.lru_cache(maxsize=1)
+def _frozen_toolchain_versions() -> tuple[tuple[str, str], ...]:
+    """Cached toolchain probe (immutable tuple for ``lru_cache`` safety)."""
+
     versions = {"androguard": "—", "aapt2": "—", "apksigner": "—"}
     try:  # pragma: no cover - dependency introspection
         import androguard  # type: ignore
@@ -184,7 +204,11 @@ def _resolve_toolchain_versions() -> Mapping[str, str]:
     aapt2 = shutil.which("aapt2")
     if aapt2:
         versions["aapt2"] = "present"
-    return versions
+    return tuple(versions.items())
+
+
+def _resolve_toolchain_versions() -> Mapping[str, str]:
+    return dict(_frozen_toolchain_versions())
 
 
 def analyze_apk(
@@ -208,11 +232,19 @@ def analyze_apk(
     run_id = derive_run_id(apk_sha256, analysis_config)
     report_metadata.setdefault("run_id", run_id)
 
-    log_path = configure_third_party_loggers(
-        verbosity=analysis_config.verbosity,
-        run_id=run_id,
-        debug_dir=str(Path(app_config.LOGS_DIR).resolve()),
+    global _apk_non_debug_log_verbosity
+    verbosity = analysis_config.verbosity
+    should_configure, _apk_non_debug_log_verbosity = _next_apk_logger_reconfigure(
+        verbosity, _apk_non_debug_log_verbosity
     )
+    if should_configure:
+        log_path = configure_third_party_loggers(
+            verbosity=verbosity,
+            run_id=run_id,
+            debug_dir=str(Path(app_config.LOGS_DIR).resolve()),
+        )
+    else:
+        log_path = None
     if log_path is not None:
         report_metadata["androguard_log_path"] = str(log_path)
 
@@ -321,8 +353,14 @@ def analyze_apk(
     # String index (optional & resilient)
     string_index = None
     if analysis_config.enable_string_index:
+        report_metadata["string_index_include_resources"] = bool(
+            analysis_config.string_index_include_resources
+        )
         try:
-            string_index = build_string_index(apk)
+            string_index = build_string_index(
+                apk,
+                include_resources=analysis_config.string_index_include_resources,
+            )
         except Exception as e:
             report_metadata["string_index_error"] = str(e)
 

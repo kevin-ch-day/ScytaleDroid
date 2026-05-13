@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.permission_intel_freeze import (
     list_operational_managed_tables,
@@ -170,6 +171,8 @@ def run_health_summary() -> None:
     target: dict[str, object] = {}
     duplicates: list[dict[str, object]] = []
     pi_status_line: str | None = None
+    target_err: str | None = None
+    gov_err: str | None = None
 
     if not intel_db.is_permission_intel_configured():
         pi_status_line = "Permission Intel        : SKIPPED — DSN not configured"
@@ -179,8 +182,6 @@ def run_health_summary() -> None:
             _pi_health_log_subcheck_failure("operational_duplicate_scan", exc)
             duplicates = []
     else:
-        target_err: str | None = None
-        gov_err: str | None = None
         try:
             target = intel_db.describe_target()
         except Exception as exc:
@@ -220,6 +221,15 @@ def run_health_summary() -> None:
             ("rows", gov_rows if gov_rows is not None else "—"),
         ]
     )
+    if intel_db.is_permission_intel_configured() and not target_err and gov_err is None:
+        try:
+            ok_gov, gov_detail = governance_ready()
+            print(
+                f"  governance_ready (static CLI / paper-grade gate): {ok_gov} ({gov_detail or 'ok'})"
+            )
+        except Exception as exc:
+            print(f"  governance_ready (static CLI gate): query failed ({exc})")
+
     menu_utils.print_section("Permission-intel split")
     dup_present = [row for row in duplicates if row["exists"]]
     menu_utils.print_metrics(

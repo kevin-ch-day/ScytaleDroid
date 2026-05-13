@@ -65,14 +65,56 @@ SCYTALEDROID_WEB_ROOT=/var/www/html/ScytaleDroid-Web ./scripts/db/smoke_web_db.s
 
 Adjust `SCYTALEDROID_WEB_ROOT` to your deployed Web tree.
 
+### Static session truth model
+
+**`static_analysis_sessions`** is the **session-level** source of truth for static run health and Web/session eligibility summaries. **`static_analysis_runs.static_session_id`** links each SAR row to its session header (nullable only where legacy/incomplete; prefer writers setting it).
+
+Expected lifecycle (do not skip or invert casually):
+
+1. Ensure / upsert the **`static_analysis_sessions`** shell for `(session_stamp, scope_label)` when ingesting or refreshing.
+2. Insert **`static_analysis_runs`** with **`static_session_id`** when the session shell is known.
+3. Refresh session summaries **after** run finalization and **after** `static_session_run_links` writes.
+4. Batch repair: **`PYTHONPATH=. python scripts/db/refresh_static_analysis_sessions.py --all`**
+5. Verify linkage: **`PYTHONPATH=. python scripts/db/verify_static_session_id_rollout.py`** (read-only counts).
+
+Do **not** hand-edit session counter columns in SQL unless you are doing an **explicit, reviewed** DB repair and understand downstream Web/read-model expectations.
+
+### Repo-owned static session views (v2)
+
+These **repo-owned** views are part of the DB contract (DDL in this tree; Web consumes them). **Never** patch them only in production — change **`Database/db_queries/views_static_sessions_v2.py`** (and related manifest entries), then **posture / recreate** views and verify consumers.
+
+- `v_static_session_health_v2`
+- `v_web_static_session_index_v2`
+- `v_web_static_latest_session_by_scope_v2`
+- `v_static_session_cleanup_candidates_v2`
+- `v_static_session_supersession_candidates_v1`
+
+### Artifact registry backlog signal
+
+**`artifact_static_numeric_dangling`** from **`verify_static_session_id_rollout.py`** (via **`v_artifact_registry_integrity`**) is often **historical artifact-registry debt**, not proof that the static-session rollout failed. Do **not** delete **`artifact_registry`** rows or filesystem evidence under **`output/`** or **`evidence/`** based on this count alone. Triage with read-only reporting (e.g. **`scripts/db/report_artifact_registry_integrity.py`**) and **`docs/maintenance/artifact_registry_cleanup_track.md`**; any delete path needs export, explicit approval, and staged execution (see below).
+
+### Destructive DB cleanup (staging)
+
+Prune / bulk-delete workflows must be **staged**, not one-shot silent deletes: (1) read-only footprint report, (2) export of target keys/paths, (3) transactional deletes scoped by **explicit ID sets** (temp tables or equivalent — no open-ended `DELETE` without a bounded key list), (4) verify **zero** remaining targets for that scope, (5) commit or rollback. No “fire and forget” prune: default **dry-run**, explicit **`--execute`** (or equivalent menu confirmation), and before/after counts in operator output.
+
 ## Canonical static persistence and legacy bridge
 
 **Canonical surfaces** (static analysis writes here):
 
-- `static_analysis_runs`, `static_analysis_findings`
+- `static_analysis_sessions`, `static_analysis_runs`, `static_analysis_findings`
 - `static_permission_matrix`, `static_string_summary`, `static_string_samples`
 - `static_session_run_links`, `static_session_rollups`
 - Static handoff via views such as **`v_static_handoff_v1`**
+
+**Static scan grain (CLI progress vs canonical DB)**
+
+Per-APK artifact JSON reports are **not** the same thing as canonical package-level DB summaries. Live pipeline warning/failure counts may **sum per-artifact detector stages**; canonical DB findings (and related canonical tables fed from the base report) are **package / base-report scoped** unless a task explicitly documents otherwise. Do **not** “fix” perceived mismatch by blindly deduping pipeline rollups or widening canonical writers without an explicit product + schema decision.
+
+**Permission matrix vs `static_permission_risk_vnext`**
+
+- **`static_permission_matrix.permission_name`** — detector/manifest string after **`strip()`**; in-batch dedupe uses a **lowercase canonical key**, but the **stored value keeps first-seen casing** (evidence-oriented).
+- **`static_permission_risk_vnext.permission_name`** — **canonical lowercase** risk row identity per run.
+- SQL joining matrix ↔ vnext must **canonicalize** (e.g. **`LOWER(TRIM(spm.permission_name))`**) and use an **explicit collation** where MariaDB requires it (see **`risk_actions.py`** backfill). Do **not** change matrix storage or bulk-rewrite historical matrix casing unless the task **explicitly** approves migration and consumer impact.
 
 **Legacy tables** (`runs`, `metrics`, `buckets`, legacy `findings`, etc.) may still hold **historical** rows from older pipelines; static analysis **no longer writes** a compatibility mirror there—persistence is **`static_analysis_*` only**. **Do not** reintroduce or widen legacy write paths without an explicit product decision and dependency map. Session audits and diagnostics must treat **empty or stale legacy tables as normal** when only canonical writers are in use.
 
@@ -83,6 +125,7 @@ Prioritize: **preflight clarity**, **Permission Intel status before scan**, **ru
 **Labeling rules**
 
 - Do **not** imply **execution crashes** when **`detector_errors=0`**. Use **`detector_pipeline`** / pipeline rollup vocabulary: distinguish **policy/gate failures** and **warnings** from **execution errors**.
+- Live compact progress **pipeline event** counts (warnings / policy fails) are **summed across APK artifacts**; they are **not** the same as **`static_analysis_findings`** row counts (canonical findings are **base-report / package-level**). See **Static scan grain** under canonical static persistence.
 - Separate **workflow execution** (scan finished, artifacts, DB persist) from **governance / paper-grade** and from **overall partial** when only detector policy stages fired.
 - Do not treat **permission audit snapshot prevalence counts** as MariaDB **`permission_matrix`** row counts — different artifacts.
 
@@ -129,6 +172,7 @@ Additional rules:
 
 - **Web UI** lives in a **separate** repo — do not patch this Python tree for analyst Web issues.
 - **`scripts/`** are wrappers and automation — business logic belongs in `scytaledroid/` modules unless the script is explicitly the supported surface (see `docs/supported_entrypoints.md`).
+- **`scripts/**/*.py` `--help`** must be **side-effect free**: no DB connection, no PyMySQL/dotenv-heavy work, and no imports that require credentials **before** `argparse` can parse and exit (see **`tests/gates/test_scripts_help_contract.py`**). Add repo-root `sys.path` bootstrap when needed so bare `python scripts/...py --help` works.
 
 ## High-risk seams (extra review, narrow diffs)
 
@@ -178,6 +222,9 @@ PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py posture
 PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py semantic
 SCYTALEDROID_WEB_ROOT=/var/www/html/ScytaleDroid-Web ./scripts/db/smoke_web_db.sh
 ```
+
+Optional **static cohort grain** (package-level DB vs per-artifact JSON; read-only):  
+`PYTHONPATH=. python scripts/db/report_static_session_grain_integrity.py --session-stamp <stamp> --count-archive-json` (optional `--with-display-labels` for a CSV+`apps.display_name` column; archive JSON count ≠ persistence-audit `latest/` path totals — see `scripts/db/README.md`), or **Database → Curated queries → option 13** in the TUI.
 
 Always compile touched modules (including CLI menus and DB helpers when edited):
 

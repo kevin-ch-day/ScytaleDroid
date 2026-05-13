@@ -247,6 +247,7 @@ def print_main_banner(
         for message in hero_messages:
             banner_lines.append(f"{bullet} {message}")
 
+    text_blocks.print_accent_rule(width=term_width)
     print(text_blocks.boxed(banner_lines, width=term_width, padding=1))
 
     if menu_title:
@@ -573,7 +574,8 @@ def print_section(title: str) -> None:
         return
 
     palette = colors.get_palette()
-    print(colors.apply(heading, palette.banner_primary, bold=True))
+    leader = colors.apply("» ", palette.accent, bold=True) if colors.colors_enabled() and not use_ascii_ui() else ""
+    print(f"{leader}{colors.apply(heading, palette.banner_primary, bold=True)}")
     print(text_blocks.divider(width=max(4, len(heading)), style="divider"))
 
 

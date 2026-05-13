@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution import scan_flow
+from scytaledroid.StaticAnalysis.cli.execution import scan_report as scan_report_mod
 from scytaledroid.StaticAnalysis.cli.execution.scan_formatters import _format_compact_progress_text
 from scytaledroid.StaticAnalysis.cli.persistence import run_summary
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
@@ -55,11 +56,18 @@ def _configure_scan_flow(monkeypatch, *, calls: list[str]) -> None:
     monkeypatch.setattr(scan_flow, "render_resource_warnings", lambda *_a, **_k: None)
     monkeypatch.setattr(scan_flow, "is_compact_card_mode", lambda *_a, **_k: False)
 
-    def _fake_generate_report(_artifact, _base_dir, _params, *, extra_metadata=None):
+    def _fake_generate_report(
+        _artifact,
+        _base_dir,
+        _params,
+        *,
+        extra_metadata=None,
+        phase_timing_sink=None,
+    ):
         calls.append("generate_report")
         return _FakeReport(metadata=dict(extra_metadata or {})), None, None, False
 
-    monkeypatch.setattr(scan_flow, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(scan_report_mod, "generate_report", _fake_generate_report)
     monkeypatch.setattr(
         scan_flow,
         "analyse_string_payload",
@@ -353,15 +361,17 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
         total_apps=120,
         artifacts_done=106,
         total_artifacts=459,
-        agg_checks=Counter({"ok": 888, "warn": 312, "fail": 51, "error": 0}),
+        agg_checks=Counter(
+            {"ok": 888, "warn": 312, "fail": 51, "policy_fail": 30, "finding_fail": 21, "error": 0}
+        ),
         elapsed_text="24m 18s",
         eta_text="1h 12m",
         current_app_label="Switch Access",
         current_package_name="com.google.android.accessibility.switchaccess",
         recent_completions=[
-            "#22 Foo 00:19 warnings=3 policy_failures=1 high=1 medium=2",
-            "#23 Bar 00:12 warnings=1 policy_failures=0 high=0 medium=1",
-            "#24 Newsmax 00:32 warnings=4 policy_failures=0 high=0 medium=1",
+            "#22 Foo 00:19 warnings=3 policy_gates=1 finding_gates=0 gates_total=1 high=1 medium=2",
+            "#23 Bar 00:12 warnings=1 policy_gates=0 finding_gates=0 gates_total=0 high=0 medium=1",
+            "#24 Newsmax 00:32 warnings=4 policy_gates=0 finding_gates=0 gates_total=0 high=0 medium=1",
         ],
         last_report_seconds_ago=3,
         last_report_package="com.example.pkg",
@@ -372,6 +382,8 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
         scope_display="all - All apps",
         workers_display="8",
         include_legend=False,
+        concise=False,
+        include_recent_apps=True,
     )
 
     assert "Run context" in text
@@ -385,12 +397,13 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
     assert "APK artifact progress: 106 / 459 completed" in text
     assert "Elapsed: 24m 18s" in text
     assert "ETA: ~1h 12m" in text
-    assert "Warnings: 312" in text
-    assert "Policy/finding failures: 51" in text
-    assert "Execution errors: 0 (none - no analyzer/pipeline exceptions)" in text
-    assert "Last saved report: com.example.pkg, 3s ago" in text
-    assert "Persisted JSON reports this session: 106/459" in text
+    assert "WARN detector stages" in text
+    assert "Policy gate failures" in text
+    assert "Finding gate failures" in text
+    assert "(no execution errors" in text
+    assert "APK reports saved: 106 / 459" in text
+    assert "Last report persist" not in text
     assert "Legend:" not in text
     assert "Recent apps" in text
-    assert "#23 Bar 00:12 warnings=1 policy_failures=0 high=0 medium=1" in text
-    assert "#24 Newsmax 00:32 warnings=4 policy_failures=0 high=0 medium=1" in text
+    assert "#23 Bar 00:12 warnings=1 policy_gates=0 finding_gates=0 gates_total=0 high=0 medium=1" in text
+    assert "#24 Newsmax 00:32 warnings=4 policy_gates=0 finding_gates=0 gates_total=0 high=0 medium=1" in text
