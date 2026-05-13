@@ -17,6 +17,16 @@ from scytaledroid.StaticAnalysis.cli.core.models import RunOutcome
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 
+def refresh_session_summaries_after_link_writes(session_stamp: str | None) -> None:
+    """Best-effort: sync ``static_analysis_sessions`` aggregates after link rows change."""
+
+    from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
+        refresh_static_session_summaries_for_session_stamp,
+    )
+
+    refresh_static_session_summaries_for_session_stamp(session_stamp)
+
+
 @dataclass(frozen=True)
 class SessionFinalizationResult:
     """Summary of session-level finalization work."""
@@ -171,6 +181,8 @@ def persist_static_session_links(
             "static_session_run_links insert failed for "
             f"{len(failures)} row(s). First error: {failures[0]}"
         )
+    if inserted > 0:
+        refresh_session_summaries_after_link_writes(session_stamp)
     return SessionFinalizationResult(links_written=inserted)
 
 
@@ -509,5 +521,6 @@ __all__ = [
     "emit_persistence_audit_artifact",
     "finalize_session_run_map",
     "persist_static_session_links",
+    "refresh_session_summaries_after_link_writes",
     "refresh_static_session_cache",
 ]

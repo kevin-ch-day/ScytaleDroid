@@ -101,6 +101,10 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS grade_reasons_json JSON DEFAULT NULL;
     """,
     """
+    CREATE INDEX IF NOT EXISTS ix_dynamic_sessions_static_run_id
+    ON dynamic_sessions (static_run_id);
+    """,
+    """
     CREATE TABLE IF NOT EXISTS dynamic_session_issues (
       id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       dynamic_run_id CHAR(36)        NOT NULL,

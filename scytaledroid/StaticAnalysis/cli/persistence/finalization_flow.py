@@ -7,6 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
+    maybe_refresh_static_analysis_session_summary,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _GROUP_SCOPE_SKIP_LOGGED_SESSIONS: set[str] = set()
@@ -212,6 +215,40 @@ def finalize_persisted_static_run(
         ended_at_utc=ended_at_utc,
         abort_reason=abort_reason,
         abort_signal=abort_signal,
+    )
+    refresh_stamp = session_stamp
+    refresh_scope = scope_label
+    try:
+        row = callbacks.run_sql(
+            """
+            SELECT
+              sar.session_stamp AS session_stamp,
+              COALESCE(TRIM(BOTH FROM sar.scope_label), '') AS scope_for_refresh
+            FROM static_analysis_runs sar
+            WHERE sar.id = %s
+            LIMIT 1
+            """,
+            (static_run_id,),
+            fetch="one",
+        )
+        if row:
+            if isinstance(row, dict):
+                db_stamp = row.get("session_stamp")
+                db_scope = row.get("scope_for_refresh")
+            else:
+                db_stamp = row[0] if len(row) > 0 else None
+                db_scope = row[1] if len(row) > 1 else None
+            if db_stamp is not None and str(db_stamp).strip():
+                refresh_stamp = str(db_stamp).strip()
+            if db_scope is not None:
+                refresh_scope = str(db_scope)
+    except Exception:
+        pass
+
+    maybe_refresh_static_analysis_session_summary(
+        refresh_stamp,
+        refresh_scope,
+        reason="post_static_run_finalization",
     )
     return run_status
 

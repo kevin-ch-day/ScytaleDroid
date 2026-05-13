@@ -12,6 +12,8 @@ from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .contracts import normalize_run_status
+from .session_header_linkage import resolve_static_session_id_for_run
+from .static_session_summary import ensure_static_session_shell
 from .dep_export import export_dep_json
 
 
@@ -272,9 +274,16 @@ def _create_static_run(
     study_tag: str | None = None,
     identity_mode: str | None = None,
     identity_conflict_flag: bool | None = None,
+    static_session_id: int | None = None,
 ) -> int | None:
     normalized_started_at = _normalize_datetime_value(run_started_utc)
     canonical_status = normalize_run_status(status)
+
+    resolved_session_header_id = (
+        static_session_id
+        if static_session_id is not None
+        else resolve_static_session_id_for_run(session_stamp, scope_label)
+    )
 
     def _insert_run(columns: list[str], values: list[object]) -> int | None:
         placeholders = ", ".join(["%s"] * len(columns))
@@ -287,6 +296,7 @@ def _create_static_run(
         "session_stamp",
         "session_label",
         "scope_label",
+        "static_session_id",
         "category",
         "profile_key",
         "scenario_id",
@@ -319,6 +329,7 @@ def _create_static_run(
         session_stamp,
         session_label,
         scope_label,
+        resolved_session_header_id,
         category,
         profile_key,
         scenario_id,
@@ -436,6 +447,14 @@ def create_static_run_ledger(
         is_canonical = False
         canonical_set_at_utc = None
         canonical_reason = "identity_conflict"
+    resolved_header = ensure_static_session_shell(
+        session_stamp=session_stamp,
+        scope_label=scope_label,
+        session_label=session_label or None,
+        tool_semver=tool_semver,
+        tool_git_commit=tool_git_commit,
+        schema_version=schema_version,
+    )
     static_run_id = _create_static_run(
         app_version_id=app_version_id,
         session_stamp=session_stamp,
@@ -469,6 +488,7 @@ def create_static_run_ledger(
         study_tag=study_tag,
         identity_mode=identity_mode,
         identity_conflict_flag=identity_conflict_flag,
+        static_session_id=resolved_header,
     )
     if static_run_id is None:
         return None

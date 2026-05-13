@@ -190,3 +190,124 @@ def test_group_scope_skip_does_not_mutate_slotted_outcome(monkeypatch):
     assert messages == [
         "Skipping canonical singleton enforcement for group scope session_label=20260428-all-full"
     ]
+
+
+@pytest.mark.unit
+def test_finalize_persisted_static_run_triggers_session_summary_refresh(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+
+    def _capture(stamp, scope, *, reason):
+        calls.append((stamp, str(scope), reason))
+
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.finalization_flow.maybe_refresh_static_analysis_session_summary",
+        _capture,
+    )
+
+    outcome = _Outcome()
+    finalize_persisted_static_run(
+        static_run_id=9001,
+        dry_run=False,
+        package_for_run="com.example",
+        session_stamp="sess-refresh",
+        scope_label="Research Dataset Alpha",
+        run_package="com.example",
+        run_status="COMPLETED",
+        paper_grade_requested=False,
+        canonical_action=None,
+        persistence_failed=False,
+        outcome=outcome,
+        ended_at_utc=None,
+        abort_reason=None,
+        abort_signal=None,
+        callbacks=_build_callbacks(),
+    )
+
+    assert calls == [
+        ("sess-refresh", "Research Dataset Alpha", "post_static_run_finalization"),
+    ]
+
+
+@pytest.mark.unit
+def test_finalize_prefers_db_stamp_and_scope_for_session_refresh(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+
+    def _capture(stamp, scope, *, reason):
+        calls.append((stamp, str(scope), reason))
+
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.finalization_flow.maybe_refresh_static_analysis_session_summary",
+        _capture,
+    )
+
+    def run_sql(sql: str, params=None, fetch=None):
+        sql_norm = " ".join(sql.split())
+        if "SELECT session_label FROM static_analysis_runs WHERE id=%s" in sql_norm:
+            return ("lbl",)
+        if "scope_for_refresh" in sql_norm:
+            return ("db-stamp", "db-scope")
+        return None
+
+    callbacks = StaticRunFinalizationCallbacks(
+        run_sql=run_sql,
+        export_dep_json=lambda *_a, **_k: None,
+        maybe_set_canonical_static_run=lambda **_k: None,
+        update_static_run_metadata=lambda *_a, **_k: None,
+        update_static_run_status=lambda **_k: None,
+        normalize_run_status=lambda status: str(status or "").upper(),
+    )
+
+    outcome = _Outcome()
+    finalize_persisted_static_run(
+        static_run_id=4242,
+        dry_run=False,
+        package_for_run="com.example",
+        session_stamp="caller-stamp",
+        scope_label="caller-scope",
+        run_package="com.example",
+        run_status="COMPLETED",
+        paper_grade_requested=False,
+        canonical_action=None,
+        persistence_failed=False,
+        outcome=outcome,
+        ended_at_utc=None,
+        abort_reason=None,
+        abort_signal=None,
+        callbacks=callbacks,
+    )
+
+    assert calls == [("db-stamp", "db-scope", "post_static_run_finalization")]
+
+
+@pytest.mark.unit
+def test_finalize_persisted_static_run_skips_session_refresh_on_dry_run(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+
+    def _capture(stamp, scope, *, reason):
+        calls.append((stamp, str(scope), reason))
+
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.finalization_flow.maybe_refresh_static_analysis_session_summary",
+        _capture,
+    )
+
+    outcome = _Outcome()
+    finalize_persisted_static_run(
+        static_run_id=9002,
+        dry_run=True,
+        package_for_run="com.example",
+        session_stamp="sess-skip",
+        scope_label="",
+        run_package="com.example",
+        run_status="COMPLETED",
+        paper_grade_requested=False,
+        canonical_action=None,
+        persistence_failed=False,
+        outcome=outcome,
+        ended_at_utc=None,
+        abort_reason=None,
+        abort_signal=None,
+        callbacks=_build_callbacks(),
+    )
+
+    assert calls == []

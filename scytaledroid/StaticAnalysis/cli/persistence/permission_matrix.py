@@ -1,4 +1,18 @@
-"""Persistence helpers for per-run permission matrices."""
+"""Persistence helpers for per-run permission matrices.
+
+Contract (matrix vs ``static_permission_risk_vnext``):
+    ``static_permission_matrix.permission_name`` is **detector-facing evidence**:
+    keys are ``strip()``-normalized, duplicates collapse using a **lowercase canonical
+    key** for dedupe only, but the **stored string keeps the first-seen spelling**
+    (e.g. ``android.permission.USE_BIOMETRIC`` if that key appeared first). This
+    preserves how the manifest/detector surfaced the permission for operators and
+    Web cohort rules that still match on the stored string.
+
+    ``static_permission_risk_vnext.permission_name`` is the **canonical lowercase**
+    identity used for joins and rollups. Any SQL joining matrix → vnext must align
+    on ``LOWER(spm.permission_name)`` (with an explicit collation where MariaDB
+    requires it) — see ``risk_actions.backfill_static_permission_risk_vnext``.
+"""
 
 from __future__ import annotations
 
@@ -40,7 +54,12 @@ def persist_permission_matrix(
     apk_id: int | None,
     permission_profiles: Mapping[str, Mapping[str, object]] | None,
 ) -> None:
-    """Persist permission profile metadata when available."""
+    """Persist permission profile metadata when available.
+
+    Rows are deduped by lowercase canonical permission string but ``permission_name``
+    retains the first profile key spelling after ``strip()`` — not forced lowercase
+    (see module docstring).
+    """
 
     require_canonical_schema()
     if static_run_id is None:

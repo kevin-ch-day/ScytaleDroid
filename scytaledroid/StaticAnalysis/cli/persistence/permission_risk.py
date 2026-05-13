@@ -70,7 +70,12 @@ def _persist_permission_risk_vnext(
     risk_score_text: str,
     permission_profiles: Mapping[str, Mapping[str, object]],
 ) -> list[dict[str, str]]:
-    """Upsert vnext rows; return structured warnings (e.g. duplicate canonical permissions)."""
+    """Upsert vnext rows; return structured warnings (e.g. duplicate canonical permissions).
+
+    ``permission_name`` on insert is always ``str(key).strip().lower()`` — canonical
+    lowercase identity. Join matrix → vnext in SQL using ``LOWER(spm.permission_name)``
+    (see ``permission_matrix`` module docstring for matrix display semantics).
+    """
 
     if not _ensure_permission_vnext_table():
         raise RuntimeError("static_permission_risk_vnext table unavailable")

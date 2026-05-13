@@ -8,7 +8,8 @@ import re
 from typing import Callable
 
 _VIEW_HEAD = re.compile(
-    r"^\s*CREATE\s+OR\s+REPLACE\s+VIEW\s+`?([a-zA-Z0-9_]+)`?",
+    # Allow optional qualifiers (e.g. ``SQL SECURITY INVOKER``) between ``REPLACE`` and ``VIEW``.
+    r"^\s*CREATE\s+OR\s+REPLACE\s+(?:SQL\s+SECURITY\s+(?:DEFINER|INVOKER)\s+)?VIEW\s+`?([a-zA-Z0-9_]+)`?",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -199,6 +200,11 @@ EXPECTED_VIEW_OBJECTS: tuple[str, ...] = (
     "v_web_app_permissions",
     "v_web_permission_intel_current",
     "v_web_static_session_health",
+    "v_static_session_health_v2",
+    "v_web_static_session_index_v2",
+    "v_web_static_latest_session_by_scope_v2",
+    "v_static_session_cleanup_candidates_v2",
+    "v_static_session_supersession_candidates_v1",
 )
 
 

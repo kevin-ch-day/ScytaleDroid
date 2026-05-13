@@ -14,6 +14,12 @@ from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
+from scytaledroid.StaticAnalysis.cli.persistence.session_header_linkage import (
+    resolve_static_session_id_for_run,
+)
+from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
+    ensure_static_session_shell,
+)
 from scytaledroid.StaticAnalysis.cli.persistence.utils import first_text
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -480,6 +486,21 @@ def _create_run_row(
             "analysis_indicators": _serialise_json(analysis_indicators),
             "workload_profile": _serialise_json(workload_profile),
         }
+        stamp = row_data.get("session_stamp") if isinstance(row_data.get("session_stamp"), str) else None
+        scope_for_shell = row_data.get("scope_label") if isinstance(row_data.get("scope_label"), str) else None
+        if stamp:
+            ensure_static_session_shell(
+                session_stamp=stamp,
+                scope_label=scope_for_shell,
+                session_label=None,
+                tool_semver=None,
+                tool_git_commit=None,
+                schema_version=None,
+            )
+        row_data["static_session_id"] = resolve_static_session_id_for_run(
+            stamp,
+            scope_for_shell,
+        )
         columns = list(row_data.keys())
         placeholders = ", ".join(["%s"] * len(columns))
         sql = f"INSERT INTO static_analysis_runs ({', '.join(columns)}) VALUES ({placeholders})"

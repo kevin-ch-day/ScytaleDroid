@@ -43,6 +43,13 @@ from .views import (
     CREATE_VW_STATIC_FINDING_SURFACES_LATEST,
     CREATE_VW_STATIC_RISK_SURFACES_LATEST,
 )
+from .views_static_sessions_v2 import (
+    CREATE_V_STATIC_SESSION_CLEANUP_CANDIDATES_V2,
+    CREATE_V_STATIC_SESSION_HEALTH_V2,
+    CREATE_V_STATIC_SESSION_SUPERSESSION_CANDIDATES_V1,
+    CREATE_V_WEB_STATIC_LATEST_SESSION_BY_SCOPE_V2,
+    CREATE_V_WEB_STATIC_SESSION_INDEX_V2,
+)
 
 _CREATE_TABLE_RE = re.compile(
     r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?([a-zA-Z0-9_]+)`?",
@@ -157,6 +164,14 @@ def ordered_schema_statements() -> list[str]:
     statements.append(CREATE_V_WEB_RUNTIME_RUN_DETAIL)
     statements.append(CREATE_V_ARTIFACT_REGISTRY_INTEGRITY)
     statements.append(CREATE_V_CURRENT_ARTIFACT_REGISTRY)
+
+    # Static session summaries (``static_analysis_sessions``) plus Web/cleanup/supersession
+    # projections.  Must stay after canonical session tables bootstrap.
+    statements.append(CREATE_V_STATIC_SESSION_HEALTH_V2)
+    statements.append(CREATE_V_WEB_STATIC_SESSION_INDEX_V2)
+    statements.append(CREATE_V_WEB_STATIC_LATEST_SESSION_BY_SCOPE_V2)
+    statements.append(CREATE_V_STATIC_SESSION_CLEANUP_CANDIDATES_V2)
+    statements.append(CREATE_V_STATIC_SESSION_SUPERSESSION_CANDIDATES_V1)
 
     return _dedupe_create_tables(statements)
 
