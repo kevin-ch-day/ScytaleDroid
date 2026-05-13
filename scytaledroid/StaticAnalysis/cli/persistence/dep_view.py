@@ -130,8 +130,8 @@ LEFT JOIN (
 """
 
 
-def _perms_join() -> str:
-    if _table_exists("static_permission_matrix"):
+def _perms_join(presence: Mapping[str, bool]) -> str:
+    if presence.get("static_permission_matrix"):
         return """
 LEFT JOIN (
   SELECT
@@ -183,6 +183,7 @@ LEFT JOIN (
 
 
 def _build_dep_view_sql() -> str:
+    presence: Mapping[str, bool] = diagnostics.check_required_tables(list(_DEP_OPTIONAL_SOURCES))
     return f"""
 CREATE OR REPLACE VIEW {_DEP_VIEW_NAME} AS
 SELECT

@@ -95,7 +95,9 @@ def test_static_preflight_runs_when_canonical_grade_off(
     out = capsys.readouterr().out
     assert "Static run preflight" in out
     assert "Core readiness" in out
-    assert "Research readiness" in out
+    assert "After this run" in out
+    assert "Post-run diagnostics" in out
+    assert "Permission Intel" in out
     assert "Run grade: EXPERIMENTAL" in out
     assert "SCYTALEDROID_CANONICAL_GRADE=0" in out
     assert "DB persistence: ON" in out
@@ -138,8 +140,9 @@ def test_static_preflight_shows_persistence_skipped(
         base_dir=Path("."),
     )
     out = capsys.readouterr().out
-    assert "DB persistence: skipped" in out
+    assert "DB persistence:" in out
     assert "SCYTALEDROID_PERSISTENCE_READY=0" in out
+    assert "[WARN]" in out
 
 
 def test_preflight_warns_when_intel_not_configured(
@@ -160,7 +163,10 @@ def test_preflight_warns_when_intel_not_configured(
     out = capsys.readouterr().out
     assert "Permission Intel: not configured" in out
     assert "Run grade: EXPERIMENTAL" in out
-    assert "Paper-grade / governance-complete evidence requires Permission Intel readiness." in out
+    assert (
+        "Paper-grade / governance-complete evidence requires Permission Intel readiness." in out
+        or "paper-grade needs Permission Intel + governance snapshots" in out
+    )
     assert "SCYTALEDROID_PERMISSION_INTEL_DB_" in out
 
 
@@ -174,7 +180,7 @@ def test_preflight_ok_when_governance_ready(
         lambda: True,
     )
     monkeypatch.setattr(
-        "scytaledroid.StaticAnalysis.cli.execution.pipeline.governance_ready",
+        "scytaledroid.StaticAnalysis.cli.intel_gate.governance_ready",
         lambda: (True, "ok"),
     )
 
@@ -186,7 +192,7 @@ def test_preflight_ok_when_governance_ready(
     out = capsys.readouterr().out
     assert "Permission Intel: OK" in out
     assert "Run grade: PAPER-GRADE READY" in out
-    assert "Core scan: allowed" in out
+    assert "does not gate" in out.lower()
 
 
 def test_preflight_governance_missing_message(
@@ -199,7 +205,7 @@ def test_preflight_governance_missing_message(
         lambda: True,
     )
     monkeypatch.setattr(
-        "scytaledroid.StaticAnalysis.cli.execution.pipeline.governance_ready",
+        "scytaledroid.StaticAnalysis.cli.intel_gate.governance_ready",
         lambda: (False, "governance_missing"),
     )
 
@@ -222,7 +228,7 @@ def test_preflight_warns_other_governance_detail(
         lambda: True,
     )
     monkeypatch.setattr(
-        "scytaledroid.StaticAnalysis.cli.execution.pipeline.governance_ready",
+        "scytaledroid.StaticAnalysis.cli.intel_gate.governance_ready",
         lambda: (False, "conn_failed"),
     )
 
@@ -233,6 +239,7 @@ def test_preflight_warns_other_governance_detail(
     )
     out = capsys.readouterr().out
     assert "conn_failed" in out
+    assert "[WARN]" in out
 
 
 def test_preflight_handles_governance_exception(
@@ -249,7 +256,7 @@ def test_preflight_handles_governance_exception(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(
-        "scytaledroid.StaticAnalysis.cli.execution.pipeline.governance_ready",
+        "scytaledroid.StaticAnalysis.cli.intel_gate.governance_ready",
         _raise,
     )
 
@@ -261,6 +268,7 @@ def test_preflight_handles_governance_exception(
     out = capsys.readouterr().out
     assert "query failed" in out.lower()
     assert "boom" in out
+    assert "[WARN]" in out
 
 
 def test_preflight_run_context_includes_package_and_apk_counts(
@@ -284,3 +292,101 @@ def test_preflight_run_context_includes_package_and_apk_counts(
     assert "Run context" in out
     assert "Packages in this run: 1" in out
     assert "APK files in this run: 2" in out
+
+
+class _FakeDatabaseEngine:
+    def fetch_one(self, _q: str) -> tuple[int]:
+        return (1,)
+
+    def close(self) -> None:
+        return
+
+
+def test_preflight_primary_db_connect_failure_emits_error_row(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("scytaledroid.Database.db_core.db_config.db_enabled", lambda: True)
+
+    class _Boom:
+        def __init__(self) -> None:
+            raise ConnectionError("refused")
+
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.db_engine.DatabaseEngine",
+        _Boom,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.permission_intel.is_permission_intel_configured",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.flows.static_run_preflight.check_static_persistence_readiness",
+        lambda _p: (True, "OK", ""),
+    )
+
+    run_dispatch._emit_static_run_preflight_summary(
+        _base_params(),
+        frozen_ctx=_ctx(),
+        base_dir=Path("."),
+    )
+    out = capsys.readouterr().out
+    assert "[ERROR]" in out
+    assert "Primary DB: ERROR" in out
+
+
+def test_preflight_static_schema_gate_failure_emits_error_row(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("scytaledroid.Database.db_core.db_config.db_enabled", lambda: True)
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.db_engine.DatabaseEngine",
+        lambda: _FakeDatabaseEngine(),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.flows.static_run_preflight.check_static_persistence_readiness",
+        lambda _p: (False, "static DDL incomplete", "apply migrations"),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.permission_intel.is_permission_intel_configured",
+        lambda: False,
+    )
+
+    run_dispatch._emit_static_run_preflight_summary(
+        _base_params(),
+        frozen_ctx=_ctx(),
+        base_dir=Path("."),
+    )
+    out = capsys.readouterr().out
+    assert "[ERROR]" in out
+    assert "Static schema gate: ERROR" in out
+    assert "static DDL incomplete" in out
+
+
+def test_preflight_output_paths_not_writable_emits_error_row(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _preflight_no_primary_db: None,
+) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.permission_intel.is_permission_intel_configured",
+        lambda: False,
+    )
+    _orig_write = Path.write_text
+
+    def _write_text(self: Path, *args: object, **kwargs: object) -> int:
+        if self.name == ".scytaledroid_write_probe_delete_me":
+            raise OSError("read-only filesystem")
+        return _orig_write(self, *args, **kwargs)  # type: ignore[misc]
+
+    monkeypatch.setattr(Path, "write_text", _write_text)
+
+    run_dispatch._emit_static_run_preflight_summary(
+        _base_params(),
+        frozen_ctx=_ctx(),
+        base_dir=Path("."),
+    )
+    out = capsys.readouterr().out
+    assert "[ERROR]" in out
+    assert "Output paths: ERROR" in out

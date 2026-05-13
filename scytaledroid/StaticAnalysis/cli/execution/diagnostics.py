@@ -10,6 +10,10 @@ from scytaledroid.Utils.DisplayUtils import table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.models import RunOutcome
+from .operator_display_label import (
+    build_operator_label_metadata_from_report,
+    resolve_operator_app_label,
+)
 from .results_formatters import _hash_prefix
 from .static_run_map import load_run_map, resolve_run_map_entry
 
@@ -192,12 +196,37 @@ def _diagnostic_linkage_status(
     return "UNAVAILABLE", "UNAVAILABLE: no run_map; no db link"
 
 
+def _diagnostics_operator_display_label(
+    app,
+    *,
+    v3_overrides: Mapping[str, str] | None = None,
+    db_display_names: Mapping[str, str] | None = None,
+) -> str:
+    """Match persistence / scan label chain (v3 → harvest metadata → ``apps.display_name`` → package)."""
+
+    v3 = dict(v3_overrides or {})
+    db = dict(db_display_names or {})
+    br = app.base_report()
+    if br is not None:
+        meta = build_operator_label_metadata_from_report(br)
+    else:
+        meta = {}
+        base_out = app.base_artifact_outcome()
+        md = getattr(base_out, "metadata", None)
+        if isinstance(md, Mapping):
+            meta = md
+    resolved = resolve_operator_app_label(str(getattr(app, "package_name", "") or ""), meta, v3, db)
+    return str(resolved).strip() if resolved else str(getattr(app, "package_name", "") or "")
+
+
 def _render_diagnostic_app_summary(
     outcome: RunOutcome,
     *,
     session_stamp: str | None,
     compact_mode: bool = True,
     verbose_mode: bool = False,
+    v3_overrides: Mapping[str, str] | None = None,
+    db_display_names: Mapping[str, str] | None = None,
 ) -> tuple[list[tuple[str, str, str]], list[str], list[bool]]:
     try:
         run_map = load_run_map(session_stamp)
@@ -216,7 +245,12 @@ def _render_diagnostic_app_summary(
     trace_rows: list[list[str]] = []
     label_map: dict[str, str] = {}
     for app in outcome.results:
-        label_map[app.package_name] = app.app_label or app.package_name
+        disp = _diagnostics_operator_display_label(
+            app,
+            v3_overrides=v3_overrides,
+            db_display_names=db_display_names,
+        )
+        label_map[app.package_name] = disp
         identity_note = app.identity_error_reason if app.identity_valid is False else None
         run_map_entry: Mapping[str, object] | None = None
         db_link_entry: Mapping[str, object] | None = None
@@ -365,6 +399,7 @@ def _plan_provenance_lines(
 __all__ = [
     "SUPPORTED_RUN_SIGNATURE_VERSIONS",
     "_diagnostic_linkage_status",
+    "_diagnostics_operator_display_label",
     "_group_diagnostic_warnings",
     "_plan_provenance_lines",
     "_render_diagnostic_app_summary",

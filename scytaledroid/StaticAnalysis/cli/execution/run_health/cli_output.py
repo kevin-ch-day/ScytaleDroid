@@ -6,12 +6,29 @@ import json
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
+from ..scan_formatters import _detector_posture_readable
+
 
 def sanitize_session_stamp_for_filename(session_stamp: str | None) -> str:
     """Return a filesystem-friendly token for tagging ``run_health`` JSON files."""
     token = str(session_stamp or "unknown-session").strip()
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in token).strip("_")
     return cleaned[:120] if cleaned else "unknown-session"
+
+
+def _workflow_completion_stdout_label(exec_workflow: str) -> str:
+    """Human token for scan/persistence workflow (distinct from detector/session posture)."""
+
+    w = str(exec_workflow or "").strip().lower()
+    table = {
+        "complete": "COMPLETE",
+        "aborted": "ABORTED",
+        "persistence_failed": "FAILED (DB persistence)",
+        "apps_failed": "FAILED (one or more apps)",
+        "skipped_no_persistence": "SKIPPED (persistence not attempted)",
+        "unknown": "UNKNOWN",
+    }
+    return table.get(w, w.upper().replace("_", " ") if w else "—")
 
 
 def write_run_health_json(path: Path, document: Mapping[str, object]) -> Path:
@@ -144,7 +161,11 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
                 "Governance       : "
                 f"{sr.get('governance_grade')} - {gov_r}"
             ),
-            f"Overall health   : {doc.get('final_run_status')}",
+            f"Run completion   : {_workflow_completion_stdout_label(exec_workflow)}",
+            (
+                "Detector posture : "
+                f"{_detector_posture_readable(str(doc.get('final_run_status') or ''))}"
+            ),
             (
                 "Counts           : "
                 f"parse_fallbacks={sr.get('parse_fallbacks')} "
@@ -160,9 +181,9 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         and str(sr.get("db_persistence_status") or "") in {"ok", "partial"}
     ):
         lines.append(
-            "Operator note    : Overall health is 'partial' because detector warnings and/or policy-finding "
-            "gates fired. Workflow and DB persistence still completed; execution_errors=0 means no "
-            "analyzer/pipeline crashes."
+            "Operator note    : Detector posture / session rollup is 'partial' because detector warnings "
+            "and/or policy-finding gates fired. Run completion and DB persistence still finished; "
+            "execution_errors=0 means no analyzer/pipeline crashes."
         )
 
     apps = doc.get("apps") if isinstance(doc.get("apps"), list) else []

@@ -70,9 +70,47 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
     assert "Re-analyze last app" in out
     assert "Review" in out
     assert "View previous static runs" in out
+    assert "MASVS (database-backed)" in out
+    assert "MASVS area summary" in out
+    assert "MASVS matrix" in out
+    assert "Risk scoring explainer" in out
     assert "Compare two app versions" in out
     assert "APK drilldown" in out
     assert "Library details" in out
+
+
+def test_static_menu_m_routes_to_masvs_summary(monkeypatch):
+    import scytaledroid.StaticAnalysis.cli.menus.masvs_menu as masvs_menu_mod
+
+    calls: list[bool] = []
+    monkeypatch.setattr(masvs_menu_mod, "render_masvs_summary_menu", lambda: calls.append(True))
+
+    menu_module = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu")
+    dummy_group = _dummy_group()
+
+    monkeypatch.setattr("scytaledroid.StaticAnalysis.core.repository.group_artifacts", lambda *_a, **_k: (dummy_group,))
+    monkeypatch.setattr(menu_module.static_scope_service, "count", lambda: 0)
+    monkeypatch.setattr(menu_module.static_scope_service, "selected_set", lambda: set())
+    monkeypatch.setattr(menu_module.static_scope_service, "prune_missing_paths", lambda *_a, **_k: 0)
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.schema_gate.check_base_schema",
+        lambda: (True, None, None),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.schema_gate.static_schema_gate",
+        lambda: (True, None, None),
+    )
+    monkeypatch.setattr(
+        menu_module,
+        "describe_last_selection",
+        lambda _groups: {"available": True, "label": "Example | com.example.app", "source": "static-run"},
+    )
+    choices = iter(["m", "0"])
+    monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: next(choices))
+
+    menu_module.static_analysis_menu()
+
+    assert calls == [True]
 
 
 def test_reanalyze_last_command_prompts_reset() -> None:
@@ -194,6 +232,7 @@ def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) 
     assert "Full — 9 modules, 20 detector stages" in out
     assert "Post-run audit" in out
     assert "PYTHONPATH=. python scripts/db/audit_static_session.py" in out
+    assert "report_static_session_grain_integrity.py" in out
     assert "Existing session" in out
     assert "Canonical run" in out
     assert "static_run_id=1832" in out

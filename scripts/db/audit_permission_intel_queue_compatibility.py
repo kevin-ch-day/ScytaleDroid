@@ -22,11 +22,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
-from scytaledroid.Database.db_func.permissions.queue_apply_compat_check import (
-    queue_row_apply_outcome,
-)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 _QUEUE_ACTIVE: tuple[str, ...] = ("queued", "pending")
 
@@ -41,6 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        from scytaledroid.Database.db_func.permissions.queue_apply_compat_check import (
+            queue_row_apply_outcome,
+        )
         from scytaledroid.Database.db_core import permission_intel as intel_db
     except ImportError as exc:
         sys.stderr.write(f"Import failed (PYTHONPATH=. from repo root): {exc}\n")

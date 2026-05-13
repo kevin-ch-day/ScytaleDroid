@@ -14,6 +14,38 @@ from ..persistence.evidence_manifest_writer import write_session_evidence_manife
 from .session_finalizer import finalize_session_run_map
 
 
+def _format_permission_parity_completion_detail(
+    refresh_summary: Mapping[str, object] | None,
+) -> tuple[str | None, str | None]:
+    """Build (cohort_apps_line, snapshot_path) without duplicating paths or redundant counts."""
+
+    if not isinstance(refresh_summary, dict):
+        return None, None
+    raw_path = refresh_summary.get("snapshot_path")
+    path = str(raw_path).strip() if raw_path else ""
+    path = path or None
+
+    def _intish(value: object) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    proc = _intish(refresh_summary.get("processed_apps"))
+    pers = _intish(refresh_summary.get("persisted_apps"))
+    if proc is not None and pers is not None and proc != pers:
+        line = f"processed={proc} apps · permission_table_writes={pers} apps"
+    elif proc is not None:
+        line = f"apps in snapshot={proc}"
+    elif pers is not None:
+        line = f"permission_table_writes={pers} apps"
+    else:
+        line = None
+    return line, path
+
+
 @dataclass(frozen=True)
 class LinkagePlan:
     """Gate state for session linkage and permission refresh work."""
@@ -137,6 +169,15 @@ def run_post_summary_postprocessing(
                 )
                 run_map = None
 
+    if params.session_stamp and linkage_plan.blocked_reason:
+        print(
+            status_messages.status(
+                "Run map / session evidence manifest were skipped (linkage gate above); "
+                "persistence audit JSON still writes for per-app reconciliation.",
+                level="info",
+            )
+        )
+
     emit_postprocessing_step("Writing persistence audit", run_ctx=run_ctx)
     emit_missing_run_ids_artifact(
         outcome=outcome,
@@ -194,8 +235,7 @@ def run_post_summary_postprocessing(
                                 (
                                     f"Parity: {index}/{total} app(s) | "
                                     f"changed={parity_counts['changed']} "
-                                    f"reused_saved_report={parity_counts['reused_saved_report']} "
-                                    "errors=0 | "
+                                    f"reused_saved_report={parity_counts['reused_saved_report']} | "
                                     f"{app_label}"
                                 ),
                                 level="info",
@@ -226,22 +266,12 @@ def run_post_summary_postprocessing(
                     reuse_saved_reports=True,
                     progress_callback=_parity_progress,
                 )
-                refreshed_apps = None
-                snapshot_path = None
-                summary_bits: list[str] = []
                 audit_persist_failed = False
                 if isinstance(refresh_summary, dict):
-                    refreshed_apps = refresh_summary.get("persisted_apps")
-                    snapshot_path = refresh_summary.get("snapshot_path")
-                    refreshed_processed = refresh_summary.get("processed_apps")
                     audit_persist_failed = bool(refresh_summary.get("audit_persist_failed"))
-                    if refreshed_processed is not None:
-                        summary_bits.append(f"{refreshed_processed} app(s)")
-                if refreshed_apps is not None:
-                    summary_bits.append(f"{refreshed_apps} apps")
-                if snapshot_path:
-                    summary_bits.append(f"output={snapshot_path}")
-                summary_suffix = " | ".join(summary_bits) if summary_bits else ""
+                cohort_line, snapshot_path = _format_permission_parity_completion_detail(
+                    refresh_summary if isinstance(refresh_summary, dict) else None
+                )
                 checked = parity_counts["changed"] + parity_counts["reused_saved_report"]
                 err_fin = int(audit_persist_failed)
                 out_display = snapshot_path or "(not returned; see persistence audit/logs)"
@@ -256,8 +286,8 @@ def run_post_summary_postprocessing(
                     )
                 )
                 print(status_messages.status(f"  output={out_display}", level="info"))
-                if summary_suffix:
-                    print(status_messages.status(f"  detail: {summary_suffix}", level="info"))
+                if cohort_line:
+                    print(status_messages.status(f"  cohort: {cohort_line}", level="info"))
                 if emit_phase_transition is not None:
                     emit_phase_transition(
                         phase="permission_snapshot_parity",

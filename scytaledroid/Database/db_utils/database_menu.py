@@ -5,7 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_utils.menus import health_checks, query_runner
+from scytaledroid.Database.db_utils.menus import (
+    catalog_hygiene_menu,
+    health_checks,
+    query_runner,
+    static_session_diagnostics_menu,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
@@ -113,6 +118,8 @@ def database_menu() -> None:
         "8": write_db_schema_snapshot_audit,
         "9": prompt_permission_intel_readiness,
         "10": _maintenance_menu,
+        "11": catalog_hygiene_menu.catalog_hygiene_menu,
+        "12": static_session_diagnostics_menu.static_session_diagnostics_menu,
     }
 
     options: list[MenuOption] = [
@@ -126,6 +133,11 @@ def database_menu() -> None:
         MenuOption("8", "Schema snapshot audit"),
         MenuOption("9", "Permission Intel readiness (SCYTALEDROID_PERMISSION_INTEL_DB_*)"),
         MenuOption("10", "Maintenance, repair, and migrations"),
+        MenuOption("11", "Catalog hygiene (display-name report / override preview & apply)"),
+        MenuOption(
+            "12",
+            "Static session diagnostics (health, grain, registry, session_id rollout verify)",
+        ),
     ]
 
     while True:

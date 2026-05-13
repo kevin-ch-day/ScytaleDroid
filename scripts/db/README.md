@@ -86,6 +86,27 @@ After a profile/cohort static run, verify canonical row counts and Web/read view
 PYTHONPATH=. python scripts/db/audit_static_session.py --session 20260502-rda-canonical-only
 ```
 
+### Static pipeline grain / integrity (read-only)
+
+Explains **package-level DB vs per-artifact JSON** and optional **artifact-stage pipeline_summary**
+sums from archive JSON (not deduped). Complements ``audit_static_session.py`` (counts only).
+
+**JSON path semantics:** persistence summaries count **paths recorded on outcomes**, usually under
+``data/static_analysis/reports/latest/<sha>.json`` (hash-deduped). This script's ``--count-archive-json``
+counts ``*.json`` under ``data/static_analysis/reports/archive/<session_stamp>/`` (session tree when
+archive/both mode writes there). Those totals are **not** expected to match.
+
+Optional ``--with-display-labels`` adds a human-facing column: CSV override (default reference file)
+then ``apps.display_name`` (does not load static report JSON).
+
+```bash
+PYTHONPATH=. python scripts/db/report_static_session_grain_integrity.py --session-stamp 20260510-all-full
+PYTHONPATH=. python scripts/db/report_static_session_grain_integrity.py --session-stamp 20260510-all-full \
+  --count-archive-json --aggregate-json-summaries --json
+PYTHONPATH=. python scripts/db/report_static_session_grain_integrity.py --session-stamp 20260510-all-full \
+  --count-archive-json --with-display-labels
+```
+
 ## Static session header refresh (aggregates + disposition)
 
 After bulk repairs or if you need to recompute ``static_analysis_sessions`` counters from
@@ -119,6 +140,7 @@ PYTHONPATH=. python scripts/db/audit_static_session.py --session 20260502-rda-ca
 | `audit_static_permission_observation_linkage.py` | Read-only core DB: matrix → run SHA-256 / versions / `apk_id`. |
 | `run_permission_intel_scytale_s2_readiness_audit.sh` | Bundles intel check + audits + targeted pytest (best-effort if DB unset). |
 | `audit_static_session.py` | Cohort audit: canonical tables + `v_web_*` + handoff + legacy-table counts (informational); prints copyable SQL. |
+| `report_static_session_grain_integrity.py` | Read-only grain map: SAR counts + optional archive JSON pipeline rollups vs DB findings (split-heavy triage). |
 | `smoke_web_db.sh` | Wraps **`ScytaleDroid-Web/scripts/sd_web_db_smoke.php`** (PDO read smoke). |
 
 ## Naming contract

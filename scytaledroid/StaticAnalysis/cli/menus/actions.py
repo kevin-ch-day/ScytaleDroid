@@ -22,7 +22,10 @@ from ...core.repository import load_display_name_map
 from ..core.analysis_profiles import run_modules_for_profile
 from ..commands.models import Command
 from ..core.models import RunParameters
-from ..flows.profile_prior_session import format_audit_session_command
+from ..flows.profile_prior_session import (
+    format_audit_session_command,
+    format_grain_integrity_session_command,
+)
 
 _LARGE_SPLIT_WARN_MIN_APK = 20
 _RUN_SETUP_LABEL_W = 18
@@ -426,6 +429,10 @@ def prompt_run_setup(
         _run_setup_kv("Existing session", "none")
     _run_setup_kv("Post-run audit", "after run completes")
     _run_setup_kv("Audit command", format_audit_session_command(session_stamp))
+    _run_setup_kv(
+        "Grain / split triage",
+        format_grain_integrity_session_command(session_stamp, count_archive=True, aggregate_json=False),
+    )
     print()
     if has_existing:
         print("1) Replace this session and rerun")

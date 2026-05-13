@@ -30,6 +30,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# Session-wide cohort scans: counts aggregate every package; one static_run_id is only a drill-down anchor.
+GROUP_SCOPE_VERIFICATION_GUIDANCE = (
+    "Group/cohort scope: table counts are session-wide aggregates; the static_run_id in the "
+    "header is one representative row for menu drill-down (filter SQL by session_stamp for the cohort)."
+)
+
 
 def _configure_db_target(db_target: str) -> None:
     parsed = urlparse(db_target)
@@ -532,7 +538,7 @@ def audit_run(session_stamp: str | None, run_id: int | None) -> int:
         f"{audit.static_run_id} run_id={audit.run_id} session={audit.session_stamp}"
     )
     if audit.is_group_scope:
-        print("Note: Group scope detected; per-package run mapping not applicable.")
+        print(f"Note: {GROUP_SCOPE_VERIFICATION_GUIDANCE}")
     if audit.is_orphan:
         print("Note: ORPHAN static run (runs row missing).")
     if audit.status:

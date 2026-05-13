@@ -94,6 +94,23 @@ def divider(char: str = "-", *, width: int | None = None, style: str | None = "d
     return line
 
 
+def accent_rule_line(*, width: int | None = None) -> str:
+    """Full-width accent bar for screen chrome (startup banner, dashboards, hand-offs)."""
+
+    effective = width if width is not None else min(max(36, get_terminal_width() - 2), 78)
+    effective = max(8, int(effective))
+    if not colors.colors_enabled():
+        return "=" * effective
+    ch = "=" * effective if use_ascii_ui() else "━" * effective
+    return colors.apply(ch, colors.get_palette().accent, bold=True)
+
+
+def print_accent_rule(*, width: int | None = None) -> None:
+    """Print :func:`accent_rule_line` to stdout."""
+
+    print(accent_rule_line(width=width))
+
+
 def boxed(lines: Iterable[str], *, width: int | None = None, padding: int = 1) -> str:
     """Return *lines* surrounded by a box with ANSI-aware layout."""
 
@@ -148,9 +165,23 @@ def headline(title: str, *, width: int | None = None, style: str = "header") -> 
     underline_width = min(underline_width, available_width)
     if colors.colors_enabled():
         styled_title = colors.apply(title, colors.style(style), bold=True)
+        rail = ""
+        if not use_ascii_ui():
+            palette = colors.get_palette()
+            rail = colors.apply("▍ ", palette.accent, bold=True)
+        styled_title = f"{rail}{styled_title}"
     else:
         styled_title = title
-    underline = divider("─" if not use_ascii_ui() else "-", width=underline_width, style="divider")
+
+    if colors.colors_enabled() and not use_ascii_ui():
+        palette = colors.get_palette()
+        accent_len = min(6, underline_width)
+        rest_w = max(0, underline_width - accent_len)
+        underline_left = colors.apply("━" * accent_len, palette.accent, bold=True)
+        underline_right = divider("─", width=rest_w, style="divider") if rest_w else ""
+        underline = f"{underline_left}{underline_right}"
+    else:
+        underline = divider("─" if not use_ascii_ui() else "-", width=underline_width, style="divider")
     return f"{styled_title}\n{underline}"
 
 
@@ -163,10 +194,12 @@ def bullet_list(items: Iterable[str], *, bullet: str | None = None) -> str:
 
 
 __all__ = [
+    "accent_rule_line",
     "boxed",
     "bullet_list",
     "divider",
     "headline",
+    "print_accent_rule",
     "truncate_visible",
     "visible_width",
 ]

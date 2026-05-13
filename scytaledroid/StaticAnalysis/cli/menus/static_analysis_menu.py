@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, text_blocks
+from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .static_analysis_menu_helpers import (
@@ -215,6 +216,8 @@ def static_analysis_menu() -> None:
         last_info = describe_last_selection(groups)
 
         print()
+        if colors.colors_enabled():
+            text_blocks.print_accent_rule(width=min(56, max(28, get_terminal_width() - 4)))
         menu_utils.print_header(
             "Android APK Static Analysis",
             "Analyze APKs that have already been harvested and stored locally.",
@@ -264,12 +267,16 @@ def static_analysis_menu() -> None:
         print("  6) Compare two app versions")
         print("  D) APK drilldown")
         print("  L) Library details")
+        menu_utils.print_section("MASVS (database-backed)")
+        print("  M) MASVS area summary — pick a canonical static run")
+        print("  V) MASVS matrix — latest run per package (pass % / score)")
+        print("  E) Risk scoring explainer (MASVS-aligned legend)")
 
         print()
         print("0) Back")
 
         choice = prompt_utils.get_choice(
-            ["1", "A", "2", "3", "4", "5", "6", "D", "L", "0"],
+            ["1", "A", "2", "3", "4", "5", "6", "D", "L", "M", "V", "E", "0"],
             default="1",
             casefold=True,
         )
@@ -279,6 +286,24 @@ def static_analysis_menu() -> None:
 
         if choice == "5":
             render_static_diagnostics_menu()
+            continue
+
+        if choice.lower() == "m":
+            from . import masvs_menu
+
+            masvs_menu.render_masvs_summary_menu()
+            continue
+
+        if choice.lower() == "v":
+            from . import masvs_menu
+
+            masvs_menu.render_masvs_matrix_menu()
+            continue
+
+        if choice.lower() == "e":
+            from . import masvs_menu
+
+            masvs_menu.render_scoring_explainer_menu()
             continue
 
         if choice.lower() == "l":

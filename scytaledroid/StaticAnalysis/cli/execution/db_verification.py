@@ -18,7 +18,10 @@ from datetime import datetime
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
-from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
+from scytaledroid.Database.db_scripts.static_run_audit import (
+    GROUP_SCOPE_VERIFICATION_GUIDANCE,
+    collect_static_run_counts,
+)
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
     LEGACY_MIRROR_TABLES_AUDIT,
@@ -753,7 +756,7 @@ def _render_persistence_footer(
         lines.append(("governance", governance_status))
 
     if group_scope:
-        lines.append(("scope_note", "Group scope detected; per-package mapping not applicable."))
+        lines.append(("scope_note", GROUP_SCOPE_VERIFICATION_GUIDANCE))
 
     if audit and audit.run_id is None:
         if audit.is_group_scope:

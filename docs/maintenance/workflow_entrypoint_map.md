@@ -237,6 +237,7 @@ operator routing does not require a second overlapping workflow doc.
 - reporting/export services
 - Run Health and DB diagnostics
 - static/dynamic handoff and comparison workflows
+- **MASVS CLI review:** Static Analysis menu → **M** / **V** / **E** (`cli/menus/masvs_menu.py`; canonical DB reads after full runs)
 
 ### Validation / smoke checks
 

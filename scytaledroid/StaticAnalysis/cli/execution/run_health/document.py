@@ -181,6 +181,11 @@ def build_run_health_document(
     payload: dict[str, object] = {
         "schema_version": 3,
         "generated_at_utc": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        # Post-run grain is merged in a second phase (see merge_post_run_grain_into_run_health_json).
+        "post_run_grain_present": False,
+        "post_run_grain_merged_at_utc": None,
+        "run_health_revision": 1,
+        "post_run_merge_status": "pending",
         "session_stamp": session_stamp,
         "session_label": getattr(params, "session_label", None) or session_stamp,
         "preset": str(preset) if preset else None,

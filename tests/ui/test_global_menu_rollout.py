@@ -294,6 +294,7 @@ def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     monkeypatch.setattr(menu_module, "list_operational_managed_tables", lambda: [])
     monkeypatch.setattr(menu_module.intel_db, "governance_snapshot_count", lambda: 1)
     monkeypatch.setattr(menu_module.intel_db, "governance_row_count", lambda: 1828)
+    monkeypatch.setattr(menu_module, "governance_ready", lambda: (True, "ok"))
     monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
 
     menu_module.run_health_summary()
@@ -301,6 +302,7 @@ def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "DB Health Summary" in out
     assert "Run status" in out
+    assert "governance_ready (static CLI / paper-grade gate): True" in out
 
 
 def test_api_menu_renders_runtime_state(monkeypatch, capsys):

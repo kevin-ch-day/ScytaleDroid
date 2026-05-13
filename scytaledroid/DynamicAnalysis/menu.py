@@ -38,7 +38,8 @@ from scytaledroid.StaticAnalysis.core.repository import (
     list_packages,
     load_profile_map,
 )
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, table_utils, text_blocks
+from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
@@ -736,6 +737,8 @@ def dynamic_analysis_menu() -> None:
 
     while True:
         print()
+        if colors.colors_enabled():
+            text_blocks.print_accent_rule(width=min(56, max(28, get_terminal_width() - 4)))
         menu_utils.print_header("Dynamic Analysis")
         _warn_if_code_changed()
         render_dynamic_menu_overview()
@@ -1519,7 +1522,6 @@ def _prepare_package_selection_view(groups) -> _PreparedPackageSelectionView | N
         load_dataset_tracker,
     )
     from scytaledroid.DynamicAnalysis.utils.run_cleanup import recent_tracker_runs
-    from scytaledroid.Utils.DisplayUtils import text_blocks
 
     cfg = DatasetTrackerConfig()
     tracker = load_dataset_tracker()

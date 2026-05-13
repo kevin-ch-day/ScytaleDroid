@@ -24,7 +24,7 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
     text_blocks,
 )
-from scytaledroid.Utils.DisplayUtils.terminal import use_ascii_ui
+from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width, use_ascii_ui
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .formatters import (
@@ -761,6 +761,9 @@ def print_dashboard(
 ) -> None:
     devices_found = len(summaries)
     print()
+    if colors.colors_enabled():
+        tw = min(max(36, get_terminal_width() - 2), 78)
+        text_blocks.print_accent_rule(width=tw)
 
     # One-line guidance when disconnected
     if not active_details:

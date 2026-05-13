@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from scytaledroid.Database.db_core import permission_intel as intel_db
-from scytaledroid.StaticAnalysis.cli.execution.pipeline import governance_ready
+from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 

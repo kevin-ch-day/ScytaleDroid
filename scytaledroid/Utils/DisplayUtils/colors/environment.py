@@ -9,7 +9,7 @@ from collections.abc import Callable
 def detect_palette_name(normaliser: Callable[[str], str]) -> str:
     """Return the palette name that best matches the current environment."""
 
-    env = os.environ.get("SCYTALE_UI_THEME")
+    env = os.environ.get("SCYTALEDROID_UI_THEME") or os.environ.get("SCYTALE_UI_THEME")
     if env:
         try:
             return normaliser(env)

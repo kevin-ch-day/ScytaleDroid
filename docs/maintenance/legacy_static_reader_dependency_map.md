@@ -167,7 +167,7 @@ Legend for **Suggested handling** (Phase 2 planning — **not** a commitment to 
 | `scytaledroid/Database/db_utils/static_reconcile.py` | package query | reconcile | keep | |
 | `scripts/db/audit_static_session.py` | count via `static_run_id IN (SELECT id FROM static_analysis_runs …)` | read / diagnostic | keep | **Join key is canonical static id**, not `runs.run_id` |
 | `scripts/db/session_static_health.py` | `findings` + `runs` join | diagnostic | keep | |
-| `scytaledroid/StaticAnalysis/cli/persistence/reports/masvs_summary_report.py` | `fetch_db_masvs_summary` | read / compat | replace later | Prefer canonical / `masvs_control_coverage` |
+| `scytaledroid/StaticAnalysis/cli/persistence/reports/masvs_summary_report.py` | `fetch_db_masvs_summary` | read / compat | env-gated legacy | Canonical by default; legacy `findings`/`runs` only with **`SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK`** |
 | `scytaledroid/Database/db_utils/menus/query_runner.py` | digest `legacy_mirror_spec` (display); **`SESSION_DIGEST_REQUIRED_SINGLE_TABLES`** gates on **`static_analysis_findings`** | diagnostic / policy | **Digest gate updated:** canonical findings required for single-scope “missing” | Legacy `findings` optional in mirror table only | Canonical-only DB without legacy `findings` table |
 | `scytaledroid/Database/db_utils/reset_static.py` | reset list | write_admin | keep | |
 | `scytaledroid/Database/db_utils/action_groups/status_actions.py` | `check_required_tables` includes `findings` | diagnostic | replace | Schema **presence** gate — consider `static_analysis_findings` |

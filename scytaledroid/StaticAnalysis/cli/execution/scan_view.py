@@ -110,6 +110,19 @@ def _error_detector_parts(payload: object, *, limit: int) -> list[str]:
     return parts
 
 
+def _policy_finding_gate_counts(app_summary: Mapping[str, object] | None) -> tuple[int, int]:
+    """Return (policy_gate_failures, finding_gate_failures) with legacy ``fail_count`` fallback."""
+
+    if not isinstance(app_summary, Mapping):
+        return 0, 0
+    pol = int(app_summary.get("policy_fail_count", 0) or 0)
+    fnd = int(app_summary.get("finding_fail_count", 0) or 0)
+    legacy = int(app_summary.get("fail_count", 0) or 0)
+    if pol == 0 and fnd == 0 and legacy > 0:
+        return legacy, 0
+    return pol, fnd
+
+
 def format_compact_completion_line(
     *,
     app_index: int,
@@ -122,7 +135,7 @@ def format_compact_completion_line(
 ) -> str:
     label = (app_title or package_name or "").strip() or str(package_name or "<unknown>")
     warn = int(app_summary.get("warn_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
-    fail = int(app_summary.get("fail_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
+    pol, fnd = _policy_finding_gate_counts(app_summary)
     severity_counts = app_summary.get("severity_counts") if isinstance(app_summary, Mapping) else None
     if isinstance(severity_counts, Mapping):
         high = int(app_summary.get("high_count", severity_counts.get("P1", 0)) or 0)
@@ -136,7 +149,9 @@ def format_compact_completion_line(
         f"{artifact_count} APK{'s' if artifact_count != 1 else ''}",
         _format_elapsed(elapsed_seconds or 0.0),
         f"detector_warnings={warn}",
-        f"policy_failures={fail}",
+        f"policy_gate_failures={pol}",
+        f"finding_gate_failures={fnd}",
+        f"gate_failures_total={pol + fnd}",
         f"execution_errors={err}",
         f"high={high}",
         f"medium={med}",
@@ -154,7 +169,7 @@ def format_recent_completion_line(
 ) -> str:
     label = (app_title or package_name or "").strip() or str(package_name or "<unknown>")
     warn = int(app_summary.get("warn_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
-    fail = int(app_summary.get("fail_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
+    pol, fnd = _policy_finding_gate_counts(app_summary)
     severity_counts = app_summary.get("severity_counts") if isinstance(app_summary, Mapping) else None
     high = med = 0
     if isinstance(severity_counts, Mapping):
@@ -165,7 +180,7 @@ def format_recent_completion_line(
         med = int(app_summary.get("medium_count", 0) or 0) if isinstance(app_summary, Mapping) else 0
     return (
         f"#{app_index} {label} {_format_elapsed(elapsed_seconds or 0.0)} "
-        f"warnings={warn} policy_failures={fail} high={high} medium={med}"
+        f"warnings={warn} policy_gates={pol} finding_gates={fnd} gates_total={pol + fnd} high={high} medium={med}"
     )
 
 
@@ -309,15 +324,25 @@ def render_app_completion(
                     level="warn",
                 )
             )
-            print(
-                status_messages.status(
-                    "Impact: detectors scan base and split APK rows when split scan is on; "
-                    "string payload rollup after the run is base-APK only for now.",
-                    level="info",
-                    show_icon=False,
-                    show_prefix=False,
+            if params.verbose_output:
+                print(
+                    status_messages.status(
+                        "Impact: detectors scan base and split APK rows when split scan is on; "
+                        "string payload rollup after the run is base-APK only for now.",
+                        level="info",
+                        show_icon=False,
+                        show_prefix=False,
+                    )
                 )
-            )
+            else:
+                print(
+                    status_messages.status(
+                        "Split scan: each APK artifact is scanned; string rollup stays base-APK for now.",
+                        level="info",
+                        show_icon=False,
+                        show_prefix=False,
+                    )
+                )
 
         if very_large_batch_mode:
             _emit_large_artifact_split_notice()
@@ -345,7 +370,9 @@ def render_app_completion(
                 artifact_label,
                 elapsed,
                 f"detector_warnings={warn_count}",
-                f"policy_failures={fail_count}",
+                f"policy_gate_failures={policy_fail_count}",
+                f"finding_gate_failures={finding_fail_count}",
+                f"gate_failures_total={fail_count}",
                 f"execution_errors={error_count}",
             ]
             if h_count or m_count:
@@ -386,7 +413,9 @@ def render_app_completion(
                 status_messages.status(
                     (
                         f"Pipeline stages: ok={ok_count} detector_warnings={warn_count} "
-                        f"policy_failures={fail_count} execution_errors={error_count} "
+                        f"policy_gate_failures={policy_fail_count} "
+                        f"finding_gate_failures={finding_fail_count} "
+                        f"gate_failures_total={fail_count} execution_errors={error_count} "
                         f"detector_stages_skipped={skipped_count}"
                     ),
                     level="info",
@@ -494,11 +523,9 @@ def render_app_completion(
     status_line = "Pipeline stages"
     if executed is not None and total is not None:
         status_line += f": {executed}/{total} executed"
-    status_line += f" · ok={ok_count} warn={warn_count} policy_fail={policy_fail_count}"
-    if finding_fail_count:
-        status_line += f" fail={finding_fail_count}"
+    status_line += f" · ok={ok_count} warn={warn_count} pol_gates={policy_fail_count} fnd_gates={finding_fail_count}"
     if error_count:
-        status_line += f" error={error_count}"
+        status_line += f" err={error_count}"
     if info_count:
         status_line += f" info={info_count}"
     if skipped_count:

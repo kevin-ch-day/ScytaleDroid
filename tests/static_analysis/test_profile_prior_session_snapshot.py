@@ -28,6 +28,20 @@ def test_format_audit_session_command() -> None:
     assert "20260502-rda-full" in mod.format_audit_session_command("20260502-rda-full")
 
 
+def test_format_grain_integrity_session_command() -> None:
+    mod = pytest.importorskip("scytaledroid.StaticAnalysis.cli.flows.profile_prior_session")
+
+    cmd = mod.format_grain_integrity_session_command(
+        "20260502-rda-full",
+        scope_label="Cohort Alpha",
+        aggregate_json=True,
+    )
+    assert "report_static_session_grain_integrity.py" in cmd
+    assert "20260502-rda-full" in cmd
+    assert "Cohort Alpha" in cmd
+    assert "--aggregate-json-summaries" in cmd
+
+
 def test_fetch_prior_profile_session_snapshot_returns_aggregates(monkeypatch) -> None:
     from scytaledroid.Database.db_core import db_queries as core_q
     from scytaledroid.Database.db_utils import schema_gate

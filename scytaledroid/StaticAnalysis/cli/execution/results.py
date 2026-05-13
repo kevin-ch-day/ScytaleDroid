@@ -22,7 +22,7 @@ from scytaledroid.Utils.LoggingUtils import logging_engine, logging_events
 
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
-from ..core.models import RunOutcome, RunParameters
+from ..core.models import AppRunResult, RunOutcome, RunParameters
 from ..core.run_context import StaticRunContext
 from ..core.run_lifecycle import finalize_static_run
 from ..persistence.run_summary import (
@@ -82,7 +82,12 @@ from .results_sections import (
     render_static_output_context_compact,
 )
 from .run_db_queries import _apply_display_names
-from .scan_flow import format_duration
+from ...core.repository import load_display_name_map
+from .operator_display_label import (
+    build_operator_label_metadata_from_report,
+    resolve_operator_app_label,
+)
+from .scan_formatters import _load_v3_catalog_label_overrides, format_duration
 from .string_analysis_payload import analyse_string_payload
 from .view import DetailBuffer
 
@@ -134,6 +139,31 @@ def _is_large_compact_batch(params: RunParameters, outcome: RunOutcome) -> bool:
         not params.verbose_output
         and params.scope in {"all", "profile"}
         and len(outcome.results) >= 8
+    )
+
+
+def _persistence_progress_display_label(
+    app_result: AppRunResult,
+    *,
+    v3_overrides: Mapping[str, str],
+    fresh_display_names: Mapping[str, str],
+) -> str | None:
+    """Match per-app scan heartbeat / compact summary label chain (same ``resolve_operator_app_label``).
+
+    Uses the same V3 override map and ``apps.display_name`` map loaded for the finalization
+    pass as ``scan_flow`` uses for checkpoint/heartbeat display names. The end-of-run
+    ``format_static_run_final_summary_block`` digest is aggregate-only (no per-package titles).
+    """
+
+    base_out = app_result.base_artifact_outcome()
+    meta: Mapping[str, object] = {}
+    if base_out and isinstance(base_out.metadata, Mapping):
+        meta = base_out.metadata
+    return resolve_operator_app_label(
+        app_result.package_name,
+        meta,
+        v3_overrides,
+        fresh_display_names,
     )
 
 
@@ -891,6 +921,23 @@ def _render_run_results_impl(
     detailed_finalization_logs = total_results <= 5
     checkpoint_stride = 10 if total_results >= 50 else 5
     persistence_started_monotonic = time.monotonic()
+    show_compact_pipeline_lines = not (
+        compact_mode and params.scope in {"all", "profile"} and total_results > 5
+    )
+    need_operator_labels = total_results > 0 and (
+        persist_enabled or (compact_mode and show_compact_pipeline_lines)
+    )
+    fresh_display: dict[str, str] = {}
+    v3_persist: dict[str, str] = {}
+    if need_operator_labels:
+        try:
+            fresh_display = load_display_name_map(outcome.scope.groups)
+        except Exception:
+            fresh_display = {}
+        try:
+            v3_persist = _load_v3_catalog_label_overrides(outcome.scope)
+        except Exception:
+            v3_persist = {}
     if persist_enabled:
         _emit_static_persistence_event(
             event=logging_events.PERSIST_START,
@@ -918,7 +965,14 @@ def _render_run_results_impl(
                                 index=index,
                                 total_results=total_results,
                                 package_name=app_result.package_name,
-                                app_label=app_result.app_label,
+                                app_label=(
+                                    _persistence_progress_display_label(
+                                        app_result,
+                                        v3_overrides=v3_persist,
+                                        fresh_display_names=fresh_display,
+                                    )
+                                    or app_result.app_label
+                                ),
                                 elapsed_text=format_duration(elapsed_s),
                                 eta_text=format_duration(float(eta_s)) if eta_s >= 0 else "--",
                                 persistence_error_count=len(
@@ -930,9 +984,17 @@ def _render_run_results_impl(
                         )
                     )
             elif detailed_finalization_logs:
+                _fdisp = (
+                    _persistence_progress_display_label(
+                        app_result,
+                        v3_overrides=v3_persist,
+                        fresh_display_names=fresh_display,
+                    )
+                    or app_result.package_name
+                )
                 print(
                     status_messages.status(
-                        f"Finalizing [{index}/{total_results}] {app_result.package_name}…",
+                        f"Finalizing [{index}/{total_results}] {_fdisp}…",
                         level="info",
                     )
                 )
@@ -991,7 +1053,16 @@ def _render_run_results_impl(
         secret_profiles.append(_collect_secret_stats(string_data, base_report))
         masvs_profile = _collect_masvs_profile(base_report)
         if masvs_profile:
-            app_label = manifest.app_label if manifest and manifest.app_label else app_result.package_name
+            meta_m = build_operator_label_metadata_from_report(base_report)
+            resolved_m = resolve_operator_app_label(
+                app_result.package_name,
+                meta_m,
+                v3_persist,
+                fresh_display,
+            )
+            app_label = resolved_m or (
+                manifest.app_label if manifest and manifest.app_label else app_result.package_name
+            )
             masvs_profile["label"] = app_label
             masvs_profile["package"] = (
                 manifest.package_name if manifest and manifest.package_name else app_result.package_name
@@ -1028,16 +1099,17 @@ def _render_run_results_impl(
                     baseline_hits = len(findings_payload)
         baseline_rule_hits_total += baseline_hits
 
-        show_compact_pipeline_lines = not (
-            compact_mode and params.scope in {"all", "profile"} and len(outcome.results) > 5
-        )
         if compact_mode and show_compact_pipeline_lines:
-            if manifest and manifest.app_label:
-                display_name = manifest.app_label
-            elif manifest and manifest.package_name:
-                display_name = manifest.package_name
-            else:
-                display_name = app_result.package_name
+            meta_for_compact = build_operator_label_metadata_from_report(base_report)
+            display_name = (
+                resolve_operator_app_label(
+                    app_result.package_name,
+                    meta_for_compact,
+                    v3_persist,
+                    fresh_display,
+                )
+                or app_result.package_name
+            )
             compact_block = [
                 f"• {display_name} (runtime {format_duration(total_duration)})",
                 (
@@ -1646,11 +1718,25 @@ def _render_run_results_impl(
         linkage_states: list[str] = []
         run_id_states: list[bool] = []
         if params.dry_run and outcome.results:
+            v3_for_diag: dict[str, str] = dict(v3_persist) if v3_persist else {}
+            if not v3_for_diag:
+                try:
+                    v3_for_diag = dict(_load_v3_catalog_label_overrides(outcome.scope))
+                except Exception:
+                    v3_for_diag = {}
+            display_for_diag: dict[str, str] = dict(fresh_display) if fresh_display else {}
+            if not display_for_diag:
+                try:
+                    display_for_diag = dict(load_display_name_map(outcome.scope.groups))
+                except Exception:
+                    display_for_diag = {}
             diagnostic_warnings, linkage_states, run_id_states = _render_diagnostic_app_summary(
                 outcome,
                 session_stamp=session_stamp,
                 compact_mode=compact_mode,
                 verbose_mode=params.verbose_output,
+                v3_overrides=v3_for_diag,
+                db_display_names=display_for_diag,
             )
         if compact_mode:
             print(

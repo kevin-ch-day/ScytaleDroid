@@ -21,11 +21,27 @@ from scytaledroid.Utils.System import output_prefs
 from ..core.abort_reasons import classify_exception, normalize_abort_reason
 from ..core.models import RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
-from ..execution import request_abort
 from ..execution.static_run_map import REQUIRED_FIELDS
 from ..views.view_layouts import render_run_start
 from .postprocessing import PostSummaryResult
-from .run_events import _emit_phase_log as _run_events_emit_phase_log
+from .static_scan_constants import (
+    PHASE_COMPLETED,
+    PHASE_FAILED,
+    PHASE_PERSIST_SUMMARY,
+    PHASE_POSTPROCESS,
+    PHASE_REFRESH_VIEWS,
+    PHASE_RUNTIME_EXCEPTION,
+    PHASE_SCAN,
+)
+from .static_scan_lifecycle import (
+    collect_static_run_ids_for_finalize,
+    effective_static_run_status,
+    emit_static_dry_run_banner,
+    emit_static_run_end_log,
+    emit_static_run_phase_log,
+    emit_static_run_start_log,
+)
+from .static_scan_signals import build_static_scan_sigint_handler
 from .selection import format_scope_target
 from .session_finalizer import refresh_static_session_cache
 from .static_run_helpers import (
@@ -37,79 +53,6 @@ from .static_run_helpers import (
 from .static_run_helpers import (
     resolve_workers as _resolve_workers,
 )
-
-
-def _effective_run_status(
-    outcome: RunOutcome | None,
-    *,
-    current_status: str | None = None,
-    summary_render_failed: bool = False,
-) -> str | None:
-    """Return the final run status after scan and post-processing mutations."""
-
-    status = (current_status or "").strip().upper() or None
-    if outcome is None:
-        return status
-    if summary_render_failed:
-        return "FAILED"
-    if outcome.aborted:
-        return "FAILED"
-    if getattr(outcome, "persistence_failed", False):
-        return "FAILED"
-    if getattr(outcome, "canonical_failed", False):
-        return "FAILED"
-    failures = {str(item).strip().upper() for item in (outcome.failures or []) if str(item).strip()}
-    if failures:
-        return "FAILED"
-    return status or "COMPLETED"
-
-
-def _emit_phase_log(
-    *,
-    run_ctx: RunContext,
-    session_stamp: str | None,
-    scope_target: str | None,
-    scope_label: str | None,
-    profile_label: str | None,
-    execution_id: str | None,
-    phase: str,
-    status: str | None = None,
-    extra: dict[str, object] | None = None,
-) -> None:
-    """Compatibility facade for phase logging from run_dispatch."""
-
-    from scytaledroid.StaticAnalysis.cli.flows import run_dispatch as _dispatch_phase
-
-    payload: dict[str, object] = {
-        "event": log_events.RUN_PHASE,
-        "run_id": session_stamp,
-        "session_stamp": session_stamp,
-        "execution_id": execution_id,
-        "target": scope_target,
-        "scope_label": scope_label,
-        "profile": profile_label,
-        "phase": phase,
-    }
-    if status:
-        payload["status"] = status
-    if extra:
-        payload.update({key: value for key, value in extra.items() if value is not None})
-
-    try:
-        logger = _dispatch_phase.get_run_logger("static", run_ctx)
-        logger.info("Static RUN_PHASE", extra=payload)
-    except Exception:
-        _run_events_emit_phase_log(
-            run_ctx=run_ctx,
-            session_stamp=session_stamp,
-            scope_target=scope_target,
-            scope_label=scope_label,
-            profile_label=profile_label,
-            execution_id=execution_id,
-            phase=phase,
-            status=status,
-            extra=extra,
-        )
 
 
 def launch_scan_flow_resolved(
@@ -126,6 +69,7 @@ def launch_scan_flow_resolved(
 
     # Freeze run context once. Deep execution/render paths must not read env vars or
     # mutable output prefs after this point.
+    workers = _resolve_workers(params.workers)
     frozen_ctx = StaticRunContext(
         run_mode=output_prefs.effective_run_mode(),
         quiet=output_prefs.effective_quiet(),
@@ -135,6 +79,7 @@ def launch_scan_flow_resolved(
         session_stamp=params.session_stamp,
         persistence_ready=bool(getattr(params, "persistence_ready", True)),
         paper_grade_requested=bool(getattr(params, "paper_grade_requested", True)),
+        resolved_worker_count=int(workers),
     )
     run_persistence_enabled = _dispatch.persistence_runtime.persistence_enabled(
         dry_run=params.dry_run,
@@ -149,7 +94,6 @@ def launch_scan_flow_resolved(
             strict_persistence=bool(params.strict_persistence),
         )
 
-    workers = _resolve_workers(params.workers)
     if not params.reuse_cache:
         _purge_run_cache()
 
@@ -179,97 +123,23 @@ def launch_scan_flow_resolved(
         scope=scope_target,
         profile=params.profile_label,
     )
-    try:
-        static_logger = _dispatch.get_run_logger("static", run_ctx)
-        run_context_payload = dict(frozen_ctx.__dict__)
-        run_context_payload["canonical_grade_requested"] = run_context_payload.pop(
-            "paper_grade_requested",
-            bool(getattr(params, "paper_grade_requested", True)),
-        )
-        run_context_payload["execution_id"] = params.execution_id
-        static_logger.info(
-            "Static RUN_START",
-            extra={
-                "event": log_events.RUN_START,
-                "run_id": params.session_stamp,
-                "execution_id": params.execution_id,
-                "target": scope_target,
-                "profile": params.profile_label,
-                "scope_label": params.scope_label,
-                "analysis_version": params.analysis_version,
-                "modules": modules,
-                "workers": workers_label,
-                "cache": "purge" if not params.reuse_cache else "reuse",
-                "perm_cache": "refresh" if params.permission_snapshot_refresh else "skip",
-                "dry_run": params.dry_run,
-                "run_context": run_context_payload,
-            },
-        )
-    except Exception:
-        static_logger = None
+    emit_static_run_start_log(
+        run_ctx=run_ctx,
+        frozen_ctx=frozen_ctx,
+        params=params,
+        modules=modules,
+        workers_label=workers_label,
+        scope_target=scope_target,
+    )
 
     _dispatch.configure_logging_for_cli(params.log_level)
 
-    abort_notified = {"shown": False, "count": 0}
-
-    def _handle_sigint(signum, frame) -> None:  # pragma: no cover - signal path
-        abort_notified["count"] += 1
-        if not abort_notified["shown"]:
-            print(status_messages.status("Interrupt received — stopping safely…", level="warn"))
-            print(
-                status_messages.status(
-                    "Safe stop requested. Current artifact will finish/abort, then partial persistence will run.",
-                    level="info",
-                )
-            )
-            abort_notified["shown"] = True
-        else:
-            print(
-                status_messages.status(
-                    "Interrupt already requested — waiting for safe stop and partial persistence…",
-                    level="warn",
-                )
-            )
-        request_abort(reason="SIGINT", signal="SIGINT")
-        try:
-            _dispatch._hb_set_phase("aborting", keep_app=True)
-        except Exception:
-            pass
-        _emit_phase_log(
-            run_ctx=run_ctx,
-            session_stamp=params.session_stamp,
-            scope_target=scope_target,
-            scope_label=params.scope_label,
-            profile_label=params.profile_label,
-            execution_id=params.execution_id,
-            phase="aborting",
-            status="requested",
-            extra={
-                "abort_reason": "user_abort",
-                "abort_signal": "SIGINT",
-                "interrupt_count": abort_notified["count"],
-                "execution_id": params.execution_id,
-            },
-        )
-        try:
-            logger = _dispatch.get_run_logger("static", run_ctx)
-            logger.warning(
-                "Static RUN_ABORT_REQUESTED",
-                extra={
-                    "event": log_events.RUN_ABORT_REQUESTED,
-                    "run_id": params.session_stamp,
-                    "session_stamp": params.session_stamp,
-                    "execution_id": params.execution_id,
-                    "target": scope_target,
-                    "scope_label": params.scope_label,
-                    "profile": params.profile_label,
-                    "abort_reason": "user_abort",
-                    "abort_signal": "SIGINT",
-                    "interrupt_count": abort_notified["count"],
-                },
-            )
-        except Exception:
-            pass
+    _handle_sigint, _abort_sig_state = build_static_scan_sigint_handler(
+        dispatch=_dispatch,
+        run_ctx=run_ctx,
+        params=params,
+        scope_target=scope_target,
+    )
 
     previous_handler = None
     sigint_installed = False
@@ -291,20 +161,7 @@ def launch_scan_flow_resolved(
         return None
 
     if params.dry_run:
-        pipeline_version = getattr(params, "analysis_version", None)
-        run_sig_version = getattr(params, "run_signature_version", "v1")
-        print("DIAGNOSTIC MODE (dry run)")
-        print("────────────────────────────────")
-        print("persist=no  evidence_pack=no  plan_generation=no")
-        print("identity_required=yes  linkage_required=yes")
-        print("metadata=partial  linkage_sources=run_map,db_link")
-        print(f"pipeline_version={pipeline_version or '—'}  run_signature_version={run_sig_version}")
-        if params.session_stamp:
-            print(
-                f"Session: {params.session_stamp}  Preset: {params.profile_label}  "
-                f"Scope: {params.scope_label or params.scope}"
-            )
-        print()
+        emit_static_dry_run_banner(params)
     _dispatch._emit_db_preflight_lock_warning(params=params, run_ctx=frozen_ctx)
     _dispatch._emit_static_run_preflight_summary(
         params,
@@ -316,15 +173,15 @@ def launch_scan_flow_resolved(
     run_status: str | None = None
     abort_reason: str | None = None
     abort_signal: str | None = None
-    _dispatch._hb_set_run(params.session_stamp, phase="scan")
-    _emit_phase_log(
+    _dispatch._hb_set_run(params.session_stamp, phase=PHASE_SCAN)
+    emit_static_run_phase_log(
         run_ctx=run_ctx,
         session_stamp=params.session_stamp,
         scope_target=scope_target,
         scope_label=params.scope_label,
         profile_label=params.profile_label,
         execution_id=params.execution_id,
-        phase="scan",
+        phase=PHASE_SCAN,
         status="running",
     )
     try:
@@ -348,15 +205,15 @@ def launch_scan_flow_resolved(
             abort_reason = normalize_abort_reason(outcome.abort_reason or ("SIGINT" if outcome.aborted else None))
             abort_signal = outcome.abort_signal
             if not outcome.aborted:
-                _dispatch._hb_set_phase("persist_summary", keep_app=True)
-                _emit_phase_log(
+                _dispatch._hb_set_phase(PHASE_PERSIST_SUMMARY, keep_app=True)
+                emit_static_run_phase_log(
                     run_ctx=run_ctx,
                     session_stamp=params.session_stamp,
                     scope_target=scope_target,
                     scope_label=params.scope_label,
                     profile_label=params.profile_label,
                     execution_id=params.execution_id,
-                    phase="persist_summary",
+                    phase=PHASE_PERSIST_SUMMARY,
                     status="running",
                     extra={
                         "applications": len(outcome.results or []),
@@ -379,21 +236,21 @@ def launch_scan_flow_resolved(
                     defer_persistence_footer=True,
                     defer_post_run_menu=True,
                 )
-                run_status = _effective_run_status(
+                run_status = effective_static_run_status(
                     outcome,
                     current_status=run_status,
                     summary_render_failed=summary_render_failed,
                 )
             except Exception as exc:
-                _dispatch._hb_set_phase("failed", keep_app=True)
-                _emit_phase_log(
+                _dispatch._hb_set_phase(PHASE_FAILED, keep_app=True)
+                emit_static_run_phase_log(
                     run_ctx=run_ctx,
                     session_stamp=params.session_stamp,
                     scope_target=scope_target,
                     scope_label=params.scope_label,
                     profile_label=params.profile_label,
                     execution_id=params.execution_id,
-                    phase="persist_summary",
+                    phase=PHASE_PERSIST_SUMMARY,
                     status="failed",
                     extra={"abort_reason": "run_summary_render_failed"},
                 )
@@ -424,15 +281,15 @@ def launch_scan_flow_resolved(
                     )
                 )
             if not params.dry_run:
-                _dispatch._hb_set_phase("postprocess", keep_app=True)
-                _emit_phase_log(
+                _dispatch._hb_set_phase(PHASE_POSTPROCESS, keep_app=True)
+                emit_static_run_phase_log(
                     run_ctx=run_ctx,
                     session_stamp=params.session_stamp,
                     scope_target=scope_target,
                     scope_label=params.scope_label,
                     profile_label=params.profile_label,
                     execution_id=params.execution_id,
-                    phase="postprocess",
+                    phase=PHASE_POSTPROCESS,
                     status="running",
                 )
                 post_summary = _dispatch.run_post_summary_postprocessing(
@@ -452,7 +309,7 @@ def launch_scan_flow_resolved(
                     persist_session_run_links=_dispatch._persist_session_run_links,
                     emit_missing_run_ids_artifact=emit_missing_run_ids_artifact,
                     execute_permission_scan=_dispatch.execute_permission_scan,
-                    emit_phase_transition=lambda phase, status=None, extra=None: _emit_phase_log(
+                    emit_phase_transition=lambda phase, status=None, extra=None: emit_static_run_phase_log(
                         run_ctx=run_ctx,
                         session_stamp=params.session_stamp,
                         scope_target=scope_target,
@@ -465,15 +322,15 @@ def launch_scan_flow_resolved(
                     ),
                 )
                 if post_summary.permission_refresh_error is not None:
-                    _dispatch._hb_set_phase("failed", keep_app=True)
-                    _emit_phase_log(
+                    _dispatch._hb_set_phase(PHASE_FAILED, keep_app=True)
+                    emit_static_run_phase_log(
                         run_ctx=run_ctx,
                         session_stamp=params.session_stamp,
                         scope_target=scope_target,
                         scope_label=params.scope_label,
                         profile_label=params.profile_label,
                         execution_id=params.execution_id,
-                        phase="postprocess",
+                        phase=PHASE_POSTPROCESS,
                         status="failed",
                         extra={"abort_reason": "permission_snapshot_refresh_failed"},
                     )
@@ -499,21 +356,21 @@ def launch_scan_flow_resolved(
                             level="error",
                         )
                     )
-            run_status = _effective_run_status(
+            run_status = effective_static_run_status(
                 outcome,
                 current_status=run_status,
                 summary_render_failed=summary_render_failed,
             )
     except Exception as exc:
-        _dispatch._hb_set_phase("failed", keep_app=True)
-        _emit_phase_log(
+        _dispatch._hb_set_phase(PHASE_FAILED, keep_app=True)
+        emit_static_run_phase_log(
             run_ctx=run_ctx,
             session_stamp=params.session_stamp,
             scope_target=scope_target,
             scope_label=params.scope_label,
             profile_label=params.profile_label,
             execution_id=params.execution_id,
-            phase="runtime_exception",
+            phase=PHASE_RUNTIME_EXCEPTION,
             status="failed",
             extra={"abort_reason": classify_exception(exc)},
         )
@@ -547,45 +404,14 @@ def launch_scan_flow_resolved(
                 )
             )
 
-        run_status = _effective_run_status(
+        run_status = effective_static_run_status(
             outcome,
             current_status=run_status,
             summary_render_failed=summary_render_failed,
         )
         if outcome is not None and not params.dry_run and run_status:
-            static_run_ids = [
-                result.static_run_id
-                for result in outcome.results
-                if result.static_run_id
-            ]
-            # Recovery: persistence failures may null out static_run_id on app results
-            # after a STARTED row was created. Close any lingering STARTED rows for
-            # this session stamp so dashboards do not accumulate phantom open runs.
-            if params.session_stamp:
-                try:
-                    from scytaledroid.Database.db_core import db_queries as core_q
-
-                    rows = core_q.run_sql(
-                        """
-                        SELECT id
-                        FROM static_analysis_runs
-                        WHERE session_stamp=%s
-                          AND status='STARTED'
-                          AND ended_at_utc IS NULL
-                        """,
-                        (params.session_stamp,),
-                        fetch="all",
-                    )
-                    for row in rows or []:
-                        try:
-                            sid = int(row[0])
-                        except Exception:
-                            continue
-                        static_run_ids.append(sid)
-                except Exception:
-                    pass
+            static_run_ids = collect_static_run_ids_for_finalize(outcome, params.session_stamp)
             if static_run_ids:
-                static_run_ids = sorted(set(int(sid) for sid in static_run_ids if sid))
                 ended_at = outcome.finished_at.isoformat(timespec="seconds") + "Z"
                 _dispatch.finalize_open_runs(
                     static_run_ids,
@@ -597,15 +423,15 @@ def launch_scan_flow_resolved(
 
     if run_persistence_enabled and params.session_stamp and outcome is not None:
         if not outcome.aborted:
-            _dispatch._hb_set_phase("refresh_views", keep_app=True)
-            _emit_phase_log(
+            _dispatch._hb_set_phase(PHASE_REFRESH_VIEWS, keep_app=True)
+            emit_static_run_phase_log(
                 run_ctx=run_ctx,
                 session_stamp=params.session_stamp,
                 scope_target=scope_target,
                 scope_label=params.scope_label,
                 profile_label=params.profile_label,
                 execution_id=params.execution_id,
-                phase="refresh_views",
+                phase=PHASE_REFRESH_VIEWS,
                 status="running",
             )
             _dispatch._emit_postprocessing_step("Refreshing canonical session views", run_ctx=frozen_ctx)
@@ -659,19 +485,44 @@ def launch_scan_flow_resolved(
         if outcome.results and not summary_render_failed and not outcome.aborted:
             _dispatch._persist_cohort_rollup(params.session_stamp, params.scope_label)
 
+        if (
+            run_persistence_enabled
+            and outcome is not None
+            and not outcome.aborted
+            and not params.dry_run
+            and params.session_stamp
+            and bool(params.persistence_ready)
+            and outcome.results
+            and not summary_render_failed
+            and str(run_status or "").upper() == "COMPLETED"
+        ):
+            from ..execution.post_run_cohort_quick_check import (
+                maybe_emit_post_run_grain_summary,
+                merge_post_run_grain_into_run_health_json,
+            )
+
+            maybe_emit_post_run_grain_summary(
+                params.session_stamp,
+                scope_label=params.scope_label,
+                run_ctx=frozen_ctx,
+                run_aggregate_status=getattr(outcome, "run_aggregate_status", None),
+                session_metrics=outcome.session_metrics,
+            )
+            merge_post_run_grain_into_run_health_json(outcome)
+
     if outcome is not None and not params.dry_run and not outcome.aborted:
         _dispatch.prompt_deferred_post_run_diagnostics(outcome, params)
 
     if outcome is not None and run_status:
-        _dispatch._hb_set_phase("completed" if run_status == "COMPLETED" else "failed", keep_app=True)
-        _emit_phase_log(
+        _dispatch._hb_set_phase(PHASE_COMPLETED if run_status == "COMPLETED" else PHASE_FAILED, keep_app=True)
+        emit_static_run_phase_log(
             run_ctx=run_ctx,
             session_stamp=params.session_stamp,
             scope_target=scope_target,
             scope_label=params.scope_label,
             profile_label=params.profile_label,
             execution_id=params.execution_id,
-            phase="completed" if run_status == "COMPLETED" else "failed",
+            phase=PHASE_COMPLETED if run_status == "COMPLETED" else PHASE_FAILED,
             status=run_status.lower(),
             extra={
                 "abort_reason": abort_reason,
@@ -682,60 +533,16 @@ def launch_scan_flow_resolved(
             },
         )
 
-    # Emit RUN_END after required persistence/postprocessing/view refresh work so
-    # the lifecycle record reflects the actual terminal state of the run.
-    if params.session_stamp:
-        end_payload = {
-            "event": log_events.RUN_END,
-            "run_id": params.session_stamp,
-            "execution_id": params.execution_id,
-            "target": scope_target,
-            "profile": params.profile_label,
-            "scope_label": params.scope_label,
-            "analysis_version": params.analysis_version,
-            "detectors": modules,
-            "detectors_count": len(modules),
-            "status": (run_status or "UNKNOWN").lower(),
-            "dry_run": params.dry_run,
-        }
-        if outcome is not None:
-            end_payload["duration_seconds"] = outcome.duration_seconds
-            end_payload["applications"] = len(outcome.results or [])
-            end_payload["artifacts"] = outcome.total_artifacts
-            end_payload["artifacts_completed"] = outcome.completed_artifacts
-            end_payload["dry_run_skipped"] = outcome.dry_run_skipped
-            end_payload["warnings_count"] = len(outcome.warnings or [])
-            end_payload["failures_count"] = len(outcome.failures or [])
-            if outcome.failures:
-                end_payload["failure_codes"] = [str(item) for item in outcome.failures[:10]]
-            if getattr(outcome, "persistence_failed", False):
-                end_payload["persistence_failed"] = True
-            if getattr(outcome, "compat_export_failed", False):
-                end_payload["compat_export_failed"] = True
-            if getattr(outcome, "canonical_failed", False):
-                end_payload["canonical_failed"] = True
-        if abort_reason:
-            end_payload["abort_reason"] = abort_reason
-        if abort_signal:
-            end_payload["abort_signal"] = abort_signal
-        if summary_render_failed:
-            end_payload["summary_render_failed"] = True
-        if (
-            (run_status or "").upper() == "FAILED"
-            and "failure_codes" not in end_payload
-            and "abort_reason" not in end_payload
-            and outcome is not None
-            and outcome.completed_artifacts < outcome.total_artifacts
-        ):
-            end_payload["status_reason"] = "artifacts_incomplete"
-        try:
-            static_logger = _dispatch.get_run_logger("static", run_ctx)
-            static_logger.info("Static RUN_END", extra=end_payload)
-        except Exception:
-            try:
-                logger = logging_engine.get_static_logger()
-                logger.info("Static RUN_END", extra=logging_engine.ensure_trace(end_payload))
-            except Exception:
-                pass
+    emit_static_run_end_log(
+        run_ctx=run_ctx,
+        params=params,
+        outcome=outcome,
+        modules=modules,
+        scope_target=scope_target,
+        run_status=run_status,
+        abort_reason=abort_reason,
+        abort_signal=abort_signal,
+        summary_render_failed=summary_render_failed,
+    )
 
     return outcome

@@ -17,7 +17,14 @@ _AREA_ORDER = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
 
 
 def _legacy_masvs_db_fallback_enabled() -> bool:
-    """Allow ``runs`` / legacy ``findings`` when resolving ``fetch_db_masvs_summary(None)``."""
+    """Allow legacy ``runs`` / ``findings`` for MASVS when canonical-only mode is insufficient.
+
+    When unset: ``fetch_db_masvs_summary(None)`` uses the latest ``static_analysis_runs`` row only;
+    a non-``None`` ``run_id`` is interpreted as ``static_analysis_runs.id`` (canonical static summary).
+
+    When set: ``fetch_db_masvs_summary(None)`` may resolve ``run_id`` from ``runs``, and a non-``None``
+    ``run_id`` may use ``findings`` (linked static ids or legacy per-row MASVS).
+    """
 
     return os.environ.get("SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK", "").strip().lower() in {
         "1",
@@ -39,6 +46,22 @@ def _masvs_area_case_sql(column: str, *, fallback_sql: str | None = None) -> str
                 ELSE {fallback}
               END
     """.strip()
+
+
+def _masvs_matrix_pillar_case_sql(column_expr: str) -> str:
+    """Map raw MASVS-ish tags to the four matrix pillars.
+
+    ``CRYPTO``, ``RESILIENCE``, and bare ``OTHER`` roll into ``PLATFORM`` so those
+    findings affect the same column operators expect from the four-area matrix.
+    """
+
+    inner = " ".join(_masvs_area_case_sql(column_expr, fallback_sql="'OTHER'").split())
+    return (
+        "CASE "
+        f"WHEN ({inner}) IN ('CRYPTO', 'RESILIENCE', 'OTHER') THEN 'PLATFORM' "
+        f"ELSE ({inner}) "
+        "END"
+    )
 
 
 def _masvs_mapped_predicate_sql(alias: str = "saf") -> str:
@@ -300,6 +323,15 @@ def _build_summary(
 
 
 def fetch_db_masvs_summary(run_id: int | None = None) -> tuple[int, list[dict[str, object | None]]] | None:
+    """Load MASVS summary rows from the DB.
+
+    ``run_id`` is optional. When omitted, the latest completed canonical surface uses
+    ``static_analysis_runs`` / ``static_analysis_findings``. When provided and legacy fallback is
+    disabled (default), ``run_id`` is a ``static_analysis_runs.id``; when legacy fallback is
+    enabled, it may be a legacy session run id resolved via ``findings``.
+    """
+
+    resolved_from_legacy_runs = False
     try:
         if run_id is None:
             canon = core_q.run_sql(
@@ -317,6 +349,17 @@ def fetch_db_masvs_summary(run_id: int | None = None) -> tuple[int, list[dict[st
             if not row or not row[0]:
                 return None
             run_id = int(row[0])
+            resolved_from_legacy_runs = True
+
+        if (
+            run_id is not None
+            and not resolved_from_legacy_runs
+            and not _legacy_masvs_db_fallback_enabled()
+        ):
+            summary = fetch_db_masvs_summary_static_many([int(run_id)])
+            if summary is not None:
+                return int(run_id), summary[1]
+            return None
 
         linked_static_rows = core_q.run_sql(
             """
@@ -404,6 +447,7 @@ def fetch_db_masvs_summary_static_many(
     placeholders = ",".join(["%s"] * len(ids))
     params = tuple(ids)
     canonical_area_case = _masvs_area_case_sql("COALESCE(saf.masvs_area, saf.masvs_control)")
+    mapped_sql = _masvs_mapped_predicate_sql("saf")
     try:
         rows = core_q.run_sql(
             f"""
@@ -415,7 +459,7 @@ def fetch_db_masvs_summary_static_many(
                    SUM(CASE WHEN LOWER(COALESCE(saf.severity, ''))='info' THEN 1 ELSE 0 END) AS info
             FROM static_analysis_findings saf
             WHERE saf.run_id IN ({placeholders})
-              AND NULLIF(TRIM(COALESCE(saf.masvs_control, '')), '') IS NOT NULL
+              AND {mapped_sql}
             GROUP BY masvs
             """,
             params,
@@ -432,7 +476,7 @@ def fetch_db_masvs_summary_static_many(
                    saf.severity
             FROM static_analysis_findings saf
             WHERE saf.run_id IN ({placeholders})
-              AND NULLIF(TRIM(COALESCE(saf.masvs_control, '')), '') IS NOT NULL
+              AND {mapped_sql}
             """,
             params,
             fetch="all",
@@ -448,7 +492,7 @@ def fetch_db_masvs_summary_static_many(
                    COUNT(*) AS occurrences
             FROM static_analysis_findings saf
             WHERE saf.run_id IN ({placeholders})
-              AND NULLIF(TRIM(COALESCE(saf.masvs_control, '')), '') IS NOT NULL
+              AND {mapped_sql}
             GROUP BY masvs, saf.severity, identifier
             ORDER BY
                 CASE saf.severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END,
@@ -459,54 +503,6 @@ def fetch_db_masvs_summary_static_many(
             dictionary=True,
         ) or []
 
-        if not rows and not cvss_rows and not top_rows:
-            rows = core_q.run_sql(
-                f"""
-                SELECT masvs,
-                       SUM(CASE WHEN severity='High' THEN 1 ELSE 0 END) AS high,
-                       SUM(CASE WHEN severity='Medium' THEN 1 ELSE 0 END) AS medium,
-                       SUM(CASE WHEN severity='Low' THEN 1 ELSE 0 END) AS low,
-                       SUM(CASE WHEN severity='Info' THEN 1 ELSE 0 END) AS info
-                FROM static_findings
-                WHERE static_run_id IN ({placeholders})
-                GROUP BY masvs
-                """,
-                params,
-                fetch="all",
-                dictionary=True,
-            ) or []
-
-            cvss_rows = core_q.run_sql(
-                f"""
-                SELECT masvs,
-                       cvss,
-                       COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
-                       severity
-                FROM static_findings
-                WHERE static_run_id IN ({placeholders}) AND masvs IS NOT NULL
-                """,
-                params,
-                fetch="all",
-                dictionary=True,
-            ) or []
-
-            top_rows = core_q.run_sql(
-                f"""
-                SELECT masvs,
-                       severity,
-                       COALESCE(NULLIF(kind, ''), 'unknown') AS identifier,
-                       COUNT(*) AS occurrences
-                FROM static_findings
-                WHERE static_run_id IN ({placeholders})
-                GROUP BY masvs, severity, identifier
-                ORDER BY
-                    CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END,
-                    occurrences DESC
-                """,
-                params,
-                fetch="all",
-                dictionary=True,
-            ) or []
     except Exception:
         return None
 
@@ -579,7 +575,7 @@ def fetch_masvs_matrix() -> dict[str, dict[str, object]]:
 
     placeholders = ",".join(["%s"] * len(run_ids))
     params = tuple(run_ids)
-    area_case = _masvs_area_case_sql("COALESCE(saf.masvs_area, saf.masvs_control)", fallback_sql="'OTHER'")
+    area_case = _masvs_matrix_pillar_case_sql("COALESCE(saf.masvs_area, saf.masvs_control)")
     mapped_sql = _masvs_mapped_predicate_sql("saf")
     try:
         rows = core_q.run_sql(

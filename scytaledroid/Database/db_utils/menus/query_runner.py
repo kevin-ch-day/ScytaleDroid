@@ -10,7 +10,10 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_utils import diagnostics
-from scytaledroid.Database.db_scripts.static_run_audit import collect_static_run_counts
+from scytaledroid.Database.db_scripts.static_run_audit import (
+    GROUP_SCOPE_VERIFICATION_GUIDANCE,
+    collect_static_run_counts,
+)
 from scytaledroid.Database.summary_surfaces import static_dynamic_summary_cache_status
 from scytaledroid.StaticAnalysis.cli.persistence.reports.masvs_summary_report import (
     fetch_db_masvs_summary_static_many,
@@ -43,6 +46,7 @@ def run_query_menu() -> None:
             ("10", "Harvested version gaps"),
             ("11", "Interrupted permission partials"),
             ("12", "MASVS session summary (canonical view)"),
+            ("13", "Static session grain / integrity (split-heavy triage)"),
         )
         spec = menu_utils.MenuSpec(
             items=options,
@@ -78,6 +82,8 @@ def run_query_menu() -> None:
             show_interrupted_permission_partials()
         elif choice == "12":
             prompt_masvs_session_summary()
+        elif choice == "13":
+            prompt_static_session_grain_report()
         elif choice == "0":
             break
 
@@ -211,6 +217,113 @@ def prompt_session_counts() -> None:
     print()
     menu_utils.print_section(f"Session counts — {session_stamp}")
     _print_session_counts(session_stamp)
+    prompt_utils.press_enter_to_continue()
+
+
+def prompt_static_session_grain_report() -> None:
+    """Read-only grain map: DB counts + optional archive JSON pipeline rollups."""
+
+    session_stamp = prompt_utils.prompt_text(
+        "Session stamp (leave blank for latest)",
+        required=False,
+    ).strip()
+    if not session_stamp:
+        session_stamp = (_latest_session_stamp() or "").strip()
+    if not session_stamp:
+        print(status_messages.status("No sessions found.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    scope_raw = prompt_utils.prompt_text(
+        "scope_label filter (blank for all runs in this session)",
+        required=False,
+    ).strip()
+    scope_label = scope_raw or None
+
+    print()
+    menu_utils.print_hint(
+        "Optional JSON aggregate parses each file under reports/archive/<session>/ (I/O heavy)."
+    )
+    agg_choice = prompt_utils.get_choice(
+        ["y", "n"],
+        default="n",
+        casefold=True,
+        prompt="Sum pipeline_summary from archive JSON? [N]: ",
+    )
+    want_agg = agg_choice.lower() == "y"
+    want_labels = prompt_utils.prompt_yes_no(
+        "Add display column (CSV overrides + apps.display_name)?", default=False
+    )
+
+    from scytaledroid.Database.db_utils.static_session_grain_integrity import (
+        aggregate_archive_json_pipeline_totals,
+        collect_session_grain,
+        count_json_files_in_dir,
+        format_grain_integrity_cli_command,
+        load_grain_operator_display_overrides,
+        render_text_report,
+        reports_archive_dir,
+    )
+
+    archive_dir = reports_archive_dir(session_stamp=session_stamp, data_dir=app_config.DATA_DIR)
+    json_count = count_json_files_in_dir(archive_dir)
+    json_aggregate = None
+    if want_agg:
+        json_aggregate = aggregate_archive_json_pipeline_totals(archive_dir, max_files=5000)
+
+    print()
+    menu_utils.print_section(f"Static session grain — {session_stamp}")
+    if scope_label:
+        menu_utils.print_metrics([("scope_label filter", scope_label)])
+
+    try:
+        data = collect_session_grain(
+            run_sql,
+            session_stamp=session_stamp,
+            scope_label=scope_label,
+            top_packages=25,
+        )
+    except Exception as exc:
+        print(status_messages.status(f"Grain query failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    if int(data.get("static_run_rows") or 0) == 0:
+        print(status_messages.status("No static_analysis_runs rows for this session_stamp.", level="warn"))
+        print()
+        print(
+            format_grain_integrity_cli_command(
+                session_stamp,
+                scope_label=scope_label,
+                count_archive=True,
+                aggregate_json=want_agg,
+                with_display_labels=want_labels,
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return
+
+    override_path = Path(app_config.DATA_DIR) / "reference" / "app_display_name_overrides.csv"
+    label_overrides = load_grain_operator_display_overrides(override_path) if want_labels else None
+
+    text = render_text_report(
+        data,
+        json_archive_count=json_count,
+        json_aggregate=json_aggregate,
+        with_display_labels=want_labels,
+        display_override_by_lower=label_overrides,
+    )
+    print(text)
+    print(status_messages.status("Copy/paste CLI (repo root):", level="info"))
+    print(
+        format_grain_integrity_cli_command(
+            session_stamp,
+            scope_label=scope_label,
+            count_archive=True,
+            aggregate_json=want_agg,
+            with_display_labels=want_labels,
+        )
+    )
     prompt_utils.press_enter_to_continue()
 
 
@@ -1049,7 +1162,7 @@ def render_session_digest(session_stamp: str | None, *, header: str | None = Non
     print()
     menu_utils.print_section(title)
     if audit.is_group_scope:
-        print(status_messages.status("Group scope detected; per-package mapping not applicable.", level="info"))
+        print(status_messages.status(GROUP_SCOPE_VERIFICATION_GUIDANCE, level="info"))
     if audit.is_orphan:
         print(
             status_messages.status(
@@ -1251,6 +1364,7 @@ __all__ = [
     "run_query_menu",
     "show_latest_session",
     "prompt_session_counts",
+    "prompt_static_session_grain_report",
     "prompt_runs_for_package",
     "prompt_harvest_for_package",
     "prompt_masvs_by_package",

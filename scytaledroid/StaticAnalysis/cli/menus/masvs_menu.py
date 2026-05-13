@@ -72,6 +72,66 @@ def _format_cvss(entry: dict[str, object]) -> tuple[str, str, str]:
     return worst, avg, bands
 
 
+_PILLAR_AREAS: tuple[str, ...] = ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE")
+
+
+def _masvs_summary_row(area_title: str, entry: Mapping[str, object]) -> tuple[list[str], str]:
+    """Build one MASVS summary table row and its status label."""
+
+    high = int(entry.get("high", 0) or 0)
+    medium = int(entry.get("medium", 0) or 0)
+    low = int(entry.get("low", 0) or 0)
+    info = int(entry.get("info", 0) or 0)
+    quality = entry.get("quality") if isinstance(entry, dict) else None
+    coverage_status = quality.get("coverage_status") if isinstance(quality, dict) else None
+    if coverage_status == "no_data":
+        status = "NO DATA"
+    elif high > 0:
+        status = "FAIL"
+    elif medium > 0:
+        status = "WARN"
+    else:
+        status = "PASS"
+    if coverage_status == "no_data":
+        total_controls = 0
+    else:
+        total_controls = int(entry.get("control_count") or high + medium + low + info)
+    affected = high + medium
+    worst_cvss, avg_cvss, band_cvss = _format_cvss(dict(entry) if isinstance(entry, dict) else {})
+    basis_display = "—"
+    risk_index = None
+    coverage = None
+    if isinstance(quality, dict):
+        risk_index = quality.get("risk_index")
+        coverage = quality.get("cvss_coverage")
+        components = quality.get("risk_components") if isinstance(quality.get("risk_components"), dict) else {}
+        inputs = components.get("inputs") if isinstance(components, dict) else {}
+        if isinstance(inputs, dict):
+            sev = inputs.get("severity_density_norm")
+            band = inputs.get("cvss_band_score")
+            intensity = inputs.get("cvss_intensity")
+            if all(isinstance(val, (int, float)) for val in (sev, band, intensity)):
+                basis_display = f"S{sev:.2f}/B{band:.2f}/I{intensity:.2f}"
+    risk_display = f"{risk_index:.1f}" if isinstance(risk_index, (int, float)) else "—"
+    coverage_display = f"{coverage * 100:.0f}%" if isinstance(coverage, (int, float)) else "—"
+    row = [
+        area_title,
+        str(high),
+        str(medium),
+        str(low),
+        str(info),
+        status,
+        risk_display,
+        basis_display,
+        coverage_display,
+        worst_cvss,
+        avg_cvss,
+        band_cvss,
+        f"{affected}/{total_controls}" if total_controls else "0/0",
+    ]
+    return row, status
+
+
 def render_masvs_summary_menu() -> None:
     run_info = _select_static_run()
     if run_info is None:
@@ -111,8 +171,8 @@ def render_masvs_summary_menu() -> None:
     ]
     table: list[list[str]] = []
     passes = 0
-    for area in ("NETWORK", "PLATFORM", "PRIVACY", "STORAGE"):
-        entry = next((row for row in rows if row["area"] == area), None)
+    for area in _PILLAR_AREAS:
+        entry = next((row for row in rows if row.get("area") == area), None)
         if entry is None:
             table.append([
                 area.title(),
@@ -131,65 +191,37 @@ def render_masvs_summary_menu() -> None:
             ])
             passes += 1
             continue
-        high = entry.get("high", 0)
-        medium = entry.get("medium", 0)
-        low = entry["low"]
-        info = entry["info"]
-        quality = entry.get("quality") if isinstance(entry, dict) else None
-        coverage_status = quality.get("coverage_status") if isinstance(quality, dict) else None
-        if coverage_status == "no_data":
-            status = "NO DATA"
-        elif high > 0:
-            status = "FAIL"
-        elif medium > 0:
-            status = "WARN"
-        else:
-            status = "PASS"
+        row, status = _masvs_summary_row(area.title(), entry)
+        table.append(row)
         if status == "PASS":
             passes += 1
-        if coverage_status == "no_data":
-            total_controls = 0
-        else:
-            total_controls = int(entry.get("control_count") or high + medium + low + info)
-        affected = high + medium
-        worst_cvss, avg_cvss, band_cvss = _format_cvss(entry)
-        basis_display = "—"
-        if isinstance(quality, dict):
-            risk_index = quality.get("risk_index")
-            coverage = quality.get("cvss_coverage")
-            components = quality.get("risk_components") if isinstance(quality.get("risk_components"), dict) else {}
-            inputs = components.get("inputs") if isinstance(components, dict) else {}
-            if isinstance(inputs, dict):
-                sev = inputs.get("severity_density_norm")
-                band = inputs.get("cvss_band_score")
-                intensity = inputs.get("cvss_intensity")
-                if all(isinstance(val, (int, float)) for val in (sev, band, intensity)):
-                    basis_display = f"S{sev:.2f}/B{band:.2f}/I{intensity:.2f}"
-        else:
-            risk_index = None
-            coverage = None
-        risk_display = f"{risk_index:.1f}" if isinstance(risk_index, (int, float)) else "—"
-        coverage_display = (
-            f"{coverage * 100:.0f}%" if isinstance(coverage, (int, float)) else "—"
-        )
-        table.append([
-            area.title(),
-            str(high),
-            str(medium),
-            str(low),
-            str(info),
-            status,
-            risk_display,
-            basis_display,
-            coverage_display,
-            worst_cvss,
-            avg_cvss,
-            band_cvss,
-            f"{affected}/{total_controls}" if total_controls else "0/0",
-        ])
+
+    extra_areas = sorted(
+        {str(r.get("area") or "").upper() for r in rows if isinstance(r, dict)}
+        - set(_PILLAR_AREAS)
+        - {""}
+    )
+    if extra_areas:
+        for xarea in extra_areas:
+            entry = next((row for row in rows if str(row.get("area") or "").upper() == xarea), None)
+            if not isinstance(entry, dict):
+                continue
+            row, _status = _masvs_summary_row(xarea.title(), entry)
+            table.append(row)
+
     table_utils.render_table(headers, table)
     pct = int(round((passes / 4) * 100))
-    print(f"Pass percentage (no high findings): {pct}%")
+    print(f"Pass percentage (four pillars, no high findings): {pct}%")
+    if extra_areas:
+        menu_utils.print_hint(
+            "Extended categories (e.g. CRYPTO, RESILIENCE) are listed after the four pillars; "
+            "they do not change the 4-pillar pass percentage. Matrix view rolls those into PLATFORM.",
+            icon="ℹ",
+        )
+    menu_utils.print_hint(
+        "Data source: canonical ``static_analysis_findings`` (and related static summaries), not legacy ``runs``/``findings``.",
+        icon="ℹ",
+    )
     prompt_utils.press_enter_to_continue()
 
 
@@ -414,7 +446,11 @@ def render_masvs_matrix_menu() -> None:
             label = area.title()
             print(status_messages.status(f"{label:9} pass coverage: {count}/{total_packages} ({pct:.0f}%)", level="info"))
     print()
-    menu_utils.print_hint("Data source: MASVS findings persisted in the database (runs/findings tables).", icon="ℹ")
+    menu_utils.print_hint(
+        "Data source: canonical ``static_analysis_findings`` for the latest completed run per package "
+        "(CRYPTO/RESILIENCE/OTHER rolled into PLATFORM in this matrix).",
+        icon="ℹ",
+    )
     print()
     print("Legend:")
     print(f"  {colors.apply('PASS', colors.style('success'), bold=True)}  No medium/high findings - contributes 1.0 to score")

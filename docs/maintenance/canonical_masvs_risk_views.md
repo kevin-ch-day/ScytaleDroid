@@ -45,7 +45,7 @@ Legacy mirror keyed by legacy `runs.run_id` when present. Long-term source is `s
 
 ### Python branches still using legacy `findings` / `runs`
 
-`fetch_db_masvs_summary()` uses latest `static_analysis_runs` when `run_id` is omitted; legacy `runs` / `findings` remain only as a fallback when no canonical rows exist.
+`fetch_db_masvs_summary()` prefers latest `static_analysis_runs` / `static_analysis_findings`. Legacy `runs` / `findings` run only when **`SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK`** is set (for example resolving `None` via `MAX(runs.run_id)` or session-scoped `findings` rows). When that env is unset, an explicit numeric `run_id` is treated as **`static_analysis_runs.id`** (canonical static summary), not legacy `findings.run_id`.
 
 ## Safe retirement order
 
@@ -65,7 +65,7 @@ Use this as the working queue; tick items in PRs when done.
 | --- | --- | --- |
 | A1 | **`audit_static_session.py`** prints canonical MASVS session rollup + matrix row count | **Done** — matrix row count + `v_static_masvs_session_summary_v1` block. |
 | A2 | **DB menu** (`query_runner`) exposes **`v_static_masvs_session_summary_v1`** by `session_stamp` | **Done** — curated queries option **12**. |
-| A3 | Gate **`fetch_db_masvs_summary`** legacy path behind **`SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK=1`** (default off in CI smoke optional) | **Done** — `None` uses latest `static_analysis_runs` first; `runs`/`findings` only with env or explicit `run_id`. |
+| A3 | Gate **`fetch_db_masvs_summary`** legacy path behind **`SCYTALEDROID_ALLOW_LEGACY_MASVS_FALLBACK=1`** (default off in CI smoke optional) | **Done** — `None` uses latest `static_analysis_runs` first; `runs`/`findings` only with env (including resolving `None` to `MAX(runs.run_id)`). Without env, explicit `run_id` is canonical **`static_analysis_runs.id`**. |
 | A4 | **`prompt_masvs_by_package`** stops listing “recent packages” from **`runs`**; use **`static_analysis_runs`** | **Done** — recent list uses canonical runs + `static_run_id` label. |
 
 ### Tier B — Medium ROI / more moving parts

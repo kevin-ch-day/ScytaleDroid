@@ -258,15 +258,9 @@ def ensure_recent_inventory(
     if message.severity == "warn":
         print(status_messages.status(message.short, level="warn"))
     elif condensed_recent:
-        stamp = _format_snapshot_reference(snapshot_id, timestamp)
-        tail = f" ({stamp})" if stamp.strip() else ""
-        print(
-            status_messages.status(
-                f"Fresh inventory snapshot ({humanize_seconds(age_seconds or 0.0)} ago){tail}. "
-                "Proceeding with harvest.",
-                level="info",
-            )
-        )
+        # Recent snapshot + auto-continue: omit the extra INFO line (dashboard + harvest
+        # scope table already establish freshness; delta lines below cover material drift).
+        pass
     else:
         print(status_messages.status(message.short, level="info"))
     if delta_obj and delta_obj.changed_packages_count:
