@@ -108,29 +108,17 @@ def persist_permission_matrix(
 
             declared_in = profile.get("declared_in") if isinstance(profile, Mapping) else None
 
-            flag_map = {
-                key: bool(profile.get(key))
-                for key in (
-                    "is_runtime_dangerous",
-                    "is_signature",
-                    "is_privileged",
-                    "is_special_access",
-                    "is_custom",
-                    "is_flagged_normal",
-                )
-                if isinstance(profile, Mapping)
-            }
             catalog_source = profile.get("catalog_source") if isinstance(profile, Mapping) else None
-            if catalog_source:
-                flag_map["catalog_source"] = catalog_source
             protection_levels = profile.get("protection_levels") if isinstance(profile, Mapping) else None
+            extra_only: dict[str, object] = {}
+            if catalog_source:
+                extra_only["catalog_source"] = catalog_source
             if protection_levels:
                 if isinstance(protection_levels, (list, tuple, set)):
-                    flag_map["protection_levels"] = list(protection_levels)
+                    extra_only["protection_levels"] = list(protection_levels)
                 else:
-                    flag_map["protection_levels"] = protection_levels
-
-            flags = json.dumps(flag_map, default=str) if flag_map else None
+                    extra_only["protection_levels"] = protection_levels
+            flags = json.dumps(extra_only, default=str) if extra_only else None
 
             severity = profile.get("severity") if isinstance(profile, Mapping) else 0
             try:

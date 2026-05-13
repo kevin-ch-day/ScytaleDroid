@@ -39,6 +39,7 @@ from . import run_writers as _run_writers
 from .contracts import normalize_run_status
 from .dep_export import export_dep_json
 from .finalization_flow import StaticRunFinalizationCallbacks, finalize_persisted_static_run
+from .finding_evidence_payload import canonical_evidence_body, findings_evidence_inline_enabled
 from .findings_writer import (
     compute_cvss_base,
     derive_masvs_tag,
@@ -1442,16 +1443,44 @@ def _persist_static_analysis_findings(
     )
     if not rows:
         return
+
+    payload_sql = """
+        INSERT IGNORE INTO static_finding_evidence_payloads (
+          evidence_hash, evidence_json, evidence_chars
+        ) VALUES (%s, %s, %s)
+    """
+    payload_params: list[tuple[object, ...]] = []
+    seen_hashes: set[str] = set()
+    for row in rows:
+        ev = row.get("evidence")
+        digest, body = canonical_evidence_body(ev)
+        if digest and body and digest not in seen_hashes:
+            seen_hashes.add(digest)
+            payload_params.append((digest, body, len(body)))
+    if payload_params:
+        core_q.run_sql_many(
+            payload_sql,
+            payload_params,
+            query_name="static_findings_evidence_payloads.insert_ignore",
+        )
+
+    inline_evidence = findings_evidence_inline_enabled()
     sql = """
         INSERT INTO static_analysis_findings (
-          run_id, finding_id, status, severity, severity_raw, category, title, tags, evidence, fix,
+          run_id, finding_id, status, severity, severity_raw, category, title, tags, evidence, evidence_hash, fix,
           rule_id, cvss_score, masvs_area, masvs_control_id, masvs_control, detector, module, evidence_refs
         ) VALUES (
-          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
     """
     params: list[tuple[object, ...]] = []
     for row in rows:
+        ev = row.get("evidence")
+        digest, _body = canonical_evidence_body(ev)
+        if digest and not inline_evidence:
+            ev_out: object | None = None
+        else:
+            ev_out = ev
         params.append(
             (
                 static_run_id,
@@ -1462,7 +1491,8 @@ def _persist_static_analysis_findings(
                 row.get("category"),
                 row.get("title"),
                 row.get("tags"),
-                row.get("evidence"),
+                ev_out,
+                digest,
                 row.get("fix"),
                 row.get("rule_id"),
                 row.get("cvss_score"),

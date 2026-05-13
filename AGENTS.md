@@ -75,7 +75,7 @@ Expected lifecycle (do not skip or invert casually):
 2. Insert **`static_analysis_runs`** with **`static_session_id`** when the session shell is known.
 3. Refresh session summaries **after** run finalization and **after** `static_session_run_links` writes.
 4. Batch repair: **`PYTHONPATH=. python scripts/db/refresh_static_analysis_sessions.py --all`**
-5. Verify linkage: **`PYTHONPATH=. python scripts/db/verify_static_session_id_rollout.py`** (read-only counts).
+5. Verify linkage: **`PYTHONPATH=. python scripts/db/verify_static_session_id_rollout.py`** (read-only counts; add **`--explain`** for stderr legend on **`artifact_static_numeric_dangling`**).
 
 Do **not** hand-edit session counter columns in SQL unless you are doing an **explicit, reviewed** DB repair and understand downstream Web/read-model expectations.
 
@@ -91,11 +91,11 @@ These **repo-owned** views are part of the DB contract (DDL in this tree; Web co
 
 ### Artifact registry backlog signal
 
-**`artifact_static_numeric_dangling`** from **`verify_static_session_id_rollout.py`** (via **`v_artifact_registry_integrity`**) is often **historical artifact-registry debt**, not proof that the static-session rollout failed. Do **not** delete **`artifact_registry`** rows or filesystem evidence under **`output/`** or **`evidence/`** based on this count alone. Triage with read-only reporting (e.g. **`scripts/db/report_artifact_registry_integrity.py`**) and **`docs/maintenance/artifact_registry_cleanup_track.md`**; any delete path needs export, explicit approval, and staged execution (see below).
+**`artifact_static_numeric_dangling`** from **`verify_static_session_id_rollout.py`** (via **`v_artifact_registry_integrity`**) is often **artifact_registry ledger debt** (numeric `run_id` with no matching `static_analysis_runs` row — e.g. deleted SAR, DB reset), **not** proof that the static-session rollout failed. Triage with **`scripts/db/report_artifact_registry_integrity.py`**, **`scripts/db/report_artifact_registry_cleanup_candidates.py`**, and **`docs/maintenance/artifact_registry_cleanup_track.md`**. **Registry-only** cleanup is supported by **`scripts/db/prune_artifact_registry_dangling.py`** (timestamped receipt + **`--apply`**; never deletes APKs or arbitrary files under **`output/`** / **`evidence/`**). Do **not** bulk-delete filesystem evidence based on this scalar alone.
 
 ### Destructive DB cleanup (staging)
 
-Prune / bulk-delete workflows must be **staged**, not one-shot silent deletes: (1) read-only footprint report, (2) export of target keys/paths, (3) transactional deletes scoped by **explicit ID sets** (temp tables or equivalent — no open-ended `DELETE` without a bounded key list), (4) verify **zero** remaining targets for that scope, (5) commit or rollback. No “fire and forget” prune: default **dry-run**, explicit **`--execute`** (or equivalent menu confirmation), and before/after counts in operator output.
+Prune / bulk-delete workflows must be **staged**, not one-shot silent deletes: (1) read-only footprint report, (2) export of target keys/paths, (3) transactional deletes scoped by **explicit ID sets** (temp tables or equivalent — no open-ended `DELETE` without a bounded key list), (4) verify **zero** remaining targets for that scope, (5) commit or rollback. No “fire and forget” prune: default **dry-run**, explicit opt-in (**`--apply`** on `prune_artifact_registry_dangling.py` or equivalent menu confirmation), and before/after counts in operator output. **`artifact_registry`** age-gated prune implements (2)–(4) for selected ledger rows only.
 
 ## Canonical static persistence and legacy bridge
 
@@ -144,11 +144,11 @@ Prefer operator-facing phrases like **newest harvest capture per package**, **se
 
 ## Static-to-dynamic handoff
 
-Dynamic analysis depends on **`static_run_id`**, **handoff hashes**, **plan/baseline artifacts**, and views such as **`v_static_handoff_v1`**. Do not change **`v_static_handoff_v1`**, **`v_run_identity`**, cohort/runtime identity views, or handoff hash contracts without **targeted** dynamic-readiness coverage.
+Dynamic analysis depends on **`static_run_id`**, **handoff hashes**, **plan/baseline artifacts**, and views such as **`v_static_handoff_v1`**. **`v_static_handoff_v1`** is contract-tight: **COMPLETED**, **`run_class = CANONICAL`**, **`identity_valid = 1`**, and required handoff/hash fields (see `views_static.CREATE_V_STATIC_HANDOFF_V1`). Do not widen or narrow **`v_static_handoff_v1`**, **`v_run_identity`**, cohort/runtime identity views, or handoff hash contracts without **targeted** dynamic-readiness coverage.
 
 **Sanity targets**
 
-- `v_static_handoff_v1` returns a row for the target **`static_run_id`** when the run completed with required hashes.
+- `v_static_handoff_v1` returns a row for the target **`static_run_id`** when the run meets the view’s **completed + canonical-class + identity-valid + hash-populated** predicate.
 - Baseline/plan artifacts exist where the loader expects them.
 - Dynamic plan loader accepts the linked static run.
 

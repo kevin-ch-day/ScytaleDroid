@@ -334,8 +334,8 @@ def audit_static_session_operator(
         "row count can be lower than raw static_analysis_findings."
     )
     print(
-        "  ** v_static_handoff_v1 only includes COMPLETED runs with handoff hashes populated; "
-        "zero rows can mean incomplete runs or missing handoff fields — compare to static_analysis_runs.status."
+        "  ** v_static_handoff_v1 includes only COMPLETED runs with run_class CANONICAL, "
+        "identity_valid = 1, and handoff hashes populated — compare counts to static_analysis_runs for the session."
     )
     if not bridge_on:
         print(

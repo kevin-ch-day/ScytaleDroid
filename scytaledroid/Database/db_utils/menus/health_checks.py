@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_utils.static_run_governance_checks import (
+    fetch_static_run_governance_counts,
+)
 from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.permission_intel_freeze import (
@@ -138,6 +141,32 @@ def run_health_summary() -> None:
             ("orphan_audit_apps", summary.orphan_audit_apps if summary.orphan_audit_apps is not None else "—"),
         ]
     )
+
+    menu_utils.print_section("Static run class / handoff invariants")
+    try:
+        gov_counts = fetch_static_run_governance_counts(run_sql)
+    except Exception as exc:
+        print(status_messages.status(f"Governance posture counts unavailable: {exc}", level="warn"))
+        gov_counts = None
+    if gov_counts is not None:
+        menu_utils.print_metrics(
+            [
+                ("failed_canonical_runs", str(gov_counts.failed_canonical_runs)),
+                ("failed_missing_run_class", str(gov_counts.failed_missing_run_class)),
+                (
+                    "completed_session_invariant_violations",
+                    str(gov_counts.completed_session_invariant_violations),
+                ),
+            ]
+        )
+        if gov_counts.non_zero_check_count() > 0:
+            print(
+                status_messages.status(
+                    "One or more governance invariants are non-zero; use Database Tools → "
+                    "Static & registry diagnostics (items 1–2) or scripts/db/check_static_run_governance_posture.py.",
+                    level="warn",
+                )
+            )
 
     menu_utils.print_section("Evidence integrity")
     if _column_exists("permission_audit_snapshots", "evidence_relpath"):

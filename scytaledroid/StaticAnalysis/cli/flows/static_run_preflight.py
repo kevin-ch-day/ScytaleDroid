@@ -254,7 +254,7 @@ def emit_static_run_preflight_summary(
     print_section("After this run")
     _preflight_plain(
         "Read-only DB checks: Post-run diagnostics → 11 (DB-backed session checks); "
-        "Database Tools → 12 (session health, grain, artifact registry, static_session_id rollout verify)."
+        "Database Tools → 9 — Static & registry diagnostics (ledger invariants, artifact registry, session health / grain / audit / rollout)."
     )
     print()
 

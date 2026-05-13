@@ -143,7 +143,7 @@ def format_apps_display_name_hygiene_line(groups: Sequence[Any]) -> str | None:
     need = max(0, total - labeled)
     base = (
         f"Display labels: {labeled}/{total} labeled · {need} need review — "
-        "review: Database Tools → option 11 (Catalog hygiene), or "
+        "review: Database Tools → option 8 (Catalog hygiene), or "
         "`PYTHONPATH=. python scripts/db/report_app_label_hygiene.py`"
     )
     if need <= 0 or not miss_keys:

@@ -176,7 +176,15 @@ def clear_dangling_dynamic_static_links(dynamic_run_ids: list[str]) -> int:
 
 
 def find_artifact_registry_orphans(*, run_type: str | None = None) -> list[dict[str, object]]:
-    """Return artifact_registry rows whose linked run no longer resolves."""
+    """Return artifact_registry rows whose linked run no longer resolves.
+
+    **Warning:** this selects **every** non-``linked`` row from ``v_artifact_registry_integrity``
+    (optionally filtered by ``run_type``). Workspace maintenance uses the full list for bulk
+    ``DELETE`` after a single confirmation — **too broad** for catalog-wide lifecycle debt.
+    Prefer ``scripts/db/prune_artifact_registry_dangling.py`` (age-gated, receipt, ``--apply``)
+    or ``scripts/db/report_artifact_registry_cleanup_candidates.py`` (read-only buckets) before
+    calling :func:`delete_artifact_registry_rows` ad hoc.
+    """
 
     clauses = ["link_state != 'linked'"]
     params: list[object] = []
@@ -224,7 +232,12 @@ def find_artifact_registry_orphans(*, run_type: str | None = None) -> list[dict[
 
 
 def delete_artifact_registry_rows(artifact_ids: list[int]) -> int:
-    """Delete artifact_registry rows by primary key."""
+    """Delete artifact_registry rows by primary key.
+
+    Destructive — use only after operator review. For bulk historical dangling rows, prefer
+    ``scripts/db/prune_artifact_registry_dangling.py`` (writes a receipt, then ``--apply``).
+    See ``docs/maintenance/artifact_registry_cleanup_track.md``.
+    """
 
     if not artifact_ids:
         return 0

@@ -255,8 +255,19 @@ def format_text_report(data: Mapping[str, Any]) -> str:
     lines.append(
         "Notes: link_state comes from v_artifact_registry_integrity. "
         "static linked requires numeric run_id and matching static_analysis_runs.id. "
-        "dynamic linked requires dynamic_sessions.dynamic_run_id = artifact_registry.run_id. "
-        "See docs/maintenance/artifact_registry_cleanup_track.md for cleanup policy (design only)."
+        "dynamic linked requires dynamic_sessions.dynamic_run_id = artifact_registry.run_id."
+    )
+    lines.append(
+        "Interpretation: large static dangling_static_run counts usually mean numeric run_id rows whose "
+        "SAR row is gone (DB reset, selective delete, or test churn) — a derived-ledger gap, not necessarily "
+        "bad harvest/APK data. Age buckets show backlog age; use prune_artifact_registry_dangling.py for "
+        "age-gated registry cleanup (receipt + --apply). Dynamic dangling_* is separate (same prune script, "
+        "--run-type dynamic)."
+    )
+    lines.append(
+        "See docs/maintenance/artifact_registry_cleanup_track.md. "
+        "Read-only buckets: scripts/db/report_artifact_registry_cleanup_candidates.py; "
+        "scoped prune: scripts/db/prune_artifact_registry_dangling.py."
     )
     return "\n".join(lines) + "\n"
 

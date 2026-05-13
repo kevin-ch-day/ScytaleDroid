@@ -17,17 +17,26 @@ Legend:
 
 | Script | Class | Purpose (short) | Read-only? | DB? | `--help` | Auto-call? | Menu / owner |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `check_permission_intel.py` | G | Validate Intel env, connectivity, governance snapshot rows | yes | Intel DSN | yes | optional CI | `run.sh` / gates; DB Tools → 9 |
-| `permission_intel_readiness.py` | G | Thin CLI wrapper around `permission_intel_readiness` module | yes | Intel | yes | optional | DB Tools → 9 |
+| `check_permission_intel.py` | G | Validate Intel env, connectivity, governance snapshot rows | yes | Intel DSN | yes | optional CI | `run.sh` / gates; DB Tools → 2 (readiness is item 2) |
+| `permission_intel_readiness.py` | G | Thin CLI wrapper around `permission_intel_readiness` module | yes | Intel | yes | optional | DB Tools → 2 (item 2) |
 | `recreate_web_consumer_views.py` | A / G | Recreate Web consumer **views** (DDL on views) | **writes** DDL | core | yes | posture/semantic workflows | DB maintenance; AGENTS smoke |
 | `view_repair_support.py` | C | Shared helpers for view repair scripts (imported) | n/a | n/a | n/a | no | `recreate_web_consumer_views` |
 | `static_schema_audit.py` | S | Read-only static-related schema inventory | yes | core | yes | CI / doctor | DB Tools / gates |
-| `session_static_health.py` | S | Read-only static session health probe | yes | core | yes | post-run diagnostics menu | **DB Tools → 12**; static post-run → 11 |
+| `session_static_health.py` | S | Read-only static session health probe | yes | core | yes | post-run diagnostics menu | **DB Tools → 9 (item 6)**; static post-run → 11 |
 | `audit_static_session.py` | S | Cohort/session audit: counts + Web views + legacy | yes | core (+views) | yes | propose post-run | Static audit; `audit_static_session` |
 | `refresh_static_analysis_sessions.py` | S | Recompute `static_analysis_sessions` rollups | **writes** | core | yes | propose post-run job | DB maintenance |
-| `report_static_session_grain_integrity.py` | S | Grain / `static_session_id` integrity report | yes | core | yes | optional | DB health |
-| `verify_static_session_id_rollout.py` | S | Scalar counts for session-id rollout | yes | core | yes | optional | **DB Tools → 12 (option 4)**; post-run → 11 |
-| `report_artifact_registry_integrity.py` | S | Artifact registry integrity (dangling refs) | yes | core | yes | propose post-run | DB health |
+| `report_static_session_grain_integrity.py` | S | Grain / `static_session_id` integrity report | yes | core | yes | optional | **DB Tools → 9 (item 7)** |
+| `verify_static_session_id_rollout.py` | S | Scalar counts for session-id rollout | yes | core | yes (`--explain` = stderr legend) | optional | **DB Tools → 9 (item 5)**; post-run → 11 |
+| `check_evidence_storage_posture.py` | G | Snapshot metadata vs pointers; findings hash↔payload | yes | core | yes | optional CI / doctor | scripts/db; DB maintenance |
+| `check_evidence_latest_write_posture.py` | G | Recent-window findings: hash↔payload, inline vs env, web-shaped evidence | yes | core | yes | after fresh static run | operator / DB maintenance |
+| `report_dynamic_static_alignment.py` | G | Dynamic sessions vs canonical static hash alignment + static worklist | yes | core | yes | no | operator triage; dynamic↔static research |
+| `report_evidence_storage_posture.py` | G | Read-only sizes / dedupe signals (flags, findings, audit) | yes | core | yes | no | operator triage |
+| `probe_finding_evidence_hash_parity.py` | G | Sample SQL vs Python ``evidence_hash`` / mismatch hints | yes | core | yes | no | operator triage before strip-inline |
+| `backfill_static_finding_evidence_payloads.py` | M | Backfill ``evidence_hash`` + payload table; optional strip inline | default read; **writes** with ``--apply`` | core | yes | no | operator / maintenance |
+| `check_static_run_governance_posture.py` | G | Static run canonical / handoff invariant counts | yes | core | yes | optional CI / doctor | **DB Tools → 9 (item 2)**; shared module `static_run_governance_checks`; gates |
+| `report_artifact_registry_integrity.py` | S | Artifact registry integrity (dangling refs) | yes | core | yes | propose post-run | **DB Tools → 9 (item 3)** |
+| `report_artifact_registry_cleanup_candidates.py` | S | Read-only cleanup policy buckets for `artifact_registry` | yes | core | yes | no | **DB Tools → 9 (item 4)**; post-run → 11 |
+| `prune_artifact_registry_dangling.py` | A | Age-gated dangling registry prune (receipt JSON v1 envelope + CSV/SQL; receipt + `--apply`; DB only) | default dry-run; **writes** with `--apply` | core | yes | never auto | operator / maintenance |
 | `verify_evidence_manifest.py` | S | Filesystem + optional DB evidence manifest parity | mixed | optional | yes | deploy | evidence checks |
 | `validate_canonical_masvs_session.py` | S | MASVS views vs session stamp | yes | core | yes | CI / research | static gates |
 | `audit_static_permission_observation_linkage.py` | S | Matrix → run → SHA linkage audit | yes | core | yes | CI | persistence QA |
@@ -58,18 +67,20 @@ Legend:
 Single “audit card” or optional prompt should summarize (read-only where possible):
 
 - `refresh_static_analysis_sessions` (currently a **write** — should remain operator-triggered or explicit post-run flag)
-- session health (`session_static_health` via **static post-run diagnostics → 11** and **DB Tools → 12**)
+- session health (`session_static_health` via **static post-run diagnostics → 11** and **DB Tools → 9 item 6**)
 - run completion matrix (completed / failed / interrupted)
 - APK reports saved vs expected (from run outcome / rollups)
 - persistence failures (existing persistence diagnostics)
 - `static_session_id` verification (`report_static_session_grain_integrity` / `verify_static_session_id_rollout`)
+- static run governance invariants (`check_static_run_governance_posture.py`)
 - dynamic orphan check (existing dynamic DB utilities — route separately)
 - artifact registry dangling (`report_artifact_registry_integrity`)
+- artifact registry cleanup candidates / policy buckets (`report_artifact_registry_cleanup_candidates`)
 - **app display-name unresolved count** (same counter as preflight delta)
 
 ### Database Tools menu (implemented baseline)
 
-See `database_menu.py`: **option 11 — Catalog hygiene**; **option 12 — Static session diagnostics** (read-only `session_static_health`, grain integrity, artifact registry, **`verify_static_session_id_rollout`**).
+See `database_menu.py`: **option 8 — Catalog hygiene**; **option 9 — Static & registry diagnostics** (ledger: run-class / handoff invariants, governance subprocess, artifact registry integrity, cleanup candidates, `verify_static_session_id_rollout`; session: `session_static_health`, grain integrity, canonical audit). **option 1 — Database health & integrity** rolls up DB-wide summary, latest-session depth checks, and evidence linkage. **option 2 — Permission Intel & snapshot governance** covers Intel DSN snapshot status and readiness.
 
 ### Deploy / readiness
 

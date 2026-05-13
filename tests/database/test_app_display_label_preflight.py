@@ -79,7 +79,7 @@ def test_format_line_includes_counts_and_option_hint(preflight_mod, monkeypatch:
     line = preflight_mod.format_apps_display_name_hygiene_line(groups)
     assert line is not None
     assert "1/2" in line
-    assert "option 11" in line
+    assert "option 8" in line
 
 
 def test_format_line_explains_preflight_vs_focus_bucket_gap(

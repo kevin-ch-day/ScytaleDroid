@@ -1,8 +1,40 @@
-# Artifact registry cleanup track (design)
+# Artifact registry cleanup track
 
-Read-only reporting lives in `scripts/db/report_artifact_registry_integrity.py`.
-This document records **policy categories** and a **future delete workflow** only — no
-automated prune is implemented here.
+Read-only reporting:
+
+- `scripts/db/report_artifact_registry_integrity.py` — counts and dangling breakdowns.
+- `scripts/db/report_artifact_registry_cleanup_candidates.py` — policy buckets (no DML).
+
+**Write-capable prune (implemented):** `scripts/db/prune_artifact_registry_dangling.py` — age-gated
+dangling rows only, lightweight JSON/CSV/SQL receipt, ``DELETE`` only with ``--apply`` (never
+deletes host files).
+
+## 0. Operator policy (research / test installs)
+
+ScytaleDroid is used as a **research and test** framework. **Low-trust alpha-era** derived
+ledger rows in ``artifact_registry`` do not need indefinite preservation.
+
+**Preserve (do not touch with registry prune tools):**
+
+- Harvested **APK bytes** and repository / app-version **identity** inputs.
+- **Inventory** snapshots and cohort metadata operators rely on for reruns.
+- **Permission Intel** dictionaries and governance data (separate DSN / product boundary).
+
+**Treat as disposable (this track):**
+
+- ``artifact_registry`` rows that are **not** ``link_state='linked'`` and are **older than**
+  configured age thresholds — the table is a **derived index**; static/dynamic analyses can be
+  **rerun** from harvest + current schema when needed.
+
+**Current good work** (e.g. session stamp ``20260513-all-full``) remains safe while runs still
+exist in ``static_analysis_runs`` / ``dynamic_sessions``: linked registry rows are **never**
+selected for prune.
+
+**Filesystem:** prune tools **never** delete APKs or evidence files under ``output/``; only
+``artifact_registry`` rows.
+
+**Receipts:** a **lightweight** timestamped bundle (JSON + CSV + commented SQL listing ids) is
+enough audit trail before delete — not a heavy archival programme.
 
 ## 1. Model summary (authoritative in code)
 
@@ -52,13 +84,22 @@ Core helper: `Database/db_utils/artifact_registry.py` → `record_artifacts`.
 
 ### Existing maintenance (destructive when confirmed)
 
+**Do not use the workspace prune for bulk historical cleanup.** It deletes **all** rows returned
+by `find_artifact_registry_orphans()` (every non-`linked` registry row matching the view) after
+interactive prompts — suitable only for small, deliberate repairs.
+
 - `scytaledroid/DynamicAnalysis/storage/db_maintenance.py` — `find_artifact_registry_orphans`,
   `delete_artifact_registry_rows` (DB rows only).
 - `scytaledroid/Utils/System/workspace_maintenance_menu.py` — `_prune_artifact_registry_orphans`
   (interactive menu; deletes orphan **registry** rows after prompts).
 
-`reset_static.py` does **not** currently clear `artifact_registry` in the snippets reviewed for
-this pass; full reset behavior should be re-checked if reset scope expands.
+**Read-only triage:** `PYTHONPATH=. python scripts/db/report_artifact_registry_cleanup_candidates.py`
+
+**Scoped prune (preferred for bulk debt):** `PYTHONPATH=. python scripts/db/prune_artifact_registry_dangling.py` — see §4.
+
+`reset_static.py` intentionally omits `artifact_registry` from `STATIC_ANALYSIS_TABLES` (see
+comment in that module). Expanding reset scope to the registry requires an explicit product
+decision; use the prune script for ledger cleanup instead of widening static reset blindly.
 
 ---
 
@@ -74,7 +115,9 @@ Use these **labels** in runbooks and future tooling; they are not DB enums yet.
 | `dangling_db_only_candidate` | Dangling, `host_path` null/empty or path probe **missing** — safe **registry row** delete candidate after export. |
 | `dangling_file_present_review` | Dangling but file **exists** — evidence may still be valuable; **human review** before registry delete. |
 | `dynamic_dangling_review` | `dangling_dynamic_run` — correlate with evidence dirs and `dynamic_sessions` history before delete. |
-| `static_dangling_safe_metadata_delete_candidate` | Dangling static, numeric `run_id`, confirmed no SAR and no downstream FK need — **metadata-only** delete candidate (still export-first). |
+| `static_nonnumeric_run_id_review` | Non-numeric static `run_id` — **legacy / mis-keyed**; investigate before bulk delete. |
+| `static_numeric_missing_sar_candidate` | Mid-age (between recent and old thresholds) static numeric `run_id` with no SAR and **blank** `host_path` — export then registry delete candidate. |
+| `unknown_link_review` | Unexpected `link_state` / `run_type` combination — inspect manually. |
 
 Non-numeric static `run_id` rows are **always** `dangling_static_run` under the current view;
 treat as **legacy / mis-keyed** and review before any bulk action.
@@ -97,6 +140,7 @@ treat as **legacy / mis-keyed** and review before any bulk action.
 
 4. **Mandatory backup/export before delete?**  
    **Yes** for any non–dry-run batch: at minimum CSV of `(artifact_id, run_id, run_type, artifact_type, host_path)`.
+   Implemented for registry prune as the JSON/CSV/SQL bundle from ``prune_artifact_registry_dangling.py`` (§4).
 
 5. **Age threshold?**  
    Start conservative: e.g. **90 days** for automatic *candidates*; **7 days** cooling-off
@@ -108,29 +152,65 @@ treat as **legacy / mis-keyed** and review before any bulk action.
 
 ---
 
-## 4. Future delete workflow (not implemented)
+## 4. Implemented prune workflow (`prune_artifact_registry_dangling.py`)
 
-When implemented, require:
+| Step | Behavior |
+|------|------------|
+| Select | ``v_artifact_registry_integrity`` with ``link_state <> 'linked'`` (never SAR/dynamic-linked rows). |
+| Age | ``created_at_utc < UTC_TIMESTAMP() - INTERVAL max(--min-age-days, --cooling-off-days) DAY`` (defaults 90 / 7). Optional ``--include-null-created-at`` for NULL timestamps. |
+| Receipt | With ``--receipt-dir``, writes ``artifact_registry_prune_<timestamp>.{json,csv,sql}`` **before** any ``DELETE``. JSON uses envelope ``scytaledroid.artifact_registry_prune_receipt.v1`` (``meta`` + ``artifact_rows``); CSV is flat rows; SQL lists commented ``DELETE`` batches. |
+| Delete | Only with ``--apply``; **requires** ``--receipt-dir`` when the candidate set is non-empty. |
+| Counts | Prints total ``artifact_registry`` rows before, candidate count, deleted count, total after (when ``--apply`` ran deletes). |
+| Files | **No** filesystem deletes; **no** APK removal. |
 
-- **Default dry-run** — print counts and sample only.
-- **`--export PATH`** — write audit CSV/JSON before any mutation.
-- **`--execute`** — explicit opt-in to run deletes (no silent default).
-- **Transactions** — batched `DELETE FROM artifact_registry WHERE artifact_id IN (...)` with
-  before/after counts.
-- **Never delete** `link_state='linked'`.
-- **Never delete** artifacts for runs tied to **current Web-default** session surfaces without
-  product sign-off (define query when implemented).
-- **Never delete** dynamic artifacts for `dynamic_sessions` that still exist (`linked` rows only
-  anyway — dangling implies session gone; still verify evidence policy).
+Suggested operator flow:
 
-Filesystem deletion **only** if a separate flag (e.g. `--delete-host-files`) exists and is
-documented as irreversible.
+1. ``report_artifact_registry_cleanup_candidates.py`` (optional) — confirm buckets.
+2. ``prune_artifact_registry_dangling.py --min-age-days …`` — dry-run counts.
+3. ``prune_artifact_registry_dangling.py --receipt-dir data/state/artifact_registry_prune`` — write receipt, still dry-run.
+4. Same command **+** ``--apply`` — receipt then batched ``DELETE``.
+
+Workspace menu **prune all orphans** remains a last-resort hammer (all non-linked rows).
+
+**Receipt JSON format:** new runs emit ``scytaledroid.artifact_registry_prune_receipt.v1`` with top-level
+``meta`` and ``artifact_rows``. Older receipts in ``data/state/artifact_registry_prune/`` may be a bare
+array (pre-change exports); treat those as legacy when scripting parsers.
+
+### Operational cadence (after an initial prune)
+
+- **Expect new dangling rows over time** whenever SAR or `dynamic_sessions` rows are removed but
+  `artifact_registry` was not cascaded (no FK by design). That is normal; it is not a signal to
+  re-panic about alpha-era “unknown” data if you already adopted the research policy in §0.
+- **Re-run** `report_artifact_registry_integrity.py` on a schedule or after large DB resets; use
+  age buckets to see whether debt is mostly **7–90d** (waiting game) vs **90d+** (prune candidates
+  at default `--min-age-days 90`).
+- **Static vs dynamic:** run `prune_artifact_registry_dangling.py` with `--run-type static` and/or
+  `dynamic` so linked rows for live sessions stay untouched while each ledger is trimmed on its own
+  schedule.
+- **Session spot-check:** optional SQL join from `v_artifact_registry_integrity` to
+  `static_analysis_runs` filtered by `session_stamp` (as in operator notes) confirms linked rows for
+  a golden session stamp. Multi-table session rollups for a **stamp list**:
+  `scripts/db/sql/report_static_session_stamp_cohort_rollups.sql`.
 
 ---
 
 ## 5. Tests (see repo)
 
 - `tests/db/test_report_artifact_registry_integrity.py` — formatting + `--help` contract.
+- `tests/db/test_report_artifact_registry_cleanup_candidates.py` — formatting + mocked SQL contract.
+- `tests/db/test_artifact_registry_prune.py` — cutoff math, receipt bundle, prune orchestration mocks.
 - Future: integration tests against a DB fixture for linked vs dangling classification mirror
   `v_artifact_registry_integrity` DDL in `tests/database/test_schema_manifest_static_handoff_view.py`
   style.
+
+---
+
+## 6. RFC (future schema / ops; not implemented)
+
+- **Nullable `session_stamp` or `source_session_stamp`** on `artifact_registry` for new rows
+  would make session-scoped triage and retention policies cheaper without replacing `run_id`
+  join semantics for static/dynamic.
+- **Operator menu wiring** for prune (optional): keep script as primary surface until UX review.
+- **Indexes** — once delete batches are defined, add covering indexes aligned with
+  `v_artifact_registry_integrity` filters (`run_type`, `link_state`, `created_at_utc`) only
+  after measuring production plans (avoid speculative DDL in this track).

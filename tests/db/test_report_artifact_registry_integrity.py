@@ -45,8 +45,8 @@ def test_format_text_report_includes_sections() -> None:
     assert "static\tdangling_static_run\tdep_snapshot\t3" in text
     assert "999001\t3" in text
     assert "dyn-old\t2" in text
-    assert "non-numeric run_id: 1" in text
-    assert "no SAR row" in text
+    assert "Interpretation:" in text
+    assert "prune_artifact_registry_dangling.py" in text
 
 
 def test_collect_report_queries_core_q(monkeypatch: pytest.MonkeyPatch) -> None:

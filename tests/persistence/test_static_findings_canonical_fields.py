@@ -45,7 +45,7 @@ def test_persist_static_analysis_findings_writes_masvs_area_and_control_id(monke
     params = recorded["params"]
     assert "masvs_area" in sql
     assert "masvs_control_id" in sql
-    assert "severity_raw" in sql
+    assert "evidence_hash" in sql
     assert params == [
         (
             99,
@@ -57,6 +57,7 @@ def test_persist_static_analysis_findings_writes_masvs_area_and_control_id(monke
             "Exported activity without permission",
             "{}",
             "{}",
+            None,
             "Lock it down",
             "BASE-IPC-COMP-NO-ACL",
             "8.0",

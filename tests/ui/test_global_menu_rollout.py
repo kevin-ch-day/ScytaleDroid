@@ -56,7 +56,12 @@ def test_database_menu_renders_shared_sections(monkeypatch, capsys):
     monkeypatch.setattr(menu_module.diagnostics, "get_schema_version", lambda: "0.2.5")
     monkeypatch.setattr(menu_module.diagnostics, "check_connection", lambda: True)
     monkeypatch.setattr(menu_module.diagnostics, "get_server_info", lambda: {"database": "scytaledroid_test"})
-    monkeypatch.setattr(menu_module.menu_utils, "render_menu", lambda *_a, **_k: None)
+    rendered_labels: list[str] = []
+
+    def capture_render(spec, *_a, **_k):
+        rendered_labels.extend(item.label for item in spec.items)
+
+    monkeypatch.setattr(menu_module.menu_utils, "render_menu", capture_render)
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.database_menu()
@@ -65,6 +70,9 @@ def test_database_menu_renders_shared_sections(monkeypatch, capsys):
     assert "Database Tools" in out
     assert "Database State" in out
     assert "Read-Only Diagnostics" in out
+    assert any("Database health & integrity" in label for label in rendered_labels)
+    assert any("Permission Intel & snapshot governance" in label for label in rendered_labels)
+    assert any("Static & registry diagnostics" in label for label in rendered_labels)
     assert "Maintenance, repair, and migrations" in out
     assert "Connection" in out
     assert "Target DB" in out
@@ -285,6 +293,13 @@ def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     )
     monkeypatch.setattr(menu_module, "_column_exists", lambda *_a, **_k: False)
     monkeypatch.setattr(menu_module, "scalar", lambda *_a, **_k: 1)
+    from scytaledroid.Database.db_utils.static_run_governance_checks import StaticRunGovernanceCounts
+
+    monkeypatch.setattr(
+        menu_module,
+        "fetch_static_run_governance_counts",
+        lambda *_a, **_k: StaticRunGovernanceCounts(0, 0, 0),
+    )
     monkeypatch.setattr(menu_module.intel_db, "is_permission_intel_configured", lambda: True)
     monkeypatch.setattr(
         menu_module.intel_db,
@@ -302,6 +317,7 @@ def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "DB Health Summary" in out
     assert "Run status" in out
+    assert "Static run class / handoff invariants" in out
     assert "governance_ready (static CLI / paper-grade gate): True" in out
 
 

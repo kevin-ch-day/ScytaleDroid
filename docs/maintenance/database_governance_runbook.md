@@ -122,9 +122,10 @@ PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py posture
 PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py semantic
 PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py counts
 SCYTALEDROID_WEB_ROOT=… ./scripts/db/smoke_web_db.sh
+PYTHONPATH=. python scripts/db/check_static_run_governance_posture.py
 ```
 
-**PDO smoke** verifies “**SQL executes**”. **`semantic`** verifies **baseline counts print** plus **logical coherence** (e.g. `static_analysis_findings` non-empty but `v_web_app_findings` empty → exit **1**) so dashboards cannot silently regress.
+The last line asserts **static run governance invariants** (failed runs not `is_canonical`, failed runs classified, completed sessions aligned with `v_static_handoff_v1` / canonical class / identity). Exit **1** if any counter is non-zero. **`semantic`** verifies **baseline counts print** plus **logical coherence** (e.g. `static_analysis_findings` non-empty but `v_web_app_findings` empty → exit **1**) so dashboards cannot silently regress.
 
 Suggested **mental model** vs zeros:
 

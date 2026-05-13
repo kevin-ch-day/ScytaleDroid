@@ -7,7 +7,9 @@ from collections.abc import Callable
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.menus import (
     catalog_hygiene_menu,
+    db_health_integrity_menu,
     health_checks,
+    permission_intel_snapshot_menu,
     query_runner,
     static_session_diagnostics_menu,
 )
@@ -15,7 +17,6 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
 
 from .action_groups.status_actions import write_db_schema_snapshot_audit
-from .permission_intel_readiness import prompt_permission_intel_readiness
 from .menu_actions import (
     apply_canonical_schema_bootstrap,
     audit_static_risk_coverage,
@@ -34,7 +35,6 @@ from .menu_actions import (
     run_inventory_determinism_comparator,
     seed_dataset_profile,
     show_connection_and_config,
-    show_governance_snapshot_status,
     sync_contracts_to_db,
 )
 
@@ -108,35 +108,35 @@ def database_menu() -> None:
     """Render the database utilities menu and dispatch to sub-menus."""
 
     actions: dict[str, Callable[[], None]] = {
-        "1": health_checks.run_health_summary,
-        "2": health_checks.run_health_checks,
-        "3": health_checks.run_evidence_integrity_check,
-        "4": show_governance_snapshot_status,
-        "5": show_connection_and_config,
-        "6": query_runner.run_query_menu,
-        "7": run_inventory_determinism_comparator,
-        "8": write_db_schema_snapshot_audit,
-        "9": prompt_permission_intel_readiness,
-        "10": _maintenance_menu,
-        "11": catalog_hygiene_menu.catalog_hygiene_menu,
-        "12": static_session_diagnostics_menu.static_session_diagnostics_menu,
+        "1": db_health_integrity_menu.database_health_and_integrity_menu,
+        "2": permission_intel_snapshot_menu.permission_intel_and_snapshot_menu,
+        "3": show_connection_and_config,
+        "4": query_runner.run_query_menu,
+        "5": run_inventory_determinism_comparator,
+        "6": write_db_schema_snapshot_audit,
+        "7": _maintenance_menu,
+        "8": catalog_hygiene_menu.catalog_hygiene_menu,
+        "9": static_session_diagnostics_menu.static_session_diagnostics_menu,
     }
 
     options: list[MenuOption] = [
-        MenuOption("1", "Health summary"),
-        MenuOption("2", "Integrity and contract checks"),
-        MenuOption("3", "Evidence linkage check"),
-        MenuOption("4", "Governance snapshot status"),
-        MenuOption("5", "Connection and target info"),
-        MenuOption("6", "Curated SQL queries"),
-        MenuOption("7", "Inventory determinism comparator"),
-        MenuOption("8", "Schema snapshot audit"),
-        MenuOption("9", "Permission Intel readiness (SCYTALEDROID_PERMISSION_INTEL_DB_*)"),
-        MenuOption("10", "Maintenance, repair, and migrations"),
-        MenuOption("11", "Catalog hygiene (display-name report / override preview & apply)"),
         MenuOption(
-            "12",
-            "Static session diagnostics (health, grain, registry, session_id rollout verify)",
+            "1",
+            "Database health & integrity (summary, latest-session checks, evidence linkage)",
+        ),
+        MenuOption(
+            "2",
+            "Permission Intel & snapshot governance (Intel DSN: snapshot status + readiness)",
+        ),
+        MenuOption("3", "Connection and target info"),
+        MenuOption("4", "Curated SQL queries"),
+        MenuOption("5", "Inventory determinism comparator"),
+        MenuOption("6", "Schema snapshot audit"),
+        MenuOption("7", "Maintenance, repair, and migrations"),
+        MenuOption("8", "Catalog hygiene (display-name report / override preview & apply)"),
+        MenuOption(
+            "9",
+            "Static & registry diagnostics (ledger invariants, artifact registry, session probes)",
         ),
     ]
 
@@ -149,7 +149,8 @@ def database_menu() -> None:
         target_database = server_info.get("database") or "<unknown>"
         menu_utils.print_header("Database Tools")
         menu_utils.print_hint(
-            "Inspect schema, integrity, and governance state."
+            "Inspect schema, integrity, and governance state. "
+            "Core DB vs Permission Intel: items 1 vs 2."
         )
         menu_utils.print_section("Database State")
         menu_utils.print_metrics(
@@ -162,7 +163,9 @@ def database_menu() -> None:
         )
         if schema_ver != expected_schema and schema_ver != "<unknown>":
             print(status_messages.status(f"Schema baseline mismatch: expected {expected_schema}.", level="warn"))
-            menu_utils.print_hint("Open Maintenance, repair, and migrations to apply schema updates before DB-backed workflows.")
+            menu_utils.print_hint(
+                "Open Maintenance, repair, and migrations (option 7) to apply schema updates before DB-backed workflows."
+            )
 
         menu_utils.print_section("Read-Only Diagnostics")
         menu_utils.render_menu(
