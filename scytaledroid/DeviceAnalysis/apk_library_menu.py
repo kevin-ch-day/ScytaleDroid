@@ -351,6 +351,46 @@ def _selection_manager() -> None:
         static_analysis_menu()
 
 
+def _package_lineage_report() -> None:
+    """Run the package/version/hash lineage and availability report."""
+
+    package_name = prompt_utils.prompt_text(
+        "Package filter (blank for top gaps)",
+        required=False,
+    ).strip()
+    args = ["--hash-limit", "5"]
+    if package_name:
+        args.extend(["--package", package_name])
+    else:
+        args.extend(["--only-gaps", "--limit", "15"])
+    try:
+        from scytaledroid.Database.db_utils.menus.repo_db_script_runner import run_scripts_db_py
+
+        run_scripts_db_py("report_apk_lineage_availability.py", args)
+    except Exception as exc:
+        print(status_messages.status(f"Unable to run lineage report: {exc}", level="error"))
+    prompt_utils.press_enter_to_continue()
+
+
+def _static_target_queue_report() -> None:
+    """Run the read-only static target queue report."""
+
+    package_name = prompt_utils.prompt_text(
+        "Package filter (blank for actionable targets)",
+        required=False,
+    ).strip()
+    args = ["--only-actionable", "--limit", "50"]
+    if package_name:
+        args.extend(["--package", package_name])
+    try:
+        from scytaledroid.Database.db_utils.menus.repo_db_script_runner import run_scripts_db_py
+
+        run_scripts_db_py("report_static_analysis_targets.py", args)
+    except Exception as exc:
+        print(status_messages.status(f"Unable to run static target queue: {exc}", level="error"))
+    prompt_utils.press_enter_to_continue()
+
+
 def apk_library_menu(device_filter: str | None = None) -> None:
     """Entry point for APK library & archives."""
 
@@ -389,8 +429,17 @@ def apk_library_menu(device_filter: str | None = None) -> None:
             menu_utils.MenuOption("2", "Browse APKs by session (coming soon)", disabled=True),
             menu_utils.MenuOption("3", "Browse all APKs (flat list)"),
             menu_utils.MenuOption("4", "Search APKs (by package name or label)"),
-            menu_utils.MenuOption("5", "Show APKs without static analysis runs", disabled=True),
-            menu_utils.MenuOption("6", "Show APKs with high-risk findings (from database)", disabled=True),
+            menu_utils.MenuOption(
+                "5",
+                "Package lineage and byte/static/dynamic coverage",
+                hint="Shows versions, hashes, install sets, byte availability, and next action",
+            ),
+            menu_utils.MenuOption(
+                "6",
+                "Static analysis target queue (read-only)",
+                hint="Prioritized package/hash targets with ready/blocked/link/review states",
+            ),
+            menu_utils.MenuOption("7", "Show APKs with high-risk findings (from database)", disabled=True),
         ]
         if device_filter:
             items.insert(
@@ -436,6 +485,10 @@ def apk_library_menu(device_filter: str | None = None) -> None:
             _browse_all()
         elif choice == "4":
             _search_packages()
+        elif choice == "5":
+            _package_lineage_report()
+        elif choice == "6":
+            _static_target_queue_report()
         else:
             print(status_messages.status("Option not available yet.", level="warn"))
 

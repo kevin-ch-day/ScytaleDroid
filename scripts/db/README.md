@@ -128,6 +128,70 @@ Canonical writers only (empty historical legacy-table rows are **not** treated a
 PYTHONPATH=. python scripts/db/audit_static_session.py --session 20260502-rda-canonical-only
 ```
 
+## Evidence hash posture
+
+Finding evidence externalization uses a compact query row plus a SHA-256 keyed
+payload table:
+
+- `static_analysis_findings.evidence_hash`
+- `static_finding_evidence_payloads.evidence_hash`
+
+New canonical DDL defines both as:
+
+```sql
+CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
+```
+
+Existing development databases may still have older collations such as
+`utf8mb4_general_ci` or `latin1_swedish_ci`. Check before disabling inline
+finding evidence:
+
+```bash
+PYTHONPATH=. python scripts/db/check_evidence_storage_posture.py
+PYTHONPATH=. python scripts/db/check_evidence_latest_write_posture.py --since-hours 168
+```
+
+If `evidence_hash_collation_ok=0`, use a reviewed safe-alter path during a
+maintenance window. Back up first, verify no hash values exceed 64 hex
+characters, then alter only the two hash columns:
+
+```bash
+PYTHONPATH=. python scripts/db/normalize_evidence_hash_collation.py
+PYTHONPATH=. python scripts/db/normalize_evidence_hash_collation.py --apply
+```
+
+The helper is dry-run by default, validates existing hashes as 64-character hex
+strings, and uses the direct narrow `MODIFY` path. On MariaDB/InnoDB this works
+with the existing payload primary key and findings secondary index; the table is
+rebuilt as needed by the server. The equivalent reviewed SQL is:
+
+```sql
+ALTER TABLE static_finding_evidence_payloads
+  MODIFY evidence_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL;
+
+ALTER TABLE static_analysis_findings
+  MODIFY evidence_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL;
+```
+
+Then rerun storage posture, latest-write posture, and hash parity before
+changing `SCYTALEDROID_FINDINGS_EVIDENCE_INLINE` or stripping inline evidence.
+
+Manual indexes added during live diagnosis must be represented in canonical
+schema/bootstrap before they are treated as durable. The dynamic/static exact
+hash path currently expects `ix_dynamic_sessions_base_apk_sha256` and the
+`static_analysis_runs` composite contract index
+`ix_static_runs_base_hash_contract (base_apk_sha256, status, run_class,
+identity_valid)`. A separate single-column `static_analysis_runs(base_apk_sha256)`
+index is intentionally omitted because the composite index has `base_apk_sha256`
+as its leftmost column and covers exact-hash probes.
+
+Do not strip inline finding evidence until all of the following are true:
+
+- a fresh static run succeeds on the current writer path;
+- latest-write posture is clean;
+- evidence hash collation is fixed;
+- `v_web_app_findings` resolves payload fallback.
+
 ## Files
 
 | File | Role |
@@ -136,6 +200,7 @@ PYTHONPATH=. python scripts/db/audit_static_session.py --session 20260502-rda-ca
 | `recreate_web_consumer_views.py` | Posture / semantic smoke / counts; guarded **`recreate`** (`--layer` full, manifest, or web). |
 | `view_repair_support.py` | Helpers; ordered DDL for full vs manifest vs web-only sequences (scripts package). |
 | `check_permission_intel.py` | Env/connectivity + governance row counts for **`SCYTALEDROID_PERMISSION_INTEL_DB_*`**. |
+| `normalize_evidence_hash_collation.py` | Dry-run default migration helper for the two finding evidence hash columns (`--apply` writes). |
 | `audit_permission_intel_queue_compatibility.py` | Read-only PI queue report (`aosp` vs legacy `aosp_promote`, Scytale rows, apply-outcome dry check). |
 | `audit_static_permission_observation_linkage.py` | Read-only core DB: matrix → run SHA-256 / versions / `apk_id`. |
 | `run_permission_intel_scytale_s2_readiness_audit.sh` | Bundles intel check + audits + targeted pytest (best-effort if DB unset). |

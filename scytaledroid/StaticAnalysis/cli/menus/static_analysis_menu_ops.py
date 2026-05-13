@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
 from ...core.detector_runner import PIPELINE_STAGES
 from ..core.analysis_profiles import run_modules_for_profile
@@ -166,6 +166,179 @@ def search_app_scope(groups: tuple) -> ScopeSelection | None:
     scoped = select_latest_groups(matching_groups)
     label = f"{app_label} | {package_name}" if app_label else package_name
     return ScopeSelection("app", label, scoped)
+
+
+def choose_exact_dynamic_worklist_target() -> tuple[ScopeSelection, object] | None:
+    """Select and validate an exact APK target from the dynamic/static worklist."""
+
+    from ..flows.exact_target import (
+        ExactTargetResolutionError,
+        assess_exact_target_readiness,
+        resolve_exact_static_target,
+        write_exact_target_receipt,
+    )
+
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+        from scytaledroid.Database.db_scripts.dynamic_static_alignment_report import sql_worklist
+    except Exception as exc:
+        print(status_messages.status(f"Dynamic/static worklist unavailable: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return None
+
+    rows = core_q.run_sql(
+        sql_worklist(25),
+        (),
+        fetch="all_dict",
+        query_name="static_menu.exact_dynamic_worklist",
+    ) or []
+    if not rows:
+        print(status_messages.status("No exact dynamic APK hashes currently need static analysis.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return None
+
+    print()
+    menu_utils.print_header(
+        "Exact Dynamic APK Hash",
+        "Select a dynamic/static worklist row. This path never falls back to newest package capture.",
+    )
+    try:
+        from scytaledroid.StaticAnalysis.core.repository import group_artifacts
+
+        receipt_groups = tuple(group_artifacts())
+    except Exception:
+        receipt_groups = ()
+    readiness_rows = []
+    for row in rows:
+        try:
+            readiness_rows.append(
+                assess_exact_target_readiness(
+                    apk_id=row.get("apk_id"),
+                    base_apk_sha256=row.get("base_apk_sha256"),
+                    package_name=row.get("package_name"),
+                    dynamic_runs=row.get("dynamic_runs"),
+                    groups=receipt_groups,
+                )
+            )
+        except ExactTargetResolutionError:
+            readiness_rows.append(None)
+    table_rows: list[list[str]] = []
+    for idx, row in enumerate(rows, start=1):
+        readiness = readiness_rows[idx - 1]
+        action = readiness.recommended_action if readiness is not None else "readiness_error"
+        splits = (
+            f"{readiness.split_files_available}/{readiness.split_files_expected}"
+            if readiness is not None
+            else "?"
+        )
+        table_rows.append(
+            [
+                str(idx),
+                str(row.get("package_name") or ""),
+                str(row.get("apk_id") or ""),
+                str(row.get("base_apk_sha256") or "")[:16] + "...",
+                str(row.get("dynamic_runs") or "0"),
+                splits,
+                action,
+            ]
+        )
+    table_utils.render_table(
+        ["#", "Package", "apk_id", "Base hash", "Dyn", "Splits", "Action"],
+        table_rows,
+        padding=1,
+        compact=True,
+    )
+    print("0) Back")
+    choice = prompt_utils.get_choice(
+        [str(i) for i in range(1, len(rows) + 1)] + ["0"],
+        default="1",
+    )
+    if choice == "0":
+        return None
+
+    row = rows[int(choice) - 1]
+    readiness = readiness_rows[int(choice) - 1]
+    if readiness is None:
+        try:
+            readiness = assess_exact_target_readiness(
+                apk_id=row.get("apk_id"),
+                base_apk_sha256=row.get("base_apk_sha256"),
+                package_name=row.get("package_name"),
+                dynamic_runs=row.get("dynamic_runs"),
+                groups=receipt_groups,
+            )
+        except ExactTargetResolutionError as exc:
+            print(status_messages.status(f"Exact target readiness failed: {exc}", level="error"))
+            prompt_utils.press_enter_to_continue()
+            return None
+
+    print()
+    menu_utils.print_section("Exact Target Readiness")
+    print(f"  package            : {readiness.package_name}")
+    print(f"  apk_id             : {readiness.apk_id or 'unknown'}")
+    print(f"  expected hash      : {readiness.base_apk_sha256 or 'unknown'}")
+    print(f"  repository row     : {'yes' if readiness.repository_row_exists else 'no'}")
+    print(f"  receipt-backed set : {'yes' if readiness.receipt_backed_group_available else 'no'}")
+    print(
+        "  base bytes         : "
+        f"{'available' if readiness.base_file_available else 'missing'} "
+        f"(verified={'yes' if readiness.base_file_hash_verified else 'no'})"
+    )
+    print(
+        "  split bytes        : "
+        f"{readiness.split_files_available}/{readiness.split_files_expected} verified"
+    )
+    print(f"  recorded path      : {'available' if readiness.recorded_local_file_available else 'missing'}")
+    print(f"  canonical store    : {'available' if readiness.canonical_store_file_available else 'missing'}")
+    print(f"  recommended action : {readiness.recommended_action}")
+    print(f"  reason             : {readiness.reason}")
+
+    include_splits = "auto"
+    if readiness.recommended_action not in {"exact_static_available", "base_only_available_explicit"}:
+        print(
+            status_messages.status(
+                "This target is not currently analyzable from local bytes. "
+                "Restore artifacts or reharvest explicitly before static analysis.",
+                level="warn",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return None
+    if readiness.recommended_action == "base_only_available_explicit":
+        print("Only verified base APK bytes are available for this target.")
+        if not prompt_utils.prompt_yes_no("Run exact base-only analysis?", default=False):
+            return None
+        include_splits = "base-only"
+
+    try:
+        target = resolve_exact_static_target(
+            apk_id=row.get("apk_id"),
+            base_apk_sha256=row.get("base_apk_sha256"),
+            package_name=row.get("package_name"),
+            include_splits=include_splits,
+        )
+    except ExactTargetResolutionError as exc:
+        print(status_messages.status(f"Exact target preflight failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return None
+
+    receipt_path = write_exact_target_receipt(
+        target,
+        source_worklist_bucket="dynamic_static_alignment",
+    )
+    print()
+    menu_utils.print_section("Exact Target Preflight")
+    print(f"  package           : {target.package_name}")
+    print(f"  apk_id            : {target.apk_id or 'unknown'}")
+    print(f"  expected hash     : {target.expected_base_sha256}")
+    print(f"  actual hash       : {target.actual_base_sha256} (verified)")
+    print(f"  split mode        : {target.split_mode}")
+    print(f"  split members     : {target.split_count}")
+    print(f"  artifacts verified: {len(target.artifacts)}")
+    print(f"  receipt           : {receipt_path}")
+    if not prompt_utils.prompt_yes_no("Run static analysis for this exact verified target?", default=True):
+        return None
+    return target.selection, target
 
 
 def emit_selected_preset_summary(command: Command) -> None:

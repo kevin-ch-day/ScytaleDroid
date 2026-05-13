@@ -76,3 +76,43 @@ def test_schema_manifest_includes_core_reporting_views():
     ]
     for marker in required:
         assert any(marker in stmt for stmt in statements), marker
+
+
+def test_schema_manifest_uses_ascii_bin_for_static_finding_evidence_hashes():
+    statements = schema_manifest.ordered_schema_statements()
+    combined = "\n".join(statements).lower()
+    assert (
+        "evidence_hash char(64) character set ascii collate ascii_bin not null"
+        in combined
+    )
+    assert (
+        "evidence_hash char(64) character set ascii collate ascii_bin default null"
+        in combined
+    )
+
+
+def test_schema_manifest_includes_dynamic_static_exact_hash_indexes():
+    statements = schema_manifest.ordered_schema_statements()
+    combined = "\n".join(statements).lower()
+    assert "ix_dynamic_sessions_base_apk_sha256" in combined
+    assert "on dynamic_sessions (base_apk_sha256)".lower() in combined
+    assert "ix_static_runs_base_hash_contract" in combined
+    assert (
+        "on static_analysis_runs (base_apk_sha256, status, run_class, identity_valid)".lower()
+        in combined
+    )
+
+
+def test_schema_manifest_includes_apk_install_set_spine():
+    statements = schema_manifest.ordered_schema_statements()
+    combined = "\n".join(statements)
+    assert "CREATE TABLE IF NOT EXISTS harvest_sessions" in combined
+    assert "CREATE TABLE IF NOT EXISTS apk_sets" in combined
+    assert "CREATE TABLE IF NOT EXISTS apk_set_members" in combined
+    assert "CREATE TABLE IF NOT EXISTS harvest_apk_observations" in combined
+    assert "CREATE OR REPLACE VIEW v_apk_set_coverage_v1" in combined
+    assert "ux_apk_sets_hash_version" in combined
+    assert "artifact_set_hash_version" in combined
+    assert "ADD COLUMN IF NOT EXISTS apk_set_id BIGINT UNSIGNED DEFAULT NULL" in combined
+    assert "ix_static_runs_apk_set_id" in combined
+    assert "ix_dynamic_sessions_apk_set_id" in combined

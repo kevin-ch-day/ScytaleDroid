@@ -66,6 +66,21 @@ These stay in place as **active operator, readiness, posture, catalog hygiene, o
 | Governance / DB | Permission Intel readiness (DB Tools), view posture (`recreate_web_consumer_views` posture/semantic), catalog hygiene submenu. |
 | Writes | Any DB write remains behind **explicit confirmation** in menus or deliberate CLI flags (`--apply`, `--confirm`). |
 
+## Current refinement pass
+
+Do not add another DB script until its family and replacement status are clear in
+[`db_scripts_inventory.md`](db_scripts_inventory.md). The current direction is:
+
+- keep existing paths stable;
+- move reusable report/check logic into `scytaledroid/Database/db_utils/` or
+  narrowly scoped `scytaledroid/Database/db_scripts/` modules;
+- let menu code call app modules in-process when practical;
+- keep DDL, prune, and one-time migration flows as explicit operator commands;
+- archive only after a separate grep/docs/tests/external-use check.
+
+Current combine-later families: evidence storage, dynamic/static alignment,
+static sessions, artifact registry, Permission Intel, and catalog hygiene.
+
 ---
 
 ## Suggested archive layout (future PR only)
@@ -133,6 +148,7 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | `report_evidence_storage_posture.py` | workflow_helper | RO | core | yes | operator sizing / dedupe report | triage | keep |
 | `probe_finding_evidence_hash_parity.py` | workflow_helper | RO | core | yes | SQL vs Python hash parity before inline strip | triage | keep |
 | `backfill_static_finding_evidence_payloads.py` | migration_historical | MIX | core | yes | dedupe ``static_analysis_findings`` evidence | maintenance | keep |
+| `normalize_evidence_hash_collation.py` | migration_helper | MIX | core | yes | narrow ``evidence_hash`` ascii_bin migration; dry-run default | maintenance | keep |
 | `view_repair_support.py` | workflow_helper | RO | none | yes | imported by `recreate_web_consumer_views.py` | View repair library | **keep** (explicit list) |
 | `report_app_label_hygiene.py` | supported_operator | RO | core | yes | menu Catalog hygiene; `tests/gates/test_app_display_name_catalog_scripts.py` | DB Tools → 8 | **keep** (explicit list) |
 | `apply_app_display_name_overrides.py` | supported_operator | MIX | core | yes | menu Catalog hygiene (confirm); gate tests load module | DB Tools → 8 | **keep** (explicit list) |

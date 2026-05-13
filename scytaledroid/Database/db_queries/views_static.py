@@ -214,6 +214,7 @@ CREATE OR REPLACE VIEW v_static_handoff_v1 AS
 SELECT
   sar.id AS static_run_id,
   sar.session_label,
+  sar.apk_set_id,
   sar.base_apk_sha256,
   sar.artifact_set_hash,
   sar.identity_mode,

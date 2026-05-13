@@ -87,6 +87,7 @@ def test_v_static_handoff_view_requires_canonical_class_and_identity() -> None:
 
     sql = views_static.CREATE_V_STATIC_HANDOFF_V1.lower()
     assert "create or replace view v_static_handoff_v1" in sql
+    assert "sar.apk_set_id" in sql
     assert "upper(trim(coalesce(sar.run_class, ''))) = 'canonical'" in sql
     assert "coalesce(sar.identity_valid, 0) = 1" in sql
 

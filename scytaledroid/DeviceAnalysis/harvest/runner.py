@@ -178,6 +178,10 @@ def execute_harvest(
         "db_split_groups": 0,
         "db_artifact_paths": 0,
         "db_source_paths": 0,
+        "db_harvest_sessions": 0,
+        "db_apk_sets": 0,
+        "db_apk_set_members": 0,
+        "db_harvest_observations": 0,
         "db_errors": 0,
     }
 
@@ -194,15 +198,18 @@ def execute_harvest(
 
     storage_root_id: int | None = None
     db_repo: ModuleType | None = None
+    db_install_sets: ModuleType | None = None
     if options.write_db:
         # Import DB repositories only when DB writes are enabled. This keeps harvest usable
         # on clean machines where DB deps/connectors/migrations may be absent.
         try:
             from scytaledroid.Database.db_func.harvest import (
                 apk_repository as repo,  # local import (optional DB)
+                install_sets as install_set_repo,
             )
 
             db_repo = repo
+            db_install_sets = install_set_repo
         except Exception as exc:
             stats["db_errors"] += 1
             _emit(
@@ -314,6 +321,7 @@ def execute_harvest(
                 display_total=display_total,
                 base_context=base_context,
                 db_repo=db_repo,
+                db_install_sets=db_install_sets,
                 emit=_emit,
                 stats=stats,
                 snapshot_id=snapshot_id,
@@ -364,6 +372,10 @@ def execute_harvest(
             "db_split_groups": stats["db_split_groups"],
             "db_artifact_paths": stats["db_artifact_paths"],
             "db_source_paths": stats["db_source_paths"],
+            "db_harvest_sessions": stats["db_harvest_sessions"],
+            "db_apk_sets": stats["db_apk_sets"],
+            "db_apk_set_members": stats["db_apk_set_members"],
+            "db_harvest_observations": stats["db_harvest_observations"],
             "db_errors": stats["db_errors"],
             "write_db_requested": requested_db_mirror,
             "write_db_effective": options.write_db,
@@ -406,6 +418,7 @@ def _execute_package_plan(
     display_total: int,
     base_context: Mapping[str, object],
     db_repo: ModuleType | None,
+    db_install_sets: ModuleType | None,
     emit: Callable[[str, str, Mapping[str, object | None], str | None], None],
     stats: dict[str, int],
     snapshot_id: int | None,
@@ -669,6 +682,19 @@ def _execute_package_plan(
         artifact_index += 1
 
     package_contract.finalize_package_result(result, write_db_requested=options.write_db)
+    if effective_options.write_db and db_install_sets is not None and result.ok:
+        _persist_install_set_spine(
+            result=result,
+            serial=serial,
+            session_stamp=session_stamp,
+            app_id=app_id,
+            snapshot_id=snapshot_id,
+            db_install_sets=db_install_sets,
+            stats=stats,
+            emit=emit,
+            base_context=base_context,
+        )
+        package_contract.finalize_package_result(result, write_db_requested=options.write_db)
     package_contract.write_package_manifest(
         result=result,
         package_dir=package_dir,
@@ -692,6 +718,91 @@ def _execute_package_plan(
         },
     )
     return result
+
+
+def _persist_install_set_spine(
+    *,
+    result: PullResult,
+    serial: str,
+    session_stamp: str,
+    app_id: int | None,
+    snapshot_id: int | None,
+    db_install_sets: ModuleType,
+    stats: dict[str, int],
+    emit: Callable[[str, str, Mapping[str, object | None], str | None], None],
+    base_context: Mapping[str, object],
+) -> None:
+    inventory = result.plan.inventory
+    members = []
+    for ordinal, artifact in enumerate(result.ok):
+        digest = str(artifact.sha256 or "").strip().lower()
+        if len(digest) != 64:
+            return
+        is_base = bool(artifact.is_base)
+        split_name = artifact.artifact_label or ("base" if is_base else artifact.file_name)
+        role = "base" if is_base else "split"
+        members.append(
+            db_install_sets.InstallSetMember(
+                apk_id=artifact.apk_id,
+                role=role,
+                split_name=str(split_name or role).strip().lower(),
+                sha256=digest,
+                source_path=artifact.observed_source_path or artifact.source_path,
+                local_relpath=normalise_local_path(artifact.dest_path),
+                canonical_relpath=artifact.canonical_store_path,
+                member_status=artifact.status,
+                ordinal=ordinal,
+            )
+        )
+    if len([member for member in members if member.role == "base"]) != 1:
+        return
+
+    try:
+        record = db_install_sets.InstallSetRecord(
+            session_label=session_stamp,
+            package_name=inventory.package_name,
+            device_serial=serial,
+            snapshot_id=snapshot_id,
+            app_id=app_id,
+            version_code=inventory.version_code,
+            version_name=inventory.version_name,
+            status=result.capture_status or "unknown",
+            generated_at_utc=datetime.now(UTC),
+            receipt_root="data/receipts/harvest",
+            members=tuple(members),
+            source_kind="harvest_runner",
+        )
+        apk_set_id = db_install_sets.upsert_install_set(record)
+        if apk_set_id is None:
+            return
+        stats["db_harvest_sessions"] += 1
+        stats["db_apk_sets"] += 1
+        stats["db_apk_set_members"] += len(members)
+        stats["db_harvest_observations"] += len(members)
+        emit(
+            "info",
+            "harvest.install_set.persisted",
+            extra={
+                "package_name": inventory.package_name,
+                "apk_set_id": apk_set_id,
+                "member_count": len(members),
+                "base_apk_sha256": next((member.sha256 for member in members if member.role == "base"), None),
+            },
+        )
+    except Exception as exc:
+        if hasattr(db_install_sets, "log_mirror_failure"):
+            db_install_sets.log_mirror_failure(inventory.package_name, exc)
+        stats["db_errors"] += 1
+        emit(
+            "warning",
+            "harvest.db.error",
+            extra={
+                "package_name": inventory.package_name,
+                "stage": "upsert_install_set_spine",
+                "error": str(exc),
+                **dict(base_context),
+            },
+        )
 
 
 def _pull_and_record(

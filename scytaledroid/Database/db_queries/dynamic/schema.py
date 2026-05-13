@@ -38,6 +38,7 @@ _DDL_STATEMENTS: list[str] = [
       status             VARCHAR(16)  DEFAULT NULL,
       evidence_path      TEXT         DEFAULT NULL,
       static_run_id      BIGINT       DEFAULT NULL,
+      apk_set_id         BIGINT UNSIGNED DEFAULT NULL,
       static_handoff_hash CHAR(64)    DEFAULT NULL,
       run_signature      CHAR(64)     DEFAULT NULL,
       run_signature_version VARCHAR(16) DEFAULT NULL,
@@ -72,6 +73,7 @@ _DDL_STATEMENTS: list[str] = [
       PRIMARY KEY (dynamic_run_id),
       KEY idx_dyn_sessions_pkg_scenario_started (package_name, scenario_id, started_at_utc),
       KEY idx_dyn_sessions_pkg_bundle_scenario (package_name, artifact_set_hash, scenario_id),
+      KEY ix_dynamic_sessions_apk_set_id (apk_set_id),
       KEY idx_dyn_sessions_device_started (device_serial, started_at_utc)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     """,
@@ -93,6 +95,7 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS drift_ms_start BIGINT DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS drift_ms_end BIGINT DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS apk_sha256 CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS apk_set_id BIGINT UNSIGNED DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS static_handoff_hash CHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS tool_semver VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS tool_git_commit VARCHAR(40) DEFAULT NULL,
@@ -103,6 +106,14 @@ _DDL_STATEMENTS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS ix_dynamic_sessions_static_run_id
     ON dynamic_sessions (static_run_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_dynamic_sessions_apk_set_id
+    ON dynamic_sessions (apk_set_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_dynamic_sessions_base_apk_sha256
+    ON dynamic_sessions (base_apk_sha256);
     """,
     """
     CREATE TABLE IF NOT EXISTS dynamic_session_issues (

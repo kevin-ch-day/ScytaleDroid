@@ -131,12 +131,11 @@ def main(argv: list[str] | None = None) -> int:
                 """
                 SELECT COUNT(*) AS c
                 FROM static_analysis_findings f
+                LEFT JOIN static_finding_evidence_payloads ep
+                  ON ep.evidence_hash = f.evidence_hash
                 WHERE f.evidence_hash IS NOT NULL
                   AND TRIM(f.evidence_hash) <> ''
-                  AND NOT EXISTS (
-                    SELECT 1 FROM static_finding_evidence_payloads ep
-                    WHERE ep.evidence_hash = f.evidence_hash
-                  )
+                  AND ep.evidence_hash IS NULL
                 """,
                 (),
                 fetch="one",

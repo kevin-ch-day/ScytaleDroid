@@ -34,9 +34,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scytaledroid.Database.db_core import db_config
+from scytaledroid.Database.db_core import db_config  # noqa: E402
 
-from scripts.db.view_repair_support import (
+from scripts.db.view_repair_support import (  # noqa: E402
     EXPECTED_VIEW_OBJECTS,
     REQUIRED_COLUMNS,
     full_operational_view_repair_sequence,
@@ -177,7 +177,7 @@ def cmd_posture() -> int:
             else:
                 print(f"  OK_COL      {table}.{col}")
 
-        print("# UTF-8 posture sample (non-utf8mb4 text on hotspot tables)")
+        print("# UTF-8 posture sample (non-utf8mb4 non-hash text on hotspot tables)")
         cur.execute(
             """
             SELECT TABLE_NAME, COLUMN_NAME, CHARACTER_SET_NAME, COLLATION_NAME
@@ -189,6 +189,15 @@ def cmd_posture() -> int:
               )
               AND DATA_TYPE IN ('varchar','char','text','tinytext','mediumtext','longtext')
               AND CHARACTER_SET_NAME IS NOT NULL AND CHARACTER_SET_NAME <> 'utf8mb4'
+              AND NOT (
+                CHARACTER_SET_NAME = 'ascii'
+                AND (
+                  COLUMN_NAME LIKE '%hash'
+                  OR COLUMN_NAME LIKE '%sha256'
+                  OR COLUMN_NAME LIKE '%digest'
+                  OR COLUMN_NAME LIKE '%signature'
+                )
+              )
             ORDER BY TABLE_NAME, COLUMN_NAME
             LIMIT 50
             """

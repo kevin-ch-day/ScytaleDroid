@@ -28,6 +28,9 @@ from .static_analysis_menu_ops import (
     choose_run_profile as _choose_run_profile,
 )
 from .static_analysis_menu_ops import (
+    choose_exact_dynamic_worklist_target as _choose_exact_dynamic_worklist_target,
+)
+from .static_analysis_menu_ops import (
     distinct_package_count as _distinct_package_count,
 )
 from .static_analysis_menu_ops import (
@@ -259,6 +262,7 @@ def static_analysis_menu() -> None:
         print("  2) Analyze by profile")
         print("  3) Analyze one app")
         print("  4) Re-analyze last app")
+        print("  7) Analyze exact APK hash from dynamic/static worklist")
         menu_utils.print_section("Customize")
         print("  A) Advanced all-app run — choose size & preset")
 
@@ -276,7 +280,7 @@ def static_analysis_menu() -> None:
         print("0) Back")
 
         choice = prompt_utils.get_choice(
-            ["1", "A", "2", "3", "4", "5", "6", "D", "L", "M", "V", "E", "0"],
+            ["1", "A", "2", "3", "4", "5", "6", "7", "D", "L", "M", "V", "E", "0"],
             default="1",
             casefold=True,
         )
@@ -330,6 +334,39 @@ def static_analysis_menu() -> None:
             package_name = selection.groups[0].package_name if selection.groups else selection.label
             render_version_diff(package_name)
             prompt_utils.press_enter_to_continue()
+            continue
+
+        if choice == "7":
+            selected = _choose_exact_dynamic_worklist_target()
+            if selected is None:
+                continue
+            selection, target = selected
+            from ..commands.models import Command
+            from ..flows.exact_target import count_linkable_dynamic_sessions_for_hash
+
+            command = Command(
+                id="X",
+                title="Exact dynamic APK hash",
+                description="Analyze the exact locally verified APK hash from dynamic/static alignment.",
+                kind="scan",
+                profile="full",
+                section="workflow",
+                auto_verify=True,
+                prompt_reset=True,
+            )
+            _dispatch_run(command, selection)
+            linkable = count_linkable_dynamic_sessions_for_hash(target.expected_base_sha256)
+            if linkable is not None:
+                print(
+                    status_messages.status(
+                        (
+                            f"{linkable} dynamic session(s) may now be linkable by exact hash. "
+                            "Run dynamic link repair preview to verify."
+                        ),
+                        level="info",
+                    )
+                )
+                prompt_utils.press_enter_to_continue()
             continue
 
         if choice.lower() == "d":
