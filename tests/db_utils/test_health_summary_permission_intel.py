@@ -9,6 +9,7 @@ import pytest
 
 from scytaledroid.Database.db_utils.health_checks.analysis_integrity import AnalysisIntegritySummary
 from scytaledroid.Database.db_utils.menus import health_checks as menu_module
+from scytaledroid.Database.db_utils.static_run_governance_checks import StaticRunGovernanceCounts
 
 
 def _analysis_integrity_stub() -> AnalysisIntegritySummary:
@@ -39,6 +40,11 @@ def _patch_health_summary_common(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(menu_module, "_column_exists", lambda *_a, **_k: False)
     monkeypatch.setattr(menu_module, "scalar", lambda *_a, **_k: 0)
+    monkeypatch.setattr(
+        menu_module,
+        "fetch_static_run_governance_counts",
+        lambda *_a, **_k: StaticRunGovernanceCounts(0, 0, 0),
+    )
     monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
 
 

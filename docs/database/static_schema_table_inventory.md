@@ -6,6 +6,7 @@ Operator reference: how persistent static-analysis objects are classified in thi
 | --- | --- | --- |
 | `static_analysis_runs` | **canonical** | Primary static-run ledger; FK hub for SAR rows. |
 | `static_analysis_findings` | **canonical** | Per-finding store keyed by SAR `run_id`. |
+| `static_finding_evidence_payloads` | **canonical (dedupe store)** | SHA-256–keyed JSON bodies referenced by ``static_analysis_findings.evidence_hash``; inline ``evidence`` may be NULL when externalized. |
 | `static_permission_matrix` | **canonical** | Permission facts for the run. |
 | `static_string_summary` | **canonical** | String analysis rollup for the run. |
 | `static_string_samples` | **canonical** | String samples for the run. |

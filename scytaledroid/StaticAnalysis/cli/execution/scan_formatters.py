@@ -525,7 +525,7 @@ def format_static_run_final_summary_block(
         audit = f"PYTHONPATH=. python scripts/db/audit_static_session.py --session '{safe}'"
         grain = format_grain_integrity_session_command(stamp, count_archive=True, aggregate_json=False)
 
-    menu_hints = "Post-run diagnostics → 11 · Database Tools → 12"
+    menu_hints = "Post-run diagnostics → 11 · Database Tools → 9 (Static & registry diagnostics)"
     lines = [
         "Static run summary",
         "------------------",

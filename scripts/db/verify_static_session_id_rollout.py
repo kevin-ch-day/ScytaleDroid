@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Print scalar verification counts for static_session_id rollout (read-only)."""
+"""Print scalar verification counts for static_session_id rollout (read-only).
+
+Emits one ``label=value`` line per metric on stdout (stable for scripts). The
+``artifact_static_numeric_dangling`` count reflects **artifact_registry** rows that no
+longer join to ``static_analysis_runs`` — usually ledger debt, not a failed rollout; use
+``--explain`` for a short stderr legend.
+"""
 
 from __future__ import annotations
 
@@ -104,9 +110,29 @@ def _connect():
     )
 
 
+def _print_metric_legend() -> None:
+    """Context for mixed-signal counts (stderr: keeps stdout as bare key=value lines)."""
+
+    sys.stderr.write(
+        "\n"
+        "# verify_static_session_id_rollout — metric notes\n"
+        "# artifact_static_numeric_dangling: rows in v_artifact_registry_integrity where\n"
+        "#   run_type=static and link_state=dangling_static_run (numeric run_id with no SAR row).\n"
+        "#   This is usually **artifact_registry ledger debt** (deleted SAR, DB reset, old runs),\n"
+        "#   not evidence that static_session_id rollout failed. Triage:\n"
+        "#   report_artifact_registry_integrity.py, report_artifact_registry_cleanup_candidates.py;\n"
+        "#   age-gated registry-only delete: prune_artifact_registry_dangling.py (receipt + --apply).\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="After key=value lines, print artifact_static_numeric_dangling interpretation on stderr.",
+    )
+    args = parser.parse_args(argv)
     conn = _connect()
     conn.autocommit(True)
     try:
@@ -118,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{label}={value}")
     finally:
         conn.close()
+    if args.explain:
+        _print_metric_legend()
     return 0
 
 

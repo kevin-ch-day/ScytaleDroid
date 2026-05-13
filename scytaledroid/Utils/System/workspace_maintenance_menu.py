@@ -503,7 +503,14 @@ def _clear_dangling_dynamic_static_links() -> None:
 
 
 def _prune_artifact_registry_orphans() -> None:
-    """Delete artifact_registry rows whose linked run no longer resolves."""
+    """Delete artifact_registry rows whose linked run no longer resolves.
+
+    **Danger:** ``find_artifact_registry_orphans`` returns **all** dangling/unlinked registry rows
+    (global catalog debt), not a scoped cohort.     Bulk delete here can remove tens of thousands of
+    historical ledger rows in one confirm. For routine cleanup use
+    ``scripts/db/prune_artifact_registry_dangling.py`` (age gate + receipt + ``--apply``); see
+    ``docs/maintenance/artifact_registry_cleanup_track.md``.
+    """
 
     from scytaledroid.DynamicAnalysis.storage.db_maintenance import (
         delete_artifact_registry_rows,
@@ -512,6 +519,15 @@ def _prune_artifact_registry_orphans() -> None:
 
     print()
     menu_utils.print_header("Prune Orphan Artifact Registry Rows")
+    print(
+        status_messages.status(
+            "STOP: This path deletes ALL non-linked artifact_registry rows after one prompt — "
+            "appropriate only for small, deliberate repairs. For catalog-wide dangling debt, use "
+            "PYTHONPATH=. python scripts/db/prune_artifact_registry_dangling.py (receipt + --apply) "
+            "or report_artifact_registry_cleanup_candidates.py (read-only triage) first.",
+            level="warn",
+        )
+    )
     print(status_messages.status("DB is a derived index. Evidence packs remain authoritative.", level="info"))
     rows = find_artifact_registry_orphans()
     if not rows:

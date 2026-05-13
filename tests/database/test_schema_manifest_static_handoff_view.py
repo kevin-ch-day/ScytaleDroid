@@ -23,6 +23,14 @@ def test_schema_manifest_includes_static_handoff_view():
     assert found
 
 
+def test_v_static_handoff_manifest_sql_matches_contract_predicates():
+    statements = schema_manifest.ordered_schema_statements()
+    handoff = next(stmt for stmt in statements if "CREATE OR REPLACE VIEW v_static_handoff_v1" in stmt)
+    low = handoff.lower()
+    assert "upper(trim(coalesce(sar.run_class, ''))) = 'canonical'" in low
+    assert "coalesce(sar.identity_valid, 0) = 1" in low
+
+
 def test_manifest_orders_web_consumer_masvs_and_handoff_after_canonical_prereqs():
     statements = schema_manifest.ordered_schema_statements()
     idx_handoff_core = next(

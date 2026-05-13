@@ -31,6 +31,7 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
     "static_findings",
     "static_findings_summary",
     "static_analysis_findings",
+    "static_finding_evidence_payloads",
     "static_permission_risk_vnext",
     "static_permission_matrix",
     "static_correlation_results",
@@ -52,6 +53,8 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
     "permission_audit_apps",
     "runs",
     # Optional detector caches
+    # Note: ``artifact_registry`` is intentionally omitted — loose SAR/dynamic ledger;
+    # lifecycle cleanup is tracked separately (see docs/maintenance/artifact_registry_cleanup_track.md).
 )
 
 HARVEST_TABLES: Sequence[str] = (

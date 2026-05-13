@@ -552,6 +552,23 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS severity_raw VARCHAR(32) DEFAULT NULL;
     """,
     """
+    CREATE TABLE IF NOT EXISTS static_finding_evidence_payloads (
+      evidence_hash CHAR(64) NOT NULL,
+      evidence_json LONGTEXT NOT NULL,
+      evidence_chars INT UNSIGNED NOT NULL,
+      first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (evidence_hash)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    ALTER TABLE static_analysis_findings
+      ADD COLUMN IF NOT EXISTS evidence_hash CHAR(64) DEFAULT NULL AFTER evidence_refs;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_findings_evidence_hash
+    ON static_analysis_findings (evidence_hash);
+    """,
+    """
     CREATE INDEX IF NOT EXISTS ix_static_findings_rule_severity
     ON static_analysis_findings (rule_id, severity, run_id);
     """,

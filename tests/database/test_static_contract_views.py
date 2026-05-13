@@ -75,6 +75,20 @@ def test_web_app_static_handoff_readiness_joins_handoff_contract_view() -> None:
     assert "create or replace view v_web_app_static_handoff_readiness_v1" in sql
     assert "from static_analysis_runs sar" in sql
     assert "left join v_static_handoff_v1 h" in sql
+    assert "coalesce(sar.is_canonical, 0) as is_canonical" in sql
+    assert "canonical_class_flag" in sql
+    assert "usable_static_handoff_flag" in sql
+    assert "completed_canonical_low_signal_tables" in sql
+    assert "run_class = 'canonical' or coalesce(sar.is_canonical" not in sql
+
+
+def test_v_static_handoff_view_requires_canonical_class_and_identity() -> None:
+    from scytaledroid.Database.db_queries import views_static
+
+    sql = views_static.CREATE_V_STATIC_HANDOFF_V1.lower()
+    assert "create or replace view v_static_handoff_v1" in sql
+    assert "upper(trim(coalesce(sar.run_class, ''))) = 'canonical'" in sql
+    assert "coalesce(sar.identity_valid, 0) = 1" in sql
 
 
 def test_web_static_dynamic_summary_reads_explicit_latest_static_surfaces() -> None:
@@ -86,3 +100,10 @@ def test_web_static_dynamic_summary_reads_explicit_latest_static_surfaces() -> N
     assert "vw_static_finding_surfaces_latest" in sql
     assert "from permission_audit_apps" not in sql
     assert "from static_findings_summary" not in sql
+
+
+def test_web_app_findings_joins_evidence_payload_store() -> None:
+    sql = views.CREATE_V_WEB_APP_FINDINGS.lower()
+    assert "create or replace view v_web_app_findings" in sql
+    assert "left join static_finding_evidence_payloads ep" in sql
+    assert "coalesce(f.evidence, json_extract(ep.evidence_json, '$'))" in sql

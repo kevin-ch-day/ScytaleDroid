@@ -235,6 +235,8 @@ WHERE UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
   AND sar.base_apk_sha256 IS NOT NULL
   AND sar.identity_mode IS NOT NULL
   AND sar.run_class IS NOT NULL
+  AND UPPER(TRIM(COALESCE(sar.run_class, ''))) = 'CANONICAL'
+  AND COALESCE(sar.identity_valid, 0) = 1
   AND sar.static_handoff_hash IS NOT NULL
   AND sar.masvs_mapping_hash IS NOT NULL;
 """

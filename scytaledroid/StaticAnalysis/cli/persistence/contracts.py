@@ -16,6 +16,7 @@ SCIENTIFIC_UOW_TABLES = frozenset(
         "static_analysis_runs",
         # Canonical findings and observation rows.
         "static_analysis_findings",
+        "static_finding_evidence_payloads",
         "findings",
         "static_correlation_results",
         "static_fileproviders",

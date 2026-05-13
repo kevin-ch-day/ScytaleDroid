@@ -35,6 +35,7 @@ Current scientific table set:
 20. `static_string_selected_samples`
 21. `static_string_sample_sets`
 22. `doc_hosts`
+23. `static_finding_evidence_payloads`
 
 ## Ledger / Audit Tables (Non-Scientific)
 

@@ -136,8 +136,9 @@ def static_schema_gate() -> tuple[bool, str, str]:
     """
     required_tables = [
         "static_analysis_runs",
-        "static_analysis_findings",
-        "static_permission_matrix",
+    "static_analysis_findings",
+    "static_finding_evidence_payloads",
+    "static_permission_matrix",
         "static_string_summary",
         "static_string_samples",
         "static_session_run_links",
@@ -171,6 +172,7 @@ def static_schema_gate() -> tuple[bool, str, str]:
             "title",
             "tags",
             "evidence",
+            "evidence_hash",
             "fix",
             "rule_id",
             "cvss_score",

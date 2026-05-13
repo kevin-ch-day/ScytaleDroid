@@ -615,7 +615,7 @@ SELECT
   COALESCE(f.category, 'Uncategorized') AS category,
   COALESCE(f.masvs_area, 'Unmapped') AS masvs_area,
   COALESCE(f.detector, 'unknown') AS detector,
-  f.evidence,
+  COALESCE(f.evidence, JSON_EXTRACT(ep.evidence_json, '$')) AS evidence,
   f.fix,
   f.created_at
 FROM vw_static_finding_surfaces_latest latest
@@ -624,7 +624,9 @@ LEFT JOIN apps a
 LEFT JOIN android_app_profiles ap
   ON ap.profile_key = a.profile_key
 JOIN static_analysis_findings f
-  ON f.run_id = latest.static_run_id;
+  ON f.run_id = latest.static_run_id
+LEFT JOIN static_finding_evidence_payloads ep
+  ON ep.evidence_hash = f.evidence_hash;
 """
 
 CREATE_V_WEB_APP_PERMISSIONS = """
@@ -1215,7 +1217,12 @@ JOIN (
 """
 
 # Per-run static-to-dynamic readiness (handoff contract + heuristic). Uses ``v_static_handoff_v1`` for
-# the strict handoff-eligibility row (`handoff_row_present`).
+# the strict handoff-eligibility row (`handoff_row_present`). Run-level: multiple rows per package are
+# expected across sessions; do not treat as one-row-per-app.
+#
+# ``is_canonical`` mirrors the persisted ``static_analysis_runs.is_canonical`` flag only (0/1).
+# Use ``canonical_class_flag`` for ``run_class = CANONICAL`` and ``usable_static_handoff_flag`` for
+# the combined strict handoff-ready predicate (aligns with ``v_static_handoff_v1`` membership).
 CREATE_V_WEB_APP_STATIC_HANDOFF_READINESS_V1 = """
 CREATE OR REPLACE VIEW v_web_app_static_handoff_readiness_v1 AS
 SELECT
@@ -1226,11 +1233,19 @@ SELECT
   COALESCE(sar.status, 'UNKNOWN') AS run_status,
   sar.profile AS run_profile_key,
   UPPER(TRIM(COALESCE(sar.run_class, ''))) AS run_class_uc,
+  COALESCE(sar.is_canonical, 0) AS is_canonical,
   CASE
-    WHEN UPPER(TRIM(COALESCE(sar.run_class, ''))) = 'CANONICAL' OR COALESCE(sar.is_canonical, 0) = 1
+    WHEN UPPER(TRIM(COALESCE(sar.run_class, ''))) = 'CANONICAL' THEN 1
+    ELSE 0
+  END AS canonical_class_flag,
+  CASE
+    WHEN UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
+         AND UPPER(TRIM(COALESCE(sar.run_class, ''))) = 'CANONICAL'
+         AND COALESCE(sar.identity_valid, 0) = 1
+         AND h.static_run_id IS NOT NULL
       THEN 1
     ELSE 0
-  END AS is_canonical,
+  END AS usable_static_handoff_flag,
   sar.findings_total AS run_findings_total,
   COALESCE(cf.findings_total, 0) AS canonical_findings_rowcount,
   COALESCE(pm.permission_rows, 0) AS permission_rows,
@@ -1268,6 +1283,16 @@ SELECT
       AND COALESCE(pm.permission_rows, 0) > 0
       AND COALESCE(sss.string_rows, 0) > 0
       THEN 'usable_complete'
+    WHEN UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
+      AND h.static_run_id IS NOT NULL
+      AND UPPER(TRIM(COALESCE(sar.run_class, ''))) = 'CANONICAL'
+      AND COALESCE(sar.identity_valid, 0) = 1
+      AND (
+           COALESCE(cf.findings_total, 0) = 0
+        OR COALESCE(pm.permission_rows, 0) = 0
+        OR COALESCE(sss.string_rows, 0) = 0
+      )
+      THEN 'completed_canonical_low_signal_tables'
     WHEN UPPER(COALESCE(sar.status, '')) = 'COMPLETED' THEN 'partial_rows'
     ELSE 'partial_rows'
   END AS session_usability

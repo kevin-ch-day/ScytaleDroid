@@ -579,8 +579,9 @@ def render_static_handoff_diagnostic_section(*, static_run_id: int | None, packa
     if not rows:
         print(
             "No rows in v_static_handoff_v1 for this static_run_id. "
-            "The view requires COMPLETED runs with handoff hashes populated - "
-            "check static_analysis_runs.status and static_handoff_json_path."
+            "The view requires COMPLETED runs with run_class CANONICAL, identity_valid = 1, "
+            "and handoff hashes populated — check static_analysis_runs.status, run_class, identity_valid, "
+            "and static_handoff_json_path."
         )
         return
 
