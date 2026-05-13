@@ -455,9 +455,10 @@ def test_static_scope_selection_uses_shared_actions(monkeypatch, capsys):
 def test_apk_library_menu_renders_summary_sections(monkeypatch, capsys):
     from scytaledroid.DeviceAnalysis import apk_library_menu as menu_module
 
+    rendered = []
     monkeypatch.setattr(menu_module.apk_library_service, "list_groups", lambda *args, **kwargs: [])
     monkeypatch.setattr(menu_module.static_scope_service, "count", lambda: 0)
-    monkeypatch.setattr(menu_module.menu_utils, "render_menu", lambda *_a, **_k: None)
+    monkeypatch.setattr(menu_module.menu_utils, "render_menu", lambda spec, *_a, **_k: rendered.append(spec))
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.apk_library_menu()
@@ -466,6 +467,11 @@ def test_apk_library_menu_renders_summary_sections(monkeypatch, capsys):
     assert "APK Library" in out
     assert "Library Summary" in out
     assert "Actions" in out
+    assert any(
+        "Package lineage" in getattr(item, "label", "")
+        for spec in rendered
+        for item in getattr(spec, "items", [])
+    )
 
 
 def test_utilities_menu_uses_shared_actions(monkeypatch, capsys):

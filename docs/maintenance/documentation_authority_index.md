@@ -45,6 +45,7 @@ Notes:
   - [adb_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/adb_contract.md)
   - [workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
   - [v1_evidence_catalog_verification.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/design/v1_evidence_catalog_verification.md) — ACK-pending V1 schema/verify semantics (**do not reopen without blocker**)
+  - [apk_lineage_redesign_assessment.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/apk_lineage_redesign_assessment.md) — current exact-hash/static-dynamic availability findings; package/version/hash lineage redesign assessment
 - `historical`
   - none currently separated
 
@@ -115,6 +116,7 @@ Notes:
   - [maintenance/database_cleanup_audit_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_cleanup_audit_plan.md) — read-only audit SQL pack; interrupted-session drill queries
   - [maintenance/database_schema_cleanup_design.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_schema_cleanup_design.md) — phased schema cleanup, `static_analysis_sessions`, Web SOT, prune/collation strategy
   - [maintenance/database_target_schema_v2.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_target_schema_v2.md) — **target** domain model, sessions center, run identity v2, permission observations/rollup, v2 Web views, migration phases 0–7
+  - [maintenance/apk_lineage_redesign_assessment.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/apk_lineage_redesign_assessment.md) — APK content identity vs harvest observation gap; install-set schema and reset guidance
   - [maintenance/database_static_child_table_join_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/database_static_child_table_join_map.md) — canonical vs legacy FK patterns (`run_id` vs `static_run_id`), COALESCE trap, session-scoped SQL audit pack pointers
   - [maintenance/repo_ownership_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/repo_ownership_map.md)
 

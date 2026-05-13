@@ -131,6 +131,7 @@ _DDL_STATEMENTS: list[str] = [
     CREATE TABLE IF NOT EXISTS static_analysis_runs (
       id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       app_version_id   BIGINT UNSIGNED NOT NULL,
+      apk_set_id       BIGINT UNSIGNED DEFAULT NULL,
       session_stamp    VARCHAR(128)   DEFAULT NULL,
       scope_label      VARCHAR(191)   DEFAULT NULL,
       category         VARCHAR(64)    DEFAULT NULL,
@@ -164,6 +165,7 @@ _DDL_STATEMENTS: list[str] = [
       created_at       TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
       KEY ix_static_runs_version (app_version_id),
+      KEY ix_static_runs_apk_set_id (apk_set_id),
       KEY ix_static_runs_session (session_stamp),
       KEY ix_static_runs_sha (sha256),
       CONSTRAINT fk_static_runs_version FOREIGN KEY (app_version_id)
@@ -174,6 +176,14 @@ _DDL_STATEMENTS: list[str] = [
     """
     ALTER TABLE static_analysis_runs
       ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT NULL;
+    """,
+    """
+    ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS apk_set_id BIGINT UNSIGNED DEFAULT NULL;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_runs_apk_set_id
+      ON static_analysis_runs (apk_set_id);
     """,
     """
     ALTER TABLE static_analysis_runs
@@ -222,6 +232,10 @@ _DDL_STATEMENTS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS ix_static_runs_canonical
       ON static_analysis_runs (session_label, is_canonical);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_runs_base_hash_contract
+      ON static_analysis_runs (base_apk_sha256, status, run_class, identity_valid);
     """,
     """
     CREATE TABLE IF NOT EXISTS artifact_registry (
@@ -553,7 +567,7 @@ _DDL_STATEMENTS: list[str] = [
     """,
     """
     CREATE TABLE IF NOT EXISTS static_finding_evidence_payloads (
-      evidence_hash CHAR(64) NOT NULL,
+      evidence_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
       evidence_json LONGTEXT NOT NULL,
       evidence_chars INT UNSIGNED NOT NULL,
       first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -562,7 +576,7 @@ _DDL_STATEMENTS: list[str] = [
     """,
     """
     ALTER TABLE static_analysis_findings
-      ADD COLUMN IF NOT EXISTS evidence_hash CHAR(64) DEFAULT NULL AFTER evidence_refs;
+      ADD COLUMN IF NOT EXISTS evidence_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL AFTER evidence_refs;
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_static_findings_evidence_hash

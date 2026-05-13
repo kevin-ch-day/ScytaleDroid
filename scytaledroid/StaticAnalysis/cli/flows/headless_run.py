@@ -15,6 +15,12 @@ from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
+from scytaledroid.StaticAnalysis.cli.flows.exact_target import (
+    ExactTargetResolutionError,
+    count_linkable_dynamic_sessions_for_hash,
+    resolve_exact_static_target,
+    write_exact_target_receipt,
+)
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
 from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import (
     check_session_uniqueness as _check_session_uniqueness,
@@ -136,6 +142,91 @@ def _run_single_apk(
     return 0
 
 
+def _run_exact_target(
+    *,
+    apk_id: str | None,
+    base_apk_sha256: str | None,
+    session: str | None,
+    scope_label: str | None,
+    profile: str,
+    include_splits: str,
+    allow_session_reuse: bool,
+    dry_run: bool,
+) -> int:
+    try:
+        target = resolve_exact_static_target(
+            apk_id=apk_id,
+            base_apk_sha256=base_apk_sha256,
+            include_splits=include_splits,  # type: ignore[arg-type]
+        )
+    except ExactTargetResolutionError as exc:
+        raise SystemExit(f"Exact target resolution failed: {exc}") from exc
+
+    receipt_path = write_exact_target_receipt(
+        target,
+        source_worklist_bucket="dynamic_static_alignment",
+    )
+    resolved_scope_label = scope_label or target.selection.label
+    selection = ScopeSelection(
+        scope=target.selection.scope,
+        label=resolved_scope_label,
+        groups=target.selection.groups,
+        selection_rule_summary=target.selection.selection_rule_summary,
+    )
+    params = RunParameters(
+        profile=profile,
+        scope=selection.scope,
+        scope_label=selection.label,
+        dry_run=dry_run,
+        paper_grade_requested=False,
+    )
+    if session:
+        params = replace(params, session_stamp=session, session_label=session)
+    if params.session_stamp:
+        normalized = normalize_session_stamp(params.session_stamp)
+        if normalized != params.session_stamp:
+            params = replace(params, session_stamp=normalized, session_label=normalized)
+
+    _check_session_uniqueness(
+        params.session_stamp,
+        target.package_name,
+        allow_session_reuse,
+        dry_run=params.dry_run,
+    )
+
+    print("Exact static target preflight")
+    print(f"  package           : {target.package_name}")
+    print(f"  apk_id            : {target.apk_id or 'unknown'}")
+    print(f"  expected hash     : {target.expected_base_sha256}")
+    print(f"  actual hash       : {target.actual_base_sha256} (verified)")
+    print(f"  split mode        : {target.split_mode}")
+    print(f"  split members     : {target.split_count}")
+    print(f"  artifacts verified: {len(target.artifacts)}")
+    print(f"  receipt           : {receipt_path}")
+
+    base_dir = artifact_store.analysis_apk_root()
+    spec = build_static_run_spec(
+        selection=selection,
+        params=params,
+        base_dir=base_dir,
+        run_mode="batch",
+        quiet=True,
+        noninteractive=True,
+    )
+    execute_run_spec(spec)
+    linkable = count_linkable_dynamic_sessions_for_hash(target.expected_base_sha256)
+    if linkable is not None:
+        print(
+            f"{linkable} dynamic session(s) may now be linkable by exact hash. "
+            "Run dynamic link repair preview to verify."
+        )
+    print(
+        "Static analysis completed: "
+        f"session={params.session_stamp} package={target.package_name} exact_hash={target.expected_base_sha256[:12]}..."
+    )
+    return 0
+
+
 def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool, dry_run: bool) -> int:
     base_dir = artifact_store.analysis_apk_root()
     groups = tuple(group_artifacts())
@@ -191,6 +282,14 @@ def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool,
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Headless static analysis runner")
     parser.add_argument("--apk", help="Path to APK file")
+    parser.add_argument("--apk-id", help="android_apk_repository.apk_id for exact-hash static analysis")
+    parser.add_argument("--base-apk-sha256", "--exact-hash", dest="base_apk_sha256", help="Exact base APK SHA-256 to analyze")
+    parser.add_argument(
+        "--include-splits",
+        default="auto",
+        choices=["auto", "base-only", "require"],
+        help="Exact target split handling: auto uses receipt-backed group; base-only must be explicit.",
+    )
     parser.add_argument(
         "--profile-key",
         choices=["research_dataset_alpha"],
@@ -207,8 +306,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Run analysis without database persistence")
     parser.add_argument("--allow-session-reuse", action="store_true", help="Permit reusing an existing session stamp")
     args = parser.parse_args(argv)
-    if bool(args.apk) == bool(args.profile_key):
-        raise SystemExit("Choose exactly one mode: --apk <path> OR --profile-key research_dataset_alpha")
+    exact_mode = bool(args.apk_id or args.base_apk_sha256)
+    selected_modes = sum(1 for enabled in (bool(args.apk), bool(args.profile_key), exact_mode) if enabled)
+    if selected_modes != 1:
+        raise SystemExit(
+            "Choose exactly one mode: --apk <path> OR --profile-key research_dataset_alpha "
+            "OR --apk-id/--base-apk-sha256 exact target."
+        )
 
     if not args.dry_run:
         ok, message, detail = schema_gate.static_schema_gate()
@@ -229,6 +333,17 @@ def main(argv: list[str] | None = None) -> int:
         return _run_dataset_alpha(
             session=args.session,
             profile=args.profile,
+            allow_session_reuse=args.allow_session_reuse,
+            dry_run=args.dry_run,
+        )
+    if exact_mode:
+        return _run_exact_target(
+            apk_id=args.apk_id,
+            base_apk_sha256=args.base_apk_sha256,
+            session=args.session,
+            scope_label=args.scope_label,
+            profile=args.profile,
+            include_splits=args.include_splits,
             allow_session_reuse=args.allow_session_reuse,
             dry_run=args.dry_run,
         )

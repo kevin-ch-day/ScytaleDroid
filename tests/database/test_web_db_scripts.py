@@ -6,9 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -49,6 +46,8 @@ def test_check_schema_posture_sql_exists() -> None:
     assert "information_schema.TABLES" in body
     assert "REGEXP '^v_.*'" in body
     assert "analysis_dynamic_cohort_status" in body
+    assert "non_utf8mb4_non_hash_text_column" in body
+    assert "COLUMN_NAME LIKE '%sha256'" in body
 
 
 def test_smoke_shell_script_readable() -> None:

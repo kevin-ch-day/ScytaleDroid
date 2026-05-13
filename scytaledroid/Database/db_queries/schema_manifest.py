@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from .analysis import schema as analysis_schema
 from .canonical import schema as canonical_schema
 from .dynamic import schema as dynamic_schema
-from .harvest import device_inventory, dynamic_loading
+from .harvest import device_inventory, dynamic_loading, install_sets
 from .permissions import governance_snapshot, permission_support
 from .static_analysis import (
     risk_scores,
@@ -134,9 +134,11 @@ def ordered_schema_statements() -> list[str]:
             dynamic_loading.CREATE_TABLE_REFLECTION,
         ]
     )
+    statements.extend(list(getattr(install_sets, "_DDL_STATEMENTS", [])))
 
     # Dynamic analysis sessions + telemetry (Phase 2).
     statements.extend(list(getattr(dynamic_schema, "_DDL_STATEMENTS", [])))
+    statements.append(install_sets.CREATE_V_APK_SET_COVERAGE_V1)
 
     # Post-paper analysis registry + derived aggregates (Phase H).
     statements.extend(list(getattr(analysis_schema, "_DDL_STATEMENTS", [])))

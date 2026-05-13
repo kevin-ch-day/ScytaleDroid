@@ -44,7 +44,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from scytaledroid.Database.db_core import db_config
         from scytaledroid.Database.db_core import db_queries as core_q
-        from scytaledroid.Database.db_scripts.evidence_latest_write_posture import fetch_recent_posture
+        from scytaledroid.Database.db_scripts.evidence_latest_write_posture import (
+            fetch_recent_posture,
+        )
         from scytaledroid.StaticAnalysis.cli.persistence.finding_evidence_payload import (
             findings_evidence_inline_enabled,
         )

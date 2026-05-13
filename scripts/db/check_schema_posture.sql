@@ -82,9 +82,9 @@ WHERE NOT EXISTS (
     AND t.TABLE_NAME = 'analysis_dynamic_cohort_status'
 );
 
--- 4) Charset snapshot: non-utf8mb4 text columns on common join hotspots
+-- 4) Charset snapshot: non-utf8mb4 non-hash text columns on common join hotspots
 SELECT
-  'non_utf8mb4_text_column' AS check_id,
+  'non_utf8mb4_non_hash_text_column' AS check_id,
   TABLE_NAME,
   COLUMN_NAME,
   CHARACTER_SET_NAME,
@@ -103,4 +103,13 @@ WHERE TABLE_SCHEMA = DATABASE()
   AND DATA_TYPE IN ('varchar', 'char', 'text', 'tinytext', 'mediumtext', 'longtext')
   AND CHARACTER_SET_NAME IS NOT NULL
   AND CHARACTER_SET_NAME <> 'utf8mb4'
+  AND NOT (
+    CHARACTER_SET_NAME = 'ascii'
+    AND (
+      COLUMN_NAME LIKE '%hash'
+      OR COLUMN_NAME LIKE '%sha256'
+      OR COLUMN_NAME LIKE '%digest'
+      OR COLUMN_NAME LIKE '%signature'
+    )
+  )
 ORDER BY TABLE_NAME, COLUMN_NAME;

@@ -15,6 +15,22 @@ Legend:
 | **L** | Legacy / superseded by menu modules (keep until callers migrated) |
 | **C** | CI / test-only or library (not a standalone operator entry) |
 
+## Refinement status fields
+
+When touching a `scripts/db` helper, keep the row below current and preserve these
+working decisions:
+
+| Status | Meaning |
+| --- | --- |
+| `keep` | Stable path; do not rename or remove. |
+| `combine_later` | Keep path, but move reusable logic into an app module or future grouped command. |
+| `move_later` | Candidate for package/module relocation after caller parity. |
+| `archive_later` | One-time or historical helper; only move after docs/tests/external-use check. |
+| `delete_later` | Superseded and safe to remove only after a dedicated removal review. |
+
+The current cleanup rule is **inventory first, no deletes or renames yet**.
+Operators still use the existing script paths.
+
 | Script | Class | Purpose (short) | Read-only? | DB? | `--help` | Auto-call? | Menu / owner |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `check_permission_intel.py` | G | Validate Intel env, connectivity, governance snapshot rows | yes | Intel DSN | yes | optional CI | `run.sh` / gates; DB Tools → 2 (readiness is item 2) |
@@ -33,6 +49,7 @@ Legend:
 | `report_evidence_storage_posture.py` | G | Read-only sizes / dedupe signals (flags, findings, audit) | yes | core | yes | no | operator triage |
 | `probe_finding_evidence_hash_parity.py` | G | Sample SQL vs Python ``evidence_hash`` / mismatch hints | yes | core | yes | no | operator triage before strip-inline |
 | `backfill_static_finding_evidence_payloads.py` | M | Backfill ``evidence_hash`` + payload table; optional strip inline | default read; **writes** with ``--apply`` | core | yes | no | operator / maintenance |
+| `normalize_evidence_hash_collation.py` | M | Narrow safe ALTER helper for finding evidence hash ``ascii_bin`` collation | default read; **writes** with ``--apply`` | core | yes | no | evidence migration maintenance |
 | `check_static_run_governance_posture.py` | G | Static run canonical / handoff invariant counts | yes | core | yes | optional CI / doctor | **DB Tools → 9 (item 2)**; shared module `static_run_governance_checks`; gates |
 | `report_artifact_registry_integrity.py` | S | Artifact registry integrity (dangling refs) | yes | core | yes | propose post-run | **DB Tools → 9 (item 3)** |
 | `report_artifact_registry_cleanup_candidates.py` | S | Read-only cleanup policy buckets for `artifact_registry` | yes | core | yes | no | **DB Tools → 9 (item 4)**; post-run → 11 |
@@ -47,6 +64,22 @@ Legend:
 | `backfill_static_session_id_on_runs.py` | M | Backfill `static_session_id` on runs | **writes** | core | yes | no | one-time / maintenance |
 
 > Note: `scripts/db/__init__.py` is package metadata only (class **C**).
+
+## Consolidation candidates
+
+These are planning notes only; keep old paths stable until wrappers, docs, and
+menus have parity.
+
+| Family | Current scripts | Future grouped surface | Recommended status | Notes |
+| --- | --- | --- | --- | --- |
+| evidence-storage | `check_evidence_storage_posture.py`, `check_evidence_latest_write_posture.py`, `report_evidence_storage_posture.py`, `probe_finding_evidence_hash_parity.py`, `backfill_static_finding_evidence_payloads.py`, `normalize_evidence_hash_collation.py` | `evidence_storage.py check/latest/report/probe/backfill/normalize-collation` or app module wrappers | combine_later | Keep inline evidence enabled until fresh-write proof and `evidence_hash` collation posture are clean. |
+| dynamic-static | `report_dynamic_static_alignment.py` | `dynamic_static.py alignment/worklist` or Dynamic/DB menu in-process report | keep/combine_later | Report is read-only and correctly avoids package-name repair. |
+| static-session | `audit_static_session.py`, `session_static_health.py`, `report_static_session_grain_integrity.py`, `refresh_static_analysis_sessions.py`, `verify_static_session_id_rollout.py`, `check_static_run_governance_posture.py` | `static_sessions.py health/grain/refresh/verify/governance` | combine_later | Preserve write boundaries: refresh remains explicit. |
+| artifact-registry | `report_artifact_registry_integrity.py`, `report_artifact_registry_cleanup_candidates.py`, `prune_artifact_registry_dangling.py` | `artifact_registry.py integrity/cleanup-candidates/prune` | combine_later | Prune remains dry-run by default with receipt + `--apply`. |
+| permission-intel | `check_permission_intel.py`, `permission_intel_readiness.py`, `audit_permission_intel_queue_compatibility.py`, `audit_permission_name_casing.py`, `run_permission_intel_scytale_s2_readiness_audit.sh` | `permission_intel.py readiness/queue/casing` | keep/combine_later | Separate Intel DB target; do not mix with core static results. |
+| schema-view-maintenance | `recreate_web_consumer_views.py`, `view_repair_support.py`, `check_schema_posture.sql`, `smoke_web_db.sh` | keep explicit scripts | keep | DDL and Web smoke should stay deliberate operator actions. |
+| catalog-hygiene | `report_app_label_hygiene.py`, `apply_app_display_name_overrides.py` | catalog menu + package module | keep/combine_later | Never auto-apply display name overrides during static scan. |
+| backfill-migration | `backfill_static_session_id_on_runs.py`, `scripts/db/sql/backfill_static_analysis_runs_static_session_id.sql` | archive folder after confirmation | archive_later | Historical rollout helper; do not run routinely. |
 
 ## Integration roadmap (not all implemented in the first wiring PR)
 

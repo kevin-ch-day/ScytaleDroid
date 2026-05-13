@@ -928,7 +928,9 @@ class PermissionAuditAccumulator:
                             core_q.run_sql(
                                 """
                                 UPDATE permission_audit_snapshots
-                                SET evidence_relpath=%s, evidence_sha256=%s
+                                SET evidence_relpath=%s,
+                                    evidence_sha256=%s,
+                                    metadata=NULL
                                 WHERE snapshot_id=%s
                                 """,
                                 (relpath, sha256, sid),
