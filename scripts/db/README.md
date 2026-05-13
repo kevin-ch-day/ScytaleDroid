@@ -86,6 +86,21 @@ After a profile/cohort static run, verify canonical row counts and Web/read view
 PYTHONPATH=. python scripts/db/audit_static_session.py --session 20260502-rda-canonical-only
 ```
 
+## Static session header refresh (aggregates + disposition)
+
+After bulk repairs or if you need to recompute ``static_analysis_sessions`` counters from
+child tables (without touching ``web_visibility_default`` / ``cleanup_status`` /
+``superseded_by_session_id``):
+
+```bash
+PYTHONPATH=. python scripts/db/refresh_static_analysis_sessions.py --all
+PYTHONPATH=. python scripts/db/refresh_static_analysis_sessions.py \
+  --session-stamp '20260510-all-full-145' --scope-label ''
+```
+
+Normal static runs also trigger a **best-effort** refresh at run finalization and after
+successful ``static_session_run_links`` writes (see ``static_session_summary.py``).
+
 Canonical writers only (empty historical legacy-table rows are **not** treated as failure):
 
 ```bash

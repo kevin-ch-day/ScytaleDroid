@@ -522,7 +522,14 @@ def test_launch_scan_flow_marks_run_failed_when_session_finalization_is_incomple
     assert any(record.get("phase") == "failed" and record.get("status") == "failed" for record in phase_events)
 
 
-def test_persist_static_session_links_normalizes_package_name() -> None:
+def test_persist_static_session_links_normalizes_package_name(monkeypatch) -> None:
+    refresh_calls: list[str | None] = []
+
+    def _track_refresh(stamp: str | None) -> None:
+        refresh_calls.append(stamp)
+
+    monkeypatch.setattr(session_finalizer, "refresh_session_summaries_after_link_writes", _track_refresh)
+
     writes: list[tuple[str, tuple[object, ...] | None]] = []
 
     def _run_sql(query, params=None, **kwargs):
@@ -552,6 +559,7 @@ def test_persist_static_session_links_normalizes_package_name() -> None:
     assert result.links_written == 1
     insert_sql, insert_params = writes[-1]
     assert "INSERT INTO static_session_run_links" in insert_sql
+    assert refresh_calls == ["sess-links"]
 
 
 def test_session_finalization_outputs_flags_incomplete_link_coverage(monkeypatch, tmp_path) -> None:

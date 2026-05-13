@@ -4,9 +4,43 @@
 (canonical static run primary key), **not** legacy ``runs.run_id``. The
 ``metrics`` table is still a legacy-named **bridge** surface for feature rows;
 retirement is tracked with other legacy-five work in the maintenance playbook.
+
+Matrix ↔ vnext joins in this file use ``LOWER(spm.permission_name)`` with an
+explicit ``utf8mb4_general_ci`` match to ``static_permission_risk_vnext.permission_name``
+because ``static_permission_matrix`` keeps detector-first casing while vnext stores
+lowercase canonical names (see ``permission_matrix`` / ``permission_risk`` persistence).
 """
 
 from __future__ import annotations
+
+_INFLIGHT_STATIC_RUN_STATUSES = (
+    "STARTED",
+    "RUNNING",
+    "SCANNED",
+    "PERSISTING",
+    "IN_PROGRESS",
+)
+
+
+def count_inflight_static_analysis_runs(*, core_q) -> int:
+    """Return SAR rows whose status indicates a scan/write path may still be active.
+
+    Matches the non-terminal set used in web session views so fleet-wide backfill
+    does not race live ``static_permission_matrix`` / vnext writers by default.
+    """
+
+    def _scalar(sql: str) -> int:
+        row = core_q.run_sql(sql, fetch="one", query_name="db_utils.risk_actions.inflight_sar_count")
+        return int((row or [0])[0] or 0)
+
+    placeholders = ", ".join(f"'{s}'" for s in _INFLIGHT_STATIC_RUN_STATUSES)
+    return _scalar(
+        f"""
+        SELECT COUNT(*)
+        FROM static_analysis_runs
+        WHERE UPPER(TRIM(COALESCE(status, ''))) IN ({placeholders})
+        """
+    )
 
 
 def backfill_static_permission_risk_vnext(*, core_q, prompt_utils, status_messages) -> None:
@@ -21,6 +55,18 @@ def backfill_static_permission_risk_vnext(*, core_q, prompt_utils, status_messag
     print("2) Fill missing static_permission_risk_vnext rows from permission matrix + risk_scores.")
     print()
 
+    inflight = count_inflight_static_analysis_runs(core_q=core_q)
+    if inflight > 0:
+        print(
+            status_messages.status(
+                f"In-flight static runs detected: count={inflight} "
+                f"(status in {', '.join(_INFLIGHT_STATIC_RUN_STATUSES)}). "
+                "Avoid this backfill during an active full static scan unless you "
+                "accept possible writer overlap.",
+                level="warn",
+            )
+        )
+
     if not prompt_utils.prompt_yes_no("Run backfill now?", default=False):
         print(status_messages.status("Backfill cancelled.", level="warn"))
         prompt_utils.press_enter_to_continue()
@@ -30,6 +76,17 @@ def backfill_static_permission_risk_vnext(*, core_q, prompt_utils, status_messag
         print(status_messages.status("static_permission_risk_vnext table unavailable.", level="error"))
         prompt_utils.press_enter_to_continue()
         return
+
+    inflight_after = count_inflight_static_analysis_runs(core_q=core_q)
+    if inflight_after > 0:
+        if not prompt_utils.prompt_yes_no(
+            f"{inflight_after} in-flight static run(s) are still present. "
+            "Proceed with risk_scores + vnext backfill anyway? (not recommended during fleet scans)",
+            default=False,
+        ):
+            print(status_messages.status("Backfill cancelled (in-flight runs).", level="warn"))
+            prompt_utils.press_enter_to_continue()
+            return
 
     def _scalar(sql: str) -> int:
         row = core_q.run_sql(sql, fetch="one")
@@ -277,5 +334,6 @@ def show_governance_snapshot_status(*, core_q, prompt_utils, status_messages) ->
 __all__ = [
     "audit_static_risk_coverage",
     "backfill_static_permission_risk_vnext",
+    "count_inflight_static_analysis_runs",
     "show_governance_snapshot_status",
 ]

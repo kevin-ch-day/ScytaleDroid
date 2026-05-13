@@ -336,6 +336,14 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS findings_capped_by_detector_json JSON DEFAULT NULL;
     """,
     """
+    ALTER TABLE static_analysis_runs
+      ADD COLUMN IF NOT EXISTS static_session_id BIGINT UNSIGNED DEFAULT NULL;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_static_analysis_runs_static_session_id
+      ON static_analysis_runs (static_session_id);
+    """,
+    """
     CREATE TABLE IF NOT EXISTS static_analysis_sessions (
       static_session_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       session_stamp VARCHAR(128) NOT NULL,

@@ -1,4 +1,10 @@
-"""Matrix persistence dedupes permissions that collide after lowercase canonicalization."""
+"""Matrix persistence dedupes permissions that collide after lowercase canonicalization.
+
+``static_permission_matrix.permission_name`` keeps **first-seen detector casing**
+after ``strip()``; dedupe is by lowercase key only (see ``permission_matrix`` module
+docstring). ``static_permission_risk_vnext`` stores lowercase — pairing is via
+``LOWER(spm.permission_name)`` in SQL backfill/joins.
+"""
 
 from __future__ import annotations
 
@@ -62,6 +68,32 @@ def test_permission_matrix_skips_case_colliding_keys(monkeypatch) -> None:
     )
     assert len(captured) == 1
     assert captured[0]["permission_name"] == "Android.Permission.CAMERA"
+
+
+def test_permission_matrix_strips_leading_trailing_whitespace_on_keys(monkeypatch) -> None:
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_matrix.matrix_db.ensure_table",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_matrix.require_canonical_schema",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.persistence.permission_matrix.matrix_db.replace_for_run",
+        lambda _rid, rows: captured.extend(list(rows)),
+    )
+    persist_permission_matrix(
+        static_run_id=21,
+        package_name="com.example.ws",
+        apk_id=None,
+        permission_profiles={
+            "  android.permission.INTERNET  ": {"is_runtime_dangerous": False},
+        },
+    )
+    assert len(captured) == 1
+    assert captured[0]["permission_name"] == "android.permission.INTERNET"
 
 
 def test_permission_matrix_skips_empty_keys(monkeypatch) -> None:
