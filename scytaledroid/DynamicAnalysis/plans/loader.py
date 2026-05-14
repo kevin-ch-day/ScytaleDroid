@@ -213,6 +213,7 @@ def _normalize_plan(plan: dict[str, Any]) -> dict[str, object]:
         "package_name": plan.get("package_name"),
         # Back-compat: some plan writers store static_run_id only under run_identity.
         "static_run_id": plan.get("static_run_id") or identity.get("static_run_id"),
+        "apk_set_id": plan.get("apk_set_id") or identity.get("apk_set_id"),
         "run_signature": plan.get("run_signature") or identity.get("run_signature"),
         "run_signature_version": plan.get("run_signature_version") or identity.get("run_signature_version"),
         "artifact_set_hash": plan.get("artifact_set_hash") or identity.get("artifact_set_hash"),
@@ -434,6 +435,7 @@ def _fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
         SELECT sar.id AS static_run_id,
                sar.run_signature,
                sar.run_signature_version,
+               sar.apk_set_id,
                sar.artifact_set_hash,
                sar.static_handoff_hash,
                sar.base_apk_sha256,

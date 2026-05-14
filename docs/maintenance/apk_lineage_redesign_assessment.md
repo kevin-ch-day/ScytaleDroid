@@ -650,25 +650,194 @@ da81...  dynamic=0  static=5  bytes=available_recorded_and_canonical
 `base_apk_sha256` remains the historical fallback for rows that cannot yet be
 linked to a receipt-backed install set.
 
+Seventh additive slice implemented on 2026-05-14:
+
+```text
+scripts/db/report_package_lineage_workbench.py
+APK Library -> Package lineage workbench
+```
+
+This is the first package-first operator workbench. It consolidates the package
+lineage, byte availability, static coverage, dynamic coverage, pairing, and
+action semantics into one read-only package view.
+
+For `com.whatsapp`, the current local DB result is:
+
+```text
+versions_seen = 10
+base_hashes_seen = 10
+install_sets_seen = 1
+bytes_available = 1
+static_covered = 3
+dynamic_covered = 2
+dynamic_sessions = 13
+dynamic_exact_static_links = 0
+exact_static_dynamic_gaps = 2
+recommended_next_action = restore_artifacts
+```
+
+The workbench deliberately keeps these states separate:
+
+```text
+known APK identity
+available APK bytes
+static analyzed
+dynamic captured
+static/dynamic paired by exact identity
+```
+
+Rows can therefore show, for example, `static=covered` but
+`bytes=no:missing_current_root_file`, which means the historical analysis exists
+but the artifact lifecycle still needs reharvest/restore attention.
+
+Eighth additive slice implemented on 2026-05-14:
+
+```text
+new static run writes propagate apk_set_id when artifact_set_hash uniquely
+matches apk_sets
+dynamic plans include apk_set_id in run_identity
+new dynamic session writes persist apk_set_id when the selected handoff carries it
+evidence-pack reindex preserves apk_set_id from static_dynamic_plan.json
+```
+
+This strengthens `apk_set_id` as the exact install-set spine for new evidence
+without forcing historical backfills or dynamic link repair. The matching rule is
+intentionally conservative:
+
+```text
+artifact_set_hash must match exactly one apk_sets row
+ambiguous or missing matches write NULL
+no package-name, version-code, or newest-capture fallback
+```
+
+Historical rows still rely on `base_apk_sha256` / `artifact_set_hash` fallback
+until explicit preview/apply backfills are run.
+
+Ninth additive slice implemented on 2026-05-14:
+
+```text
+scripts/db/report_dynamic_static_recovery_plan.py --write-receipt
+APK Library -> Write artifact recovery plan receipt
+data/receipts/artifact_recovery_plans/<timestamp>_all.json
+```
+
+This writes a non-destructive artifact recovery plan receipt for exact
+dynamic/static gaps. The receipt records the current package/hash recovery
+classification and keeps the decision explicit:
+
+```text
+decision = plan_only_no_apply
+no DB updates
+no APK moves/deletes
+no static runs
+no dynamic link repair
+```
+
+Current generated receipt:
+
+```text
+data/receipts/artifact_recovery_plans/20260514T065329_all.json
+exact_gap_hashes = 31
+dynamic_sessions_affected = 140
+restore_old_root = 30 hashes / 139 dynamic sessions
+explicit_reharvest_needed = 1 hash / 1 dynamic session
+```
+
+Tenth additive slice implemented on 2026-05-14:
+
+```text
+Package lineage workbench and static target queue now distinguish:
+  static missing + bytes missing -> static/recovery target
+  static covered + bytes missing -> artifact_lifecycle_gap
+```
+
+This prevents static-covered rows from being presented as static-analysis gaps
+just because their local APK bytes are missing. For example, WhatsApp now shows
+older covered hashes with:
+
+```text
+static=covered(...) bytes=no:missing_current_root_file
+action=restore_artifacts
+reason=artifact_lifecycle_gap
+```
+
+Eleventh additive slice implemented on 2026-05-14:
+
+```text
+scripts/db/report_dynamic_static_recovery_plan.py --old-root-policy restore
+scripts/db/report_dynamic_static_recovery_plan.py --old-root-policy unrecoverable
+APK Library -> Write artifact recovery plan receipt
+```
+
+The artifact recovery plan now has root-level grouping and an explicit policy
+switch for missing legacy roots:
+
+```text
+default restore policy:
+  exact_gap_hashes = 31
+  restore_old_root = 30 hashes / 139 dynamic sessions
+  explicit_reharvest = 1 hash / 1 dynamic session
+  ready_for_exact_static_analysis = 0
+
+unrecoverable policy:
+  exact_gap_hashes = 31
+  unrecoverable_without_external_archive = 30 hashes / 139 dynamic sessions
+  explicit_reharvest = 1 hash / 1 dynamic session
+  ready_for_exact_static_analysis = 0
+```
+
+This keeps the next operator decision explicit:
+
+```text
+restore/mount old root if available
+otherwise treat exact historical builds as unavailable unless an external
+archive can supply the exact bytes
+```
+
+Twelfth additive slice implemented on 2026-05-14:
+
+```text
+scripts/db/report_package_lineage_workbench.py
+  --only-actionable
+  --hash-limit N
+  --show-paths
+```
+
+The package lineage workbench now separates full package coverage from the
+visible row set. Package-level counts always describe the whole package, while
+visible action/availability summaries describe the current filtered view.
+
+For `com.whatsapp --only-actionable`, the current local result is:
+
+```text
+Coverage Summary:
+  versions_seen = 10
+  base_hashes_seen = 10
+  bytes_available = 1/10
+  static_covered = 3/10
+  row_filter = actionable (9/10)
+
+Visible Action Summary:
+  restore_artifacts = 8
+  reharvest_required = 1
+```
+
+This makes the workbench more usable as the operator front door for
+package/version/hash/install-set lineage without changing DB state.
+
 ## Next Heavy Lifts
 
 1. **Artifact restore decision.** Decide whether the old root can be mounted or
    copied back. If yes, restore and rerun the recovery plan; if no, decide which
    historical identities should remain as missing lineage versus be reset from
    a dev-system cleanup plan.
-2. **Static writer direct `apk_set_id` assignment.** Backfill links exist, but new
-   static runs should write `apk_set_id` at run creation whenever the exact target
-   resolver selected a receipt-backed install set.
-3. **Dynamic writer direct `apk_set_id` assignment.** New dynamic sessions should
-   persist exact observed install-set identity when the selected static handoff
-   includes it.
-4. **Package dashboard/menu surface.** The current menu launches a report. The
+2. **Package dashboard/menu surface.** The current menu launches a report. The
    next UI pass should make package -> versions -> hashes/install sets -> action
    a navigable operator flow.
-5. **Receipt-first dynamic link preview.** After exact static coverage exists,
+3. **Receipt-first dynamic link preview.** After exact static coverage exists,
    repair can require exact base hash and, where present, exact `apk_set_id` /
    `artifact_set_hash`; apply remains a later explicit step.
-6. **Controlled reset/prune.** After new writes and coverage reports are stable,
+4. **Controlled reset/prune.** After new writes and coverage reports are stable,
    stale path-only rows can be archived or deleted from the dev DB with a
    receipt-backed export. Do not drop historical missing identities until deciding
    whether longitudinal absence is useful.

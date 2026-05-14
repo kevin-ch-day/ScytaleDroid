@@ -391,6 +391,63 @@ def _static_target_queue_report() -> None:
     prompt_utils.press_enter_to_continue()
 
 
+def _package_lineage_workbench() -> None:
+    """Open the package-first lineage workbench."""
+
+    package_name = prompt_utils.prompt_text(
+        "Package name (blank for high-priority package choices)",
+        required=False,
+    ).strip()
+    args: list[str] = []
+    if package_name:
+        args.extend(["--package", package_name])
+    else:
+        args.extend(["--top-actions", "15"])
+    try:
+        from scytaledroid.Database.db_utils.menus.repo_db_script_runner import run_scripts_db_py
+
+        run_scripts_db_py("report_package_lineage_workbench.py", args)
+    except Exception as exc:
+        print(status_messages.status(f"Unable to run package lineage workbench: {exc}", level="error"))
+    prompt_utils.press_enter_to_continue()
+
+
+def _artifact_recovery_plan_receipt() -> None:
+    """Write a non-destructive artifact recovery plan receipt."""
+
+    package_name = prompt_utils.prompt_text(
+        "Package filter (blank for all exact dynamic/static gaps)",
+        required=False,
+    ).strip()
+    print(
+        status_messages.status(
+            "This writes a plan receipt only; it does not modify DB rows or APK files.",
+            level="info",
+        )
+    )
+    old_root_choice = prompt_utils.get_choice(
+        ["n", "y"],
+        default="n",
+        casefold=True,
+        prompt="Treat missing old roots as unrecoverable without external archive? [y/N]",
+    )
+    choice = prompt_utils.get_choice(["y", "n"], default="y", casefold=True, prompt="Write receipt? [Y/n]")
+    if choice.lower() != "y":
+        return
+    args = ["--write-receipt", "--limit", "5000"]
+    if old_root_choice.lower() == "y":
+        args.extend(["--old-root-policy", "unrecoverable"])
+    if package_name:
+        args.extend(["--package", package_name])
+    try:
+        from scytaledroid.Database.db_utils.menus.repo_db_script_runner import run_scripts_db_py
+
+        run_scripts_db_py("report_dynamic_static_recovery_plan.py", args)
+    except Exception as exc:
+        print(status_messages.status(f"Unable to write artifact recovery plan receipt: {exc}", level="error"))
+    prompt_utils.press_enter_to_continue()
+
+
 def apk_library_menu(device_filter: str | None = None) -> None:
     """Entry point for APK library & archives."""
 
@@ -431,15 +488,25 @@ def apk_library_menu(device_filter: str | None = None) -> None:
             menu_utils.MenuOption("4", "Search APKs (by package name or label)"),
             menu_utils.MenuOption(
                 "5",
+                "Package lineage workbench",
+                hint="Package-first view of versions, hashes, bytes, static/dynamic coverage, and actions",
+            ),
+            menu_utils.MenuOption(
+                "6",
                 "Package lineage and byte/static/dynamic coverage",
                 hint="Shows versions, hashes, install sets, byte availability, and next action",
             ),
             menu_utils.MenuOption(
-                "6",
+                "7",
                 "Static analysis target queue (read-only)",
                 hint="Prioritized package/hash targets with ready/blocked/link/review states",
             ),
-            menu_utils.MenuOption("7", "Show APKs with high-risk findings (from database)", disabled=True),
+            menu_utils.MenuOption(
+                "8",
+                "Write artifact recovery plan receipt",
+                hint="Plan-only receipt for exact dynamic/static gaps blocked by missing APK bytes",
+            ),
+            menu_utils.MenuOption("9", "Show APKs with high-risk findings (from database)", disabled=True),
         ]
         if device_filter:
             items.insert(
@@ -486,9 +553,13 @@ def apk_library_menu(device_filter: str | None = None) -> None:
         elif choice == "4":
             _search_packages()
         elif choice == "5":
-            _package_lineage_report()
+            _package_lineage_workbench()
         elif choice == "6":
+            _package_lineage_report()
+        elif choice == "7":
             _static_target_queue_report()
+        elif choice == "8":
+            _artifact_recovery_plan_receipt()
         else:
             print(status_messages.status("Option not available yet.", level="warn"))
 

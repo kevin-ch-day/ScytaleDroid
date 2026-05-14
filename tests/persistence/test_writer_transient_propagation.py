@@ -30,3 +30,21 @@ def test_create_static_run_rethrows_transient_db_error(monkeypatch: pytest.Monke
             run_started_utc=None,
             status="STARTED",
         )
+
+
+def test_resolve_apk_set_id_for_artifact_set_hash_requires_unique_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _one_match(*_args, **_kwargs):
+        return {"apk_set_id": 144, "match_count": 1}
+
+    monkeypatch.setattr(run_writers.core_q, "run_sql", _one_match)
+
+    assert run_writers.resolve_apk_set_id_for_artifact_set_hash("ABC") == 144
+
+    def _ambiguous(*_args, **_kwargs):
+        return {"apk_set_id": 144, "match_count": 2}
+
+    monkeypatch.setattr(run_writers.core_q, "run_sql", _ambiguous)
+
+    assert run_writers.resolve_apk_set_id_for_artifact_set_hash("ABC") is None

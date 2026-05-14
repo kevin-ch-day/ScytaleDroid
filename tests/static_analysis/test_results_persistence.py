@@ -95,3 +95,30 @@ def test_merge_persistence_metadata_preserves_existing_truthy_values() -> None:
 
     assert report.metadata["base_apk_sha256"] == "existing"
     assert report.metadata["exploratory_only"] is False
+
+
+def test_merge_persistence_metadata_carries_apk_set_id() -> None:
+    report = SimpleNamespace(metadata={})
+    app_result = SimpleNamespace(
+        base_apk_sha256=None,
+        artifact_set_hash=None,
+        apk_set_id=144,
+        run_signature=None,
+        run_signature_version=None,
+        identity_valid=None,
+        identity_error_reason=None,
+        harvest_manifest_path=None,
+        harvest_capture_status=None,
+        harvest_persistence_status=None,
+        harvest_research_status=None,
+        harvest_matches_planned_artifacts=None,
+        harvest_observed_hashes_complete=None,
+        research_usable=None,
+        exploratory_only=None,
+        research_block_reasons=[],
+    )
+    params = SimpleNamespace(config_hash=None, analysis_version=None, catalog_versions=None)
+
+    merge_persistence_metadata(base_report=report, app_result=app_result, params=params)
+
+    assert report.metadata["apk_set_id"] == 144

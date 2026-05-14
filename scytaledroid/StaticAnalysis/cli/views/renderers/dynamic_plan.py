@@ -469,6 +469,7 @@ def build_dynamic_plan(
             "signer_primary_digest": signer_primary,
             "base_apk_sha256": metadata.get("base_apk_sha256"),
             "artifact_set_hash": metadata.get("artifact_set_hash"),
+            "apk_set_id": metadata.get("apk_set_id"),
             "run_signature": metadata.get("run_signature"),
             "run_signature_version": metadata.get("run_signature_version"),
             "static_handoff_hash": metadata.get("static_handoff_hash"),

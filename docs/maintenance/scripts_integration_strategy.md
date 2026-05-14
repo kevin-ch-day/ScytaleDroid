@@ -49,6 +49,9 @@ These stay in place as **active operator, readiness, posture, catalog hygiene, o
 | `scripts/db/apply_app_display_name_overrides.py` |
 | `scripts/db/audit_static_session.py` |
 | `scripts/db/report_static_session_grain_integrity.py` |
+| `scripts/db/report_package_lineage_workbench.py` |
+| `scripts/db/report_static_analysis_targets.py` |
+| `scripts/db/report_dynamic_static_recovery_plan.py` |
 | `scripts/db/smoke_web_db.sh` |
 
 **Note:** `scytaledroid_doctor` lives at **`scripts/db/scytaledroid_doctor.sh`** (not repo root). Treat it as part of the same keep contract as `smoke_web_db.sh` and `check_permission_intel.py`.
@@ -74,12 +77,16 @@ Do not add another DB script until its family and replacement status are clear i
 - keep existing paths stable;
 - move reusable report/check logic into `scytaledroid/Database/db_utils/` or
   narrowly scoped `scytaledroid/Database/db_scripts/` modules;
+- for package lineage / exact recovery, use
+  `scytaledroid/Database/db_scripts/package_lineage_read_model.py` as the
+  shared read-model seed;
 - let menu code call app modules in-process when practical;
 - keep DDL, prune, and one-time migration flows as explicit operator commands;
 - archive only after a separate grep/docs/tests/external-use check.
 
-Current combine-later families: evidence storage, dynamic/static alignment,
-static sessions, artifact registry, Permission Intel, and catalog hygiene.
+Current combine-later families: package lineage / exact recovery, evidence
+storage, dynamic/static alignment, static sessions, artifact registry,
+Permission Intel, and catalog hygiene.
 
 ---
 
@@ -145,10 +152,17 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | `check_evidence_storage_posture.py` | workflow_helper | RO | core | yes | evidence externalization / snapshot posture | optional CI / doctor | keep |
 | `check_evidence_latest_write_posture.py` | workflow_helper | RO | core | yes | recent findings vs inline env + web-shaped evidence | post fresh static run | keep |
 | `report_dynamic_static_alignment.py` | workflow_helper | RO | core | yes | dynamic↔static hash alignment; static analysis worklist | research triage | keep |
+| `report_apk_lineage_availability.py` | workflow_helper | RO | core | yes | package/version/hash/install-set lineage and availability | package lineage coverage | keep · combine_later |
+| `report_package_lineage_coverage.py` | workflow_helper | RO | core | yes | compatibility wrapper for package lineage coverage | package lineage coverage | keep · combine_later |
+| `report_package_lineage_workbench.py` | supported_operator | RO | core | yes | package-first operator view; APK Library menu | APK Library → Package Lineage Workbench | **keep** (explicit list) · combine_later |
+| `report_static_analysis_targets.py` | supported_operator | RO | core | yes | queue-like static target read model | APK Library / static target planning | **keep** (explicit list) · combine_later |
+| `report_dynamic_static_recovery_plan.py` | supported_operator | MIX | core | yes | exact dynamic/static artifact recovery plan; optional receipt only | APK Library / artifact lifecycle planning | **keep** (explicit list) · combine_later |
 | `report_evidence_storage_posture.py` | workflow_helper | RO | core | yes | operator sizing / dedupe report | triage | keep |
 | `probe_finding_evidence_hash_parity.py` | workflow_helper | RO | core | yes | SQL vs Python hash parity before inline strip | triage | keep |
 | `backfill_static_finding_evidence_payloads.py` | migration_historical | MIX | core | yes | dedupe ``static_analysis_findings`` evidence | maintenance | keep |
 | `normalize_evidence_hash_collation.py` | migration_helper | MIX | core | yes | narrow ``evidence_hash`` ascii_bin migration; dry-run default | maintenance | keep |
+| `backfill_apk_sets_from_receipts.py` | migration_historical | MIX | core | yes | install-set spine from receipt-backed harvest artifacts | APK lineage migration helper | keep · archive_later after rollout |
+| `backfill_apk_set_links.py` | migration_historical | MIX | core | yes | nullable `apk_set_id` links from unique artifact-set hashes | APK lineage migration helper | keep · archive_later after rollout |
 | `view_repair_support.py` | workflow_helper | RO | none | yes | imported by `recreate_web_consumer_views.py` | View repair library | **keep** (explicit list) |
 | `report_app_label_hygiene.py` | supported_operator | RO | core | yes | menu Catalog hygiene; `tests/gates/test_app_display_name_catalog_scripts.py` | DB Tools → 8 | **keep** (explicit list) |
 | `apply_app_display_name_overrides.py` | supported_operator | MIX | core | yes | menu Catalog hygiene (confirm); gate tests load module | DB Tools → 8 | **keep** (explicit list) |

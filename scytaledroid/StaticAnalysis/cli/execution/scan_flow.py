@@ -17,6 +17,7 @@ from ...core.repository import load_display_name_map
 from ..core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
 from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
+from ..persistence.run_writers import resolve_apk_set_id_for_artifact_set_hash
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .operator_display_label import resolve_operator_app_label
@@ -320,6 +321,7 @@ def execute_scan(
         app_result.identity_error_reason = identity.get("identity_error_reason")
         app_result.base_apk_sha256 = identity.get("base_apk_sha256")
         app_result.artifact_set_hash = identity.get("artifact_set_hash")
+        app_result.apk_set_id = resolve_apk_set_id_for_artifact_set_hash(app_result.artifact_set_hash)
         app_result.run_signature = run_signature
         app_result.run_signature_version = identity.get("run_signature_version")
 
@@ -383,6 +385,7 @@ def execute_scan(
                     sha256=app_result.base_apk_sha256,
                     base_apk_sha256=app_result.base_apk_sha256,
                     artifact_set_hash=app_result.artifact_set_hash,
+                    apk_set_id=app_result.apk_set_id,
                     run_signature=app_result.run_signature,
                     run_signature_version=app_result.run_signature_version,
                     identity_valid=app_result.identity_valid,
@@ -423,6 +426,7 @@ def execute_scan(
             "pipeline_version": pipeline_version,
             "base_apk_sha256": identity["base_apk_sha256"],
             "artifact_set_hash": identity["artifact_set_hash"],
+            "apk_set_id": app_result.apk_set_id,
             "run_signature": run_signature,
             "run_signature_version": identity["run_signature_version"],
             "identity_valid": identity["identity_valid"],

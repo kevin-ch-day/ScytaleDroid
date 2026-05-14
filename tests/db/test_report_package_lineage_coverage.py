@@ -89,6 +89,151 @@ def test_recovery_action_maps_missing_old_root_to_restore_old_root() -> None:
     assert action == "restore_old_root"
 
 
+def test_recovery_action_can_mark_missing_old_root_unrecoverable() -> None:
+    from scripts.db import report_dynamic_static_recovery_plan as recovery
+
+    action = recovery._recovery_action(
+        {
+            "recommended_action": "restore_artifacts",
+            "recorded_storage_root": "/missing/old/root",
+            "recorded_storage_root_exists": False,
+            "canonical_store_file_available": False,
+        },
+        static_exact_coverage=0,
+        old_root_policy="unrecoverable",
+    )
+
+    assert action == "historical_identity_only"
+
+
+def test_recovery_operator_conclusion_unrecoverable_and_reharvest() -> None:
+    from scripts.db import report_dynamic_static_recovery_plan as recovery
+
+    rows = [
+        {
+            "recommended_action": "historical_identity_only",
+            "dynamic_sessions": 139,
+        },
+        {
+            "recommended_action": "explicit_reharvest",
+            "dynamic_sessions": 1,
+        },
+    ]
+
+    conclusion = recovery._operator_conclusion(rows)
+
+    assert conclusion == [
+        "No exact static analysis can be run for the 2 dynamic/static gap(s) from current local bytes.",
+        "1 are historical identity only unless an external archive is explicitly provided.",
+        "1 require explicit reharvest (1 dynamic session(s) affected).",
+        "Dynamic link repair remains blocked for rows without exact completed static coverage.",
+    ]
+
+
+def test_pairing_eligibility_classification_and_dataset_use() -> None:
+    from scripts.db import report_dynamic_static_pairing_eligibility as pairing
+
+    assert (
+        pairing._classify_session({"linked_exact_static": 1}, recovery_action=None)
+        == "paired_exact_static"
+    )
+    assert (
+        pairing._classify_session(
+            {"unlinked_exact_static_available": 1},
+            recovery_action=None,
+        )
+        == "unpaired_exact_static_available"
+    )
+    assert (
+        pairing._classify_session(
+            {"base_apk_sha256": "a" * 64},
+            recovery_action="historical_identity_only",
+        )
+        == "historical_identity_only"
+    )
+    assert (
+        pairing._classify_session(
+            {"base_apk_sha256": "c" * 64},
+            recovery_action="restore_old_root",
+        )
+        == "unpaired_restore_required"
+    )
+    assert (
+        pairing._classify_session(
+            {"base_apk_sha256": "b" * 64},
+            recovery_action="explicit_reharvest",
+        )
+        == "unpaired_reharvest_required"
+    )
+    assert (
+        pairing._dataset_use_for_classification("historical_identity_only")
+        == "exclude_from_paired_analysis_missing_artifact"
+    )
+    assert (
+        pairing._dataset_use_for_classification("unpaired_restore_required")
+        == "exclude_from_paired_analysis_missing_artifact"
+    )
+
+
+def test_pairing_eligibility_restore_blocks_package_strict_pair_use() -> None:
+    from scripts.db import report_dynamic_static_pairing_eligibility as pairing
+
+    packages = pairing._package_summary(
+        [
+            {
+                "package_name": "com.example",
+                "classification": "paired_exact_static",
+            },
+            {
+                "package_name": "com.example",
+                "classification": "unpaired_restore_required",
+            },
+        ]
+    )
+
+    assert packages == [
+        {
+            "package_name": "com.example",
+            "dynamic_sessions": 2,
+            "paired_exact_static": 1,
+            "unpaired_exact_static_available": 0,
+            "historical_identity_only": 0,
+            "unrecoverable_without_archive": 0,
+            "restore_required": 1,
+            "reharvest_required": 0,
+            "bytes_available_but_static_missing": 0,
+            "dynamic_only_valid": 0,
+            "recommended_dataset_use": "exclude_from_paired_analysis_missing_artifact",
+        }
+    ]
+
+
+def test_recovery_action_recorded_bytes_without_canonical_rehydrates_store() -> None:
+    from scripts.db import report_dynamic_static_recovery_plan as recovery
+
+    action = recovery._recovery_action(
+        {
+            "recommended_action": "exact_static_available",
+            "recorded_local_file_available": True,
+            "canonical_store_file_available": False,
+        },
+        static_exact_coverage=0,
+    )
+
+    assert action == "analyze_exact_static_available"
+
+    action = recovery._recovery_action(
+        {
+            "recommended_action": "restore_artifacts",
+            "recorded_local_file_available": True,
+            "canonical_store_file_available": False,
+        },
+        static_exact_coverage=0,
+    )
+
+    assert action == "rehydrate_canonical_store"
+
+
 def test_recovery_action_static_coverage_wins() -> None:
     from scripts.db import report_dynamic_static_recovery_plan as recovery
 
@@ -97,7 +242,65 @@ def test_recovery_action_static_coverage_wins() -> None:
         static_exact_coverage=1,
     )
 
-    assert action == "already_covered_refresh_report"
+    assert action == "no_action_already_covered"
+
+
+def test_recovery_root_summary_groups_actions() -> None:
+    from scripts.db import report_dynamic_static_recovery_plan as recovery
+
+    roots = recovery._root_summary(
+        [
+            {
+                "recorded_root": "/old",
+                "recorded_root_exists": False,
+                "recommended_action": "restore_old_root",
+                "dynamic_sessions": 2,
+            },
+            {
+                "recorded_root": "/old",
+                "recorded_root_exists": False,
+                "recommended_action": "restore_old_root",
+                "dynamic_sessions": 3,
+            },
+        ]
+    )
+
+    assert roots == [
+        {
+            "recorded_root": "/old",
+            "root_exists": False,
+            "hashes": 2,
+            "dynamic_sessions": 5,
+            "actions": {"restore_old_root": 2},
+        }
+    ]
+
+
+def test_recovery_plan_receipt_write_is_explicit(tmp_path) -> None:
+    from scripts.db import report_dynamic_static_recovery_plan as recovery
+
+    payload = {
+        "receipt_type": "artifact_recovery_plan",
+        "schema_version": "1",
+        "created_at": "2026-05-14T12:00:00Z",
+        "decision": "plan_only_no_apply",
+        "filters": {"package_name": "com.example.app", "old_root_policy": "unrecoverable"},
+        "operator_notes": ["Legacy CARS2025 APK root retired; reharvest current corpus"],
+        "operator_state": {"legacy_apk_root_retired": True},
+        "summary": {"exact_gap_hashes": 1},
+        "packages": [],
+        "storage_roots": [],
+        "gaps": [],
+        "notes": [],
+    }
+
+    path = recovery._write_receipt(payload, receipt_dir=tmp_path)
+
+    assert path.name == "20260514T120000_com.example.app.json"
+    assert path.exists()
+    text = path.read_text(encoding="utf-8")
+    assert '"decision": "plan_only_no_apply"' in text
+    assert '"receipt_type": "artifact_recovery_plan"' in text
 
 
 def test_static_target_dynamic_gap_missing_old_root_is_blocked() -> None:
@@ -155,3 +358,106 @@ def test_static_target_static_covered_recorded_only_rebuilds_store() -> None:
     )
 
     assert status == "rebuild_canonical_store"
+
+
+def test_static_target_static_covered_missing_current_root_is_artifact_lifecycle() -> None:
+    from scripts.db import report_static_analysis_targets as targets
+
+    status = targets._target_status(
+        exact_static=1,
+        byte_status="missing_current_root_file",
+        split_status="unknown_until_bytes_restored",
+        dynamic_unlinked=0,
+        same_version_hash_drift=False,
+    )
+    reason = targets._target_reason(
+        exact_static=1,
+        byte_status="missing_current_root_file",
+        dynamic_sessions=0,
+        dynamic_unlinked=0,
+        same_version_hash_drift=False,
+    )
+
+    assert reason == "artifact_lifecycle_gap"
+    assert status == "artifact_lifecycle_gap"
+    assert targets._operator_action(status) == "Restore or reharvest bytes"
+
+
+def test_workbench_action_mapping_keeps_states_distinct() -> None:
+    from scripts.db import report_package_lineage_workbench as workbench
+
+    assert workbench._workbench_action("covered") == "already_covered"
+    assert workbench._workbench_action("ready") == "analyze_exact_static"
+    assert workbench._workbench_action("blocked_missing_bytes") == "restore_artifacts"
+    assert workbench._workbench_action("needs_reharvest") == "reharvest_required"
+    assert workbench._workbench_action("artifact_lifecycle_gap") == "restore_artifacts"
+    assert (
+        workbench._workbench_action("link_repair_preview_available")
+        == "dynamic_link_preview_available"
+    )
+
+
+def test_workbench_actionable_filter_keeps_lifecycle_gap() -> None:
+    from scripts.db import report_package_lineage_workbench as workbench
+
+    assert workbench._is_actionable(
+        {
+            "recommended_action": "already_covered",
+            "bytes_available": True,
+            "unpaired_dynamic_sessions": 0,
+            "exact_static_dynamic_gap": False,
+            "review_flags": [],
+        }
+    ) is False
+    assert workbench._is_actionable(
+        {
+            "recommended_action": "already_covered",
+            "bytes_available": False,
+            "unpaired_dynamic_sessions": 0,
+            "exact_static_dynamic_gap": False,
+            "review_flags": [],
+        }
+    ) is True
+
+
+def test_workbench_summary_counts_actions_and_availability() -> None:
+    from scripts.db import report_package_lineage_workbench as workbench
+
+    summary = workbench._summary(
+        [
+            {
+                "version_code": "1",
+                "version_name": "1.0",
+                "apk_set_id": 10,
+                "bytes_available": True,
+                "static_coverage_state": "covered",
+                "dynamic_sessions": 2,
+                "paired_dynamic_sessions": 1,
+                "exact_static_dynamic_gap": False,
+                "recommended_action": "already_covered",
+                "target_status": "covered",
+                "availability_state": "available_canonical",
+            },
+            {
+                "version_code": "2",
+                "version_name": "2.0",
+                "apk_set_id": None,
+                "bytes_available": False,
+                "static_coverage_state": "covered",
+                "dynamic_sessions": 0,
+                "paired_dynamic_sessions": 0,
+                "exact_static_dynamic_gap": False,
+                "recommended_action": "restore_artifacts",
+                "target_status": "artifact_lifecycle_gap",
+                "availability_state": "missing_current_root_file",
+            },
+        ],
+        package_name="com.example.app",
+    )
+
+    assert summary["static_covered_missing_bytes"] == 1
+    assert summary["action_counts"] == {"already_covered": 1, "restore_artifacts": 1}
+    assert summary["availability_counts"] == {
+        "available_canonical": 1,
+        "missing_current_root_file": 1,
+    }

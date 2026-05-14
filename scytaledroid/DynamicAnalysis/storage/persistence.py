@@ -103,6 +103,7 @@ def persist_dynamic_summary(
         "status": result.status,
         "evidence_path": result.evidence_path,
         "static_run_id": _safe_int(plan_identity.get("static_run_id") or config.static_run_id),
+        "apk_set_id": _safe_int(plan_identity.get("apk_set_id")),
         "static_handoff_hash": plan_identity.get("static_handoff_hash"),
         "run_signature": plan_identity.get("run_signature"),
         "run_signature_version": plan_identity.get("run_signature_version"),
@@ -659,7 +660,7 @@ def _extract_plan_identity(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
     identity = extract_plan_identity(dict(plan_payload))
     run_identity = plan_payload.get("run_identity") or {}
     if isinstance(run_identity, dict):
-        for key in ("base_apk_sha256", "artifact_set_hash", "run_signature", "run_signature_version", "static_handoff_hash"):
+        for key in ("base_apk_sha256", "artifact_set_hash", "apk_set_id", "run_signature", "run_signature_version", "static_handoff_hash"):
             if run_identity.get(key) and not identity.get(key):
                 identity[key] = run_identity[key]
     for key in ("version_name", "version_code"):

@@ -203,6 +203,7 @@ class _PersistenceRunContext:
     manifest_sha: str | None
     base_apk_sha256: str | None
     artifact_set_hash: str | None
+    apk_set_id: int | None
     run_signature: str | None
     run_signature_version: str | None
     identity_valid: object
@@ -364,6 +365,7 @@ def _build_persistence_run_context(
     manifest_sha = None
     base_apk_sha256 = None
     artifact_set_hash = None
+    apk_set_id = None
     run_signature = None
     run_signature_version = None
     identity_valid = None
@@ -375,6 +377,11 @@ def _build_persistence_run_context(
         )
         base_apk_sha256 = first_text(metadata_map.get("base_apk_sha256"))
         artifact_set_hash = first_text(metadata_map.get("artifact_set_hash"))
+        try:
+            apk_set_id_raw = metadata_map.get("apk_set_id")
+            apk_set_id = int(apk_set_id_raw) if apk_set_id_raw not in {None, ""} else None
+        except (TypeError, ValueError):
+            apk_set_id = None
         run_signature = first_text(metadata_map.get("run_signature"))
         run_signature_version = first_text(metadata_map.get("run_signature_version"))
         identity_valid = metadata_map.get("identity_valid")
@@ -445,6 +452,7 @@ def _build_persistence_run_context(
         manifest_sha=manifest_sha,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
+        apk_set_id=apk_set_id,
         run_signature=run_signature,
         run_signature_version=run_signature_version,
         identity_valid=identity_valid,
@@ -877,6 +885,7 @@ def _bootstrap_persistence_transaction(
             sha256=run_context.base_apk_sha256 or run_context.manifest_sha,
             base_apk_sha256=run_context.base_apk_sha256,
             artifact_set_hash=run_context.artifact_set_hash,
+            apk_set_id=run_context.apk_set_id,
             run_signature=run_context.run_signature,
             run_signature_version=run_context.run_signature_version,
             identity_valid=run_context.identity_valid if isinstance(run_context.identity_valid, bool) else None,
@@ -910,6 +919,7 @@ def _bootstrap_persistence_transaction(
             sha256_value=run_context.base_apk_sha256 or run_context.manifest_sha,
             base_apk_sha256=run_context.base_apk_sha256,
             artifact_set_hash=run_context.artifact_set_hash,
+            apk_set_id=run_context.apk_set_id,
             run_signature=run_context.run_signature,
             run_signature_version=run_context.run_signature_version,
             identity_valid=run_context.identity_valid if isinstance(run_context.identity_valid, bool) else None,
@@ -1550,6 +1560,7 @@ def _create_static_run(
     sha256: str | None = None,
     base_apk_sha256: str | None = None,
     artifact_set_hash: str | None = None,
+    apk_set_id: int | None = None,
     run_signature: str | None = None,
     run_signature_version: str | None = None,
     identity_valid: bool | None = None,
@@ -1582,6 +1593,7 @@ def _create_static_run(
         sha256=sha256,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
+        apk_set_id=apk_set_id,
         run_signature=run_signature,
         run_signature_version=run_signature_version,
         identity_valid=identity_valid,
@@ -1610,6 +1622,7 @@ def create_static_run_ledger(
     sha256: str | None = None,
     base_apk_sha256: str | None = None,
     artifact_set_hash: str | None = None,
+    apk_set_id: int | None = None,
     run_signature: str | None = None,
     run_signature_version: str | None = None,
     identity_valid: bool | None = None,
@@ -1653,6 +1666,7 @@ def create_static_run_ledger(
         sha256=sha256,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
+        apk_set_id=apk_set_id,
         run_signature=run_signature,
         run_signature_version=run_signature_version,
         identity_valid=identity_valid,
@@ -1671,6 +1685,7 @@ def _update_static_run_metadata(
     sha256_value: str | None = None,
     base_apk_sha256: str | None = None,
     artifact_set_hash: str | None = None,
+    apk_set_id: int | None = None,
     run_signature: str | None = None,
     run_signature_version: str | None = None,
     identity_valid: bool | None = None,
@@ -1694,6 +1709,7 @@ def _update_static_run_metadata(
         sha256=sha256_value,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
+        apk_set_id=apk_set_id,
         run_signature=run_signature,
         run_signature_version=run_signature_version,
         identity_valid=identity_valid,
