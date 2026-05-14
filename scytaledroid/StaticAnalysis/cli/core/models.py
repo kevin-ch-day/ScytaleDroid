@@ -244,6 +244,7 @@ class AppRunResult:
     identity_error_reason: str | None = None
     base_apk_sha256: str | None = None
     artifact_set_hash: str | None = None
+    apk_set_id: int | None = None
     run_signature: str | None = None
     run_signature_version: str | None = None
     static_handoff_hash: str | None = None

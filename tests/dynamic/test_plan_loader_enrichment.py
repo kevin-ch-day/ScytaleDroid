@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.plans.loader import load_dynamic_plan
+from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity, load_dynamic_plan
 
 
 def test_load_dynamic_plan_enriches_legacy_static_features_and_identity(tmp_path: Path) -> None:
@@ -17,6 +17,7 @@ def test_load_dynamic_plan_enriches_legacy_static_features_and_identity(tmp_path
         "version_code": "468616494",
         "run_identity": {
             "artifact_set_hash": "b" * 64,
+            "apk_set_id": 144,
             "base_apk_sha256": "a" * 64,
             "run_signature": "c" * 64,
             "run_signature_version": "v1",
@@ -46,6 +47,7 @@ def test_load_dynamic_plan_enriches_legacy_static_features_and_identity(tmp_path
 
     assert ident.get("package_name_lc") == "com.facebook.katana"
     assert ident.get("version_code") == "468616494"
+    assert ident.get("apk_set_id") == 144
     # Legacy fallback: signer fields are derived from run_signature when missing.
     assert ident.get("signer_digest") == ("c" * 64)
     assert ident.get("signer_set_hash") == ("c" * 64)
@@ -58,3 +60,16 @@ def test_load_dynamic_plan_enriches_legacy_static_features_and_identity(tmp_path
     assert sf.get("uses_cleartext_traffic") is False
     assert "static_risk_score" in sf
     assert sf.get("static_risk_band") in {"LOW", "MEDIUM", "HIGH"}
+
+
+def test_extract_plan_identity_preserves_top_level_apk_set_id() -> None:
+    identity = extract_plan_identity(
+        {
+            "package_name": "com.example.app",
+            "static_run_id": 10,
+            "apk_set_id": 55,
+            "run_identity": {"apk_set_id": 44},
+        }
+    )
+
+    assert identity["apk_set_id"] == 55

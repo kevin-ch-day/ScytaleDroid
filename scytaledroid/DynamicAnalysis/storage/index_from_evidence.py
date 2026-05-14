@@ -221,6 +221,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "status": str(mf.get("status") or "") or None,
         "evidence_path": str(run_dir),
         "static_run_id": int(ident.get("static_run_id") or 0) or None,
+        "apk_set_id": _as_int(ident.get("apk_set_id")),
         "static_handoff_hash": ident.get("static_handoff_hash"),
         "run_signature": ident.get("run_signature"),
         "run_signature_version": ident.get("run_signature_version"),

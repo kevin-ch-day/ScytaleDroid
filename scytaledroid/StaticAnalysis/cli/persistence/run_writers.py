@@ -99,6 +99,33 @@ def _detect_identity_conflict(
         return False
 
 
+def resolve_apk_set_id_for_artifact_set_hash(artifact_set_hash: str | None) -> int | None:
+    """Resolve the unique apk_sets row for an artifact_set_hash, if one exists."""
+
+    value = str(artifact_set_hash or "").strip().lower()
+    if not value:
+        return None
+    try:
+        row = core_q.run_sql(
+            """
+            SELECT MIN(apk_set_id) AS apk_set_id, COUNT(*) AS match_count
+            FROM apk_sets
+            WHERE LOWER(TRIM(artifact_set_hash)) = %s
+            """,
+            (value,),
+            fetch="one_dict",
+            query_name="static.run_writers.resolve_apk_set_id",
+        )
+    except Exception:
+        return None
+    if not isinstance(row, dict) or int(row.get("match_count") or 0) != 1:
+        return None
+    try:
+        return int(row.get("apk_set_id"))
+    except (TypeError, ValueError):
+        return None
+
+
 def _ensure_app_version(
     *,
     package_for_run: str,
@@ -243,6 +270,7 @@ def _ensure_app_version(
 def _create_static_run(
     *,
     app_version_id: int,
+    apk_set_id: int | None = None,
     session_stamp: str,
     session_label: str,
     scope_label: str,
@@ -293,6 +321,7 @@ def _create_static_run(
 
     full_columns = [
         "app_version_id",
+        "apk_set_id",
         "session_stamp",
         "session_label",
         "scope_label",
@@ -326,6 +355,7 @@ def _create_static_run(
     ]
     full_values: list[object] = [
         app_version_id,
+        apk_set_id,
         session_stamp,
         session_label,
         scope_label,
@@ -406,6 +436,7 @@ def create_static_run_ledger(
     analysis_version: str | None = None,
     catalog_versions: str | None = None,
     study_tag: str | None = None,
+    apk_set_id: int | None = None,
 ) -> int | None:
     if is_canonical and session_label:
         try:
@@ -447,6 +478,7 @@ def create_static_run_ledger(
         is_canonical = False
         canonical_set_at_utc = None
         canonical_reason = "identity_conflict"
+    resolved_apk_set_id = apk_set_id or resolve_apk_set_id_for_artifact_set_hash(artifact_set_hash)
     resolved_header = ensure_static_session_shell(
         session_stamp=session_stamp,
         scope_label=scope_label,
@@ -457,6 +489,7 @@ def create_static_run_ledger(
     )
     static_run_id = _create_static_run(
         app_version_id=app_version_id,
+        apk_set_id=resolved_apk_set_id,
         session_stamp=session_stamp,
         session_label=session_label,
         scope_label=scope_label,
@@ -506,6 +539,7 @@ def create_static_run_ledger(
         analysis_version=analysis_version,
         catalog_versions=catalog_versions,
         study_tag=study_tag,
+        apk_set_id=resolved_apk_set_id,
         identity_mode=identity_mode,
         identity_conflict_flag=identity_conflict_flag,
     )
@@ -537,6 +571,7 @@ def _update_static_run_metadata(
     study_tag: str | None = None,
     identity_mode: str | None = None,
     identity_conflict_flag: bool | None = None,
+    apk_set_id: int | None = None,
     static_handoff_hash: str | None = None,
     static_handoff_json: str | None = None,
     static_handoff_json_path: str | None = None,
@@ -554,6 +589,7 @@ def _update_static_run_metadata(
             identity_mode=COALESCE(%s, identity_mode),
             identity_conflict_flag=COALESCE(%s, identity_conflict_flag),
             artifact_set_hash=COALESCE(%s, artifact_set_hash),
+            apk_set_id=COALESCE(%s, apk_set_id),
             base_apk_sha256=COALESCE(%s, base_apk_sha256),
             sha256=COALESCE(%s, sha256),
             static_handoff_hash=COALESCE(%s, static_handoff_hash),
@@ -577,6 +613,7 @@ def _update_static_run_metadata(
             identity_mode,
             1 if identity_conflict_flag else 0 if identity_conflict_flag is not None else None,
             artifact_set_hash,
+            apk_set_id,
             base_apk_sha256,
             sha256,
             static_handoff_hash,
