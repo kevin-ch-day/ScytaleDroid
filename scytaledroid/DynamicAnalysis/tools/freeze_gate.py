@@ -43,6 +43,14 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _first_hex_hash(*values: object, expected_len: int = 64) -> str | None:
+    for value in values:
+        normalized = _normalize_hex_hash(value, expected_len=expected_len)
+        if normalized:
+            return normalized
+    return None
+
+
 def run_freeze_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
     errors: list[str] = []
     freeze = _read_json(freeze_path)
@@ -109,30 +117,34 @@ def run_freeze_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
         if str(cohort_status.get("status") or "") != "CANONICAL_PAPER_ELIGIBLE":
             errors.append(f"{run_id}:not_paper_eligible:{cohort_status.get('reason_code')}")
 
+        target = run_manifest.get("target") if isinstance(run_manifest.get("target"), dict) else {}
+        target_identity = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
+        target_signer_set_hash = _first_hex_hash(
+            target_identity.get("signer_set_hash"),
+            target.get("signer_set_hash"),
+            target.get("observed_signer_set_hash"),
+            target_identity.get("signer_digest"),
+        )
+        plan_signer_set_hash = _first_hex_hash(identity.get("signer_set_hash"), identity.get("signer_digest"))
+
         for key in (
             "static_handoff_hash",
             "base_apk_sha256",
             "artifact_set_hash",
             "package_name_lc",
             "version_code",
-            "signer_digest",
-            "signer_set_hash",
         ):
             value = identity.get(key)
             if not isinstance(value, str) or not value.strip():
                 # version_code may be numeric in some plan payloads.
                 if key == "version_code" and value not in (None, ""):
                     pass
-                elif key == "signer_set_hash" and isinstance(identity.get("signer_digest"), str) and str(identity.get("signer_digest")).strip():
-                    pass
                 else:
                     errors.append(f"{run_id}:missing_plan_identity:{key}")
-        signer_set_hash_raw = str(identity.get("signer_set_hash") or identity.get("signer_digest") or "").strip()
-        signer_set_hash = _normalize_hex_hash(signer_set_hash_raw, expected_len=64)
+        signer_set_hash = plan_signer_set_hash or target_signer_set_hash
         if signer_set_hash is None:
             errors.append(f"{run_id}:bad_identity_hash:signer_set_hash")
 
-        target = run_manifest.get("target") if isinstance(run_manifest.get("target"), dict) else {}
         plan_package = str(identity.get("package_name_lc") or plan.get("package_name") or "").strip().lower()
         target_package = str(target.get("package_name") or "").strip().lower()
         if plan_package and target_package and plan_package != target_package:
@@ -141,21 +153,10 @@ def run_freeze_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
         target_version = str(target.get("version_code") or "").strip()
         if plan_version and target_version and plan_version != target_version:
             errors.append(f"{run_id}:apk_changed_during_run:version_code")
-        target_identity = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
         target_base_sha = str(target_identity.get("base_apk_sha256") or "").strip().lower()
         plan_base_sha = str(identity.get("base_apk_sha256") or "").strip().lower()
         if target_base_sha and plan_base_sha and target_base_sha != plan_base_sha:
             errors.append(f"{run_id}:apk_changed_during_run:base_apk_sha256")
-        target_signer_set_hash = str(
-            target_identity.get("signer_set_hash")
-            or target.get("signer_set_hash")
-            or ""
-        ).strip().lower()
-        plan_signer_set_hash = str(
-            identity.get("signer_set_hash")
-            or identity.get("signer_digest")
-            or ""
-        ).strip().lower()
         if not target_signer_set_hash:
             errors.append(f"{run_id}:missing_observed_signer_set_hash")
         elif plan_signer_set_hash and target_signer_set_hash != plan_signer_set_hash:

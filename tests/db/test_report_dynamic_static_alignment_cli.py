@@ -156,6 +156,7 @@ def test_current_corpus_preflight_help() -> None:
     out = (proc.stdout or "").lower()
     assert out.startswith("usage:")
     assert "--only-current-bytes" in out
+    assert "--status" in out
     assert "preflight" in out
 
 

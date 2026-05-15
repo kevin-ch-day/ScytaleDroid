@@ -42,6 +42,14 @@ def _normalize_hex(value: object, *, n: int) -> str | None:
     return raw
 
 
+def _first_hex(*values: object, n: int) -> str | None:
+    for value in values:
+        normalized = _normalize_hex(value, n=n)
+        if normalized:
+            return normalized
+    return None
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -186,7 +194,17 @@ def build_snapshot_freeze_manifest(
         version_code = str(run_identity.get("version_code") or plan.get("version_code") or "").strip()
         base_sha = _normalize_hex(run_identity.get("base_apk_sha256"), n=64)
         artifact_set_hash = _normalize_hex(run_identity.get("artifact_set_hash"), n=64)
-        signer_set_hash = _normalize_hex(run_identity.get("signer_set_hash") or run_identity.get("signer_digest"), n=64)
+        target = mf.get("target") if isinstance(mf.get("target"), dict) else {}
+        target_identity = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
+        signer_set_hash = _first_hex(
+            run_identity.get("signer_set_hash"),
+            run_identity.get("signer_digest"),
+            target_identity.get("signer_set_hash"),
+            target.get("signer_set_hash"),
+            target.get("observed_signer_set_hash"),
+            target_identity.get("signer_digest"),
+            n=64,
+        )
         if not (pkg_lc and version_code and base_sha and artifact_set_hash and signer_set_hash):
             raise RuntimeError(f"FREEZE_BAD_IDENTITY:{rid}")
         identity_key = (pkg_lc, version_code, base_sha, artifact_set_hash, signer_set_hash)

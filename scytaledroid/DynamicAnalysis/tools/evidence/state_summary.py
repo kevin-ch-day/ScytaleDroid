@@ -16,6 +16,10 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
     load_dataset_tracker,
 )
+from scytaledroid.DynamicAnalysis.plans.loader import (
+    SUPPORTED_SIGNATURE_VERSIONS,
+    extract_plan_identity,
+)
 from scytaledroid.DynamicAnalysis.templates.category_map import category_for_package
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
@@ -72,10 +76,96 @@ def build_state_summary() -> dict[str, Any]:
         "exclusion_top_offenders": dict(payload.get("exclusion_top_offenders") or {}),
         "tracker_vs_evidence_per_app": _tracker_vs_evidence_per_app(),
         "baseline_signal_summary": _baseline_signal_summary(),
+        "static_handoff_plan_summary": build_static_handoff_plan_summary(),
     }
     out["next_collection_priorities"] = _build_collection_priorities(
         out["tracker_vs_evidence_per_app"] if isinstance(out["tracker_vs_evidence_per_app"], list) else []
     )
+    return out
+
+
+def build_static_handoff_plan_summary() -> dict[str, Any]:
+    """Summarize dynamic plan readiness for the dataset cohort.
+
+    Dynamic evidence packs are authoritative after collection, but before the
+    first post-reset run the useful readiness signal is whether static produced
+    usable dynamic plans for the dataset apps.
+    """
+
+    plan_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
+    dataset_pkgs = sorted({str(pkg).strip().lower() for pkg in load_dataset_packages() if str(pkg).strip()})
+    by_pkg: dict[str, list[dict[str, Any]]] = {pkg: [] for pkg in dataset_pkgs}
+    dynamic_plan_files = 0
+    valid_plan_files = 0
+    invalid_plan_files = 0
+
+    if plan_dir.exists():
+        for path in sorted(plan_dir.glob("*.json")):
+            dynamic_plan_files += 1
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                invalid_plan_files += 1
+                continue
+            if not isinstance(payload, dict):
+                invalid_plan_files += 1
+                continue
+            identity_raw = payload.get("run_identity") if isinstance(payload.get("run_identity"), dict) else {}
+            if identity_raw.get("identity_valid") is False:
+                invalid_plan_files += 1
+                continue
+            identity = extract_plan_identity(payload)
+            package_name = str(identity.get("package") or payload.get("package_name") or "").strip().lower()
+            if not package_name:
+                invalid_plan_files += 1
+                continue
+            if identity.get("run_signature_version") not in SUPPORTED_SIGNATURE_VERSIONS:
+                invalid_plan_files += 1
+                continue
+            if not identity.get("run_signature") or not identity.get("artifact_set_hash"):
+                invalid_plan_files += 1
+                continue
+            valid_plan_files += 1
+            if package_name in by_pkg:
+                by_pkg[package_name].append(
+                    {
+                        "path": str(path),
+                        "static_run_id": identity.get("static_run_id"),
+                        "apk_set_id": identity.get("apk_set_id"),
+                        "base_apk_sha256": identity.get("base_apk_sha256"),
+                        "artifact_set_hash": identity.get("artifact_set_hash"),
+                        "generated_at": payload.get("generated_at"),
+                    }
+                )
+
+    packages_with_plan = [pkg for pkg, rows in by_pkg.items() if rows]
+    missing_packages = [pkg for pkg, rows in by_pkg.items() if not rows]
+    multiple_plan_packages = [pkg for pkg, rows in by_pkg.items() if len(_identity_keys(rows)) > 1]
+    return {
+        "plan_dir": str(plan_dir),
+        "plan_dir_exists": bool(plan_dir.exists()),
+        "dynamic_plan_files": int(dynamic_plan_files),
+        "valid_plan_files": int(valid_plan_files),
+        "invalid_plan_files": int(invalid_plan_files),
+        "dataset_packages_total": int(len(dataset_pkgs)),
+        "dataset_packages_with_plan": int(len(packages_with_plan)),
+        "dataset_packages_missing_plan": int(len(missing_packages)),
+        "missing_packages": missing_packages,
+        "multiple_plan_identity_packages": multiple_plan_packages,
+        "ready_for_guided_dataset_run": bool(dataset_pkgs and not missing_packages),
+    }
+
+
+def _identity_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
+    out: set[tuple[str, str, str]] = set()
+    for row in rows:
+        out.add(
+            (
+                str(row.get("base_apk_sha256") or ""),
+                str(row.get("artifact_set_hash") or ""),
+                str(row.get("apk_set_id") or ""),
+            )
+        )
     return out
 
 
@@ -161,9 +251,19 @@ def _tracker_vs_evidence_per_app() -> list[dict[str, Any]]:
         tracker_countable = tracker_base + tracker_inter
         base_eligible = int(per_pkg.get(pkg, {}).get("base_eligible", 0))
         inter_eligible = int(per_pkg.get(pkg, {}).get("inter_eligible", 0))
-        evidence_countable = min(base_eligible, int(cfg.baseline_required)) + min(inter_eligible, int(cfg.interactive_required))
+        countable_base = min(base_eligible, int(cfg.baseline_required))
+        countable_inter = (
+            min(inter_eligible, int(cfg.interactive_required))
+            if countable_base >= int(cfg.baseline_required)
+            else 0
+        )
+        evidence_countable = countable_base + countable_inter
         need_baseline = max(0, int(cfg.baseline_required) - min(base_eligible, int(cfg.baseline_required)))
-        need_interactive = max(0, int(cfg.interactive_required) - min(inter_eligible, int(cfg.interactive_required)))
+        need_interactive = (
+            max(0, int(cfg.interactive_required) - min(inter_eligible, int(cfg.interactive_required)))
+            if need_baseline == 0
+            else int(cfg.interactive_required)
+        )
         extras = max(0, base_eligible - int(cfg.baseline_required)) + max(0, inter_eligible - int(cfg.interactive_required))
         excluded = int(per_pkg.get(pkg, {}).get("excluded", 0))
         rows.append(
@@ -238,6 +338,20 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "  baseline_connected_successes="
             + str(int(baseline_signal.get("baseline_connected_successes") or 0))
+        )
+    handoff = (
+        out.get("static_handoff_plan_summary")
+        if isinstance(out.get("static_handoff_plan_summary"), dict)
+        else {}
+    )
+    if handoff:
+        print(
+            "STATIC_HANDOFF_PLANS "
+            + f"dataset_ready={int(handoff.get('dataset_packages_with_plan') or 0)}/"
+            + f"{int(handoff.get('dataset_packages_total') or 0)} "
+            + f"files={int(handoff.get('dynamic_plan_files') or 0)} "
+            + f"valid={int(handoff.get('valid_plan_files') or 0)} "
+            + f"missing={int(handoff.get('dataset_packages_missing_plan') or 0)}"
         )
     priorities = out.get("next_collection_priorities") if isinstance(out.get("next_collection_priorities"), list) else []
     if priorities:

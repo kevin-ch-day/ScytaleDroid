@@ -183,6 +183,9 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         if bucket == "interactive" and str(operator.get("protocol_fit") or "").strip().lower() == "poor":
             out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
         needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
+        if bucket == "interactive" and int(pkg_counts.get("baseline", 0)) < int(cfg.baseline_required):
+            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+            continue
         if int(pkg_counts.get(bucket, 0)) < needed:
             pkg_counts[bucket] = int(pkg_counts.get(bucket, 0)) + 1
             out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
@@ -743,26 +746,15 @@ def dynamic_analysis_menu() -> None:
         _warn_if_code_changed()
         render_dynamic_menu_overview()
         print()
-        menu_utils.print_hint(
-            "Start with Guided cohort run. Use Freeze readiness audit and State summary for dataset health."
-        )
         print()
-        menu_utils.print_section("Primary Actions")
+        menu_utils.print_section("Run")
         menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Legacy / Archive")
-        menu_utils.print_menu(sections.legacy_archive, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Evidence & Integrity")
-        menu_utils.print_menu(sections.evidence_integrity, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Exports")
-        menu_utils.print_menu(sections.exports, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("System")
-        menu_utils.print_menu(
-            sections.system,
-            show_exit=True,
-            exit_label="Back",
-            show_descriptions=False,
-            compact=True,
-        )
+        menu_utils.print_section("Validate")
+        menu_utils.print_menu(sections.validation, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Maintenance")
+        menu_utils.print_menu(sections.maintenance, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_section("Archive / Export")
+        menu_utils.print_menu(sections.archive_export, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(options, include_exit=True),
             disabled=[option.key for option in options if option.disabled],
@@ -783,7 +775,8 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "3":
-            _legacy_structural_archive_menu(pause_if_verbose=_pause_if_verbose)
+            _run_state_summary()
+            _pause_if_verbose()
             continue
 
         if choice == "4":
@@ -792,16 +785,21 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "5":
-            _repair_reindex_tracker()
+            _verify_host_pcap_tools()
             _pause_if_verbose()
             continue
 
         if choice == "6":
-            _prune_incomplete_dynamic_evidence_dirs()
+            _repair_reindex_tracker()
             _pause_if_verbose()
             continue
 
         if choice == "7":
+            _prune_incomplete_dynamic_evidence_dirs()
+            _pause_if_verbose()
+            continue
+
+        if choice == "8":
             # Single canonical frozen-cohort export surface lives in Reporting.
             try:
                 from scytaledroid.Reporting.menu_actions import handle_export_freeze_anchored_csvs
@@ -812,14 +810,8 @@ def dynamic_analysis_menu() -> None:
             _pause_if_verbose()
             continue
 
-        if choice == "8":
-            _verify_host_pcap_tools()
-            _pause_if_verbose()
-            continue
-
         if choice == "9":
-            _run_state_summary()
-            _pause_if_verbose()
+            _legacy_structural_archive_menu(pause_if_verbose=_pause_if_verbose)
             continue
 
 
@@ -837,7 +829,7 @@ def _prune_incomplete_dynamic_evidence_dirs() -> None:
     incomplete = find_incomplete_dynamic_run_dirs()
     if not incomplete:
         print(status_messages.status("No incomplete evidence dirs found.", level="success"))
-        print(status_messages.status("Next: run option 10 (State summary) before collection.", level="info"))
+        print(status_messages.status("Next: run option 3 (State summary) before collection.", level="info"))
         return
 
     print(
@@ -862,7 +854,7 @@ def _prune_incomplete_dynamic_evidence_dirs() -> None:
         )
     )
     if remaining == 0:
-        print(status_messages.status("Next: run option 10 (State summary) to verify CAN_FREEZE and blockers.", level="info"))
+        print(status_messages.status("Next: run option 3 (State summary) to verify CAN_FREEZE and blockers.", level="info"))
         if prompt_utils.prompt_yes_no("Run state summary now?", default=True):
             _run_state_summary()
     else:
@@ -886,6 +878,28 @@ def _repair_reindex_tracker() -> None:
         for v in before_apps.values()
         if isinstance(v, dict) and isinstance(v.get("runs"), list)
     ) if isinstance(before_apps, dict) else 0
+    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+
+    if not evidence_root.exists():
+        print(status_messages.status("No dynamic evidence root found.", level="info"))
+        print(status_messages.status("Nothing to reindex yet.", level="info"))
+        print(status_messages.status("Run Guided cohort first to create evidence packs.", level="info"))
+        return
+    if not os.access(evidence_root, os.R_OK):
+        print(status_messages.status(f"Evidence root exists but is not readable: {evidence_root}", level="error"))
+        return
+    evidence_dirs = [p for p in evidence_root.iterdir() if p.is_dir()]
+    if not evidence_dirs:
+        print(status_messages.status("No dynamic evidence packs found under the evidence root.", level="info"))
+        print(status_messages.status("Nothing to reindex yet.", level="info"))
+        print(status_messages.status("Run Guided cohort first to create evidence packs.", level="info"))
+        return
+    complete_dirs = [p for p in evidence_dirs if (p / "run_manifest.json").exists()]
+    if not complete_dirs:
+        print(status_messages.status("No complete dynamic evidence packs found.", level="info"))
+        print(status_messages.status(f"Incomplete evidence dirs found: {len(evidence_dirs)}", level="warn"))
+        print(status_messages.status("Nothing to reindex yet. Use option 7 to review/prune incomplete dirs, or run Guided cohort.", level="info"))
+        return
 
     if before_runs > 0:
         print(
@@ -902,14 +916,22 @@ def _repair_reindex_tracker() -> None:
             print(status_messages.status("Reindex canceled.", level="info"))
             return
 
-    out = recompute_dataset_tracker(config=cfg)
+    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import run_freeze_readiness_audit
+
+    summary_before = run_freeze_readiness_audit()
+    try:
+        out = recompute_dataset_tracker(config=cfg)
+    except Exception as exc:
+        print(status_messages.status(f"Reindex failed unexpectedly: {exc}", level="error"))
+        return
     if out is None:
         print(
             status_messages.status(
-                "No dynamic evidence root found; cannot reindex tracker. Ensure output/evidence/dynamic exists.",
-                level="error",
+                "No dynamic evidence packs are present, so there is nothing to reindex yet.",
+                level="info",
             )
         )
+        print(status_messages.status("Next: run option 1 (Guided cohort run) to create evidence packs.", level="info"))
         return
 
     tracker_after = load_dataset_tracker()
@@ -960,6 +982,10 @@ def _repair_reindex_tracker() -> None:
     report_payload = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "tracker_path": str(out),
+        "evidence_packs_found": int(summary_before.total_runs),
+        "evidence_valid_packs_found": int(summary_before.valid_runs),
+        "evidence_invalid_packs_found": max(int(summary_before.total_runs) - int(summary_before.valid_runs), 0),
+        "evidence_incomplete_dirs_found": int(summary_before.missing_run_manifest_dirs),
         "tracker_before_runs": int(before_runs),
         "tracker_after_runs": int(run_count),
         "tracker_after_apps": int(app_count),
@@ -974,6 +1000,10 @@ def _repair_reindex_tracker() -> None:
     report_path.write_text(json.dumps(report_payload, indent=2, sort_keys=True), encoding="utf-8")
 
     rows = [
+        ("Evidence packs found", str(summary_before.total_runs)),
+        ("Valid evidence packs", str(summary_before.valid_runs)),
+        ("Invalid evidence packs", str(max(int(summary_before.total_runs) - int(summary_before.valid_runs), 0))),
+        ("Incomplete evidence dirs", str(summary_before.missing_run_manifest_dirs)),
         ("Tracker runs (before)", str(before_runs)),
         ("Tracker runs (after)", str(run_count)),
         ("Tracker apps (after)", str(app_count)),
@@ -991,7 +1021,8 @@ def _repair_reindex_tracker() -> None:
         quota_line = next((v for k, v in rows if k == "Evidence quota counted"), "")
         print(
             status_messages.status(
-                f"Reindex complete | runs={run_count} apps={app_count} valid={valid_count} | quota={quota_line}",
+                f"Reindex complete | packs={summary_before.total_runs} valid_packs={summary_before.valid_runs} "
+                f"| tracker_runs={run_count} apps={app_count} | quota={quota_line}",
                 level="success",
             )
         )
@@ -1124,9 +1155,30 @@ def _next_action_from_need(need_baseline: int, need_interactive: int) -> str:
     if nb > 0:
         return "baseline"
     if ni > 0:
-        return "scripted"
+        return "scripted interaction"
     # Quota satisfied: avoid implying additional action is required.
     return "—"
+
+
+def _quota_progress_label(count: int, required: int) -> str:
+    count_i = max(0, int(count))
+    required_i = max(0, int(required))
+    missing = max(0, required_i - count_i)
+    if required_i <= 0:
+        return str(count_i)
+    if missing == 0:
+        return f"{count_i}/{required_i} complete"
+    return f"{count_i}/{required_i} need {missing}"
+
+
+def _static_build_label(active_runs: int, legacy_valid: int) -> str:
+    if active_runs > 0 and legacy_valid > 0:
+        return "mixed"
+    if active_runs > 0:
+        return "current"
+    if legacy_valid > 0:
+        return "legacy"
+    return "ready"
 
 
 def _render_dataset_status() -> None:
@@ -1635,8 +1687,13 @@ def _build_package_selection_row(
         active_runs = base_countable + base_extra + inter_countable + inter_extra
         total_valid_runs = active_runs + legacy_valid
 
-        base_label = str(base_countable) if base_extra <= 0 else f"{base_countable} (+{base_extra})"
-        inter_label = str(inter_countable) if inter_extra <= 0 else f"{inter_countable} (+{inter_extra})"
+        base_label = _quota_progress_label(base_countable, int(cfg.baseline_required))
+        baseline_complete = base_countable >= int(cfg.baseline_required)
+        inter_label = (
+            _quota_progress_label(inter_countable, int(cfg.interactive_required))
+            if baseline_complete
+            else "locked"
+        )
         scripted_label = str(scripted_countable) if scripted_extra <= 0 else f"{scripted_countable} (+{scripted_extra})"
         manual_label = str(manual_countable) if manual_extra <= 0 else f"{manual_countable} (+{manual_extra})"
         need_base = max(0, int(cfg.baseline_required) - base_countable)
@@ -1654,16 +1711,10 @@ def _build_package_selection_row(
         else:
             need_label = "0"
         technical_total = int(scoped.get("technical_valid_total") or total_valid_runs)
-        total_label = str(technical_total)
+        total_required = int(cfg.baseline_required) + int(cfg.interactive_required)
+        total_label = f"{base_countable + inter_countable}/{total_required}"
         legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
-        if active_runs > 0 and legacy_valid > 0:
-            build_label = "MIX"
-        elif active_runs > 0:
-            build_label = "CUR"
-        elif legacy_valid > 0:
-            build_label = "OLD"
-        else:
-            build_label = "—"
+        build_label = _static_build_label(active_runs, legacy_valid)
 
         recent = recent_tracker_runs(package, limit=1)
         if recent:
@@ -1720,13 +1771,11 @@ def _build_package_selection_row(
             str(idx),
             display,
             base_label,
-            scripted_label,
-            manual_label,
-            need_label,
-            next_label,
-            build_label,
+            inter_label,
             total_label,
+            build_label,
             last_label,
+            next_label,
         ],
         build_row=build_row,
         dataset_app_count=dataset_app_count,
@@ -1746,17 +1795,30 @@ def _run_package_selection_menu(prepared: _PreparedPackageSelectionView) -> str 
             and quota >= int(prepared.expected_runs)
             and apps_ok >= int(prepared.dataset_apps_total)
         ) if evidence_summary else False
-        line = f"Evidence quota: {quota}/{prepared.expected_runs} | Apps satisfied: {apps_ok}/{prepared.dataset_apps_total}"
+        remaining = max(0, int(prepared.expected_runs) - int(quota))
+        print(f"Progress: {quota} / {prepared.expected_runs} required runs complete")
+        print(f"Apps complete: {apps_ok} / {prepared.dataset_apps_total}")
         if freeze_ok:
-            line += " | Freeze: enabled"
+            print("Freeze/export: ready")
         else:
-            line += f" | Freeze: blocked ({max(0, int(prepared.expected_runs) - int(quota))} run(s) missing)"
-        print(line)
+            print(f"Freeze/export: blocked — {remaining} runs remaining")
+        next_row = next((row for row in prepared.op_rows if len(row) >= 8 and row[7] != "—"), None)
+        if next_row:
+            print(f"Next recommended run: {next_row[1]} — {next_row[7]}")
         print()
 
     _render_package_table(
         prepared.op_rows,
-        headers=["#", "App", "Baseline", "Scripted", "Manual", "Need", "Next", "Build", "Total", "QA"],
+        headers=[
+            "#",
+            "App",
+            "Baseline",
+            "Interactive",
+            "Total",
+            "Static",
+            "QA",
+            "Next run",
+        ],
     )
 
     while True:
@@ -1771,7 +1833,7 @@ def _run_package_selection_menu(prepared: _PreparedPackageSelectionView) -> str 
         choice = prompt_utils.prompt_text("Select", required=False).strip()
 
         if choice in {"", "1"}:
-            index = _choose_index("Select app #", len(prepared.packages))
+            index = _choose_package_selection(prepared)
             if index is None:
                 return None
             package_name, _, _, _ = prepared.packages[index]
@@ -1809,6 +1871,25 @@ def _run_package_selection_menu(prepared: _PreparedPackageSelectionView) -> str 
 
 def _render_package_table(rows, *, headers: list[str] | None = None, max_preview: int = 15) -> None:
     headers = list(headers) if headers else ["#", "App"]
+    selection_headers = ["#", "App", "Baseline", "Interactive", "Total", "Static", "QA", "Next run"]
+    if headers == selection_headers and get_terminal_width() < 96:
+        rendered = rows if len(rows) <= max_preview else rows[:max_preview]
+        for row in rendered:
+            print(
+                f"{row[0]}) {row[1]} | Baseline: {row[2]} | Interactive: {row[3]} | "
+                f"Total: {row[4]} | Static: {row[5]} | QA: {row[6]}"
+            )
+            print(f"   Next run: {row[7]}")
+        if len(rows) > max_preview:
+            response = prompt_utils.prompt_text("[L] List all | [Enter] Continue", required=False)
+            if response.strip().lower() == "l":
+                for row in rows:
+                    print(
+                        f"{row[0]}) {row[1]} | Baseline: {row[2]} | Interactive: {row[3]} | "
+                        f"Total: {row[4]} | Static: {row[5]} | QA: {row[6]}"
+                    )
+                    print(f"   Next run: {row[7]}")
+        return
     if len(rows) <= max_preview:
         table_utils.render_table(headers, rows, compact=False)
         return
@@ -1978,6 +2059,51 @@ def _choose_index(prompt: str, total: int) -> int | None:
     if choice == "0":
         return None
     return int(choice) - 1
+
+
+def _choose_package_selection(prepared: _PreparedPackageSelectionView) -> int | None:
+    total = len(prepared.packages)
+    if total <= 0:
+        return None
+    lookup: dict[str, int] = {}
+    for idx, (package_name, app_label, _static_run_id, _plan_path) in enumerate(prepared.packages):
+        lookup[str(idx + 1)] = idx
+        pkg_lc = str(package_name or "").strip().lower()
+        if pkg_lc:
+            lookup[pkg_lc] = idx
+        label_lc = str(app_label or "").strip().lower()
+        if label_lc:
+            lookup[label_lc] = idx
+        if idx < len(prepared.op_rows) and len(prepared.op_rows[idx]) > 1:
+            display_lc = str(prepared.op_rows[idx][1] or "").strip().lower()
+            if display_lc:
+                lookup[display_lc] = idx
+
+    while True:
+        raw = prompt_utils.prompt_text(
+            "Select app number or app name",
+            required=False,
+        ).strip()
+        if not raw:
+            return 0
+        choice = raw.lower()
+        if choice in {"0", "b", "back", "cancel"}:
+            return None
+        if choice in lookup:
+            return lookup[choice]
+        matches = [idx for key, idx in lookup.items() if choice and choice in key and not key.isdigit()]
+        matches = sorted(set(matches))
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            print(status_messages.status(f"Multiple apps matched \"{raw}\". Please enter the app number.", level="warn"))
+            continue
+        print(
+            status_messages.status(
+                f"No matching app found. Enter a number from 1-{total} or an app name like Facebook.",
+                level="warn",
+            )
+        )
 
 
 def _prompt_custom_package() -> str:

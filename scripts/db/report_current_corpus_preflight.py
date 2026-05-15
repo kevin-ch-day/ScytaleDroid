@@ -30,6 +30,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Show only rows with recorded or canonical bytes currently available.",
     )
     parser.add_argument(
+        "--status",
+        choices=("covered", "ready", "review"),
+        help="Limit rows to one current target status.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=100,
@@ -58,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.only_current_bytes:
         rows = [row for row in rows if row["bytes_available"]]
+    if args.status:
+        rows = [row for row in rows if row["status"] == args.status]
 
     payload = {
         "report_type": "current_corpus_preflight",
@@ -65,10 +72,14 @@ def main(argv: list[str] | None = None) -> int:
         "filters": {
             "package_name": args.package_name,
             "only_current_bytes": bool(args.only_current_bytes),
+            "status": args.status,
         },
         "summary": _summary(rows),
         "packages": _package_summary(rows),
         "rows": rows,
+        "review_drift_comparisons": _build_review_drift_comparisons(core_q, rows)
+        if args.status == "review"
+        else [],
         "current_collection_workflow": [
             "fresh device inventory",
             "fresh APK harvest into the current configured root",
@@ -173,13 +184,19 @@ def _build_rows(
                 "apk_set_present": bool(set_info),
                 "apk_set_member_count": int(set_info.get("member_count") or 0),
                 "apk_set_split_count": int(set_info.get("split_count") or 0),
+                "members": int(set_info.get("member_count") or 0),
+                "splits": int(set_info.get("split_count") or 0),
                 "split_status": split_state,
                 "static_exact_coverage": static_count,
+                "static_run_count": static_count,
                 "dynamic_sessions": dynamic_sessions,
                 "dynamic_unlinked_sessions": dynamic_unlinked,
                 "target_status": status,
                 "target_reason": reason,
+                "status": status,
+                "review_reason": reason if status == "review" else None,
                 "operator_action": lineage.operator_action(status),
+                "recommended_action": lineage.operator_action(status),
             }
         )
 
@@ -192,6 +209,196 @@ def _build_rows(
         )
     )
     return result
+
+
+def _build_review_drift_comparisons(
+    core_q: Any,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    comparisons: list[dict[str, Any]] = []
+    review_rows = [row for row in rows if row.get("status") == "review"]
+    for row in review_rows:
+        drift_rows = _fetch_same_version_hash_rows(core_q, row)
+        by_hash: dict[str, dict[str, Any]] = {}
+        for item in drift_rows:
+            sha = str(item.get("base_apk_sha256") or "").lower()
+            if not sha:
+                continue
+            bucket = by_hash.setdefault(
+                sha,
+                {
+                    "base_apk_sha256": sha,
+                    "apk_ids": [],
+                    "apk_set_ids": [],
+                    "artifact_set_hashes": [],
+                    "first_seen_at": None,
+                    "last_seen_at": None,
+                    "harvest_runs": [],
+                    "storage_roots": [],
+                    "recorded_paths": [],
+                    "source_kind": None,
+                    "static_run_count": 0,
+                },
+            )
+            _append_unique(bucket["apk_ids"], item.get("apk_id"))
+            _append_unique(bucket["apk_set_ids"], item.get("apk_set_id"))
+            _append_unique(bucket["artifact_set_hashes"], item.get("artifact_set_hash"))
+            _append_unique(bucket["harvest_runs"], item.get("harvest_run"))
+            _append_unique(bucket["storage_roots"], item.get("storage_root"))
+            _append_unique(bucket["recorded_paths"], item.get("recorded_path"))
+            if item.get("source_kind") and not bucket["source_kind"]:
+                bucket["source_kind"] = item.get("source_kind")
+            bucket["static_run_count"] = max(
+                int(bucket.get("static_run_count") or 0),
+                int(item.get("static_run_count") or 0),
+            )
+            bucket["first_seen_at"] = _min_datetime_text(
+                bucket.get("first_seen_at"),
+                item.get("first_seen_at") or item.get("harvested_at"),
+            )
+            bucket["last_seen_at"] = _max_datetime_text(
+                bucket.get("last_seen_at"),
+                item.get("last_seen_at") or item.get("harvested_at"),
+            )
+
+        current_sha = str(row.get("base_apk_sha256") or "").lower()
+        current_hash = by_hash.get(current_sha, {})
+        other_hashes = [
+            value for sha, value in sorted(by_hash.items()) if sha != current_sha
+        ]
+        suggestion, severity = _review_classification(str(row.get("package_name") or ""))
+        comparisons.append(
+            {
+                "package_name": row.get("package_name"),
+                "display_name": row.get("display_name"),
+                "version_code": row.get("version_code"),
+                "version_name": row.get("version_name"),
+                "current_base_apk_sha256": current_sha,
+                "current_apk_id": row.get("apk_id"),
+                "current_apk_set_id": row.get("apk_set_id"),
+                "current_artifact_set_hash": row.get("artifact_set_hash"),
+                "current_seen_at": current_hash.get("last_seen_at"),
+                "current_harvest_run": _latest_text(current_hash.get("harvest_runs")),
+                "current_storage_roots": current_hash.get("storage_roots") or [],
+                "current_recorded_paths": current_hash.get("recorded_paths") or [],
+                "other_hash_count_for_same_package_version": len(other_hashes),
+                "other_hashes": other_hashes,
+                "classification_suggestion": suggestion,
+                "review_severity": severity,
+            }
+        )
+    return comparisons
+
+
+def _fetch_same_version_hash_rows(core_q: Any, row: dict[str, Any]) -> list[dict[str, Any]]:
+    return list(
+        core_q.run_sql(
+            """
+            SELECT
+              r.apk_id,
+              LOWER(TRIM(r.sha256)) AS base_apk_sha256,
+              r.harvested_at,
+              sr.data_root AS storage_root,
+              h.local_rel_path AS recorded_path,
+              s.apk_set_id,
+              s.artifact_set_hash,
+              s.source_kind,
+              s.first_seen_at,
+              s.last_seen_at,
+              hs.session_label AS harvest_run,
+              COALESCE(st.static_run_count, 0) AS static_run_count
+            FROM android_apk_repository r
+            LEFT JOIN harvest_artifact_paths h ON h.apk_id = r.apk_id
+            LEFT JOIN harvest_storage_roots sr ON sr.root_id = h.storage_root_id
+            LEFT JOIN apk_sets s
+              ON CONVERT(LOWER(TRIM(s.base_apk_sha256)) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+               = CONVERT(LOWER(TRIM(r.sha256)) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            LEFT JOIN harvest_apk_observations hao
+              ON hao.apk_id = r.apk_id
+             AND CONVERT(LOWER(TRIM(hao.sha256)) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+               = CONVERT(LOWER(TRIM(r.sha256)) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+             AND hao.role = 'base'
+            LEFT JOIN harvest_sessions hs
+              ON hs.harvest_session_id = hao.harvest_session_id
+            LEFT JOIN (
+              SELECT
+                LOWER(TRIM(base_apk_sha256)) AS base_apk_sha256,
+                COUNT(*) AS static_run_count
+              FROM static_analysis_runs
+              WHERE base_apk_sha256 IS NOT NULL
+                AND status = 'COMPLETED'
+                AND run_class = 'CANONICAL'
+                AND COALESCE(identity_valid, 0) = 1
+              GROUP BY LOWER(TRIM(base_apk_sha256))
+            ) st ON CONVERT(st.base_apk_sha256 USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                = CONVERT(LOWER(TRIM(r.sha256)) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            WHERE LOWER(TRIM(r.package_name)) = %s
+              AND COALESCE(CAST(r.version_code AS CHAR), '') = %s
+              AND COALESCE(r.version_name, '') = %s
+              AND r.sha256 IS NOT NULL
+              AND COALESCE(r.is_split_member, 0) = 0
+            ORDER BY r.harvested_at, r.apk_id
+            """,
+            (
+                str(row.get("package_name") or "").lower(),
+                str(row.get("version_code") or ""),
+                str(row.get("version_name") or ""),
+            ),
+            fetch="all",
+            dictionary=True,
+            query_name="current_corpus_preflight.same_version_hash_rows",
+        )
+        or []
+    )
+
+
+def _review_classification(package_name: str) -> tuple[str, str]:
+    package = package_name.strip().lower()
+    trusted_prefixes = (
+        "android.",
+        "com.android.",
+        "com.google.",
+        "com.motorola.",
+        "com.marvin.",
+    )
+    if package.startswith(trusted_prefixes):
+        return "normal_google_oem_drift", "informational_review"
+    if package:
+        return "third_party_same_version_hash_drift", "manual_review"
+    return "needs_manual_review", "manual_review"
+
+
+def _append_unique(values: list[Any], value: Any) -> None:
+    if value is None or value == "":
+        return
+    if value not in values:
+        values.append(value)
+
+
+def _latest_text(values: Any) -> Any:
+    if isinstance(values, list) and values:
+        return max(str(value) for value in values)
+    return None
+
+
+def _min_datetime_text(left: Any, right: Any) -> str | None:
+    left_text = str(left) if left else None
+    right_text = str(right) if right else None
+    if not left_text:
+        return right_text
+    if not right_text:
+        return left_text
+    return min(left_text, right_text)
+
+
+def _max_datetime_text(left: Any, right: Any) -> str | None:
+    left_text = str(left) if left else None
+    right_text = str(right) if right else None
+    if not left_text:
+        return right_text
+    if not right_text:
+        return left_text
+    return max(left_text, right_text)
 
 
 def _canonical_store_paths(groups: tuple[Any, ...]) -> dict[str, Path]:
@@ -234,6 +441,14 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "byte_statuses": byte_states,
         "target_statuses": statuses,
         "target_reasons": reasons,
+        "review_reason_counts": {
+            reason: count
+            for reason, count in sorted(reasons.items())
+            if any(
+                row.get("target_status") == "review" and row.get("target_reason") == reason
+                for row in rows
+            )
+        },
     }
 
 
@@ -293,6 +508,10 @@ def _print_text(payload: dict[str, Any], *, limit: int) -> None:
     print("  target_statuses:")
     for key, value in sorted(summary["target_statuses"].items()):
         print(f"    {key}: {value}")
+    if summary["review_reason_counts"]:
+        print("  review_reason_counts:")
+        for key, value in sorted(summary["review_reason_counts"].items()):
+            print(f"    {key}: {value}")
     print()
     print("=== Packages ===")
     if not payload["packages"]:
@@ -310,15 +529,59 @@ def _print_text(payload: dict[str, Any], *, limit: int) -> None:
         print("  (empty)")
     for row in payload["rows"][:limit]:
         print(
-            f"  {row['package_name']} | vCode={row.get('version_code') or 'unknown'} "
-            f"sha={row['base_apk_sha256'][:16]}... bytes={row['byte_status']} "
+            f"  {row['package_name']} ({row['display_name']}) | "
+            f"vCode={row.get('version_code') or 'unknown'} "
+            f"vName={row.get('version_name') or 'unknown'} "
+            f"sha={row['base_apk_sha256'][:16]}... "
+            f"apk_id={row.get('apk_id') or 'none'} "
             f"apk_set={row.get('apk_set_id') or 'none'} "
-            f"members={row['apk_set_member_count']} splits={row['apk_set_split_count']} "
-            f"static={row['static_exact_coverage']} status={row['target_status']} "
-            f"action={row['operator_action']}"
+            f"artifact_set_hash={_short_hash(row.get('artifact_set_hash'))} "
+            f"members={row['members']} splits={row['splits']} "
+            f"static={row['static_run_count']} status={row['status']} "
+            f"review_reason={row.get('review_reason') or 'none'} "
+            f"action={row['recommended_action']}"
         )
     if len(payload["rows"]) > limit:
         print(f"  hint: showing {limit}/{len(payload['rows'])} row(s). Use --limit N or --json.")
+    if payload.get("review_drift_comparisons"):
+        print()
+        print("=== Review drift comparison ===")
+        for item in payload["review_drift_comparisons"][:limit]:
+            current_root = ", ".join(item.get("current_storage_roots") or []) or "unknown"
+            print(
+                f"  {item['package_name']} ({item['display_name']}) | "
+                f"vCode={item.get('version_code') or 'unknown'} "
+                f"vName={item.get('version_name') or 'unknown'} "
+                f"current_sha={_short_hash(item.get('current_base_apk_sha256'))} "
+                f"current_apk_id={item.get('current_apk_id') or 'none'} "
+                f"current_apk_set={item.get('current_apk_set_id') or 'none'} "
+                f"current_artifact_set_hash={_short_hash(item.get('current_artifact_set_hash'))} "
+                f"current_seen_at={item.get('current_seen_at') or 'unknown'} "
+                f"current_harvest_run={item.get('current_harvest_run') or 'unknown'} "
+                f"other_hashes={item['other_hash_count_for_same_package_version']} "
+                f"classification={item['classification_suggestion']} "
+                f"severity={item['review_severity']}"
+            )
+            print(f"    current_storage_root: {current_root}")
+            if not item.get("other_hashes"):
+                print("    other hashes: none")
+            for other in item.get("other_hashes") or []:
+                roots = ", ".join(other.get("storage_roots") or []) or "unknown"
+                print(
+                    f"    other sha={_short_hash(other.get('base_apk_sha256'))} "
+                    f"apk_ids={_join_values(other.get('apk_ids'))} "
+                    f"apk_sets={_join_values(other.get('apk_set_ids'))} "
+                    f"artifact_set_hashes={_join_hashes(other.get('artifact_set_hashes'))} "
+                    f"first_seen_at={other.get('first_seen_at') or 'unknown'} "
+                    f"last_seen_at={other.get('last_seen_at') or 'unknown'} "
+                    f"static={other.get('static_run_count') or 0}"
+                )
+                print(f"      storage_root: {roots}")
+        if len(payload["review_drift_comparisons"]) > limit:
+            print(
+                f"  hint: showing {limit}/{len(payload['review_drift_comparisons'])} "
+                "drift comparison row(s). Use --limit N or --json."
+            )
     print()
     print("=== Current collection workflow ===")
     for step in payload["current_collection_workflow"]:
@@ -327,6 +590,27 @@ def _print_text(payload: dict[str, Any], *, limit: int) -> None:
     print("=== Notes ===")
     for note in payload["notes"]:
         print(f"  - {note}")
+
+
+def _short_hash(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "none"
+    if len(text) <= 16:
+        return text
+    return f"{text[:16]}..."
+
+
+def _join_values(values: Any) -> str:
+    if not isinstance(values, list) or not values:
+        return "none"
+    return ",".join(str(value) for value in values)
+
+
+def _join_hashes(values: Any) -> str:
+    if not isinstance(values, list) or not values:
+        return "none"
+    return ",".join(_short_hash(value) for value in values)
 
 
 if __name__ == "__main__":

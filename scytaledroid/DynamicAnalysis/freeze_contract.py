@@ -16,7 +16,11 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+    BASELINE_REQUIRED,
+    INTERACTION_REQUIRED,
+    MIN_WINDOWS_PER_RUN,
+)
 from scytaledroid.DynamicAnalysis.templates.category_map import (
     mapping_sha256,
     mapping_snapshot,
@@ -40,8 +44,8 @@ def build_freeze_contract_snapshot() -> dict[str, Any]:
         },
         "qa": {
             "min_pcap_bytes": int(getattr(profile_config, "MIN_PCAP_BYTES", 50000)),
-            "baseline_required": int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1)),
-            "interactive_required": int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2)),
+            "baseline_required": int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", BASELINE_REQUIRED)),
+            "interactive_required": int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", INTERACTION_REQUIRED)),
         },
         "templates": {
             "category_map_version": mapping_version(),
@@ -74,4 +78,3 @@ __all__ = [
     "build_freeze_contract_snapshot",
     "freeze_contract_hash",
 ]
-
