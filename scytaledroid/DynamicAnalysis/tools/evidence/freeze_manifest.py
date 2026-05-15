@@ -32,7 +32,11 @@ from scytaledroid.DynamicAnalysis.freeze_contract import (
 )
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+    BASELINE_REQUIRED,
+    INTERACTION_REQUIRED,
+    MIN_WINDOWS_PER_RUN,
+)
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
@@ -41,8 +45,8 @@ from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
 
 @dataclass(frozen=True)
 class FreezeConfig:
-    baseline_required: int = int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1))
-    interactive_required: int = int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2))
+    baseline_required: int = int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", BASELINE_REQUIRED))
+    interactive_required: int = int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", INTERACTION_REQUIRED))
     min_duration_s: int = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
     min_pcap_bytes: int = int(paper_config.MIN_PCAP_BYTES)
     min_windows_baseline: int = int(paper_config.MIN_WINDOWS_BASELINE)
@@ -76,6 +80,14 @@ def _normalize_hex(value: object, *, n: int) -> str | None:
     if any(ch not in allowed for ch in raw):
         return None
     return raw
+
+
+def _first_hex(*values: object, n: int) -> str | None:
+    for value in values:
+        normalized = _normalize_hex(value, n=n)
+        if normalized:
+            return normalized
+    return None
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -402,7 +414,17 @@ def build_dataset_freeze_manifest(
             version_code = str(run_identity.get("version_code") or run_plan.get("version_code") or "").strip()
             base_sha = _normalize_hex(run_identity.get("base_apk_sha256"), n=64)
             artifact_set_hash = _normalize_hex(run_identity.get("artifact_set_hash"), n=64)
-            signer_set_hash = _normalize_hex(run_identity.get("signer_set_hash") or run_identity.get("signer_digest"), n=64)
+            target = mf.get("target") if isinstance(mf.get("target"), dict) else {}
+            target_identity = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
+            signer_set_hash = _first_hex(
+                run_identity.get("signer_set_hash"),
+                run_identity.get("signer_digest"),
+                target_identity.get("signer_set_hash"),
+                target.get("signer_set_hash"),
+                target.get("observed_signer_set_hash"),
+                target_identity.get("signer_digest"),
+                n=64,
+            )
             if not (pkg_lc and version_code and base_sha and artifact_set_hash and signer_set_hash):
                 raise RuntimeError(f"FREEZE_BAD_IDENTITY:{rid}")
             run_checksums[rid] = {

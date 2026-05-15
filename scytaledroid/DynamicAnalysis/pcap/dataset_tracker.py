@@ -20,6 +20,9 @@ from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
 SHORT_RUN_TOLERANCE_SECONDS = 2.0
+BASELINE_REQUIRED = 3
+INTERACTION_REQUIRED = 2
+TOTAL_REQUIRED_PER_APP = BASELINE_REQUIRED + INTERACTION_REQUIRED
 
 
 def _effective_min_sampling_seconds() -> float:
@@ -37,10 +40,10 @@ def _effective_target_sampling_seconds() -> float:
 @dataclass(frozen=True)
 class DatasetTrackerConfig:
     baseline_required: int = field(
-        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", 1))
+        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RUNS", BASELINE_REQUIRED))
     )
     interactive_required: int = field(
-        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", 2))
+        default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", INTERACTION_REQUIRED))
     )
     baseline_profile: str = "baseline_idle"
     interactive_profile: str = "interaction_scripted"
@@ -54,6 +57,14 @@ def _is_baseline_profile(profile: object, cfg: DatasetTrackerConfig) -> bool:
 def _is_interactive_profile(profile: object, cfg: DatasetTrackerConfig) -> bool:
     p = str(profile or "")
     return p.startswith(cfg.interactive_profile) or p.startswith("interaction_") or "interactive" in p
+
+
+def _known_identity_value(*values: object) -> object | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text and text.lower() not in {"unknown", "none", "null"}:
+            return value
+    return None
 
 
 _VALIDITY_ENUM = {
@@ -122,9 +133,11 @@ def update_dataset_tracker(
         ),
         "base_apk_sha256": target_identity.get("base_apk_sha256"),
         "artifact_set_hash": target_identity.get("artifact_set_hash"),
-        "signer_set_hash": (
-            target_identity.get("signer_set_hash")
-            or target_identity.get("signer_digest")
+        "signer_set_hash": _known_identity_value(
+            target_identity.get("signer_set_hash"),
+            target_identity.get("signer_digest"),
+            target.get("signer_set_hash"),
+            target.get("observed_signer_set_hash"),
         ),
         "low_signal": (
             True
@@ -428,7 +441,8 @@ def peek_next_run_protocol(
     #
     # If Run #1 fails QA, the next retry should still be "Run #1" until a valid run
     # is recorded. This avoids confusing operators ("baseline Run #2") and matches
-    # the paper contract: each app needs >=3 VALID runs; retries fill the same slot.
+    # the dataset contract: each app needs baseline + interaction VALID runs; retries
+    # fill the same slot.
     needed = int(cfg.baseline_required) + int(cfg.interactive_required)
     run_sequence = max(min(total_valid + 1, needed), 1)
 
@@ -609,7 +623,11 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         if is_baseline and baseline_seen < baseline_needed:
             baseline_seen += 1
             counted = True
-        elif is_interactive and interactive_seen < interactive_needed:
+        elif (
+            is_interactive
+            and baseline_seen >= baseline_needed
+            and interactive_seen < interactive_needed
+        ):
             interactive_seen += 1
             counted = True
         elif (baseline_seen + interactive_seen) < needed and not (is_baseline or is_interactive):

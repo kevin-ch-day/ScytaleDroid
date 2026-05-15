@@ -120,7 +120,10 @@ def _intent_counts_toward_quota(
     if profile.startswith("baseline"):
         return int(baseline_valid_runs) < int(cfg.baseline_required)
     if profile.startswith("interaction_") or "interactive" in profile:
-        return int(interactive_valid_runs) < int(cfg.interactive_required)
+        return (
+            int(baseline_valid_runs) >= int(cfg.baseline_required)
+            and int(interactive_valid_runs) < int(cfg.interactive_required)
+        )
     return False
 
 
@@ -217,6 +220,33 @@ def _load_plan_identity(plan_path: str) -> dict[str, str]:
             run_identity.get("signer_set_hash") or run_identity.get("signer_digest") or ""
         ).strip().lower(),
     }
+
+
+def _known_signer_hash(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"", "unknown", "none", "null"}:
+        return ""
+    return text
+
+
+def _progress_label(count: int, required: int, *, noun: str = "needed") -> str:
+    count_i = max(0, int(count))
+    required_i = max(0, int(required))
+    missing = max(0, required_i - count_i)
+    if missing == 0:
+        return f"{count_i}/{required_i} complete"
+    return f"{count_i}/{required_i} need {missing}"
+
+
+def _run_profile_label(run_profile: str | None) -> str:
+    profile = str(run_profile or "").strip().lower()
+    if profile == "baseline_idle" or "baseline" in profile or "idle" in profile:
+        return "baseline"
+    if profile == "interaction_scripted":
+        return "scripted interaction"
+    if profile == "interaction_manual":
+        return "manual interaction"
+    return str(run_profile or "interaction").strip() or "interaction"
 
 
 def _read_battery_level(device_serial: str) -> int | None:
@@ -544,7 +574,7 @@ def _pre_run_scientific_checks(
     else:
         rows.append(["Build identity", "OK", f"version_code={expected_vc}"])
 
-    expected_signer = str(plan_identity.get("signer_set_hash") or "").strip().lower()
+    expected_signer = _known_signer_hash(plan_identity.get("signer_set_hash"))
     observed_signer = _read_observed_signer_set_hash(device_serial, package_name) or ""
     if expected_signer:
         if not observed_signer:
@@ -561,6 +591,12 @@ def _pre_run_scientific_checks(
             )
         else:
             rows.append(["Signer identity", "OK", expected_signer[:12]])
+    elif observed_signer:
+        warnings.append("Plan signer identity unavailable; signer drift comparison skipped")
+        rows.append(["Signer identity", "WARN", f"observed={observed_signer[:12]} expected=unavailable"])
+    else:
+        warnings.append("Signer identity unavailable")
+        rows.append(["Signer identity", "WARN", "plan and device signer unavailable"])
 
     if "pcapdroid_capture" not in observer_ids:
         hard_failures.append("Required observer missing: pcapdroid_capture")
@@ -573,9 +609,9 @@ def _pre_run_scientific_checks(
     menu_utils.print_table(["Check", "Status", "Details"], rows)
     for msg in warnings:
         print(status_messages.status(msg, level="warn"))
-        if hard_failures:
-            for msg in hard_failures:
-                print(status_messages.status(msg, level="error"))
+    if hard_failures:
+        for msg in hard_failures:
+            print(status_messages.status(msg, level="error"))
         print(
             status_messages.status(
                 "Pre-run scientific checks failed. Run blocked in freeze/profile mode.",
@@ -951,25 +987,41 @@ def run_guided_dataset_run(
     suggested_slot = state.suggested_slot
     paper_eligible_local = int(state.paper_eligible_local)
     quota_counted_local = int(state.quota_counted_local)
+    if int(counts.baseline_valid_runs) < int(cfg.baseline_required):
+        suggested_profile = _canonical_baseline_profile_for_package(package_name)
+        suggested_slot = max(1, min(int(counts.baseline_valid_runs) + 1, int(cfg.baseline_required)))
 
     print()
-    # Operator-default: one short status line. Details are available via [V].
-    op_line = (
-        f"Runs: baseline {counts.baseline_valid_runs}/{cfg.baseline_required}, "
-        f"interactive {counts.interactive_valid_runs}/{cfg.interactive_required} | "
-        f"quota_counted(local)={quota_counted_local}/{total_required} | "
-        f"evidence_dirs={state.local_evidence_dir_count}"
-    )
+    display_label = package_name
+    try:
+        display_map = {g.package_name: g.display_name for g in groups}
+        display_label = display_map.get(package_name) or package_name
+    except Exception:
+        display_label = package_name
+    print(f"{display_label} progress:")
+    print(f"  Baseline: {_progress_label(counts.baseline_valid_runs, int(cfg.baseline_required))}")
+    baseline_complete = int(counts.baseline_valid_runs) >= int(cfg.baseline_required)
+    if baseline_complete:
+        print(f"  Interactive: {_progress_label(counts.interactive_valid_runs, int(cfg.interactive_required))}")
+    else:
+        print("  Interactive: locked until baseline complete")
+    if int(state.local_evidence_dir_count) == int(paper_eligible_local):
+        print(f"  Evidence packs: {paper_eligible_local} valid")
+    else:
+        print(f"  Evidence packs: {paper_eligible_local} valid / {state.local_evidence_dir_count} local")
+    print(f"  Quota: {quota_counted_local}/{total_required} complete")
     if counts.quota_met:
-        # Once quota is met, runs are still allowed, but they're "extra" and don't change completion.
-        op_line += " | quota_met=YES (extra runs only)"
+        print("  Next run: optional extra")
         suggested_slot = None
     elif suggested_slot:
-        # Do not imply an ordering constraint. Operators may run in any order;
-        # the tracker deterministically counts the first N valid baseline/interactive runs.
-        op_line += f" | suggested_next={suggested_profile}"
-    print(status_messages.status(op_line, level="info"))
-    if prompt_utils.prompt_text("[Enter] Continue | [V] View details", required=False).strip().lower() in {"v", "view"}:
+        print(f"  Next run: {_run_profile_label(suggested_profile)}")
+    response = prompt_utils.prompt_text(
+        "Press Enter to continue, V to view details, or B to go back",
+        required=False,
+    ).strip().lower()
+    if response in {"b", "back"}:
+        return
+    if response in {"v", "view", "y", "yes", "details"}:
         if meta_family_note:
             print(
                 status_messages.status(
@@ -990,9 +1042,9 @@ def run_guided_dataset_run(
             reason_line = ", ".join([f"{k}={v}" for k, v in state.exclusion_reason_top])
             print(f"  local_exclusion_top: {reason_line}")
         if counts.quota_met:
-            print("Quota met. Additional runs are allowed and will be tracked as extra (do not change completion).")
+            print("Quota met. Additional runs are allowed and retained as supplemental evidence.")
         elif suggested_slot:
-            print(f"Suggested by quota (counts toward completion): {suggested_profile}")
+            print(f"Suggested by quota (counts toward completion): {_run_profile_label(suggested_profile)}")
         print(f"Freeze cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
         baseline_recommended = max(
             int(cfg.baseline_required),
@@ -1010,11 +1062,11 @@ def run_guided_dataset_run(
             cfg=cfg,
         )
         if counts.quota_met:
-            print("Default suggestion countability: EXTRA (not countable).")
+            print("Default suggestion countability: supplemental evidence (not quota-counted).")
         else:
             print(
                 "Default suggestion countability: "
-                + ("COUNTABLE" if suggested_counts else "EXTRA (not countable)")
+                + ("COUNTABLE" if suggested_counts else "supplemental evidence (not quota-counted)")
                 + f" ({suggested_profile})."
             )
     print()
@@ -1032,13 +1084,17 @@ def run_guided_dataset_run(
             "1",
             "Baseline",
             description=(
-                "Purpose: baseline-only training. run_profile="
+                (
+                    "Purpose: baseline-only training. run_profile="
+                    if int(counts.baseline_valid_runs) < int(cfg.baseline_required)
+                    else "Purpose: supplemental baseline evidence. run_profile="
+                )
                 + _canonical_baseline_profile_for_package(package_name)
                 + " | "
                 + (
-                    "Counts toward quota: YES (if VALID)"
+                    "Counts toward quota: YES (baseline requirement not yet met)"
                     if int(counts.baseline_valid_runs) < int(cfg.baseline_required)
-                    else "Counts toward quota: NO (baseline quota met; saved as EXTRA)"
+                    else "Counts toward quota: NO (baseline requirement already met). Saved as supplemental baseline evidence."
                 )
             ),
             badge=_badge_for("1"),
@@ -1050,8 +1106,12 @@ def run_guided_dataset_run(
                 "Purpose: repeatable stimulus. run_profile=interaction_scripted | "
                 + (
                     "Counts toward quota: YES (if VALID)"
-                    if int(counts.interactive_valid_runs) < int(cfg.interactive_required)
-                    else "Counts toward quota: NO (interactive quota met; saved as EXTRA)"
+                    if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)
+                    else (
+                        "Counts toward quota: NO (baseline requirement not complete)"
+                        if not baseline_complete
+                        else "Counts toward quota: NO (interactive quota met; saved as supplemental evidence)"
+                    )
                 )
             ),
             badge=_badge_for("2"),
@@ -1063,8 +1123,12 @@ def run_guided_dataset_run(
                 "Purpose: operator-driven stimulus. run_profile=interaction_manual | "
                 + (
                     "Counts toward quota: YES (if VALID)"
-                    if int(counts.interactive_valid_runs) < int(cfg.interactive_required)
-                    else "Counts toward quota: NO (interactive quota met; saved as EXTRA)"
+                    if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)
+                    else (
+                        "Counts toward quota: NO (baseline requirement not complete)"
+                        if not baseline_complete
+                        else "Counts toward quota: NO (interactive quota met; saved as supplemental evidence)"
+                    )
                 )
             ),
             badge=None,
@@ -1204,7 +1268,7 @@ def run_guided_dataset_run(
                 status_messages.status(
                     "Recent baseline_idle runs repeatedly failed with PCAP_MISSING. "
                     "If idle traffic stays low, try a minimal warm baseline (open chats list briefly) "
-                    "or collect scripted interaction first.",
+                    "before collecting interaction.",
                     level="warn",
                 )
             )
@@ -1220,11 +1284,10 @@ def run_guided_dataset_run(
             print(
                 status_messages.status(
                     "Recent baseline_connected runs failed with INSUFFICIENT_DURATION. "
-                    "Policy: switch to scripted-first for this app/build; baseline remains pending.",
+                    "Baseline quota remains the recommended next step until it is complete.",
                     level="warn",
                 )
             )
-            suggested_profile = state.effective_suggested_profile
 
     # Capture modes.
     tier = "dataset"
@@ -1237,6 +1300,20 @@ def run_guided_dataset_run(
     else:
         run_profile = "interaction_manual"
         interaction_level = "manual"
+    if (
+        selected_protocol in {"2", "3"}
+        and int(counts.baseline_valid_runs) < int(cfg.baseline_required)
+    ):
+        print(
+            status_messages.status(
+                "Baseline requirement is not complete: "
+                f"{counts.baseline_valid_runs}/{cfg.baseline_required} valid baseline runs.",
+                level="warn",
+            )
+        )
+        print(status_messages.status("Recommended next run is baseline.", level="warn"))
+        if not prompt_utils.prompt_yes_no("Proceed with interaction anyway?", default=False):
+            return
     counts_toward_completion = _intent_counts_toward_quota(
         run_profile=run_profile,
         baseline_valid_runs=int(counts.baseline_valid_runs),
@@ -1247,11 +1324,11 @@ def run_guided_dataset_run(
     if selected_protocol in {"1", "2"} and selected_protocol != suggested_key and not counts_toward_completion:
         print(
             status_messages.status(
-                "Selected intent is not quota-suggested and will be saved as EXTRA (not countable).",
+                "Selected intent is not quota-suggested and will be saved as supplemental evidence (not quota-counted).",
                 level="warn",
             )
         )
-        proceed = prompt_utils.prompt_yes_no("Proceed with EXTRA run anyway?", default=False)
+        proceed = prompt_utils.prompt_yes_no("Proceed with supplemental run anyway?", default=False)
         if not proceed:
             print(status_messages.status("Run canceled. Choose the suggested intent to fill quota.", level="info"))
             return
@@ -1401,7 +1478,7 @@ def run_guided_dataset_run(
     elif counts_toward_completion:
         paper_impact_label = "Cohort quota impact: YES (if VALID)"
     else:
-        paper_impact_label = "Cohort quota impact: NO (extra run / policy)"
+        paper_impact_label = "Cohort quota impact: NO (supplemental evidence / policy)"
 
     print(
         paper_impact_label

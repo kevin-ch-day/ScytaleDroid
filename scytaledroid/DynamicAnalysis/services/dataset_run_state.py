@@ -146,8 +146,10 @@ def _protocol_from_runs(
     suggested_slot = max(min(total_valid + 1, total_required), 1)
     if baseline_valid < int(cfg.baseline_required):
         suggested_profile = cfg.baseline_profile
+        suggested_slot = min(baseline_valid + 1, int(cfg.baseline_required))
     elif interactive_valid < int(cfg.interactive_required):
         suggested_profile = cfg.interactive_profile
+        suggested_slot = int(cfg.baseline_required) + min(interactive_valid + 1, int(cfg.interactive_required))
     else:
         suggested_profile = cfg.interactive_profile
     if str(suggested_profile).strip().lower() == "baseline_idle":
@@ -336,7 +338,10 @@ def load_dataset_run_state(
         package_name=package,
     )
     effective_suggested_profile = suggested_profile_from_tracker
-    if baseline_connected_insufficient_duration_streak >= 2:
+    if (
+        baseline_connected_insufficient_duration_streak >= 2
+        and counts.baseline_valid_runs >= int(cfg.baseline_required)
+    ):
         effective_suggested_profile = "interaction_scripted"
 
     paper_eligible_local, quota_counted_local, exclusion_reason_top = _local_rollups(

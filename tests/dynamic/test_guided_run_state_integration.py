@@ -39,17 +39,17 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
                 quota_met=False,
                 extra_valid_runs=0,
             ),
-            baseline_required=1,
+            baseline_required=3,
             interactive_required=2,
-            total_required=3,
+            total_required=5,
             local_evidence_dir_count=1,
             reset_available=False,
             paper_eligible_local=1,
             quota_counted_local=1,
             exclusion_reason_top=(("EXCLUDED_LOW_SIGNAL", 1),),
             suggested_profile_from_tracker="baseline_connected",
-            effective_suggested_profile="interaction_scripted",
-            suggested_slot=2,
+            effective_suggested_profile="baseline_connected",
+            suggested_slot=1,
             recent_runs=(
                 DatasetRunRecentSummary(
                     ended_at="2026-04-16T12:00:00Z",
@@ -73,7 +73,7 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
     monkeypatch.setattr(guided_run.prompt_utils, "prompt_text", lambda *_args, **_kwargs: "v")
 
     def _fake_choice(choices, *, default=None, disabled=None, **_kwargs):
-        assert default == "2"
+        assert default == "1"
         assert "D" in (disabled or [])
         return "0"
 
@@ -86,7 +86,11 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
     )
     out = capsys.readouterr().out
 
-    assert "quota_counted(local)=1/3" in out
-    assert "evidence_dirs=1" in out
-    assert "Suggested by quota (counts toward completion): interaction_scripted" in out
+    assert "Baseline: 0/3 need 3" in out
+    assert "Interactive: locked until baseline complete" in out
+    assert "Evidence packs: 1 valid" in out
+    assert "Quota: 1/5 complete" in out
+    assert "Next run: baseline" in out
+    assert "quota_counted(local)=1/5" in out
+    assert "Suggested by quota (counts toward completion): baseline" in out
     assert "local_exclusion_top: EXCLUDED_LOW_SIGNAL=1" in out

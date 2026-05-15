@@ -121,6 +121,8 @@ def _compute_evidence_quota(
             continue
         counts = per_pkg.setdefault(package, {"baseline": 0, "interactive": 0})
         needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
+        if bucket == "interactive" and int(counts.get("baseline", 0)) < int(cfg.baseline_required):
+            continue
         if int(counts.get(bucket, 0)) < needed:
             counts[bucket] = int(counts.get(bucket, 0)) + 1
             quota_runs_counted += 1

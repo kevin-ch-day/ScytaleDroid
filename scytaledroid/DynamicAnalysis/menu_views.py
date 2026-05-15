@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
-from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
+from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_static_handoff_plan_summary
 from scytaledroid.Utils.DisplayUtils import status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
@@ -16,19 +15,17 @@ from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 @dataclass(frozen=True)
 class DynamicMenuSections:
     primary_actions: list[MenuOption]
-    evidence_integrity: list[MenuOption]
-    exports: list[MenuOption]
-    system: list[MenuOption]
-    legacy_archive: list[MenuOption]
+    validation: list[MenuOption]
+    maintenance: list[MenuOption]
+    archive_export: list[MenuOption]
 
     @property
     def all_options(self) -> list[MenuOption]:
         return [
             *self.primary_actions,
-            *self.legacy_archive,
-            *self.evidence_integrity,
-            *self.exports,
-            *self.system,
+            *self.validation,
+            *self.maintenance,
+            *self.archive_export,
         ]
 
 
@@ -38,20 +35,18 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
             MenuOption("1", "Guided cohort run (Research Dataset Alpha)"),
             MenuOption("2", "Cohort status overview"),
         ],
-        legacy_archive=[
-            MenuOption("3", "Archived structural cohort tools"),
-        ],
-        evidence_integrity=[
+        validation=[
+            MenuOption("3", "State summary"),
             MenuOption("4", "Freeze readiness audit (evidence packs)"),
-            MenuOption("5", "Reindex/repair tracker from evidence packs"),
-            MenuOption("6", "Prune incomplete dynamic evidence dirs"),
+            MenuOption("5", "Verify capture environment"),
         ],
-        exports=[
-            MenuOption("7", "Export frozen archive CSVs (Reporting)"),
+        maintenance=[
+            MenuOption("6", "Reindex tracker from evidence packs"),
+            MenuOption("7", "Prune incomplete evidence dirs"),
         ],
-        system=[
-            MenuOption("8", "Verify host PCAP tools (tshark + capinfos)"),
-            MenuOption("9", "State summary (freeze/evidence/tracker deltas)"),
+        archive_export=[
+            MenuOption("8", "Export frozen archive CSVs (Reporting)"),
+            MenuOption("9", "Archived structural cohort tools"),
         ],
     )
 
@@ -67,14 +62,6 @@ def _humanize_code(value: str | None, *, hyphenate_go: bool = False) -> str:
     return lowered
 
 
-def _short_path(path_value: str | Path) -> str:
-    path = Path(path_value)
-    try:
-        return str(path.relative_to(Path.cwd()))
-    except Exception:
-        return str(path)
-
-
 def render_dynamic_menu_overview() -> None:
     try:
         summary = run_freeze_readiness_audit()
@@ -82,45 +69,57 @@ def render_dynamic_menu_overview() -> None:
         print(status_messages.status("Dynamic state overview unavailable.", level="warn"))
         return
 
-    _ = status_messages.status(
-        "ENABLED" if summary.can_freeze else "BLOCKED",
-        level="success" if summary.can_freeze else "blocked",
-        show_icon=False,
-        show_prefix=False,
+    try:
+        handoff = build_static_handoff_plan_summary()
+    except Exception:
+        handoff = {}
+    handoff_ready = 0
+    handoff_total = 0
+    handoff_status = "unknown"
+    if handoff:
+        handoff_ready = int(handoff.get("dataset_packages_with_plan") or 0)
+        handoff_total = int(handoff.get("dataset_packages_total") or 0)
+        if handoff_total and handoff_ready == handoff_total:
+            handoff_status = "ready"
+        elif handoff_total:
+            handoff_status = f"partial ({handoff_ready}/{handoff_total})"
+    evidence_text = (
+        "none yet"
+        if int(summary.total_runs) == 0
+        else f"{summary.total_runs} packs ({summary.valid_runs} valid)"
     )
-    latest_freeze = (
-        f"dataset_freeze.json ({summary.canonical_freeze_role})"
-        if str(summary.canonical_freeze_role or "").strip().lower() not in {"", "none"}
-        else "none"
-    )
-    freeze_manifest = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
-    tracker_state = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    freeze_text = "ready" if summary.can_freeze else "blocked"
+    reason_text = _humanize_code(summary.first_failing_reason)
+    next_step = "run Guided cohort"
+    if int(summary.total_runs) > 0 and not summary.can_freeze:
+        next_step = "run State summary"
+    if summary.can_freeze:
+        next_step = "export frozen archive"
+    if handoff and not bool(handoff.get("ready_for_guided_dataset_run")):
+        next_step = "run State summary"
+
+    state_items = [
+        summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
+        summary_cards.summary_item(
+            "Freeze/export",
+            freeze_text,
+            value_style="success" if summary.can_freeze else "warning",
+        ),
+        summary_cards.summary_item("Reason", reason_text, value_style="muted"),
+        summary_cards.summary_item(
+            "Current static handoff",
+            handoff_status,
+            value_style="success" if handoff_status == "ready" else "warning",
+        ),
+        summary_cards.summary_item("Next", next_step, value_style="text"),
+    ]
+    footer = None
+    if int(summary.total_runs) == 0:
+        footer = "No dynamic evidence packs are present. This is expected after cleanup or before the first run."
     print(
         summary_cards.format_summary_card(
-            "Dynamic State",
-            [
-                summary_cards.summary_item("Freeze capability", "ENABLED" if summary.can_freeze else "BLOCKED", value_style="success" if summary.can_freeze else "warning"),
-                summary_cards.summary_item("Freeze audit", _humanize_code(summary.result, hyphenate_go=True), value_style="success" if str(summary.result).upper() == "GO" else "warning"),
-                summary_cards.summary_item("Reason", _humanize_code(summary.first_failing_reason), value_style="muted"),
-                summary_cards.summary_item(
-                    "Evidence packs",
-                    f"{summary.total_runs} (valid {summary.valid_runs}, invalid {max(int(summary.total_runs) - int(summary.valid_runs), 0)})",
-                    value_style="accent",
-                ),
-                summary_cards.summary_item("Latest freeze", latest_freeze, value_style="text"),
-            ],
-            subtitle="Freeze readiness, evidence health, and tracker alignment.",
-        )
-    )
-    print()
-    print(
-        summary_cards.format_summary_card(
-            "Evidence Roots",
-            [
-                summary_cards.summary_item("Root", _short_path(summary.evidence_root), value_style="muted"),
-                summary_cards.summary_item("Freeze", _short_path(freeze_manifest), value_style="muted"),
-                summary_cards.summary_item("Tracker", _short_path(tracker_state), value_style="muted"),
-            ],
-            footer="Use State summary for per-app tracker vs evidence deltas.",
+            "Status",
+            state_items,
+            footer=footer,
         )
     )

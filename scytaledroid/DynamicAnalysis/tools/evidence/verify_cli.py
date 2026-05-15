@@ -624,7 +624,7 @@ def run_dynamic_evidence_verify(
         cfg = DatasetTrackerConfig()
         baseline_required = int(cfg.baseline_required)
         interactive_required = int(cfg.interactive_required)
-        valid_required_total = int(cfg.repeats_per_app)
+        valid_required_total = baseline_required + interactive_required
     except Exception:
         baseline_required = 1
         interactive_required = 2
