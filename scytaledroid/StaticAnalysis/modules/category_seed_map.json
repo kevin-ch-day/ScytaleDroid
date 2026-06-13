@@ -1,0 +1,361 @@
+{
+  "exact": {
+    "com.facebook.katana": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Facebook exact package seed"
+    },
+    "com.facebook.orca": {
+      "category": "Messaging",
+      "confidence": "high",
+      "reason": "Facebook Messenger exact package seed"
+    },
+    "com.instagram.android": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Instagram exact package seed"
+    },
+    "com.snapchat.android": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Snapchat exact package seed"
+    },
+    "com.reddit.frontpage": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Reddit exact package seed"
+    },
+    "com.twitter.android": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "X/Twitter exact package seed"
+    },
+    "com.pinterest": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Pinterest exact package seed"
+    },
+    "com.zhiliaoapp.musically": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "TikTok exact package seed"
+    },
+    "com.whatsapp": {
+      "category": "Messaging",
+      "confidence": "high",
+      "reason": "WhatsApp exact package seed"
+    },
+    "org.telegram.messenger": {
+      "category": "Messaging",
+      "confidence": "high",
+      "reason": "Telegram exact package seed"
+    },
+    "org.thoughtcrime.securesms": {
+      "category": "Messaging",
+      "confidence": "high",
+      "reason": "Signal exact package seed"
+    },
+    "com.discord": {
+      "category": "Messaging",
+      "confidence": "high",
+      "reason": "Discord exact package seed"
+    },
+    "com.google.android.apps.messaging": {
+      "category": "Messaging",
+      "confidence": "high",
+      "reason": "Messages exact package seed"
+    },
+    "com.chase.sig.android": {
+      "category": "Finance",
+      "confidence": "high",
+      "reason": "Chase exact package seed"
+    },
+    "com.citi.citimobile": {
+      "category": "Finance",
+      "confidence": "high",
+      "reason": "Citi exact package seed"
+    },
+    "com.coinbase.android": {
+      "category": "Finance",
+      "confidence": "high",
+      "reason": "Coinbase exact package seed"
+    },
+    "com.squareup.cash": {
+      "category": "Finance",
+      "confidence": "high",
+      "reason": "Cash App exact package seed"
+    },
+    "com.wf.wellsfargomobile": {
+      "category": "Finance",
+      "confidence": "high",
+      "reason": "Wells Fargo exact package seed"
+    },
+    "com.venmo": {
+      "category": "Finance",
+      "confidence": "high",
+      "reason": "Venmo exact package seed"
+    },
+    "com.kalshi.mobile": {
+      "category": "Finance",
+      "confidence": "high",
+      "reason": "Kalshi exact package seed"
+    },
+    "com.amazon.avod.thirdpartyclient": {
+      "category": "Media & streaming",
+      "confidence": "high",
+      "reason": "Prime Video exact package seed"
+    },
+    "com.amazon.mp3": {
+      "category": "Media & streaming",
+      "confidence": "high",
+      "reason": "Amazon Music exact package seed"
+    },
+    "com.amazon.kindle": {
+      "category": "Productivity",
+      "confidence": "medium",
+      "reason": "Kindle exact package seed"
+    },
+    "com.amazon.dee.app": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "Amazon Shopping exact package seed"
+    },
+    "com.amazon.mshop.android.shopping": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "Amazon Shopping exact package seed"
+    },
+    "com.walmart.android": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "Walmart exact package seed"
+    },
+    "com.ebay.mobile": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "eBay exact package seed"
+    },
+    "com.einnovation.temu": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "Temu exact package seed"
+    },
+    "com.bestbuy.android": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "Best Buy exact package seed"
+    },
+    "com.bathandbody.bbw": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "Bath & Body Works exact package seed"
+    },
+    "com.netflix.mediaclient": {
+      "category": "Media & streaming",
+      "confidence": "high",
+      "reason": "Netflix exact package seed"
+    },
+    "com.disney.disneyplus": {
+      "category": "Media & streaming",
+      "confidence": "high",
+      "reason": "Disney+ exact package seed"
+    },
+    "com.crunchyroll.crunchyroid": {
+      "category": "Media & streaming",
+      "confidence": "high",
+      "reason": "Crunchyroll exact package seed"
+    },
+    "com.wbd.stream": {
+      "category": "Media & streaming",
+      "confidence": "high",
+      "reason": "HBO Max exact package seed"
+    },
+    "tv.twitch.android.app": {
+      "category": "Media & streaming",
+      "confidence": "high",
+      "reason": "Twitch exact package seed"
+    },
+    "bbc.mobile.news.ww": {
+      "category": "News",
+      "confidence": "high",
+      "reason": "BBC News exact package seed"
+    },
+    "com.cnn.mobile.android.phone": {
+      "category": "News",
+      "confidence": "high",
+      "reason": "CNN exact package seed"
+    },
+    "com.fli.android.newsmaxapp": {
+      "category": "News",
+      "confidence": "high",
+      "reason": "Newsmax exact package seed"
+    },
+    "com.fng.foxnation": {
+      "category": "News",
+      "confidence": "high",
+      "reason": "Fox Nation exact package seed"
+    },
+    "com.adobe.reader": {
+      "category": "Productivity",
+      "confidence": "high",
+      "reason": "Adobe Acrobat exact package seed"
+    },
+    "com.dropbox.android": {
+      "category": "Productivity",
+      "confidence": "high",
+      "reason": "Dropbox exact package seed"
+    },
+    "com.anthropic.claude": {
+      "category": "Productivity",
+      "confidence": "high",
+      "reason": "Claude exact package seed"
+    },
+    "com.google.android.gm": {
+      "category": "Productivity",
+      "confidence": "high",
+      "reason": "Gmail exact package seed"
+    },
+    "notion.id": {
+      "category": "Productivity",
+      "confidence": "high",
+      "reason": "Notion exact package seed"
+    },
+    "com.android.chrome": {
+      "category": "Browser",
+      "confidence": "high",
+      "reason": "Chrome exact package seed"
+    },
+    "com.airbnb.android": {
+      "category": "Travel",
+      "confidence": "high",
+      "reason": "Airbnb exact package seed"
+    },
+    "com.expedia.bookings": {
+      "category": "Travel",
+      "confidence": "high",
+      "reason": "Expedia exact package seed"
+    },
+    "me.lyft.android": {
+      "category": "Travel",
+      "confidence": "high",
+      "reason": "Lyft exact package seed"
+    },
+    "com.vrbo.android": {
+      "category": "Travel",
+      "confidence": "high",
+      "reason": "Vrbo exact package seed"
+    },
+    "com.bestwestern.android": {
+      "category": "Travel",
+      "confidence": "high",
+      "reason": "Best Western exact package seed"
+    },
+    "com.google.android.apps.fitness": {
+      "category": "Health & fitness",
+      "confidence": "high",
+      "reason": "Google Fit exact package seed"
+    },
+    "com.king.candycrushsaga": {
+      "category": "Games",
+      "confidence": "high",
+      "reason": "Candy Crush Saga exact package seed"
+    },
+    "com.plarium.raidlegends": {
+      "category": "Games",
+      "confidence": "high",
+      "reason": "Raid: Shadow Legends exact package seed"
+    },
+    "com.roblox.client": {
+      "category": "Games",
+      "confidence": "high",
+      "reason": "Roblox exact package seed"
+    },
+    "com.truthsocial.android.app": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Truth Social exact package seed"
+    },
+    "com.tumblr": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Tumblr exact package seed"
+    },
+    "com.tinder": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Tinder exact package seed"
+    },
+    "com.dd.doordash": {
+      "category": "Unknown / review",
+      "source": "taxonomy_gap_review",
+      "confidence": "medium",
+      "reason": "DoorDash is a clear app identity but does not fit the current taxonomy without adding a food-delivery bucket",
+      "needs_review": true
+    },
+    "com.doordash.driverapp": {
+      "category": "Unknown / review",
+      "source": "taxonomy_gap_review",
+      "confidence": "medium",
+      "reason": "DoorDash Driver fits a delivery-services bucket not present in the current taxonomy",
+      "needs_review": true
+    },
+    "com.mcdonalds.app": {
+      "category": "Unknown / review",
+      "source": "taxonomy_gap_review",
+      "confidence": "medium",
+      "reason": "McDonald's app is clear but current taxonomy has no food-ordering bucket",
+      "needs_review": true
+    },
+    "com.handmark.sportcaster": {
+      "category": "Unknown / review",
+      "source": "taxonomy_gap_review",
+      "confidence": "medium",
+      "reason": "theScore likely belongs in a sports bucket not present in the current taxonomy",
+      "needs_review": true
+    },
+    "com.apartments.mobile.android": {
+      "category": "Unknown / review",
+      "source": "taxonomy_gap_review",
+      "confidence": "medium",
+      "reason": "Apartments.com fits a real-estate bucket not present in the current taxonomy",
+      "needs_review": true
+    }
+  },
+  "prefix": {
+    "com.facebook.": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Meta social prefix seed"
+    },
+    "com.instagram.": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Instagram prefix seed"
+    },
+    "com.snapchat.": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Snapchat prefix seed"
+    },
+    "com.reddit.": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "Reddit prefix seed"
+    },
+    "com.twitter.": {
+      "category": "Social media",
+      "confidence": "high",
+      "reason": "X/Twitter prefix seed"
+    },
+    "com.amazon.mshop.android": {
+      "category": "Shopping",
+      "confidence": "high",
+      "reason": "Amazon Shopping prefix seed"
+    },
+    "com.google.android.apps.messaging": {
+      "category": "Messaging",
+      "confidence": "high",
+      "reason": "Messages prefix seed"
+    }
+  }
+}
