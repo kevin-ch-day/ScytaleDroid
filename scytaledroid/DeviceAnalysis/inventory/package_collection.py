@@ -37,6 +37,35 @@ class ProgressCallback(Protocol):
 # Keep PackageRow as a loose alias for the normalized dict shape used throughout
 PackageRow = dict[str, object]
 
+_TARGET_RESEARCH_PROFILES = frozenset(
+    {
+        "SOCIAL",
+        "MESSAGING",
+        "MEDIA",
+        "BROWSER",
+        "PRODUCTIVITY",
+        "SHOPPING",
+        "NEWS",
+    }
+)
+
+
+def _is_bulk_path_relevant_for_enrichment(
+    package_name: str,
+    *,
+    canonical_entry: dict[str, object] | None,
+    bulk_base_path: str | None,
+) -> bool:
+    base_path = str(bulk_base_path or "").strip()
+    if base_path.startswith("/data/"):
+        return True
+    if not canonical_entry:
+        return False
+    profile_key = str(canonical_entry.get("profile_key") or "").strip().upper()
+    if profile_key in _TARGET_RESEARCH_PROFILES:
+        return True
+    return False
+
 
 @dataclass
 class CollectionStats:
@@ -45,6 +74,8 @@ class CollectionStats:
     new_packages: int
     removed_packages: int
     elapsed_seconds: float
+    path_enriched_packages: int = 0
+    bulk_identity_only_packages: int = 0
     package_hash: str | None = None
     package_list_hash: str | None = None
     package_signature_hash: str | None = None
@@ -52,6 +83,7 @@ class CollectionStats:
     fallback_used: bool = False
     identity_source: str = "pm_list_show_versioncode"
     identity_quality: str = "strict"
+    collection_mode: str = "baseline"
 
 
 def collect_inventory(
@@ -72,9 +104,23 @@ def collect_inventory(
 
     adb_client.clear_package_caches(serial)
 
-    packages_with_versions, package_names, _, fallback_used = adb_client.list_packages(
+    packages_with_versions, package_names, bulk_used, fallback_used = adb_client.list_packages(
         serial, use_bulk, allow_fallbacks=allow_fallbacks
     )
+    bulk_entry_map: dict[str, object] = {}
+    if bulk_used:
+        try:
+            bulk_entry_map = {
+                (
+                    normalize_package_name(entry.package_name, context="inventory")
+                    or entry.package_name.strip().lower()
+                ): entry
+                for entry in adb_client.list_package_bulk_entries(serial)
+                if entry.package_name
+            }
+        except Exception as exc:
+            log.warning(f"Failed to reload bulk package metadata: {exc}", category="inventory")
+            bulk_entry_map = {}
     if not packages_with_versions:
         raise RuntimeError("adb did not return any packages.")
     if fallback_used:
@@ -152,51 +198,108 @@ def collect_inventory(
     profile_pkg_timings: list[dict[str, object]] = []
 
     for index, package_name in enumerate(package_names, start=1):
-        # For correctness, always fetch full metadata/paths per package for now.
         t0 = time.time()
-        stage = "paths"
+        stage = "bulk"
+        package_key = normalize_package_name(package_name, context="inventory") or package_name.lower()
+        canonical_entry = canonical_metadata.get(package_key)
         try:
-            _emit_progress(
-                progress_cb,
-                processed=index - 1,
-                total=total,
-                elapsed=time.time() - scan_start,
-                eta=None,
-                split_apks=split_processed,
-                current_package=package_name,
-                current_stage="pm path",
-                path_calls_completed=profile_calls_paths,
-                metadata_calls_completed=profile_calls_meta,
-                active=True,
-            )
-            paths = adb_client.get_package_paths(
-                serial, package_name, allow_fallbacks=allow_fallbacks
-            )
-            t_paths = time.time() - t0
-            stage = "metadata"
-            profile_calls_paths += 1
-            _emit_progress(
-                progress_cb,
-                processed=index - 1,
-                total=total,
-                elapsed=time.time() - scan_start,
-                eta=None,
-                split_apks=split_processed,
-                current_package=package_name,
-                current_stage="pm dump",
-                path_calls_completed=profile_calls_paths,
-                metadata_calls_completed=profile_calls_meta,
-                active=True,
-            )
-            metadata = adb_client.get_package_metadata(serial, package_name)
-            t_meta = time.time() - t0 - t_paths
+            if bulk_used:
+                _emit_progress(
+                    progress_cb,
+                    processed=index - 1,
+                    total=total,
+                    elapsed=time.time() - scan_start,
+                    eta=None,
+                    split_apks=split_processed,
+                    current_package=package_name,
+                    current_stage="bulk",
+                    path_calls_completed=profile_calls_paths,
+                    metadata_calls_completed=profile_calls_meta,
+                    active=True,
+                )
+                bulk_entry = bulk_entry_map.get(package_key)
+                bulk_base_path = str(getattr(bulk_entry, "apk_path", "")).strip() or None
+                should_enrich_paths = _is_bulk_path_relevant_for_enrichment(
+                    package_name,
+                    canonical_entry=canonical_entry,
+                    bulk_base_path=bulk_base_path,
+                )
+                if should_enrich_paths:
+                    stage = "paths"
+                    _emit_progress(
+                        progress_cb,
+                        processed=index - 1,
+                        total=total,
+                        elapsed=time.time() - scan_start,
+                        eta=None,
+                        split_apks=split_processed,
+                        current_package=package_name,
+                        current_stage="pm path",
+                        path_calls_completed=profile_calls_paths,
+                        metadata_calls_completed=profile_calls_meta,
+                        active=True,
+                    )
+                    paths = adb_client.get_package_paths(
+                        serial, package_name, allow_fallbacks=allow_fallbacks
+                    )
+                    path_fidelity = "pm_path"
+                    t_paths = time.time() - t0
+                    profile_calls_paths += 1
+                else:
+                    paths = [bulk_base_path] if bulk_base_path else []
+                    path_fidelity = "bulk_base_only"
+                    t_paths = time.time() - t0
+                metadata = {
+                    "package_name": package_name,
+                    "installer": getattr(bulk_entry, "installer", None),
+                    "version_code": getattr(bulk_entry, "version_code", None),
+                    "user_id": str(getattr(bulk_entry, "uid")) if getattr(bulk_entry, "uid", None) is not None else None,
+                    "path_fidelity": path_fidelity,
+                }
+                t_meta = 0.0
+            else:
+                _emit_progress(
+                    progress_cb,
+                    processed=index - 1,
+                    total=total,
+                    elapsed=time.time() - scan_start,
+                    eta=None,
+                    split_apks=split_processed,
+                    current_package=package_name,
+                    current_stage="pm path",
+                    path_calls_completed=profile_calls_paths,
+                    metadata_calls_completed=profile_calls_meta,
+                    active=True,
+                )
+                paths = adb_client.get_package_paths(
+                    serial, package_name, allow_fallbacks=allow_fallbacks
+                )
+                t_paths = time.time() - t0
+                stage = "metadata"
+                profile_calls_paths += 1
+                _emit_progress(
+                    progress_cb,
+                    processed=index - 1,
+                    total=total,
+                    elapsed=time.time() - scan_start,
+                    eta=None,
+                    split_apks=split_processed,
+                    current_package=package_name,
+                    current_stage="pm dump",
+                    path_calls_completed=profile_calls_paths,
+                    metadata_calls_completed=profile_calls_meta,
+                    active=True,
+                )
+                metadata = adb_client.get_package_metadata(serial, package_name)
+                t_meta = time.time() - t0 - t_paths
         except Exception as exc:
             raise InventoryCollectionError(
                 package=package_name, index=index, total=total, stage=stage, original=exc
             ) from exc
-        profile_calls_meta += 1
-        package_key = normalize_package_name(package_name, context="inventory") or package_name.lower()
-        canonical_entry = canonical_metadata.get(package_key)
+        if bulk_used:
+            profile_calls_meta += 1
+        else:
+            profile_calls_meta += 1
         entry = normalizer.compose_inventory_entry(package_name, paths, metadata, canonical_entry)
         canonical_name = str(entry.get("package_name") or "").strip().lower()
         authoritative_version_code = version_by_package.get(canonical_name)
@@ -300,6 +403,8 @@ def collect_inventory(
         new_packages=0,  # computed in runner using previous snapshot
         removed_packages=0,  # computed in runner using previous snapshot
         elapsed_seconds=elapsed_total,
+        path_enriched_packages=sum(1 for row in rows if row.get("path_fidelity") == "pm_path"),
+        bulk_identity_only_packages=sum(1 for row in rows if row.get("path_fidelity") == "bulk_base_only"),
         package_hash=package_hash,
         package_list_hash=package_list_hash,
         package_signature_hash=package_signature_hash,
@@ -307,6 +412,7 @@ def collect_inventory(
         fallback_used=fallback_used,
         identity_source="pm_list_show_versioncode" if not fallback_used else "fallback",
         identity_quality="degraded" if degraded_identity else "strict",
+        collection_mode="bulk" if bulk_used else "baseline",
     )
 
     return rows, stats

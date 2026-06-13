@@ -35,7 +35,9 @@ def list_packages(
     if use_bulk:
         bulk_entries = adb_bulk.list_packages_bulk(serial)
         if bulk_entries:
-            packages_with_versions = [(entry.package_name, None, None) for entry in bulk_entries]
+            packages_with_versions = [
+                (entry.package_name, entry.version_code, None) for entry in bulk_entries
+            ]
             bulk_used = True
         else:
             if not allow_fallbacks:
@@ -73,6 +75,10 @@ def list_packages(
 
     package_names = [entry[0] for entry in packages_with_versions if entry and entry[0]]
     return packages_with_versions, package_names, bulk_used, fallback_used
+
+
+def list_package_bulk_entries(serial: str) -> list[adb_bulk.BulkPackageEntry]:
+    return adb_bulk.list_packages_bulk(serial)
 
 
 def clear_package_caches(serial: str) -> None:

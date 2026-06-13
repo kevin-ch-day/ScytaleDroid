@@ -52,7 +52,7 @@ def _emit_uniform_placeholder_skips(apps: Sequence[AppRunResult]) -> None:
     sigs: list[frozenset[str]] = []
     for app in apps:
         summary = _summarize_app_pipeline(app)
-        raw = summary.get("skipped_detectors")
+        raw = summary.get("placeholder_detectors")
         if not isinstance(raw, list):
             sigs.append(frozenset())
             continue

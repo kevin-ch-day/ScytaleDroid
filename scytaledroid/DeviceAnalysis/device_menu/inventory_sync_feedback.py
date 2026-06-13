@@ -19,7 +19,12 @@ def inventory_run_duration_label(seconds: float | None) -> str:
     return f"{secs}s"
 
 
-def print_inventory_run_feedback(result, *, scoped_label: str | None = None) -> None:
+def print_inventory_run_feedback(
+    result,
+    *,
+    scoped_label: str | None = None,
+    mode_label: str | None = None,
+) -> None:
     if result is None or not hasattr(result, "stats"):
         return
     sid = result.snapshot_id if getattr(result, "snapshot_id", None) is not None else "—"
@@ -28,6 +33,11 @@ def print_inventory_run_feedback(result, *, scoped_label: str | None = None) -> 
     if scoped_label:
         body = (
             f"{inventory_cli_labels.FEEDBACK_ACTION} ({scoped_label}) · "
+            f"{result.stats.total_packages} pkgs · snap {sid}{timing}"
+        )
+    elif mode_label:
+        body = (
+            f"{inventory_cli_labels.FEEDBACK_ACTION} ({mode_label}) · "
             f"{result.stats.total_packages} pkgs · snap {sid}{timing}"
         )
     else:

@@ -126,6 +126,7 @@ class WebViewDetector(BaseDetector):
     name = "WebView hygiene detector"
     default_profiles = ("quick", "full")
     section_key = "webview"
+    requires_string_index = True
 
     def run(self, context: DetectorContext) -> DetectorResult:
         started = perf_counter()

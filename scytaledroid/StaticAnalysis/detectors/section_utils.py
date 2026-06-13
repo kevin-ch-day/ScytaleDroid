@@ -20,6 +20,7 @@ def placeholder_result(
     metrics: dict[str, object] = {
         "summary": summary,
         "status": status.value,
+        "placeholder_detector": True,
     }
     note_lines = tuple(notes) if notes else tuple()
     return DetectorResult(

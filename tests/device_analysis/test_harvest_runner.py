@@ -454,6 +454,98 @@ def test_execute_harvest_replans_stale_package_and_recovers_cleanly(
     assert len(result.ok) == 1
 
 
+def test_pull_and_record_marks_stale_path_as_retryable_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.harvest.common import DedupeTracker, HarvestOptions
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError, ArtifactPlan, InventoryRow, PackagePlan
+
+    monkeypatch.setattr(
+        runner,
+        "adb_pull",
+        lambda **kwargs: ArtifactError(source_path=kwargs["source_path"], reason="path_stale"),
+    )
+
+    printed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        runner.common,
+        "print_artifact_status",
+        lambda _label, _file_name, **kwargs: printed.append((kwargs["suffix"], kwargs["level"])),
+    )
+
+    emitted: list[tuple[str, str, dict[str, object | None]]] = []
+
+    inventory = InventoryRow(
+        raw={},
+        package_name="com.example.retry",
+        app_label="Retry App",
+        installer="com.android.vending",
+        category=None,
+        primary_path="/data/app/com.example.retry/base.apk",
+        profile_key="TEST_PROFILE",
+        profile=None,
+        version_name="1.0",
+        version_code="1",
+        apk_paths=["/data/app/com.example.retry/base.apk"],
+        split_count=1,
+    )
+    plan = PackagePlan(
+        inventory=inventory,
+        artifacts=[
+            ArtifactPlan(
+                source_path="/data/app/com.example.retry/base.apk",
+                artifact="base",
+                file_name="com_example_retry_1__base.apk",
+                is_split_member=False,
+            )
+        ],
+        total_paths=1,
+    )
+
+    artifact_result, skip_reason = runner._pull_and_record(
+        serial="SERIAL123",
+        adb_path="adb",
+        package_dir=tmp_path,
+        plan=plan,
+        artifact=plan.artifacts[0],
+        app_id=None,
+        group_id=None,
+        verbose=False,
+        options=HarvestOptions(write_db=False, write_meta=False, pull_mode="inventory"),
+        tracker=DedupeTracker(HarvestOptions(write_db=False, write_meta=False, pull_mode="inventory")),
+        session_stamp="20260328",
+        storage_root_id=None,
+        artifact_index=1,
+        artifact_total=1,
+        verbose_output=False,
+        base_context={},
+        db_repo=None,
+        emit=lambda level, event, extra, message=None: emitted.append((level, event, dict(extra or {}))),
+        stats={},
+        snapshot_id=None,
+        snapshot_captured_at=None,
+    )
+
+    assert isinstance(artifact_result, ArtifactError)
+    assert artifact_result.reason == "path_stale"
+    assert skip_reason is None
+    assert printed == [("path_stale", "warn")]
+    assert emitted == [
+        (
+            "warning",
+            "harvest.artifact.retryable",
+            {
+                "package_name": "com.example.retry",
+                "artifact_path": "/data/app/com.example.retry/base.apk",
+                "file_name": "com_example_retry_1__base.apk",
+                "error": "path_stale",
+            },
+        )
+    ]
+
+
 def test_execute_harvest_marks_package_drifted_after_partial_pull_replan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -137,6 +137,30 @@ def _inventory_status_text(status_label: str) -> str:
     return _styled_summary_value(status_label, tone=tone)
 
 
+def _inventory_mode_label(mode: object) -> str | None:
+    value = str(mode or "").strip().lower()
+    if not value:
+        return None
+    if value == "bulk":
+        return "fast"
+    if value == "baseline":
+        return "full"
+    if value == "user_only":
+        return "profile"
+    return value.replace("_", "-")
+
+
+def _identity_quality_label(value: object) -> str | None:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if text == "strict":
+        return "strict"
+    if text == "degraded":
+        return "degraded"
+    return text.replace("_", "-")
+
+
 def _evidence_alignment_tone(
     *,
     latest_harvest: dict[str, object] | None,
@@ -588,6 +612,7 @@ def _render_compact_status(
     status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
     age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
     pkg_count = getattr(inventory_metadata, "package_count", None)
+    inventory_mode = _inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
     harvested_count = pipeline.get("harvested")
     blocked_policy = pipeline.get("blocked_policy")
     blocked_scope = pipeline.get("blocked_scope")
@@ -606,11 +631,12 @@ def _render_compact_status(
     palette = colors.get_palette()
     pipe = colors.apply(" │ ", palette.muted)
 
-    inv_part = (
-        f"{_inventory_status_text(status_label)} · "
-        f"{_styled_count_phrase(pkg_count, 'pkgs', tone='accent')} · "
-        f"{colors.apply(f'{age_display} ago', colors.style('muted'))}"
-    )
+    inv_bits = [f"{_inventory_status_text(status_label)}"]
+    if inventory_mode:
+        inv_bits.append(colors.apply(inventory_mode, palette.info, bold=True))
+    inv_bits.append(f"{_styled_count_phrase(pkg_count, 'pkgs', tone='accent')}")
+    inv_bits.append(colors.apply(f"{age_display} ago", colors.style("muted")))
+    inv_part = " · ".join(inv_bits)
     harvest_token = "none" if harvested_count in (None, 0) else str(harvested_count)
     harvest_styled = colors.apply(
         harvest_token,
@@ -680,6 +706,14 @@ def print_device_details(
     status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
     age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
     pkg_count = getattr(inventory_metadata, "package_count", None)
+    inventory_mode = _inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
+    identity_source = str(getattr(inventory_metadata, "identity_source", "") or "").strip()
+    identity_quality = _identity_quality_label(getattr(inventory_metadata, "identity_quality", None))
+    path_enriched = getattr(inventory_metadata, "path_enriched_packages", None)
+    bulk_only = getattr(inventory_metadata, "bulk_identity_only_packages", None)
+    current_state_unavailable_reason = str(
+        getattr(inventory_metadata, "current_state_unavailable_reason", "") or ""
+    ).strip()
     serial = active_details.get("serial") if isinstance(active_details, dict) else None
     pipeline = _compute_pipeline_state(serial)
     latest_harvest = pipeline.get("latest_harvest") if isinstance(pipeline, dict) else None
@@ -706,6 +740,30 @@ def print_device_details(
         f"{'Blocked':<12} : {_styled_count_phrase(pipeline.get('blocked_policy'), 'policy', tone='blocked')} | "
         f"{_styled_count_phrase(pipeline.get('blocked_scope'), 'scope', tone='warning')}"
     )
+    if inventory_mode:
+        print(
+            f"{'Mode':<12} : "
+            f"{colors.apply(inventory_mode, colors.style('info'), bold=True)}"
+        )
+    if identity_source or identity_quality:
+        identity_bits: list[str] = []
+        if identity_source:
+            identity_bits.append(colors.apply(identity_source, colors.style("text"), bold=True))
+        if identity_quality:
+            tone = "success" if identity_quality == "strict" else "warning"
+            identity_bits.append(colors.apply(identity_quality, colors.style(tone), bold=True))
+        print(f"{'Identity':<12} : " + " | ".join(identity_bits))
+    if path_enriched is not None or bulk_only is not None:
+        print(
+            f"{'Path detail':<12} : "
+            f"{_styled_count_phrase(path_enriched, 'enriched', tone='success')} | "
+            f"{_styled_count_phrase(bulk_only, 'bulk-only', tone='muted')}"
+        )
+    if current_state_unavailable_reason:
+        print(
+            f"{'Live compare':<12} : "
+            f"{colors.apply('unavailable', colors.style('warning'), bold=True)}"
+        )
 
     if isinstance(latest_harvest, dict):
         session_label = latest_harvest.get("session_label") or "unknown"

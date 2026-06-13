@@ -309,19 +309,9 @@ def render_snapshot_block(
         status_text = "STALE" if is_stale else "FRESH"
         age_text = format_inventory_elapsed(age_seconds)
         snapshot_count = getattr(previous_meta, "package_count", None)
-        device_count = None
-        if serial:
-            try:
-                from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
-
-                device_count = len(adb_packages.list_packages(serial))
-            except Exception:
-                device_count = None
-        if snapshot_count is not None and device_count and device_count != snapshot_count:
-            status_text = "MISMATCH"
-            pkg_text = f"{snapshot_count} (device {device_count})"
-        else:
-            pkg_text = str(snapshot_count if snapshot_count is not None else "—")
+        # Keep the pre-run snapshot card side-effect free. Live device-vs-snapshot drift is
+        # computed elsewhere; this banner should report the recorded snapshot state only.
+        pkg_text = str(snapshot_count if snapshot_count is not None else "—")
 
     mode_text = (mode or "baseline").strip()
     device_text = (serial or "unknown").strip()

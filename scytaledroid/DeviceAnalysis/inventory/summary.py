@@ -38,9 +38,14 @@ def render_sync_summary_box(result) -> None:
     net_count_delta = total_packages - (getattr(result, "previous_total", 0) or 0)
     elapsed_seconds = float(getattr(result, "elapsed_seconds", 0.0) or 0.0)
     split_packages = int(stats_split_packages or 0)
+    path_enriched = int(getattr(stats, "path_enriched_packages", 0) or 0) if stats else 0
+    bulk_only = int(getattr(stats, "bulk_identity_only_packages", 0) or 0) if stats else 0
     if rows:
         if split_packages <= 0:
             split_packages = sum(1 for row in rows if int((row or {}).get("split_count") or 1) > 1)
+        if path_enriched <= 0 and bulk_only <= 0:
+            path_enriched = sum(1 for row in rows if (row or {}).get("path_fidelity") == "pm_path")
+            bulk_only = sum(1 for row in rows if (row or {}).get("path_fidelity") == "bulk_base_only")
 
     formatter.print_header(SUMMARY_BOX_TITLE)
     print(
@@ -64,6 +69,11 @@ def render_sync_summary_box(result) -> None:
                     f"{_format_delta_text(net_count_delta if not first_snapshot else 0, first_snapshot=first_snapshot, updated_count=updated_count)}"
                 ),
                 "Split APK packages": f"{split_packages}",
+                **(
+                    {"Path fidelity": f"enriched={path_enriched}  bulk_only={bulk_only}"}
+                    if path_enriched or bulk_only
+                    else {}
+                ),
             },
         )
     )

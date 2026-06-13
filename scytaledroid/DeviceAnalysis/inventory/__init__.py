@@ -89,7 +89,12 @@ def run_device_summary(serial: str | None) -> None:
             try:
                 from scytaledroid.DeviceAnalysis.services import inventory_service
 
-                inventory_service.run_full_sync(serial=serial, ui_prefs=None, progress_sink="cli")
+                inventory_service.run_full_sync(
+                    serial=serial,
+                    ui_prefs=None,
+                    progress_sink="cli",
+                    mode="bulk",
+                )
             except Exception as exc:  # pragma: no cover - defensive
                 status_messages.print_status(f"Inventory sync failed: {exc}", level="error")
                 prompt_utils.press_enter_to_continue()
@@ -145,4 +150,3 @@ __all__ = [
     "print_inventory_run_summary_from_result",
     "run_device_summary",
 ]
-

@@ -60,6 +60,8 @@ class BaseDetector(ABC):
     name: str = "Base detector"
     default_profiles: Sequence[str] = ("quick", "full")
     section_key: str = "generic"
+    placeholder_detector: bool = False
+    requires_string_index: bool = False
 
     def applies_to_profile(self, profile: str) -> bool:
         if not self.default_profiles:

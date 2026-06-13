@@ -16,6 +16,7 @@ class FileIoSinksDetector(BaseDetector):
     name = "File I/O sinks detector"
     default_profiles = ("quick", "full")
     section_key = "file_io_sinks"
+    placeholder_detector = True
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(

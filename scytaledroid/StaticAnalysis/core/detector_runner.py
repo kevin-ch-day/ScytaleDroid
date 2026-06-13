@@ -172,6 +172,27 @@ def run_detector_pipeline(context) -> tuple[DetectorResult, ...]:
                 )
             continue
 
+        if getattr(detector, "requires_string_index", False):
+            index = getattr(context, "string_index", None)
+            if index is None or index.is_empty():
+                reason = "string index unavailable"
+                results.append(_build_skipped_result(detector, stage.section_key, reason))
+                if emit:
+                    _safe_emit_progress(
+                        emit,
+                        {
+                            "event": "stage_end",
+                            "stage_index": len(results),
+                            "stage_total": len(PIPELINE_STAGES),
+                            "section_key": stage.section_key,
+                            "detector_id": detector.detector_id,
+                            "status": "skipped",
+                            "duration_sec": 0.0,
+                            "note": reason,
+                        },
+                    )
+                continue
+
         started = perf_counter()
         try:
             result = detector.run(context)

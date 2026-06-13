@@ -43,6 +43,11 @@ class InventoryMeta:
     delta_changed_count: int | None = None
     delta_split_delta: int | None = None
     delta_details: InventoryDelta | None = None
+    collection_mode: str | None = None
+    identity_source: str | None = None
+    identity_quality: str | None = None
+    path_enriched_packages: int | None = None
+    bulk_identity_only_packages: int | None = None
 
     def to_payload(self) -> dict:
         payload = asdict(self)
@@ -75,6 +80,11 @@ class InventoryMeta:
             "delta_changed_count",
             "delta_split_delta",
             "delta_details",
+            "collection_mode",
+            "identity_source",
+            "identity_quality",
+            "path_enriched_packages",
+            "bulk_identity_only_packages",
         ):
             if payload.get(field) is None:
                 payload.pop(field, None)
@@ -163,6 +173,20 @@ class InventoryMeta:
         delta_updated = _coerce_int(payload.get("delta_updated"))
         delta_changed_count = _coerce_int(payload.get("delta_changed_count"))
         delta_split_delta = _coerce_int(payload.get("delta_split_delta"))
+        path_enriched_packages = _coerce_int(payload.get("path_enriched_packages"))
+        bulk_identity_only_packages = _coerce_int(payload.get("bulk_identity_only_packages"))
+
+        collection_mode = payload.get("collection_mode")
+        if not isinstance(collection_mode, str):
+            collection_mode = None
+
+        identity_source = payload.get("identity_source")
+        if not isinstance(identity_source, str):
+            identity_source = None
+
+        identity_quality = payload.get("identity_quality")
+        if not isinstance(identity_quality, str):
+            identity_quality = None
 
         delta_details = None
         delta_payload = payload.get("delta")
@@ -203,6 +227,11 @@ class InventoryMeta:
             delta_changed_count=delta_changed_count,
             delta_split_delta=delta_split_delta,
             delta_details=delta_details,
+            collection_mode=collection_mode,
+            identity_source=identity_source,
+            identity_quality=identity_quality,
+            path_enriched_packages=path_enriched_packages,
+            bulk_identity_only_packages=bulk_identity_only_packages,
         )
 
     def write_files(self, timestamp: str, *, suffix: str | None = None) -> None:

@@ -18,3 +18,9 @@ class InventoryStatus:
     scope_changed: bool = False
     state_changed: bool = False
     fingerprint_changed: bool = False
+    collection_mode: str | None = None
+    identity_source: str | None = None
+    identity_quality: str | None = None
+    path_enriched_packages: int | None = None
+    bulk_identity_only_packages: int | None = None
+    current_state_unavailable_reason: str | None = None

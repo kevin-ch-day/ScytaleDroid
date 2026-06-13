@@ -16,6 +16,7 @@ class UserInteractionRisksDetector(BaseDetector):
     name = "Clipboard/Overlay/Accessibility detector"
     default_profiles = ("quick", "full")
     section_key = "interaction_risks"
+    placeholder_detector = True
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(

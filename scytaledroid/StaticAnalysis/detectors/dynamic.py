@@ -16,6 +16,7 @@ class DynamicLoadingDetector(BaseDetector):
     name = "Dynamic / Reflection detector"
     default_profiles = ("quick", "full")
     section_key = "dynamic_loading"
+    placeholder_detector = True
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(
