@@ -350,8 +350,15 @@ def adb_pull(
             check=False,
         )
     except Exception as exc:  # pragma: no cover - defensive
+        message = str(exc)
+        if _is_device_unavailable_error(message):
+            log.warning(
+                f"adb pull aborted because the device became unavailable for {package_name}: {message}",
+                category="device",
+            )
+            return ArtifactError(source_path=source_path, reason="device_unavailable")
         log.error(f"adb pull execution failed for {package_name}: {exc}", category="device")
-        return ArtifactError(source_path=source_path, reason=str(exc))
+        return ArtifactError(source_path=source_path, reason=message)
 
     if completed.returncode != 0:
         stdout = (completed.stdout or "").strip()
@@ -363,6 +370,12 @@ def adb_pull(
                 category="device",
             )
             return ArtifactError(source_path=source_path, reason="path_stale")
+        if _is_device_unavailable_error(stderr):
+            log.warning(
+                f"adb pull aborted because the device became unavailable for {package_name}: {stderr}",
+                category="device",
+            )
+            return ArtifactError(source_path=source_path, reason="device_unavailable")
         log.warning(
             f"adb pull returned {completed.returncode} for {package_name}: {stderr}",
             category="device",
@@ -390,6 +403,19 @@ def format_file_size(num_bytes: int) -> str:
 def _is_stale_path_error(message: str) -> bool:
     lowered = message.lower()
     return "failed to stat remote object" in lowered or "no such file or directory" in lowered
+
+
+def _is_device_unavailable_error(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        token in lowered
+        for token in (
+            "device not found",
+            "no devices/emulators found",
+            "device offline",
+            "failed to get feature set: device",
+        )
+    )
 
 
 def print_artifact_status(

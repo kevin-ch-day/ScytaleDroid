@@ -161,12 +161,21 @@ def execute_harvest(
 
     stats: dict[str, int] = {
         "packages_total": len(plans),
+        "packages_reviewed": 0,
+        "packages_eligible": sum(1 for plan in plans if not plan.skip_reason),
+        "packages_attempted": 0,
+        "packages_harvested": 0,
         "packages_skipped": 0,
         "packages_clean": 0,
         "packages_partial": 0,
         "packages_failed": 0,
         "packages_drifted": 0,
         "packages_mirror_failed": 0,
+        "packages_runtime_skipped": 0,
+        "packages_path_stale": 0,
+        "packages_replanned": 0,
+        "packages_replan_success": 0,
+        "packages_replan_failed": 0,
         "artifacts_planned": sum(len(plan.artifacts) for plan in plans),
         "artifacts_written": 0,
         "artifacts_failed": 0,
@@ -337,6 +346,27 @@ def execute_harvest(
                 display_index=current_display_index,
                 display_total=display_total,
             )
+            terminal_abort_reason = _terminal_abort_reason(result)
+            if terminal_abort_reason:
+                run_error = terminal_abort_reason
+                packages_remaining = max(total - len(results), 0)
+                print(
+                    status_messages.status(
+                        "ADB device unavailable; stopping harvest early.",
+                        level="warn",
+                    )
+                )
+                _emit(
+                    "warning",
+                    "harvest.run.aborted",
+                    extra={
+                        "reason": terminal_abort_reason,
+                        "package_name": result.plan.inventory.package_name,
+                        "packages_processed": len(results),
+                        "packages_remaining": packages_remaining,
+                    },
+                )
+                break
     except Exception as exc:
         run_failed = True
         run_error = str(exc)
@@ -354,8 +384,18 @@ def execute_harvest(
     finally:
         summary = {
             "package_total": stats["packages_total"],
+            "packages_reviewed": stats["packages_reviewed"],
+            "packages_eligible": stats["packages_eligible"],
+            "packages_attempted": stats["packages_attempted"],
+            "packages_harvested": stats["packages_harvested"],
             "packages_skipped": stats["packages_skipped"],
-            "packages_processed": stats["packages_total"] - stats["packages_skipped"],
+            "packages_runtime_skipped": stats["packages_runtime_skipped"],
+            "packages_path_stale": stats["packages_path_stale"],
+            "packages_replanned": stats["packages_replanned"],
+            "packages_replan_success": stats["packages_replan_success"],
+            "packages_replan_failed": stats["packages_replan_failed"],
+            "packages_processed": len(results),
+            "packages_remaining": max(stats["packages_total"] - len(results), 0),
             "packages_clean": stats["packages_clean"],
             "packages_partial": stats["packages_partial"],
             "packages_failed": stats["packages_failed"],
@@ -382,6 +422,7 @@ def execute_harvest(
             "run_state": _derive_run_state(
                 stats,
                 run_failed=run_failed,
+                run_error=run_error,
                 write_db_requested=requested_db_mirror,
                 write_db_effective=options.write_db,
             ),
@@ -602,6 +643,7 @@ def _execute_package_plan(
             and not stale_replan_attempted
         ):
             stale_replan_attempted = True
+            result.stale_replan_required = True
             refreshed_plan, drift_reasons = package_refresh.replan_package_after_stale_path(
                 serial=serial,
                 plan=active_plan,
@@ -625,6 +667,17 @@ def _execute_package_plan(
                         + (f" ({','.join(drift_reasons)})" if drift_reasons else "")
                     ),
                     category="device",
+                )
+                result.stale_replan_outcome = _classify_stale_replan_outcome(
+                    refreshed_plan=refreshed_plan,
+                    drift_reasons=drift_reasons,
+                )
+                _print_stale_replan_outcome(
+                    plan=active_plan,
+                    artifact=artifact,
+                    artifact_index=artifact_index,
+                    artifact_total=artifact_total,
+                    outcome=result.stale_replan_outcome,
                 )
                 if drift_reasons:
                     result.drift_reasons = list(drift_reasons)
@@ -650,6 +703,14 @@ def _execute_package_plan(
                 if artifact_index <= len(active_plan.artifacts):
                     continue
                 break
+            result.stale_replan_outcome = "path_stale_replan_failed"
+            _print_stale_replan_outcome(
+                plan=active_plan,
+                artifact=artifact,
+                artifact_index=artifact_index,
+                artifact_total=artifact_total,
+                outcome=result.stale_replan_outcome,
+            )
             result.capture_status = "drifted"
             result.drift_reasons = ["package_refresh_failed"]
             result.errors.append(
@@ -851,7 +912,7 @@ def _pull_and_record(
             artifact.file_name,
             index=artifact_index,
             total=artifact_total,
-            suffix=pull_result.reason,
+            suffix=_artifact_status_suffix(pull_result.reason),
             level="warn" if retryable_stale_path else "error",
         )
         emit(
@@ -1107,6 +1168,71 @@ def _pull_and_record(
     )
 
 
+def _artifact_status_suffix(reason: str) -> str:
+    if reason == "path_stale":
+        return "path stale; replan required"
+    return reason
+
+
+def _classify_stale_replan_outcome(
+    *,
+    refreshed_plan: PackagePlan,
+    drift_reasons: Sequence[str],
+) -> str:
+    if refreshed_plan.skip_reason == "no_paths":
+        return "path_stale_package_no_longer_accessible"
+    if refreshed_plan.skip_reason:
+        return "path_stale_blocked_before_pull"
+    if drift_reasons:
+        return "path_stale_package_updated_since_inventory"
+    return "path_stale_refreshed_and_retried"
+
+
+def _stale_replan_outcome_text(outcome: str) -> tuple[str, str]:
+    mapping = {
+        "path_stale_refreshed_and_retried": (
+            "path stale; refreshed package paths and retried",
+            "warn",
+        ),
+        "path_stale_package_updated_since_inventory": (
+            "path stale; package appears updated since inventory snapshot",
+            "warn",
+        ),
+        "path_stale_blocked_before_pull": (
+            "path stale; blocked before pull",
+            "warn",
+        ),
+        "path_stale_package_no_longer_accessible": (
+            "path stale; replan failed because package is no longer accessible",
+            "error",
+        ),
+        "path_stale_replan_failed": (
+            "path stale; replan failed",
+            "error",
+        ),
+    }
+    return mapping.get(outcome, ("path stale; replan required", "warn"))
+
+
+def _print_stale_replan_outcome(
+    *,
+    plan: PackagePlan,
+    artifact: ArtifactPlan,
+    artifact_index: int,
+    artifact_total: int,
+    outcome: str,
+) -> None:
+    suffix, level = _stale_replan_outcome_text(outcome)
+    common.print_artifact_status(
+        plan.inventory.display_name(),
+        artifact.file_name,
+        index=artifact_index,
+        total=artifact_total,
+        suffix=suffix,
+        level=level,
+    )
+
+
 def _print_progress(index: int, total: int, plan: PackagePlan) -> None:
     artifact_count = len(plan.artifacts)
     suffix = "artifact" if artifact_count == 1 else "artifacts"
@@ -1166,8 +1292,31 @@ def _progress_step_for_total(display_total: int) -> int:
 
 
 def _update_package_outcome(stats: dict[str, int], result: PullResult) -> None:
+    stats["packages_reviewed"] += 1
     if result.preflight_reason:
         return
+    stats["packages_attempted"] += 1
+    if result.ok:
+        stats["packages_harvested"] += 1
+    if result.skipped and not result.ok and not result.errors:
+        stats["packages_runtime_skipped"] += 1
+    stale_replan_required = bool(getattr(result, "stale_replan_required", False))
+    stale_replan_outcome = getattr(result, "stale_replan_outcome", None)
+    if stale_replan_required:
+        stats["packages_path_stale"] += 1
+    if stale_replan_outcome:
+        stats["packages_replanned"] += 1
+        if stale_replan_outcome in {
+            "path_stale_refreshed_and_retried",
+            "path_stale_package_updated_since_inventory",
+            "path_stale_blocked_before_pull",
+        }:
+            stats["packages_replan_success"] += 1
+        elif stale_replan_outcome in {
+            "path_stale_package_no_longer_accessible",
+            "path_stale_replan_failed",
+        }:
+            stats["packages_replan_failed"] += 1
     if result.capture_status == "drifted":
         stats["packages_drifted"] += 1
     elif result.capture_status == "partial":
@@ -1221,15 +1370,25 @@ def _print_progress_line(
     partial_count = int(stats.get("packages_partial", 0))
     err_count = int(stats.get("packages_failed", 0))
     drifted_count = int(stats.get("packages_drifted", 0))
-    skipped_seen = int(stats.get("packages_skipped", 0))
-    blocked_total = max(int(stats.get("packages_total", 0)) - int(package_total), 0)
-    package_index = min(package_index, package_total)
-    pct = (100 * package_index) // package_total if package_total else 0
-    line = f"Harvest: {package_index}/{package_total} pulled ({pct}%)"
-    if blocked_total > 0:
-        line += f" · blocked reviewed {min(skipped_seen, blocked_total)}/{blocked_total}"
-    elif skipped_seen > 0:
-        line += f" · skipped {skipped_seen}"
+    reviewed = min(int(stats.get("packages_reviewed", 0)), int(stats.get("packages_total", 0)))
+    reviewed_total = int(stats.get("packages_total", 0))
+    eligible = int(stats.get("packages_eligible", 0))
+    attempted = int(stats.get("packages_attempted", 0))
+    harvested = int(stats.get("packages_harvested", 0))
+    blocked = int(stats.get("packages_skipped", 0))
+    skipped_runtime = int(stats.get("packages_runtime_skipped", 0))
+    replanned = int(stats.get("packages_replanned", 0))
+    replan_failed = int(stats.get("packages_replan_failed", 0))
+
+    line = f"Harvest: reviewed {reviewed}/{reviewed_total} · eligible {eligible} · attempted {attempted} · harvested {harvested}"
+    if blocked > 0:
+        line += f" · blocked before pull {blocked}"
+    if skipped_runtime > 0:
+        line += f" · skipped {skipped_runtime}"
+    if replanned > 0:
+        line += f" · replanned {replanned}"
+        if replan_failed > 0:
+            line += f" (failed {replan_failed})"
     if err_count or drifted_count:
         line += f" · issues (failed={err_count} drifted={drifted_count} partial={partial_count})"
     elif partial_count:
@@ -1344,11 +1503,14 @@ def _derive_run_state(
     stats: Mapping[str, int],
     *,
     run_failed: bool,
+    run_error: str | None,
     write_db_requested: bool,
     write_db_effective: bool,
 ) -> str:
     if run_failed:
         return "FAILED"
+    if run_error == "device_unavailable":
+        return "ABORTED_DEVICE_UNAVAILABLE"
     scheduled_packages = max(int(stats.get("packages_total", 0)) - int(stats.get("packages_skipped", 0)), 0)
     mirror_failed = int(stats.get("packages_mirror_failed", 0))
     if write_db_requested and scheduled_packages > 0 and (mirror_failed >= scheduled_packages or not write_db_effective):
@@ -1360,6 +1522,13 @@ def _derive_run_state(
     if int(stats.get("packages_failed", 0)) > 0 or int(stats.get("packages_partial", 0)) > 0:
         return "PARTIAL"
     return "SUCCESS"
+
+
+def _terminal_abort_reason(result: PullResult) -> str | None:
+    for error in result.errors:
+        if error.reason == "device_unavailable":
+            return "device_unavailable"
+    return None
 
 
 __all__ = ["execute_harvest"]

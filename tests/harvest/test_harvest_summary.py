@@ -37,6 +37,9 @@ def test_build_summary_card_lines_surfaces_executed_and_blocked_counts():
         runtime_skips=Counter(),
         runtime_notes=Counter(),
         preflight_skips=Counter({"policy_non_root": 411, "no_paths": 18}),
+        reviewed_packages=546,
+        eligible_packages=117,
+        harvested_packages=117,
     )
 
     lines = _build_summary_card_lines(
@@ -48,7 +51,15 @@ def test_build_summary_card_lines_surfaces_executed_and_blocked_counts():
         pull_errors=0,
     )
 
-    assert any("Packages" in line and "546 total" in line and "117 executed" in line and "429 blocked" in line for line in lines)
+    assert any(
+        "Packages" in line
+        and "546 total" in line
+        and "546 reviewed" in line
+        and "117 eligible" in line
+        and "117 attempted" in line
+        and "429 blocked before pull" in line
+        for line in lines
+    )
     assert any("Results" in line and "clean" in line for line in lines)
 
 
@@ -191,6 +202,79 @@ def test_build_harvest_run_report_collects_policy_and_denied_packages():
     assert report.denied_packages == ["com.example.app"]
 
 
+def test_build_harvest_run_report_counts_only_attempted_packages_on_early_abort():
+    selection, plan, pkg_plan = _single_package_plan()
+    second_inventory = _dummy_inventory("com.example.two", "Second")
+    second_plan = PackagePlan(
+        inventory=second_inventory,
+        artifacts=[
+            ArtifactPlan(
+                second_inventory.primary_path or "",
+                "artifact.apk",
+                "artifact.apk",
+                False,
+            )
+        ],
+        total_paths=1,
+    )
+    selection.packages.append(second_inventory)
+    selection.metadata["candidate_count"] = 2
+    selection.metadata["selected_count"] = 2
+    plan.packages.append(second_plan)
+
+    result = PullResult(
+        plan=pkg_plan,
+        errors=[ArtifactError(source_path="/data/app/com.example.app/base.apk", reason="device_unavailable")],
+        capture_status="failed",
+    )
+
+    report = build_harvest_run_report(plan, [result], selection=selection)
+
+    assert report.metrics.total_packages == 2
+    assert report.metrics.executed_packages == 1
+    assert report.metrics.eligible_packages == 2
+    assert report.metrics.reviewed_packages == 1
+    assert report.status == "aborted_device_unavailable"
+    assert report.status_level == "error"
+
+
+def test_build_harvest_run_report_counts_path_stale_replan_outcomes():
+    selection, plan, pkg_plan = _single_package_plan()
+    result = PullResult(
+        plan=pkg_plan,
+        ok=[],
+        skipped=[],
+        capture_status="drifted",
+        stale_replan_required=True,
+        stale_replan_outcome="path_stale_blocked_before_pull",
+    )
+
+    report = build_harvest_run_report(plan, [result], selection=selection)
+
+    assert report.metrics.path_stale_packages == 1
+    assert report.metrics.replanned_packages == 1
+    assert report.metrics.replan_success_packages == 1
+    assert report.metrics.replan_failed_packages == 0
+
+
+def test_build_harvest_run_report_tolerates_legacy_pull_result_without_replan_fields():
+    selection, plan, pkg_plan = _single_package_plan()
+    result = PullResult(
+        plan=pkg_plan,
+        ok=[],
+        skipped=[],
+        capture_status="clean",
+    )
+    delattr(result, "stale_replan_required")
+    delattr(result, "stale_replan_outcome")
+
+    report = build_harvest_run_report(plan, [result], selection=selection)
+
+    assert report.metrics.path_stale_packages == 0
+    assert report.metrics.replanned_packages == 0
+    assert report.status == "success"
+
+
 def test_render_harvest_summary_consumes_report_without_rederiving_status(monkeypatch, capsys):
     metrics = HarvestRunMetrics(
         total_packages=1,
@@ -264,3 +348,70 @@ def test_render_harvest_summary_consumes_report_without_rederiving_status(monkey
     )
     render_harvest_summary(plan, [], selection=selection)
     assert "[COPY] harvest" in capsys.readouterr().out
+
+
+def test_render_harvest_summary_uses_supplied_report_without_rebuild(monkeypatch, capsys):
+    metrics = HarvestRunMetrics(
+        total_packages=1,
+        blocked_packages=0,
+        executed_packages=1,
+        planned_artifacts=1,
+        artifacts_written=1,
+        artifacts_failed=0,
+        artifact_status_counter=Counter({"written": 1}),
+        packages_with_writes=1,
+        packages_with_errors=0,
+        packages_failed=0,
+        packages_drifted=0,
+        packages_with_mirror_failures=0,
+        packages_skipped_runtime=0,
+        runtime_skips=Counter(),
+        runtime_notes=Counter(),
+        preflight_skips=Counter(),
+    )
+    selection, plan, _pkg_plan = _single_package_plan()
+    fake_report = HarvestRunReport(
+        harvest_result=type(
+            "HarvestResultLike",
+            (),
+            {"packages": [], "device_serial": None, "scope_name": "Test Scope"},
+        )(),
+        metrics=metrics,
+        pull_errors=0,
+        files_written=1,
+        status="success",
+        status_level="success",
+        metadata={},
+        scope_hash_changed=False,
+        policy_filtered={},
+        policy_details=None,
+        excluded_counts={},
+        excluded_samples={},
+        denied_packages=[],
+        top_package_limit=5,
+        summary_card_lines=["Scope   : Test Scope"],
+        highlights=[],
+        artifacts_root="/tmp/artifacts",
+        receipts_root="/tmp/receipts",
+        runtime_note_summary=None,
+        no_new=[],
+        delta_summary=None,
+        copy_line="[COPY] harvest scope='Test Scope' status=success",
+        delta_line=None,
+        skip_counts_line=None,
+        package_rollup_line="packages: total=1",
+        artifact_rollup_line="artifacts: 1 planned / 1 written / 0 failed",
+    )
+
+    monkeypatch.setattr(
+        "scytaledroid.DeviceAnalysis.harvest.summary.build_harvest_run_report",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not rebuild report")),
+    )
+    monkeypatch.setattr("scytaledroid.DeviceAnalysis.harvest.summary._harvest_simple_mode", lambda: True)
+    monkeypatch.setattr("scytaledroid.DeviceAnalysis.harvest.summary._harvest_compact_mode", lambda: True)
+
+    render_harvest_summary(plan, [], selection=selection, report=fake_report)
+    out = capsys.readouterr().out
+
+    assert "Harvest finished (success)" in out
+    assert "scope=Test Scope" in out

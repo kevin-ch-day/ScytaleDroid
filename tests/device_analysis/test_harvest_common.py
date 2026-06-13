@@ -104,6 +104,40 @@ def test_adb_pull_returns_path_stale_error_for_stale_remote_path(
     assert result.reason == "path_stale"
 
 
+def test_adb_pull_normalizes_device_unavailable_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scytaledroid.DeviceAnalysis.harvest import common
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError
+
+    dest = tmp_path / "base.apk"
+
+    monkeypatch.setattr(
+        common.adb_client,
+        "run_adb_command",
+        lambda *_args, **_kwargs: _Completed(
+            returncode=1,
+            stderr="adb: error: failed to get feature set: device 'SERIAL' not found",
+        ),
+    )
+
+    result = common.adb_pull(
+        adb_path="adb",
+        serial="SERIAL",
+        source_path="/data/app/base.apk",
+        dest_path=dest,
+        package_name="pkg",
+        verbose=False,
+        overwrite_existing=False,
+    )
+
+    assert isinstance(result, ArtifactError)
+    assert result.reason == "device_unavailable"
+    assert capsys.readouterr().out == ""
+
+
 def test_iter_harvest_package_manifest_paths_sorted_and_skips_missing(tmp_path: Path) -> None:
     from scytaledroid.DeviceAnalysis.harvest import common
 
