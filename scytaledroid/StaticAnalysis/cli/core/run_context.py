@@ -14,6 +14,7 @@ class StaticRunContext:
     batch: bool
     noninteractive: bool
     show_splits: bool
+    scan_splits_enabled: bool
     session_stamp: str | None
     persistence_ready: bool
     paper_grade_requested: bool
@@ -34,6 +35,7 @@ def build_static_run_context(spec: StaticRunSpec) -> StaticRunContext:
         batch=batch,
         noninteractive=spec.noninteractive,
         show_splits=bool(spec.params.show_split_summaries),
+        scan_splits_enabled=bool(spec.params.scan_splits),
         session_stamp=spec.params.session_stamp,
         persistence_ready=bool(spec.params.persistence_ready),
         paper_grade_requested=bool(spec.params.paper_grade_requested),

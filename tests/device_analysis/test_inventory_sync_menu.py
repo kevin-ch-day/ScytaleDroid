@@ -104,6 +104,7 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
     assert scoped_call["serial"] == "SERIAL123"
     assert scoped_call["scope_id"] == "profile::research_dataset_alpha"
     assert scoped_call["packages"] == {"com.example.alpha", "com.example.beta"}
+    assert scoped_call["mode"] == "bulk"
 
 
 def test_run_inventory_sync_menu_uses_harvest_ready_full_sync_mode(monkeypatch) -> None:

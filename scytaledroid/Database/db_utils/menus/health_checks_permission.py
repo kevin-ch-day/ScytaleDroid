@@ -98,7 +98,7 @@ def render_scoring_checks(
 
     optional_tables = {
         "contributors": "legacy mirror / compat (optional; empty normal in canonical-only)",
-        "risk_scores": "session rollup summary on core DB (not static_schema_gate); empty can be normal",
+        "risk_scores": "permission posture session rollup on core DB (not static_schema_gate); empty can be normal",
         "static_permission_risk_vnext": "canonical run-scoped permission risk detail (matrix sibling)",
     }
     for table, hint in optional_tables.items():
@@ -117,4 +117,3 @@ def render_scoring_checks(
         if not count:
             detail += f" — {hint}"
         print_status_line(level, table, detail=detail)
-

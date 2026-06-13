@@ -39,6 +39,7 @@ from .scan_identity_helpers import (
     _compute_run_identity,
     _dedupe_artifacts,
     _run_signature_sha256,
+    select_group_artifacts,
 )
 from .scan_progress_display import _PipelineProgress
 from .scan_report import (
@@ -127,6 +128,7 @@ def execute_scan(
             batch=False,
             noninteractive=False,
             show_splits=bool(getattr(params, "show_split_summaries", False)),
+            scan_splits_enabled=bool(getattr(params, "scan_splits", True)),
             session_stamp=getattr(params, "session_stamp", None),
             persistence_ready=bool(getattr(params, "persistence_ready", True)),
             paper_grade_requested=bool(getattr(params, "paper_grade_requested", True)),
@@ -137,6 +139,7 @@ def execute_scan(
     _abort_reason = None
     _abort_signal = None
     reset_split_heavy_session_notice()
+    scan_splits_enabled = bool(getattr(params, "scan_splits", True))
 
     started_at = datetime.now(UTC)
     results: list[AppRunResult] = []
@@ -144,7 +147,10 @@ def execute_scan(
     failures: list[str] = []
     dry_run_skipped = 0
     completed_artifacts = 0
-    total_artifacts = sum(len(_dedupe_artifacts(group.artifacts)) for group in selection.groups)
+    total_artifacts = sum(
+        len(select_group_artifacts(group, scan_splits=scan_splits_enabled))
+        for group in selection.groups
+    )
     artifact_phase_timings: dict[str, float] = {}
     session_parallel_peak_workers = 0
     show_splits = _show_split_breakdown(run_ctx)
@@ -274,7 +280,8 @@ def execute_scan(
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         harvest_research_usable, harvest_block_reasons = _apply_harvest_contract(app_result, group)
         identity = _compute_run_identity(group)
-        manifest_sha256 = _artifact_manifest_sha256(group)
+        planned_artifacts = select_group_artifacts(group, scan_splits=scan_splits_enabled)
+        manifest_sha256 = _artifact_manifest_sha256(group, artifacts=planned_artifacts)
         run_signature = _run_signature_sha256(
             identity["base_apk_sha256"],
             identity["artifact_set_hash"],
@@ -355,11 +362,7 @@ def execute_scan(
         if abort_requested:
             break
 
-        artifacts = _dedupe_artifacts(group.artifacts)
-        if run_ctx.batch and run_ctx.quiet and not bool(getattr(params, "scan_splits", True)):
-            # Batch dataset runs should be predictable and cheap: scan base only.
-            base_artifact = getattr(group, "base_artifact", None)
-            artifacts = [base_artifact] if base_artifact is not None else artifacts[:1]
+        artifacts = planned_artifacts
         app_result.discovered_artifacts = len(artifacts)
         if not artifacts:
             message = f"No artifacts available for {group.package_name}; skipping."

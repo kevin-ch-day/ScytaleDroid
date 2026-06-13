@@ -55,7 +55,13 @@ def test_render_scoring_checks_handles_no_snapshots_and_optional_tables():
 
     assert ("warn", "permission audit", "no snapshots recorded yet") in calls
     assert ("warn", "grade distribution", "no snapshots available") in calls
-    assert any(label == "risk_scores" and level == "info" for level, label, _ in calls)
+    assert any(
+        label == "risk_scores"
+        and level == "info"
+        and detail is not None
+        and "permission posture" in detail
+        for level, label, detail in calls
+    )
 
 
 def test_run_inventory_health_check_passes_computed_snapshot_inputs():

@@ -21,6 +21,10 @@ class ProgressCallback(Protocol):
         ...
 
 
+InventoryRow = dict[str, object]
+InventoryFilter = Callable[[InventoryRow], bool]
+
+
 @dataclass
 class InventorySyncStats:
     total_packages: int
@@ -59,40 +63,9 @@ def _resolve_use_bulk(mode: str) -> bool:
     return InventoryMode.from_str(mode) is InventoryMode.BULK
 
 
-def run_full_sync(
-    serial: str,
-    filter_fn: Callable[[dict[str, object | None], bool]] = None,
-    progress_cb: ProgressCallback | None = None,
-    mode: str | None = None,
-    config: InventoryConfig | None = None,
-) -> InventoryResult:
-    """
-    Run a full inventory sync for *serial* and return a UI-free result.
-    """
-    prev_meta = snapshot_io.load_latest_snapshot_meta(serial)
-    prev_snapshot = snapshot_io.load_latest_inventory(serial)
-    prev_packages: set[str] = set()
-    prev_identity: dict[str, str | None] = {}
-    prev_split = 0
-    if prev_snapshot:
-        pkgs = prev_snapshot.get("packages") or []
-        if isinstance(pkgs, list):
-            for item in pkgs:
-                if isinstance(item, dict):
-                    name = item.get("package_name")
-                    if isinstance(name, str):
-                        cleaned = normalize_package_name(name, context="inventory")
-                        if cleaned:
-                            prev_packages.add(cleaned)
-                            version_code = item.get("version_code")
-                            if isinstance(version_code, (int, str)):
-                                prev_identity[cleaned] = str(version_code)
-                            else:
-                                prev_identity[cleaned] = None
-                    if int(item.get("split_count") or 1) > 1:
-                        prev_split += 1
+def _make_progress_adapter(progress_cb: ProgressCallback | None):
+    """Adapt collector-style numeric progress into the runner's event payloads."""
 
-    # Adapt the collector's numeric progress callback to dict-based callbacks expected by CLI.
     def _progress_adapter(
         processed: int,
         total: int,
@@ -126,18 +99,83 @@ def run_full_sync(
                 }
             )
 
-    if progress_cb:
-        progress_cb({"phase": "start", "total": None, "phase_label": "Collecting packages"})
+    return _progress_adapter if progress_cb else None
+
+
+def _emit_progress_phase(
+    progress_cb: ProgressCallback | None,
+    *,
+    phase: str,
+    elapsed_seconds: float | None = None,
+    total: int | None = None,
+) -> None:
+    if not progress_cb:
+        return
+    payload: dict[str, object] = {
+        "phase": phase,
+        "phase_label": "Collecting packages",
+    }
+    if total is not None:
+        payload["total"] = total
+    else:
+        payload["total"] = None
+    if elapsed_seconds is not None:
+        payload["elapsed_seconds"] = elapsed_seconds
+    progress_cb(payload)
+
+
+def _resolve_effective_filter(mode: str, filter_fn: InventoryFilter | None) -> InventoryFilter | None:
+    if mode != InventoryMode.USER_ONLY.value:
+        return filter_fn
+
+    def _user_only(entry: InventoryRow) -> bool:
+        primary_path = str(entry.get("primary_path") or "")
+        return primary_path.startswith("/data/")
+
+    if filter_fn is None:
+        return _user_only
+    return lambda entry: filter_fn(entry) and _user_only(entry)
+
+
+def run_full_sync(
+    serial: str,
+    filter_fn: InventoryFilter | None = None,
+    progress_cb: ProgressCallback | None = None,
+    mode: str | None = None,
+    config: InventoryConfig | None = None,
+) -> InventoryResult:
+    """
+    Run a full inventory sync for *serial* and return a UI-free result.
+    """
+    prev_meta = snapshot_io.load_latest_snapshot_meta(serial)
+    prev_snapshot = snapshot_io.load_latest_inventory(serial)
+    prev_packages: set[str] = set()
+    prev_identity: dict[str, str | None] = {}
+    prev_split = 0
+    if prev_snapshot:
+        pkgs = prev_snapshot.get("packages") or []
+        if isinstance(pkgs, list):
+            for item in pkgs:
+                if isinstance(item, dict):
+                    name = item.get("package_name")
+                    if isinstance(name, str):
+                        cleaned = normalize_package_name(name, context="inventory")
+                        if cleaned:
+                            prev_packages.add(cleaned)
+                            version_code = item.get("version_code")
+                            if isinstance(version_code, (int, str)):
+                                prev_identity[cleaned] = str(version_code)
+                            else:
+                                prev_identity[cleaned] = None
+                    if int(item.get("split_count") or 1) > 1:
+                        prev_split += 1
+
+    _emit_progress_phase(progress_cb, phase="start")
 
     # Resolve mode/config once and keep it consistent for the run.
     resolved_config = config or InventoryConfig.from_env()
     mode = (mode or resolved_config.mode.value).lower().strip()
-    effective_filter = filter_fn
-    if mode == InventoryMode.USER_ONLY.value:
-        def _user_only(entry: dict[str, object]) -> bool:
-            primary_path = str(entry.get("primary_path") or "")
-            return primary_path.startswith("/data/")
-        effective_filter = _user_only if filter_fn is None else lambda entry: filter_fn(entry) and _user_only(entry)
+    effective_filter = _resolve_effective_filter(mode, filter_fn)
 
     collect_start = time.time()
     try:
@@ -145,7 +183,7 @@ def run_full_sync(
             serial=serial,
             filter_fn=effective_filter,
             package_allowlist=None,
-            progress_cb=_progress_adapter if progress_cb else None,
+            progress_cb=_make_progress_adapter(progress_cb),
             use_bulk=_resolve_use_bulk(mode),
             allow_fallbacks=resolved_config.allow_fallbacks,
         )
@@ -240,15 +278,12 @@ def run_full_sync(
         first_snapshot=first_snapshot,
     )
 
-    if progress_cb:
-        progress_cb(
-            {
-                "phase": "complete",
-                "phase_label": "Collecting packages",
-                "total": stats.total_packages,
-                "elapsed_seconds": stats.elapsed_seconds,
-            }
-        )
+    _emit_progress_phase(
+        progress_cb,
+        phase="complete",
+        total=stats.total_packages,
+        elapsed_seconds=stats.elapsed_seconds,
+    )
 
     overall_elapsed = collect_elapsed + persist_elapsed + db_elapsed
     try:
@@ -287,42 +322,7 @@ def run_scoped_sync(
     resolved_config = config or InventoryConfig.from_env()
     mode = (mode or resolved_config.mode.value).lower().strip()
 
-    # Progress adapter uses the allowlisted total (collect_inventory filters early).
-    def _progress_adapter(
-        processed: int,
-        total: int,
-        elapsed_seconds: float,
-        eta_seconds: float | None,
-        split_apks: int,
-        *,
-        current_package: str | None = None,
-        current_stage: str | None = None,
-        bulk_rows_completed: int | None = None,
-        path_calls_completed: int | None = None,
-        metadata_calls_completed: int | None = None,
-        active: bool = False,
-    ) -> None:
-        if progress_cb:
-            progress_cb(
-                {
-                    "phase": "progress",
-                    "phase_label": "Collecting packages",
-                    "processed": processed,
-                    "total": total,
-                    "elapsed_seconds": elapsed_seconds,
-                    "eta_seconds": eta_seconds,
-                    "split_processed": split_apks,
-                    "current_package": current_package,
-                    "current_stage": current_stage,
-                    "bulk_rows_completed": bulk_rows_completed,
-                    "path_calls_completed": path_calls_completed,
-                    "metadata_calls_completed": metadata_calls_completed,
-                    "active": active,
-                }
-            )
-
-    if progress_cb:
-        progress_cb({"phase": "start", "total": None, "phase_label": "Collecting packages"})
+    _emit_progress_phase(progress_cb, phase="start")
 
     collect_start = time.time()
     try:
@@ -330,7 +330,8 @@ def run_scoped_sync(
             serial=serial,
             filter_fn=None,
             package_allowlist={p.strip().lower() for p in package_allowlist if str(p).strip()},
-            progress_cb=_progress_adapter if progress_cb else None,
+            progress_cb=_make_progress_adapter(progress_cb),
+            use_bulk=_resolve_use_bulk(mode),
             allow_fallbacks=resolved_config.allow_fallbacks,
         )
     except KeyboardInterrupt:
@@ -377,12 +378,9 @@ def run_scoped_sync(
         delta=InventoryDelta(new_count=0, removed_count=0, updated_count=0, changed_packages_count=0),
         first_snapshot=False,
     )
-    if progress_cb:
-        progress_cb(
-            {
-                "phase": "complete",
-                "elapsed_seconds": stats.elapsed_seconds,
-                "phase_label": "Collecting packages",
-            }
-        )
+    _emit_progress_phase(
+        progress_cb,
+        phase="complete",
+        elapsed_seconds=stats.elapsed_seconds,
+    )
     return result

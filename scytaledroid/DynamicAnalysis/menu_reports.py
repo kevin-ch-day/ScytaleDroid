@@ -332,6 +332,13 @@ def run_state_summary_report(
     verbose = ui_level in {"details", "debug"}
     if not verbose:
         env = _capture_environment_summary()
+        total_runs = int(getattr(summary, "total_runs", 0) or 0)
+        valid_runs = int(getattr(summary, "valid_runs", 0) or 0)
+        missing_run_manifest_dirs = int(getattr(summary, "missing_run_manifest_dirs", 0) or 0)
+        evidence_root_exists = bool(getattr(summary, "evidence_root_exists", False))
+        evidence_root = str(getattr(summary, "evidence_root", "") or "")
+        tracker_runs_hint = int(getattr(summary, "tracker_runs_hint", 0) or 0)
+        reasons = tuple(getattr(summary, "reasons", ()) or ())
         handoff = (
             state_payload.get("static_handoff_plan_summary")
             if isinstance(state_payload.get("static_handoff_plan_summary"), dict)
@@ -367,23 +374,38 @@ def run_state_summary_report(
                 ],
             ),
             (
-                "Evidence",
+                "Repeatability",
                 [
-                    ("evidence packs", f"{summary.total_runs} total / {summary.valid_runs} valid / {max(int(summary.total_runs) - int(summary.valid_runs), 0)} invalid"),
-                    ("incomplete dirs", str(summary.missing_run_manifest_dirs)),
-                    ("evidence root exists", _bool_text(summary.evidence_root_exists)),
-                    ("evidence root", str(summary.evidence_root)),
+                    (
+                        "runs ready",
+                        f"{int(((state_payload.get('repeatability_summary') or {}) if isinstance(state_payload.get('repeatability_summary'), dict) else {}).get('runs_repeatability_ready') or 0)}/"
+                        f"{int(((state_payload.get('repeatability_summary') or {}) if isinstance(state_payload.get('repeatability_summary'), dict) else {}).get('runs_total') or 0)}",
+                    ),
+                    ("freeze role", str((((state_payload.get("repeatability_summary") or {}) if isinstance(state_payload.get("repeatability_summary"), dict) else {}).get("freeze_role") or "none"))),
+                    (
+                        "publication manifests",
+                        _bool_text((((state_payload.get("repeatability_summary") or {}) if isinstance(state_payload.get("repeatability_summary"), dict) else {}).get("publication_manifests_present"))),
+                    ),
                 ],
             ),
-            (
-                "Tracker",
-                [
-                    ("tracker exists", _bool_text(_tracker_path().exists())),
-                    ("tracker rows", str(int(summary.tracker_runs_hint))),
-                    ("tracker/evidence mismatches", str(mismatches)),
-                    ("dataset rows evaluated", str(tracker_rows)),
-                ],
-            ),
+                (
+                    "Evidence",
+                    [
+                        ("evidence packs", f"{total_runs} total / {valid_runs} valid / {max(total_runs - valid_runs, 0)} invalid"),
+                        ("incomplete dirs", str(missing_run_manifest_dirs)),
+                        ("evidence root exists", _bool_text(evidence_root_exists)),
+                        ("evidence root", evidence_root),
+                    ],
+                ),
+                (
+                    "Tracker",
+                    [
+                        ("tracker exists", _bool_text(_tracker_path().exists())),
+                        ("tracker rows", str(tracker_runs_hint)),
+                        ("tracker/evidence mismatches", str(mismatches)),
+                        ("dataset rows evaluated", str(tracker_rows)),
+                    ],
+                ),
             (
                 "Freeze",
                 [
@@ -397,7 +419,7 @@ def run_state_summary_report(
             print()
             menu_utils.print_header(title)
             table_utils.render_table(["Signal", "Value"], rows_for_section, compact=False)
-        if "NO_EVIDENCE_PACKS_FOUND" in summary.reasons:
+        if "NO_EVIDENCE_PACKS_FOUND" in reasons:
             print(
                 status_messages.status(
                     "No dynamic evidence packs are present. This is expected after cleanup or before the first run.",
@@ -490,6 +512,42 @@ def run_state_summary_report(
         missing_pkgs = handoff.get("missing_packages") if isinstance(handoff.get("missing_packages"), list) else []
         if missing_pkgs:
             print(status_messages.status("Missing dataset plans: " + ", ".join(str(pkg) for pkg in missing_pkgs), level="warn"))
+
+    repeatability = (
+        state_payload.get("repeatability_summary")
+        if isinstance(state_payload.get("repeatability_summary"), dict)
+        else {}
+    )
+    if repeatability:
+        print()
+        menu_utils.print_header("Repeatability")
+        rrows = [
+            ("Runs total", str(int(repeatability.get("runs_total") or 0))),
+            ("Identity complete", str(int(repeatability.get("runs_identity_complete") or 0))),
+            ("Static link ready", str(int(repeatability.get("runs_static_link_ready") or 0))),
+            ("PCAP present", str(int(repeatability.get("runs_pcap_present") or 0))),
+            ("Features present", str(int(repeatability.get("runs_features_present") or 0))),
+            ("Windowing recorded", str(int(repeatability.get("runs_windowing_recorded") or 0))),
+            ("Threshold present", str(int(repeatability.get("runs_threshold_present") or 0))),
+            ("RDI ready", str(int(repeatability.get("runs_rdi_ready") or 0))),
+            ("Freeze stamped", str(int(repeatability.get("runs_freeze_stamped") or 0))),
+            ("Fully repeatable", str(int(repeatability.get("runs_repeatability_ready") or 0))),
+            ("Publication manifests", _bool_text(repeatability.get("publication_manifests_present"))),
+        ]
+        table_utils.render_table(["Metric", "Value"], rrows, compact=False)
+        blockers = repeatability.get("top_blockers") if isinstance(repeatability.get("top_blockers"), list) else []
+        if blockers:
+            brows = [
+                [
+                    str(item.get("code") or "unknown"),
+                    str(int(item.get("count") or 0)),
+                    ", ".join(str(x) for x in (item.get("sample_run_ids") or [])[:3]) or "—",
+                ]
+                for item in blockers
+                if isinstance(item, dict)
+            ]
+            if brows:
+                table_utils.render_table(["Blocker", "Count", "Sample runs"], brows, compact=False)
 
     if delta_rows:
         print()

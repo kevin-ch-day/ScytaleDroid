@@ -22,6 +22,7 @@ from ...core.repository import load_display_name_map
 from ..core.analysis_profiles import run_modules_for_profile
 from ..commands.models import Command
 from ..core.models import RunParameters
+from ..execution.scan_identity_helpers import select_group_artifacts
 from ..flows.profile_prior_session import (
     format_audit_session_command,
     format_grain_integrity_session_command,
@@ -33,6 +34,31 @@ _RUN_SETUP_LABEL_W = 18
 
 def _run_setup_kv(label: str, value: str) -> None:
     print(f"{label:<{_RUN_SETUP_LABEL_W}} : {value}")
+
+
+def _effective_artifact_counts(groups: tuple[Any, ...], *, scan_splits: bool) -> tuple[int, int]:
+    total = 0
+    split_total = 0
+    for group in groups:
+        artifacts = select_group_artifacts(group, scan_splits=scan_splits)
+        total += len(artifacts)
+        split_total += sum(1 for artifact in artifacts if getattr(artifact, "is_split_member", False))
+    return total, split_total
+
+
+def _large_split_groups(groups: tuple[Any, ...]) -> list[tuple[int, str, str]]:
+    disp = load_display_name_map(groups)
+    heavy = sorted(
+        (
+            len(getattr(group, "artifacts", ()) or ()),
+            str(getattr(group, "package_name", "") or "unknown"),
+            disp.get(str(getattr(group, "package_name", "") or "").lower(), ""),
+        )
+        for group in groups
+    )
+    heavy = [row for row in heavy if row[0] >= _LARGE_SPLIT_WARN_MIN_APK]
+    heavy.sort(key=lambda row: row[0], reverse=True)
+    return heavy
 
 
 def _compact_preset_summary_for_run_setup(params: RunParameters, command: Command) -> str:
@@ -151,11 +177,8 @@ def render_run_preflight(
 ) -> None:
     groups = tuple(getattr(selection, "groups", ()) or ())
     package_count = len(groups)
-    artifact_count = sum(len(getattr(group, "artifacts", ()) or ()) for group in groups)
-    split_apk_total = sum(
-        sum(1 for a in getattr(group, "artifacts", ()) or () if getattr(a, "is_split_member", False))
-        for group in groups
-    )
+    scan_splits = bool(getattr(params, "scan_splits", True))
+    artifact_count, split_apk_total = _effective_artifact_counts(groups, scan_splits=scan_splits)
     base_apk_total = artifact_count - split_apk_total
     target = getattr(selection, "label", None) or "selected scope"
     print()
@@ -172,7 +195,7 @@ def render_run_preflight(
         f"{artifact_count} ({base_apk_total} base + {split_apk_total} split)",
     )
     _run_setup_kv("Session", str(params.session_stamp or "unspecified"))
-    scan_splits_note = "on" if bool(getattr(params, "scan_splits", True)) else "off"
+    scan_splits_note = "on" if scan_splits else "off"
     _run_setup_kv("Split APK scan", scan_splits_note)
     if reset_mode == "session":
         _run_setup_kv("Reset", "session")
@@ -364,11 +387,13 @@ def prompt_run_setup(
 
     groups = tuple(getattr(selection, "groups", ()) or ())
     package_count = len(groups)
-    artifact_counts = [len(getattr(group, "artifacts", ()) or ()) for group in groups]
-    artifact_count = sum(artifact_counts)
-    split_apk_total = sum(
-        sum(1 for a in getattr(group, "artifacts", ()) or () if getattr(a, "is_split_member", False))
-        for group in groups
+    scan_splits_enabled = bool(getattr(params, "scan_splits", True))
+    effective_artifact_counts = [
+        len(select_group_artifacts(group, scan_splits=scan_splits_enabled)) for group in groups
+    ]
+    artifact_count, split_apk_total = _effective_artifact_counts(
+        groups,
+        scan_splits=scan_splits_enabled,
     )
     older_excluded = int(getattr(selection, "older_captures_excluded", 0) or 0)
     selection_rule = getattr(selection, "selection_rule_summary", None)
@@ -397,20 +422,10 @@ def prompt_run_setup(
     )
     if older_excluded > 0:
         _run_setup_kv("Older captures", f"{older_excluded} excluded")
-    scan_splits_note = "on" if bool(getattr(params, "scan_splits", True)) else "off"
+    scan_splits_note = "on" if scan_splits_enabled else "off"
     _run_setup_kv("Split APK scan", scan_splits_note)
-    if artifact_counts and max(artifact_counts) >= _LARGE_SPLIT_WARN_MIN_APK:
-        disp = load_display_name_map(groups)
-        heavy = sorted(
-            (
-                len(getattr(g, "artifacts", ()) or ()),
-                str(getattr(g, "package_name", "") or "unknown"),
-                disp.get(str(getattr(g, "package_name", "") or "").lower(), ""),
-            )
-            for g in groups
-        )
-        heavy = [row for row in heavy if row[0] >= _LARGE_SPLIT_WARN_MIN_APK]
-        heavy.sort(key=lambda row: row[0], reverse=True)
+    heavy = _large_split_groups(groups)
+    if scan_splits_enabled and effective_artifact_counts and heavy:
         top = heavy[:5]
         parts = []
         for n, pkg, label in top:
@@ -418,6 +433,10 @@ def prompt_run_setup(
             parts.append(f"{shown} ({n} APK files)")
         top_txt = "; ".join(parts)
         _run_setup_kv("Large split apps", top_txt)
+        _run_setup_kv(
+            "Recommendation",
+            "3) Advanced / edit run options -> Split APK scan off (base APK only)",
+        )
     _run_setup_kv("Session", session_stamp)
     if has_existing:
         _run_setup_kv("Existing session", "found")

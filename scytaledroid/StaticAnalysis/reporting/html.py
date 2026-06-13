@@ -78,8 +78,10 @@ def render_html_report(view: Mapping[str, Any]) -> str:
 
     secret_rows = _render_secret_rows(secrets)
 
+    risk_title = escape(str(risk.get("title", "Selected static risk indicators")))
     risk_score = escape(str(risk.get("score", 0)))
     risk_band = escape(str(risk.get("band", "Low")))
+    risk_surface = escape(str(risk.get("surface_kind", "heuristic_static_indicator_summary")))
     risk_factors = "".join(
         f"<span class=\"pill\">{escape(str(factor))}</span>" for factor in risk.get("top_factors", [])
     )
@@ -131,9 +133,10 @@ def render_html_report(view: Mapping[str, Any]) -> str:
         f"      <div style=\"margin-top:12px\">Result: <span class=\"badge {badge_class}\">{badge_text}</span> &nbsp; P0={escape(str(result.get('p0', 0)))} P1={escape(str(result.get('p1', 0)))} P2={escape(str(result.get('p2', 0)))}</div>",
         "    </section>",
         "    <section class=\"card\">",
-        "      <h2>Risk</h2>",
+        f"      <h2>{risk_title}</h2>",
         f"      <div class=\"score\">{risk_score}</div>",
         f"      <div class=\"muted\" style=\"margin:4px 0 10px\">{risk_band}</div>",
+        f"      <div class=\"muted\" style=\"margin:0 0 10px\">Heuristic surface: {risk_surface}</div>",
         f"      <div>{risk_factors}</div>",
         "    </section>",
         "  </div>",
@@ -144,7 +147,7 @@ def render_html_report(view: Mapping[str, Any]) -> str:
         "  <section class=\"card section\">",
         "    <h2>Permissions</h2>",
         "    <table>",
-        "      <thead><tr><th>Permission</th><th>Namespace</th><th>Risk</th></tr></thead>",
+        "      <thead><tr><th>Permission</th><th>Namespace</th><th>Permission band</th></tr></thead>",
         "      <tbody>",
         permissions_table,
         "      </tbody>",
@@ -246,7 +249,7 @@ def _render_permission_rows(permissions: Sequence[Mapping[str, Any]]) -> list[st
             "        <tr>"
             f"<td class=\"mono\">{escape(str(entry.get('display_name', '—')))}</td>"
             f"<td class=\"mono muted\">{escape(str(entry.get('namespace', '—')))}</td>"
-            f"<td>{escape(str(entry.get('risk', 'Low')))}</td>"
+            f"<td>{escape(str(entry.get('band') or entry.get('risk') or 'Low'))}</td>"
             "</tr>"
         )
     return rows

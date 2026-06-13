@@ -76,6 +76,7 @@ def launch_scan_flow_resolved(
         batch=output_prefs.effective_batch(),
         noninteractive=output_prefs.effective_noninteractive(),
         show_splits=output_prefs.effective_show_splits(),
+        scan_splits_enabled=bool(getattr(params, "scan_splits", True)),
         session_stamp=params.session_stamp,
         persistence_ready=bool(getattr(params, "persistence_ready", True)),
         paper_grade_requested=bool(getattr(params, "paper_grade_requested", True)),
@@ -99,7 +100,12 @@ def launch_scan_flow_resolved(
 
     modules = _modules_for_run(params)
     scope_target = format_scope_target(selection)
-    _dispatch._emit_selection_manifest(selection, params.session_stamp, execution_id=params.execution_id)
+    _dispatch._emit_selection_manifest(
+        selection,
+        params.session_stamp,
+        execution_id=params.execution_id,
+        scan_splits=bool(getattr(params, "scan_splits", True)),
+    )
     _dispatch._write_execution_marker(params)
     if not (frozen_ctx.quiet and frozen_ctx.batch):
         print()

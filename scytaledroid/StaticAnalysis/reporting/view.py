@@ -69,6 +69,10 @@ def build_report_view(report: StaticAnalysisReport) -> Mapping[str, Any]:
         network=network_payload,
         report=report,
     ).to_dict()
+    risk_payload = dict(risk_payload)
+    risk_payload.setdefault("title", "Selected static risk indicators")
+    risk_payload.setdefault("surface_kind", "heuristic_static_indicator_summary")
+    risk_payload.setdefault("is_canonical_app_risk", False)
 
     timestamp_utc = _format_generated_timestamp(report.generated_at)
     toolchain = _normalise_toolchain(metadata.get("toolchain"))
@@ -276,6 +280,7 @@ def _collect_permission_rows(report: StaticAnalysisReport) -> list[Mapping[str, 
                 "name": name,
                 "display_name": display_name,
                 "namespace": namespace,
+                "band": band,
                 "risk": band,
                 "weight": severity,
                 "is_custom": name in custom,

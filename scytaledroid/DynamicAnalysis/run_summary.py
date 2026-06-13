@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -289,7 +290,7 @@ def print_run_summary(result, duration_label: str) -> None:
                 _print_simple_list("Monitor", [f"Runtime: {monitor_path}"])
 
     if status == "blocked":
-        print(status_messages.status("Session blocked by plan validation.", level="blocked"))
+        print(status_messages.status(_blocked_status_message(result, run_dir), level="blocked"))
     elif status != "success":
         print(status_messages.status("Session marked as degraded. Check observer errors above.", level="warn"))
     if result.dynamic_run_id and result.evidence_path:
@@ -365,6 +366,100 @@ def _load_json(path: Path | None) -> dict[str, object] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _load_latest_event_details(run_dir: Path | None, *, event_type: str) -> dict[str, object] | None:
+    if not run_dir:
+        return None
+    events_path = run_dir / "notes" / "run_events.jsonl"
+    if not events_path.exists():
+        return None
+    latest: dict[str, object] | None = None
+    try:
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("event_type") != event_type:
+                continue
+            details = payload.get("details")
+            if isinstance(details, dict):
+                latest = details
+    except OSError:
+        return None
+    return latest
+
+
+def _blocked_status_message(result, run_dir: Path | None) -> str:
+    tools_missing = _blocked_tools_missing_detail(run_dir)
+    if tools_missing:
+        return f"Session blocked: missing required host tools. {tools_missing}"
+    blocked_detail = _blocked_plan_validation_detail(result, run_dir)
+    message = "Session blocked by plan validation."
+    if blocked_detail:
+        message = f"{message} {blocked_detail}"
+    return message
+
+
+def _blocked_tools_missing_detail(run_dir: Path | None) -> str | None:
+    event = _load_latest_event_details(run_dir, event_type="preflight.tools_missing")
+    if not isinstance(event, dict):
+        return None
+    tools = _string_list(event.get("missing_tools"))
+    if not tools:
+        return None
+    return f"missing_tools={','.join(tools)}"
+
+
+def _blocked_plan_validation_detail(result, run_dir: Path | None) -> str | None:
+    event = _load_latest_event_details(run_dir, event_type="plan.validation")
+    if isinstance(event, dict):
+        reasons = _string_list(event.get("reasons"))
+        warnings = _string_list(event.get("warnings"))
+        summary = event.get("summary") if isinstance(event.get("summary"), dict) else {}
+        pieces: list[str] = []
+        primary_reason = reasons[0] if reasons else None
+        if primary_reason:
+            pieces.append(primary_reason)
+        mismatch_count = _safe_nonnegative_int(summary.get("mismatch_count"))
+        warning_count = _safe_nonnegative_int(summary.get("warning_count"))
+        if mismatch_count:
+            pieces.append(f"mismatches={mismatch_count}")
+        if warning_count:
+            pieces.append(f"warnings={warning_count}")
+        elif warnings:
+            pieces.append(f"warnings={len(warnings)}")
+        if pieces:
+            return " | ".join(pieces)
+    errors = _string_list(getattr(result, "errors", ()))
+    if errors:
+        return errors[0]
+    return None
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, dict)):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _safe_nonnegative_int(value: object) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
 
 
 def _format_bytes(size: int) -> str:
