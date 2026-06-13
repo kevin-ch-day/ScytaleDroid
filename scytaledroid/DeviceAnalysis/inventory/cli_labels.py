@@ -19,7 +19,8 @@ PROFILE_MENU_SUBTITLE = "Choose profile"
 FULL_SYNC_WHILE_FRESH_PROMPT = "Snapshot already fresh ({age} · {packages}). Full device refresh anyway?"
 
 MENU_OPTION_FULL = "Full device (all packages)"
-MENU_OPTION_SCOPED = "Profile packages only (faster)"
+MENU_OPTION_FAST = "Full device (fast harvest-readiness)"
+MENU_OPTION_SCOPED = "Profile packages only (fastest)"
 
 RUN_START_HEADER = "Refresh inventory · start"
 RUN_START_CARD_FOOTER = (

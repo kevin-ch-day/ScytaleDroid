@@ -14,13 +14,20 @@ def test_build_pipeline_summary_skipped_uses_metrics_summary_when_no_skip_reason
             section_key="domain",
             status=Badge.SKIPPED,
             duration_sec=0.0,
-            metrics={"summary": "Domain verification analysis placeholder", "status": "skipped"},
+            metrics={
+                "summary": "Domain verification analysis placeholder",
+                "status": "skipped",
+                "placeholder_detector": True,
+            },
         ),
     )
     summary = build_pipeline_summary(results)
     skipped = summary.get("skipped_detectors")
-    assert isinstance(skipped, list) and len(skipped) == 1
-    assert skipped[0]["reason"] == "Domain verification analysis placeholder"
+    placeholders = summary.get("placeholder_detectors")
+    assert skipped is None
+    assert isinstance(placeholders, list) and len(placeholders) == 1
+    assert placeholders[0]["reason"] == "Domain verification analysis placeholder"
+    assert summary.get("placeholder_detector_count") == 1
 
 
 def test_build_pipeline_summary_skipped_prefers_skip_reason_over_summary() -> None:

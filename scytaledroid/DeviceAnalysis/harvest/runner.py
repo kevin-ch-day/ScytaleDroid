@@ -840,17 +840,18 @@ def _pull_and_record(
         overwrite_existing=options.overwrite_existing,
     )
     if isinstance(pull_result, ArtifactError):
+        retryable_stale_path = pull_result.reason == "path_stale"
         common.print_artifact_status(
             plan.inventory.display_name(),
             artifact.file_name,
             index=artifact_index,
             total=artifact_total,
             suffix=pull_result.reason,
-            level="error",
+            level="warn" if retryable_stale_path else "error",
         )
         emit(
-            "error",
-            "harvest.artifact.error",
+            "warning" if retryable_stale_path else "error",
+            "harvest.artifact.retryable" if retryable_stale_path else "harvest.artifact.error",
             extra={
                 "package_name": plan.inventory.package_name,
                 "artifact_path": artifact.source_path,

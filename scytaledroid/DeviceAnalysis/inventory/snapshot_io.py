@@ -473,12 +473,21 @@ def persist_snapshot(
     if duration_seconds is not None:
         payload["duration_seconds"] = duration_seconds
     if collection_stats is not None:
+        collection_mode = getattr(collection_stats, "collection_mode", None)
         identity_source = getattr(collection_stats, "identity_source", None)
         identity_quality = getattr(collection_stats, "identity_quality", None)
+        path_enriched_packages = getattr(collection_stats, "path_enriched_packages", None)
+        bulk_identity_only_packages = getattr(collection_stats, "bulk_identity_only_packages", None)
+        if isinstance(collection_mode, str) and collection_mode:
+            payload["collection_mode"] = collection_mode
         if isinstance(identity_source, str) and identity_source:
             payload["identity_source"] = identity_source
         if isinstance(identity_quality, str) and identity_quality:
             payload["identity_quality"] = identity_quality
+        if isinstance(path_enriched_packages, int):
+            payload["path_enriched_packages"] = path_enriched_packages
+        if isinstance(bulk_identity_only_packages, int):
+            payload["bulk_identity_only_packages"] = bulk_identity_only_packages
 
     suffix_segment = f".{filename_suffix}" if filename_suffix else ""
     target_file = device_dir / f"inventory_{timestamp}{suffix_segment}.json"
@@ -519,6 +528,7 @@ def persist_snapshot(
                     scope_size=len(normalized_rows),
                     extras={
                         "snapshot_path": str(display_path),
+                        "collection_mode": payload.get("collection_mode"),
                         "identity_source": payload.get("identity_source"),
                         "identity_quality": payload.get("identity_quality"),
                     },
@@ -586,6 +596,11 @@ def persist_snapshot(
         delta_changed_count=delta_changed,
         delta_split_delta=delta_split,
         delta_details=delta if delta is not None else None,
+        collection_mode=getattr(collection_stats, "collection_mode", None) if collection_stats is not None else None,
+        identity_source=getattr(collection_stats, "identity_source", None) if collection_stats is not None else None,
+        identity_quality=getattr(collection_stats, "identity_quality", None) if collection_stats is not None else None,
+        path_enriched_packages=getattr(collection_stats, "path_enriched_packages", None) if collection_stats is not None else None,
+        bulk_identity_only_packages=getattr(collection_stats, "bulk_identity_only_packages", None) if collection_stats is not None else None,
     )
     meta.write_files(timestamp, suffix=filename_suffix)
 

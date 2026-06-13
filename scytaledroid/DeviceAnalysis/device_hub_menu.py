@@ -21,10 +21,18 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 def _inventory_badge(status: InventoryStatus | None) -> str:
     if status is None or status.last_run_ts is None:
         return "NONE (no snapshot)"
+    mode = str(getattr(status, "collection_mode", "") or "").strip().lower()
+    mode_label = ""
+    if mode == "bulk":
+        mode_label = " fast"
+    elif mode == "baseline":
+        mode_label = " full"
+    elif mode == "user_only":
+        mode_label = " profile"
     count_text = (
         f"{status.package_count} pkg" if status.package_count is not None else "unknown"
     )
-    return f"{status.status_label} ({status.age_display}) {count_text}"
+    return f"{status.status_label}{mode_label} ({status.age_display}) {count_text}"
 
 
 def _render_header(adb_status: str, live_count: int) -> None:

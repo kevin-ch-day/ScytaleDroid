@@ -34,6 +34,7 @@ def _fake_result():
         delta=delta,
         first_snapshot=False,
         fallback_used=True,
+        stats=SimpleNamespace(total_packages=2, split_packages=0, path_enriched_packages=1, bulk_identity_only_packages=1),
     )
 
 
@@ -51,6 +52,8 @@ def test_print_inventory_run_summary_from_result(capsys):
     assert "11" in out
     assert re.search(r"Packages\s*:\s*2", out)
     assert re.search(r"Split APK packages\s*:\s*0", out)
+    assert "Path fidelity" in out
+    assert "enriched=1  bulk_only=1" in out
     assert "Duration" in out and "5s" in out
     assert "Delta vs previous" in out
     assert "updated=0" in out
@@ -77,6 +80,7 @@ def test_inventory_summary_field_order_is_stable(capsys):
         "[RUN] Duration",
         "[RESULT] Delta vs previous",
         "[RESULT] Split APK packages",
+        "[RESULT] Path fidelity",
     ]
     positions = []
     for prefix in expected_prefixes:

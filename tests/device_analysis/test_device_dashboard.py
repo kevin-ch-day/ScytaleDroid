@@ -18,7 +18,12 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
         "battery_status": "Charging",
         "is_rooted": "NO",
     }
-    inventory = SimpleNamespace(status_label="FRESH", age_display="14 Hrs 39 Mins", package_count=546)
+    inventory = SimpleNamespace(
+        status_label="FRESH",
+        age_display="14 Hrs 39 Mins",
+        package_count=546,
+        collection_mode="bulk",
+    )
 
     monkeypatch.setattr(
         dashboard,
@@ -56,6 +61,7 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     assert "Motorola" in out and "Android 15" in out and "Physical" in out and "NON-ROOT" in out
     assert "Inv" in out and "Har" in out and "Ev" in out
     assert "546 pkgs" in out and "14h 39m ago" in out
+    assert "Inv FRESH" in out and "fast" in out
     # Compact pipeline strip: word labels (operator-readable) vs legacy "117 hv" tokens
     assert "117" in out and "411" in out and "18" in out
     assert "pullable" in out and "policy-blocked" in out and "scope-blocked" in out
@@ -106,7 +112,17 @@ def test_print_device_details_shows_moved_pipeline_and_evidence_blocks(monkeypat
         "battery_status": "Charging",
         "is_rooted": "NO",
     }
-    inventory = SimpleNamespace(status_label="FRESH", age_display="14 Hrs 39 Mins", package_count=546)
+    inventory = SimpleNamespace(
+        status_label="FRESH",
+        age_display="14 Hrs 39 Mins",
+        package_count=546,
+        collection_mode="bulk",
+        identity_source="pm_list_show_versioncode",
+        identity_quality="strict",
+        path_enriched_packages=117,
+        bulk_identity_only_packages=429,
+        current_state_unavailable_reason="pm list unsupported",
+    )
 
     monkeypatch.setattr(
         dashboard,
@@ -142,6 +158,10 @@ def test_print_device_details_shows_moved_pipeline_and_evidence_blocks(monkeypat
     assert "Inventory    : 546 inventoried | 546 in scope | 117 eligible" in out
     assert "Harvest      : 117 scheduled | 117 harvested | 546 receipts" in out
     assert "Blocked      : 411 policy | 18 scope" in out
+    assert "Mode         : fast" in out
+    assert "Identity     : pm_list_show_versioncode | strict" in out
+    assert "Path detail  : 117 enriched | 429 bulk-only" in out
+    assert "Live compare : unavailable" in out
     assert "Evidence and Paths" in out
     assert "Latest harvest  : 20260416" in out
     assert "Alignment       : current" in out
@@ -161,7 +181,12 @@ def test_dashboard_next_step_explains_inventory_harvest_misalignment(monkeypatch
         "battery_status": "Charging",
         "is_rooted": "NO",
     }
-    inventory = SimpleNamespace(status_label="FRESH", age_display="10 Secs", package_count=546)
+    inventory = SimpleNamespace(
+        status_label="FRESH",
+        age_display="10 Secs",
+        package_count=546,
+        collection_mode="bulk",
+    )
 
     monkeypatch.setattr(
         dashboard,

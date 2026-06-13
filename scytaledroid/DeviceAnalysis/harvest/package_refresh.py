@@ -64,13 +64,10 @@ def refresh_inventory_row_from_device(serial: str, inventory: InventoryRow) -> I
         refresh=True,
         allow_fallbacks=allow_fallbacks,
     )
-    metadata = adb_packages.get_package_metadata(
-        serial,
-        inventory.package_name,
-        refresh=True,
-    )
     version_code = inventory.version_code
     version_name = inventory.version_name
+    installer = inventory.installer
+    app_label = inventory.app_label
     try:
         versions = adb_packages.list_packages_with_versions(serial, allow_fallbacks=allow_fallbacks)
     except Exception:
@@ -81,13 +78,25 @@ def refresh_inventory_row_from_device(serial: str, inventory: InventoryRow) -> I
         version_code = maybe_str(refreshed_version_code) or version_code
         version_name = maybe_str(refreshed_version_name) or version_name
         break
-    version_name = maybe_str(metadata.get("version_name")) or version_name
+
+    # Hot-path stale recovery should avoid `pm dump` unless existing metadata is
+    # missing. Fresh paths and version identity are sufficient to replan safely.
+    metadata: dict[str, str | None] = {}
+    if app_label is None or installer is None or version_name is None:
+        metadata = adb_packages.get_package_metadata(
+            serial,
+            inventory.package_name,
+            refresh=True,
+        )
+        app_label = maybe_str(metadata.get("app_label")) or app_label
+        installer = maybe_str(metadata.get("installer")) or installer
+        version_name = maybe_str(metadata.get("version_name")) or version_name
     raw = dict(inventory.raw)
     raw.update(
         {
             "package_name": inventory.package_name,
-            "app_label": maybe_str(metadata.get("app_label")) or inventory.app_label,
-            "installer": maybe_str(metadata.get("installer")) or inventory.installer,
+            "app_label": app_label,
+            "installer": installer,
             "version_name": version_name,
             "version_code": version_code,
             "primary_path": refreshed_paths[0] if refreshed_paths else None,

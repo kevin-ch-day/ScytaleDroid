@@ -55,6 +55,10 @@ class InventoryResult:
     first_snapshot: bool
 
 
+def _resolve_use_bulk(mode: str) -> bool:
+    return InventoryMode.from_str(mode) is InventoryMode.BULK
+
+
 def run_full_sync(
     serial: str,
     filter_fn: Callable[[dict[str, object | None], bool]] = None,
@@ -140,6 +144,7 @@ def run_full_sync(
             filter_fn=effective_filter,
             package_allowlist=None,
             progress_cb=_progress_adapter if progress_cb else None,
+            use_bulk=_resolve_use_bulk(mode),
             allow_fallbacks=resolved_config.allow_fallbacks,
         )
     except KeyboardInterrupt:

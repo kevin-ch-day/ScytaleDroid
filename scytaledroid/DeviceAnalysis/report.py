@@ -50,7 +50,7 @@ def generate_device_report(serial: str | None) -> None:
         if prompt_utils.prompt_yes_no(
             "No inventory data found. Run a new inventory sync now?", default=True
         ):
-            device_service.sync_inventory(serial)
+            device_service.sync_inventory(serial, mode="bulk")
             inventory_payload = device_service.fetch_raw_inventory(serial)
         else:
             inventory_payload = {"packages": [], "package_count": 0}
@@ -116,6 +116,45 @@ def _summary_pairs(summary: dict[str, str | None]) -> list[tuple[str, str]]:
     ]
 
 
+def _collection_mode_label(payload: dict[str, object]) -> str | None:
+    mode = str(payload.get("collection_mode") or "").strip().lower()
+    if not mode:
+        return None
+    if mode == "bulk":
+        return "fast"
+    if mode == "baseline":
+        return "full"
+    if mode == "user_only":
+        return "profile"
+    return mode.replace("_", "-")
+
+
+def _snapshot_overview_pairs(payload: dict[str, object]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    snapshot_id = payload.get("snapshot_id")
+    if snapshot_id is not None:
+        pairs.append(("Snapshot ID", str(snapshot_id)))
+    generated_at = payload.get("generated_at")
+    if generated_at:
+        pairs.append(("Captured", str(generated_at)))
+    mode_label = _collection_mode_label(payload)
+    if mode_label:
+        pairs.append(("Inventory mode", mode_label))
+    identity_quality = str(payload.get("identity_quality") or "").strip()
+    if identity_quality:
+        pairs.append(("Identity quality", identity_quality))
+    path_enriched = payload.get("path_enriched_packages")
+    bulk_only = payload.get("bulk_identity_only_packages")
+    if path_enriched is not None or bulk_only is not None:
+        pairs.append(
+            (
+                "Path fidelity",
+                f"enriched={path_enriched or 0}  bulk_only={bulk_only or 0}",
+            )
+        )
+    return pairs
+
+
 def _inventory_preview(packages: list[dict[str, object]]) -> list[list[str]]:
     max_preview = 15
     preview_rows: list[list[str]] = []
@@ -153,6 +192,13 @@ def _write_report(
     lines.append("")
     lines.extend(_markdown_table(["Field", "Value"], _summary_pairs(summary)))
     lines.append("")
+
+    snapshot_pairs = _snapshot_overview_pairs(inventory_payload)
+    if snapshot_pairs:
+        lines.append("## Inventory Snapshot")
+        lines.append("")
+        lines.extend(_markdown_table(["Field", "Value"], snapshot_pairs))
+        lines.append("")
 
     packages: list[dict[str, object]] = inventory_payload.get("packages", [])  # type: ignore[assignment]
     package_count = inventory_payload.get("package_count", len(packages))

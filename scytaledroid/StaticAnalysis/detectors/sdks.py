@@ -16,6 +16,7 @@ class SdkInventoryDetector(BaseDetector):
     name = "SDK / Tracker detector"
     default_profiles = ("full",)
     section_key = "sdk_inventory"
+    placeholder_detector = True
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(

@@ -138,6 +138,7 @@ class CryptoHygieneDetector(BaseDetector):
     name = "Crypto hygiene detector"
     default_profiles = ("quick", "full")
     section_key = "crypto_hygiene"
+    requires_string_index = True
 
     def run(self, context: DetectorContext) -> DetectorResult:
         started = perf_counter()

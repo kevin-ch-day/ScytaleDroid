@@ -377,7 +377,8 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         menu_utils.print_header(inventory_cli_labels.SECTION_HEADLINE, inventory_cli_labels.SCOPE_MENU_SUBTITLE)
         sync_opts = [
             menu_utils.MenuOption("1", inventory_cli_labels.MENU_OPTION_FULL),
-            menu_utils.MenuOption("2", inventory_cli_labels.MENU_OPTION_SCOPED),
+            menu_utils.MenuOption("2", inventory_cli_labels.MENU_OPTION_FAST, badge="recommended"),
+            menu_utils.MenuOption("3", inventory_cli_labels.MENU_OPTION_SCOPED),
         ]
         menu_utils.render_menu(
             menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=False, compact=True)
@@ -420,9 +421,20 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 serial,
                 ui_prefs=None,
                 progress_sink="cli",
+                mode="baseline",
                 allow_fallbacks=allow_fallbacks,
             )
-            print_inventory_run_feedback(result)
+            print_inventory_run_feedback(result, mode_label="full")
+        elif choice == "2":
+            print()
+            result = inventory_workflow.run_inventory_sync(
+                serial,
+                ui_prefs=None,
+                progress_sink="cli",
+                mode="bulk",
+                allow_fallbacks=allow_fallbacks,
+            )
+            print_inventory_run_feedback(result, mode_label="fast")
         else:
             selected_profile = _select_inventory_sync_profile()
             if selected_profile is None:

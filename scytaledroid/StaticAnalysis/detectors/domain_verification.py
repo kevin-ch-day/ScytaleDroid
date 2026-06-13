@@ -16,6 +16,7 @@ class DomainVerificationDetector(BaseDetector):
     name = "Domain verification detector"
     default_profiles = ("quick", "full")
     section_key = "domain_verification"
+    placeholder_detector = True
 
     def run(self, context: DetectorContext) -> DetectorResult:
         return placeholder_result(

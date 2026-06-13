@@ -78,6 +78,7 @@ def compose_inventory_entry(
 
     split_count = len(paths)
     apk_dirs = sorted({path.rsplit("/", 1)[0] for path in paths if "/" in path})
+    path_fidelity = maybe_str(metadata.get("path_fidelity")) or "pm_path"
 
     entry: dict[str, object] = {
         "package_name": cleaned_package,
@@ -104,6 +105,7 @@ def compose_inventory_entry(
         "split_flag": "Yes" if split_count > 1 else "No",
         "apk_paths": paths,
         "apk_dirs": apk_dirs,
+        "path_fidelity": path_fidelity,
         "review_needed": review_needed,
         "inferred_category": heuristic_category,
         "inferred_profile": heuristic_profile,
@@ -165,6 +167,13 @@ def _normalise_installer(installer: str | None) -> str | None:
     if not installer or installer.lower() in {"null", "none", ""}:
         return None
     return installer
+
+
+def maybe_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def split_count(entry: dict[str, object]) -> int:

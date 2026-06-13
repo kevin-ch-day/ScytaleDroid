@@ -36,6 +36,15 @@ class _FakeHeavyDetector(BaseDetector):
         raise AssertionError("detector.run must not be invoked when skipped by quick profile")
 
 
+class _FakeStringIndexDetector(BaseDetector):
+    detector_id = "fake_string_idx"
+    default_profiles = ("quick", "full")
+    requires_string_index = True
+
+    def run(self, context):  # noqa: ANN001
+        raise AssertionError("detector.run must not be invoked when string index is unavailable")
+
+
 def test_stage_observer_raises_pipeline_still_returns_results(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         detector_runner,
@@ -151,3 +160,23 @@ def test_safe_emit_failure_debug_omits_absent_status(monkeypatch: pytest.MonkeyP
     assert "status" not in msg
     assert isinstance(extra, dict)
     assert "status" not in extra
+
+
+def test_string_index_required_detector_skips_before_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        detector_runner,
+        "PIPELINE_STAGES",
+        (PipelineStage(_FakeStringIndexDetector, "string_sec", include_in_quick=True),),
+    )
+
+    ctx = SimpleNamespace(
+        config=AnalysisConfig(profile="full", enabled_detectors=None),
+        stage_observer=None,
+        intermediate_results=(),
+        string_index=None,
+    )
+
+    results = run_detector_pipeline(ctx)
+    assert len(results) == 1
+    assert results[0].status == Badge.SKIPPED
+    assert results[0].notes == ("string index unavailable",)

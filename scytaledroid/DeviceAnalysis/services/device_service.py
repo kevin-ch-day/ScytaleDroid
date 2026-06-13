@@ -156,6 +156,12 @@ def _compute_inventory_status(
     scope_changed = False
     state_changed = False
     fp_changed = False
+    collection_mode = None
+    identity_source = None
+    identity_quality = None
+    path_enriched_packages = None
+    bulk_identity_only_packages = None
+    current_state_unavailable_reason = None
 
     if isinstance(meta, dict):
         ts = meta.get("timestamp")
@@ -164,6 +170,16 @@ def _compute_inventory_status(
         scope_changed = bool(meta.get("scope_changed"))
         state_changed = bool(meta.get("state_changed"))
         fp_changed = bool(meta.get("build_fingerprint_changed"))
+        collection_mode = meta.get("collection_mode") if isinstance(meta.get("collection_mode"), str) else None
+        identity_source = meta.get("identity_source") if isinstance(meta.get("identity_source"), str) else None
+        identity_quality = meta.get("identity_quality") if isinstance(meta.get("identity_quality"), str) else None
+        path_enriched_packages = meta.get("path_enriched_packages") if isinstance(meta.get("path_enriched_packages"), int) else None
+        bulk_identity_only_packages = meta.get("bulk_identity_only_packages") if isinstance(meta.get("bulk_identity_only_packages"), int) else None
+        current_state_unavailable_reason = (
+            meta.get("current_state_unavailable_reason")
+            if isinstance(meta.get("current_state_unavailable_reason"), str)
+            else None
+        )
     if ts is None and snapshot_meta is not None:
         ts = snapshot_meta.captured_at
         pkg_count = snapshot_meta.package_count
@@ -202,6 +218,12 @@ def _compute_inventory_status(
         scope_changed=scope_changed,
         state_changed=state_changed,
         fingerprint_changed=fp_changed,
+        collection_mode=collection_mode,
+        identity_source=identity_source,
+        identity_quality=identity_quality,
+        path_enriched_packages=path_enriched_packages,
+        bulk_identity_only_packages=bulk_identity_only_packages,
+        current_state_unavailable_reason=current_state_unavailable_reason,
     )
 
 
@@ -233,6 +255,7 @@ def sync_inventory(
     *,
     filter_name: str | None = None,
     filter_fn: Callable[..., object] | None = None,
+    mode: str | None = None,
 ) -> InventoryStatus:
     """
     Run an inventory sync for the given device serial and return updated status.
@@ -241,7 +264,7 @@ def sync_inventory(
     """
     from scytaledroid.DeviceAnalysis.inventory.runner import run_full_sync
 
-    run_full_sync(serial=serial, filter_fn=filter_fn, progress_cb=None)
+    run_full_sync(serial=serial, filter_fn=filter_fn, progress_cb=None, mode=mode)
     # Refresh metadata after sync
     status = fetch_inventory_metadata(serial, with_current_state=True)
     return status or InventoryStatus(

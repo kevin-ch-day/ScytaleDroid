@@ -164,22 +164,26 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
     )[:3]
 
     skipped_details = []
+    placeholder_details = []
     for result in results:
         if result.status is Badge.SKIPPED:
             metrics_payload = _serialise_metrics(result.metrics)
+            is_placeholder = bool(metrics_payload.get("placeholder_detector", False))
             reason = _first_non_empty(
                 metrics_payload.get("skip_reason"),
                 metrics_payload.get("summary"),
                 metrics_payload.get("error"),
                 *(note.strip() for note in result.notes if isinstance(note, str)),
             )
-            skipped_details.append(
-                {
-                    "detector": result.detector_id,
-                    "section": result.section_key,
-                    "reason": reason or "unspecified",
-                }
-            )
+            row = {
+                "detector": result.detector_id,
+                "section": result.section_key,
+                "reason": reason or "unspecified",
+            }
+            if is_placeholder:
+                placeholder_details.append(row)
+            else:
+                skipped_details.append(row)
 
     summary: dict[str, object] = {
         "detector_total": total,
@@ -215,6 +219,9 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
 
     if skipped_details:
         summary["skipped_detectors"] = skipped_details
+    if placeholder_details:
+        summary["placeholder_detector_count"] = len(placeholder_details)
+        summary["placeholder_detectors"] = placeholder_details
 
     return summary
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
 try:
     from scytaledroid.Database.db_utils.package_utils import normalize_package_name  # type: ignore
 except Exception:  # pragma: no cover
@@ -50,6 +52,11 @@ def get_latest_inventory_metadata(
     snapshot_scope_hash: str | None = None
     snapshot_scope_size: int | None = None
     snapshot_id: int | None = None
+    collection_mode: str | None = None
+    identity_source: str | None = None
+    identity_quality: str | None = None
+    path_enriched_packages: int | None = None
+    bulk_identity_only_packages: int | None = None
     if snapshot_meta:
         timestamp = snapshot_meta.captured_at
         package_count = snapshot_meta.package_count
@@ -62,6 +69,11 @@ def get_latest_inventory_metadata(
         snapshot_type = snapshot_meta.snapshot_type
         snapshot_scope_hash = snapshot_meta.scope_hash
         snapshot_scope_size = snapshot_meta.scope_size
+        collection_mode = getattr(snapshot_meta, "collection_mode", None)
+        identity_source = getattr(snapshot_meta, "identity_source", None)
+        identity_quality = getattr(snapshot_meta, "identity_quality", None)
+        path_enriched_packages = coerce_int(getattr(snapshot_meta, "path_enriched_packages", None))
+        bulk_identity_only_packages = coerce_int(getattr(snapshot_meta, "bulk_identity_only_packages", None))
         if with_current_state:
             snapshot_payload_candidate = inventory_service.load_latest_inventory(serial)
             if isinstance(snapshot_payload_candidate, dict):
@@ -145,6 +157,42 @@ def get_latest_inventory_metadata(
         elif isinstance(scope_size_value, str) and scope_size_value.isdigit():
             snapshot_scope_size = int(scope_size_value)
 
+    if snapshot_payload is None:
+        snapshot_payload_candidate = inventory_service.load_latest_inventory(serial)
+        if isinstance(snapshot_payload_candidate, dict):
+            snapshot_payload = snapshot_payload_candidate
+            packages_candidate = snapshot_payload_candidate.get("packages")
+            if isinstance(packages_candidate, list) and snapshot_packages is None:
+                snapshot_packages = packages_candidate
+
+    if snapshot_payload:
+        collection_mode_value = snapshot_payload.get("collection_mode")
+        if isinstance(collection_mode_value, str) and collection_mode_value:
+            collection_mode = collection_mode_value
+        identity_source_value = snapshot_payload.get("identity_source")
+        if isinstance(identity_source_value, str) and identity_source_value:
+            identity_source = identity_source_value
+        identity_quality_value = snapshot_payload.get("identity_quality")
+        if isinstance(identity_quality_value, str) and identity_quality_value:
+            identity_quality = identity_quality_value
+        path_enriched_value = coerce_int(snapshot_payload.get("path_enriched_packages"))
+        if path_enriched_value is not None:
+            path_enriched_packages = path_enriched_value
+        bulk_only_value = coerce_int(snapshot_payload.get("bulk_identity_only_packages"))
+        if bulk_only_value is not None:
+            bulk_identity_only_packages = bulk_only_value
+        if snapshot_packages:
+            if path_enriched_packages is None:
+                path_enriched_packages = sum(
+                    1 for entry in snapshot_packages if isinstance(entry, dict) and entry.get("path_fidelity") == "pm_path"
+                )
+            if bulk_identity_only_packages is None:
+                bulk_identity_only_packages = sum(
+                    1
+                    for entry in snapshot_packages
+                    if isinstance(entry, dict) and entry.get("path_fidelity") == "bulk_base_only"
+                )
+
     metadata: dict[str, object] = {"timestamp": timestamp}
     if snapshot_id is not None:
         metadata["snapshot_id"] = snapshot_id
@@ -166,6 +214,16 @@ def get_latest_inventory_metadata(
         metadata["scope_hash"] = snapshot_scope_hash
     if snapshot_scope_size is not None:
         metadata["snapshot_scope_size"] = snapshot_scope_size
+    if collection_mode:
+        metadata["collection_mode"] = collection_mode
+    if identity_source:
+        metadata["identity_source"] = identity_source
+    if identity_quality:
+        metadata["identity_quality"] = identity_quality
+    if path_enriched_packages is not None:
+        metadata["path_enriched_packages"] = path_enriched_packages
+    if bulk_identity_only_packages is not None:
+        metadata["bulk_identity_only_packages"] = bulk_identity_only_packages
     # Propagate last-run delta info (added/removed/updated) from the snapshot meta.
     for field in (
         "delta_new",
@@ -223,7 +281,28 @@ def get_latest_inventory_metadata(
     if not with_current_state:
         return metadata
 
-    raw_current_signatures = device_service.list_packages_with_versions(serial)
+    try:
+        raw_current_signatures = device_service.list_packages_with_versions(serial)
+    except RuntimeError as exc:
+        # The dashboard metadata path should never block entry into the Device
+        # menu. Current-state comparison is best-effort here; strict fallback
+        # policy still applies to explicit inventory refresh workflows.
+        log.warning(
+            f"Inventory guard current-state comparison unavailable: {exc}",
+            category="inventory",
+            extra={
+                "event": "inventory.guard.current_state_unavailable",
+                "reason": "package_version_listing_unavailable",
+                "serial": serial,
+            },
+        )
+        metadata["current_state_unavailable_reason"] = str(exc)
+        metadata.setdefault("packages_changed", False)
+        metadata.setdefault("scope_changed", False)
+        metadata.setdefault("build_fingerprint_changed", False)
+        metadata["state_changed"] = bool(metadata.get("scope_hash_changed"))
+        return metadata
+
     current_signatures: list[tuple[str, str | None, str | None]] = []
     for name, version_code, version_name in raw_current_signatures:
         cleaned = normalize_package_name(name, context="inventory")
