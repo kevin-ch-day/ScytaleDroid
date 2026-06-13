@@ -5,7 +5,7 @@ from pathlib import Path
 from scytaledroid.DeviceAnalysis import report
 
 
-def test_generate_device_report_bootstraps_inventory_with_fast_mode(
+def test_generate_device_report_bootstraps_inventory_with_harvest_ready_mode(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -73,6 +73,6 @@ def test_write_report_includes_inventory_snapshot_section(tmp_path: Path, monkey
 
     assert "## Inventory Snapshot" in text
     assert "| Snapshot ID | 53 |" in text
-    assert "| Inventory mode | fast |" in text
+    assert "| Inventory mode | harvest-ready |" in text
     assert "| Identity quality | strict |" in text
     assert "| Path fidelity | enriched=1  bulk_only=0 |" in text

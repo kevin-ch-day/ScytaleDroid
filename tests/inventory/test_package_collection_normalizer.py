@@ -1,6 +1,7 @@
 from scytaledroid.DeviceAnalysis import inventory_meta, package_inventory
 from scytaledroid.DeviceAnalysis.inventory import adb_bulk
 from scytaledroid.DeviceAnalysis.inventory import normalizer, package_collection
+from types import SimpleNamespace
 
 
 def test_compose_inventory_entry_sorts_paths_and_counts_splits():
@@ -37,6 +38,39 @@ def test_parse_package_listing_preserves_raw_package_case():
     )
 
     assert parsed == [("com.qualcomm.qti.uimGbaApp", "35", None)]
+
+
+def test_list_packages_with_versions_uses_portable_versioncode_only_probe(monkeypatch):
+    calls: list[list[str]] = []
+
+    def _run_shell_command(_serial, command, timeout=20):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout="package:com.example.app versionCode:42\n",
+        )
+
+    monkeypatch.setattr(package_inventory.adb_client, "run_shell_command", _run_shell_command)
+
+    rows = package_inventory.list_packages_with_versions("SER123", allow_fallbacks=False)
+
+    assert calls == [["pm", "list", "packages", "--show-versioncode"]]
+    assert rows == [("com.example.app", "42", None)]
+
+
+def test_list_packages_with_versions_falls_back_to_package_only_when_versioncode_unsupported(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        package_inventory.adb_client,
+        "run_shell_command",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=""),
+    )
+    monkeypatch.setattr(package_inventory, "list_packages", lambda _serial: ["com.example.app"])
+
+    rows = package_inventory.list_packages_with_versions("SER123", allow_fallbacks=True)
+
+    assert rows == [("com.example.app", None, None)]
 
 
 def test_collect_inventory_uses_raw_package_for_adb_and_normalized_hash(monkeypatch):
@@ -255,3 +289,77 @@ def test_collect_inventory_bulk_mode_enriches_profiled_package_even_when_not_dat
     assert calls == ["com.example.profiled"]
     assert rows[0]["split_count"] == 2
     assert rows[0]["path_fidelity"] == "pm_path"
+
+
+def test_collect_inventory_bulk_mode_progress_reports_bulk_rows_not_metadata(monkeypatch):
+    events: list[dict[str, object]] = []
+
+    monkeypatch.setattr(package_collection.adb_client, "clear_package_caches", lambda _serial: None)
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "list_packages",
+        lambda _serial, _use_bulk, allow_fallbacks=False: (
+            [("com.example.bulk", "77", None)],
+            ["com.example.bulk"],
+            True,
+            False,
+        ),
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "list_package_bulk_entries",
+        lambda _serial: [
+            adb_bulk.BulkPackageEntry(
+                package_name="com.example.bulk",
+                apk_path="/data/app/~~abc/pkg-base/base.apk",
+                user="0",
+                uid=10234,
+                installer="com.android.vending",
+                version_code="77",
+            )
+        ],
+    )
+    monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_paths",
+        lambda _serial, _package_name, allow_fallbacks=False: ["/data/app/~~abc/pkg-base/base.apk"],
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pm dump should not run in bulk mode")),
+    )
+    monkeypatch.setattr(package_collection.snapshot_io, "load_canonical_metadata", lambda _names: {})
+
+    def _progress_cb(
+        processed,
+        total,
+        elapsed_seconds,
+        eta_seconds,
+        split_apks,
+        **kwargs,
+    ):
+        events.append(
+            {
+                "processed": processed,
+                "total": total,
+                "elapsed_seconds": elapsed_seconds,
+                "eta_seconds": eta_seconds,
+                "split_apks": split_apks,
+                **kwargs,
+            }
+        )
+
+    package_collection.collect_inventory(
+        "SER123",
+        use_bulk=True,
+        allow_fallbacks=False,
+        progress_cb=_progress_cb,
+    )
+
+    completion_events = [event for event in events if event.get("current_stage") == "complete"]
+    assert completion_events
+    assert completion_events[-1]["bulk_rows_completed"] == 1
+    assert completion_events[-1]["path_calls_completed"] == 1
+    assert completion_events[-1]["metadata_calls_completed"] is None

@@ -16,11 +16,11 @@ def format_inventory_status(serial: str | None) -> str:
     label = status.status_label.lower()
     mode = str(getattr(status, "collection_mode", "") or "").strip().lower()
     if mode == "bulk":
-        label = f"{label} fast"
+        label = f"{label} harvest-ready"
     elif mode == "baseline":
-        label = f"{label} full"
+        label = f"{label} baseline-full"
     elif mode == "user_only":
-        label = f"{label} profile"
+        label = f"{label} profile-only"
     age = status.age_display
     text = f"{label} {age} ago" if age and age != "unknown" else label
     if status.is_stale:
@@ -38,11 +38,11 @@ def format_pull_hint(serial: str | None) -> str:
     mode = str(getattr(status, "collection_mode", "") or "").strip().lower()
     mode_suffix = ""
     if mode == "bulk":
-        mode_suffix = ", fast"
+        mode_suffix = ", harvest-ready"
     elif mode == "baseline":
-        mode_suffix = ", full"
+        mode_suffix = ", baseline-full"
     elif mode == "user_only":
-        mode_suffix = ", profile"
+        mode_suffix = ", profile-only"
     prefix = "inventory stale" if status.is_stale else "inventory ready"
     if isinstance(count, int):
         return f"{prefix} ({count} packages{mode_suffix})"

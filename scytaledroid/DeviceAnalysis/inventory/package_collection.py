@@ -27,6 +27,7 @@ class ProgressCallback(Protocol):
         *,
         current_package: str | None = None,
         current_stage: str | None = None,
+        bulk_rows_completed: int | None = None,
         path_calls_completed: int | None = None,
         metadata_calls_completed: int | None = None,
         active: bool = False,
@@ -194,7 +195,8 @@ def collect_inventory(
     split_processed = 0
     profile_enabled = os.getenv("SCYTALEDROID_INVENTORY_PROFILE", "0").strip() in {"1", "true", "yes", "on"}
     profile_calls_paths = 0
-    profile_calls_meta = 0
+    profile_calls_metadata = 0
+    profile_bulk_rows = 0
     profile_pkg_timings: list[dict[str, object]] = []
 
     for index, package_name in enumerate(package_names, start=1):
@@ -213,8 +215,9 @@ def collect_inventory(
                     split_apks=split_processed,
                     current_package=package_name,
                     current_stage="bulk",
+                    bulk_rows_completed=profile_bulk_rows,
                     path_calls_completed=profile_calls_paths,
-                    metadata_calls_completed=profile_calls_meta,
+                    metadata_calls_completed=profile_calls_metadata,
                     active=True,
                 )
                 bulk_entry = bulk_entry_map.get(package_key)
@@ -235,8 +238,9 @@ def collect_inventory(
                         split_apks=split_processed,
                         current_package=package_name,
                         current_stage="pm path",
+                        bulk_rows_completed=profile_bulk_rows,
                         path_calls_completed=profile_calls_paths,
-                        metadata_calls_completed=profile_calls_meta,
+                        metadata_calls_completed=profile_calls_metadata,
                         active=True,
                     )
                     paths = adb_client.get_package_paths(
@@ -257,6 +261,7 @@ def collect_inventory(
                     "path_fidelity": path_fidelity,
                 }
                 t_meta = 0.0
+                profile_bulk_rows += 1
             else:
                 _emit_progress(
                     progress_cb,
@@ -267,8 +272,9 @@ def collect_inventory(
                     split_apks=split_processed,
                     current_package=package_name,
                     current_stage="pm path",
+                    bulk_rows_completed=None,
                     path_calls_completed=profile_calls_paths,
-                    metadata_calls_completed=profile_calls_meta,
+                    metadata_calls_completed=profile_calls_metadata,
                     active=True,
                 )
                 paths = adb_client.get_package_paths(
@@ -286,8 +292,9 @@ def collect_inventory(
                     split_apks=split_processed,
                     current_package=package_name,
                     current_stage="pm dump",
+                    bulk_rows_completed=None,
                     path_calls_completed=profile_calls_paths,
-                    metadata_calls_completed=profile_calls_meta,
+                    metadata_calls_completed=profile_calls_metadata,
                     active=True,
                 )
                 metadata = adb_client.get_package_metadata(serial, package_name)
@@ -296,10 +303,8 @@ def collect_inventory(
             raise InventoryCollectionError(
                 package=package_name, index=index, total=total, stage=stage, original=exc
             ) from exc
-        if bulk_used:
-            profile_calls_meta += 1
-        else:
-            profile_calls_meta += 1
+        if not bulk_used:
+            profile_calls_metadata += 1
         entry = normalizer.compose_inventory_entry(package_name, paths, metadata, canonical_entry)
         canonical_name = str(entry.get("package_name") or "").strip().lower()
         authoritative_version_code = version_by_package.get(canonical_name)
@@ -336,14 +341,16 @@ def collect_inventory(
                 split_apks=split_processed,
                 current_package=package_name,
                 current_stage="complete",
+                bulk_rows_completed=profile_bulk_rows if bulk_used else None,
                 path_calls_completed=profile_calls_paths,
-                metadata_calls_completed=profile_calls_meta,
+                metadata_calls_completed=profile_calls_metadata if not bulk_used else None,
             )
         if profile_enabled:
             try:
                 log.debug(
                     f"[inv.profile] {index}/{total} pkg={package_name} splits={normalizer.split_count(entry)} "
-                    f"t_paths={t_paths:.3f}s t_meta={t_meta:.3f}s t_pkg={(time.time()-t0):.3f}s",
+                    f"t_paths={t_paths:.3f}s t_meta={t_meta:.3f}s t_pkg={(time.time()-t0):.3f}s "
+                    f"bulk_row={'yes' if bulk_used else 'no'}",
                     category="inventory",
                 )
                 profile_pkg_timings.append(
@@ -362,8 +369,9 @@ def collect_inventory(
     if profile_enabled:
         try:
             log.info(
-                f"[inv.profile] total_pkgs={len(rows)} calls_paths={profile_calls_paths} "
-                f"calls_meta={profile_calls_meta} elapsed_total={elapsed_total:.2f}s",
+                f"[inv.profile] total_pkgs={len(rows)} bulk_rows={profile_bulk_rows} "
+                f"calls_paths={profile_calls_paths} calls_metadata={profile_calls_metadata} "
+                f"elapsed_total={elapsed_total:.2f}s",
                 category="inventory",
             )
             if profile_pkg_timings:
@@ -428,6 +436,7 @@ def _emit_progress(
     split_apks: int,
     current_package: str | None = None,
     current_stage: str | None = None,
+    bulk_rows_completed: int | None = None,
     path_calls_completed: int | None = None,
     metadata_calls_completed: int | None = None,
     active: bool = False,
@@ -443,6 +452,7 @@ def _emit_progress(
             split_apks,
             current_package=current_package,
             current_stage=current_stage,
+            bulk_rows_completed=bulk_rows_completed,
             path_calls_completed=path_calls_completed,
             metadata_calls_completed=metadata_calls_completed,
             active=active,

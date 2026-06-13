@@ -25,8 +25,8 @@ from .watchlists import Watchlist
 
 _LAST_SCOPE: ScopeSelection | None = None
 
-# Menu label for the all-inventory scope (still filtered by non-root path policy when not rooted).
-FULL_INVENTORY_POLICY_FILTERED_LABEL = "Full inventory, policy-filtered"
+# Menu label for the all-inventory scope after applying the active path policy.
+FULL_INVENTORY_POLICY_FILTERED_LABEL = "All pullable packages (full inventory)"
 
 _DASH = "—"
 
@@ -627,7 +627,7 @@ def _render_scope_table(
     default_rows: Sequence[InventoryRow],
 ) -> None:
     print()
-    print("Execute harvest — inventory vs pull policy")
+    print("Execute harvest — inventory snapshot vs pull policy")
     print("-" * 86)
     candidates = len(rows)
     pullable_rows = _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)
@@ -635,15 +635,15 @@ def _render_scope_table(
     blocked = max(candidates - eligible, 0)
     policy = "none (root)" if is_rooted else "non-root paths"
     est_artifacts = estimated_files(pullable_rows)
-    print(f"Inventory scope      : {candidates} package(s)")
-    print(f"Eligible to pull     : {eligible} package(s)")
-    print(f"Blocked by policy    : {blocked} package(s)")
+    print(f"Inventory snapshot   : {candidates} package(s)")
+    print(f"Pullable on device   : {eligible} package(s)")
+    print(f"Policy-blocked       : {blocked} package(s)")
     print(f"Policy               : {policy}")
     print(f"Estimated artifacts  : ~{est_artifacts} APK path(s) (splits count as separate paths)")
     if not is_rooted and blocked > 0:
         print(
             status_messages.status(
-                "Non-root: system/vendor APK paths stay inventoried but are not pulled.",
+                "Non-root: system/product/vendor APK paths stay inventoried but are not pulled.",
                 level="info",
             )
         )

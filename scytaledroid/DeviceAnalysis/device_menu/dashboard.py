@@ -142,11 +142,11 @@ def _inventory_mode_label(mode: object) -> str | None:
     if not value:
         return None
     if value == "bulk":
-        return "fast"
+        return "harvest-ready"
     if value == "baseline":
-        return "full"
+        return "baseline-full"
     if value == "user_only":
-        return "profile"
+        return "profile-only"
     return value.replace("_", "-")
 
 

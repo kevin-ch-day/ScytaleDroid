@@ -376,17 +376,30 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         print()
         menu_utils.print_header(inventory_cli_labels.SECTION_HEADLINE, inventory_cli_labels.SCOPE_MENU_SUBTITLE)
         sync_opts = [
-            menu_utils.MenuOption("1", inventory_cli_labels.MENU_OPTION_FULL),
-            menu_utils.MenuOption("2", inventory_cli_labels.MENU_OPTION_FAST, badge="recommended"),
-            menu_utils.MenuOption("3", inventory_cli_labels.MENU_OPTION_SCOPED),
+            menu_utils.MenuOption(
+                "1",
+                inventory_cli_labels.MENU_OPTION_FULL,
+                description="Uses per-package metadata collection. Best for deep diagnostics, but slow on non-root devices.",
+            ),
+            menu_utils.MenuOption(
+                "2",
+                inventory_cli_labels.MENU_OPTION_FAST,
+                description="Uses bulk package identity plus targeted pm path enrichment for harvest/static readiness.",
+                badge="recommended",
+            ),
+            menu_utils.MenuOption(
+                "3",
+                inventory_cli_labels.MENU_OPTION_SCOPED,
+                description="Refreshes only active profile packages. Fastest, but not a full-device snapshot.",
+            ),
         ]
         menu_utils.render_menu(
-            menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=False, compact=True)
+            menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=True, compact=True)
         )
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(sync_opts, include_exit=True),
-            default="1",
-            prompt="Scope [1]: ",
+            default="2",
+            prompt="Scope [2]: ",
         )
         if choice == "0":
             return
@@ -424,7 +437,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 mode="baseline",
                 allow_fallbacks=allow_fallbacks,
             )
-            print_inventory_run_feedback(result, mode_label="full")
+            print_inventory_run_feedback(result, mode_label="baseline-full")
         elif choice == "2":
             print()
             result = inventory_workflow.run_inventory_sync(
@@ -434,7 +447,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 mode="bulk",
                 allow_fallbacks=allow_fallbacks,
             )
-            print_inventory_run_feedback(result, mode_label="fast")
+            print_inventory_run_feedback(result, mode_label="harvest-ready")
         else:
             selected_profile = _select_inventory_sync_profile()
             if selected_profile is None:

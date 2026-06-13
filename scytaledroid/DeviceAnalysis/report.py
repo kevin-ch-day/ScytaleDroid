@@ -121,11 +121,11 @@ def _collection_mode_label(payload: dict[str, object]) -> str | None:
     if not mode:
         return None
     if mode == "bulk":
-        return "fast"
+        return "harvest-ready"
     if mode == "baseline":
-        return "full"
+        return "baseline-full"
     if mode == "user_only":
-        return "profile"
+        return "profile-only"
     return mode.replace("_", "-")
 
 

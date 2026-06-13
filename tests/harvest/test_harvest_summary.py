@@ -40,7 +40,7 @@ def test_build_summary_card_lines_surfaces_executed_and_blocked_counts():
     )
 
     lines = _build_summary_card_lines(
-        selection_label="Full inventory, policy-filtered",
+        selection_label="All pullable packages (full inventory)",
         pull_mode="inventory",
         metadata={"candidate_count": 546, "selected_count": 546},
         guard_brief=None,

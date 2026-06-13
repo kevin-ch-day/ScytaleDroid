@@ -6,7 +6,7 @@ from scytaledroid.DeviceAnalysis.device_menu import harvest_entry
 from scytaledroid.Utils.DisplayUtils import text_blocks
 
 
-def test_refresh_inventory_for_harvest_menu_uses_fast_mode(monkeypatch) -> None:
+def test_refresh_inventory_for_harvest_menu_uses_harvest_ready_mode(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
@@ -35,4 +35,4 @@ def test_refresh_inventory_for_harvest_menu_uses_fast_mode(monkeypatch) -> None:
     assert ok is True
     assert status.status_label == "FRESH"
     assert captured["run_kwargs"]["mode"] == "bulk"
-    assert captured["feedback_kwargs"]["mode_label"] == "fast"
+    assert captured["feedback_kwargs"]["mode_label"] == "harvest-ready"
