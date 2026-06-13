@@ -32,7 +32,7 @@ def refresh_inventory_for_harvest_menu(serial: str) -> tuple[bool, InventoryStat
             ui_prefs=text_blocks.UI_PREFS,
             mode="bulk",
         )
-        print_inventory_run_feedback(result, mode_label="fast")
+        print_inventory_run_feedback(result, mode_label="harvest-ready")
         return True, device_service.fetch_inventory_metadata(serial)
     except Exception as exc:
         print(

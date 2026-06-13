@@ -24,11 +24,11 @@ def _inventory_badge(status: InventoryStatus | None) -> str:
     mode = str(getattr(status, "collection_mode", "") or "").strip().lower()
     mode_label = ""
     if mode == "bulk":
-        mode_label = " fast"
+        mode_label = " harvest-ready"
     elif mode == "baseline":
-        mode_label = " full"
+        mode_label = " baseline-full"
     elif mode == "user_only":
-        mode_label = " profile"
+        mode_label = " profile-only"
     count_text = (
         f"{status.package_count} pkg" if status.package_count is not None else "unknown"
     )

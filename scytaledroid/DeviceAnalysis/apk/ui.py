@@ -32,7 +32,7 @@ def _describe_harvest_policy(policy: str, *, is_rooted: bool) -> str:
     if token in {"", "none"}:
         return "root · no non-root path gate on this plan" if is_rooted else "paths per scope"
     if "non_root" in token or token == "non_root_paths":
-        return "non-root paths (system/vendor APK paths not harvested)"
+        return "non-root paths (system/product/vendor APK paths not harvested)"
     return policy
 
 
@@ -488,16 +488,8 @@ def report_harvest_started(
     delta_filter_applied: bool | None = None,
     is_rooted: bool = False,
 ) -> None:
-    _ = (
-        policy_eligible,
-        policy,
-        is_rooted,
-        blocked_policy,
-        blocked_scope,
-        selected_count,
-    )  # API parity / future diagnostics; scope table + summary already showed counts & policy.
+    policy_text = _describe_harvest_policy(policy, is_rooted=is_rooted)
     sel = str(selection_label).strip() or "(unknown scope)"
-    # One short line: inventory math and non-root policy note already printed above.
     print(
         status_messages.status(
             f"Harvest start: {sel} · pulling {int(scheduled)} packages · ~{int(artifacts)} APK paths",
@@ -511,6 +503,18 @@ def report_harvest_started(
                 level="info",
             )
         )
+    elif selected_count != scheduled or blocked_policy or blocked_scope:
+        detail_bits = [f"inventory snapshot={int(selected_count)}"]
+        if policy_eligible != scheduled:
+            detail_bits.append(f"pullable={int(policy_eligible)}")
+        else:
+            detail_bits.append(f"pullable={int(scheduled)}")
+        if blocked_policy:
+            detail_bits.append(f"policy-blocked={int(blocked_policy)}")
+        if blocked_scope:
+            detail_bits.append(f"scope-blocked={int(blocked_scope)}")
+        detail_bits.append(f"policy={policy_text}")
+        print(status_messages.status(" · ".join(detail_bits), level="info"))
     tail_bits = []
     if harvest_mode:
         tail_bits.append(f"harvest_mode={harvest_mode}")

@@ -119,6 +119,7 @@ def _format_progress_lines(
     phase_label: str | None = None,
     current_package: str | None = None,
     current_stage: str | None = None,
+    bulk_rows_completed: int | None = None,
     path_calls_completed: int | None = None,
     metadata_calls_completed: int | None = None,
     active: bool = False,
@@ -166,10 +167,16 @@ def _format_progress_lines(
     )
     if split_processed and show_splits:
         line2 += f" · split APKs {split_processed}"
-    if total > 0 and (path_calls_completed is not None or metadata_calls_completed is not None):
-        path_text = path_calls_completed if path_calls_completed is not None else 0
-        meta_text = metadata_calls_completed if metadata_calls_completed is not None else 0
-        line2 += f" · paths {path_text}/{total} · metadata {meta_text}/{total}"
+    progress_parts: list[str] = []
+    if total > 0:
+        if bulk_rows_completed is not None:
+            progress_parts.append(f"bulk rows {bulk_rows_completed}/{total}")
+        if path_calls_completed is not None:
+            progress_parts.append(f"paths {path_calls_completed}/{total}")
+        if metadata_calls_completed is not None:
+            progress_parts.append(f"metadata {metadata_calls_completed}/{total}")
+    if progress_parts:
+        line2 += " · " + " · ".join(progress_parts)
 
     line3: str | None = None
     if current_package:
@@ -229,6 +236,7 @@ def make_cli_progress_printer(ui_prefs=None):
             pct = int((processed / total) * 100) if total > 0 else 0
             current_package = str(event.get("current_package") or "").strip() or None
             current_stage = str(event.get("current_stage") or "").strip() or None
+            bulk_rows_completed = event.get("bulk_rows_completed")
             path_calls_completed = event.get("path_calls_completed")
             metadata_calls_completed = event.get("metadata_calls_completed")
             active = bool(event.get("active", False))
@@ -250,6 +258,7 @@ def make_cli_progress_printer(ui_prefs=None):
                 phase_label=current_phase_label,
                 current_package=current_package,
                 current_stage=current_stage,
+                bulk_rows_completed=int(bulk_rows_completed) if bulk_rows_completed is not None else None,
                 path_calls_completed=int(path_calls_completed) if path_calls_completed is not None else None,
                 metadata_calls_completed=int(metadata_calls_completed) if metadata_calls_completed is not None else None,
                 active=active,

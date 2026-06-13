@@ -25,48 +25,49 @@ def list_packages_with_versions(
     *,
     allow_fallbacks: bool = False,
 ) -> list[tuple[str, str | None, str | None]]:
-    """Return package identifiers along with version metadata when available."""
+    """Return package identifiers with portable version identity.
 
-    attempts = [
-        ["pm", "list", "packages", "--show-versioncode", "--show-versionname"],
-        ["pm", "list", "packages", "--show-versioncode"],
-    ]
+    ``version_code`` is the live inventory identity field. ``version_name`` is
+    best-effort and may be absent from package-list output on modern Android
+    builds (for example Android 15 on the attached Motorola test device).
+    """
 
-    for command in attempts:
-        try:
-            completed = adb_client.run_shell_command(serial, command, timeout=20)
-        except RuntimeError:
-            continue
+    try:
+        completed = adb_client.run_shell_command(
+            serial,
+            ["pm", "list", "packages", "--show-versioncode"],
+            timeout=20,
+        )
+    except RuntimeError:
+        completed = None
 
-        if completed.returncode != 0:
-            continue
-
+    if completed is not None and completed.returncode == 0:
         parsed = _parse_package_listing(completed.stdout)
         if parsed:
             return parsed
 
-    # Fallback to basic package names if newer flags are unsupported.
+    # Fallback to basic package names if versionCode listing is unsupported.
     if not allow_fallbacks:
         log.warning(
-            "Inventory fallback blocked: pm --show-version* unsupported.",
+            "Inventory fallback blocked: pm --show-versioncode unsupported.",
             category="inventory",
             extra={
                 "event": "inventory.fallback_blocked",
-                "reason": "pm_list_versions_unsupported",
+                "reason": "pm_list_versioncode_unsupported",
                 "serial": serial,
             },
         )
         raise RuntimeError(
-            "Inventory fallback blocked (pm --show-version* unsupported). "
+            "Inventory fallback blocked (pm --show-versioncode unsupported). "
             "Enable inventory fallbacks in the Device Analysis menu to proceed."
         )
     log.warning(
-        "Inventory fallback invoked: pm --show-version* unsupported; "
+        "Inventory fallback invoked: pm --show-versioncode unsupported; "
         "using package-only listing.",
         category="inventory",
         extra={
             "event": "inventory.fallback",
-            "reason": "pm_list_versions_unsupported",
+            "reason": "pm_list_versioncode_unsupported",
             "serial": serial,
         },
     )

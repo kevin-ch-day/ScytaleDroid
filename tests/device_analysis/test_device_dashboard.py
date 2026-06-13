@@ -61,7 +61,7 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     assert "Motorola" in out and "Android 15" in out and "Physical" in out and "NON-ROOT" in out
     assert "Inv" in out and "Har" in out and "Ev" in out
     assert "546 pkgs" in out and "14h 39m ago" in out
-    assert "Inv FRESH" in out and "fast" in out
+    assert "Inv FRESH" in out and "harvest-ready" in out
     # Compact pipeline strip: word labels (operator-readable) vs legacy "117 hv" tokens
     assert "117" in out and "411" in out and "18" in out
     assert "pullable" in out and "policy-blocked" in out and "scope-blocked" in out
@@ -158,7 +158,7 @@ def test_print_device_details_shows_moved_pipeline_and_evidence_blocks(monkeypat
     assert "Inventory    : 546 inventoried | 546 in scope | 117 eligible" in out
     assert "Harvest      : 117 scheduled | 117 harvested | 546 receipts" in out
     assert "Blocked      : 411 policy | 18 scope" in out
-    assert "Mode         : fast" in out
+    assert "Mode         : harvest-ready" in out
     assert "Identity     : pm_list_show_versioncode | strict" in out
     assert "Path detail  : 117 enriched | 429 bulk-only" in out
     assert "Live compare : unavailable" in out

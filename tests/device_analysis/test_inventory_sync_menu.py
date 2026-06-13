@@ -53,6 +53,9 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
 
     def _capture_menu(spec):
         captured_menu["labels"] = [item.label for item in spec.items]
+        captured_menu["descriptions"] = [item.description for item in spec.items]
+        captured_menu["default"] = spec.default
+        captured_menu["show_descriptions"] = spec.show_descriptions
 
     monkeypatch.setattr(actions.menu_utils, "render_menu", _capture_menu)
     monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
@@ -97,12 +100,13 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
         actions.inventory_cli_labels.MENU_OPTION_FAST,
         actions.inventory_cli_labels.MENU_OPTION_SCOPED,
     ]
+    assert captured_menu["show_descriptions"] is True
     assert scoped_call["serial"] == "SERIAL123"
     assert scoped_call["scope_id"] == "profile::research_dataset_alpha"
     assert scoped_call["packages"] == {"com.example.alpha", "com.example.beta"}
 
 
-def test_run_inventory_sync_menu_uses_fast_full_sync_mode(monkeypatch) -> None:
+def test_run_inventory_sync_menu_uses_harvest_ready_full_sync_mode(monkeypatch) -> None:
     from scytaledroid.DeviceAnalysis import runtime_flags
     from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
 
@@ -191,6 +195,34 @@ def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, 
     assert prompted["default"] is False
 
 
+def test_run_inventory_sync_defaults_prompt_to_recommended_harvest_ready_mode(monkeypatch) -> None:
+    from scytaledroid.DeviceAnalysis import runtime_flags
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        actions.device_service,
+        "fetch_inventory_metadata",
+        lambda _serial: SimpleNamespace(status_label="STALE", is_stale=True),
+    )
+    monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
+    monkeypatch.setattr(actions.menu_utils, "print_header", lambda *args, **kwargs: None)
+    monkeypatch.setattr(actions.menu_utils, "render_menu", lambda _spec: None)
+    monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
+
+    def _capture_choice(_choices, **kwargs):
+        captured["default"] = kwargs.get("default")
+        captured["prompt"] = kwargs.get("prompt")
+        return "0"
+
+    monkeypatch.setattr(actions.prompt_utils, "get_choice", _capture_choice)
+
+    actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
+
+    assert captured["default"] == "2"
+    assert captured["prompt"] == "Scope [2]: "
+
+
 def test_print_inventory_run_feedback_uses_single_compact_success_line(capsys) -> None:
     result = SimpleNamespace(
         stats=SimpleNamespace(total_packages=546),
@@ -214,7 +246,7 @@ def test_print_inventory_run_feedback_can_include_mode_label(capsys) -> None:
         elapsed_seconds=125.0,
     )
 
-    inventory_sync_feedback.print_inventory_run_feedback(result, mode_label="fast")
+    inventory_sync_feedback.print_inventory_run_feedback(result, mode_label="harvest-ready")
 
     out = capsys.readouterr().out
-    assert "Refresh inventory (fast)" in out
+    assert "Refresh inventory (harvest-ready)" in out

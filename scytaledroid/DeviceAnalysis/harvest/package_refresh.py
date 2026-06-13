@@ -44,8 +44,6 @@ def replan_package_after_stale_path(
     drift_reasons: list[str] = []
     if refreshed_plan.inventory.version_code != plan.inventory.version_code:
         drift_reasons.append("version_code_changed")
-    elif refreshed_plan.inventory.version_name != plan.inventory.version_name:
-        drift_reasons.append("version_name_changed")
     if package_plan_identity(refreshed_plan) != package_plan_identity(plan):
         drift_reasons.append("artifact_set_changed")
     if refreshed_plan.skip_reason:

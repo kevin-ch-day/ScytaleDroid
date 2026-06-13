@@ -41,7 +41,7 @@ def describe_inventory_state(
         return InventoryGuardMessage(
             severity="warn",
             short="No inventory snapshot is available.",
-            long="Run a full inventory and database refresh before Execute Harvest.",
+            long="Run refresh inventory before Execute Harvest. Harvest-ready mode is usually the right default on non-root devices.",
         )
 
     if age >= threshold:
@@ -86,7 +86,7 @@ def prompt_inventory_decision(
 
     # Title/body (centralized copy by state)
     if not timestamp:
-        print(status_messages.status("No inventory snapshot exists; run a full refresh before Execute Harvest.", level="warn"))
+        print(status_messages.status("No inventory snapshot exists; run refresh inventory before Execute Harvest.", level="warn"))
     elif age_stale and last_synced:
         print(
             status_messages.status(

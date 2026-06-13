@@ -91,6 +91,30 @@ def test_inventory_progress_shows_active_package_and_call_counts(capsys) -> None
     assert "Active pm dump: com.google.android.apps.messaging" in out
 
 
+def test_inventory_progress_bulk_mode_shows_bulk_rows_without_fake_metadata(capsys) -> None:
+    printer = inventory_progress.make_cli_progress_printer()
+    printer({"phase": "start", "phase_label": "Collecting packages"})
+    printer(
+        {
+            "phase": "progress",
+            "processed": 5,
+            "total": 10,
+            "elapsed_seconds": 72.0,
+            "split_processed": 1,
+            "current_package": "com.example.bulk",
+            "current_stage": "pm path",
+            "bulk_rows_completed": 5,
+            "path_calls_completed": 2,
+            "active": True,
+        }
+    )
+    out = colors.strip(capsys.readouterr().out)
+    assert "bulk rows 5/10" in out
+    assert "paths 2/10" in out
+    assert "metadata" not in out
+    assert "Active pm path: com.example.bulk" in out
+
+
 def test_table_utils_unknown_column_style_does_not_raise(capsys) -> None:
     table_utils.render_table(
         ["Name", "Value"],
