@@ -382,6 +382,14 @@ def report_summary_failure(exc: Exception) -> None:
     )
 
 
+def report_report_failure(exc: Exception) -> None:
+    error_panels.print_error_panel(
+        "APK Harvest",
+        f"Harvest completed, but report preparation failed: {exc}",
+        hint="Artifacts and logs were written; inspect harvest logs for details.",
+    )
+
+
 def report_apk_pull_cancelled() -> None:
     print(status_messages.status("Execute Harvest cancelled by user.", level="warn"))
 

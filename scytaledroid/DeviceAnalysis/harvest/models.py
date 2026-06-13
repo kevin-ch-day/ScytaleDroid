@@ -129,6 +129,8 @@ class PullResult:
     research_status: str = "pending_audit"
     comparison: dict[str, object] = field(default_factory=dict)
     package_manifest_path: Path | None = None
+    stale_replan_required: bool = False
+    stale_replan_outcome: str | None = None
 
 
 @dataclass

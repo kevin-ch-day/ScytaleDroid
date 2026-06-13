@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from scytaledroid.Config import app_config
@@ -23,6 +23,52 @@ from scytaledroid.Utils.DisplayUtils import text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.ops.operation_result import OperationResult
+
+
+def _harvest_result_context_counts(results: Sequence[harvest.PullResult]) -> dict[str, int]:
+    """Best-effort counters for workflow context and summary failure paths."""
+
+    reviewed = len(results)
+    eligible = sum(1 for result in results if not result.preflight_reason)
+    harvested = sum(1 for result in results if result.ok)
+    blocked_preflight = sum(1 for result in results if result.preflight_reason)
+    replanned = sum(1 for result in results if getattr(result, "stale_replan_outcome", None))
+    return {
+        "packages_reviewed": reviewed,
+        "packages_eligible": eligible,
+        "packages_executed": eligible,
+        "packages_harvested": harvested,
+        "packages_blocked_preflight": blocked_preflight,
+        "packages_replanned": replanned,
+        "artifacts_written": sum(len(result.ok) for result in results),
+        "artifacts_failed": sum(len(result.errors) for result in results),
+    }
+
+
+def _update_outcome_context_from_harvest_report(
+    outcome_context: dict[str, object],
+    report: object,
+) -> None:
+    """Copy report-derived counters into workflow context."""
+
+    metrics = getattr(report, "metrics", None)
+    if metrics is None:
+        return
+    outcome_context.update(
+        {
+            "harvest_status": getattr(report, "status", None),
+            "packages": getattr(metrics, "harvested_packages", None),
+            "packages_blocked": getattr(metrics, "blocked_packages", None),
+            "packages_reviewed": getattr(metrics, "reviewed_packages", None),
+            "packages_eligible": getattr(metrics, "eligible_packages", None),
+            "packages_executed": getattr(metrics, "executed_packages", None),
+            "packages_harvested": getattr(metrics, "harvested_packages", None),
+            "packages_blocked_preflight": getattr(metrics, "blocked_packages", None),
+            "packages_replanned": getattr(metrics, "replanned_packages", None),
+            "artifacts_written": getattr(metrics, "artifacts_written", None),
+            "artifacts_failed": getattr(metrics, "artifacts_failed", None),
+        }
+    )
 
 
 def run_apk_pull(
@@ -168,6 +214,45 @@ def run_apk_pull(
             artifact_store.harvest_receipts_root() / session_stamp
         ),
     }
+    outcome_context.update(_harvest_result_context_counts(results))
+
+    report = None
+    try:
+        report = harvest.build_harvest_run_report(
+            resolution.plan,
+            results,
+            selection=resolution.selection,
+            pull_mode=resolution.pull_mode,
+            serial=serial,
+            run_timestamp=session_stamp,
+            guard_brief=resolution.selection.metadata.get("inventory_guard_brief"),
+            harvest_session_root=dest_root,
+        )
+        _update_outcome_context_from_harvest_report(outcome_context, report)
+    except Exception as exc:
+        logging_engine.get_error_logger().exception(
+            "Harvest report build failed",
+            extra=logging_engine.ensure_trace(
+                {
+                    "event": "apk_harvest.report_failed",
+                    "run_id": run_id,
+                    "device_serial": serial,
+                    "scope_label": resolution.selection.label,
+                }
+            ),
+        )
+        ui.report_report_failure(exc)
+        ui.maybe_save_watchlist(resolution.selection)
+        log.close_harvest_adapter(run_id)
+        return OperationResult.partial(
+            user_message=(
+                "Harvest pull finished, but summary/report preparation failed. "
+                "Artifacts were still written — check logs and paths below."
+            ),
+            error_code="apk_harvest_report_failed",
+            log_hint="See logs/error.log for the report traceback.",
+            context=outcome_context,
+        )
 
     summary_ok = True
     try:
@@ -182,6 +267,7 @@ def run_apk_pull(
             run_id=run_id,
             harvest_logger=harvest_logger,
             harvest_session_root=dest_root,
+            report=report,
         )
     except Exception as exc:
         summary_ok = False
@@ -209,7 +295,26 @@ def run_apk_pull(
             log_hint="See logs/error.log for the summary traceback.",
             context=outcome_context,
         )
-    return OperationResult.success(context=outcome_context)
+    if report.status == "aborted_device_unavailable":
+        return OperationResult.partial(
+            user_message=(
+                "Harvest aborted because the ADB device became unavailable during APK pulls."
+            ),
+            error_code="apk_pull_device_unavailable",
+            log_hint="Reconnect the device, confirm adb sees it, then rerun the harvest.",
+            context=outcome_context,
+        )
+    if report.status == "partial":
+        return OperationResult.partial(
+            user_message=(
+                "Harvest completed with package or artifact failures. Review the harvest summary and receipts."
+            ),
+            error_code="apk_pull_partial",
+            log_hint="Inspect the harvest summary and receipt paths for package-level failure reasons.",
+            context=outcome_context,
+        )
+    result_status = "OK" if report.status == "success" else report.status.upper()
+    return OperationResult.success(status=result_status, context=outcome_context)
 
 
 def device_is_rooted(serial: str) -> bool:
@@ -588,7 +693,7 @@ def resolve_harvest_plan(
                 selected_count = active_selection.metadata.get("selected_count") or len(
                     active_selection.packages
                 )
-                eligible = max(int(stats["scheduled_packages"]) + int(stats["policy_blocked"]), 0)
+                eligible = int(stats["scheduled_packages"])
                 blocked_total = int(stats["blocked_packages"])
                 blocked_policy = int(stats["policy_blocked"])
                 blocked_scope = max(blocked_total - blocked_policy, 0)

@@ -57,6 +57,22 @@ _NON_FATAL_NOTES = {
 }
 
 
+def _result_flag(result: PullResult, name: str, default: bool = False) -> bool:
+    """Return boolean result flags with backward-compatible defaults."""
+
+    return bool(getattr(result, name, default))
+
+
+def _result_text(result: PullResult, name: str) -> str | None:
+    """Return optional text attributes from result-like objects safely."""
+
+    value = getattr(result, name, None)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 @dataclass
 class HarvestRunMetrics:
     """Aggregate statistics for a completed harvest run."""
@@ -80,6 +96,13 @@ class HarvestRunMetrics:
     # Optional: which packages produced non-fatal runtime notes (e.g., DB mirror issues).
     # Kept out of strict contracts; used only to make operator output actionable.
     runtime_note_packages: dict[str, list[str]] = field(default_factory=dict)
+    reviewed_packages: int = 0
+    eligible_packages: int = 0
+    harvested_packages: int = 0
+    path_stale_packages: int = 0
+    replanned_packages: int = 0
+    replan_success_packages: int = 0
+    replan_failed_packages: int = 0
 
     @property
     def dedupe_skips(self) -> int:
@@ -207,7 +230,30 @@ class HarvestRunMetrics:
         artifacts_written = artifact_status_counter.get("written", 0)
         artifacts_failed = sum(len(result.errors) for result in results)
 
-        executed_packages = total_packages - len(blocked_package_names)
+        executed_packages = sum(1 for result in results if not result.preflight_reason)
+        eligible_packages = total_packages - len(blocked_package_names)
+        harvested_packages = sum(1 for result in results if result.ok)
+        path_stale_packages = sum(1 for result in results if _result_flag(result, "stale_replan_required"))
+        replanned_packages = sum(1 for result in results if _result_text(result, "stale_replan_outcome"))
+        replan_success_packages = sum(
+            1
+            for result in results
+            if _result_text(result, "stale_replan_outcome")
+            in {
+                "path_stale_refreshed_and_retried",
+                "path_stale_package_updated_since_inventory",
+                "path_stale_blocked_before_pull",
+            }
+        )
+        replan_failed_packages = sum(
+            1
+            for result in results
+            if _result_text(result, "stale_replan_outcome")
+            in {
+                "path_stale_package_no_longer_accessible",
+                "path_stale_replan_failed",
+            }
+        )
 
         return cls(
             total_packages=total_packages,
@@ -227,6 +273,13 @@ class HarvestRunMetrics:
             runtime_notes=runtime_notes,
             runtime_note_packages={k: sorted(v) for k, v in runtime_note_packages.items()},
             preflight_skips=preflight_skips,
+            reviewed_packages=len(results),
+            eligible_packages=eligible_packages,
+            harvested_packages=harvested_packages,
+            path_stale_packages=path_stale_packages,
+            replanned_packages=replanned_packages,
+            replan_success_packages=replan_success_packages,
+            replan_failed_packages=replan_failed_packages,
         )
 
 
@@ -345,7 +398,7 @@ def build_harvest_run_report(
     metrics = HarvestRunMetrics.from_run(plan, harvest_result, results)
     pull_errors = metrics.artifacts_failed
     metadata = selection.metadata or {}
-    status, status_level = _derive_harvest_status(metrics)
+    status, status_level = _derive_harvest_status(metrics, results)
     runtime_note_summary = _build_runtime_note_summary(metrics)
     artifacts_root = _run_artifacts_root(serial=serial, result=harvest_result)
     if harvest_session_root is not None:
@@ -493,18 +546,20 @@ def render_harvest_summary(
     harvest_logger: logging_engine.ContextAdapter | None = None,
     log_summary: bool = True,
     harvest_session_root: Path | str | None = None,
+    report: HarvestRunReport | None = None,
 ) -> None:
     """Render the end-of-run summary with diagnostics."""
-    report = build_harvest_run_report(
-        plan,
-        results,
-        selection=selection,
-        pull_mode=pull_mode,
-        serial=serial,
-        run_timestamp=run_timestamp,
-        guard_brief=guard_brief,
-        harvest_session_root=harvest_session_root,
-    )
+    if report is None:
+        report = build_harvest_run_report(
+            plan,
+            results,
+            selection=selection,
+            pull_mode=pull_mode,
+            serial=serial,
+            run_timestamp=run_timestamp,
+            guard_brief=guard_brief,
+            harvest_session_root=harvest_session_root,
+        )
     harvest_result = report.harvest_result
     metrics = report.metrics
 
@@ -783,8 +838,10 @@ def _build_summary_card_lines(
 
     package_pairs = _format_breakdown_pairs(
         [
-            (metrics.executed_packages, "executed"),
-            (metrics.blocked_packages, "blocked"),
+            (metrics.reviewed_packages, "reviewed"),
+            (metrics.eligible_packages, "eligible"),
+            (metrics.executed_packages, "attempted"),
+            (metrics.blocked_packages, "blocked before pull"),
         ]
     )
     lines.append(
@@ -794,6 +851,7 @@ def _build_summary_card_lines(
     outcome_pairs = _format_breakdown_pairs(
         [
             (metrics.packages_successful, "clean"),
+            (metrics.harvested_packages, "harvested"),
             (metrics.packages_with_partial_errors, "partial issues"),
             (metrics.packages_failed, "failed"),
             (metrics.packages_skipped_runtime, "runtime skipped"),
@@ -848,6 +906,17 @@ def _build_summary_card_lines(
                 runtime_breakdown,
             )
         )
+
+    replan_pairs = _format_breakdown_pairs(
+        [
+            (metrics.path_stale_packages, "path stale"),
+            (metrics.replanned_packages, "replanned"),
+            (metrics.replan_success_packages, "replan ok"),
+            (metrics.replan_failed_packages, "replan failed"),
+        ]
+    )
+    if replan_pairs:
+        lines.append(format_card_line("Replan", "stale-path triage", replan_pairs))
 
     if pull_errors:
         lines.append(format_card_line("Errors", f"{pull_errors} artifact(s)"))
@@ -1044,7 +1113,7 @@ def _operator_harvest_finish_line(report: HarvestRunReport, *, run_id: str | Non
     parts = [
         f"Harvest finished ({report.status})",
         f"scope={scope}",
-        f"pulled {m.executed_packages} eligible package(s) under policy",
+        f"attempted {m.executed_packages} eligible package(s) under policy",
         f"{m.total_packages} package row(s) in this harvest plan",
     ]
     if run_id:
@@ -1074,7 +1143,13 @@ def _skip_counts_redundant_with_finish_line(report: HarvestRunReport) -> bool:
     return sum(m.preflight_skips.values()) == m.blocked_packages and len(m.preflight_skips) == 1
 
 
-def _derive_harvest_status(metrics: HarvestRunMetrics) -> tuple[str, str]:
+def _derive_harvest_status(
+    metrics: HarvestRunMetrics,
+    results: Sequence[PullResult],
+) -> tuple[str, str]:
+    if any(error.reason == "device_unavailable" for result in results for error in result.errors):
+        return "aborted_device_unavailable", "error"
+
     status = "success"
     if metrics.packages_with_mirror_failures and metrics.executed_packages and (
         metrics.packages_with_mirror_failures >= metrics.executed_packages
