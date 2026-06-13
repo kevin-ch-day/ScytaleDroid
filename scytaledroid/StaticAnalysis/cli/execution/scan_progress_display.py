@@ -50,6 +50,7 @@ class _PipelineProgress:
                 batch=False,
                 noninteractive=False,
                 show_splits=show_splits,
+                scan_splits_enabled=True,
                 session_stamp=None,
                 persistence_ready=True,
                 paper_grade_requested=True,

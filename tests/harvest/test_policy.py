@@ -96,3 +96,31 @@ def test_scope_metadata_counts_social_subset():
     excluded = meta.get("excluded_counts") or {}
     # Expect at least one policy exclusion
     assert sum(int(v) for v in excluded.values()) >= 1
+
+
+def test_policy_blocked_bulk_base_only_package_remains_a_valid_sparse_inventory_row():
+    row = InventoryRow(
+        raw={"path_fidelity": "bulk_base_only"},
+        package_name="com.vendor.blocked",
+        app_label="Blocked",
+        installer=None,
+        category=None,
+        primary_path="/vendor/app/Blocked/Blocked.apk",
+        profile_key=None,
+        profile=None,
+        version_name=None,
+        version_code="1",
+        apk_paths=["/vendor/app/Blocked/Blocked.apk"],
+        split_count=1,
+    )
+
+    plan = planner.build_harvest_plan([row], include_system_partitions=False)
+
+    assert plan.failures == []
+    assert plan.policy_filtered == {"non_root_paths": 1}
+    assert len(plan.packages) == 1
+    pkg = plan.packages[0]
+    assert pkg.total_paths == 1
+    assert pkg.policy_filtered_count == 1
+    assert pkg.skip_reason == "policy_non_root"
+    assert pkg.artifacts == []

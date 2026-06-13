@@ -178,6 +178,12 @@ def render_plan_validation_block(outcome: PlanValidationOutcome) -> str:
             outcome.db.get("artifact_set_hash"),
         )
         lines.append(f"Artifact set hash    : {hash_match}")
+    if outcome.db.get("static_handoff_hash"):
+        handoff_match = _match_marker(
+            outcome.plan.get("static_handoff_hash"),
+            outcome.db.get("static_handoff_hash"),
+        )
+        lines.append(f"Static handoff hash  : {handoff_match}")
     if outcome.status == "PASS":
         if outcome.warnings:
             lines.append(f"Warnings             : {', '.join(outcome.warnings)}")
@@ -200,6 +206,17 @@ def build_plan_validation_event(outcome: PlanValidationOutcome) -> dict[str, obj
         "validation_result": outcome.status,
         "reasons": outcome.reasons,
         "warnings": outcome.warnings,
+        "summary": {
+            "reason_count": len(outcome.reasons),
+            "warning_count": len(outcome.warnings),
+            "mismatch_count": len(outcome.mismatches),
+            "db_row_found": bool(outcome.db),
+            "has_static_link": bool(
+                outcome.plan.get("artifact_set_hash")
+                and outcome.plan.get("static_handoff_hash")
+                and outcome.plan.get("run_signature")
+            ),
+        },
         "plan": _event_fields(outcome.plan),
         "db": _event_fields(outcome.db),
         "resolved_db_source": outcome.source,

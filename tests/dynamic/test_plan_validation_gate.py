@@ -149,3 +149,32 @@ def test_plan_validation_missing_static_handoff_hash(monkeypatch):
     outcome = loader.validate_dynamic_plan(plan, package_name="com.example.app")
     assert outcome.status == "FAIL"
     assert any("missing required fields" in reason for reason in outcome.reasons)
+
+
+def test_render_plan_validation_block_surfaces_static_handoff_hash_status(monkeypatch):
+    db_row = _db_row()
+    db_row["static_handoff_hash"] = "z" * 64
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(db_row))
+
+    outcome = loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")
+    block = loader.render_plan_validation_block(outcome)
+
+    assert "PLAN VALIDATION FAILED" in block
+    assert "Static handoff hash  : MISMATCH" in block
+    assert "Dynamic execution blocked." in block
+
+
+def test_build_plan_validation_event_includes_summary_counts(monkeypatch):
+    plan = _base_plan()
+    plan["run_identity"].pop("static_handoff_hash")
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(_db_row()))
+
+    outcome = loader.validate_dynamic_plan(plan, package_name="com.example.app")
+    event = loader.build_plan_validation_event(outcome)
+
+    assert event["validation_result"] == "FAIL"
+    assert event["summary"]["reason_count"] >= 1
+    assert event["summary"]["warning_count"] == 0
+    assert event["summary"]["mismatch_count"] == len(outcome.mismatches)
+    assert event["summary"]["db_row_found"] is True
+    assert event["summary"]["has_static_link"] is False

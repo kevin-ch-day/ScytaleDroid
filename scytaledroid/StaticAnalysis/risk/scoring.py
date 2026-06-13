@@ -117,7 +117,9 @@ def _permission_factor(
     config: RiskConfig,
 ) -> tuple[int, RiskFactor | None]:
     high_risk_permissions = sum(
-        1 for entry in permissions if entry.get("risk") == "High"
+        1
+        for entry in permissions
+        if str(entry.get("band") or entry.get("risk") or "").strip() == "High"
     )
     if high_risk_permissions <= 0:
         return (0, None)

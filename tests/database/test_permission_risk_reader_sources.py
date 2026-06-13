@@ -11,6 +11,8 @@ def test_latest_permission_risk_view_uses_risk_scores_not_legacy_table():
     sql = views.CREATE_VW_LATEST_PERMISSION_RISK.lower()
     assert "risk_scores" in sql
     assert "static_permission_risk" not in sql
+    assert "permission_posture_score" in sql
+    assert "permission_posture_grade" in sql
     assert "collate utf8mb4_unicode_ci" in sql
 
 

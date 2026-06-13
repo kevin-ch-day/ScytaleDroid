@@ -355,7 +355,7 @@ def compute_metrics_bundle(report: Any, string_data: Mapping[str, object]) -> Me
             contributors.append((
                 "correlations",
                 corr_points,
-                f"Composite risk correlations (+{corr_points})",
+                f"Heuristic static exposure correlations (+{corr_points})",
                 0,
             ))
     except Exception as exc:  # pragma: no cover - defensive

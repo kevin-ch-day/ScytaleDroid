@@ -1,8 +1,6 @@
 """Inventory service façade for menus/controllers."""
 
 from __future__ import annotations
-
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -33,6 +31,81 @@ class InventorySnapshotInfo:
 
 class InventoryServiceError(Exception):
     """Raised when an inventory operation fails at the service boundary."""
+
+
+def _inventory_collection_failure_message(
+    *,
+    serial: str,
+    exc: InventoryCollectionError,
+    scoped: bool,
+) -> str:
+    completed = max(0, exc.index - 1)
+    if scoped:
+        return (
+            f"Scoped inventory sync failed for {serial}: package={exc.package} "
+            f"stage={exc.stage} progress={completed}/{exc.total}."
+        )
+    return (
+        f"Inventory sync failed for {serial}: package={exc.package} "
+        f"stage={exc.stage} progress={completed}/{exc.total}. "
+        "Run aborted before persistence; last good snapshot preserved."
+    )
+
+
+def _raise_inventory_service_error(serial: str, exc: Exception, *, scoped: bool) -> None:
+    if isinstance(exc, InventoryCollectionError):
+        msg = _inventory_collection_failure_message(serial=serial, exc=exc, scoped=scoped)
+    elif scoped:
+        msg = f"Scoped inventory sync failed for {serial}: {exc}."
+    else:
+        msg = (
+            f"Inventory sync failed for {serial}: {exc}. "
+            "Run aborted before persistence; last good snapshot preserved."
+        )
+    print(status_messages.status(msg, level="error"))
+    raise InventoryServiceError(msg) from exc
+
+
+def _resolve_inventory_config(
+    *,
+    mode: str | None,
+    allow_fallbacks: bool | None,
+) -> tuple[InventoryConfig, str]:
+    resolved_config = InventoryConfig.from_env()
+    if allow_fallbacks is None:
+        allow_fallbacks = allow_inventory_fallbacks()
+    resolved_config.allow_fallbacks = bool(allow_fallbacks)
+    resolved_mode = (mode or resolved_config.mode.value).lower().strip()
+    return resolved_config, resolved_mode
+
+
+def _make_inventory_progress_callback(
+    *,
+    serial: str,
+    snapshot_meta,
+    ui_prefs,
+    progress_sink: str,
+    mode_label: str,
+    allow_fallbacks: bool,
+):
+    if progress_sink != "cli":
+        return None
+    from scytaledroid.DeviceAnalysis.inventory import progress
+
+    progress.render_snapshot_block(
+        snapshot_meta,
+        ui_prefs=ui_prefs,
+        mode=mode_label,
+        serial=serial,
+        allow_fallbacks=allow_fallbacks,
+    )
+    return progress.make_cli_progress_printer(ui_prefs=ui_prefs)
+
+
+def _print_inventory_cli_completion(result: InventoryResult) -> None:
+    from scytaledroid.DeviceAnalysis.inventory import views
+
+    views.print_inventory_run_summary_from_result(result)
 
 
 def get_latest_snapshot_info(serial: str) -> InventorySnapshotInfo | None:
@@ -102,23 +175,18 @@ def run_full_sync(
         device_manager.set_active_device(serial)
 
     meta = snapshot_io.load_latest_snapshot_meta(serial)
-    resolved_config = InventoryConfig.from_env()
-    if allow_fallbacks is None:
-        allow_fallbacks = allow_inventory_fallbacks()
-    resolved_config.allow_fallbacks = bool(allow_fallbacks)
-    mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
-    progress_cb = None
-    if progress_sink == "cli":
-        from scytaledroid.DeviceAnalysis.inventory import progress
-
-        progress.render_snapshot_block(
-            meta,
-            ui_prefs=ui_prefs,
-            mode=mode,
-            serial=serial,
-            allow_fallbacks=resolved_config.allow_fallbacks,
-        )
-        progress_cb = progress.make_cli_progress_printer(ui_prefs=ui_prefs)
+    resolved_config, mode = _resolve_inventory_config(
+        mode=mode,
+        allow_fallbacks=allow_fallbacks,
+    )
+    progress_cb = _make_inventory_progress_callback(
+        serial=serial,
+        snapshot_meta=meta,
+        ui_prefs=ui_prefs,
+        progress_sink=progress_sink,
+        mode_label=mode,
+        allow_fallbacks=resolved_config.allow_fallbacks,
+    )
 
     # Structured RUN_START log
     run_ctx = RunContext(
@@ -161,27 +229,11 @@ def run_full_sync(
             mode=mode,
             config=resolved_config,
         )
-    except InventoryCollectionError as exc:  # pragma: no cover - map to service error
-        completed = max(0, exc.index - 1)
-        msg = (
-            f"Inventory sync failed for {serial}: package={exc.package} "
-            f"stage={exc.stage} progress={completed}/{exc.total}. "
-            "Run aborted before persistence; last good snapshot preserved."
-        )
-        print(status_messages.status(msg, level="error"))
-        raise InventoryServiceError(msg) from exc
     except Exception as exc:  # pragma: no cover - map to service error
-        msg = (
-            f"Inventory sync failed for {serial}: {exc}. "
-            "Run aborted before persistence; last good snapshot preserved."
-        )
-        print(status_messages.status(msg, level="error"))
-        raise InventoryServiceError(msg) from exc
+        _raise_inventory_service_error(serial, exc, scoped=False)
 
     if progress_sink == "cli":
-        from scytaledroid.DeviceAnalysis.inventory import views
-
-        views.print_inventory_run_summary_from_result(result)
+        _print_inventory_cli_completion(result)
         total_pkgs = int(getattr(result.stats, "total_packages", 0) or 0)
         snapshot_id = getattr(result, "snapshot_id", None)
         if total_pkgs > 0 and snapshot_id is None:
@@ -270,25 +322,18 @@ def run_scoped_sync(
         raise InventoryServiceError("No packages provided for scoped inventory sync.")
 
     meta = snapshot_io.load_latest_snapshot_meta(serial)
-    resolved_config = InventoryConfig.from_env()
-    if allow_fallbacks is None:
-        allow_fallbacks = allow_inventory_fallbacks()
-    resolved_config.allow_fallbacks = bool(allow_fallbacks)
-    mode = (mode or os.getenv("SCYTALEDROID_INVENTORY_MODE", "baseline")).lower().strip()
-
-    progress_cb = None
-    if progress_sink == "cli":
-        from scytaledroid.DeviceAnalysis.inventory import progress
-
-        # Reuse the snapshot block for consistent UX, but make it explicit that this is scoped.
-        progress.render_snapshot_block(
-            meta,
-            ui_prefs=ui_prefs,
-            mode=f"{mode} (scoped:{scope_id})",
-            serial=serial,
-            allow_fallbacks=resolved_config.allow_fallbacks,
-        )
-        progress_cb = progress.make_cli_progress_printer(ui_prefs=ui_prefs)
+    resolved_config, mode = _resolve_inventory_config(
+        mode=mode,
+        allow_fallbacks=allow_fallbacks,
+    )
+    progress_cb = _make_inventory_progress_callback(
+        serial=serial,
+        snapshot_meta=meta,
+        ui_prefs=ui_prefs,
+        progress_sink=progress_sink,
+        mode_label=f"{mode} (scoped:{scope_id})",
+        allow_fallbacks=resolved_config.allow_fallbacks,
+    )
 
     try:
         from scytaledroid.DeviceAnalysis.inventory import runner
@@ -301,21 +346,9 @@ def run_scoped_sync(
             mode=mode,
             config=resolved_config,
         )
-    except InventoryCollectionError as exc:  # pragma: no cover
-        completed = max(0, exc.index - 1)
-        msg = (
-            f"Scoped inventory sync failed for {serial}: package={exc.package} "
-            f"stage={exc.stage} progress={completed}/{exc.total}."
-        )
-        print(status_messages.status(msg, level="error"))
-        raise InventoryServiceError(msg) from exc
     except Exception as exc:  # pragma: no cover
-        msg = f"Scoped inventory sync failed for {serial}: {exc}."
-        print(status_messages.status(msg, level="error"))
-        raise InventoryServiceError(msg) from exc
+        _raise_inventory_service_error(serial, exc, scoped=True)
 
     if progress_sink == "cli":
-        from scytaledroid.DeviceAnalysis.inventory import views
-
-        views.print_inventory_run_summary_from_result(result)
+        _print_inventory_cli_completion(result)
     return result

@@ -117,6 +117,7 @@ def _compute_config_hash(params: RunParameters) -> str:
         "profile": params.profile,
         "profile_label": params.profile_label,
         "scope": params.scope,
+        "scan_splits": bool(getattr(params, "scan_splits", True)),
         "selected_tests": list(params.selected_tests),
         "strings_mode": params.strings_mode,
         "string_min_entropy": params.string_min_entropy,
@@ -155,9 +156,10 @@ def _run_signature_sha256(
     return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def _artifact_manifest_sha256(group) -> str | None:
+def _artifact_manifest_sha256(group, *, artifacts: Sequence | None = None) -> str | None:
     entries = []
-    for artifact in _dedupe_artifacts(group.artifacts):
+    selected_artifacts = artifacts if artifacts is not None else _dedupe_artifacts(group.artifacts)
+    for artifact in selected_artifacts:
         sha = _artifact_sha256(artifact)
         meta = getattr(artifact, "metadata", {}) or {}
         label = None
@@ -173,6 +175,18 @@ def _artifact_manifest_sha256(group) -> str | None:
         "artifacts": sorted(entries, key=lambda item: item["split"]),
     }
     return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def select_group_artifacts(group, *, scan_splits: bool) -> list:
+    """Return the effective artifact set for a group under the current split policy."""
+
+    artifacts = _dedupe_artifacts(getattr(group, "artifacts", ()) or ())
+    if scan_splits:
+        return artifacts
+    base_artifact = getattr(group, "base_artifact", None)
+    if base_artifact is not None:
+        return [base_artifact]
+    return artifacts[:1]
 
 
 def _dedupe_artifacts(artifacts: Sequence) -> list:
@@ -302,4 +316,5 @@ __all__ = [
     "_normalise_digest",
     "_run_signature_sha256",
     "_split_name_for_artifact_with_reason",
+    "select_group_artifacts",
 ]

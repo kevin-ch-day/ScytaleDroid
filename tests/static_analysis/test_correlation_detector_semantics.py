@@ -63,6 +63,8 @@ def test_correlation_missing_baseline_is_warn_not_fail(monkeypatch):
     risk = next((f for f in result.findings if f.finding_id == "risk_profile"), None)
     assert risk is not None
     assert risk.status is not Badge.FAIL
+    assert risk.title.startswith("Correlation priority")
+    assert risk.metrics["is_canonical_app_risk"] is False
 
 
 def test_correlation_rule_violation_is_fail(monkeypatch, tmp_path):

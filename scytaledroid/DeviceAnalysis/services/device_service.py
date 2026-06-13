@@ -254,7 +254,7 @@ def sync_inventory(
     serial: str,
     *,
     filter_name: str | None = None,
-    filter_fn: Callable[..., object] | None = None,
+    filter_fn: Callable[[dict[str, object]], bool] | None = None,
     mode: str | None = None,
 ) -> InventoryStatus:
     """

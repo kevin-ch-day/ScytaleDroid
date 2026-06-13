@@ -365,6 +365,44 @@ def test_dynamic_state_summary_uses_shared_hint(monkeypatch, capsys):
     assert "Compare tracker state" in out
 
 
+def test_dynamic_state_summary_surfaces_repeatability_section(monkeypatch, capsys):
+    from scytaledroid.DynamicAnalysis import menu_reports as menu_module
+
+    monkeypatch.setenv("SCYTALEDROID_UI_LEVEL", "")
+    summary = SimpleNamespace(
+        can_freeze=False,
+        total_runs=2,
+        valid_runs=1,
+        missing_run_manifest_dirs=0,
+        evidence_root_exists=True,
+        evidence_root="output/evidence/dynamic",
+        tracker_runs_hint=0,
+        report_path="output/report.json",
+        reasons=(),
+        first_failing_reason="NO_VALID_RUNS",
+    )
+
+    menu_module.run_state_summary_report(
+        summary=summary,
+        payload={},
+        state_payload={
+            "repeatability_summary": {
+                "runs_repeatability_ready": 1,
+                "runs_total": 2,
+                "freeze_role": "canonical",
+                "publication_manifests_present": True,
+            }
+        },
+        delta_rows=[],
+        priorities=[],
+    )
+
+    out = capsys.readouterr().out
+    assert "Repeatability" in out
+    assert "runs ready" in out
+    assert "publication manifests" in out
+
+
 def test_static_diagnostics_menu_uses_shared_actions(monkeypatch, capsys):
     from scytaledroid.StaticAnalysis.cli.persistence.reports import session_diagnostics as menu_module
 

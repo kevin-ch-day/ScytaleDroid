@@ -128,6 +128,7 @@ def test_persist_permission_risk_writes_risk_scores_and_vnext_rows(monkeypatch):
     assert int(record.dangerous) == 2
     assert int(record.signature) == 3
     assert int(record.vendor) == 1
+    assert "permission" in record.__class__.__doc__.lower()
 
     vnext = _fetch_spr_vnext()
     assert len(vnext) == 1

@@ -463,6 +463,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
                 packages=packages,
                 ui_prefs=None,
                 progress_sink="cli",
+                mode="bulk",
                 allow_fallbacks=allow_fallbacks,
             )
             print_inventory_run_feedback(

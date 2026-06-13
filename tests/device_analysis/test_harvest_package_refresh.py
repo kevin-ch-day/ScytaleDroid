@@ -111,6 +111,55 @@ def test_refresh_inventory_row_from_device_falls_back_to_pm_dump_when_metadata_m
     assert refreshed.installer == "com.android.vending"
 
 
+def test_refresh_inventory_row_from_device_skips_pm_dump_when_package_disappeared(
+    monkeypatch,
+) -> None:
+    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
+    from scytaledroid.DeviceAnalysis import runtime_flags
+
+    monkeypatch.setattr(runtime_flags, "allow_inventory_fallbacks", lambda: False)
+    monkeypatch.setattr(
+        adb_packages,
+        "get_package_paths",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        adb_packages,
+        "list_packages_with_versions",
+        lambda *_args, **_kwargs: [("com.other.app", "7", "7.0")],
+    )
+    monkeypatch.setattr(
+        adb_packages,
+        "get_package_metadata",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pm dump should not run")),
+    )
+
+    inventory = InventoryRow(
+        raw={},
+        package_name="com.example.app",
+        app_label=None,
+        installer=None,
+        category=None,
+        primary_path="/data/app/~~oldtoken/com.example.app/base.apk",
+        profile_key="TEST_PROFILE",
+        profile=None,
+        version_name=None,
+        version_code="41",
+        apk_paths=["/data/app/~~oldtoken/com.example.app/base.apk"],
+        split_count=1,
+    )
+
+    refreshed = package_refresh.refresh_inventory_row_from_device("SER123", inventory)
+
+    assert refreshed.version_code == "41"
+    assert refreshed.version_name is None
+    assert refreshed.app_label is None
+    assert refreshed.installer is None
+    assert refreshed.primary_path is None
+    assert refreshed.apk_paths == []
+    assert refreshed.split_count == 0
+
+
 def test_replan_package_after_stale_path_ignores_version_name_only_drift(monkeypatch) -> None:
     inventory = InventoryRow(
         raw={},

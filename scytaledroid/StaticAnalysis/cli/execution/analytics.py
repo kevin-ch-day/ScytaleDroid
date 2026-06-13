@@ -32,6 +32,29 @@ from ..core.models import RunOutcome
 from .results_formatters import _format_masvs_cell, _percentile
 
 
+def static_exposure_grade(score_0_10: float) -> str:
+    """Return a heuristic exposure grade for the runtime composite static summary.
+
+    This is intentionally separate from ``permission_risk_grade()``. The
+    broader static exposure composite mixes multiple control families and must
+    not inherit permission-posture thresholds by name.
+    """
+
+    try:
+        score = float(score_0_10)
+    except (TypeError, ValueError):
+        return "N/A"
+    if score <= 2.0:
+        return "Minimal"
+    if score <= 4.0:
+        return "Low"
+    if score <= 6.5:
+        return "Moderate"
+    if score <= 8.0:
+        return "Elevated"
+    return "High"
+
+
 def _derive_highlight_stats(outcome: RunOutcome) -> dict[str, int]:
     stats = {"providers": 0, "nsc_guard": 0, "secrets_suppressed": 0}
     for app_result in outcome.results:
@@ -327,13 +350,16 @@ def _build_static_risk_row(
 
     total_score = perm_points + net_points + sto_points + comp_points + secrets_points + webssl_points + corr_points
     score_0_10 = max(0.0, min(10.0, (float(total_score) / 75.0) * 10.0))
-    grade = permission_risk_grade(score_0_10)
+    grade = static_exposure_grade(score_0_10)
     package = getattr(report.manifest, "package_name", None) or app_result.package_name
     label = permission_profile.get("label") if permission_profile else package
 
     return {
         "package": package,
         "label": label,
+        "score_kind": "heuristic_static_exposure",
+        "grade_kind": "heuristic_static_exposure",
+        "is_canonical_app_risk": False,
         "permission": round(perm_points, 2),
         "network": round(net_points, 2),
         "storage": round(sto_points, 2),

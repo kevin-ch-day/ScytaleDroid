@@ -37,6 +37,7 @@ class ProgressCallback(Protocol):
 
 # Keep PackageRow as a loose alias for the normalized dict shape used throughout
 PackageRow = dict[str, object]
+InventoryFilter = Callable[[PackageRow], bool]
 
 _TARGET_RESEARCH_PROFILES = frozenset(
     {
@@ -90,7 +91,7 @@ class CollectionStats:
 def collect_inventory(
     serial: str,
     *,
-    filter_fn: Callable[[dict[str, object | None], bool]] = None,
+    filter_fn: InventoryFilter | None = None,
     package_allowlist: set[str] | None = None,
     progress_cb: ProgressCallback | None = None,
     use_bulk: bool | None = None,
@@ -183,7 +184,6 @@ def collect_inventory(
         if isinstance(version_code, str) and version_code.strip():
             version_by_package[canonical_name] = version_code.strip()
 
-    package_definitions: dict[str, str | None] = {}
     # Progress cadence: for small scoped cohorts (e.g., paper profiles with ~19-21 packages),
     # emit every package. For full-device runs, target roughly 40 visible completions so the
     # operator sees regular forward motion even on slow non-root devices.
@@ -222,7 +222,11 @@ def collect_inventory(
                 )
                 bulk_entry = bulk_entry_map.get(package_key)
                 bulk_base_path = str(getattr(bulk_entry, "apk_path", "")).strip() or None
-                should_enrich_paths = _is_bulk_path_relevant_for_enrichment(
+                # If the package is present in the authoritative bulk version list but
+                # missing from the parsed bulk-entry map, prefer `pm path` over
+                # silently recording a sparse row. That keeps parser gaps from
+                # masquerading as real `no_paths` device state.
+                should_enrich_paths = bulk_entry is None or _is_bulk_path_relevant_for_enrichment(
                     package_name,
                     canonical_entry=canonical_entry,
                     bulk_base_path=bulk_base_path,
@@ -321,9 +325,6 @@ def collect_inventory(
             continue
 
         rows.append(entry)
-        normalized_key = str(entry.get("package_name") or package_name).lower()
-        app_label = entry.get("app_label")
-        package_definitions.setdefault(normalized_key, app_label if isinstance(app_label, str) else None)
 
         if normalizer.split_count(entry) > 1:
             split_processed += 1

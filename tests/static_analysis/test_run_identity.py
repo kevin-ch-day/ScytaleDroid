@@ -4,6 +4,7 @@ import json
 from hashlib import sha256
 
 from scytaledroid.StaticAnalysis.cli.execution import scan_flow
+from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 
 
 class FakeArtifact:
@@ -50,3 +51,10 @@ def test_compute_run_identity_missing_split_name():
     identity = scan_flow._compute_run_identity(group)
     assert identity["identity_valid"] is False
     assert identity["identity_error_reason"].startswith("split_name_missing")
+
+
+def test_compute_config_hash_changes_when_split_scan_changes() -> None:
+    params_on = RunParameters(profile="full", scope="app", scope_label="Example", scan_splits=True)
+    params_off = RunParameters(profile="full", scope="app", scope_label="Example", scan_splits=False)
+
+    assert scan_flow._compute_config_hash(params_on) != scan_flow._compute_config_hash(params_off)

@@ -981,6 +981,7 @@ def test_render_results_reuses_cached_base_string_payload(tmp_path, monkeypatch)
         batch=True,
         noninteractive=True,
         show_splits=False,
+        scan_splits_enabled=True,
         session_stamp=params.session_stamp,
         persistence_ready=False,
         paper_grade_requested=False,

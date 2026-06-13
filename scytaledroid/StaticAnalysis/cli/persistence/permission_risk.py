@@ -1,4 +1,9 @@
-"""Permission risk persistence helpers."""
+"""Permission posture persistence helpers.
+
+The historical ``risk_scores`` table name is compatibility-oriented. Rows
+written here are permission-scoped posture summaries, not canonical whole-app
+static risk.
+"""
 
 from __future__ import annotations
 

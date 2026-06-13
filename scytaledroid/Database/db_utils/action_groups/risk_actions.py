@@ -1,4 +1,4 @@
-"""Risk, coverage, and governance actions for Database Tools.
+"""Permission-posture coverage and governance actions for Database Tools.
 
 ``metrics`` joins in this module use ``metrics.run_id = static_analysis_runs.id``
 (canonical static run primary key), **not** legacy ``runs.run_id``. The
@@ -44,14 +44,14 @@ def count_inflight_static_analysis_runs(*, core_q) -> int:
 
 
 def backfill_static_permission_risk_vnext(*, core_q, prompt_utils, status_messages) -> None:
-    """Backfill canonical risk tables from current canonical artifacts."""
+    """Backfill permission-posture tables from current canonical artifacts."""
     from scytaledroid.Database.db_func.static_analysis import static_permission_risk as spr_db
 
     print()
-    print("Backfill Static Permission Risk (vNext)")
-    print("--------------------------------------")
+    print("Backfill Permission Posture Risk (vNext)")
+    print("----------------------------------------")
     print("Idempotent operation:")
-    print("1) Fill missing risk_scores rows from static run metrics.")
+    print("1) Fill missing risk_scores rows from permission posture metrics.")
     print("2) Fill missing static_permission_risk_vnext rows from permission matrix + risk_scores.")
     print()
 
@@ -81,7 +81,8 @@ def backfill_static_permission_risk_vnext(*, core_q, prompt_utils, status_messag
     if inflight_after > 0:
         if not prompt_utils.prompt_yes_no(
             f"{inflight_after} in-flight static run(s) are still present. "
-            "Proceed with risk_scores + vnext backfill anyway? (not recommended during fleet scans)",
+            "Proceed with permission posture risk_scores + vnext backfill anyway? "
+            "(not recommended during fleet scans)",
             default=False,
         ):
             print(status_messages.status("Backfill cancelled (in-flight runs).", level="warn"))
@@ -182,8 +183,11 @@ def backfill_static_permission_risk_vnext(*, core_q, prompt_utils, status_messag
     after_scores = _scalar("SELECT COUNT(*) FROM risk_scores")
     after_vnext = _scalar("SELECT COUNT(*) FROM static_permission_risk_vnext")
 
-    print(status_messages.status("Backfill complete.", level="success"))
-    print(f"risk_scores: {before_scores} -> {after_scores} (inserted={max(0, after_scores - before_scores)})")
+    print(status_messages.status("Permission posture backfill complete.", level="success"))
+    print(
+        "risk_scores (permission posture): "
+        f"{before_scores} -> {after_scores} (inserted={max(0, after_scores - before_scores)})"
+    )
     print(
         "static_permission_risk_vnext: "
         f"{before_vnext} -> {after_vnext} (inserted={max(0, after_vnext - before_vnext)})"
@@ -193,10 +197,10 @@ def backfill_static_permission_risk_vnext(*, core_q, prompt_utils, status_messag
 
 
 def audit_static_risk_coverage(*, core_q, prompt_utils, status_messages) -> None:
-    """Audit coverage gaps for risk_scores and static_permission_risk_vnext."""
+    """Audit coverage gaps for permission-posture rollups and vnext rows."""
     print()
-    print("Static Risk Coverage Audit")
-    print("--------------------------")
+    print("Permission Posture Coverage Audit")
+    print("--------------------------------")
 
     def _scalar(sql: str) -> int:
         row = core_q.run_sql(sql, fetch="one")
@@ -274,12 +278,17 @@ def audit_static_risk_coverage(*, core_q, prompt_utils, status_messages) -> None
         fetch="all",
     ) or []
 
-    print(f"runs: total={runs_total} with_risk_scores={runs_with_risk} without_risk_scores={runs_without_risk}")
+    print(
+        "runs: "
+        f"total={runs_total} "
+        f"with_permission_posture_scores={runs_with_risk} "
+        f"without_permission_posture_scores={runs_without_risk}"
+    )
     print(f"permission_matrix rows={spm_total} vnext rows={vnext_total} missing vnext rows={spm_missing_vnext}")
     print(f"runs missing permissions.risk_score metric={runs_missing_metric}")
     if missing_status_rows:
         status_detail = ", ".join(f"{row[0] or '<null>'}:{int(row[1] or 0)}" for row in missing_status_rows)
-        print(f"missing risk_scores by run status: {status_detail}")
+        print(f"missing permission posture risk_scores by run status: {status_detail}")
     if unresolved_sample:
         print("sample unresolved runs (id, package, session, scope, status):")
         for row in unresolved_sample:

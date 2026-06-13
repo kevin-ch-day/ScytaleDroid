@@ -82,6 +82,10 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         "Artifact detail output",
         default=params.artifact_detail,
     )
+    scan_splits = prompt_utils.prompt_yes_no(
+        "Split APK scan (scan base + split APKs)",
+        default=params.scan_splits,
+    )
     dry_run = prompt_utils.prompt_yes_no("Dry-run (no persistence)", default=params.dry_run)
     permission_refresh = prompt_utils.prompt_yes_no(
         "Refresh permission snapshot after detector run",
@@ -107,6 +111,7 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         dry_run=dry_run,
         verbose_output=verbose_output,
         artifact_detail=artifact_detail,
+        scan_splits=scan_splits,
         permission_snapshot_refresh=permission_refresh,
     )
 
@@ -143,6 +148,7 @@ def _summarise_params(params: RunParameters) -> tuple[tuple[str, object], ...]:
             ("Log level", params.log_level.upper()),
             ("Verbose output", _format_bool(params.verbose_output)),
             ("Artifact detail output", _format_bool(params.artifact_detail)),
+            ("Split APK scan", _format_bool(params.scan_splits)),
             (
                 "Post-run permission refresh",
                 _format_bool(params.permission_snapshot_refresh),

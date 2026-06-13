@@ -8,23 +8,49 @@ from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSele
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 
 
-def _dummy_group(package_name: str = "com.example.app", version_name: str = "1.0.0", version_code: str = "42"):
-    artifact = RepositoryArtifact(
-        path=Path(f"/tmp/{package_name}-{version_code}.apk"),
-        display_path=f"{package_name}-{version_code}.apk",
-        metadata={
-            "package_name": package_name,
-            "version_code": version_code,
-            "version_name": version_name,
-        },
-    )
+def _dummy_group(
+    package_name: str = "com.example.app",
+    version_name: str = "1.0.0",
+    version_code: str = "42",
+    *,
+    split_count: int = 0,
+):
+    artifacts = [
+        RepositoryArtifact(
+            path=Path(f"/tmp/{package_name}-{version_code}-base.apk"),
+            display_path=f"{package_name}-{version_code}-base.apk",
+            metadata={
+                "package_name": package_name,
+                "version_code": version_code,
+                "version_name": version_name,
+                "artifact": "base",
+                "split_name": "base",
+                "is_split_member": False,
+            },
+        )
+    ]
+    for index in range(1, split_count + 1):
+        artifacts.append(
+            RepositoryArtifact(
+                path=Path(f"/tmp/{package_name}-{version_code}-split{index}.apk"),
+                display_path=f"{package_name}-{version_code}-split{index}.apk",
+                metadata={
+                    "package_name": package_name,
+                    "version_code": version_code,
+                    "version_name": version_name,
+                    "artifact": f"split_config.{index}",
+                    "split_name": f"split_config.{index}",
+                    "is_split_member": True,
+                },
+            )
+        )
     return ArtifactGroup(
         group_key=f"{package_name}:{version_name}",
         package_name=package_name,
         version_display=version_name,
         session_stamp=None,
         capture_id=f"capture-{version_code}",
-        artifacts=(artifact,),
+        artifacts=tuple(artifacts),
     )
 
 
@@ -262,6 +288,52 @@ def test_run_setup_change_options_routes_to_advanced(monkeypatch) -> None:
 
     assert action == "advanced"
     assert reset_mode is None
+
+
+def test_run_setup_split_heavy_guidance_tracks_base_only_override(monkeypatch, capsys) -> None:
+    actions = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.actions")
+    selection = ScopeSelection(
+        "profile",
+        "Research Dataset Alpha",
+        (_dummy_group("com.zhiliaoapp.musically", split_count=53),),
+    )
+    params = RunParameters(
+        profile="full",
+        scope="profile",
+        scope_label="Research Dataset Alpha",
+        scan_splits=True,
+    )
+    command = Command(
+        id="1",
+        title="Run Static Pipeline (Full)",
+        description="Run full static profile.",
+        kind="scan",
+        profile="full",
+    )
+
+    monkeypatch.setattr(actions, "_lookup_existing_session_state", lambda _stamp: (False, 0, None))
+    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *_a, **_k: "0")
+
+    actions.prompt_run_setup(params, selection, command)
+    out = capsys.readouterr().out
+    assert "APK files          : 54 (1 base + 53 split)" in out
+    assert "Large split apps   : com.zhiliaoapp.musically (54 APK files)" in out
+    assert "Recommendation     : 3) Advanced / edit run options -> Split APK scan off (base APK only)" in out
+
+    actions.prompt_run_setup(
+        RunParameters(
+            profile="full",
+            scope="profile",
+            scope_label="Research Dataset Alpha",
+            scan_splits=False,
+        ),
+        selection,
+        command,
+    )
+    out = capsys.readouterr().out
+    assert "APK files          : 1 (1 base + 0 split)" in out
+    assert "Large split apps" not in out
+    assert "Recommendation     :" not in out
 
 
 def test_static_menu_shows_persistence_warning_when_schema_is_unavailable(monkeypatch, capsys):

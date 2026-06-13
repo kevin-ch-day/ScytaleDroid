@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from ..core.models import ScopeSelection
+from ..execution.scan_identity_helpers import select_group_artifacts
 
 
 def _emit_selection_manifest(
@@ -14,6 +15,7 @@ def _emit_selection_manifest(
     session_stamp: str | None,
     *,
     execution_id: str | None = None,
+    scan_splits: bool = True,
 ) -> None:
     stamp = (session_stamp or "").strip() or "unspecified-session"
     groups = tuple(getattr(selection, "groups", ()) or ())
@@ -23,7 +25,7 @@ def _emit_selection_manifest(
     digest_inputs: list[str] = []
 
     for group in groups:
-        artifacts = tuple(getattr(group, "artifacts", ()) or ())
+        artifacts = tuple(select_group_artifacts(group, scan_splits=scan_splits))
         package = str(getattr(group, "package_name", "") or "")
         group_key = str(getattr(group, "group_key", "") or "")
         capture_id = str(getattr(group, "capture_id", None) or "unknown")
@@ -54,6 +56,7 @@ def _emit_selection_manifest(
         "execution_id": execution_id,
         "scope": getattr(selection, "scope", None),
         "scope_label": getattr(selection, "label", None),
+        "split_scan_enabled": bool(scan_splits),
         "group_count": len(groups),
         "artifact_count": sum(int(row["artifact_count"]) for row in app_rows),
         "capture_distribution": dict(sorted(capture_distribution.items())),

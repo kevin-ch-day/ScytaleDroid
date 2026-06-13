@@ -184,6 +184,9 @@ def risk_score(
     profile = {
         "score": total_score,
         "grade": grade,
+        "surface_kind": "correlation_priority",
+        "finding_kind": "synthetic_prioritization",
+        "is_canonical_app_risk": False,
         "factors": scores,
         "oem_factor": oem_factor,
         "dangerous_permissions": dangerous_perm_count,
@@ -200,8 +203,12 @@ def risk_score(
 
 
 def risk_finding(profile: Mapping[str, object]) -> Finding:
-    score = profile.get("score", 0)
-    grade = profile.get("grade", "Informational")
+    normalized_profile = dict(profile)
+    normalized_profile.setdefault("surface_kind", "correlation_priority")
+    normalized_profile.setdefault("finding_kind", "synthetic_prioritization")
+    normalized_profile.setdefault("is_canonical_app_risk", False)
+    score = normalized_profile.get("score", 0)
+    grade = normalized_profile.get("grade", "Informational")
     if grade == "Critical":
         severity = SeverityLevel.P0
         badge = Badge.FAIL
@@ -215,17 +222,17 @@ def risk_finding(profile: Mapping[str, object]) -> Finding:
         severity = SeverityLevel.NOTE
         badge = Badge.INFO
 
-    because = f"Composite static risk score {score} ({grade})."
+    because = f"Correlation priority score {score} ({grade}); synthetic prioritization signal."
 
     return Finding(
         finding_id="risk_profile",
-        title=f"Composite risk — {grade}",
+        title=f"Correlation priority — {grade}",
         severity_gate=severity,
         category_masvs=MasvsCategory.OTHER,
         status=badge,
         because=because,
-        metrics=profile,
-        remediate="Prioritise remediation of P0/P1 findings to reduce the score.",
+        metrics=normalized_profile,
+        remediate="Prioritise remediation of the contributing findings that raised this synthetic priority score.",
     )
 
 

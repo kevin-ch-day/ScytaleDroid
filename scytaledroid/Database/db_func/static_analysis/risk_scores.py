@@ -1,4 +1,4 @@
-"""DB helpers for persisting permission risk scores (per run).
+"""DB helpers for persisting permission posture scores (per run).
 
 See :mod:`docs.database.permission_analysis_schema` for the column layout
 mirrored by :class:`RiskScoreRecord`.
@@ -17,7 +17,7 @@ from ...db_queries.static_analysis import risk_scores as queries
 
 @dataclass(slots=True)
 class RiskScoreRecord:
-    """Typed payload representing a row in ``risk_scores``."""
+    """Typed payload representing a permission-posture row in ``risk_scores``."""
 
     package_name: str
     session_stamp: str

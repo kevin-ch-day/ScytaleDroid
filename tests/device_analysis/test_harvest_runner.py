@@ -682,3 +682,116 @@ def test_execute_harvest_marks_package_drifted_after_partial_pull_replan(
     payload = result.package_manifest_path.read_text(encoding="utf-8")
     assert '"capture_status": "drifted"' in payload
     assert '"drift_reasons": [' in payload
+
+
+def test_execute_harvest_surfaces_refreshed_skip_reason_after_stale_path_replan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.Database.db_utils import diagnostics
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.harvest.common import HarvestOptions
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError, ArtifactPlan, InventoryRow, PackagePlan
+
+    monkeypatch.setattr(
+        runner,
+        "load_options",
+        lambda config, *, pull_mode: HarvestOptions(
+            write_db=False,
+            write_meta=False,
+            pull_mode=pull_mode,
+        ),
+    )
+    monkeypatch.setattr(diagnostics, "check_connection", lambda: True)
+    monkeypatch.setattr(runner, "get_run_logger", lambda *args, **kwargs: _FakeRunLogger())
+    monkeypatch.setattr(runner.log, "harvest_adapter", lambda *args, **kwargs: _FakeAdapter())
+    monkeypatch.setattr(runner.log, "close_harvest_adapter", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "info", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.log, "error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "resolve_storage_root", lambda: ("test-host", tmp_path.as_posix()))
+    monkeypatch.setattr(runner, "_quiet_mode", lambda: True)
+    monkeypatch.setattr(runner, "_compact_mode", lambda: True)
+    monkeypatch.setattr(
+        runner,
+        "adb_pull",
+        lambda **kwargs: ArtifactError(source_path=kwargs["source_path"], reason="path_stale"),
+    )
+
+    inventory = InventoryRow(
+        raw={},
+        package_name="com.example.reblocked",
+        app_label="Reblocked App",
+        installer="com.android.vending",
+        category=None,
+        primary_path="/data/app/com.example.reblocked/base.apk",
+        profile_key="TEST_PROFILE",
+        profile=None,
+        version_name="1.0",
+        version_code="1",
+        apk_paths=["/data/app/com.example.reblocked/base.apk"],
+        split_count=1,
+    )
+    original_plan = PackagePlan(
+        inventory=inventory,
+        artifacts=[
+            ArtifactPlan(
+                source_path="/data/app/com.example.reblocked/base.apk",
+                artifact="base",
+                file_name="com_example_reblocked_1__base.apk",
+                is_split_member=False,
+            )
+        ],
+        total_paths=1,
+    )
+    refreshed_plan = PackagePlan(
+        inventory=InventoryRow(
+            raw={"path_fidelity": "bulk_base_only"},
+            package_name="com.example.reblocked",
+            app_label="Reblocked App",
+            installer="com.android.vending",
+            category=None,
+            primary_path="/system/app/Reblocked/Reblocked.apk",
+            profile_key="TEST_PROFILE",
+            profile=None,
+            version_name="1.0",
+            version_code="1",
+            apk_paths=["/system/app/Reblocked/Reblocked.apk"],
+            split_count=1,
+        ),
+        artifacts=[],
+        total_paths=1,
+        policy_filtered_count=1,
+        policy_filtered_reason="non_root_paths",
+        skip_reason="policy_non_root",
+    )
+    monkeypatch.setattr(
+        runner.package_refresh,
+        "replan_package_after_stale_path",
+        lambda **_kwargs: (refreshed_plan, ("refreshed_skip:policy_non_root",)),
+    )
+
+    results = runner.execute_harvest(
+        serial="SERIAL123",
+        adb_path="adb",
+        dest_root=tmp_path / "SERIAL123" / "20260328",
+        session_stamp="20260328",
+        plans=[original_plan],
+        config=object(),
+        pull_mode="inventory",
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.capture_status == "drifted"
+    assert result.persistence_status == "not_requested"
+    assert result.research_status == "ineligible"
+    assert result.preflight_reason == "policy_non_root"
+    assert result.skipped == ["policy_non_root"]
+    assert result.errors == []
+    assert result.drift_reasons == ["refreshed_skip:policy_non_root"]
+    assert result.package_manifest_path is not None
+    payload = result.package_manifest_path.read_text(encoding="utf-8")
+    assert '"preflight_reason": "policy_non_root"' in payload
+    assert '"capture_status": "drifted"' in payload
+    assert '"policy_filtered_reason": "non_root_paths"' in payload

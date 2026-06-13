@@ -19,27 +19,54 @@ class _FakeReport:
     detector_results: list[object] = field(default_factory=list)
 
 
-def _make_group(tmp_path: Path, *, package_name: str, harvest_manifest: dict[str, object] | None) -> ArtifactGroup:
+def _make_group(
+    tmp_path: Path,
+    *,
+    package_name: str,
+    harvest_manifest: dict[str, object] | None,
+    split_count: int = 0,
+) -> ArtifactGroup:
+    artifacts = []
     apk_path = tmp_path / f"{package_name}__base.apk"
     apk_path.write_bytes(b"apk")
-    artifact = RepositoryArtifact(
-        path=apk_path,
-        display_path=apk_path.name,
-        metadata={
-            "package_name": package_name,
-            "version_code": "101",
-            "version_name": "1.0.1",
-            "artifact": "base",
-            "is_split_member": False,
-        },
+    artifacts.append(
+        RepositoryArtifact(
+            path=apk_path,
+            display_path=apk_path.name,
+            metadata={
+                "package_name": package_name,
+                "version_code": "101",
+                "version_name": "1.0.1",
+                "artifact": "base",
+                "split_name": "base",
+                "is_split_member": False,
+            },
+        )
     )
+    for index in range(1, split_count + 1):
+        split_path = tmp_path / f"{package_name}__split{index}.apk"
+        split_path.write_bytes(b"apk")
+        artifacts.append(
+            RepositoryArtifact(
+                path=split_path,
+                display_path=split_path.name,
+                metadata={
+                    "package_name": package_name,
+                    "version_code": "101",
+                    "version_name": "1.0.1",
+                    "artifact": f"split_config.{index}",
+                    "split_name": f"split_config.{index}",
+                    "is_split_member": True,
+                },
+            )
+        )
     return ArtifactGroup(
         group_key=f"{package_name}:101",
         package_name=package_name,
         version_display="1.0.1",
         session_stamp="20260328",
         capture_id="20260328",
-        artifacts=(artifact,),
+        artifacts=tuple(artifacts),
         harvest_manifest_path=(
             str(tmp_path / package_name / "harvest_package_manifest.json") if harvest_manifest else None
         ),
@@ -238,6 +265,59 @@ def test_execute_scan_creates_started_static_run_ledger_before_scan(monkeypatch,
     assert ledger_calls[0]["session_stamp"] == "sess-visible"
     assert ledger_calls[0]["scope_label"] == "Example"
     assert outcome.results[0].static_run_id == 321
+
+
+def test_execute_scan_respects_split_scan_override_for_interactive_runs(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    _configure_scan_flow(monkeypatch, calls=calls)
+    group = _make_group(
+        tmp_path,
+        package_name="com.example.splits",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+        split_count=2,
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        paper_grade_requested=False,
+        dry_run=False,
+        scan_splits=False,
+    )
+
+    outcome = scan_flow.execute_scan(
+        ScopeSelection(scope="app", label="Example", groups=(group,)),
+        params,
+        tmp_path,
+    )
+
+    assert calls == ["generate_report", "string_payload"]
+    assert outcome.total_artifacts == 1
+    assert outcome.completed_artifacts == 1
+    assert outcome.results[0].discovered_artifacts == 1
+    assert outcome.results[0].executed_artifacts == 1
+    base_report = outcome.results[0].base_report()
+    assert base_report is not None
+    metadata = base_report.metadata
+    assert isinstance(metadata, dict)
+    assert metadata.get("artifact_manifest_sha256") == scan_flow._artifact_manifest_sha256(  # noqa: SLF001 - contract guard
+        group,
+        artifacts=(group.base_artifact,),
+    )
 
 
 def test_execute_scan_prints_batch_persistence_timing_note(monkeypatch, tmp_path: Path, capsys) -> None:

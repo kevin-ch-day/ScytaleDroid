@@ -12,6 +12,7 @@ def _ctx() -> StaticRunContext:
         batch=False,
         noninteractive=False,
         show_splits=False,
+        scan_splits_enabled=True,
         session_stamp="sess-1",
         persistence_ready=True,
         paper_grade_requested=False,

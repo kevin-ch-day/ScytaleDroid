@@ -29,6 +29,7 @@ def _ctx(*, quiet: bool = False, batch: bool = False) -> StaticRunContext:
         batch=batch,
         noninteractive=False,
         show_splits=False,
+        scan_splits_enabled=True,
         session_stamp="sess",
         persistence_ready=True,
         paper_grade_requested=True,

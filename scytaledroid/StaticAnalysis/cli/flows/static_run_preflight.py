@@ -21,6 +21,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
+from scytaledroid.StaticAnalysis.cli.execution.scan_identity_helpers import select_group_artifacts
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.DisplayUtils.menu_utils import print_section
 
@@ -213,7 +214,8 @@ def _emit_run_context_preflight(params: RunParameters, selection: Any | None) ->
     groups = tuple(getattr(selection, "groups", ()) or ()) if selection is not None else ()
     if groups:
         n_pkg = len(groups)
-        n_apk = sum(len(getattr(g, "artifacts", ()) or ()) for g in groups)
+        scan_splits = bool(getattr(params, "scan_splits", True))
+        n_apk = sum(len(select_group_artifacts(g, scan_splits=scan_splits)) for g in groups)
         _preflight_plain(f"Packages in this run: {n_pkg}")
         _preflight_plain(f"APK files in this run: {n_apk}")
 

@@ -629,6 +629,10 @@ def _execute_package_plan(
                 if drift_reasons:
                     result.drift_reasons = list(drift_reasons)
                     result.capture_status = "drifted"
+                    if refreshed_plan.skip_reason and not result.ok:
+                        result.preflight_reason = refreshed_plan.skip_reason
+                        if refreshed_plan.skip_reason not in result.skipped:
+                            result.skipped.append(refreshed_plan.skip_reason)
                     if result.ok:
                         result.errors.append(
                             ArtifactError(
@@ -640,6 +644,7 @@ def _execute_package_plan(
                         stats["artifacts_failed"] += 1
                         break
                 active_plan = refreshed_plan
+                result.plan = active_plan
                 artifact_total = len(active_plan.artifacts)
                 artifact_index = package_refresh.next_unwritten_artifact_index(active_plan, result.ok)
                 if artifact_index <= len(active_plan.artifacts):

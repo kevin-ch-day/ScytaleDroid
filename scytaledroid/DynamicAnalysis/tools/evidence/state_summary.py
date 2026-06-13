@@ -21,6 +21,9 @@ from scytaledroid.DynamicAnalysis.plans.loader import (
     extract_plan_identity,
 )
 from scytaledroid.DynamicAnalysis.templates.category_map import category_for_package
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
+    inspect_canonical_freeze,
+)
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
@@ -55,6 +58,7 @@ def _run_profile_bucket(run_profile: str) -> str:
 def build_state_summary() -> dict[str, Any]:
     summary = run_freeze_readiness_audit()
     payload = _read_json(Path(summary.report_path)) or {}
+    repeatability = build_repeatability_summary()
     out: dict[str, Any] = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "audit_result": summary.result,
@@ -77,6 +81,7 @@ def build_state_summary() -> dict[str, Any]:
         "tracker_vs_evidence_per_app": _tracker_vs_evidence_per_app(),
         "baseline_signal_summary": _baseline_signal_summary(),
         "static_handoff_plan_summary": build_static_handoff_plan_summary(),
+        "repeatability_summary": repeatability,
     }
     out["next_collection_priorities"] = _build_collection_priorities(
         out["tracker_vs_evidence_per_app"] if isinstance(out["tracker_vs_evidence_per_app"], list) else []
@@ -154,6 +159,216 @@ def build_static_handoff_plan_summary() -> dict[str, Any]:
         "multiple_plan_identity_packages": multiple_plan_packages,
         "ready_for_guided_dataset_run": bool(dataset_pkgs and not missing_packages),
     }
+
+
+def build_repeatability_summary() -> dict[str, Any]:
+    """Summarize evidence-pack repeatability/readiness using on-disk contracts only."""
+
+    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    publication_manifests = Path(app_config.OUTPUT_DIR) / "publication" / "manifests"
+    canonical_freeze = inspect_canonical_freeze(archive_dir=archive_dir, evidence_root=root)
+
+    summary: dict[str, Any] = {
+        "evidence_root": str(root),
+        "evidence_root_exists": bool(root.exists()),
+        "runs_total": 0,
+        "runs_with_manifest": 0,
+        "runs_identity_complete": 0,
+        "runs_static_link_ready": 0,
+        "runs_pcap_present": 0,
+        "runs_features_present": 0,
+        "runs_windowing_recorded": 0,
+        "runs_threshold_present": 0,
+        "runs_rdi_ready": 0,
+        "runs_freeze_stamped": 0,
+        "runs_repeatability_ready": 0,
+        "issue_counts": {},
+        "top_blockers": [],
+        "publication_manifests_present": bool(publication_manifests.exists()),
+        "publication_manifest_files": int(len(list(publication_manifests.glob("*.json"))) if publication_manifests.exists() else 0),
+        "freeze_role": str(canonical_freeze.get("freeze_role") or "none"),
+    }
+    if not root.exists():
+        return summary
+
+    issue_counts: dict[str, int] = {}
+    blocker_samples: dict[str, list[str]] = {}
+
+    for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        summary["runs_total"] = int(summary["runs_total"]) + 1
+        manifest = _read_json(run_dir / "run_manifest.json")
+        if not isinstance(manifest, dict):
+            _bump_issue(issue_counts, blocker_samples, "manifest_missing_or_invalid", run_dir.name)
+            continue
+        summary["runs_with_manifest"] = int(summary["runs_with_manifest"]) + 1
+
+        plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json")
+        ident = extract_plan_identity(plan) if isinstance(plan, dict) else {}
+        features = _read_json(run_dir / "analysis" / "pcap_features.json")
+        report = _read_json(run_dir / "analysis" / "pcap_report.json")
+        summary_json = _read_json(run_dir / "analysis" / "summary.json")
+        ml_summary = _read_json(run_dir / "analysis" / "ml" / "v1" / "ml_summary.json")
+        model_manifest = _read_json(run_dir / "analysis" / "ml" / "v1" / "model_manifest.json")
+
+        run_blockers: list[str] = []
+
+        identity_complete = _identity_complete(ident)
+        if identity_complete:
+            summary["runs_identity_complete"] = int(summary["runs_identity_complete"]) + 1
+        else:
+            run_blockers.append("identity_incomplete")
+
+        static_link_ready = bool(ident.get("static_run_id")) and bool(ident.get("static_handoff_hash"))
+        if static_link_ready:
+            summary["runs_static_link_ready"] = int(summary["runs_static_link_ready"]) + 1
+        else:
+            run_blockers.append("static_link_missing")
+
+        pcap_present = _pcap_present(run_dir, manifest, report)
+        if pcap_present:
+            summary["runs_pcap_present"] = int(summary["runs_pcap_present"]) + 1
+        else:
+            run_blockers.append("pcap_missing")
+
+        features_present = isinstance(features, dict) and isinstance(report, dict) and isinstance(summary_json, dict)
+        if features_present:
+            summary["runs_features_present"] = int(summary["runs_features_present"]) + 1
+        else:
+            run_blockers.append("analysis_outputs_missing")
+
+        windowing_recorded = _windowing_recorded(manifest, ml_summary)
+        if windowing_recorded:
+            summary["runs_windowing_recorded"] = int(summary["runs_windowing_recorded"]) + 1
+        else:
+            run_blockers.append("windowing_unrecorded")
+
+        threshold_present = _threshold_present(run_dir, ml_summary)
+        if threshold_present:
+            summary["runs_threshold_present"] = int(summary["runs_threshold_present"]) + 1
+        else:
+            run_blockers.append("baseline_threshold_missing")
+
+        rdi_ready = _rdi_ready(run_dir, ml_summary)
+        if rdi_ready:
+            summary["runs_rdi_ready"] = int(summary["runs_rdi_ready"]) + 1
+        else:
+            run_blockers.append("rdi_missing")
+
+        freeze_stamped = _freeze_stamped(model_manifest, ml_summary)
+        if freeze_stamped:
+            summary["runs_freeze_stamped"] = int(summary["runs_freeze_stamped"]) + 1
+        else:
+            run_blockers.append("freeze_stamp_missing")
+
+        if not run_blockers:
+            summary["runs_repeatability_ready"] = int(summary["runs_repeatability_ready"]) + 1
+        else:
+            for blocker in run_blockers:
+                _bump_issue(issue_counts, blocker_samples, blocker, run_dir.name)
+
+    summary["issue_counts"] = dict(sorted(issue_counts.items(), key=lambda kv: (-int(kv[1]), str(kv[0]))))
+    summary["top_blockers"] = [
+        {
+            "code": code,
+            "count": int(count),
+            "sample_run_ids": blocker_samples.get(code, [])[:5],
+        }
+        for code, count in sorted(issue_counts.items(), key=lambda kv: (-int(kv[1]), str(kv[0])))[:8]
+    ]
+    return summary
+
+
+def _bump_issue(
+    issue_counts: dict[str, int],
+    blocker_samples: dict[str, list[str]],
+    code: str,
+    run_id: str,
+) -> None:
+    issue_counts[code] = int(issue_counts.get(code, 0)) + 1
+    samples = blocker_samples.setdefault(code, [])
+    if len(samples) < 5:
+        samples.append(run_id)
+
+
+def _identity_complete(identity: dict[str, Any]) -> bool:
+    if not isinstance(identity, dict) or identity.get("identity_valid") is False:
+        return False
+    required = (
+        "static_run_id",
+        "run_signature",
+        "run_signature_version",
+        "artifact_set_hash",
+        "base_apk_sha256",
+        "static_handoff_hash",
+    )
+    if identity.get("run_signature_version") not in SUPPORTED_SIGNATURE_VERSIONS:
+        return False
+    return all(identity.get(key) for key in required)
+
+
+def _pcap_present(run_dir: Path, manifest: dict[str, Any], report: dict[str, Any] | None) -> bool:
+    artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), list) else []
+    for item in artifacts:
+        if not isinstance(item, dict) or item.get("type") != "pcapdroid_capture":
+            continue
+        rel = item.get("relative_path")
+        if isinstance(rel, str) and rel and (run_dir / rel).exists():
+            if not isinstance(report, dict):
+                return True
+            try:
+                return int(report.get("pcap_size_bytes") or 0) > 0
+            except Exception:
+                return True
+    return False
+
+
+def _windowing_recorded(manifest: dict[str, Any], ml_summary: dict[str, Any] | None) -> bool:
+    dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
+    try:
+        window_count_ok = int(dataset.get("window_count") or 0) > 0
+    except Exception:
+        window_count_ok = False
+    try:
+        duration_ok = float(dataset.get("sampling_duration_seconds") or 0) > 0
+    except Exception:
+        duration_ok = False
+    windowing = ml_summary.get("windowing") if isinstance(ml_summary, dict) and isinstance(ml_summary.get("windowing"), dict) else {}
+    try:
+        stride_ok = float(windowing.get("stride_s") or 0) > 0
+    except Exception:
+        stride_ok = False
+    try:
+        size_ok = float(windowing.get("window_size_s") or 0) > 0
+    except Exception:
+        size_ok = False
+    return window_count_ok and duration_ok and stride_ok and size_ok
+
+
+def _threshold_present(run_dir: Path, ml_summary: dict[str, Any] | None) -> bool:
+    if (run_dir / "analysis" / "ml" / "v1" / "baseline_threshold.json").exists():
+        return True
+    models = ml_summary.get("models") if isinstance(ml_summary, dict) and isinstance(ml_summary.get("models"), dict) else {}
+    return any(isinstance(meta, dict) and meta.get("threshold_value") is not None for meta in models.values())
+
+
+def _rdi_ready(run_dir: Path, ml_summary: dict[str, Any] | None) -> bool:
+    if (run_dir / "analysis" / "ml" / "v1" / "dars_v1.json").exists():
+        return True
+    models = ml_summary.get("models") if isinstance(ml_summary, dict) and isinstance(ml_summary.get("models"), dict) else {}
+    return any(isinstance(meta, dict) and isinstance(meta.get("dars_v1"), dict) for meta in models.values())
+
+
+def _freeze_stamped(model_manifest: dict[str, Any] | None, ml_summary: dict[str, Any] | None) -> bool:
+    sources = []
+    if isinstance(model_manifest, dict):
+        sources.append(model_manifest)
+    if isinstance(ml_summary, dict):
+        sources.append(ml_summary)
+    for payload in sources:
+        if payload.get("freeze_manifest_sha256") and payload.get("freeze_dataset_hash"):
+            return True
+    return False
 
 
 def _identity_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
@@ -352,6 +567,21 @@ def main(argv: list[str] | None = None) -> int:
             + f"files={int(handoff.get('dynamic_plan_files') or 0)} "
             + f"valid={int(handoff.get('valid_plan_files') or 0)} "
             + f"missing={int(handoff.get('dataset_packages_missing_plan') or 0)}"
+        )
+    repeatability = (
+        out.get("repeatability_summary")
+        if isinstance(out.get("repeatability_summary"), dict)
+        else {}
+    )
+    if repeatability:
+        print(
+            "REPEATABILITY "
+            + f"ready={int(repeatability.get('runs_repeatability_ready') or 0)}/"
+            + f"{int(repeatability.get('runs_total') or 0)} "
+            + f"identity={int(repeatability.get('runs_identity_complete') or 0)} "
+            + f"pcap={int(repeatability.get('runs_pcap_present') or 0)} "
+            + f"rdi={int(repeatability.get('runs_rdi_ready') or 0)} "
+            + f"freeze_stamped={int(repeatability.get('runs_freeze_stamped') or 0)}"
         )
     priorities = out.get("next_collection_priorities") if isinstance(out.get("next_collection_priorities"), list) else []
     if priorities:

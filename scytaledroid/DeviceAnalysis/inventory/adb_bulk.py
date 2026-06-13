@@ -51,7 +51,8 @@ def _parse_pm_list_line(line: str) -> BulkPackageEntry | None:
         elif token.startswith("user:") or token.startswith("user="):
             user = token.split(":", 1)[1] if ":" in token else token.split("=", 1)[1]
         elif token.startswith("installer=") or token.startswith("installerPackageName="):
-            installer = token.split("=", 1)[1].strip() or None
+            installer_value = token.split("=", 1)[1].strip()
+            installer = None if installer_value.lower() in {"", "null", "none"} else installer_value
         elif token.startswith("versionCode:") or token.startswith("versionCode="):
             version_code = token.split(":", 1)[1] if ":" in token else token.split("=", 1)[1]
 
