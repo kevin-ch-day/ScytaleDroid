@@ -3,12 +3,59 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def normalize_dynamic_run_uuid(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text or not _UUID_RE.match(text):
+        return None
+    return text.lower()
+
+
+def resolve_typed_linkage(
+    *,
+    run_id: str,
+    run_type: str,
+    static_run_id: int | None = None,
+    dynamic_run_id: str | None = None,
+    linkage_migration_status: str | None = None,
+) -> tuple[int | None, str | None, str]:
+    """Return typed linkage fields for ``artifact_registry`` writes.
+
+    New writes should populate typed linkage eagerly while preserving legacy
+    ``run_id`` for backward compatibility.
+    """
+
+    rt = str(run_type or "").strip().lower()
+    run_id_text = str(run_id or "").strip()
+    resolved_static = int(static_run_id) if static_run_id is not None else None
+    resolved_dynamic = str(dynamic_run_id).strip() if dynamic_run_id is not None else None
+    status = str(linkage_migration_status or "").strip() or "legacy_unclassified"
+
+    if rt == "static":
+        if resolved_static is None and run_id_text.isdigit():
+            resolved_static = int(run_id_text)
+        if resolved_static is not None and status == "legacy_unclassified":
+            status = "typed_static_writer"
+    elif rt == "dynamic":
+        if not resolved_dynamic and run_id_text:
+            resolved_dynamic = run_id_text
+        if resolved_dynamic and status == "legacy_unclassified":
+            status = "typed_dynamic_writer"
+
+    return resolved_static, resolved_dynamic, status
 
 
 def record_artifacts(
@@ -20,9 +67,20 @@ def record_artifacts(
     base_path: Path | None = None,
     pull_status: str | None = None,
     status_reason: str | None = None,
+    static_run_id: int | None = None,
+    dynamic_run_id: str | None = None,
+    linkage_migration_status: str | None = None,
 ) -> None:
     rows = []
     now = datetime.now(UTC)
+    typed_static_run_id, typed_dynamic_run_id, typed_status = resolve_typed_linkage(
+        run_id=run_id,
+        run_type=run_type,
+        static_run_id=static_run_id,
+        dynamic_run_id=dynamic_run_id,
+        linkage_migration_status=linkage_migration_status,
+    )
+    dynamic_run_uuid = normalize_dynamic_run_uuid(typed_dynamic_run_id)
     for entry in artifacts:
         normalized = _normalize_artifact(entry, base_path)
         if not normalized:
@@ -36,6 +94,10 @@ def record_artifacts(
             (
                 run_id,
                 run_type,
+                typed_static_run_id,
+                typed_dynamic_run_id,
+                dynamic_run_uuid,
+                typed_status,
                 normalized.get("artifact_type"),
                 entry_origin,
                 normalized.get("device_path"),
@@ -55,6 +117,10 @@ def record_artifacts(
         INSERT INTO artifact_registry (
           run_id,
           run_type,
+          static_run_id,
+          dynamic_run_id,
+          dynamic_run_uuid,
+          linkage_migration_status,
           artifact_type,
           origin,
           device_path,
@@ -66,7 +132,7 @@ def record_artifacts(
           pulled_at_utc,
           status_reason,
           meta_json
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     core_q.run_sql_many(sql, rows, query_name="artifact_registry.insert")
 
@@ -133,4 +199,4 @@ def _format_datetime(value: datetime) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
-__all__ = ["record_artifacts"]
+__all__ = ["normalize_dynamic_run_uuid", "record_artifacts", "resolve_typed_linkage"]

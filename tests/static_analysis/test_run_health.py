@@ -54,6 +54,9 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
         persistence_persisted_findings=75,
         persistence_findings_capped_total=25,
         persistence_findings_capped_by_detector={"secrets": 25},
+        persistence_runtime_p0_findings=10,
+        persistence_persisted_p0_findings=8,
+        persistence_capped_p0_findings=2,
     )
     outcome = RunOutcome(
         [a],
@@ -78,12 +81,18 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
     assert roll["findings_runtime_total"] == 100
     assert roll["findings_persisted_db_total"] == 75
     assert roll["findings_capped_not_persisted_total"] == 25
+    assert roll["p0_runtime_findings_total"] == 10
+    assert roll["p0_persisted_db_findings_total"] == 8
+    assert roll["p0_capped_not_persisted_total"] == 2
     apps = doc["apps"]
     assert isinstance(apps, list) and len(apps) == 1
     fp = apps[0]["finding_persistence"]
     assert fp["runtime_findings"] == 100
     assert fp["persisted_findings_db"] == 75
     assert fp["capped_not_persisted"] == 25
+    assert fp["runtime_p0_findings"] == 10
+    assert fp["persisted_p0_findings_db"] == 8
+    assert fp["capped_p0_not_persisted"] == 2
     assert fp["capped_by_detector"] == {"secrets": 25}
     es = apps[0].get("execution_signals")
     assert isinstance(es, dict) and "drivers" in es and "counts" in es
@@ -169,6 +178,7 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
             "findings_runtime_total": 100,
             "findings_persisted_db_total": 75,
             "findings_capped_not_persisted_total": 25,
+            "p0_capped_not_persisted_total": 2,
         },
         "outputs": {},
         "status_reasons": {
@@ -198,6 +208,8 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "pipeline_token=warnings_and_policy_failures" in body
     assert "Operator note    :" in body
     assert "Detector posture / session rollup is 'partial'" in body
+    assert "Fidelity warning : PARTIAL - 25 runtime findings were capped before canonical DB persistence." in body
+    assert "High-priority fidelity warning: 2 P0 findings were capped before canonical DB persistence." in body
     assert "Persistence note :" in body
 
 

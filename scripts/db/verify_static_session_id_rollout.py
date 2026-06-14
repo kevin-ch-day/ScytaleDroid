@@ -18,6 +18,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
+
+_RESOLVED_DYNAMIC_STATIC_RUN_ID = resolved_dynamic_session_static_run_id("ds")
+
 _QUERIES: tuple[tuple[str, str], ...] = (
     (
         "sar_with_stamp_null_static_session_id",
@@ -42,11 +46,11 @@ _QUERIES: tuple[tuple[str, str], ...] = (
     ),
     (
         "dynamic_dangling_static_run_id",
-        """
+        f"""
         SELECT COUNT(*)
         FROM dynamic_sessions ds
-        LEFT JOIN static_analysis_runs sar ON sar.id = ds.static_run_id
-        WHERE ds.static_run_id IS NOT NULL
+        LEFT JOIN static_analysis_runs sar ON sar.id = {_RESOLVED_DYNAMIC_STATIC_RUN_ID}
+        WHERE {_RESOLVED_DYNAMIC_STATIC_RUN_ID} IS NOT NULL
           AND sar.id IS NULL
         """,
     ),

@@ -146,6 +146,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
     findings_runtime = _safe_int_token(roll.get("findings_runtime_total"))
     findings_persisted = _safe_int_token(roll.get("findings_persisted_db_total"))
     findings_capped = _safe_int_token(roll.get("findings_capped_not_persisted_total"))
+    p0_capped = _safe_int_token(roll.get("p0_capped_not_persisted_total"))
     scan_done = roll.get("scan_execution_complete")
     if isinstance(scan_done, bool):
         exec_label = "complete" if scan_done else "incomplete"
@@ -204,9 +205,18 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         )
     if findings_capped > 0:
         lines.append(
+            "Fidelity warning : "
+            f"PARTIAL - {findings_capped} runtime findings were capped before canonical DB persistence."
+        )
+        lines.append(
             "Persistence note : Some detector findings were intentionally omitted from canonical DB inserts "
             "because per-detector caps fired. Use run_health.json or DB capped counters when comparing "
             "runtime detector output to persisted findings."
+        )
+    if p0_capped > 0:
+        lines.append(
+            "High-priority fidelity warning: "
+            f"{p0_capped} P0 findings were capped before canonical DB persistence."
         )
 
     apps = doc.get("apps") if isinstance(doc.get("apps"), list) else []

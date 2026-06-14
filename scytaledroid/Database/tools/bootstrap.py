@@ -116,6 +116,7 @@ def _verify_required_schema(*, dialect: str) -> None:
     # Minimal invariant set. This should only expand over time.
     required_base_tables = [
         "schema_version",
+        "schema_migrations",
         "apps",
         "android_app_categories",
         "android_app_profiles",
@@ -284,6 +285,12 @@ def bootstrap_database() -> None:
             )
     except Exception as exc:  # pragma: no cover
         log.warning(f"Failed to record schema_version: {exc}", category="database")
+    try:
+        from scytaledroid.Database.db_utils.schema_migration_registry import ensure_governance_baseline
+
+        ensure_governance_baseline(run_sql)
+    except Exception as exc:  # pragma: no cover
+        log.warning(f"Failed to record schema_migrations baseline: {exc}", category="database")
     log.info("Schema bootstrap complete.", category="database")
 
 

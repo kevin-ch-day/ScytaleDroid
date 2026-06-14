@@ -31,6 +31,7 @@ def test_bucket_queries_reference_dynamic_sessions() -> None:
         sql = fn().lower()
         assert "dynamic_sessions" in sql
         assert "select count(*)" in sql
+        assert "static_run_id_u" in sql or "cast(ds.static_run_id as unsigned)" in sql
 
 
 def test_worklist_sql_distinct_and_limits() -> None:
@@ -40,6 +41,7 @@ def test_worklist_sql_distinct_and_limits() -> None:
     assert "analyze_exact_dynamic_apk_hash" in sql
     assert "harvest_artifact_paths" in sql
     assert "harvest_source_paths" in sql
+    assert "static_run_id_u" in sql or "cast(ds.static_run_id as unsigned)" in sql
 
 
 def test_worklist_distinct_count_subquery() -> None:

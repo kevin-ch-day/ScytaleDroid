@@ -111,7 +111,7 @@ def test_classification_unknown_when_empty_total():
 
 
 def test_classification_in_progress_runs_roll_to_unknown_status():
-    """All STARTED (no COMPLETED/FAILED rows in rollup) → coarse UNKNOWN + disposition unknown."""
+    """All STARTED (no COMPLETED/FAILED rows in rollup) → explicit in-progress session state."""
 
     st, disp = _call(
         total_run_count=3,
@@ -119,5 +119,5 @@ def test_classification_in_progress_runs_roll_to_unknown_status():
         failed_run_count=0,
         interrupted_run_count=0,
     )
-    assert st == "UNKNOWN"
-    assert disp == "unknown_needs_review"
+    assert st == "IN_PROGRESS"
+    assert disp == "in_progress_session"

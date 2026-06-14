@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 from scytaledroid.Config import app_config
+from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunParameters
+from scytaledroid.StaticAnalysis.cli.execution.results_persistence import merge_persistence_metadata
 from scytaledroid.StaticAnalysis.core import ManifestSummary, StaticAnalysisReport
 from scytaledroid.StaticAnalysis.persistence import reports as reports_store
-from scytaledroid.StaticAnalysis.persistence.reports import list_reports, reports_for_package, save_report
+from scytaledroid.StaticAnalysis.persistence.reports import (
+    list_reports,
+    refresh_saved_report_json,
+    reports_for_package,
+    save_report,
+)
 
 
 def _sample_report(
@@ -292,3 +298,82 @@ def test_save_report_logs_execution_id(tmp_path: Path, monkeypatch) -> None:
     assert captured["category"] == "static_analysis"
     assert captured["extra"]["event"] == "report.saved"
     assert captured["extra"]["execution_id"] == "exec-123"
+
+
+def test_refresh_saved_report_json_persists_findings_fidelity_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "both")
+    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
+
+    report = _sample_report(sha256="e" * 64)
+    save_report(report)
+
+    report.metadata["findings_fidelity"] = {
+        "finding_fidelity_status": "capped",
+        "runtime_findings": 10,
+        "persisted_db_findings": 6,
+        "capped_not_persisted": 4,
+        "cap_policy_applied": True,
+        "cap_policy_basis": "detector_count",
+        "cap_policy_detector_aware": True,
+        "cap_policy_severity_aware": False,
+        "canonical_db_complete": False,
+        "artifact_runtime_evidence_complete": True,
+        "cap_metadata_grain": "package",
+        "per_finding_persistence_status_available": False,
+        "notes": ["per-detector caps fired"],
+    }
+
+    refreshed = refresh_saved_report_json(report)
+
+    latest_payload = refreshed.json_path.read_text(encoding="utf-8")
+    archive_payload = (
+        tmp_path
+        / "data"
+        / "static_analysis"
+        / "reports"
+        / "archive"
+        / "20260328-rda-full"
+        / ("e" * 64 + ".json")
+    ).read_text(encoding="utf-8")
+
+    assert '"findings_fidelity"' in latest_payload
+    assert '"finding_fidelity_status": "capped"' in latest_payload
+    assert '"cap_metadata_grain": "package"' in latest_payload
+    assert '"findings_fidelity"' in archive_payload
+
+    stored = list_reports()[0].report
+    assert stored.metadata["findings_fidelity"]["persisted_db_findings"] == 6
+    assert stored.metadata["findings_fidelity"]["per_finding_persistence_status_available"] is False
+
+
+def test_merge_persistence_metadata_updates_frozen_report_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "both")
+    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
+
+    report = _sample_report(sha256="f" * 64)
+    app_result = AppRunResult(
+        "com.example.app",
+        "Testing",
+        persistence_runtime_findings=12,
+        persistence_persisted_findings=7,
+        persistence_findings_capped_total=5,
+        persistence_runtime_p0_findings=1,
+        persistence_persisted_p0_findings=0,
+        persistence_capped_p0_findings=1,
+    )
+    params = RunParameters(profile="full", scope="app", scope_label="Example", session_stamp="20260328-rda-full")
+
+    merge_persistence_metadata(base_report=report, app_result=app_result, params=params)
+    refreshed = refresh_saved_report_json(report)
+    payload = refreshed.json_path.read_text(encoding="utf-8")
+
+    assert '"findings_fidelity"' in payload
+    assert '"runtime_findings": 12' in payload
+    assert '"persisted_db_findings": 7' in payload
+    assert '"capped_p0_findings": 1' in payload

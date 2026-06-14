@@ -46,6 +46,8 @@ SELECT
       WHEN SUM(CASE WHEN sar.abort_reason IN ('user_abort', 'SIGINT') OR sar.abort_signal = 'SIGINT' THEN 1 ELSE 0 END) > 0
        THEN 'INTERRUPTED'
       WHEN SUM(CASE WHEN sar.status = 'FAILED' THEN 1 ELSE 0 END) = COUNT(*) THEN 'FAILED'
+      WHEN SUM(CASE WHEN sar.status = 'COMPLETED' THEN 1 ELSE 0 END) = 0
+       AND SUM(CASE WHEN sar.status = 'FAILED' THEN 1 ELSE 0 END) = 0 THEN 'IN_PROGRESS'
       ELSE 'UNKNOWN'
     END AS session_status,
 
@@ -75,6 +77,10 @@ SELECT
 
       WHEN SUM(CASE WHEN sar.status = 'COMPLETED' THEN 1 ELSE 0 END) = COUNT(*)
         THEN 'completed_profile_session'
+
+      WHEN SUM(CASE WHEN sar.status = 'COMPLETED' THEN 1 ELSE 0 END) = 0
+       AND SUM(CASE WHEN sar.status = 'FAILED' THEN 1 ELSE 0 END) = 0
+        THEN 'in_progress_session'
 
       ELSE 'unknown_needs_review'
     END AS session_disposition,

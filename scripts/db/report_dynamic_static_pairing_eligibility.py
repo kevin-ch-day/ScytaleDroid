@@ -46,6 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from scytaledroid.Database.db_core import db_config
         from scytaledroid.Database.db_core import db_queries as core_q
+        from scytaledroid.Database.db_queries.sql_typed_reads import (
+            resolved_dynamic_session_static_run_id,
+        )
         from scytaledroid.Database.db_scripts.dynamic_static_alignment_report import (
             HASH_EQ_DS_SAR,
             SAR_QUALIFYING_SQL,
@@ -70,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         limit=max(1, min(int(args.limit), 5000)),
         hash_eq_ds_sar=HASH_EQ_DS_SAR,
         sar_qualifying_sql=SAR_QUALIFYING_SQL,
+        resolved_static_run_expr=resolved_dynamic_session_static_run_id("ds"),
     )
     recovery_actions = _build_recovery_action_map(
         core_q,
@@ -140,6 +144,7 @@ def _fetch_dynamic_sessions(
     limit: int,
     hash_eq_ds_sar: str,
     sar_qualifying_sql: str,
+    resolved_static_run_expr: str,
 ) -> list[dict[str, Any]]:
     params: list[Any] = []
     package_filter = ""
@@ -156,23 +161,23 @@ def _fetch_dynamic_sessions(
               ds.version_code,
               ds.version_name,
               LOWER(TRIM(ds.base_apk_sha256)) AS base_apk_sha256,
-              ds.static_run_id,
+              {resolved_static_run_expr} AS static_run_id,
               ds.status,
               ds.valid_dataset_run,
               ds.started_at_utc,
               CASE
-                WHEN ds.static_run_id IS NOT NULL
+                WHEN {resolved_static_run_expr} IS NOT NULL
                  AND EXISTS (
                    SELECT 1
                    FROM static_analysis_runs sar
-                   WHERE sar.id = ds.static_run_id
-                     AND {hash_eq_ds_sar}
-                     AND {sar_qualifying_sql}
-                 )
+                    WHERE sar.id = {resolved_static_run_expr}
+                      AND {hash_eq_ds_sar}
+                      AND {sar_qualifying_sql}
+                  )
                 THEN 1 ELSE 0
               END AS linked_exact_static,
               CASE
-                WHEN ds.static_run_id IS NULL
+                WHEN {resolved_static_run_expr} IS NULL
                  AND ds.base_apk_sha256 IS NOT NULL
                  AND TRIM(ds.base_apk_sha256) <> ''
                  AND EXISTS (

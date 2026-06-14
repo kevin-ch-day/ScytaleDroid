@@ -16,6 +16,9 @@ class PersistenceOutcome:
     persisted_findings: int = 0
     findings_capped_total: int = 0
     findings_capped_by_detector: dict[str, int] = field(default_factory=dict)
+    runtime_p0_findings: int = 0
+    persisted_p0_findings: int = 0
+    capped_p0_findings: int = 0
     baseline_written: bool = False
     string_samples_persisted: int = 0
     persistence_failed: bool = False
@@ -101,7 +104,12 @@ class _PreparedFindingsPersistenceContext:
     control_summary: list[tuple[str, Mapping[str, Any]]]
     control_entry_count: int
     total_findings: int
+    runtime_totals: Counter[str]
     persisted_totals: Counter[str]
+    capped_by_severity: Counter[str]
+    runtime_p0_findings: int
+    persisted_p0_findings: int
+    capped_p0_findings: int
     downgraded_high: int
     capped_by_detector: Counter[str]
     taxonomy_counter: Counter[str]
@@ -140,6 +148,11 @@ class _FindingPreparationAccumulator:
     downgraded_high: int = 0
     persisted_by_detector: Counter[str] = field(default_factory=Counter)
     capped_by_detector: Counter[str] = field(default_factory=Counter)
+    persisted_by_severity: Counter[str] = field(default_factory=Counter)
+    capped_by_severity: Counter[str] = field(default_factory=Counter)
+    runtime_p0_findings: int = 0
+    persisted_p0_findings: int = 0
+    capped_p0_findings: int = 0
     taxonomy_counter: Counter[str] = field(default_factory=Counter)
     finding_rows: list[dict[str, Any]] = field(default_factory=list)
     canonical_finding_rows: list[dict[str, object]] = field(default_factory=list)

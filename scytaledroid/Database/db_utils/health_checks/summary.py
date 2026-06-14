@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_static_run_started_at_utc
 from scytaledroid.Database.db_utils.menus.sql_helpers import scalar
 
 
@@ -31,13 +32,8 @@ STALE_STATIC_SESSION_MIN_ROWS = 5
 
 def _started_at_expr(alias: str = "") -> str:
     prefix = f"{alias}." if alias else ""
-    return (
-        "COALESCE("
-        f"STR_TO_DATE(REPLACE(REPLACE({prefix}run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'), "
-        f"STR_TO_DATE(REPLACE(REPLACE({prefix}run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s'), "
-        f"{prefix}created_at"
-        ")"
-    )
+    alias_name = alias or "static_analysis_runs"
+    return f"COALESCE({resolved_static_run_started_at_utc(alias_name)}, {prefix}created_at)"
 
 
 def fetch_health_summary() -> HealthSummary:
@@ -50,14 +46,11 @@ def fetch_health_summary() -> HealthSummary:
         """
     )
     running_recent = scalar(
-        """
+        f"""
         SELECT COUNT(*)
         FROM static_analysis_runs
         WHERE status='RUNNING' AND ended_at_utc IS NULL
-          AND COALESCE(
-            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'),
-            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
-          ) >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
+          AND {_started_at_expr()} >= (UTC_TIMESTAMP() - INTERVAL 1 DAY)
         """
     )
     ok_recent = scalar(

@@ -57,7 +57,7 @@ def test_fetch_analysis_integrity_summary_includes_dynamic_retention_counts(monk
             return 12
         if "FROM web_static_dynamic_app_summary_cache" in sql and "dynamic_feature_recency_state = 'no_feature_rows_for_package'" in sql:
             return 5
-        if "WHERE ds.static_run_id IS NOT NULL" in sql:
+        if "static_run_id_u" in sql or "CAST(ds.static_run_id AS UNSIGNED)" in sql:
             return 0
         if "FROM artifact_registry ar" in sql and "ar.run_type = 'dynamic'" in sql:
             return 0

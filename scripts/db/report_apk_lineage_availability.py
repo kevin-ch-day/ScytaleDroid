@@ -24,6 +24,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -314,12 +316,13 @@ def _fetch_static_coverage(core_q: Any) -> dict[str, dict[str, Any]]:
 
 
 def _fetch_dynamic_coverage(core_q: Any) -> dict[str, dict[str, Any]]:
+    resolved_static_run_id = resolved_dynamic_session_static_run_id("ds")
     rows = core_q.run_sql(
-        """
+        f"""
         SELECT
           LOWER(TRIM(ds.base_apk_sha256)) AS base_apk_sha256,
           COUNT(*) AS dynamic_sessions,
-          SUM(CASE WHEN ds.static_run_id IS NULL THEN 1 ELSE 0 END) AS dynamic_unlinked_sessions,
+          SUM(CASE WHEN {resolved_static_run_id} IS NULL THEN 1 ELSE 0 END) AS dynamic_unlinked_sessions,
           SUM(CASE
                 WHEN sar.id IS NOT NULL
                  AND LOWER(TRIM(sar.base_apk_sha256)) = LOWER(TRIM(ds.base_apk_sha256))
@@ -327,9 +330,9 @@ def _fetch_dynamic_coverage(core_q: Any) -> dict[str, dict[str, Any]]:
                  AND sar.run_class = 'CANONICAL'
                  AND COALESCE(sar.identity_valid, 0) = 1
                 THEN 1 ELSE 0
-              END) AS dynamic_linked_sessions
+               END) AS dynamic_linked_sessions
         FROM dynamic_sessions ds
-        LEFT JOIN static_analysis_runs sar ON sar.id = ds.static_run_id
+        LEFT JOIN static_analysis_runs sar ON sar.id = {resolved_static_run_id}
         WHERE ds.base_apk_sha256 IS NOT NULL
         GROUP BY LOWER(TRIM(ds.base_apk_sha256))
         """,

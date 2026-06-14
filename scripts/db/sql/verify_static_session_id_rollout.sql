@@ -49,20 +49,60 @@ ORDER BY sas.static_session_id DESC
 LIMIT 50;
 
 -- 3) Dynamic sessions referencing a missing static_analysis_runs.id
+-- Typed-preferred linkage: static_run_id_u first, legacy signed static_run_id as fallback.
 SELECT
   COUNT(*) AS dynamic_rows_dangling_static_run_id
 FROM dynamic_sessions ds
-LEFT JOIN static_analysis_runs sar ON sar.id = ds.static_run_id
-WHERE ds.static_run_id IS NOT NULL
+LEFT JOIN static_analysis_runs sar
+  ON sar.id = COALESCE(
+    ds.static_run_id_u,
+    CASE
+      WHEN ds.static_run_id IS NOT NULL AND ds.static_run_id >= 0
+        THEN CAST(ds.static_run_id AS UNSIGNED)
+      ELSE NULL
+    END
+  )
+WHERE COALESCE(
+    ds.static_run_id_u,
+    CASE
+      WHEN ds.static_run_id IS NOT NULL AND ds.static_run_id >= 0
+        THEN CAST(ds.static_run_id AS UNSIGNED)
+      ELSE NULL
+    END
+  ) IS NOT NULL
   AND sar.id IS NULL;
 
 SELECT
   ds.dynamic_run_id,
   ds.package_name,
-  ds.static_run_id
+  COALESCE(
+    ds.static_run_id_u,
+    CASE
+      WHEN ds.static_run_id IS NOT NULL AND ds.static_run_id >= 0
+        THEN CAST(ds.static_run_id AS UNSIGNED)
+      ELSE NULL
+    END
+  ) AS resolved_static_run_id,
+  ds.static_run_id,
+  ds.static_run_id_u
 FROM dynamic_sessions ds
-LEFT JOIN static_analysis_runs sar ON sar.id = ds.static_run_id
-WHERE ds.static_run_id IS NOT NULL
+LEFT JOIN static_analysis_runs sar
+  ON sar.id = COALESCE(
+    ds.static_run_id_u,
+    CASE
+      WHEN ds.static_run_id IS NOT NULL AND ds.static_run_id >= 0
+        THEN CAST(ds.static_run_id AS UNSIGNED)
+      ELSE NULL
+    END
+  )
+WHERE COALESCE(
+    ds.static_run_id_u,
+    CASE
+      WHEN ds.static_run_id IS NOT NULL AND ds.static_run_id >= 0
+        THEN CAST(ds.static_run_id AS UNSIGNED)
+      ELSE NULL
+    END
+  ) IS NOT NULL
   AND sar.id IS NULL
 ORDER BY ds.dynamic_run_id DESC
 LIMIT 50;

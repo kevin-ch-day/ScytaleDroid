@@ -103,6 +103,7 @@ def persist_dynamic_summary(
         "status": result.status,
         "evidence_path": result.evidence_path,
         "static_run_id": _safe_int(plan_identity.get("static_run_id") or config.static_run_id),
+        "static_run_id_u": _safe_int(plan_identity.get("static_run_id") or config.static_run_id),
         "apk_set_id": _safe_int(plan_identity.get("apk_set_id")),
         "static_handoff_hash": plan_identity.get("static_handoff_hash"),
         "run_signature": plan_identity.get("run_signature"),
@@ -495,9 +496,10 @@ def _load_artifact_registry(dynamic_run_id: str | None) -> list[dict[str, Any]]:
             """
             SELECT artifact_type, origin, pull_status, sha256, host_path
             FROM artifact_registry
-            WHERE run_id=%s AND run_type='dynamic'
+            WHERE run_type='dynamic'
+              AND (dynamic_run_id=%s OR ((dynamic_run_id IS NULL OR TRIM(dynamic_run_id)='') AND run_id=%s))
             """,
-            (dynamic_run_id,),
+            (dynamic_run_id, dynamic_run_id),
             fetch="all",
         )
     except Exception:

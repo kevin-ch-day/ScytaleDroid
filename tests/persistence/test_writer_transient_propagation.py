@@ -48,3 +48,43 @@ def test_resolve_apk_set_id_for_artifact_set_hash_requires_unique_match(
     monkeypatch.setattr(run_writers.core_q, "run_sql", _ambiguous)
 
     assert run_writers.resolve_apk_set_id_for_artifact_set_hash("ABC") is None
+
+
+def test_create_static_run_refreshes_session_header_after_insert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def _run_sql(sql, params=None, **kwargs):
+        normalized = " ".join(str(sql).split())
+        if normalized.startswith("INSERT INTO static_analysis_runs"):
+            return 901
+        raise AssertionError((sql, params, kwargs))
+
+    monkeypatch.setattr(run_writers.core_q, "run_sql", _run_sql)
+    monkeypatch.setattr(
+        run_writers,
+        "maybe_refresh_static_analysis_session_summary",
+        lambda stamp, scope, *, reason: calls.append((stamp, scope, reason)),
+    )
+
+    run_id = run_writers._create_static_run(
+        app_version_id=1,
+        session_stamp="20260217",
+        session_label="20260217",
+        scope_label="All apps",
+        category=None,
+        profile="Full",
+        profile_key="Full",
+        scenario_id="static_default",
+        device_serial=None,
+        tool_semver="2.0.1",
+        tool_git_commit=None,
+        schema_version="0.2.6",
+        findings_total=0,
+        run_started_utc=None,
+        status="STARTED",
+    )
+
+    assert run_id == 901
+    assert calls == [("20260217", "All apps", "post_static_run_insert")]

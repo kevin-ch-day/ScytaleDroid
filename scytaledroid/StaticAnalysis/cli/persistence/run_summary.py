@@ -545,7 +545,12 @@ def _build_findings_persistence_context(
         control_summary=control_summary,
         control_entry_count=len(accumulator.control_entries),
         total_findings=accumulator.total_findings,
+        runtime_totals=Counter(accumulator.severity_counter),
         persisted_totals=persisted_totals,
+        capped_by_severity=Counter(accumulator.capped_by_severity),
+        runtime_p0_findings=int(accumulator.runtime_p0_findings),
+        persisted_p0_findings=int(accumulator.persisted_p0_findings),
+        capped_p0_findings=int(accumulator.capped_p0_findings),
         downgraded_high=accumulator.downgraded_high,
         capped_by_detector=accumulator.capped_by_detector,
         taxonomy_counter=accumulator.taxonomy_counter,
@@ -595,11 +600,18 @@ def _prepare_findings_persistence_context(
             gate_value = getattr(getattr(f, "severity_gate", None), "value", None)
             gate_sev = normalise_severity_token(gate_value)
             sev = detector_sev or gate_sev or "Info"
+            raw_severity = str(_finding_severity_raw_label(f) or "").strip().upper()
+            is_p0 = raw_severity == "P0"
+            if is_p0:
+                accumulator.runtime_p0_findings += 1
             if detector_sev == "High" and sev != "High":
                 accumulator.downgraded_high += 1
             accumulator.severity_counter[sev] += 1
             if accumulator.persisted_by_detector[detector_id] >= detector_cap:
                 accumulator.capped_by_detector[detector_id] += 1
+                accumulator.capped_by_severity[sev] += 1
+                if is_p0:
+                    accumulator.capped_p0_findings += 1
                 continue
             evidence = normalize_evidence(
                 f.evidence,
@@ -680,6 +692,9 @@ def _prepare_findings_persistence_context(
                 accumulator=accumulator,
             )
             accumulator.persisted_by_detector[detector_id] += 1
+            accumulator.persisted_by_severity[sev] += 1
+            if is_p0:
+                accumulator.persisted_p0_findings += 1
             accumulator.control_entries.extend(getattr(result, "masvs_coverage", []))
 
     return _build_findings_persistence_context(
@@ -1645,7 +1660,12 @@ def persist_run_summary(
             control_summary=[],
             control_entry_count=0,
             total_findings=0,
+            runtime_totals=Counter(),
             persisted_totals=Counter(baseline_counts),
+            capped_by_severity=Counter(),
+            runtime_p0_findings=0,
+            persisted_p0_findings=0,
+            capped_p0_findings=0,
             downgraded_high=0,
             capped_by_detector=Counter(),
             taxonomy_counter=Counter(),
@@ -1661,6 +1681,9 @@ def persist_run_summary(
     outcome.persisted_findings = len(findings_context.finding_rows)
     outcome.findings_capped_total = int(sum(findings_context.capped_by_detector.values()))
     outcome.findings_capped_by_detector = dict(findings_context.capped_by_detector)
+    outcome.runtime_p0_findings = int(findings_context.runtime_p0_findings)
+    outcome.persisted_p0_findings = int(findings_context.persisted_p0_findings)
+    outcome.capped_p0_findings = int(findings_context.capped_p0_findings)
     capped_total = outcome.findings_capped_total
     if capped_total > 0:
         log.warning(
