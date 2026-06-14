@@ -353,10 +353,14 @@ def collect_session_grain(
         """
         SELECT COUNT(*) FROM artifact_registry ar
         WHERE ar.run_type='static'
-          AND ar.run_id IN (SELECT CAST(r.id AS CHAR) FROM static_analysis_runs r WHERE r.session_stamp=%s"""
+          AND (
+            ar.static_run_id IN (SELECT r.id FROM static_analysis_runs r WHERE r.session_stamp=%s"""
+        + scope_extra
+        + """)
+            OR (ar.static_run_id IS NULL AND ar.run_id IN (SELECT CAST(r.id AS CHAR) FROM static_analysis_runs r WHERE r.session_stamp=%s"""
         + scope_extra
         + ")",
-        params_base,
+        params_base + params_base,
     )
 
     per_pkg_sql = (
@@ -374,7 +378,8 @@ def collect_session_grain(
           (SELECT COUNT(*) FROM static_correlation_results c WHERE c.static_run_id = r.id) AS correlation_rows,
           (SELECT COUNT(*) FROM static_persistence_failures p WHERE p.static_run_id = r.id) AS persist_fail_rows,
           (SELECT COUNT(*) FROM artifact_registry ar
-             WHERE ar.run_type='static' AND ar.run_id = CAST(r.id AS CHAR)) AS artifact_registry_rows
+             WHERE ar.run_type='static'
+               AND (ar.static_run_id = r.id OR (ar.static_run_id IS NULL AND ar.run_id = CAST(r.id AS CHAR)))) AS artifact_registry_rows
         FROM static_analysis_runs r
         JOIN app_versions av ON av.id = r.app_version_id
         JOIN apps a ON a.id = av.app_id

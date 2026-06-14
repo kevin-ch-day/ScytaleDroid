@@ -20,6 +20,8 @@ def test_static_session_health_v2_eligibility_contract() -> None:
     assert "%smoke%" in sql
     assert "%phase4a%" in sql
     assert "from static_analysis_sessions s" in sql
+    assert "'in_progress'" in sql
+    assert "'in_progress_unfinalized'" in sql
 
 
 def test_web_static_session_index_v2_filters_default_eligible() -> None:

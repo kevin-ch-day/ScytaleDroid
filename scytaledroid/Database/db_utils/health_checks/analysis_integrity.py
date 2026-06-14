@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
 from scytaledroid.Database.db_utils.menus.sql_helpers import scalar
 from scytaledroid.Database.summary_surfaces import (
     preferred_static_dynamic_summary_relation,
@@ -186,6 +187,7 @@ def _float_scalar(query: str) -> float | None:
 
 def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
     """Return cross-layer DB checks used by CLI and web-readiness audits."""
+    resolved_dynamic_static_run_id = resolved_dynamic_session_static_run_id("ds")
     dynamic_runs_with_evidence_path, dynamic_runs_missing_local_evidence = _dynamic_evidence_path_state()
     dynamic_artifact_host_paths_present, dynamic_artifact_host_paths_missing = _dynamic_artifact_host_path_state()
     summary_source = preferred_static_dynamic_summary_relation(runner=run_sql)
@@ -245,12 +247,12 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
         dynamic_artifact_host_paths_present=dynamic_artifact_host_paths_present,
         dynamic_artifact_host_paths_missing=dynamic_artifact_host_paths_missing,
         dynamic_runs_with_dangling_static_id=scalar(
-            """
+            f"""
             SELECT COUNT(*)
             FROM dynamic_sessions ds
             LEFT JOIN static_analysis_runs sar
-              ON sar.id = ds.static_run_id
-            WHERE ds.static_run_id IS NOT NULL
+              ON sar.id = {resolved_dynamic_static_run_id}
+            WHERE {resolved_dynamic_static_run_id} IS NOT NULL
               AND sar.id IS NULL
             """
         ),
@@ -259,7 +261,14 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
             SELECT COUNT(*)
             FROM artifact_registry ar
             LEFT JOIN dynamic_sessions ds
-              ON ds.dynamic_run_id = ar.run_id
+              ON ds.dynamic_run_id = COALESCE(
+                ar.dynamic_run_id,
+                CASE
+                  WHEN ar.run_type = 'dynamic' AND TRIM(COALESCE(ar.run_id, '')) <> ''
+                    THEN ar.run_id
+                  ELSE NULL
+                END
+              )
             WHERE ar.run_type = 'dynamic'
               AND ds.dynamic_run_id IS NULL
             """
@@ -269,11 +278,17 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
             SELECT COUNT(*)
             FROM artifact_registry ar
             LEFT JOIN static_analysis_runs sar
-              ON ar.run_id REGEXP '^[0-9]+$'
-             AND sar.id = CAST(ar.run_id AS UNSIGNED)
+              ON sar.id = COALESCE(
+                ar.static_run_id,
+                CASE
+                  WHEN ar.run_type = 'static' AND ar.run_id REGEXP '^[0-9]+$'
+                    THEN CAST(ar.run_id AS UNSIGNED)
+                  ELSE NULL
+                END
+              )
             WHERE ar.run_type = 'static'
               AND (
-                NOT ar.run_id REGEXP '^[0-9]+$'
+                (ar.static_run_id IS NULL AND NOT ar.run_id REGEXP '^[0-9]+$')
                 OR sar.id IS NULL
               )
             """

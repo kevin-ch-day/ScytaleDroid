@@ -48,6 +48,8 @@ def classify_static_session_status_and_disposition(
         session_status = "INTERRUPTED"
     elif failed_run_count == total:
         session_status = "FAILED"
+    elif completed_run_count == 0 and failed_run_count == 0:
+        session_status = "IN_PROGRESS"
     else:
         session_status = "UNKNOWN"
 
@@ -66,6 +68,8 @@ def classify_static_session_status_and_disposition(
         disposition = "completed_full_session"
     elif completed_run_count == total:
         disposition = "completed_profile_session"
+    elif completed_run_count == 0 and failed_run_count == 0:
+        disposition = "in_progress_session"
     else:
         disposition = "unknown_needs_review"
 

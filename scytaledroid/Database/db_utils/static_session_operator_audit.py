@@ -44,6 +44,44 @@ def _print_table(title: str, rows: Sequence[tuple[str, int | None, str]]) -> Non
         print(f"  {label:<{label_w}} {c:>12}  {status}")
 
 
+def classify_session_header_diagnostic(
+    *,
+    header_total_run_count: int,
+    header_session_link_rows: int,
+    header_rollup_rows: int,
+    actual_run_rows: int,
+    actual_completed_rows: int,
+    actual_started_rows: int,
+    actual_link_rows: int,
+    actual_rollup_rows: int,
+) -> str:
+    """Classify one session header against authoritative child-table counts."""
+
+    if (
+        actual_started_rows > 0
+        and actual_completed_rows == 0
+        and actual_link_rows == 0
+        and header_total_run_count < actual_run_rows
+    ):
+        return "in_progress_shell_unrefreshed"
+    if actual_run_rows != header_total_run_count:
+        return "run_count_mismatch"
+    if actual_completed_rows > 0 and actual_link_rows == 0:
+        return "missing_links"
+    if actual_completed_rows == actual_run_rows and actual_run_rows > 0 and actual_rollup_rows == 0:
+        return "missing_rollup"
+    if (
+        actual_completed_rows == actual_run_rows
+        and actual_run_rows > 0
+        and actual_rollup_rows > 0
+        and header_rollup_rows != actual_rollup_rows
+    ):
+        return "completed_header_stale"
+    if header_session_link_rows != actual_link_rows:
+        return "link_count_mismatch"
+    return "healthy"
+
+
 def audit_static_session_operator(
     session: str,
     *,
@@ -112,6 +150,91 @@ def audit_static_session_operator(
     )
 
     print(f"  static_run rows   : {n_runs} (id range {min_id} … {max_id})")
+
+    header_row = run_sql(
+        """
+        SELECT
+          s.session_status,
+          s.session_disposition,
+          s.total_run_count,
+          s.completed_run_count,
+          s.failed_run_count,
+          s.interrupted_run_count,
+          s.session_link_rows,
+          s.rollup_rows,
+          COALESCE(r.actual_runs, 0) AS actual_runs,
+          COALESCE(r.actual_completed, 0) AS actual_completed,
+          COALESCE(r.actual_started, 0) AS actual_started,
+          COALESCE(l.actual_link_rows, 0) AS actual_link_rows,
+          COALESCE(ro.actual_rollup_rows, 0) AS actual_rollup_rows
+        FROM static_analysis_sessions s
+        LEFT JOIN (
+          SELECT
+            sar.session_stamp,
+            COALESCE(TRIM(BOTH FROM sar.scope_label), '') AS scope_label,
+            COUNT(*) AS actual_runs,
+            SUM(CASE WHEN UPPER(COALESCE(sar.status, '')) = 'COMPLETED' THEN 1 ELSE 0 END) AS actual_completed,
+            SUM(CASE WHEN UPPER(COALESCE(sar.status, '')) IN ('STARTED', 'RUNNING') THEN 1 ELSE 0 END)
+              AS actual_started
+          FROM static_analysis_runs sar
+          GROUP BY sar.session_stamp, COALESCE(TRIM(BOTH FROM sar.scope_label), '')
+        ) r
+          ON r.session_stamp = s.session_stamp
+         AND r.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
+        LEFT JOIN (
+          SELECT session_stamp, COUNT(*) AS actual_link_rows
+          FROM static_session_run_links
+          GROUP BY session_stamp
+        ) l
+          ON l.session_stamp = s.session_stamp
+        LEFT JOIN (
+          SELECT session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '') AS scope_label, COUNT(*) AS actual_rollup_rows
+          FROM static_session_rollups
+          GROUP BY session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '')
+        ) ro
+          ON ro.session_stamp = s.session_stamp
+         AND ro.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
+        WHERE s.session_stamp = %s
+        LIMIT 1
+        """,
+        (session,),
+        fetch="one",
+        dictionary=True,
+    )
+    if isinstance(header_row, dict):
+        diagnostic_status = classify_session_header_diagnostic(
+            header_total_run_count=int(header_row.get("total_run_count") or 0),
+            header_session_link_rows=int(header_row.get("session_link_rows") or 0),
+            header_rollup_rows=int(header_row.get("rollup_rows") or 0),
+            actual_run_rows=int(header_row.get("actual_runs") or 0),
+            actual_completed_rows=int(header_row.get("actual_completed") or 0),
+            actual_started_rows=int(header_row.get("actual_started") or 0),
+            actual_link_rows=int(header_row.get("actual_link_rows") or 0),
+            actual_rollup_rows=int(header_row.get("actual_rollup_rows") or 0),
+        )
+        print()
+        print("SESSION HEADER — refresh diagnostic")
+        print("-" * 44)
+        label_w = 28
+        header_pairs = [
+            ("header.session_status", header_row.get("session_status")),
+            ("header.disposition", header_row.get("session_disposition")),
+            ("header.total_run_count", header_row.get("total_run_count")),
+            ("header.completed_run_count", header_row.get("completed_run_count")),
+            ("header.failed_run_count", header_row.get("failed_run_count")),
+            ("header.interrupted_run_count", header_row.get("interrupted_run_count")),
+            ("header.session_link_rows", header_row.get("session_link_rows")),
+            ("header.rollup_rows", header_row.get("rollup_rows")),
+            ("actual.run_rows", header_row.get("actual_runs")),
+            ("actual.completed_rows", header_row.get("actual_completed")),
+            ("actual.started_rows", header_row.get("actual_started")),
+            ("actual.link_rows", header_row.get("actual_link_rows")),
+            ("actual.rollup_rows", header_row.get("actual_rollup_rows")),
+            ("diagnostic_status", diagnostic_status),
+        ]
+        for key, value in header_pairs:
+            disp = "—" if value is None else str(value)
+            print(f"  {key:<{label_w}} {disp}")
 
     canonical_rows: list[tuple[str, int | None, str]] = []
 
@@ -352,8 +475,40 @@ def audit_static_session_operator(
         print()
         print("Copyable SQL (same session; adjust catalog/database as needed)")
         print("=" * 72)
+        print(
+            "Maintained SQL companion: scripts/db/sql/audit_static_session_header_integrity.sql"
+        )
         print(f"-- session_stamp = {lit}")
         print(f"SELECT COUNT(*) AS static_run_rows FROM static_analysis_runs WHERE session_stamp = {lit};")
+        print(
+            "SELECT s.session_stamp, s.session_status, s.session_disposition,\n"
+            "       s.total_run_count AS header_total_run_count,\n"
+            "       s.session_link_rows AS header_session_link_rows,\n"
+            "       s.rollup_rows AS header_rollup_rows,\n"
+            "       COALESCE(r.actual_runs, 0) AS actual_run_rows,\n"
+            "       COALESCE(r.actual_completed, 0) AS actual_completed_rows,\n"
+            "       COALESCE(r.actual_started, 0) AS actual_started_rows,\n"
+            "       COALESCE(l.actual_link_rows, 0) AS actual_link_rows,\n"
+            "       COALESCE(ro.actual_rollup_rows, 0) AS actual_rollup_rows\n"
+            "FROM static_analysis_sessions s\n"
+            "LEFT JOIN (\n"
+            "  SELECT sar.session_stamp, COALESCE(TRIM(BOTH FROM sar.scope_label), '') AS scope_label,\n"
+            "         COUNT(*) AS actual_runs,\n"
+            "         SUM(CASE WHEN UPPER(COALESCE(sar.status, ''))='COMPLETED' THEN 1 ELSE 0 END) AS actual_completed,\n"
+            "         SUM(CASE WHEN UPPER(COALESCE(sar.status, '')) IN ('STARTED','RUNNING') THEN 1 ELSE 0 END) AS actual_started\n"
+            "  FROM static_analysis_runs sar\n"
+            "  GROUP BY sar.session_stamp, COALESCE(TRIM(BOTH FROM sar.scope_label), '')\n"
+            ") r ON r.session_stamp = s.session_stamp AND r.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')\n"
+            "LEFT JOIN (\n"
+            "  SELECT session_stamp, COUNT(*) AS actual_link_rows\n"
+            "  FROM static_session_run_links GROUP BY session_stamp\n"
+            ") l ON l.session_stamp = s.session_stamp\n"
+            "LEFT JOIN (\n"
+            "  SELECT session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '') AS scope_label, COUNT(*) AS actual_rollup_rows\n"
+            "  FROM static_session_rollups GROUP BY session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '')\n"
+            ") ro ON ro.session_stamp = s.session_stamp AND ro.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')\n"
+            f"WHERE s.session_stamp = {lit};"
+        )
         print(
             "SELECT COUNT(*) AS finding_rows FROM static_analysis_findings f\n"
             "INNER JOIN static_analysis_runs r ON r.id = f.run_id\n"
@@ -420,5 +575,6 @@ def audit_static_session_operator(
 
 __all__ = [
     "audit_static_session_operator",
+    "classify_session_header_diagnostic",
     "sql_literal_for_session",
 ]

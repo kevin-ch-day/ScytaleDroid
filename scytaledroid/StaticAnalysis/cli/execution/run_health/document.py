@@ -35,6 +35,9 @@ def build_run_health_document(
     findings_runtime_total = 0
     findings_persisted_total = 0
     findings_capped_total_sum = 0
+    p0_runtime_total = 0
+    p0_persisted_total = 0
+    p0_capped_total = 0
     string_warn_apps = 0
     partial_ct = completed_ct = failed_ct = skipped_ct = 0
     artifact_rows_total = outcome.total_artifacts
@@ -77,12 +80,21 @@ def build_run_health_document(
         rt_pf = getattr(app, "persistence_runtime_findings", None)
         ps_pf = getattr(app, "persistence_persisted_findings", None)
         cap_pf = getattr(app, "persistence_findings_capped_total", None)
+        p0_rt_pf = getattr(app, "persistence_runtime_p0_findings", None)
+        p0_ps_pf = getattr(app, "persistence_persisted_p0_findings", None)
+        p0_cap_pf = getattr(app, "persistence_capped_p0_findings", None)
         if isinstance(rt_pf, int):
             findings_runtime_total += rt_pf
         if isinstance(ps_pf, int):
             findings_persisted_total += ps_pf
         if isinstance(cap_pf, int):
             findings_capped_total_sum += cap_pf
+        if isinstance(p0_rt_pf, int):
+            p0_runtime_total += p0_rt_pf
+        if isinstance(p0_ps_pf, int):
+            p0_persisted_total += p0_ps_pf
+        if isinstance(p0_cap_pf, int):
+            p0_capped_total += p0_cap_pf
 
         capped_map = getattr(app, "persistence_findings_capped_by_detector", None)
         capped_serial: dict[str, int] = {}
@@ -136,6 +148,9 @@ def build_run_health_document(
                     "runtime_findings": rt_pf if isinstance(rt_pf, int) else None,
                     "persisted_findings_db": ps_pf if isinstance(ps_pf, int) else None,
                     "capped_not_persisted": cap_pf if isinstance(cap_pf, int) else None,
+                    "runtime_p0_findings": p0_rt_pf if isinstance(p0_rt_pf, int) else None,
+                    "persisted_p0_findings_db": p0_ps_pf if isinstance(p0_ps_pf, int) else None,
+                    "capped_p0_not_persisted": p0_cap_pf if isinstance(p0_cap_pf, int) else None,
                     "capped_by_detector": capped_serial if capped_serial else {},
                 },
                 "mysql_web_session_health_projection": web_projection,
@@ -232,6 +247,9 @@ def build_run_health_document(
             "findings_runtime_total": findings_runtime_total,
             "findings_persisted_db_total": findings_persisted_total,
             "findings_capped_not_persisted_total": findings_capped_total_sum,
+            "p0_runtime_findings_total": p0_runtime_total,
+            "p0_persisted_db_findings_total": p0_persisted_total,
+            "p0_capped_not_persisted_total": p0_capped_total,
             "db_persistence_status": db_persistence_status,
             "detector_pipeline_status": detector_pipeline_status,
             "detector_status": detector_pipeline_status,

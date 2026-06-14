@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .sql_typed_reads import resolved_dynamic_session_static_run_id
+
 CREATE_V_WEB_APP_DIRECTORY = """
 CREATE OR REPLACE VIEW v_web_app_directory AS
 SELECT
@@ -128,7 +130,7 @@ SELECT
   latest_regime.final_regime_if,
   CASE WHEN nf.dynamic_run_id IS NULL THEN 'missing_features' ELSE 'features_available' END AS feature_state,
   CASE
-    WHEN ds.static_run_id IS NULL THEN 'missing_static_run_id'
+    WHEN {resolved_dynamic_static_run_id} IS NULL THEN 'missing_static_run_id'
     WHEN sar.id IS NULL THEN 'dangling_static_run_id'
     ELSE 'static_linked'
   END AS static_link_state
@@ -139,7 +141,7 @@ LEFT JOIN apps a
 LEFT JOIN dynamic_network_features nf
   ON nf.dynamic_run_id = ds.dynamic_run_id
 LEFT JOIN static_analysis_runs sar
-  ON sar.id = ds.static_run_id
+  ON sar.id = {resolved_dynamic_static_run_id}
 LEFT JOIN (
   SELECT dynamic_run_id, COUNT(*) AS issue_count
   FROM dynamic_session_issues
@@ -160,7 +162,9 @@ LEFT JOIN (
 ) latest_regime
   ON CONVERT(latest_regime.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
      CONVERT(ds.package_name USING utf8mb4) COLLATE utf8mb4_general_ci;
-"""
+""".format(
+    resolved_dynamic_static_run_id=resolved_dynamic_session_static_run_id("ds"),
+)
 
 CREATE_V_WEB_RUNTIME_RUN_DETAIL = """
 CREATE OR REPLACE VIEW v_web_runtime_run_detail AS
@@ -199,7 +203,7 @@ SELECT
   nf.new_dns_rate_per_min,
   CASE WHEN nf.dynamic_run_id IS NULL THEN 'missing_features' ELSE 'features_available' END AS feature_state,
   CASE
-    WHEN ds.static_run_id IS NULL THEN 'missing_static_run_id'
+    WHEN {resolved_dynamic_static_run_id} IS NULL THEN 'missing_static_run_id'
     WHEN sar.id IS NULL THEN 'dangling_static_run_id'
     ELSE 'static_linked'
   END AS static_link_state
@@ -210,8 +214,10 @@ LEFT JOIN apps a
 LEFT JOIN dynamic_network_features nf
   ON nf.dynamic_run_id = ds.dynamic_run_id
 LEFT JOIN static_analysis_runs sar
-  ON sar.id = ds.static_run_id;
-"""
+  ON sar.id = {resolved_dynamic_static_run_id};
+""".format(
+    resolved_dynamic_static_run_id=resolved_dynamic_session_static_run_id("ds"),
+)
 
 CREATE_V_WEB_STATIC_SESSION_HEALTH = """
 CREATE OR REPLACE VIEW v_web_static_session_health AS

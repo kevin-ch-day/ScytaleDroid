@@ -125,6 +125,10 @@ def build_report_view(report: StaticAnalysisReport) -> Mapping[str, Any]:
         },
     }
 
+    findings_fidelity = metadata.get("findings_fidelity")
+    if isinstance(findings_fidelity, Mapping):
+        view["run"]["findings_fidelity"] = dict(findings_fidelity)
+
     return view
 
 

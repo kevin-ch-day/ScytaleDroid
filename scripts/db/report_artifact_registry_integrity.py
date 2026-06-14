@@ -254,8 +254,8 @@ def format_text_report(data: Mapping[str, Any]) -> str:
     lines.append("")
     lines.append(
         "Notes: link_state comes from v_artifact_registry_integrity. "
-        "static linked requires numeric run_id and matching static_analysis_runs.id. "
-        "dynamic linked requires dynamic_sessions.dynamic_run_id = artifact_registry.run_id."
+        "static linked prefers typed static_run_id joins and falls back to numeric legacy run_id parsing only for unmigrated rows. "
+        "Dynamic linked prefers typed dynamic_run_id joins and falls back to legacy run_id only when dynamic_run_id is still blank."
     )
     lines.append(
         "Interpretation: large static dangling_static_run counts usually mean numeric run_id rows whose "

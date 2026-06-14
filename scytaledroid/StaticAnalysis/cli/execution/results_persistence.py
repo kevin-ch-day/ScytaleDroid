@@ -6,6 +6,82 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 
+def _set_report_metadata(*, base_report: object, metadata_map: Mapping[str, object]) -> None:
+    try:
+        object.__setattr__(base_report, "metadata", dict(metadata_map))
+    except Exception:
+        setattr(base_report, "metadata", dict(metadata_map))
+
+
+def _finding_fidelity_status(
+    *,
+    runtime_findings: int | None,
+    capped_not_persisted: int | None,
+) -> str:
+    runtime = int(runtime_findings or 0)
+    capped = int(capped_not_persisted or 0)
+    if runtime <= 0:
+        return "unknown"
+    if capped <= 0:
+        return "complete"
+    return "capped"
+
+
+def _build_findings_fidelity_metadata(*, app_result: object) -> dict[str, object] | None:
+    runtime_findings = getattr(app_result, "persistence_runtime_findings", None)
+    persisted_findings = getattr(app_result, "persistence_persisted_findings", None)
+    capped_findings = getattr(app_result, "persistence_findings_capped_total", None)
+    if not any(isinstance(value, int) for value in (runtime_findings, persisted_findings, capped_findings)):
+        return None
+
+    runtime = int(runtime_findings or 0)
+    persisted = int(persisted_findings or 0)
+    capped = int(capped_findings or 0)
+    fidelity_ratio = None
+    capped_ratio = None
+    if runtime > 0:
+        fidelity_ratio = round(persisted / runtime, 6)
+        capped_ratio = round(capped / runtime, 6)
+
+    runtime_p0 = getattr(app_result, "persistence_runtime_p0_findings", None)
+    persisted_p0 = getattr(app_result, "persistence_persisted_p0_findings", None)
+    capped_p0 = getattr(app_result, "persistence_capped_p0_findings", None)
+
+    notes: list[str] = []
+    if capped > 0:
+        notes.append(
+            "Canonical DB finding rows are incomplete for this package because per-detector caps fired during persistence."
+        )
+    if int(capped_p0 or 0) > 0:
+        notes.append(
+            f"High-priority fidelity warning: {int(capped_p0 or 0)} P0 findings were capped before canonical DB persistence."
+        )
+
+    return {
+        "finding_fidelity_status": _finding_fidelity_status(
+            runtime_findings=runtime,
+            capped_not_persisted=capped,
+        ),
+        "runtime_findings": runtime,
+        "persisted_db_findings": persisted,
+        "capped_not_persisted": capped,
+        "fidelity_ratio": fidelity_ratio,
+        "capped_ratio": capped_ratio,
+        "canonical_db_complete": capped <= 0,
+        "artifact_runtime_evidence_complete": True,
+        "cap_policy_applied": capped > 0,
+        "cap_policy_basis": "detector_count",
+        "cap_policy_detector_aware": True,
+        "cap_policy_severity_aware": False,
+        "cap_metadata_grain": "package",
+        "per_finding_persistence_status_available": False,
+        "runtime_p0_findings": int(runtime_p0 or 0) if isinstance(runtime_p0, int) else None,
+        "persisted_db_p0_findings": int(persisted_p0 or 0) if isinstance(persisted_p0, int) else None,
+        "capped_p0_findings": int(capped_p0 or 0) if isinstance(capped_p0, int) else None,
+        "notes": notes,
+    }
+
+
 def merge_persistence_metadata(*, base_report: object, app_result: object, params: object) -> None:
     try:
         metadata_map = (
@@ -61,8 +137,11 @@ def merge_persistence_metadata(*, base_report: object, app_result: object, param
             metadata_map["pipeline_version"] = params.analysis_version
         if getattr(params, "catalog_versions", None) and not metadata_map.get("catalog_versions"):
             metadata_map["catalog_versions"] = params.catalog_versions
+        findings_fidelity = _build_findings_fidelity_metadata(app_result=app_result)
+        if findings_fidelity is not None:
+            metadata_map["findings_fidelity"] = findings_fidelity
         if metadata_map:
-            base_report.metadata = metadata_map
+            _set_report_metadata(base_report=base_report, metadata_map=metadata_map)
     except Exception:
         pass
 
@@ -106,6 +185,15 @@ def apply_persistence_outcome(
         app_result.persistence_runtime_findings = int(getattr(outcome_status, "runtime_findings", 0) or 0)
         app_result.persistence_persisted_findings = normalized_findings_delta
         app_result.persistence_findings_capped_total = int(getattr(outcome_status, "findings_capped_total", 0) or 0)
+        app_result.persistence_runtime_p0_findings = int(
+            getattr(outcome_status, "runtime_p0_findings", 0) or 0
+        )
+        app_result.persistence_persisted_p0_findings = int(
+            getattr(outcome_status, "persisted_p0_findings", 0) or 0
+        )
+        app_result.persistence_capped_p0_findings = int(
+            getattr(outcome_status, "capped_p0_findings", 0) or 0
+        )
         capped_map = getattr(outcome_status, "findings_capped_by_detector", None)
         if isinstance(capped_map, Mapping):
             app_result.persistence_findings_capped_by_detector = {str(k): int(v) for k, v in cast(Mapping[Any, Any], capped_map).items()}

@@ -265,6 +265,9 @@ class AppRunResult:
     persistence_persisted_findings: int | None = None
     persistence_findings_capped_total: int | None = None
     persistence_findings_capped_by_detector: dict[str, int] | None = None
+    persistence_runtime_p0_findings: int | None = None
+    persistence_persisted_p0_findings: int | None = None
+    persistence_capped_p0_findings: int | None = None
     harvest_manifest_path: str | None = None
     harvest_capture_status: str | None = None
     harvest_persistence_status: str | None = None

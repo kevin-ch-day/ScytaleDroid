@@ -114,7 +114,7 @@ def save_report(
     """Persist *report* to disk and return the generated artefact paths."""
 
     # Import via package; re-exports ensure stable import path
-    from ..reporting import build_report_view, save_html_report
+    from ..reporting import save_html_report
 
     sha256 = report.hashes.get("sha256")
     metadata = report.metadata if isinstance(report.metadata, dict) else {}
@@ -122,19 +122,14 @@ def save_report(
     mode = _normalize_report_mode(getattr(app_config, "STATIC_REPORT_JSON_MODE", "both"))
     latest_path, archive_path = _resolve_report_paths(report, sha256=sha256, session_stamp=session_stamp)
 
-    view_payload = dict(build_report_view(report))
-    payload = report.to_dict()
-    payload["view"] = view_payload
-    payload["metadata"] = _enrich_report_metadata(payload.get("metadata"), report)
+    view_payload, payload = _build_report_payload(report)
     try:
-        if mode in {"latest", "both"}:
-            latest_path.parent.mkdir(parents=True, exist_ok=True)
-            with latest_path.open("w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, sort_keys=True, default=str)
-        if mode in {"archive", "both"} and archive_path is not None:
-            archive_path.parent.mkdir(parents=True, exist_ok=True)
-            with archive_path.open("w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+        _write_report_payload(
+            payload=payload,
+            latest_path=latest_path,
+            archive_path=archive_path,
+            mode=mode,
+        )
     except OSError as exc:  # pragma: no cover - filesystem errors
         target = latest_path if mode in {"latest", "both"} else archive_path or latest_path
         raise ReportStorageError(f"Unable to write report to {target}: {exc}") from exc
@@ -180,6 +175,62 @@ def save_report(
         cached_report = report
     _cache_saved_report(path, cached_report)
     return SavedReportPaths(json_path=path, html_path=html_path, view=view_payload)
+
+
+def refresh_saved_report_json(report: StaticAnalysisReport) -> SavedReportPaths:
+    """Rewrite persisted JSON payloads for *report* without regenerating HTML."""
+
+    sha256 = report.hashes.get("sha256")
+    metadata = report.metadata if isinstance(report.metadata, dict) else {}
+    session_stamp = metadata.get("session_stamp")
+    mode = _normalize_report_mode(getattr(app_config, "STATIC_REPORT_JSON_MODE", "both"))
+    latest_path, archive_path = _resolve_report_paths(report, sha256=sha256, session_stamp=session_stamp)
+    view_payload, payload = _build_report_payload(report)
+    try:
+        _write_report_payload(
+            payload=payload,
+            latest_path=latest_path,
+            archive_path=archive_path,
+            mode=mode,
+        )
+    except OSError as exc:  # pragma: no cover - filesystem errors
+        target = latest_path if mode in {"latest", "both"} else archive_path or latest_path
+        raise ReportStorageError(f"Unable to refresh report JSON at {target}: {exc}") from exc
+
+    path = latest_path if mode in {"latest", "both"} else archive_path or latest_path
+    try:
+        cached_report = StaticAnalysisReport.from_dict(payload)
+    except Exception:
+        cached_report = report
+    _cache_saved_report(path, cached_report)
+    return SavedReportPaths(json_path=path, html_path=None, view=view_payload)
+
+
+def _build_report_payload(report: StaticAnalysisReport) -> tuple[dict[str, object], dict[str, object]]:
+    from ..reporting import build_report_view
+
+    view_payload = dict(build_report_view(report))
+    payload = report.to_dict()
+    payload["view"] = view_payload
+    payload["metadata"] = _enrich_report_metadata(payload.get("metadata"), report)
+    return view_payload, payload
+
+
+def _write_report_payload(
+    *,
+    payload: dict[str, object],
+    latest_path: Path,
+    archive_path: Path | None,
+    mode: str,
+) -> None:
+    if mode in {"latest", "both"}:
+        latest_path.parent.mkdir(parents=True, exist_ok=True)
+        with latest_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+    if mode in {"archive", "both"} and archive_path is not None:
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        with archive_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True, default=str)
 
 
 def _enrich_report_metadata(
@@ -352,6 +403,7 @@ def _report_identity(report: StaticAnalysisReport) -> tuple[str, str, str, str, 
 
 __all__ = [
     "save_report",
+    "refresh_saved_report_json",
     "list_reports",
     "reports_for_package",
     "load_report",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .sql_typed_reads import resolved_static_run_started_utc_text
+
 CREATE_V_RUN_OVERVIEW = """
 CREATE OR REPLACE VIEW v_run_overview AS
 SELECT
@@ -31,7 +33,7 @@ SELECT
   av.version_code AS app_version_code,
   av.version_name AS app_version_name,
   sar.base_apk_sha256 AS apk_sha256,
-  sar.run_started_utc AS start_utc,
+  {resolved_started_text} AS start_utc,
   sar.ended_at_utc AS end_utc,
   sar.tool_semver,
   sar.tool_git_commit,
@@ -63,7 +65,9 @@ FROM dynamic_sessions ds
 LEFT JOIN apps a
   ON LOWER(CONVERT(a.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
    = LOWER(CONVERT(ds.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci;
-"""
+""".format(
+    resolved_started_text=resolved_static_run_started_utc_text("sar"),
+)
 
 __all__ = [
     "CREATE_V_RUN_OVERVIEW",

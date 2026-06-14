@@ -242,6 +242,9 @@ _DDL_STATEMENTS: list[str] = [
       artifact_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       run_id        VARCHAR(64)     NOT NULL,
       run_type      VARCHAR(16)     NOT NULL,
+      static_run_id BIGINT UNSIGNED DEFAULT NULL,
+      dynamic_run_id VARCHAR(64)    DEFAULT NULL,
+      linkage_migration_status VARCHAR(32) NOT NULL DEFAULT 'legacy_unclassified',
       artifact_type VARCHAR(64)     NOT NULL,
       origin        VARCHAR(16)     NOT NULL,
       device_path   TEXT            DEFAULT NULL,
@@ -255,8 +258,29 @@ _DDL_STATEMENTS: list[str] = [
       meta_json     JSON            DEFAULT NULL,
       PRIMARY KEY (artifact_id),
       KEY ix_artifact_run (run_id, run_type),
+      KEY ix_artifact_run_type_created (run_type, created_at_utc),
+      KEY ix_artifact_static_run_id (static_run_id),
+      KEY ix_artifact_dynamic_run_id (dynamic_run_id),
       KEY ix_artifact_type (artifact_type)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    ALTER TABLE artifact_registry
+      ADD COLUMN IF NOT EXISTS static_run_id BIGINT UNSIGNED DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS dynamic_run_id VARCHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS linkage_migration_status VARCHAR(32) NOT NULL DEFAULT 'legacy_unclassified';
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_artifact_run_type_created
+      ON artifact_registry (run_type, created_at_utc);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_artifact_static_run_id
+      ON artifact_registry (static_run_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_artifact_dynamic_run_id
+      ON artifact_registry (dynamic_run_id);
     """,
     """
     -- Durable failure records for static persistence. Written outside the main

@@ -72,6 +72,7 @@ SELECT
     ELSE 0
   END AS web_default_eligible,
   CASE
+    WHEN COALESCE(s.session_status, '') = 'IN_PROGRESS' THEN 'in_progress_unfinalized'
     WHEN s.session_disposition = 'interrupted_partial_session' THEN 'interrupted_by_operator'
     WHEN s.session_disposition = 'mixed_completed_failed_session' THEN 'mixed_needs_review'
     WHEN s.session_disposition = 'broken_persist_error_session' THEN 'broken_persistence_historical'
@@ -97,6 +98,7 @@ SELECT
     ELSE 'unknown_needs_review'
   END AS health_class,
   CASE
+    WHEN s.session_status = 'IN_PROGRESS' THEN 'operator_review'
     WHEN s.session_status IN ('FAILED', 'INTERRUPTED') THEN 'not_default_usable'
     WHEN s.session_status = 'PARTIAL' THEN 'operator_review'
     WHEN COALESCE(s.session_status, '') = 'COMPLETED'
@@ -126,6 +128,7 @@ SELECT
     ELSE 'unknown'
   END AS usability_class,
   CASE
+    WHEN s.session_status = 'IN_PROGRESS' THEN 1
     WHEN COALESCE(s.session_status, '') = 'COMPLETED'
       AND COALESCE(s.failed_run_count, 0) = 0
       AND COALESCE(s.persistence_failure_rows, 0) = 0

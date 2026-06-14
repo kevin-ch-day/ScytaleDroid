@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core import run_sql
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_static_run_started_at_utc
 from scytaledroid.Database.db_utils.static_run_governance_checks import (
     fetch_static_run_governance_counts,
 )
@@ -863,20 +864,16 @@ def run_tier1_audit_report() -> None:
 def prompt_finalize_stale_runs() -> None:
     menu_utils.print_header("Finalize Stale RUNNING Runs")
     threshold_minutes = 60
+    started_at_expr = resolved_static_run_started_at_utc("static_analysis_runs")
     stale_count = scalar(
-        """
+        f"""
         SELECT COUNT(*)
         FROM static_analysis_runs
         WHERE status='RUNNING'
           AND ended_at_utc IS NULL
-          AND (
-            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f')
-              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
-            OR STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
-              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
-          )
+          AND {started_at_expr} < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
         """,
-        (threshold_minutes, threshold_minutes),
+        (threshold_minutes,),
     ) or 0
 
     if stale_count == 0:
@@ -896,21 +893,16 @@ def prompt_finalize_stale_runs() -> None:
         return
 
     run_sql(
-        """
+        f"""
         UPDATE static_analysis_runs
         SET status='FAILED',
             ended_at_utc=UTC_TIMESTAMP(),
             abort_reason='stale_finalize'
         WHERE status='RUNNING'
           AND ended_at_utc IS NULL
-          AND (
-            STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f')
-              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
-            OR STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
-              < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
-          )
+          AND {started_at_expr} < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
         """,
-        (threshold_minutes, threshold_minutes),
+        (threshold_minutes,),
     )
     print(status_messages.status("Stale RUNNING rows finalized.", level="success"))
     prompt_utils.press_enter_to_continue()
@@ -1122,5 +1114,4 @@ __all__ = [
     "prompt_recompute_network_signal_quality",
     "prompt_reset_static_data",
 ]
-
 

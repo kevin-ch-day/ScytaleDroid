@@ -20,6 +20,7 @@ from scytaledroid.Utils.DisplayUtils import (
 from scytaledroid.Utils.LoggingUtils import logging_engine, logging_events
 
 from ...engine.strings import analyse_strings
+from ...persistence import refresh_saved_report_json
 from ...persistence.ingest import ingest_baseline_payload
 from ..core.models import RunOutcome, RunParameters
 from ..core.run_context import StaticRunContext
@@ -749,6 +750,30 @@ def _render_run_results_impl(
                     app_result=app_result,
                     outcome_status=outcome_status,
                 )
+                merge_persistence_metadata(
+                    base_report=base_report,
+                    app_result=app_result,
+                    params=params,
+                )
+                for artifact in app_result.artifacts:
+                    try:
+                        merge_persistence_metadata(
+                            base_report=artifact.report,
+                            app_result=app_result,
+                            params=params,
+                        )
+                        if artifact.saved_path:
+                            refresh_saved_report_json(artifact.report)
+                    except Exception as exc:
+                        print(
+                            status_messages.status(
+                                (
+                                    "Report fidelity metadata refresh failed for "
+                                    f"{app_result.package_name} ({artifact.label}): {exc}"
+                                ),
+                                level="warn",
+                            )
+                        )
                 normalized_findings_total += findings_delta
                 string_samples_persisted_total += sample_delta
                 if outcome_status and outcome_status.success:

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
+
 __all__ = [
     "HASH_EQ_DS_REPO",
     "HASH_EQ_DS_SAR",
@@ -63,6 +65,9 @@ def _ds_base_valid() -> str:
     return "ds.base_apk_sha256 IS NOT NULL AND TRIM(ds.base_apk_sha256) <> ''"
 
 
+DS_RESOLVED_STATIC_RUN_ID = resolved_dynamic_session_static_run_id("ds")
+
+
 def _exists_repo() -> str:
     return f"""
 EXISTS (
@@ -100,8 +105,8 @@ def bucket_sql_exact_static_run_linked() -> str:
     return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-INNER JOIN static_analysis_runs sar ON sar.id = ds.static_run_id
-WHERE ds.static_run_id IS NOT NULL
+INNER JOIN static_analysis_runs sar ON sar.id = {DS_RESOLVED_STATIC_RUN_ID}
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NOT NULL
   AND {_hash_eq('ds.base_apk_sha256', 'sar.base_apk_sha256')}
   AND {SAR_QUALIFYING_SQL}
 """.strip()
@@ -111,11 +116,11 @@ def bucket_sql_static_run_id_points_to_bad_static_run() -> str:
     return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NOT NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NOT NULL
   AND NOT EXISTS (
     SELECT 1
     FROM static_analysis_runs sar
-    WHERE sar.id = ds.static_run_id
+    WHERE sar.id = {DS_RESOLVED_STATIC_RUN_ID}
       AND {_hash_eq('ds.base_apk_sha256', 'sar.base_apk_sha256')}
       AND {SAR_QUALIFYING_SQL}
   )
@@ -123,10 +128,10 @@ WHERE ds.static_run_id IS NOT NULL
 
 
 def bucket_sql_dynamic_missing_base_apk_hash() -> str:
-    return """
+    return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND (ds.base_apk_sha256 IS NULL OR TRIM(ds.base_apk_sha256) = '')
 """.strip()
 
@@ -135,7 +140,7 @@ def bucket_sql_dynamic_hash_missing_from_repository() -> str:
     return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND {_ds_base_valid()}
   AND NOT ({_exists_repo()})
 """.strip()
@@ -145,7 +150,7 @@ def bucket_sql_static_run_id_missing_exact_hash_exists() -> str:
     return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND {_ds_base_valid()}
   AND ({_exists_repo()})
   AND ({_exists_exact_sar()})
@@ -156,7 +161,7 @@ def bucket_sql_package_exists_but_hash_differs() -> str:
     return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND {_ds_base_valid()}
   AND ({_exists_repo()})
   AND NOT ({_exists_exact_sar()})
@@ -168,7 +173,7 @@ def bucket_sql_repository_hash_known_static_run_missing() -> str:
     return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND {_ds_base_valid()}
   AND ({_exists_repo()})
   AND NOT ({_exists_exact_sar()})
@@ -232,7 +237,7 @@ SELECT
   MAX(ds.started_at_utc) AS last_dynamic_started,
   'analyze_exact_dynamic_apk_hash' AS recommended_action
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND {_ds_base_valid()}
   AND ({harvest_ok})
   AND ({no_exact})
@@ -270,11 +275,11 @@ NOT EXISTS (
 SELECT COUNT(*) AS c
 FROM (
   SELECT DISTINCT ds.package_name, ds.base_apk_sha256
-  FROM dynamic_sessions ds
-  WHERE ds.static_run_id IS NULL
-    AND {_ds_base_valid()}
-    AND ({harvest_ok})
-    AND ({no_exact})
+FROM dynamic_sessions ds
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
+  AND {_ds_base_valid()}
+  AND ({harvest_ok})
+  AND ({no_exact})
 ) t
 """.strip()
 
@@ -285,7 +290,7 @@ def sql_link_preview_count() -> str:
     return f"""
 SELECT COUNT(*) AS c
 FROM dynamic_sessions ds
-WHERE ds.static_run_id IS NULL
+WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND {_ds_base_valid()}
   AND EXISTS (
     SELECT 1 FROM static_analysis_runs sar

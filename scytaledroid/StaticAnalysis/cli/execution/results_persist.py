@@ -83,6 +83,25 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
         )
         return
 
+    # Per-run finalization refreshes the session header before the cohort rollup exists.
+    # Refresh once more after the rollup upsert so ``static_analysis_sessions.rollup_rows``
+    # and related header counters reflect the committed child row.
+    try:
+        from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
+            maybe_refresh_static_analysis_session_summary,
+        )
+
+        maybe_refresh_static_analysis_session_summary(
+            session_stamp,
+            scope_label,
+            reason="post_cohort_rollup",
+        )
+    except Exception as exc:
+        log.warning(
+            f"Failed to refresh static_analysis_sessions after cohort rollup for session={session_stamp}: {exc}",
+            category="static_analysis",
+        )
+
     level = "info"
     print(
         status_messages.status(

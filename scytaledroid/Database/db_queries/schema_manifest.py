@@ -66,6 +66,30 @@ def _schema_version_stmt() -> str:
     """
 
 
+def _schema_migrations_stmt() -> str:
+    return """
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      migration_entry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      migration_id VARCHAR(128) NOT NULL,
+      migration_name VARCHAR(255) NOT NULL,
+      applied_at_utc DATETIME NOT NULL,
+      repo_git_commit VARCHAR(40) DEFAULT NULL,
+      schema_version_before VARCHAR(64) DEFAULT NULL,
+      schema_version_after VARCHAR(64) DEFAULT NULL,
+      migration_checksum CHAR(64) NOT NULL,
+      applied_by VARCHAR(191) DEFAULT NULL,
+      host_name VARCHAR(191) DEFAULT NULL,
+      status VARCHAR(32) NOT NULL,
+      notes TEXT DEFAULT NULL,
+      receipt_path TEXT DEFAULT NULL,
+      payload_json JSON DEFAULT NULL,
+      PRIMARY KEY (migration_entry_id),
+      KEY ix_schema_migrations_id_status (migration_id, status, applied_at_utc),
+      KEY ix_schema_migrations_applied_at (applied_at_utc)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """
+
+
 def _dedupe_create_tables(statements: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -84,6 +108,7 @@ def ordered_schema_statements() -> list[str]:
     statements: list[str] = []
 
     statements.append(_schema_version_stmt())
+    statements.append(_schema_migrations_stmt())
 
     # Canonical static-analysis schema (ordered list).
     statements.extend(list(getattr(canonical_schema, "_DDL_STATEMENTS", [])))

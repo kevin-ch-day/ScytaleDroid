@@ -103,6 +103,26 @@ def test_schema_manifest_includes_dynamic_static_exact_hash_indexes():
     )
 
 
+def test_runtime_views_and_run_identity_prefer_phase_a_typed_read_columns():
+    statements = "\n".join(schema_manifest.ordered_schema_statements()).lower()
+    assert "create or replace view v_run_identity" in statements
+    assert "run_started_at_utc" in statements
+    assert "static_run_id_u" in statements
+    assert "v_web_runtime_run_index" in statements
+    assert "v_web_runtime_run_detail" in statements
+
+
+def test_schema_manifest_includes_artifact_registry_typed_linkage_columns_and_indexes():
+    statements = schema_manifest.ordered_schema_statements()
+    combined = "\n".join(statements).lower()
+    assert "add column if not exists static_run_id bigint unsigned default null" in combined
+    assert "add column if not exists dynamic_run_id varchar(64) default null" in combined
+    assert "add column if not exists linkage_migration_status varchar(32) not null default 'legacy_unclassified'" in combined
+    assert "ix_artifact_run_type_created" in combined
+    assert "ix_artifact_static_run_id" in combined
+    assert "ix_artifact_dynamic_run_id" in combined
+
+
 def test_schema_manifest_includes_apk_install_set_spine():
     statements = schema_manifest.ordered_schema_statements()
     combined = "\n".join(statements)

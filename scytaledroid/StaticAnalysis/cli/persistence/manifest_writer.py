@@ -125,9 +125,10 @@ def write_static_run_manifest(
             SELECT artifact_type, host_path, device_path, origin, pull_status,
                    sha256, size_bytes, created_at_utc, pulled_at_utc
             FROM artifact_registry
-            WHERE run_id=%s AND run_type='static'
+            WHERE run_type='static'
+              AND (static_run_id=%s OR (static_run_id IS NULL AND run_id=%s))
             """,
-            (str(static_run_id),),
+            (int(static_run_id), str(static_run_id)),
             fetch="all",
         )
     except Exception:

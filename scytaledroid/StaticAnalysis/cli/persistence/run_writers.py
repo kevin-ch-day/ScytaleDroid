@@ -13,7 +13,10 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .contracts import normalize_run_status
 from .session_header_linkage import resolve_static_session_id_for_run
-from .static_session_summary import ensure_static_session_shell
+from .static_session_summary import (
+    ensure_static_session_shell,
+    maybe_refresh_static_analysis_session_summary,
+)
 from .dep_export import export_dep_json
 
 
@@ -348,6 +351,7 @@ def _create_static_run(
         "schema_version",
         "findings_total",
         "run_started_utc",
+        "run_started_at_utc",
         "status",
         "is_canonical",
         "canonical_set_at_utc",
@@ -382,13 +386,14 @@ def _create_static_run(
         schema_version,
         findings_total,
         normalized_started_at,
+        normalized_started_at,
         canonical_status,
         1 if is_canonical else 0 if is_canonical is not None else None,
         _normalize_datetime_value(canonical_set_at_utc) if canonical_set_at_utc else None,
         canonical_reason,
     ]
     try:
-        return _insert_run(full_columns, full_values)
+        run_id = _insert_run(full_columns, full_values)
     except Exception as exc:
         log.warning(
             f"Failed to create static run row for {session_stamp}: {exc}",
@@ -397,6 +402,12 @@ def _create_static_run(
         if _is_transient_db_exc(exc):
             raise db_engine.TransientDbError(str(exc)) from exc
         raise
+    maybe_refresh_static_analysis_session_summary(
+        session_stamp,
+        scope_label,
+        reason="post_static_run_insert",
+    )
+    return run_id
 
 
 def create_static_run_ledger(

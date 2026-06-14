@@ -160,9 +160,10 @@ def publish_persisted_artifacts(
             """
             SELECT DISTINCT artifact_type
             FROM artifact_registry
-            WHERE run_id=%s AND run_type='static'
+            WHERE run_type='static'
+              AND (static_run_id=%s OR (static_run_id IS NULL AND run_id=%s))
             """,
-            (str(static_run_id),),
+            (int(static_run_id), str(static_run_id)),
             fetch="all",
         )
         registry_types = {str(row[0]) for row in rows or [] if row and row[0]}
