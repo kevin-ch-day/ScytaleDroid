@@ -76,6 +76,7 @@ def build_report_view(report: StaticAnalysisReport) -> Mapping[str, Any]:
 
     timestamp_utc = _format_generated_timestamp(report.generated_at)
     toolchain = _normalise_toolchain(metadata.get("toolchain"))
+    parser_provenance = _normalise_parser_provenance(metadata)
 
     view: MutableMapping[str, Any] = {
         "app": {
@@ -117,6 +118,7 @@ def build_report_view(report: StaticAnalysisReport) -> Mapping[str, Any]:
             "verbosity": metadata.get("run_verbosity") or "summary",
             "evidence_limit": metadata.get("evidence_limit") or metadata.get("run_evidence_limit") or "—",
             "toolchain": toolchain,
+            "parser_provenance": parser_provenance,
             "timestamp_utc": timestamp_utc,
             "seed": metadata.get("run_id") or "—",
             "version": f"{app_config.APP_VERSION} ({app_config.APP_RELEASE})",
@@ -241,6 +243,25 @@ def _build_signing_payload(package_profile: Mapping[str, Any]) -> Mapping[str, A
         "v4": bool(schemes.get("v4")),
         "debug": bool(signing.get("debug_cert")),
         "consistency": signing.get("consistency_state"),
+    }
+
+
+def _normalise_parser_provenance(metadata: Mapping[str, Any]) -> Mapping[str, Any]:
+    payload = metadata.get("parser_provenance")
+    parser = dict(payload) if isinstance(payload, Mapping) else {}
+    return {
+        "manifest_source": parser.get("manifest_source") or metadata.get("manifest_source") or "—",
+        "manifest_semantics_source": parser.get("manifest_semantics_source")
+        or metadata.get("manifest_semantics_source")
+        or metadata.get("manifest_source")
+        or "—",
+        "resource_open_source": parser.get("resource_open_source") or "—",
+        "resource_fallback_used": bool(parser.get("resource_fallback_used")),
+        "resource_fallback_reason": parser.get("resource_fallback_reason") or "—",
+        "resource_bounds_warning_count": int(parser.get("resource_bounds_warning_count") or 0),
+        "label_source": parser.get("label_source") or metadata.get("label_fallback") or "androguard",
+        "string_index_source": parser.get("string_index_source") or "—",
+        "aapt2_available": bool(parser.get("aapt2_available")),
     }
 
 

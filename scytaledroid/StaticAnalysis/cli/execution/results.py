@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,7 +21,7 @@ from scytaledroid.Utils.LoggingUtils import logging_engine, logging_events
 
 from ...engine.strings import analyse_strings
 from ...persistence.ingest import ingest_baseline_payload
-from ..core.models import AppRunResult, RunOutcome, RunParameters
+from ..core.models import RunOutcome, RunParameters
 from ..core.run_context import StaticRunContext
 from ..core.run_lifecycle import finalize_static_run
 from ..persistence.run_summary import (
@@ -87,208 +86,30 @@ from .operator_display_label import (
     build_operator_label_metadata_from_report,
     resolve_operator_app_label,
 )
+from .results_progress import (
+    _emit_static_persistence_event,
+    _format_persistence_progress_text,
+    _persistence_progress_display_label,
+    _render_compact_persistence_summary,
+)
+from .results_view_model import (
+    RunResultsSessionMeta,
+    RunResultsViewModel,
+    _first_int,
+    _first_text,
+    _is_large_compact_batch,
+    _load_json_mapping as _load_json_mapping_impl,
+    build_run_results_view_model as _build_run_results_view_model_impl,
+    collect_static_output_context as _collect_static_output_context_impl,
+    load_run_results_session_meta as _load_run_results_session_meta_impl,
+)
 from .scan_formatters import _load_v3_catalog_label_overrides, format_duration
 from .string_analysis_payload import analyse_string_payload
 from .view import DetailBuffer
 
 
-@dataclass(frozen=True, slots=True)
-class RunResultsSessionMeta:
-    session_label: str | None
-    session_stamp: str | None
-    attempts: int | None
-    canonical_id: int | None
-    latest_id: int | None
-    first_static_run_id: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class RunResultsViewModel:
-    title: str
-    overview_items: list[dict[str, object]]
-    subtitle: str | None
-    footer: str | None
-    static_output_context: Mapping[str, object]
-    planned_artifacts: int
-    observed_artifacts: int
-    version_line: str | None
-    session_meta: RunResultsSessionMeta
-
-
-def _first_text(*values: object) -> str | None:
-    for value in values:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _first_int(*values: object) -> int | None:
-    for value in values:
-        if value is None:
-            continue
-        try:
-            return int(value)
-        except Exception:
-            continue
-    return None
-
-
-def _is_large_compact_batch(params: RunParameters, outcome: RunOutcome) -> bool:
-    """Dense summary/persistence UX for multi-app profile or all-apps cohorts (non-verbose)."""
-    return bool(
-        not params.verbose_output
-        and params.scope in {"all", "profile"}
-        and len(outcome.results) >= 8
-    )
-
-
-def _persistence_progress_display_label(
-    app_result: AppRunResult,
-    *,
-    v3_overrides: Mapping[str, str],
-    fresh_display_names: Mapping[str, str],
-) -> str | None:
-    """Match per-app scan heartbeat / compact summary label chain (same ``resolve_operator_app_label``).
-
-    Uses the same V3 override map and ``apps.display_name`` map loaded for the finalization
-    pass as ``scan_flow`` uses for checkpoint/heartbeat display names. The end-of-run
-    ``format_static_run_final_summary_block`` digest is aggregate-only (no per-package titles).
-    """
-
-    base_out = app_result.base_artifact_outcome()
-    meta: Mapping[str, object] = {}
-    if base_out and isinstance(base_out.metadata, Mapping):
-        meta = base_out.metadata
-    return resolve_operator_app_label(
-        app_result.package_name,
-        meta,
-        v3_overrides,
-        fresh_display_names,
-    )
-
-
-def _emit_static_persistence_event(
-    *,
-    event: str,
-    message: str,
-    params: RunParameters,
-    extra: Mapping[str, object] | None = None,
-) -> None:
-    payload = {
-        "event": event,
-        "session_stamp": params.session_stamp,
-        "run_id": params.session_stamp,
-        "execution_id": getattr(params, "execution_id", None),
-        "scope_label": params.scope_label,
-        "scope": params.scope,
-        "profile": params.profile_label,
-    }
-    if extra:
-        payload.update({key: value for key, value in extra.items() if value is not None})
-    logging_engine.get_static_logger().info(
-        message,
-        extra=logging_engine.ensure_trace(payload),
-    )
-
-
-def _format_persistence_progress_text(
-    *,
-    index: int,
-    total_results: int,
-    package_name: str,
-    app_label: str | None,
-    elapsed_text: str,
-    eta_text: str,
-    persistence_error_count: int,
-    include_phase_banner: bool = True,
-) -> str:
-    current = app_label or package_name
-    lines: list[str] = []
-    if include_phase_banner:
-        lines.extend(
-            [
-                "DB persistence phase (scan finished; writing DB/evidence rows per package)",
-                "-" * 60,
-            ]
-        )
-    lines.append(f"Writing now: {current}")
-    if package_name and package_name.strip() != current.strip():
-        lines.append(f"Package: {package_name}")
-    eta_raw = str(eta_text or "").strip()
-    if eta_raw in {"", "--"}:
-        eta_disp = "not available yet"
-    else:
-        eta_disp = f"~{eta_raw}" if not eta_raw.startswith("~") else eta_raw
-    pct = ""
-    if total_results > 0:
-        pct = f" ({int(round((index / total_results) * 100))}%)"
-    lines.extend(
-        [
-            f"Package write progress: {index} / {total_results}{pct}",
-            f"Elapsed: {elapsed_text}",
-            f"ETA: {eta_disp} (from recent write rate; stabilizes mid-run)",
-            f"Persistence errors: {persistence_error_count}"
-            + (
-                " (none - DB write phase healthy so far)"
-                if persistence_error_count == 0
-                else " (see prior lines / persistence audit)"
-            ),
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _render_compact_persistence_summary(
-    *,
-    params: RunParameters,
-    total_results: int,
-    normalized_findings_total: int,
-    string_samples_persisted_total: int,
-    baseline_written_count: int,
-    plan_written_count: int,
-    report_reference_count: int,
-    persistence_errors: Sequence[str],
-    canonical_failures: Sequence[str],
-    compat_export_errors: Sequence[str],
-    run_status: str,
-) -> None:
-    print()
-    print("Persistence summary")
-    print("-------------------")
-    print(f"Session : {params.session_stamp or params.session_label or 'unspecified'}")
-    print(f"Apps    : {total_results}")
-    print(f"Findings: {normalized_findings_total}")
-    print(f"Strings : {string_samples_persisted_total}")
-    print(
-        "Artifacts: "
-        f"baseline={baseline_written_count} "
-        f"plan={plan_written_count} "
-        f"report={report_reference_count}"
-    )
-    persist_err_ct = len(list(dict.fromkeys(str(x) for x in persistence_errors)))
-    canon_err_ct = len(list(dict.fromkeys(str(x) for x in canonical_failures if x)))
-    compat_err_ct = len(list(dict.fromkeys(str(x) for x in compat_export_errors if x)))
-    print(
-        (
-            "Status  : "
-            f"{run_status} | persistence_errors={persist_err_ct} | "
-            f"canonical_failures={canon_err_ct} | compat_export_errors={compat_err_ct}"
-        )
-    )
-    print("Details : Database tools / Web view for full diagnostics")
-
-
 def _load_json_mapping(path_value: str | None) -> Mapping[str, object]:
-    if not path_value:
-        return {}
-    try:
-        path = Path(path_value)
-        if not path.exists():
-            return {}
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, Mapping) else {}
-    except Exception:
-        return {}
+    return _load_json_mapping_impl(path_value)
 
 
 def _collect_static_output_context(
@@ -297,185 +118,20 @@ def _collect_static_output_context(
     *,
     artifact_count: int,
 ) -> dict[str, object]:
-    session_id = params.session_label or params.session_stamp or "n/a"
-    analyzed_apps = len(outcome.results)
-    planned_artifacts = int(outcome.total_artifacts or artifact_count)
-    observed_artifacts = int(artifact_count)
-    first_group = outcome.scope.groups[0] if getattr(outcome.scope, "groups", ()) else None
-    group_manifest = (
-        first_group.harvest_manifest
-        if first_group is not None and isinstance(getattr(first_group, "harvest_manifest", None), Mapping)
-        else {}
-    )
-    first_manifest_path = (
-        getattr(first_group, "harvest_manifest_path", None)
-        if first_group is not None
-        else None
-    )
-    result_manifest = _load_json_mapping(getattr(outcome.results[0], "harvest_manifest_path", None)) if outcome.results else {}
-    manifest = group_manifest or result_manifest
-    package_payload = manifest.get("package") if isinstance(manifest, Mapping) else {}
-    device_serial = _first_text(
-        package_payload.get("device_serial") if isinstance(package_payload, Mapping) else None,
-    )
-    snapshot_id = _first_int(
-        package_payload.get("snapshot_id") if isinstance(package_payload, Mapping) else None,
-    )
-    snapshot_captured_at = _first_text(
-        package_payload.get("snapshot_captured_at") if isinstance(package_payload, Mapping) else None,
+    return _collect_static_output_context_impl(
+        outcome,
+        params,
+        artifact_count=artifact_count,
     )
 
-    harvested_packages = analyzed_apps
-    persisted_packages = sum(
-        1
-        for app in outcome.results
-        if str(getattr(app, "harvest_persistence_status", "") or "").strip().lower()
-        not in {"", "not_requested"}
-    )
-    if persisted_packages == 0 and analyzed_apps:
-        persisted_packages = analyzed_apps
-
-    acquisition = {
-        "inventoried": None,
-        "in_scope": None,
-        "policy_eligible": None,
-        "scheduled": None,
-        "harvested": harvested_packages,
-        "persisted": persisted_packages,
-        "blocked_policy": None,
-        "blocked_scope": None,
-    }
-
-    non_root = False
-    if device_serial and params.scope == "all":
-        try:
-            from scytaledroid.DeviceAnalysis import harvest
-            from scytaledroid.DeviceAnalysis.inventory.snapshot_io import load_latest_inventory
-
-            inventory_snapshot = load_latest_inventory(device_serial)
-            inventory_snapshot_id = _first_int(
-                inventory_snapshot.get("snapshot_id") if isinstance(inventory_snapshot, Mapping) else None,
-            )
-            if inventory_snapshot_id is not None and snapshot_id is not None and inventory_snapshot_id == snapshot_id:
-                packages = inventory_snapshot.get("packages") if isinstance(inventory_snapshot, Mapping) else None
-                if isinstance(packages, Sequence) and not isinstance(packages, (str, bytes)):
-                    rows = harvest.build_inventory_rows(packages)
-                    plan = harvest.build_harvest_plan(rows, include_system_partitions=False)
-                    scheduled = sum(1 for pkg in plan.packages if not pkg.skip_reason)
-                    blocked_policy = sum(1 for pkg in plan.packages if pkg.skip_reason == "policy_non_root")
-                    blocked_scope = sum(
-                        1 for pkg in plan.packages if pkg.skip_reason and pkg.skip_reason != "policy_non_root"
-                    )
-                    acquisition.update(
-                        {
-                            "inventoried": len(rows),
-                            "in_scope": len(plan.packages),
-                            "policy_eligible": scheduled,
-                            "scheduled": scheduled,
-                            "blocked_policy": blocked_policy,
-                            "blocked_scope": blocked_scope,
-                        }
-                    )
-                    non_root = blocked_policy > 0
-        except Exception:
-            pass
-
-    mode_tokens = ["Canonical"]
-    if non_root:
-        mode_tokens.append("non-root")
-
-    return {
-        "session_id": session_id,
-        "device_serial": device_serial,
-        "snapshot_id": snapshot_id,
-        "snapshot_captured_at": snapshot_captured_at,
-        "scope_analyzed": "Harvested APK artifacts only",
-        "mode_label": " / ".join(mode_tokens),
-        "analyzed_apps": analyzed_apps,
-        "planned_artifacts": planned_artifacts,
-        "observed_artifacts": observed_artifacts,
-        "acquisition": acquisition,
-        "has_group_manifest": bool(manifest or first_manifest_path),
-    }
 
 def _load_run_results_session_meta(
     *,
     params: RunParameters,
 ) -> RunResultsSessionMeta:
-    session_label = params.session_label or params.session_stamp
-    if not session_label or params.dry_run:
-        return RunResultsSessionMeta(
-            session_label=session_label,
-            session_stamp=params.session_stamp,
-            attempts=None,
-            canonical_id=None,
-            latest_id=None,
-            first_static_run_id=None,
-        )
-
-    attempts: int | None = None
-    canonical_id: int | None = None
-    latest_id: int | None = None
-    first_static_run_id: int | None = None
-    try:
-        row = core_q.run_sql(
-            "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s",
-            (session_label,),
-            fetch="one",
-        )
-        attempts = int(row[0]) if row and row[0] is not None else None
-    except Exception:
-        attempts = None
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT id
-            FROM static_analysis_runs
-            WHERE session_label=%s AND is_canonical=1
-            ORDER BY canonical_set_at_utc DESC
-            LIMIT 1
-            """,
-            (session_label,),
-            fetch="one",
-        )
-        canonical_id = int(row[0]) if row and row[0] is not None else None
-    except Exception:
-        canonical_id = None
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT id
-            FROM static_analysis_runs
-            WHERE session_label=%s
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (session_label,),
-            fetch="one",
-        )
-        latest_id = int(row[0]) if row and row[0] is not None else None
-    except Exception:
-        latest_id = None
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT MIN(id)
-            FROM static_analysis_runs
-            WHERE session_label=%s
-            """,
-            (session_label,),
-            fetch="one",
-        )
-        first_static_run_id = int(row[0]) if row and row[0] is not None else None
-    except Exception:
-        first_static_run_id = None
-    return RunResultsSessionMeta(
-        session_label=session_label,
-        session_stamp=params.session_stamp,
-        attempts=attempts,
-        canonical_id=canonical_id,
-        latest_id=latest_id,
-        first_static_run_id=first_static_run_id,
+    return _load_run_results_session_meta_impl(
+        params=params,
+        run_sql_fn=core_q.run_sql,
     )
 
 
@@ -486,69 +142,13 @@ def build_run_results_view_model(
     totals: Mapping[str, int],
     artifact_count: int,
 ) -> RunResultsViewModel:
-    runtime_findings_total = sum(int(value or 0) for value in totals.values())
-    overview_items = [
-        summary_cards.summary_item("Applications", len(outcome.results)),
-        summary_cards.summary_item("Artifacts", artifact_count),
-    ]
-    if params.dry_run:
-        overview_items.append(summary_cards.summary_item("Findings", "computed (not stored)"))
-    else:
-        overview_items.append(
-            summary_cards.summary_item(
-                "Detector hits (raw)",
-                runtime_findings_total,
-                value_style="severity_high" if totals.get("high") or totals.get("critical") else "emphasis",
-            )
-        )
-
-    session_meta = _load_run_results_session_meta(params=params)
-    subtitle_parts = [params.profile_label]
-    if params.scope_label:
-        subtitle_parts.append(f"Scope: {params.scope_label}")
-    if session_meta.session_label:
-        subtitle_parts.append(f"Session: {session_meta.session_label}")
-
-    result_label = "Canonical"
-    result_reasons: list[str] = []
-    if not params.dry_run:
-        if not bool(params.persistence_ready):
-            result_label = "Experimental"
-            result_reasons.append("persistence gate failed")
-        if outcome.failures:
-            result_label = "Experimental"
-            result_reasons.append("run failures present")
-    result_text = f"Result set: {result_label}"
-    if result_reasons:
-        result_text += f" ({'; '.join(result_reasons)})"
-    footer = f"{result_text}  |  Use Review, Database tools, or the Web view for deeper drilldown."
-
-    static_output_context = _collect_static_output_context(
+    return _build_run_results_view_model_impl(
         outcome,
         params,
+        totals=totals,
         artifact_count=artifact_count,
-    )
-    planned_artifacts = int(static_output_context.get("planned_artifacts") or artifact_count)
-    observed_artifacts = int(static_output_context.get("observed_artifacts") or artifact_count)
-
-    version_line = None
-    if len(outcome.results) == 1:
-        app = outcome.results[0]
-        version_name = app.version_name or "?"
-        version_code = app.version_code if app.version_code is not None else "?"
-        sha256 = app.base_apk_sha256 or "?"
-        version_line = f"Version: {version_name} ({version_code}) • SHA-256: {sha256}"
-
-    return RunResultsViewModel(
-        title="Static analysis summary",
-        overview_items=overview_items,
-        subtitle=" • ".join(subtitle_parts),
-        footer=footer,
-        static_output_context=static_output_context,
-        planned_artifacts=planned_artifacts,
-        observed_artifacts=observed_artifacts,
-        version_line=version_line,
-        session_meta=session_meta,
+        collect_static_output_context_fn=_collect_static_output_context,
+        load_run_results_session_meta_fn=_load_run_results_session_meta,
     )
 
 
@@ -1899,7 +1499,7 @@ def _render_run_results_impl(
         )
         try:
             write_run_health_json(health_target, health_doc)
-            outcome.run_health_json_path = str(health_target)
+            outcome.run_health_json_path = str(health_target.resolve())
         except OSError as exc:
             print(status_messages.status(f"Run health JSON could not be written ({exc}).", level="warn"))
 

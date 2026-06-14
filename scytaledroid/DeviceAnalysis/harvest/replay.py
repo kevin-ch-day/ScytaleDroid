@@ -265,6 +265,15 @@ def _replay_artifact(
             file_size = absolute_path.stat().st_size
 
     try:
+        signer_fingerprint = str(
+            package.get("signer_cert_digest")
+            or (
+                inventory.get("extras", {}).get("signer_cert_digest")
+                if isinstance(inventory.get("extras"), dict)
+                else ""
+            )
+            or ""
+        ).strip() or None
         record = repo.ApkRecord(
             package_name=package_name,
             app_id=app_id,
@@ -275,6 +284,7 @@ def _replay_artifact(
             version_name=str(package.get("version_name") or "").strip() or None,
             version_code=str(package.get("version_code") or "").strip() or None,
             sha256=sha256,
+            signer_fingerprint=signer_fingerprint,
             device_serial=str(package.get("device_serial") or "").strip() or None,
             harvested_at=str(artifact.get("pulled_at") or "").strip() or None,
             is_split_member=not bool(artifact.get("is_base")),

@@ -11,7 +11,6 @@ import json
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +48,24 @@ from .findings_writer import (
 from .metrics_writer import compute_metrics_bundle
 from .permission_matrix import persist_permission_matrix
 from .permission_risk import persist_permission_risk
+from .persistence_context import (
+    PersistenceOutcome,
+    _FindingPreparationAccumulator,
+    _PersistenceMetricsContext,
+    _PersistenceRunContext,
+    _PersistenceStageContext,
+    _PreparedFindingPayload,
+    _PreparedFindingsPersistenceContext,
+    _TransactionBootstrapResult,
+)
+from .run_summary_stages import (
+    bootstrap_persistence_transaction as _bootstrap_persistence_transaction_impl,
+    finalize_static_handoff_stage as _finalize_static_handoff_stage_impl,
+    persist_findings_and_correlations_stage as _persist_findings_and_correlations_stage_impl,
+    persist_metrics_and_sections_stage as _persist_metrics_and_sections_stage_impl,
+    persist_permission_and_storage_stage as _persist_permission_and_storage_stage_impl,
+    persist_static_sections_wrapper as _persist_static_sections_wrapper_impl,
+)
 from .reports.evidence_report import normalize_evidence
 from .run_envelope import prepare_run_envelope
 from .stage_writers import (
@@ -149,176 +166,6 @@ def _correlation_rows_from_result(
         static_run_id=static_run_id,
         package_name=package_name,
     )
-
-
-@dataclass(slots=True)
-class PersistenceOutcome:
-    run_id: int | None = None
-    static_run_id: int | None = None
-    runtime_findings: int = 0
-    persisted_findings: int = 0
-    findings_capped_total: int = 0
-    findings_capped_by_detector: dict[str, int] = field(default_factory=dict)
-    baseline_written: bool = False
-    string_samples_persisted: int = 0
-    persistence_failed: bool = False
-    canonical_failed: bool = False
-    compat_export_failed: bool = False
-    compat_export_stage: str | None = None
-    compat_run_created: bool = False
-    persistence_retry_count: int = 0
-    persistence_db_disconnect: bool = False
-    persistence_exception_class: str | None = None
-    persistence_exception_message: str | None = None
-    persistence_sql_errno: int | None = None
-    persistence_sqlstate: str | None = None
-    persistence_failing_table: str | None = None
-    persistence_writer: str | None = None
-    persistence_transaction_state: str | None = None
-    persistence_failure_stage: str | None = None
-    static_handoff_hash: str | None = None
-    errors: list[str] = field(default_factory=list)
-    #: Non-fatal persistence notes (e.g. duplicate permission rows skipped); echoed in audit JSON.
-    persistence_warnings: list[dict[str, str]] = field(default_factory=list)
-
-    @property
-    def success(self) -> bool:
-        return not self.errors
-
-    def add_error(self, message: str) -> None:
-        self.errors.append(message)
-
-
-@dataclass(slots=True)
-class _PersistenceRunContext:
-    display_name: str
-    version_name: str | None
-    min_sdk: int | None
-    target_sdk: int | None
-    version_code: int | None
-    profile_token: str | None
-    category_token: str | None
-    scenario_id_token: str | None
-    device_serial_token: str | None
-    manifest_sha: str | None
-    base_apk_sha256: str | None
-    artifact_set_hash: str | None
-    apk_set_id: int | None
-    run_signature: str | None
-    run_signature_version: str | None
-    identity_valid: object
-    identity_error_reason: str | None
-    config_hash: str | None
-    pipeline_version: str | None
-    catalog_versions: str | None
-    study_tag: str | None
-    analysis_version: str | None
-    harvest_manifest_path: str | None
-    harvest_capture_status: str | None
-    harvest_persistence_status: str | None
-    harvest_research_status: str | None
-    harvest_matches_planned_artifacts: object
-    harvest_observed_hashes_complete: object
-    harvest_non_canonical_reason_list: list[str]
-    research_usable: object
-
-
-@dataclass(slots=True)
-class _PersistenceMetricsContext:
-    metrics_payload: dict[str, tuple[object | None, str | None]]
-    exported_totals: dict[str, float]
-    flagged_normal_metric: float
-    weak_guard_metric: float
-    rule_cov_pct: float
-    base_cov_pct: float
-    bte_cov_pct: float
-    preview_cov_pct: float
-    path_cov_pct: float
-
-
-@dataclass(slots=True)
-class _PreparedFindingsPersistenceContext:
-    finding_rows: list[dict[str, Any]]
-    canonical_finding_rows: list[dict[str, object]]
-    correlation_rows: list[dict[str, object]]
-    control_summary: list[tuple[str, Mapping[str, Any]]]
-    control_entry_count: int
-    total_findings: int
-    persisted_totals: Counter[str]
-    downgraded_high: int
-    capped_by_detector: Counter[str]
-    taxonomy_counter: Counter[str]
-    rule_assigned: int
-    base_vector_count: int
-    bte_vector_count: int
-    preview_assigned: int
-    path_assigned: int
-    missing_masvs: int
-
-
-@dataclass(slots=True)
-class _TransactionBootstrapResult:
-    run_id: int | None
-    static_run_id: int | None
-    created_run_id: bool
-    created_static_run_id: bool
-
-
-@dataclass(slots=True)
-class _PersistenceStageContext:
-    base_report: object
-    string_data: Mapping[str, object]
-    package_for_run: str
-    session_stamp: str
-    scope_label: str
-    metadata_map: Mapping[str, object]
-    baseline_payload: Mapping[str, object]
-    metrics_bundle: object
-    manifest_obj: object | None
-
-
-@dataclass(slots=True)
-class _FindingPreparationAccumulator:
-    severity_counter: Counter[str] = field(default_factory=Counter)
-    downgraded_high: int = 0
-    persisted_by_detector: Counter[str] = field(default_factory=Counter)
-    capped_by_detector: Counter[str] = field(default_factory=Counter)
-    taxonomy_counter: Counter[str] = field(default_factory=Counter)
-    finding_rows: list[dict[str, Any]] = field(default_factory=list)
-    canonical_finding_rows: list[dict[str, object]] = field(default_factory=list)
-    control_entries: list[tuple[str, Mapping[str, Any]]] = field(default_factory=list)
-    correlation_rows: list[dict[str, object]] = field(default_factory=list)
-    total_findings: int = 0
-    rule_assigned: int = 0
-    base_vector_count: int = 0
-    bte_vector_count: int = 0
-    preview_assigned: int = 0
-    path_assigned: int = 0
-
-
-@dataclass(slots=True)
-class _PreparedFindingPayload:
-    detector_id: str
-    module_id: str | None
-    severity: str
-    evidence_payload: str
-    evidence_path: str | None
-    evidence_offset: str | None
-    evidence_preview: str | None
-    rule_id: str | None
-    masvs_area: str | None
-    masvs_control_id: str | None
-    base_vector: str | None
-    base_score_c: str | None
-    bt_vector: str | None
-    bt_score_c: str | None
-    be_vector: str | None
-    be_score_c: str | None
-    bte_vector: str | None
-    bte_score_c: str | None
-    profile_meta: Mapping[str, Any] | None
-    base_meta: Mapping[str, Any] | None
-    metrics_map: Mapping[str, object] | None
 
 
 def _build_persistence_run_context(
@@ -853,91 +700,24 @@ def _bootstrap_persistence_transaction(
     cached_schema_version: str,
     raise_db_error,
 ) -> _TransactionBootstrapResult:
-    created_run_id = False
-    created_static_run_id = False
-    if static_run_id is None:
-        app_version_id = _ensure_app_version(
-            package_for_run=stage_context.package_for_run,
-            display_name=run_context.display_name,
-            version_name=run_context.version_name,
-            version_code=run_context.version_code,
-            min_sdk=run_context.min_sdk,
-            target_sdk=run_context.target_sdk,
-        )
-        if app_version_id is None:
-            raise_db_error("static_run.create", "app_version_unresolved")
-        static_run_id = _create_static_run(
-            app_version_id=app_version_id,
-            session_stamp=stage_context.session_stamp,
-            session_label=stage_context.session_stamp,
-            scope_label=stage_context.scope_label,
-            category=run_context.category_token,
-            profile=run_context.profile_token,
-            profile_key=run_context.profile_token,
-            scenario_id=run_context.scenario_id_token,
-            device_serial=run_context.device_serial_token,
-            tool_semver=app_config.APP_VERSION,
-            tool_git_commit=get_git_commit(),
-            schema_version=cached_schema_version,
-            findings_total=int(finding_totals.get("total", 0) or 0),
-            run_started_utc=None,
-            status="STARTED",
-            sha256=run_context.base_apk_sha256 or run_context.manifest_sha,
-            base_apk_sha256=run_context.base_apk_sha256,
-            artifact_set_hash=run_context.artifact_set_hash,
-            apk_set_id=run_context.apk_set_id,
-            run_signature=run_context.run_signature,
-            run_signature_version=run_context.run_signature_version,
-            identity_valid=run_context.identity_valid if isinstance(run_context.identity_valid, bool) else None,
-            identity_error_reason=run_context.identity_error_reason,
-            config_hash=run_context.config_hash,
-            pipeline_version=run_context.pipeline_version,
-            analysis_version=run_context.analysis_version,
-            catalog_versions=run_context.catalog_versions,
-            study_tag=run_context.study_tag,
-        )
-        if static_run_id is None:
-            raise_db_error("static_run.create", "create_failed")
-        log.info(
-            f"Resolved static_run_id={static_run_id} for {stage_context.package_for_run} (session={stage_context.session_stamp})",
-            category="static_analysis",
-        )
-        created_static_run_id = True
-
-    if static_run_id:
-        identity_mode_value = _run_writers._identity_mode(
-            base_apk_sha256=run_context.base_apk_sha256,
-            version_code=run_context.version_code,
-        )
-        identity_conflict_value = _run_writers._detect_identity_conflict(
-            package_name=stage_context.package_for_run,
-            version_code=run_context.version_code,
-            base_apk_sha256=run_context.base_apk_sha256,
-        )
-        _update_static_run_metadata(
-            static_run_id,
-            sha256_value=run_context.base_apk_sha256 or run_context.manifest_sha,
-            base_apk_sha256=run_context.base_apk_sha256,
-            artifact_set_hash=run_context.artifact_set_hash,
-            apk_set_id=run_context.apk_set_id,
-            run_signature=run_context.run_signature,
-            run_signature_version=run_context.run_signature_version,
-            identity_valid=run_context.identity_valid if isinstance(run_context.identity_valid, bool) else None,
-            identity_error_reason=run_context.identity_error_reason,
-            identity_mode=identity_mode_value,
-            identity_conflict_flag=identity_conflict_value,
-            config_hash=run_context.config_hash,
-            pipeline_version=run_context.pipeline_version,
-            analysis_version=run_context.analysis_version,
-            catalog_versions=run_context.catalog_versions,
-            study_tag=run_context.study_tag,
-        )
-
-    return _TransactionBootstrapResult(
-        run_id=int(run_id) if run_id is not None else None,
-        static_run_id=int(static_run_id) if static_run_id is not None else None,
-        created_run_id=created_run_id,
-        created_static_run_id=created_static_run_id,
+    return _bootstrap_persistence_transaction_impl(
+        run_id=run_id,
+        static_run_id=static_run_id,
+        outcome=outcome,
+        stage_context=stage_context,
+        run_context=run_context,
+        envelope=envelope,
+        finding_totals=finding_totals,
+        cached_schema_version=cached_schema_version,
+        raise_db_error=raise_db_error,
+        ensure_app_version_fn=_ensure_app_version,
+        create_static_run_fn=_create_static_run,
+        update_static_run_metadata_fn=_update_static_run_metadata,
+        identity_mode_fn=_run_writers._identity_mode,
+        detect_identity_conflict_fn=_run_writers._detect_identity_conflict,
+        get_git_commit_fn=get_git_commit,
+        transaction_bootstrap_result_cls=_TransactionBootstrapResult,
+        log=log,
     )
 
 
@@ -949,26 +729,15 @@ def _persist_findings_and_correlations_stage(
     findings_context: _PreparedFindingsPersistenceContext,
     raise_db_error,
 ) -> None:
-    _ = run_id
-    if findings_context.finding_rows and static_run_id is not None:
-        try:
-            _persist_static_analysis_findings(
-                static_run_id=int(static_run_id),
-                rows=findings_context.canonical_finding_rows,
-            )
-        except Exception as exc:
-            raise_db_error(
-                "canonical_findings.write",
-                f"{exc.__class__.__name__}:{exc}",
-            )
-
-    if static_run_id and findings_context.correlation_rows:
-        try:
-            ok = _persist_correlation_results(findings_context.correlation_rows)
-        except Exception as exc:
-            raise_db_error("static_correlation_results.write", f"{exc.__class__.__name__}:{exc}")
-        if not ok:
-            raise_db_error("static_correlation_results.write", f"returned_false:static_run_id={static_run_id}")
+    _persist_findings_and_correlations_stage_impl(
+        run_id=run_id,
+        static_run_id=static_run_id,
+        stage_context=stage_context,
+        findings_context=findings_context,
+        raise_db_error=raise_db_error,
+        persist_static_analysis_findings_fn=_persist_static_analysis_findings,
+        persist_correlation_results_fn=_persist_correlation_results,
+    )
 
 
 def _persist_permission_and_storage_stage(
@@ -980,18 +749,19 @@ def _persist_permission_and_storage_stage(
     raise_db_error,
     outcome: PersistenceOutcome | None = None,
 ) -> None:
-    _stage_persist_permission_and_storage(
+    _persist_permission_and_storage_stage_impl(
         run_id=run_id,
         static_run_id=static_run_id,
         stage_context=stage_context,
         findings_context=findings_context,
         raise_db_error=raise_db_error,
+        outcome=outcome,
+        stage_persist_permission_and_storage_fn=_stage_persist_permission_and_storage,
         persist_masvs_controls=persist_masvs_controls,
         persist_storage_surface_data=persist_storage_surface_data,
         persist_permission_matrix=persist_permission_matrix,
         persist_permission_risk=persist_permission_risk,
         safe_int=safe_int,
-        outcome=outcome,
     )
 
 
@@ -1006,7 +776,7 @@ def _persist_metrics_and_sections_stage(
     note_db_error,
     raise_db_error,
 ) -> None:
-    _stage_persist_metrics_and_sections(
+    _persist_metrics_and_sections_stage_impl(
         run_id=run_id,
         static_run_id=static_run_id,
         stage_context=stage_context,
@@ -1015,6 +785,7 @@ def _persist_metrics_and_sections_stage(
         outcome=outcome,
         note_db_error=note_db_error,
         raise_db_error=raise_db_error,
+        stage_persist_metrics_and_sections_fn=_stage_persist_metrics_and_sections,
         persist_static_sections_wrapper=_persist_static_sections_wrapper,
     )
 
@@ -1027,119 +798,20 @@ def _finalize_static_handoff_stage(
     cached_schema_version: str,
     outcome: PersistenceOutcome,
 ) -> bool:
-    handoff_failed = False
-    if static_run_id and isinstance(stage_context.base_report, StaticAnalysisReport):
-        try:
-            handoff_payload = build_static_handoff(
-                report=stage_context.base_report,
-                string_data=stage_context.string_data,
-                package_name=stage_context.package_for_run,
-                version_code=run_context.version_code,
-                base_apk_sha256=run_context.base_apk_sha256,
-                artifact_set_hash=run_context.artifact_set_hash,
-                static_run_id=int(static_run_id),
-                session_label=stage_context.session_stamp,
-                tool_semver=app_config.APP_VERSION,
-                tool_git_commit=get_git_commit(),
-                schema_version=cached_schema_version,
-            )
-            handoff_hash = persist_static_handoff(
-                static_run_id=int(static_run_id),
-                handoff_payload=handoff_payload,
-            )
-            outcome.static_handoff_hash = handoff_hash
-            handoff_json_path = str(
-                Path("evidence") / "static_runs" / str(static_run_id) / "static_handoff.json"
-            )
-            identity_block = handoff_payload.get("identity", {}) if isinstance(handoff_payload, Mapping) else {}
-            masvs_block = handoff_payload.get("masvs", {}) if isinstance(handoff_payload, Mapping) else {}
-            identity_mode = str(identity_block.get("identity_mode") or "") if isinstance(identity_block, Mapping) else None
-            identity_conflict_flag = (
-                bool(identity_block.get("identity_conflict_flag"))
-                if isinstance(identity_block, Mapping)
-                else None
-            )
-            masvs_mapping_hash = (
-                str(masvs_block.get("masvs_mapping_hash") or "")
-                if isinstance(masvs_block, Mapping)
-                else None
-            )
-            run_class, non_canonical_reasons = _classify_static_contract(
-                package_name=stage_context.package_for_run,
-                version_code=run_context.version_code,
-                base_apk_sha256=run_context.base_apk_sha256,
-                identity_mode=identity_mode,
-                identity_conflict_flag=identity_conflict_flag,
-                static_handoff_hash=handoff_hash,
-                static_handoff_json_path=handoff_json_path,
-                masvs_mapping_hash=masvs_mapping_hash,
-                schema_version=cached_schema_version,
-                tool_semver=app_config.APP_VERSION,
-                tool_git_commit=get_git_commit(),
-                static_config_hash=run_context.config_hash,
-                harvest_manifest_path=run_context.harvest_manifest_path,
-                harvest_capture_status=run_context.harvest_capture_status,
-                harvest_research_status=run_context.harvest_research_status,
-                harvest_matches_planned_artifacts=(
-                    bool(run_context.harvest_matches_planned_artifacts)
-                    if run_context.harvest_matches_planned_artifacts is not None
-                    else None
-                ),
-                harvest_observed_hashes_complete=(
-                    bool(run_context.harvest_observed_hashes_complete)
-                    if run_context.harvest_observed_hashes_complete is not None
-                    else None
-                ),
-                harvest_non_canonical_reasons=run_context.harvest_non_canonical_reason_list,
-                research_usable=(
-                    bool(run_context.research_usable)
-                    if run_context.research_usable is not None
-                    else None
-                ),
-            )
-            _update_static_run_metadata(
-                int(static_run_id),
-                static_handoff_hash=handoff_hash,
-                static_handoff_json_path=handoff_json_path,
-                masvs_mapping_hash=masvs_mapping_hash,
-                run_class=run_class,
-                non_canonical_reasons=(
-                    json.dumps(non_canonical_reasons, ensure_ascii=True, sort_keys=True)
-                    if non_canonical_reasons
-                    else None
-                ),
-            )
-            if run_class != "CANONICAL":
-                try:
-                    core_q.run_sql(
-                        """
-                        UPDATE static_analysis_runs
-                        SET is_canonical=0,
-                            canonical_reason=COALESCE(canonical_reason, %s)
-                        WHERE id=%s
-                        """,
-                        ("contract_violation", int(static_run_id)),
-                    )
-                except Exception:
-                    pass
-        except Exception as exc:
-            handoff_failed = True
-            message = f"Static handoff export failed for {stage_context.package_for_run}: {exc}"
-            log.warning(message, category="static_analysis")
-            outcome.add_error(message)
-    if handoff_failed and static_run_id:
-        try:
-            _update_static_run_metadata(
-                int(static_run_id),
-                run_class="NON_CANONICAL",
-                non_canonical_reasons=json.dumps(
-                    ["HANDOFF_HASH_MISSING", "PERSISTENCE_ERROR"],
-                    ensure_ascii=True,
-                ),
-            )
-        except Exception:
-            pass
-    return handoff_failed
+    return _finalize_static_handoff_stage_impl(
+        static_run_id=static_run_id,
+        stage_context=stage_context,
+        run_context=run_context,
+        cached_schema_version=cached_schema_version,
+        outcome=outcome,
+        build_static_handoff_fn=build_static_handoff,
+        persist_static_handoff_fn=persist_static_handoff,
+        classify_static_contract_fn=_classify_static_contract,
+        update_static_run_metadata_fn=_update_static_run_metadata,
+        run_sql_fn=core_q.run_sql,
+        get_git_commit_fn=get_git_commit,
+        log=log,
+    )
 
 
 def _persist_static_sections_wrapper(
@@ -1155,7 +827,7 @@ def _persist_static_sections_wrapper(
     run_id: int | None,
     static_run_id: int | None = None,
 ) -> tuple[list[str], bool, int]:
-    return persist_static_sections_boundary(
+    return _persist_static_sections_wrapper_impl(
         package_name=package_name,
         session_stamp=session_stamp,
         scope_label=scope_label,
@@ -1166,6 +838,7 @@ def _persist_static_sections_wrapper(
         app_metadata=app_metadata,
         run_id=run_id,
         static_run_id=static_run_id,
+        persist_static_sections_boundary_fn=persist_static_sections_boundary,
     )
 
 
@@ -1635,6 +1308,7 @@ def create_static_run_ledger(
     run_started_utc: str | None = None,
     canonical_action: str | None = None,
     dry_run: bool = False,
+    static_session_id: int | None = None,
 ) -> int | None:
     """Create a STARTED static_analysis_runs row before scanning begins."""
     canonical_actions = {"first_run", "replace", "auto_suffix", "append"}
@@ -1676,6 +1350,7 @@ def create_static_run_ledger(
         analysis_version=analysis_version,
         catalog_versions=catalog_versions,
         study_tag=study_tag,
+        static_session_id=static_session_id,
     )
 
 

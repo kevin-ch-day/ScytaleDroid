@@ -174,6 +174,51 @@ def test_identity_conflict_blocks_canonical(monkeypatch):
     assert captured["identity_conflict_flag"] is True
 
 
+def test_create_static_run_ledger_reuses_pre_resolved_session_header(monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(run_writers, "_ensure_app_version", lambda **_k: 1)
+    monkeypatch.setattr(run_writers, "_identity_mode", lambda **_k: "full_hash")
+    monkeypatch.setattr(run_writers, "_detect_identity_conflict", lambda **_k: False)
+    monkeypatch.setattr(run_writers, "_update_static_run_metadata", lambda **_k: None)
+    monkeypatch.setattr(
+        run_writers,
+        "ensure_static_session_shell",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("session shell should be reused")),
+    )
+    monkeypatch.setattr(run_writers.core_q, "run_sql", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_writers, "_maybe_set_canonical_static_run", lambda **_k: None)
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return 9
+
+    monkeypatch.setattr(run_writers, "_create_static_run", _capture)
+    run_writers.create_static_run_ledger(
+        package_name="com.example.app",
+        display_name="Example",
+        version_name="1.0",
+        version_code=1,
+        min_sdk=24,
+        target_sdk=34,
+        session_stamp="s1",
+        session_label="s1",
+        scope_label="scope",
+        category="cat",
+        profile="full",
+        profile_key="full",
+        scenario_id="static_default",
+        device_serial=None,
+        tool_semver="2.0.1",
+        tool_git_commit="deadbeef",
+        schema_version="0.2.6",
+        findings_total=0,
+        run_started_utc="2026-02-20 00:00:00",
+        status="STARTED",
+        static_session_id=44,
+    )
+    assert captured["static_session_id"] == 44
+
+
 def test_masvs_mapping_hash_non_null_and_stable():
     payload_1 = build_static_handoff(
         report=_sample_report(),

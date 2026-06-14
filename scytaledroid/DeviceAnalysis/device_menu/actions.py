@@ -49,6 +49,8 @@ def _harvest_run_context_detail_lines(context: Mapping[str, object] | None) -> l
     lines: list[str] = []
     for key, label in (
         ("harvest_status", "Harvest status"),
+        ("harvest_status_reason", "Harvest status reason"),
+        ("harvest_operator_summary", "Harvest summary"),
         ("run_id", "Run ID"),
         ("session_stamp", "Session"),
         ("snapshot_id", "Inventory snapshot ID"),
@@ -57,6 +59,7 @@ def _harvest_run_context_detail_lines(context: Mapping[str, object] | None) -> l
         ("packages_executed", "Packages executed"),
         ("packages_harvested", "Packages harvested"),
         ("packages_blocked_preflight", "Packages blocked before pull"),
+        ("packages_path_stale", "Packages with path drift"),
         ("packages_replanned", "Packages replanned"),
         ("artifacts_written", "Artifacts written"),
         ("artifacts_failed", "Artifacts failed"),

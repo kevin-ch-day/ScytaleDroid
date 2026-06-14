@@ -52,7 +52,9 @@ def maybe_emit_post_run_grain_summary(
     """
 
     stamp = str(session_stamp or "").strip()
-    if not stamp or not post_run_grain_summary_enabled(run_ctx):
+    emit_summary = post_run_grain_summary_enabled(run_ctx)
+    collect_for_run_health = session_metrics is not None
+    if not stamp or (not emit_summary and not collect_for_run_health):
         return
     try:
         data = collect_session_grain(
@@ -62,21 +64,23 @@ def maybe_emit_post_run_grain_summary(
             top_packages=1,
         )
     except Exception as exc:
-        print(
-            status_messages.status(
-                f"Post-run cohort quick check skipped (DB): {exc.__class__.__name__}: {exc}",
-                level="warn",
+        if emit_summary or collect_for_run_health:
+            print(
+                status_messages.status(
+                    f"Post-run cohort quick check skipped (DB): {exc.__class__.__name__}: {exc}",
+                    level="warn",
+                )
             )
-        )
         return
     n_runs = int(data.get("static_run_rows") or 0)
     if n_runs <= 0:
-        print(
-            status_messages.status(
-                "Post-run cohort quick check: no static_analysis_runs rows for this session_stamp yet.",
-                level="warn",
+        if emit_summary:
+            print(
+                status_messages.status(
+                    "Post-run cohort quick check: no static_analysis_runs rows for this session_stamp yet.",
+                    level="warn",
+                )
             )
-        )
         return
 
     br = data.get("status_breakdown") or []
@@ -121,6 +125,9 @@ def maybe_emit_post_run_grain_summary(
             "persistence_failure_rows": pf,
             "run_aggregate_status": str(run_aggregate_status).strip() if run_aggregate_status else None,
         }
+
+    if not emit_summary:
+        return
 
     scope_note = f" scope_label={scope_label!r}" if scope_label and str(scope_label).strip() else ""
     print()

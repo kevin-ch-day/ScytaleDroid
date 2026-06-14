@@ -113,8 +113,39 @@ def test_resolve_unique_session_stamp_uses_db_attempts_without_local_run_map(mon
     from scytaledroid.Database.db_core import db_queries as core_q
 
     def _fake_run_sql(query, params=(), **_kwargs):
+        if "SELECT DISTINCT COALESCE" in query:
+            return [("20260217",)]
         if "SELECT COUNT(*)" in query:
             return (3,)
+        if "SELECT id" in query:
+            return None
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(core_q, "run_sql", _fake_run_sql)
+
+    stamp, label, action = run_dispatch._resolve_unique_session_stamp(
+        "20260217",
+        run_mode="interactive",
+        noninteractive=False,
+        quiet=True,
+        canonical_action=None,
+    )
+
+    assert stamp == "20260217-2"
+    assert label == "20260217-2"
+    assert action == "auto_suffix"
+
+
+def test_resolve_unique_session_stamp_uses_next_numeric_suffix(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(run_dispatch.app_config, "DATA_DIR", str(tmp_path))
+
+    from scytaledroid.Database.db_core import db_queries as core_q
+
+    def _fake_run_sql(query, params=(), **_kwargs):
+        if "SELECT DISTINCT COALESCE" in query:
+            return [("20260217",), ("20260217-2",), ("20260217-3",)]
+        if "SELECT COUNT(*)" in query:
+            return (12,)
         if "SELECT id" in query:
             return None
         raise AssertionError(f"Unexpected query: {query}")

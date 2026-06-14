@@ -260,6 +260,12 @@ def _prepare_extras(entry: Mapping[str, object]) -> dict | None:
         extras["publisher_source"] = entry.get("publisher_source")
     if "split_flag" in entry:
         extras["split_flag"] = entry.get("split_flag")
+    if entry.get("signer_cert_digest"):
+        extras["signer_cert_digest"] = entry.get("signer_cert_digest")
+    if entry.get("signer_set_hash"):
+        extras["signer_set_hash"] = entry.get("signer_set_hash")
+    if entry.get("split_membership_hash"):
+        extras["split_membership_hash"] = entry.get("split_membership_hash")
     return extras or None
 
 

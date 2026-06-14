@@ -17,6 +17,8 @@ from scytaledroid.DeviceAnalysis.harvest.summary import (
     render_harvest_summary,
     _build_summary_card_lines,
 )
+from scytaledroid.DeviceAnalysis.harvest.status import HarvestRunStatus
+from scytaledroid.DeviceAnalysis.harvest.status import build_harvest_run_status_from_runtime_stats
 
 
 def test_build_summary_card_lines_surfaces_executed_and_blocked_counts():
@@ -122,6 +124,59 @@ def test_build_harvest_run_report_status_derivation_degraded_total_loss():
 
     assert report.status == "degraded_db_mirror_total_loss"
     assert report.status_level == "error"
+    assert report.status_summary.status == "degraded_db_mirror_total_loss"
+    assert report.status_summary.status_reason == "db_mirror_total_loss"
+
+
+def test_build_harvest_run_report_exposes_authoritative_status_summary():
+    selection, plan, pkg_plan = _single_package_plan()
+    result = PullResult(
+        plan=pkg_plan,
+        ok=[],
+        skipped=[],
+        capture_status="drifted",
+        stale_replan_required=True,
+        stale_replan_outcome="path_stale_replan_failed",
+    )
+
+    report = build_harvest_run_report(plan, [result], selection=selection)
+
+    assert report.status == report.status_summary.status
+    assert report.status_level == report.status_summary.status_level
+    assert report.status_summary.path_stale_count == 1
+    assert report.status_summary.replanned_count == 1
+    assert report.status_summary.replan_failed_count == 1
+    assert report.status_summary.operator_summary.startswith("reviewed 1/1")
+
+
+def test_build_harvest_run_status_from_runtime_stats_enforces_count_invariants():
+    status = build_harvest_run_status_from_runtime_stats(
+        {
+            "packages_total": 5,
+            "packages_reviewed": 9,
+            "packages_eligible": 4,
+            "packages_attempted": 3,
+            "packages_harvested": 2,
+            "packages_skipped": 1,
+            "packages_runtime_skipped": 1,
+            "packages_failed": 1,
+            "packages_partial": 0,
+            "packages_drifted": 1,
+            "packages_path_stale": 2,
+            "packages_replanned": 2,
+            "packages_replan_success": 1,
+            "packages_replan_failed": 1,
+        },
+        run_error=None,
+        write_db_requested=False,
+        write_db_effective=True,
+    )
+
+    assert status.packages_reviewed == 5
+    assert status.attempted_count <= status.eligible_count
+    assert status.harvested_count <= status.attempted_count
+    assert status.replan_success_count + status.replan_failed_count <= status.replanned_count
+    assert status.path_stale_count >= status.replanned_count
 
 
 def test_build_harvest_run_report_runtime_note_summary():
@@ -257,6 +312,25 @@ def test_build_harvest_run_report_counts_path_stale_replan_outcomes():
     assert report.metrics.replan_failed_packages == 0
 
 
+def test_build_harvest_run_report_counts_path_set_change_as_successful_replan():
+    selection, plan, pkg_plan = _single_package_plan()
+    result = PullResult(
+        plan=pkg_plan,
+        ok=[],
+        skipped=[],
+        capture_status="clean",
+        stale_replan_required=True,
+        stale_replan_outcome="path_stale_package_paths_changed_since_inventory",
+    )
+
+    report = build_harvest_run_report(plan, [result], selection=selection)
+
+    assert report.metrics.path_stale_packages == 1
+    assert report.metrics.replanned_packages == 1
+    assert report.metrics.replan_success_packages == 1
+    assert report.metrics.replan_failed_packages == 0
+
+
 def test_build_harvest_run_report_tolerates_legacy_pull_result_without_replan_fields():
     selection, plan, pkg_plan = _single_package_plan()
     result = PullResult(
@@ -302,6 +376,26 @@ def test_render_harvest_summary_consumes_report_without_rederiving_status(monkey
             {"packages": [], "device_serial": None, "scope_name": "Test Scope"},
         )(),
         metrics=metrics,
+        status_summary=HarvestRunStatus(
+            packages_total=1,
+            packages_reviewed=1,
+            eligible_count=1,
+            attempted_count=1,
+            harvested_count=1,
+            blocked_preflight_count=0,
+            skipped_count=0,
+            failed_count=0,
+            partial_count=0,
+            drifted_count=0,
+            path_stale_count=0,
+            replanned_count=0,
+            replan_success_count=0,
+            replan_failed_count=0,
+            status="degraded_db_mirror_total_loss",
+            status_reason="db_mirror_total_loss",
+            status_level="error",
+            operator_summary="reviewed 1/1 · eligible 1 · attempted 1 · harvested 1 · OK",
+        ),
         pull_errors=0,
         files_written=1,
         status="degraded_db_mirror_total_loss",
@@ -377,6 +471,26 @@ def test_render_harvest_summary_uses_supplied_report_without_rebuild(monkeypatch
             {"packages": [], "device_serial": None, "scope_name": "Test Scope"},
         )(),
         metrics=metrics,
+        status_summary=HarvestRunStatus(
+            packages_total=1,
+            packages_reviewed=1,
+            eligible_count=1,
+            attempted_count=1,
+            harvested_count=1,
+            blocked_preflight_count=0,
+            skipped_count=0,
+            failed_count=0,
+            partial_count=0,
+            drifted_count=0,
+            path_stale_count=0,
+            replanned_count=0,
+            replan_success_count=0,
+            replan_failed_count=0,
+            status="success",
+            status_reason="completed_clean",
+            status_level="success",
+            operator_summary="reviewed 1/1 · eligible 1 · attempted 1 · harvested 1 · OK",
+        ),
         pull_errors=0,
         files_written=1,
         status="success",

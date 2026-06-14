@@ -13,6 +13,7 @@ from .models import (
     PullResult,
     ScopeSelection,
 )
+from .status import HarvestRunStatus
 
 _LAZY_EXPORTS = {
     "build_harvest_plan": (".planner", "build_harvest_plan"),
@@ -24,6 +25,7 @@ _LAZY_EXPORTS = {
     "select_package_scope": (".scope", "select_package_scope"),
     "select_package_scope_auto": (".scope", "select_package_scope_auto"),
     "HarvestRunMetrics": (".summary", "HarvestRunMetrics"),
+    "HarvestRunStatus": (".status", "HarvestRunStatus"),
     "build_harvest_run_report": (".summary", "build_harvest_run_report"),
     "is_harvest_simple_mode": (".summary", "is_harvest_simple_mode"),
     "preview_plan": (".summary", "preview_plan"),
@@ -39,6 +41,10 @@ _LAZY_EXPORTS = {
     "load_watchlists": (".watchlists", "load_watchlists"),
     "reset_watchlist_cache": (".watchlists", "reset_watchlist_cache"),
     "save_watchlist": (".watchlists", "save_watchlist"),
+    "STALE_REPLAN_SUCCESS_OUTCOMES": (".stale_replan", "STALE_REPLAN_SUCCESS_OUTCOMES"),
+    "STALE_REPLAN_FAILURE_OUTCOMES": (".stale_replan", "STALE_REPLAN_FAILURE_OUTCOMES"),
+    "classify_stale_replan_outcome": (".stale_replan", "classify_stale_replan_outcome"),
+    "build_stale_replan_details": (".stale_replan", "build_stale_replan_details"),
 }
 
 
@@ -54,6 +60,7 @@ __all__ = [
     "PackagePlan",
     "PullResult",
     "ScopeSelection",
+    "HarvestRunStatus",
     "build_harvest_plan",
     "build_inventory_rows",
     "quick_harvest",
@@ -79,4 +86,8 @@ __all__ = [
     "load_watchlists",
     "reset_watchlist_cache",
     "save_watchlist",
+    "STALE_REPLAN_SUCCESS_OUTCOMES",
+    "STALE_REPLAN_FAILURE_OUTCOMES",
+    "classify_stale_replan_outcome",
+    "build_stale_replan_details",
 ]

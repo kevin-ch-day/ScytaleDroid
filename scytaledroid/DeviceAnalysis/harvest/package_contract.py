@@ -6,11 +6,12 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.DeviceAnalysis.identity import compute_split_membership_hash, resolve_hex_digest
 from scytaledroid.DeviceAnalysis.services import artifact_store
 
 from . import common
 from .common import normalise_local_path, package_evidence_leaf_name
-from .models import PackagePlan, PullResult
+from .models import InventoryRow, PackagePlan, PullResult
 
 
 def package_manifest_path(package_dir: Path) -> Path:
@@ -96,6 +97,33 @@ def finalize_package_result(result: PullResult, *, write_db_requested: bool) -> 
         result.research_status = "pending_audit"
 
 
+def inventory_signer_fingerprint(inventory: InventoryRow) -> str | None:
+    raw = dict(inventory.raw or {})
+    return resolve_hex_digest(
+        raw,
+        "signer_cert_digest",
+        "signer_fingerprint",
+        "signer_primary_digest",
+    )
+
+
+def inventory_signer_set_hash(inventory: InventoryRow) -> str | None:
+    raw = dict(inventory.raw or {})
+    direct = resolve_hex_digest(raw, "signer_set_hash")
+    if direct:
+        return direct
+    primary = inventory_signer_fingerprint(inventory)
+    return primary if primary and len(primary) == 64 else None
+
+
+def inventory_split_membership_hash(inventory: InventoryRow) -> str | None:
+    raw = dict(inventory.raw or {})
+    direct = resolve_hex_digest(raw, "split_membership_hash")
+    if direct:
+        return direct
+    return compute_split_membership_hash(inventory.apk_paths)
+
+
 def write_package_manifest(
     *,
     result: PullResult,
@@ -118,6 +146,8 @@ def write_package_manifest(
             "app_label": inventory.app_label,
             "version_name": inventory.version_name,
             "version_code": inventory.version_code,
+            "signer_cert_digest": inventory_signer_fingerprint(inventory),
+            "signer_set_hash": inventory_signer_set_hash(inventory),
             "evidence_leaf": package_evidence_leaf_name(inventory),
             "device_serial": serial,
             "snapshot_id": snapshot_id,
@@ -133,6 +163,7 @@ def write_package_manifest(
             "primary_path": inventory.primary_path,
             "apk_paths": list(inventory.apk_paths),
             "split_count": inventory.split_count,
+            "split_membership_hash": inventory_split_membership_hash(inventory),
         },
         "planning": {
             "preflight_reason": result.preflight_reason,
@@ -150,6 +181,7 @@ def write_package_manifest(
             "runtime_skips": list(result.skipped),
             "mirror_failure_reasons": list(result.mirror_failure_reasons),
             "drift_reasons": list(result.drift_reasons),
+            "stale_replan": _stale_replan_payload(result),
         },
         "status": {
             "capture_status": result.capture_status,
@@ -157,7 +189,7 @@ def write_package_manifest(
             "research_status": result.research_status,
         },
         "comparison": dict(result.comparison),
-    }
+}
     receipt_path = artifact_store.harvest_receipt_path(
         session_label=session_stamp,
         package_name=inventory.package_name,
@@ -181,9 +213,18 @@ def _comparison_key(entry: Mapping[str, object]) -> tuple[str, str]:
     )
 
 
+def _stale_replan_payload(result: PullResult) -> dict[str, object]:
+    return {
+        "required": bool(result.stale_replan_required),
+        "outcome": result.stale_replan_outcome,
+        "details": dict(result.stale_replan_details or {}),
+    }
 __all__ = [
     "build_package_comparison",
     "finalize_package_result",
+    "inventory_signer_fingerprint",
+    "inventory_signer_set_hash",
+    "inventory_split_membership_hash",
     "observed_artifact_entries",
     "package_manifest_path",
     "planned_artifact_entries",

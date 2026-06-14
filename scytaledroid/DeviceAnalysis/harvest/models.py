@@ -131,6 +131,7 @@ class PullResult:
     package_manifest_path: Path | None = None
     stale_replan_required: bool = False
     stale_replan_outcome: str | None = None
+    stale_replan_details: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass

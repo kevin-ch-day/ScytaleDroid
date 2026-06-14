@@ -32,6 +32,63 @@ _LARGE_SPLIT_WARN_MIN_APK = 20
 _RUN_SETUP_LABEL_W = 18
 
 
+def _existing_db_session_labels(session_stamp: str) -> list[str]:
+    if core_q is None:
+        return []
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
+            FROM static_analysis_runs
+            WHERE session_label=%s
+               OR session_label LIKE %s
+               OR session_stamp=%s
+               OR session_stamp LIKE %s
+            """,
+            (session_stamp, f"{session_stamp}-%", session_stamp, f"{session_stamp}-%"),
+            fetch="all",
+        ) or []
+    except Exception:
+        return []
+
+    labels: list[str] = []
+    for row in rows:
+        value = None
+        if isinstance(row, (list, tuple)) and row:
+            value = row[0]
+        elif isinstance(row, dict) and row:
+            value = next(iter(row.values()))
+        if isinstance(value, str) and value.strip():
+            labels.append(value.strip())
+    return labels
+
+
+def _next_session_append_label(session_stamp: str) -> str:
+    labels = _existing_db_session_labels(session_stamp)
+    prefix = f"{session_stamp}-"
+    max_suffix = 0
+    seen = False
+    for label in labels:
+        candidate = str(label or "").strip()
+        if not candidate:
+            continue
+        if candidate == session_stamp:
+            seen = True
+            max_suffix = max(max_suffix, 1)
+            continue
+        if not candidate.startswith(prefix):
+            continue
+        tail = candidate[len(prefix) :]
+        if not re.fullmatch(r"\d+", tail):
+            continue
+        seen = True
+        max_suffix = max(max_suffix, int(tail))
+    if seen:
+        return normalize_session_stamp(f"{session_stamp}-{max_suffix + 1}")
+    fallback = datetime.now(UTC).strftime("%H%M%S")
+    return normalize_session_stamp(f"{session_stamp}-{fallback}")
+
+
 def _run_setup_kv(label: str, value: str) -> None:
     print(f"{label:<{_RUN_SETUP_LABEL_W}} : {value}")
 
@@ -287,19 +344,19 @@ def _lookup_existing_session_state(session_stamp: str) -> tuple[bool, int | None
     if core_q is not None:
         try:
             row = core_q.run_sql(
-                "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s",
-                (session_stamp,),
+                "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s OR session_stamp=%s",
+                (session_stamp, session_stamp),
                 fetch="one",
             )
             attempts = int(row[0]) if row and row[0] is not None else 0
             row = core_q.run_sql(
                 """
                 SELECT id FROM static_analysis_runs
-                WHERE session_label=%s AND is_canonical=1
+                WHERE (session_label=%s OR session_stamp=%s) AND is_canonical=1
                 ORDER BY canonical_set_at_utc DESC
                 LIMIT 1
                 """,
-                (session_stamp,),
+                (session_stamp, session_stamp),
                 fetch="one",
             )
             canonical_id = int(row[0]) if row and row[0] is not None else None
@@ -332,7 +389,7 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
     if has_local_session or has_db_attempts:
         print(status_messages.status(f"Session label already exists: {session_stamp}", level="warn"))
         if attempts is not None:
-            summary = f"Apps: {attempts}"
+            summary = f"App rows: {attempts}"
             if canonical_id:
                 summary += f" | canonical static_run_id={canonical_id}"
             print(status_messages.status(summary, level="info"))
@@ -348,12 +405,7 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
         if choice == "1":
             return replace(params, session_stamp=session_stamp, canonical_action="replace")
         # Append: generate a new, collision-free stamp now so execution is deterministic.
-        suffix = None
-        if isinstance(attempts, int) and attempts >= 0:
-            suffix = str(attempts + 1)
-        if not suffix:
-            suffix = datetime.now(UTC).strftime("%H%M%S")
-        session_stamp = normalize_session_stamp(f"{session_stamp}-{suffix}")
+        session_stamp = _append_session_label(session_stamp, attempts)
         print(status_messages.status(f"Append target: {session_stamp}", level="info"))
         return replace(params, session_stamp=session_stamp, canonical_action="append")
 
@@ -361,12 +413,7 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
 
 
 def _append_session_label(session_stamp: str, attempts: int | None) -> str:
-    suffix = None
-    if isinstance(attempts, int) and attempts >= 0:
-        suffix = str(attempts + 1)
-    if not suffix:
-        suffix = datetime.now(UTC).strftime("%H%M%S")
-    return normalize_session_stamp(f"{session_stamp}-{suffix}")
+    return _next_session_append_label(session_stamp)
 
 
 def prompt_run_setup(
@@ -443,7 +490,7 @@ def prompt_run_setup(
         if canonical_id is not None:
             _run_setup_kv("Canonical run", f"static_run_id={canonical_id}")
         elif attempts is not None:
-            _run_setup_kv("Attempts", str(attempts))
+            _run_setup_kv("App rows", str(attempts))
     else:
         _run_setup_kv("Existing session", "none")
     _run_setup_kv("Post-run audit", "after run completes")

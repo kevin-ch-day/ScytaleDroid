@@ -37,6 +37,42 @@ def test_maybe_emit_post_run_grain_summary_skips_when_disabled(monkeypatch, caps
     assert capsys.readouterr().out == ""
 
 
+def test_maybe_emit_post_run_grain_summary_collects_for_run_health_when_stdout_disabled(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("SCYTALEDROID_STATIC_POST_RUN_GRAIN_SUMMARY", "0")
+
+    def _fake_grain(_run_sql, *, session_stamp, scope_label=None, top_packages=20):
+        _ = scope_label, top_packages
+        assert session_stamp == "sess-hidden"
+        return {
+            "session_stamp": session_stamp,
+            "static_run_rows": 2,
+            "status_breakdown": [("COMPLETED", 2)],
+            "canonical_findings_rows": 10,
+            "permission_matrix_rows": 5,
+            "persistence_failure_rows": 0,
+            "top_packages": [],
+        }
+
+    monkeypatch.setattr(prq, "collect_session_grain", _fake_grain)
+    monkeypatch.setattr(prq, "count_json_files_in_dir", lambda _p: 7)
+
+    metrics: dict[str, object] = {}
+    prq.maybe_emit_post_run_grain_summary(
+        "sess-hidden",
+        scope_label="Lab",
+        run_ctx=SimpleNamespace(batch=False, noninteractive=False),
+        session_metrics=metrics,
+    )
+
+    assert capsys.readouterr().out == ""
+    grain = metrics.get("post_run_grain")
+    assert isinstance(grain, dict)
+    assert grain.get("session_stamp") == "sess-hidden"
+    assert grain.get("archive_json_files") == 7
+
+
 def test_maybe_emit_post_run_grain_summary_prints_on_mock_data(monkeypatch, capsys) -> None:
     monkeypatch.setenv("SCYTALEDROID_STATIC_POST_RUN_GRAIN_SUMMARY", "1")
 

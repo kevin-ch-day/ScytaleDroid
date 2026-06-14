@@ -65,10 +65,7 @@ def _workflow_execution_label(doc: Mapping[str, object], sr: Mapping[str, object
 def compact_run_health_stdout_line(doc: Mapping[str, object]) -> str:
     """One-line roll-up; prefer ``format_run_health_stdout_lines`` for operator-facing detail."""
     roll = doc.get("run_rollups") if isinstance(doc.get("run_rollups"), Mapping) else {}
-    path = ""
-    outp = doc.get("outputs") if isinstance(doc.get("outputs"), Mapping) else {}
-    if isinstance(outp, Mapping):
-        path = str(outp.get("run_health_json_relative") or outp.get("run_health_json_abs") or "")
+    path = _run_health_display_path(doc)
 
     return (
         f"Run health (compact): final_run_status={doc.get('final_run_status')} "
@@ -111,15 +108,27 @@ def _truncate_stdout_token(text: object, *, max_len: int = 140) -> str:
     return s[: max_len - 1] + "…"
 
 
+def _run_health_display_path(doc: Mapping[str, object]) -> str:
+    """Prefer a path token that points operators to the real file location."""
+
+    outp = doc.get("outputs") if isinstance(doc.get("outputs"), Mapping) else {}
+    if not isinstance(outp, Mapping):
+        return ""
+    preferred = str(outp.get("run_health_json_display") or "").strip()
+    if preferred:
+        return preferred
+    rel = str(outp.get("run_health_json_relative") or "").strip()
+    if rel and any(sep in rel for sep in ("/", "\\")):
+        return rel
+    return str(outp.get("run_health_json_abs") or rel or "").strip()
+
+
 def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
     """Structured operator summary when ``status_reasons`` is populated."""
 
     sr = doc.get("status_reasons") if isinstance(doc.get("status_reasons"), Mapping) else {}
     roll = doc.get("run_rollups") if isinstance(doc.get("run_rollups"), Mapping) else {}
-    outp = doc.get("outputs") if isinstance(doc.get("outputs"), Mapping) else {}
-    path = ""
-    if isinstance(outp, Mapping):
-        path = str(outp.get("run_health_json_relative") or outp.get("run_health_json_abs") or "")
+    path = _run_health_display_path(doc)
 
     lines: list[str] = [
         f"Run health{(' - ' + path) if path else ''}:",
@@ -134,6 +143,9 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
     det_exec = _safe_int_token(sr.get("detector_execution_errors") or sr.get("detector_errors"))
     det_warn = _safe_int_token(sr.get("detector_warnings"))
     det_fail = _safe_int_token(sr.get("detector_finding_failures") or sr.get("detector_failures"))
+    findings_runtime = _safe_int_token(roll.get("findings_runtime_total"))
+    findings_persisted = _safe_int_token(roll.get("findings_persisted_db_total"))
+    findings_capped = _safe_int_token(roll.get("findings_capped_not_persisted_total"))
     scan_done = roll.get("scan_execution_complete")
     if isinstance(scan_done, bool):
         exec_label = "complete" if scan_done else "incomplete"
@@ -156,6 +168,11 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             (
                 "DB persistence   : "
                 f"{sr.get('db_persistence_status')} | string_rollup={sr.get('string_status')}"
+            ),
+            (
+                "Finding fidelity : "
+                f"runtime={findings_runtime} persisted_db={findings_persisted} "
+                f"capped_not_persisted={findings_capped}"
             ),
             (
                 "Governance       : "
@@ -185,6 +202,12 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             "and/or policy-finding gates fired. Run completion and DB persistence still finished; "
             "execution_errors=0 means no analyzer/pipeline crashes."
         )
+    if findings_capped > 0:
+        lines.append(
+            "Persistence note : Some detector findings were intentionally omitted from canonical DB inserts "
+            "because per-detector caps fired. Use run_health.json or DB capped counters when comparing "
+            "runtime detector output to persisted findings."
+        )
 
     apps = doc.get("apps") if isinstance(doc.get("apps"), list) else []
     partial_hints: list[str] = []
@@ -211,6 +234,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
 def attach_run_health_outputs_on_document(doc: MutableMapping[str, object], *, path: Path, base_dir: Path) -> None:
     outp = dict(doc.get("outputs") if isinstance(doc.get("outputs"), Mapping) else {})
     outp["run_health_json_abs"] = str(path)
+    outp["run_health_base_dir_abs"] = str(base_dir)
     rel = path.name
     try:
         if base_dir.is_absolute():
@@ -220,4 +244,5 @@ def attach_run_health_outputs_on_document(doc: MutableMapping[str, object], *, p
     except (OSError, ValueError):
         rel = path.name
     outp["run_health_json_relative"] = rel
+    outp["run_health_json_display"] = rel if any(sep in rel for sep in ("/", "\\")) else str(path)
     doc["outputs"] = outp

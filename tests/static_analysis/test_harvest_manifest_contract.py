@@ -74,7 +74,12 @@ def _make_group(
     )
 
 
-def _configure_scan_flow(monkeypatch, *, calls: list[str]) -> None:
+def _configure_scan_flow(
+    monkeypatch,
+    *,
+    calls: list[str],
+    report_metadata: dict[str, object] | None = None,
+) -> None:
     monkeypatch.setattr(scan_flow, "load_display_name_map", lambda _groups: {})
     monkeypatch.setattr(scan_flow, "finalize_open_static_runs", lambda *_a, **_k: 0)
     monkeypatch.setattr(scan_flow, "create_static_run_ledger", lambda **_kwargs: None)
@@ -90,9 +95,13 @@ def _configure_scan_flow(monkeypatch, *, calls: list[str]) -> None:
         *,
         extra_metadata=None,
         phase_timing_sink=None,
+        runtime_state=None,
     ):
         calls.append("generate_report")
-        return _FakeReport(metadata=dict(extra_metadata or {})), None, None, False
+        merged_metadata = dict(extra_metadata or {})
+        if report_metadata:
+            merged_metadata.update(report_metadata)
+        return _FakeReport(metadata=merged_metadata), None, None, False
 
     monkeypatch.setattr(scan_report_mod, "generate_report", _fake_generate_report)
     monkeypatch.setattr(
@@ -145,6 +154,116 @@ def test_execute_scan_marks_harvest_ineligible_group_exploratory(monkeypatch, tm
     assert result.executed_artifacts == 1
     assert result.identity_valid is True
     assert result.base_string_data is not None
+
+
+def test_execute_scan_reuses_cached_post_run_string_payload(monkeypatch, tmp_path: Path) -> None:
+    calls: list[str] = []
+    cached_payload = {
+        "counts": {"endpoints": 1},
+        "samples": {},
+        "selected_samples": {},
+        "aggregates": {"endpoint_roots": ["example.com"]},
+    }
+    _configure_scan_flow(
+        monkeypatch,
+        calls=calls,
+        report_metadata={"post_run_string_payload": cached_payload},
+    )
+    group = _make_group(
+        tmp_path,
+        package_name="com.example.cached",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    outcome = scan_flow.execute_scan(
+        ScopeSelection(scope="app", label="Example", groups=(group,)),
+        params,
+        tmp_path,
+    )
+
+    assert calls == ["generate_report"]
+    assert outcome.failures == []
+    assert outcome.results[0].base_string_data == cached_payload
+
+
+def test_execute_scan_reuses_one_static_session_header_for_all_packages(monkeypatch, tmp_path: Path) -> None:
+    calls: list[str] = []
+    captured_session_ids: list[int | None] = []
+    _configure_scan_flow(monkeypatch, calls=calls)
+
+    monkeypatch.setattr(scan_flow, "ensure_static_session_shell", lambda **_kwargs: 77)
+
+    def _capture_create_static_run_ledger(**kwargs):
+        captured_session_ids.append(kwargs.get("static_session_id"))
+        return 321
+
+    monkeypatch.setattr(scan_flow, "create_static_run_ledger", _capture_create_static_run_ledger)
+
+    group_a = _make_group(
+        tmp_path,
+        package_name="com.example.one",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+    )
+    group_b = _make_group(
+        tmp_path,
+        package_name="com.example.two",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    scan_flow.execute_scan(
+        ScopeSelection(scope="app", label="Example", groups=(group_a, group_b)),
+        params,
+        tmp_path,
+    )
+
+    assert captured_session_ids == [77, 77]
 
 
 def test_execute_scan_fails_closed_for_paper_grade_when_harvest_ineligible(

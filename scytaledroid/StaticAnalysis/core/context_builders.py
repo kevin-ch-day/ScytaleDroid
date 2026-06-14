@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -135,6 +135,7 @@ def build_detector_context(
     string_index: StringIndex | None,
     network_security_policy: NetworkSecurityPolicy | None,
     permission_catalog: PermissionCatalog | None,
+    runtime_state: MutableMapping[str, object] | None = None,
 ) -> DetectorContext:
     """Build a detector context shared across all pipeline stages."""
 
@@ -156,6 +157,7 @@ def build_detector_context(
         network_security_policy=network_security_policy,
         permission_catalog=permission_catalog,
         config=config,
+        runtime_state=runtime_state or {},
     )
 
 

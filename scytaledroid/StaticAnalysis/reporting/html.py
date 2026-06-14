@@ -87,11 +87,21 @@ def render_html_report(view: Mapping[str, Any]) -> str:
     )
 
     toolchain = run.get("toolchain", {}) if isinstance(run.get("toolchain"), Mapping) else {}
+    parser_provenance = run.get("parser_provenance", {}) if isinstance(run.get("parser_provenance"), Mapping) else {}
     toolchain_text = " · ".join(
         (
             f"Androguard {escape(str(toolchain.get('androguard', '—')))}",
             f"aapt2={escape(str(toolchain.get('aapt2', '—')))}",
             f"apksigner={escape(str(toolchain.get('apksigner', '—')))}",
+        )
+    )
+    parser_text = " · ".join(
+        (
+            f"manifest={escape(str(parser_provenance.get('manifest_source', '—')))}",
+            f"semantics={escape(str(parser_provenance.get('manifest_semantics_source', '—')))}",
+            f"resources={escape(str(parser_provenance.get('resource_open_source', '—')))}",
+            f"label={escape(str(parser_provenance.get('label_source', '—')))}",
+            f"strings={escape(str(parser_provenance.get('string_index_source', '—')))}",
         )
     )
 
@@ -188,6 +198,7 @@ def render_html_report(view: Mapping[str, Any]) -> str:
         f"      <div>Verbosity</div><div>{escape(str(run.get('verbosity', 'summary')))}</div>",
         f"      <div>Evidence limit</div><div>{escape(str(run.get('evidence_limit', '—')))}</div>",
         f"      <div>Toolchain</div><div class=\"mono\">{toolchain_text}</div>",
+        f"      <div>Parser provenance</div><div class=\"mono\">{parser_text}</div>",
         f"      <div>Seed</div><div class=\"mono\">{escape(str(run.get('seed', '—')))}</div>",
         "    </div>",
         "  </section>",
@@ -224,6 +235,7 @@ def save_html_report(
         )
     )
     artifact = _artifact_slug(metadata.get("artifact") or report.file_name)
+    artifact = _resolve_html_artifact_name(report, artifact)
     resolved_mode = _normalize_html_mode(mode or getattr(app_config, "STATIC_HTML_MODE", "latest"))
     latest_path, archive_path = _resolve_output_paths(
         report,
@@ -290,6 +302,20 @@ def _artifact_slug(value: Any) -> str:
     if not raw:
         return "artifact"
     return _slugify(Path(raw).stem)
+
+
+def _resolve_html_artifact_name(report: StaticAnalysisReport, artifact: str) -> str:
+    normalized = str(artifact or "").strip() or "artifact"
+    if normalized == "base":
+        return normalized
+    sha256 = ""
+    try:
+        sha256 = str((getattr(report, "hashes", {}) or {}).get("sha256") or "").strip().lower()
+    except Exception:
+        sha256 = ""
+    if len(sha256) >= 12:
+        return f"{normalized}-{sha256[:12]}"
+    return normalized
 
 
 def _first_non_empty(*candidates: Any) -> Any:

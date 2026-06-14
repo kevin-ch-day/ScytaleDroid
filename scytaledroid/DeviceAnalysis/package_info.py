@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
+from scytaledroid.DeviceAnalysis.identity import compute_signer_set_hash, extract_signer_digests
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
@@ -115,6 +116,11 @@ def get_package_metadata(
             value = stripped.split("=", 1)[1].strip()
             if value:
                 metadata["version_name"] = value
+
+    signer_digests = extract_signer_digests(completed.stdout)
+    if signer_digests:
+        metadata["signer_cert_digest"] = signer_digests[0]
+        metadata["signer_set_hash"] = compute_signer_set_hash(signer_digests)
 
     adb_cache.PACKAGE_META_CACHE.set(cache_key, metadata)
     return metadata

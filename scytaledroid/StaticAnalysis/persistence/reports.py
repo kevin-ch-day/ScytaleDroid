@@ -21,6 +21,9 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_REPORT_CACHE_TOKEN: tuple[str, ...] | None = None
+_REPORT_CACHE_ENTRIES: list[StoredReport] | None = None
+_REPORT_CACHE_PACKAGE_INDEX: dict[str, list[StoredReport]] | None = None
 
 
 class ReportStorageError(Exception):
@@ -44,7 +47,70 @@ class SavedReportPaths:
     view: dict[str, object]
 
 
-def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
+def _report_cache_token() -> tuple[str, ...]:
+    return tuple(str(root.resolve(strict=False)) for root in _report_search_roots())
+
+
+def _clear_report_cache() -> None:
+    global _REPORT_CACHE_TOKEN, _REPORT_CACHE_ENTRIES, _REPORT_CACHE_PACKAGE_INDEX
+    _REPORT_CACHE_TOKEN = None
+    _REPORT_CACHE_ENTRIES = None
+    _REPORT_CACHE_PACKAGE_INDEX = None
+
+
+def _sort_key(entry: StoredReport) -> tuple:
+    report = entry.report
+    # Deterministic ordering: avoid filesystem mtimes (easy to disturb via copy/unzip/rsync).
+    generated_at = str(getattr(report, "generated_at", "") or "")
+    meta = getattr(report, "metadata", None)
+    session_stamp = ""
+    if isinstance(meta, dict):
+        session_stamp = str(meta.get("session_stamp") or "")
+    version_code = getattr(getattr(report, "manifest", None), "version_code", None)
+    try:
+        version_code_i = int(version_code) if version_code is not None else -1
+    except (TypeError, ValueError):
+        version_code_i = -1
+    return (
+        1 if generated_at else 0,
+        generated_at,
+        1 if session_stamp else 0,
+        session_stamp,
+        version_code_i,
+        entry.path.name,
+    )
+
+
+def _set_report_cache(entries: list[StoredReport]) -> None:
+    global _REPORT_CACHE_TOKEN, _REPORT_CACHE_ENTRIES, _REPORT_CACHE_PACKAGE_INDEX
+    entries.sort(key=_sort_key, reverse=True)
+    _REPORT_CACHE_TOKEN = _report_cache_token()
+    _REPORT_CACHE_ENTRIES = list(entries)
+    package_index: dict[str, list[StoredReport]] = {}
+    for entry in entries:
+        package_name = str(getattr(getattr(entry.report, "manifest", None), "package_name", "") or "").strip().lower()
+        if not package_name:
+            continue
+        package_index.setdefault(package_name, []).append(entry)
+    _REPORT_CACHE_PACKAGE_INDEX = package_index
+
+
+def _cache_saved_report(path: Path, report: StaticAnalysisReport) -> None:
+    global _REPORT_CACHE_TOKEN, _REPORT_CACHE_ENTRIES
+    token = _report_cache_token()
+    if _REPORT_CACHE_TOKEN != token or _REPORT_CACHE_ENTRIES is None:
+        return
+    identity = _report_identity(report)
+    updated = [entry for entry in _REPORT_CACHE_ENTRIES if _report_identity(entry.report) != identity]
+    updated.append(StoredReport(path=path, report=report))
+    _set_report_cache(updated)
+
+
+def save_report(
+    report: StaticAnalysisReport,
+    *,
+    execution_id: str | None = None,
+) -> SavedReportPaths:
     """Persist *report* to disk and return the generated artefact paths."""
 
     # Import via package; re-exports ensure stable import path
@@ -95,6 +161,7 @@ def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
         category="static_analysis",
         extra={
             "event": logging_events.REPORT_SAVED,
+            "execution_id": execution_id,
             "session_stamp": session_stamp,
             **identity.as_metadata(),
             "version_name": report.manifest.version_name,
@@ -107,6 +174,11 @@ def save_report(report: StaticAnalysisReport) -> SavedReportPaths:
             "generated_at": report.generated_at,
         },
     )
+    try:
+        cached_report = StaticAnalysisReport.from_dict(payload)
+    except Exception:
+        cached_report = report
+    _cache_saved_report(path, cached_report)
     return SavedReportPaths(json_path=path, html_path=html_path, view=view_payload)
 
 
@@ -151,29 +223,14 @@ def list_reports() -> list[StoredReport]:
 
     roots = _report_search_roots()
     if not any(root.exists() for root in roots):
+        _clear_report_cache()
         return []
 
-    def _sort_key(entry: StoredReport) -> tuple:
-        report = entry.report
-        # Deterministic ordering: avoid filesystem mtimes (easy to disturb via copy/unzip/rsync).
-        generated_at = str(getattr(report, "generated_at", "") or "")
-        meta = getattr(report, "metadata", None)
-        session_stamp = ""
-        if isinstance(meta, dict):
-            session_stamp = str(meta.get("session_stamp") or "")
-        version_code = getattr(getattr(report, "manifest", None), "version_code", None)
-        try:
-            version_code_i = int(version_code) if version_code is not None else -1
-        except (TypeError, ValueError):
-            version_code_i = -1
-        return (
-            1 if generated_at else 0,
-            generated_at,
-            1 if session_stamp else 0,
-            session_stamp,
-            version_code_i,
-            entry.path.name,
-        )
+    token = _report_cache_token()
+    if _REPORT_CACHE_TOKEN == token and _REPORT_CACHE_ENTRIES is not None:
+        if all(entry.path.exists() for entry in _REPORT_CACHE_ENTRIES):
+            return list(_REPORT_CACHE_ENTRIES)
+        _clear_report_cache()
 
     entries: list[StoredReport] = []
     seen_identities: set[tuple[str, str, str, str, str]] = set()
@@ -185,8 +242,31 @@ def list_reports() -> list[StoredReport]:
                 continue
             seen_identities.add(identity)
             entries.append(StoredReport(path=path, report=report))
-    entries.sort(key=_sort_key, reverse=True)
-    return entries
+    _set_report_cache(entries)
+    return list(entries)
+
+
+def reports_for_package(package_name: str | None) -> list[StoredReport]:
+    """Return cached stored reports for one package, newest first."""
+
+    package_norm = str(package_name or "").strip().lower()
+    if not package_norm:
+        return []
+    token = _report_cache_token()
+    if (
+        _REPORT_CACHE_TOKEN == token
+        and _REPORT_CACHE_PACKAGE_INDEX is not None
+        and _REPORT_CACHE_ENTRIES is not None
+        and all(entry.path.exists() for entry in _REPORT_CACHE_ENTRIES)
+    ):
+        return list(_REPORT_CACHE_PACKAGE_INDEX.get(package_norm, ()))
+    entries = list_reports()
+    return [
+        entry
+        for entry in entries
+        if str(getattr(getattr(entry.report, "manifest", None), "package_name", "") or "").strip().lower()
+        == package_norm
+    ]
 
 
 def load_report(path: Path) -> StaticAnalysisReport:
@@ -273,6 +353,7 @@ def _report_identity(report: StaticAnalysisReport) -> tuple[str, str, str, str, 
 __all__ = [
     "save_report",
     "list_reports",
+    "reports_for_package",
     "load_report",
     "ReportStorageError",
     "StoredReport",

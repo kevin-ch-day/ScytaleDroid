@@ -7,16 +7,20 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Mapping, MutableMapping, Sequence
 from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 
 from .._androguard import APK
 from ..engine import aapt2_fallback
+from ..engine.strings import _analyse_strings_from_index
+from ..detectors.correlation.runtime_state import snapshot_runtime_stats
 from ..modules import build_string_index
 from ..modules.network_security import extract_network_security_policy
 from ..modules.permissions import load_permission_catalog
@@ -49,6 +53,7 @@ from .results_builder import make_detector_result
 
 # Last non-debug verbosity passed to ``configure_third_party_loggers`` (``None`` = debug or cold).
 _apk_non_debug_log_verbosity: str | None = None
+_HASH_DIGEST_LENGTHS: Mapping[str, int] = {"md5": 32, "sha1": 40, "sha256": 64}
 
 
 def _next_apk_logger_reconfigure(
@@ -204,11 +209,139 @@ def _frozen_toolchain_versions() -> tuple[tuple[str, str], ...]:
     aapt2 = shutil.which("aapt2")
     if aapt2:
         versions["aapt2"] = "present"
+    apksigner = shutil.which("apksigner")
+    if apksigner:
+        versions["apksigner"] = "present"
     return tuple(versions.items())
 
 
 def _resolve_toolchain_versions() -> Mapping[str, str]:
     return dict(_frozen_toolchain_versions())
+
+
+def _build_parser_provenance(metadata: Mapping[str, object]) -> dict[str, object]:
+    fallback = metadata.get("resource_fallback")
+    fallback_payload = fallback if isinstance(fallback, Mapping) else {}
+    fallback_used = _coerce_bool(fallback_payload.get("fallback_used"))
+    fallback_reason = str(fallback_payload.get("fallback_reason") or "").strip() or None
+
+    label_source = str(metadata.get("label_fallback") or "").strip() or "androguard"
+    if label_source == "package_name":
+        label_source = "package_name_fallback"
+
+    warning_count = 0
+    warnings = metadata.get("resource_bounds_warnings")
+    if isinstance(warnings, Sequence) and not isinstance(warnings, (str, bytes)):
+        warning_count = sum(1 for line in warnings if str(line).strip())
+    else:
+        warning_count = _coerce_int(fallback_payload.get("warning_count")) or 0
+
+    return {
+        "manifest_source": str(metadata.get("manifest_source") or "androguard"),
+        "manifest_semantics_source": str(
+            metadata.get("manifest_semantics_source") or metadata.get("manifest_source") or "androguard"
+        ),
+        "resource_open_source": "aapt2_metadata_fallback" if fallback_used else "androguard",
+        "resource_fallback_used": fallback_used,
+        "resource_fallback_reason": fallback_reason,
+        "resource_bounds_warning_count": warning_count,
+        "label_source": label_source,
+        "string_index_source": "androguard"
+        if not str(metadata.get("string_index_error") or "").strip()
+        else "string_index_unavailable",
+        "aapt2_available": _coerce_bool(fallback_payload.get("aapt2_available")),
+    }
+
+
+def _normalize_hash(value: object, *, length: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if len(normalized) != length:
+        return None
+    if any(ch not in "0123456789abcdef" for ch in normalized):
+        return None
+    return normalized
+
+
+def _coerce_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _resolve_trusted_metadata_hashes(apk_path: Path, metadata: Mapping[str, object]) -> tuple[dict[str, str] | None, str]:
+    digests: dict[str, str] = {}
+    for algo, expected_length in _HASH_DIGEST_LENGTHS.items():
+        normalized = _normalize_hash(metadata.get(algo), length=expected_length)
+        if normalized is None:
+            return None, f"missing_or_invalid_{algo}"
+        digests[algo] = normalized
+
+    actual_size = apk_path.stat().st_size
+    declared_size = _coerce_int(metadata.get("file_size"))
+    if declared_size is not None and declared_size != actual_size:
+        return None, "file_size_mismatch"
+
+    try:
+        expected_canonical = artifact_store.canonical_apk_path(digests["sha256"]).resolve()
+    except Exception:
+        return None, "canonical_path_error"
+    if apk_path.resolve() != expected_canonical:
+        return None, "not_canonical_store_path"
+
+    canonical_store_path = metadata.get("canonical_store_path")
+    if isinstance(canonical_store_path, str) and canonical_store_path.strip():
+        candidate = Path(canonical_store_path.strip())
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        try:
+            if candidate.resolve() != expected_canonical:
+                return None, "canonical_store_path_mismatch"
+        except Exception:
+            return None, "canonical_store_path_unresolvable"
+
+    return digests, "canonical_store_verified"
+
+
+def _resolve_hashes_for_analysis(apk_path: Path, metadata: Mapping[str, object]) -> tuple[dict[str, str], dict[str, object]]:
+    trusted_hashes, provenance_reason = _resolve_trusted_metadata_hashes(apk_path, metadata)
+    if trusted_hashes is not None:
+        return trusted_hashes, {
+            "hash_source": "trusted_metadata",
+            "hash_recomputed": False,
+            "hash_provenance_ok": True,
+            "hash_provenance_reason": provenance_reason,
+        }
+
+    return compute_hashes(apk_path), {
+        "hash_source": "computed",
+        "hash_recomputed": True,
+        "hash_provenance_ok": False,
+        "hash_provenance_reason": provenance_reason,
+    }
 
 
 def analyze_apk(
@@ -217,6 +350,7 @@ def analyze_apk(
     metadata: Mapping[str, object | None] = None,
     storage_root: Path | None = None,
     config: AnalysisConfig | None = None,
+    runtime_state: MutableMapping[str, object] | None = None,
     stage_observer: object | None = None,
 ) -> StaticAnalysisReport:
     """Run resilient static analysis on *apk_path* and return a report."""
@@ -224,10 +358,14 @@ def analyze_apk(
     if not apk_path.exists():
         raise StaticAnalysisError(f"APK not found: {apk_path}")
 
+    analysis_started = time.monotonic()
     analysis_config = config or AnalysisConfig()
     report_metadata: dict[str, object] = dict(metadata or {})
 
-    hashes = compute_hashes(apk_path)
+    hash_started = time.monotonic()
+    hashes, hash_meta = _resolve_hashes_for_analysis(apk_path, report_metadata)
+    report_metadata.update(hash_meta)
+    report_metadata["hash_seconds"] = time.monotonic() - hash_started
     apk_sha256 = hashes.get("sha256", "")
     run_id = derive_run_id(apk_sha256, analysis_config)
     report_metadata.setdefault("run_id", run_id)
@@ -356,12 +494,27 @@ def analyze_apk(
         report_metadata["string_index_include_resources"] = bool(
             analysis_config.string_index_include_resources
         )
+        string_index_started = time.monotonic()
         try:
             string_index = build_string_index(
                 apk,
                 include_resources=analysis_config.string_index_include_resources,
             )
+            report_metadata["string_index_seconds"] = time.monotonic() - string_index_started
+            if string_index is not None and not _coerce_bool(report_metadata.get("is_split_member")):
+                try:
+                    report_metadata["post_run_string_payload"] = _analyse_strings_from_index(
+                        string_index,
+                        mode="both",
+                        min_entropy=4.8,
+                        max_samples=None,
+                        cleartext_only=False,
+                        include_https_risk=None,
+                    )
+                except Exception as exc:
+                    report_metadata["post_run_string_payload_error"] = str(exc)
         except Exception as e:
+            report_metadata["string_index_seconds"] = time.monotonic() - string_index_started
             report_metadata["string_index_error"] = str(e)
 
     # Build detector context
@@ -383,6 +536,7 @@ def analyze_apk(
         string_index=string_index,
         network_security_policy=network_security_policy,
         permission_catalog=permission_catalog,
+        runtime_state=runtime_state,
     )
     if callable(stage_observer):
         # Optional stage-level progress hook (used by CLI batch runs). Must not affect analysis.
@@ -411,6 +565,11 @@ def analyze_apk(
         finding for result in artifacts.results for finding in result.findings
     )
     detector_metrics = dict(artifacts.metrics)
+    correlation_runtime_stats = snapshot_runtime_stats(getattr(context, "runtime_state", None))
+    if correlation_runtime_stats:
+        report_metadata["correlation_runtime_stats"] = correlation_runtime_stats
+    report_metadata["parser_provenance"] = _build_parser_provenance(report_metadata)
+    report_metadata["artifact_total_wall_s"] = time.monotonic() - analysis_started
 
     return StaticAnalysisReport(
         file_path=str(apk_path.resolve()),
@@ -449,4 +608,5 @@ __all__ = [
     "StaticAnalysisError",
     "analyze_apk",
     "make_detector_result",
+    "_resolve_hashes_for_analysis",
 ]

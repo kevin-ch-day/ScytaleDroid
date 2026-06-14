@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.core.findings import Badge
+from scytaledroid.StaticAnalysis.detectors.correlation import diffing
 from scytaledroid.StaticAnalysis.detectors.correlation import splits
 from scytaledroid.StaticAnalysis.detectors.correlation.detector import CorrelationDetector
 from scytaledroid.StaticAnalysis.detectors.correlation.models import (
@@ -149,7 +150,15 @@ def test_collect_related_reports_is_capture_bounded(monkeypatch) -> None:
         _split_capture_stored(package="com.example.app", capture="20260215", split=72, sha="old-capture"),
         _split_capture_stored(package="com.other.app", capture="20260216", split=72, sha="other-package"),
     ]
-    monkeypatch.setattr(splits, "list_reports", lambda: reports)
+    monkeypatch.setattr(
+        splits,
+        "reports_for_package",
+        lambda package: [
+            report
+            for report in reports
+            if report.report.manifest.package_name == package
+        ],
+    )
 
     related = splits._collect_related_reports(  # noqa: SLF001 - intentional contract test
         context=None,  # type: ignore[arg-type]
@@ -161,3 +170,176 @@ def test_collect_related_reports_is_capture_bounded(monkeypatch) -> None:
 
     assert len(related) == 1
     assert related[0].report.hashes["sha256"] == "same-capture"
+
+
+def test_load_previous_report_ignores_same_session_siblings(monkeypatch, tmp_path: Path) -> None:
+    same_session = _split_capture_stored(
+        package="com.example.app",
+        capture="sess-current",
+        split=72,
+        sha="1" * 64,
+    )
+    historical = _split_capture_stored(
+        package="com.example.app",
+        capture="sess-older",
+        split=72,
+        sha="2" * 64,
+    )
+    same_session.report.metadata.update({"version_name": "1.0", "version_code": "100"})
+    historical.report.metadata.update({"version_name": "1.0", "version_code": "100"})
+    same_session.report.manifest = _SplitCaptureFakeManifest(package_name="com.example.app")  # type: ignore[misc]
+    historical.report.manifest = _SplitCaptureFakeManifest(package_name="com.example.app")  # type: ignore[misc]
+    same_session.report.manifest.version_name = "1.0"  # type: ignore[attr-defined]
+    same_session.report.manifest.version_code = "100"  # type: ignore[attr-defined]
+    historical.report.manifest.version_name = "1.0"  # type: ignore[attr-defined]
+    historical.report.manifest.version_code = "100"  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(diffing, "reports_for_package", lambda _package: [same_session, historical])
+
+    context = SimpleNamespace(
+        manifest_summary=SimpleNamespace(
+            package_name="com.example.app",
+            version_name="1.0",
+            version_code="100",
+        ),
+        hashes={"sha256": "current" * 10 + "curr"},
+        metadata={"session_stamp": "sess-current"},
+        runtime_state={},
+    )
+
+    previous = diffing.load_previous_report(context)  # type: ignore[arg-type]
+
+    assert previous is historical
+
+
+def test_collect_related_reports_prefers_runtime_saved_split_cache(monkeypatch, tmp_path: Path) -> None:
+    cached = _split_capture_stored(
+        package="com.example.app",
+        capture="20260216",
+        split=72,
+        sha="cached-sha",
+    )
+
+    def _unexpected_reports_for_package(_package: str):
+        raise AssertionError("reports_for_package should not be consulted when runtime split cache is present")
+
+    monkeypatch.setattr(splits, "reports_for_package", _unexpected_reports_for_package)
+
+    context = SimpleNamespace(
+        runtime_state={
+            "saved_reports_by_split": {
+                ("com.example.app", "20260216", "72"): [cached],
+            }
+        }
+    )
+
+    related = splits._collect_related_reports(  # noqa: SLF001 - intentional contract test
+        context=context,  # type: ignore[arg-type]
+        split_id="72",
+        current_sha="different-sha",
+        package_name="com.example.app",
+        capture_id="20260216",
+    )
+
+    assert related == [cached]
+
+
+def test_split_findings_reuse_cached_group_union_and_snapshots(monkeypatch) -> None:
+    related = [
+        StoredReport(
+            path=Path("/tmp/rel-a.json"),
+            report=SimpleNamespace(
+                hashes={"sha256": "rel-a"},
+                metadata={"artifact": "split_config.en"},
+                exported_components=SimpleNamespace(
+                    activities=("a.Activity",),
+                    services=(),
+                    receivers=(),
+                    providers=(),
+                ),
+            ),
+        ),
+        StoredReport(
+            path=Path("/tmp/rel-b.json"),
+            report=SimpleNamespace(
+                hashes={"sha256": "rel-b"},
+                metadata={"artifact": "split_config.xhdpi"},
+                exported_components=SimpleNamespace(
+                    activities=(),
+                    services=(),
+                    receivers=(),
+                    providers=(),
+                ),
+            ),
+        ),
+    ]
+
+    snapshot_calls: list[str] = []
+    snapshots = {
+        "/tmp/rel-a.json": NetworkSnapshot(
+            base_cleartext=None,
+            debug_cleartext=None,
+            trust_user_certs=False,
+            cleartext_domains=tuple(),
+            pinned_domains=tuple(),
+            http_hosts=("a.example.com",),
+            https_hosts=tuple(),
+            policy_hash=None,
+        ),
+        "/tmp/rel-b.json": NetworkSnapshot(
+            base_cleartext=None,
+            debug_cleartext=None,
+            trust_user_certs=False,
+            cleartext_domains=("clear.example.com",),
+            pinned_domains=tuple(),
+            http_hosts=("b.example.com",),
+            https_hosts=tuple(),
+            policy_hash=None,
+        ),
+    }
+
+    monkeypatch.setattr(splits, "_collect_related_reports", lambda *_a, **_k: related)
+
+    def _fake_cached_previous(runtime_state, *, report_key: str, report):
+        snapshot_calls.append(report_key)
+        return snapshots[report_key]
+
+    monkeypatch.setattr(splits, "cached_previous_network_snapshot", _fake_cached_previous)
+
+    context = SimpleNamespace(
+        metadata={
+            "split_group_id": "72",
+            "session_stamp": "sess-1",
+            "artifact": "base",
+        },
+        hashes={"sha256": "current"},
+        manifest_summary=SimpleNamespace(package_name="com.example.app"),
+        exported_components=SimpleNamespace(
+            activities=tuple(),
+            services=tuple(),
+            receivers=tuple(),
+            providers=tuple(),
+            total=lambda: 0,
+        ),
+        apk_path=Path("/tmp/current.apk"),
+        runtime_state={},
+    )
+    current_snapshot = NetworkSnapshot(
+        base_cleartext=None,
+        debug_cleartext=None,
+        trust_user_certs=False,
+        cleartext_domains=tuple(),
+        pinned_domains=tuple(),
+        http_hosts=tuple(),
+        https_hosts=tuple(),
+        policy_hash=None,
+    )
+
+    findings_a, metrics_a = splits.split_findings_and_metrics(context, current_snapshot)
+    findings_b, metrics_b = splits.split_findings_and_metrics(context, current_snapshot)
+
+    assert len(snapshot_calls) == 2
+    assert sorted(metrics_a["union_http_hosts"]) == ["a.example.com", "b.example.com"]
+    assert sorted(metrics_b["union_http_hosts"]) == ["a.example.com", "b.example.com"]
+    assert any(f.finding_id == "split_http_union" for f in findings_a)
+    assert any(f.finding_id == "split_http_union" for f in findings_b)

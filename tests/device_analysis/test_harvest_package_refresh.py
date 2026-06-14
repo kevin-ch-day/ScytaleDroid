@@ -3,7 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.harvest import package_refresh
-from scytaledroid.DeviceAnalysis.harvest.models import ArtifactPlan, InventoryRow, PackagePlan
+from pathlib import Path
+
+from scytaledroid.DeviceAnalysis.harvest.models import ArtifactPlan, ArtifactResult, InventoryRow, PackagePlan
 
 
 def test_refresh_inventory_row_from_device_avoids_pm_dump_when_identity_metadata_exists(
@@ -236,3 +238,53 @@ def test_replan_package_after_stale_path_ignores_version_name_only_drift(monkeyp
 
     assert updated_plan == refreshed_plan
     assert drift_reasons == ()
+
+
+def test_written_artifacts_fit_plan_accepts_preserved_base_artifact() -> None:
+    refreshed_plan = PackagePlan(
+        inventory=InventoryRow(
+            raw={},
+            package_name="com.example.app",
+            app_label="Example App",
+            installer="com.android.vending",
+            category=None,
+            primary_path="/data/app/com.example.app/base.apk",
+            profile_key="TEST_PROFILE",
+            profile=None,
+            version_name="1.0",
+            version_code="42",
+            apk_paths=[
+                "/data/app/com.example.app/base.apk",
+                "/data/app/com.example.app/split_config.xxhdpi.apk",
+            ],
+            split_count=2,
+        ),
+        artifacts=[
+            ArtifactPlan(
+                source_path="/data/app/com.example.app/base.apk",
+                artifact="base",
+                file_name="com_example_app_42__base.apk",
+                is_split_member=False,
+            ),
+            ArtifactPlan(
+                source_path="/data/app/com.example.app/split_config.xxhdpi.apk",
+                artifact="split_config.xxhdpi",
+                file_name="com_example_app_42__split_config.xxhdpi.apk",
+                is_split_member=True,
+            ),
+        ],
+        total_paths=2,
+    )
+
+    written = [
+        ArtifactResult(
+            file_name="com_example_app_42__base.apk",
+            apk_id=None,
+            dest_path=Path("/tmp/base.apk"),
+            source_path="/data/app/com.example.app/base.apk",
+            artifact_label="base",
+            is_base=True,
+        )
+    ]
+
+    assert package_refresh.written_artifacts_fit_plan(refreshed_plan, written) is True

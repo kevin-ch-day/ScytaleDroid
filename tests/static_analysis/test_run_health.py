@@ -5,7 +5,9 @@ from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution.run_health import (
+    attach_run_health_outputs_on_document,
     build_run_health_document,
+    compact_run_health_stdout_line,
     compute_run_aggregate_status,
     format_run_health_stdout_lines,
     merge_skipped_detectors,
@@ -164,6 +166,9 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
             "scan_execution_complete": True,
             "artifacts_scan_completed_counter": 3,
             "artifact_total_discovered_estimate": 3,
+            "findings_runtime_total": 100,
+            "findings_persisted_db_total": 75,
+            "findings_capped_not_persisted_total": 25,
         },
         "outputs": {},
         "status_reasons": {
@@ -187,11 +192,47 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "detector_warnings=3" in body
     assert "policy_failures=1" in body
     assert "execution_errors=0 (none - not analyzer crashes)" in body
+    assert "Finding fidelity : runtime=100 persisted_db=75 capped_not_persisted=25" in body
     assert "Run completion   : COMPLETE" in body
     assert "Detector posture : PARTIAL" in body
     assert "pipeline_token=warnings_and_policy_failures" in body
     assert "Operator note    :" in body
     assert "Detector posture / session rollup is 'partial'" in body
+    assert "Persistence note :" in body
+
+
+def test_attach_run_health_outputs_prefers_real_file_location_for_display(tmp_path) -> None:
+    base_dir = tmp_path / "data" / "store" / "apk"
+    path = base_dir / "sess_run_health.json"
+    doc: dict[str, object] = {"outputs": {}}
+
+    attach_run_health_outputs_on_document(doc, path=path, base_dir=base_dir)
+
+    outputs = doc["outputs"]
+    assert isinstance(outputs, dict)
+    assert outputs["run_health_json_relative"] == "sess_run_health.json"
+    assert outputs["run_health_json_display"] == str(path)
+
+    lines = format_run_health_stdout_lines(
+        {
+            "final_run_status": "complete",
+            "outputs": outputs,
+            "status_reasons": {},
+        }
+    )
+    assert str(path) in lines[0]
+    compact = compact_run_health_stdout_line(
+        {
+            "final_run_status": "complete",
+            "outputs": outputs,
+            "run_rollups": {
+                "apps_complete_final": 1,
+                "apps_partial_final": 0,
+                "apps_failed_final": 0,
+            },
+        }
+    )
+    assert str(path) in compact
 
 
 def test_build_run_health_document_includes_string_summary_note() -> None:
