@@ -15,7 +15,7 @@ from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 
-from . import common, package_contract, package_refresh
+from . import artifact_execution, common, package_contract, package_execution, package_refresh, stale_replan
 from .common import (
     DedupeTracker,
     HarvestOptions,
@@ -27,11 +27,11 @@ from .common import (
     is_system_package,
     load_options,
     normalise_local_path,
-    package_evidence_dir,
     resolve_storage_root,
     write_metadata_sidecar,
 )
 from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan, PullResult
+from .status import build_harvest_run_status_from_runtime_stats
 
 
 def execute_harvest(
@@ -382,6 +382,12 @@ def execute_harvest(
         )
         raise
     finally:
+        status_summary = build_harvest_run_status_from_runtime_stats(
+            stats,
+            run_error=run_error,
+            write_db_requested=requested_db_mirror,
+            write_db_effective=options.write_db,
+        )
         summary = {
             "package_total": stats["packages_total"],
             "packages_reviewed": stats["packages_reviewed"],
@@ -419,13 +425,10 @@ def execute_harvest(
             "db_errors": stats["db_errors"],
             "write_db_requested": requested_db_mirror,
             "write_db_effective": options.write_db,
-            "run_state": _derive_run_state(
-                stats,
-                run_failed=run_failed,
-                run_error=run_error,
-                write_db_requested=requested_db_mirror,
-                write_db_effective=options.write_db,
-            ),
+            "run_state": "FAILED" if run_failed else status_summary.status.upper(),
+            "harvest_status": status_summary.status,
+            "harvest_status_reason": status_summary.status_reason,
+            "harvest_operator_summary": status_summary.operator_summary,
             "run_failed": run_failed,
             "run_error": run_error,
         }
@@ -465,325 +468,50 @@ def _execute_package_plan(
     snapshot_id: int | None,
     snapshot_captured_at: str | None,
 ) -> PullResult:
-    result = PullResult(
-        plan=plan,
-        persistence_status="mirrored" if options.write_db else "not_requested",
-    )
-
-    if plan.skip_reason:
-        inventory = plan.inventory
-        package_name = inventory.package_name
-        package_dir = package_evidence_dir(dest_root, inventory)
-        package_dir.mkdir(parents=True, exist_ok=True)
-        result.package_manifest_path = package_contract.package_manifest_path(package_dir)
-        result.preflight_reason = plan.skip_reason
-        result.capture_status = "failed"
-        result.persistence_status = "not_requested"
-        result.research_status = "ineligible"
-        result.comparison = package_contract.build_package_comparison(plan, result)
-        result.skipped.append(plan.skip_reason)
-        package_contract.write_package_manifest(
-            result=result,
-            package_dir=package_dir,
-            serial=serial,
-            session_stamp=session_stamp,
-            snapshot_id=snapshot_id,
-            snapshot_captured_at=snapshot_captured_at,
-            execution_state="completed",
-        )
-        stats["packages_skipped"] += 1
-        emit(
-            "info",
-            "harvest.package.skipped",
-            extra={
-                "package_name": package_name,
-                "skip_reason": plan.skip_reason,
-                "package_index": package_index,
-                "package_total": package_total,
-            },
-        )
-        return result
-
-    inventory = plan.inventory
-    package_name = inventory.package_name
-    package_dir = package_evidence_dir(dest_root, inventory)
-    package_dir.mkdir(parents=True, exist_ok=True)
-    result.package_manifest_path = package_contract.package_manifest_path(package_dir)
-    package_contract.write_package_manifest(
-        result=result,
-        package_dir=package_dir,
+    request = package_execution.PackageExecutionRequest(
         serial=serial,
+        adb_path=adb_path,
+        dest_root=dest_root,
         session_stamp=session_stamp,
+        plan=plan,
+        verbose=verbose,
+        options=options,
+        tracker=tracker,
+        storage_root_id=storage_root_id,
+        package_index=package_index,
+        package_total=package_total,
+        compact_mode=compact_mode,
+        display_index=display_index,
+        display_total=display_total,
+        base_context=base_context,
+        db_repo=db_repo,
+        db_install_sets=db_install_sets,
+        emit=emit,
+        stats=stats,
         snapshot_id=snapshot_id,
         snapshot_captured_at=snapshot_captured_at,
-        execution_state="started",
     )
-
-    # DB is a mirror for harvest; if any DB op fails for this package, proceed with filesystem
-    # harvest and record the reason in result.skipped for operator visibility.
-    effective_options = options
-    app_id: int | None = None
-    if effective_options.write_db and db_repo is not None:
-        try:
-            app_id = db_repo.ensure_app_definition(
-                package_name,
-                inventory.app_label,
-                profile_key=inventory.profile_key,
-                context={**base_context, "package_name": package_name},
-            )
-            stats["db_app_definitions"] += 1
-        except Exception as exc:
-            message = f"Failed to ensure app definition for {package_name}: {exc}"
-            log.warning(message, category="database")
-            stats["db_errors"] += 1
-            emit(
-                "warning",
-                "harvest.db.error",
-                extra={
-                    "package_name": package_name,
-                    "stage": "ensure_app_definition",
-                    "error": str(exc),
-                },
-            )
-            result.mirror_failure_reasons.append("app_definition_failed")
-            result.skipped.append("app_definition_failed")
-            effective_options = HarvestOptions(
-                dedupe_sha256=options.dedupe_sha256,
-                keep_last=options.keep_last,
-                write_db=False,
-                write_meta=options.write_meta,
-                meta_fields=options.meta_fields,
-                pull_mode=options.pull_mode,
-                overwrite_existing=options.overwrite_existing,
-                thin_session=options.thin_session,
-            )
-
-    group_id: int | None = None
-    if effective_options.write_db and db_repo is not None and len(plan.artifacts) > 1:
-        try:
-            group_id = db_repo.ensure_split_group(
-                package_name,
-                context={**base_context, "package_name": package_name},
-            )
-            stats["db_split_groups"] += 1
-        except Exception as exc:
-            message = f"Failed to ensure split group for {package_name}: {exc}"
-            log.warning(message, category="database")
-            stats["db_errors"] += 1
-            emit(
-                "warning",
-                "harvest.db.error",
-                extra={
-                    "package_name": package_name,
-                    "stage": "ensure_split_group",
-                    "error": str(exc),
-                },
-            )
-            result.mirror_failure_reasons.append("split_group_failed")
-            result.skipped.append("split_group_failed")
-            effective_options = HarvestOptions(
-                dedupe_sha256=options.dedupe_sha256,
-                keep_last=options.keep_last,
-                write_db=False,
-                write_meta=options.write_meta,
-                meta_fields=options.meta_fields,
-                pull_mode=options.pull_mode,
-                overwrite_existing=options.overwrite_existing,
-                thin_session=options.thin_session,
-            )
-            group_id = None
-
-    ui_index = display_index or package_index
-    ui_total = display_total or package_total
-    _print_package_header(plan, ui_index, ui_total, compact_mode=compact_mode)
-    emit(
-        "info",
-        "harvest.package.start",
-        extra={
-            "package_name": package_name,
-            "package_index": package_index,
-            "package_total": package_total,
-            "artifact_total": len(plan.artifacts),
-        },
-    )
-
-    active_plan = plan
-    stale_replan_attempted = False
-    artifact_total = len(active_plan.artifacts)
-    package_stats = {"saved": 0, "skipped": 0, "errors": 0, "bytes": 0}
-    artifact_index = 1
-    while artifact_index <= len(active_plan.artifacts):
-        artifact = active_plan.artifacts[artifact_index - 1]
-        artifact_result, skip_reason = _pull_and_record(
-            serial=serial,
-            adb_path=adb_path,
-            package_dir=package_dir,
-            plan=active_plan,
-            artifact=artifact,
-            app_id=app_id,
-            group_id=group_id,
-            verbose=verbose,
-            options=effective_options,
-            tracker=tracker,
-            session_stamp=session_stamp,
-            storage_root_id=storage_root_id,
-            artifact_index=artifact_index,
-            artifact_total=artifact_total,
-            verbose_output=verbose,
-            base_context=base_context,
-            db_repo=db_repo,
-            emit=emit,
-            stats=stats,
-            snapshot_id=snapshot_id,
-            snapshot_captured_at=snapshot_captured_at,
-        )
-        if (
-            isinstance(artifact_result, ArtifactError)
-            and artifact_result.reason == "path_stale"
-            and not stale_replan_attempted
-        ):
-            stale_replan_attempted = True
-            result.stale_replan_required = True
-            refreshed_plan, drift_reasons = package_refresh.replan_package_after_stale_path(
-                serial=serial,
-                plan=active_plan,
-            )
-            if refreshed_plan is not None:
-                emit(
-                    "warning",
-                    "harvest.package.replanned",
-                    extra={
-                        "package_name": package_name,
-                        "artifact_path": artifact.source_path,
-                        "artifact_index": artifact_index,
-                        "artifact_total": artifact_total,
-                        "drift_detected": bool(drift_reasons),
-                        "drift_reasons": ",".join(drift_reasons) if drift_reasons else None,
-                    },
-                )
-                log.warning(
-                    (
-                        f"Package stale path detected; replanning from live package state for {package_name}"
-                        + (f" ({','.join(drift_reasons)})" if drift_reasons else "")
-                    ),
-                    category="device",
-                )
-                result.stale_replan_outcome = _classify_stale_replan_outcome(
-                    refreshed_plan=refreshed_plan,
-                    drift_reasons=drift_reasons,
-                )
-                _print_stale_replan_outcome(
-                    plan=active_plan,
-                    artifact=artifact,
-                    artifact_index=artifact_index,
-                    artifact_total=artifact_total,
-                    outcome=result.stale_replan_outcome,
-                )
-                if drift_reasons:
-                    result.drift_reasons = list(drift_reasons)
-                    result.capture_status = "drifted"
-                    if refreshed_plan.skip_reason and not result.ok:
-                        result.preflight_reason = refreshed_plan.skip_reason
-                        if refreshed_plan.skip_reason not in result.skipped:
-                            result.skipped.append(refreshed_plan.skip_reason)
-                    if result.ok:
-                        result.errors.append(
-                            ArtifactError(
-                                source_path=artifact.source_path,
-                                reason="package_drift_detected_after_partial_pull",
-                            )
-                        )
-                        package_stats["errors"] += 1
-                        stats["artifacts_failed"] += 1
-                        break
-                active_plan = refreshed_plan
-                result.plan = active_plan
-                artifact_total = len(active_plan.artifacts)
-                artifact_index = package_refresh.next_unwritten_artifact_index(active_plan, result.ok)
-                if artifact_index <= len(active_plan.artifacts):
-                    continue
-                break
-            result.stale_replan_outcome = "path_stale_replan_failed"
+    deps = package_execution.PackageExecutionDeps(
+        pull_and_record=_pull_and_record,
+        persist_install_set_spine=_persist_install_set_spine,
+        print_package_header=lambda package_plan, ui_index, ui_total: _print_package_header(
+            package_plan, ui_index, ui_total, compact_mode=compact_mode
+        ),
+        print_package_footer=lambda package_plan, package_stats, ui_index, ui_total: _print_package_footer(
+            package_plan, package_stats, ui_index, ui_total, compact_mode=compact_mode
+        ),
+        print_stale_replan_outcome=lambda package_plan, artifact, artifact_index, artifact_total, outcome: (
             _print_stale_replan_outcome(
-                plan=active_plan,
+                plan=package_plan,
                 artifact=artifact,
                 artifact_index=artifact_index,
                 artifact_total=artifact_total,
-                outcome=result.stale_replan_outcome,
+                outcome=outcome,
             )
-            result.capture_status = "drifted"
-            result.drift_reasons = ["package_refresh_failed"]
-            result.errors.append(
-                ArtifactError(
-                    source_path=artifact.source_path,
-                    reason="package_replan_failed_after_stale_path",
-                )
-            )
-            package_stats["errors"] += 1
-            stats["artifacts_failed"] += 1
-            break
-        if skip_reason:
-            result.skipped.append(skip_reason)
-            package_stats["skipped"] += 1
-            stats["artifacts_skipped"] += 1
-        elif isinstance(artifact_result, ArtifactResult):
-            result.ok.append(artifact_result)
-            if artifact_result.mirror_failure_reasons:
-                result.mirror_failure_reasons.extend(artifact_result.mirror_failure_reasons)
-                result.skipped.extend(artifact_result.mirror_failure_reasons)
-            package_stats["saved"] += 1
-            try:
-                package_stats["bytes"] += artifact_result.dest_path.stat().st_size
-            except FileNotFoundError:
-                pass
-            stats["artifacts_written"] += 1
-            try:
-                stats["bytes_written"] += artifact_result.dest_path.stat().st_size
-            except FileNotFoundError:
-                pass
-        elif isinstance(artifact_result, ArtifactError):
-            result.errors.append(artifact_result)
-            package_stats["errors"] += 1
-            stats["artifacts_failed"] += 1
-        artifact_index += 1
-
-    package_contract.finalize_package_result(result, write_db_requested=options.write_db)
-    if effective_options.write_db and db_install_sets is not None and result.ok:
-        _persist_install_set_spine(
-            result=result,
-            serial=serial,
-            session_stamp=session_stamp,
-            app_id=app_id,
-            snapshot_id=snapshot_id,
-            db_install_sets=db_install_sets,
-            stats=stats,
-            emit=emit,
-            base_context=base_context,
-        )
-        package_contract.finalize_package_result(result, write_db_requested=options.write_db)
-    package_contract.write_package_manifest(
-        result=result,
-        package_dir=package_dir,
-        serial=serial,
-        session_stamp=session_stamp,
-        snapshot_id=snapshot_id,
-        snapshot_captured_at=snapshot_captured_at,
-        execution_state="completed",
+        ),
+        log_warning=lambda message, category: log.warning(message, category=category),
     )
-
-    _print_package_footer(plan, package_stats, ui_index, ui_total, compact_mode=compact_mode)
-    emit(
-        "info",
-        "harvest.package.summary",
-        extra={
-            "package_name": package_name,
-            "saved": package_stats["saved"],
-            "skipped": package_stats["skipped"],
-            "errors": package_stats["errors"],
-            "bytes": package_stats["bytes"],
-        },
-    )
-    return result
+    return package_execution.execute_package_plan(request, deps)
 
 
 def _persist_install_set_spine(
@@ -895,323 +623,72 @@ def _pull_and_record(
     snapshot_id: int | None,
     snapshot_captured_at: str | None,
 ) -> tuple[ArtifactResult | ArtifactError | None, str | None]:
-    dest_path = package_dir / artifact.file_name
-    pull_result = adb_pull(
-        adb_path=adb_path,
+    request = artifact_execution.ArtifactExecutionRequest(
         serial=serial,
-        source_path=artifact.source_path,
-        dest_path=dest_path,
-        package_name=plan.inventory.package_name,
-        verbose=verbose_output,
-        overwrite_existing=options.overwrite_existing,
+        adb_path=adb_path,
+        package_dir=package_dir,
+        plan=plan,
+        artifact=artifact,
+        app_id=app_id,
+        group_id=group_id,
+        verbose=verbose,
+        options=options,
+        tracker=tracker,
+        session_stamp=session_stamp,
+        storage_root_id=storage_root_id,
+        artifact_index=artifact_index,
+        artifact_total=artifact_total,
+        verbose_output=verbose_output,
+        base_context=base_context,
+        db_repo=db_repo,
+        emit=emit,
+        stats=stats,
+        snapshot_id=snapshot_id,
+        snapshot_captured_at=snapshot_captured_at,
     )
-    if isinstance(pull_result, ArtifactError):
-        retryable_stale_path = pull_result.reason == "path_stale"
-        common.print_artifact_status(
-            plan.inventory.display_name(),
-            artifact.file_name,
-            index=artifact_index,
-            total=artifact_total,
-            suffix=_artifact_status_suffix(pull_result.reason),
-            level="warn" if retryable_stale_path else "error",
-        )
-        emit(
-            "warning" if retryable_stale_path else "error",
-            "harvest.artifact.retryable" if retryable_stale_path else "harvest.artifact.error",
-            extra={
-                "package_name": plan.inventory.package_name,
-                "artifact_path": artifact.source_path,
-                "file_name": artifact.file_name,
-                "error": pull_result.reason,
-            },
-        )
-        return pull_result, None
-
-    try:
-        hashes = compute_hashes(dest_path)
-    except FileNotFoundError as exc:  # pragma: no cover - IO race
-        return ArtifactError(source_path=artifact.source_path, reason=str(exc)), None
-
-    keep, occurrence = tracker.register(hashes["sha256"])
-    if not keep:
-        cleanup_duplicate(dest_path)
-        common.print_artifact_status(
-            plan.inventory.display_name(),
-            artifact.file_name,
-            index=artifact_index,
-            total=artifact_total,
-            suffix="skipped duplicate (sha256 match)",
-            level="warn",
-        )
-        emit(
-            "info",
-            "harvest.artifact.skipped",
-            extra={
-                "package_name": plan.inventory.package_name,
-                "artifact_path": artifact.source_path,
-                "file_name": artifact.file_name,
-                "skip_reason": "dedupe_sha256",
-            },
-        )
-        return None, "dedupe_sha256"
-
-    local_rel_path = normalise_local_path(dest_path)
-    canonical_store_path: str | None = None
-    canonical_abs: Path | None = None
-    try:
-        canonical_path = artifact_store.materialize_apk(
-            dest_path,
-            sha256_digest=hashes["sha256"],
-            suffix=dest_path.suffix or ".apk",
-        )
-        canonical_abs = canonical_path.expanduser().resolve()
-        canonical_store_path = artifact_store.repo_relative_path(canonical_path)
-    except Exception as exc:
-        log.warning(
-            f"Failed to materialize canonical APK store entry for {dest_path}: {exc}",
-            category="filesystem",
-        )
-
-    apk_id: int | None = None
-    mirror_failure_reasons: list[str] = []
-    if options.write_db and db_repo is not None:
-        record = db_repo.ApkRecord(
-            package_name=plan.inventory.package_name,
-            app_id=app_id,
-            file_name=dest_path.name,
-            file_size=dest_path.stat().st_size,
-            is_system=is_system_package(plan.inventory),
-            installer=plan.inventory.installer,
-            version_name=plan.inventory.version_name,
-            version_code=plan.inventory.version_code,
-            md5=hashes["md5"],
-            sha1=hashes["sha1"],
-            sha256=hashes["sha256"],
-            device_serial=serial,
-            harvested_at=datetime.now(UTC),
-            is_split_member=artifact.is_split_member,
-            split_group_id=group_id,
-        )
-
-        try:
-            apk_id = db_repo.upsert_apk_record(
-                record,
-                context={
-                    **base_context,
-                    "package_name": plan.inventory.package_name,
-                    "artifact_path": artifact.source_path,
-                    "sha256": hashes["sha256"],
-                },
-            )
-            stats["db_apk_rows"] += 1
-        except Exception as exc:
-            message = (
-                f"Failed to upsert APK metadata for {plan.inventory.package_name} "
-                f"({artifact.source_path}): {exc}"
-            )
-            log.error(message, category="database")
-            stats["db_errors"] += 1
-            emit(
-                "error",
-                "harvest.db.error",
-                extra={
-                    "package_name": plan.inventory.package_name,
-                    "artifact_path": artifact.source_path,
-                    "stage": "upsert_apk_record",
-                    "error": str(exc),
-                },
-            )
-            mirror_failure_reasons.append("apk_record_failed")
-
-        if apk_id and storage_root_id is not None:
-            try:
-                db_repo.upsert_artifact_path(
-                    apk_id,
-                    storage_root_id=storage_root_id,
-                    local_rel_path=local_rel_path,
-                    context={
-                        **base_context,
-                        "package_name": plan.inventory.package_name,
-                        "artifact_path": artifact.source_path,
-                        "apk_id": apk_id,
-                    },
-                )
-                stats["db_artifact_paths"] += 1
-            except Exception as exc:
-                log.warning(
-                    f"Failed to persist artifact path for apk_id={apk_id}: {exc}",
-                    category="database",
-                )
-                stats["db_errors"] += 1
-                emit(
-                    "warning",
-                    "harvest.db.error",
-                    extra={
-                        "package_name": plan.inventory.package_name,
-                        "artifact_path": artifact.source_path,
-                        "stage": "upsert_artifact_path",
-                        "error": str(exc),
-                    },
-                )
-                mirror_failure_reasons.append("artifact_path_failed")
-
-        if apk_id and artifact.source_path:
-            try:
-                db_repo.upsert_source_path(
-                    apk_id,
-                    artifact.source_path,
-                    context={
-                        **base_context,
-                        "package_name": plan.inventory.package_name,
-                        "artifact_path": artifact.source_path,
-                        "apk_id": apk_id,
-                    },
-                )
-                stats["db_source_paths"] += 1
-            except Exception as exc:
-                log.warning(
-                    f"Failed to persist source path for apk_id={apk_id}: {exc}",
-                    category="database",
-                )
-                stats["db_errors"] += 1
-                emit(
-                    "warning",
-                    "harvest.db.error",
-                    extra={
-                        "package_name": plan.inventory.package_name,
-                        "artifact_path": artifact.source_path,
-                        "stage": "upsert_source_path",
-                        "error": str(exc),
-                    },
-                )
-                mirror_failure_reasons.append("source_path_failed")
-
-    artifact_payload = {
-        "source_path": artifact.source_path,
-        "is_split_member": artifact.is_split_member,
-        "split_group_id": group_id,
-    }
-    inventory_meta = inventory_payload(plan.inventory)
-    extra_meta = {
-        "apk_id": apk_id,
-        "occurrence_index": occurrence,
-        "artifact": artifact.artifact,
-        "artifact_kind": "apk",
-        "canonical_store_path": canonical_store_path,
-    }
-    if snapshot_id is not None:
-        extra_meta["snapshot_id"] = snapshot_id
-    if snapshot_captured_at:
-        extra_meta["snapshot_captured_at"] = snapshot_captured_at
-    try:
-        write_metadata_sidecar(
-            dest_path,
-            inventory=inventory_meta,
-            artifact=artifact_payload,
-            hashes=hashes,
-            serial=serial,
-            session_stamp=session_stamp,
-            options=options,
-            extra=extra_meta,
-        )
-    except Exception as exc:  # pragma: no cover - filesystem issues
-        log.warning(
-            f"Failed to write metadata sidecar for {dest_path}: {exc}",
-            category="filesystem",
-        )
-
-    file_size_text = common.format_file_size(dest_path.stat().st_size)
-    common.print_artifact_status(
-        plan.inventory.display_name(),
-        artifact.file_name,
-        index=artifact_index,
-        total=artifact_total,
-        suffix=f"saved ({file_size_text})",
-        level="success",
-    )
-
-    emit(
-        "info",
-        "harvest.artifact.saved",
-        extra={
-            "package_name": plan.inventory.package_name,
-            "artifact_path": artifact.source_path,
-            "file_name": dest_path.name,
-            "bytes": dest_path.stat().st_size if dest_path.exists() else None,
-            "apk_id": apk_id,
-        },
-    )
-
-    if canonical_abs is not None:
-        common.replace_session_apk_with_symlink_to_canonical(
-            session_artifact_path=dest_path,
-            canonical_absolute=canonical_abs,
-            enabled=options.thin_session,
-        )
-
-    return (
-        ArtifactResult(
-            file_name=dest_path.name,
-            apk_id=apk_id,
-            dest_path=dest_path,
-            source_path=artifact.source_path,
-            sha256=hashes.get("sha256"),
-            file_size=dest_path.stat().st_size if dest_path.exists() else None,
-            pulled_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            artifact_label=artifact.artifact,
-            is_base=not artifact.is_split_member,
-            observed_source_path=artifact.source_path,
-            mirror_failure_reasons=mirror_failure_reasons,
-            canonical_store_path=canonical_store_path,
+    deps = artifact_execution.ArtifactExecutionDeps(
+        adb_pull=adb_pull,
+        compute_hashes=compute_hashes,
+        tracker_register=tracker.register,
+        cleanup_duplicate=cleanup_duplicate,
+        materialize_apk=lambda path, sha256_digest, suffix: artifact_store.materialize_apk(
+            path,
+            sha256_digest=sha256_digest,
+            suffix=suffix,
         ),
-        None,
+        repo_relative_path=artifact_store.repo_relative_path,
+        inventory_signer_fingerprint=package_contract.inventory_signer_fingerprint,
+        inventory_payload=inventory_payload,
+        write_metadata_sidecar=write_metadata_sidecar,
+        print_artifact_status=lambda label, file_name, index, total, suffix, level: common.print_artifact_status(
+            label,
+            file_name,
+            index=index,
+            total=total,
+            suffix=suffix,
+            level=level,
+        ),
+        replace_session_apk_with_symlink_to_canonical=lambda session_artifact_path, canonical_absolute, enabled: (
+            common.replace_session_apk_with_symlink_to_canonical(
+                session_artifact_path=session_artifact_path,
+                canonical_absolute=canonical_absolute,
+                enabled=enabled,
+            )
+        ),
+        format_file_size=common.format_file_size,
+        artifact_status_suffix=_artifact_status_suffix,
+        is_system_package=is_system_package,
+        normalise_local_path=normalise_local_path,
+        log_warning=lambda message, category: log.warning(message, category=category),
+        log_error=lambda message, category: log.error(message, category=category),
     )
+    return artifact_execution.pull_and_record(request, deps)
 
 
 def _artifact_status_suffix(reason: str) -> str:
     if reason == "path_stale":
         return "path stale; replan required"
     return reason
-
-
-def _classify_stale_replan_outcome(
-    *,
-    refreshed_plan: PackagePlan,
-    drift_reasons: Sequence[str],
-) -> str:
-    if refreshed_plan.skip_reason == "no_paths":
-        return "path_stale_package_no_longer_accessible"
-    if refreshed_plan.skip_reason:
-        return "path_stale_blocked_before_pull"
-    if drift_reasons:
-        return "path_stale_package_updated_since_inventory"
-    return "path_stale_refreshed_and_retried"
-
-
-def _stale_replan_outcome_text(outcome: str) -> tuple[str, str]:
-    mapping = {
-        "path_stale_refreshed_and_retried": (
-            "path stale; refreshed package paths and retried",
-            "warn",
-        ),
-        "path_stale_package_updated_since_inventory": (
-            "path stale; package appears updated since inventory snapshot",
-            "warn",
-        ),
-        "path_stale_blocked_before_pull": (
-            "path stale; blocked before pull",
-            "warn",
-        ),
-        "path_stale_package_no_longer_accessible": (
-            "path stale; replan failed because package is no longer accessible",
-            "error",
-        ),
-        "path_stale_replan_failed": (
-            "path stale; replan failed",
-            "error",
-        ),
-    }
-    return mapping.get(outcome, ("path stale; replan required", "warn"))
 
 
 def _print_stale_replan_outcome(
@@ -1222,7 +699,7 @@ def _print_stale_replan_outcome(
     artifact_total: int,
     outcome: str,
 ) -> None:
-    suffix, level = _stale_replan_outcome_text(outcome)
+    suffix, level = stale_replan.stale_replan_outcome_text(outcome)
     common.print_artifact_status(
         plan.inventory.display_name(),
         artifact.file_name,
@@ -1306,16 +783,9 @@ def _update_package_outcome(stats: dict[str, int], result: PullResult) -> None:
         stats["packages_path_stale"] += 1
     if stale_replan_outcome:
         stats["packages_replanned"] += 1
-        if stale_replan_outcome in {
-            "path_stale_refreshed_and_retried",
-            "path_stale_package_updated_since_inventory",
-            "path_stale_blocked_before_pull",
-        }:
+        if stale_replan.is_successful_stale_replan_outcome(stale_replan_outcome):
             stats["packages_replan_success"] += 1
-        elif stale_replan_outcome in {
-            "path_stale_package_no_longer_accessible",
-            "path_stale_replan_failed",
-        }:
+        elif stale_replan.is_failed_stale_replan_outcome(stale_replan_outcome):
             stats["packages_replan_failed"] += 1
     if result.capture_status == "drifted":
         stats["packages_drifted"] += 1
@@ -1367,36 +837,15 @@ def _print_progress_line(
 ) -> None:
     if not _quiet_mode() and not force:
         return
-    partial_count = int(stats.get("packages_partial", 0))
-    err_count = int(stats.get("packages_failed", 0))
-    drifted_count = int(stats.get("packages_drifted", 0))
-    reviewed = min(int(stats.get("packages_reviewed", 0)), int(stats.get("packages_total", 0)))
-    reviewed_total = int(stats.get("packages_total", 0))
-    eligible = int(stats.get("packages_eligible", 0))
-    attempted = int(stats.get("packages_attempted", 0))
-    harvested = int(stats.get("packages_harvested", 0))
-    blocked = int(stats.get("packages_skipped", 0))
-    skipped_runtime = int(stats.get("packages_runtime_skipped", 0))
-    replanned = int(stats.get("packages_replanned", 0))
-    replan_failed = int(stats.get("packages_replan_failed", 0))
-
-    line = f"Harvest: reviewed {reviewed}/{reviewed_total} · eligible {eligible} · attempted {attempted} · harvested {harvested}"
-    if blocked > 0:
-        line += f" · blocked before pull {blocked}"
-    if skipped_runtime > 0:
-        line += f" · skipped {skipped_runtime}"
-    if replanned > 0:
-        line += f" · replanned {replanned}"
-        if replan_failed > 0:
-            line += f" (failed {replan_failed})"
-    if err_count or drifted_count:
-        line += f" · issues (failed={err_count} drifted={drifted_count} partial={partial_count})"
-    elif partial_count:
-        line += " · mixed"
-    else:
-        line += " · OK"
+    status_summary = build_harvest_run_status_from_runtime_stats(
+        stats,
+        run_error=None,
+        write_db_requested=False,
+        write_db_effective=True,
+    )
+    line = f"Harvest: {status_summary.operator_summary}"
     skip_hint = ""
-    if force and (result.preflight_reason or (err_count or drifted_count)):
+    if force and (result.preflight_reason or status_summary.failed_count or status_summary.drifted_count):
         if result.preflight_reason:
             skip_hint = f" · preflight={result.preflight_reason}"
         elif result.skipped:
@@ -1416,7 +865,7 @@ def _print_progress_line(
             if recent_reason:
                 skip_hint = f" · skip={recent_reason}"
     line += skip_hint
-    level = "error" if err_count or drifted_count else "info"
+    level = "error" if status_summary.failed_count or status_summary.drifted_count else "info"
     print(status_messages.status(line, level=level))
 
 
@@ -1499,31 +948,6 @@ def _print_package_footer(
         ),
         category="device",
     )
-def _derive_run_state(
-    stats: Mapping[str, int],
-    *,
-    run_failed: bool,
-    run_error: str | None,
-    write_db_requested: bool,
-    write_db_effective: bool,
-) -> str:
-    if run_failed:
-        return "FAILED"
-    if run_error == "device_unavailable":
-        return "ABORTED_DEVICE_UNAVAILABLE"
-    scheduled_packages = max(int(stats.get("packages_total", 0)) - int(stats.get("packages_skipped", 0)), 0)
-    mirror_failed = int(stats.get("packages_mirror_failed", 0))
-    if write_db_requested and scheduled_packages > 0 and (mirror_failed >= scheduled_packages or not write_db_effective):
-        return "DEGRADED_DB_MIRROR_TOTAL_LOSS"
-    if write_db_requested and mirror_failed > 0:
-        return "DEGRADED"
-    if int(stats.get("packages_drifted", 0)) > 0:
-        return "PARTIAL"
-    if int(stats.get("packages_failed", 0)) > 0 or int(stats.get("packages_partial", 0)) > 0:
-        return "PARTIAL"
-    return "SUCCESS"
-
-
 def _terminal_abort_reason(result: PullResult) -> str | None:
     for error in result.errors:
         if error.reason == "device_unavailable":

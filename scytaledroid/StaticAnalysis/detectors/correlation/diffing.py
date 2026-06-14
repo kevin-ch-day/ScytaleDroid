@@ -7,10 +7,50 @@ from collections.abc import Mapping, Sequence
 from ...core.context import DetectorContext
 from ...core.findings import Badge, EvidencePointer, Finding, MasvsCategory, SeverityLevel
 from ...core.models import ComponentSummary
-from ...persistence.reports import StoredReport, list_reports
+from ...persistence.reports import StoredReport, reports_for_package
 from .models import DiffBundle, NetworkDiff
-from .network import compare_network_snapshots, current_network_snapshot, previous_network_snapshot
+from .network import (
+    cached_previous_network_snapshot,
+    compare_network_snapshots,
+    current_network_snapshot,
+)
+from .runtime_state import cache_lookup, cache_store
 from .utils import report_pointer
+
+
+def _session_stamp_from_metadata(metadata: Mapping[str, object] | None) -> str | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    value = metadata.get("session_stamp")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _historical_package_reports(
+    context: DetectorContext,
+    package: str,
+    current_session_stamp: str | None,
+) -> list[StoredReport]:
+    runtime_state = getattr(context, "runtime_state", None)
+    cache_key = ("correlation_history_reports", package, current_session_stamp or "")
+    found, cached = cache_lookup(
+        runtime_state,
+        "correlation_history_reports_cache",
+        cache_key,
+        hit_counter="historical_package_reports_cache_hits",
+        miss_counter="historical_package_reports_cache_misses",
+    )
+    if found and isinstance(cached, list):
+        return cached
+
+    historical_reports = [
+        stored
+        for stored in reports_for_package(package)
+        if _session_stamp_from_metadata(getattr(stored.report, "metadata", None)) != current_session_stamp
+    ]
+    cache_store(runtime_state, "correlation_history_reports_cache", cache_key, historical_reports)
+    return historical_reports
 
 
 def load_previous_report(context: DetectorContext) -> StoredReport | None:
@@ -19,6 +59,7 @@ def load_previous_report(context: DetectorContext) -> StoredReport | None:
         return None
 
     current_sha = context.hashes.get("sha256")
+    current_session_stamp = _session_stamp_from_metadata(context.metadata)
     target_version_name = context.manifest_summary.version_name or ""
     try:
         target_version_code = int(context.manifest_summary.version_code)
@@ -29,10 +70,8 @@ def load_previous_report(context: DetectorContext) -> StoredReport | None:
     older_versions: list[tuple[int, StoredReport]] = []
     candidates: list[StoredReport] = []
 
-    for stored in list_reports():
+    for stored in _historical_package_reports(context, package, current_session_stamp):
         report = stored.report
-        if report.manifest.package_name != package:
-            continue
         if report.hashes.get("sha256") == current_sha:
             continue
 
@@ -128,7 +167,11 @@ def build_diff_bundle(context: DetectorContext) -> DiffBundle:
         previous_report.manifest_flags.to_dict(),
     )
     current_snapshot = current_network_snapshot(context)
-    previous_snapshot = previous_network_snapshot(previous_report)
+    previous_snapshot = cached_previous_network_snapshot(
+        getattr(context, "runtime_state", None),
+        report_key=str(getattr(stored, "path", "")),
+        report=previous_report,
+    )
     network_diff = compare_network_snapshots(current_snapshot, previous_snapshot)
 
     return DiffBundle(

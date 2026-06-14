@@ -142,9 +142,11 @@ def test_prompt_session_label_detects_existing_db_session_on_default(monkeypatch
 
     def _run_sql(query, params=None, fetch=None):
         sql = " ".join(str(query).split()).lower()
-        if "count(*) from static_analysis_runs where session_label=%s" in sql:
+        if "select distinct coalesce" in sql:
+            return [("20260428-all-full",)]
+        if "count(*) from static_analysis_runs where session_label=%s or session_stamp=%s" in sql:
             return (120,)
-        if "where session_label=%s and is_canonical=1" in sql:
+        if "where (session_label=%s or session_stamp=%s) and is_canonical=1" in sql:
             return (582,)
         raise AssertionError(f"unexpected sql: {sql}")
 
@@ -155,7 +157,7 @@ def test_prompt_session_label_detects_existing_db_session_on_default(monkeypatch
     updated = actions.prompt_session_label(params)
 
     assert updated.canonical_action == "append"
-    assert updated.session_stamp == "20260428-all-full-121"
+    assert updated.session_stamp == "20260428-all-full-2"
 
 
 def test_prompt_session_label_defaults_to_append_for_smoke_batch(monkeypatch, tmp_path):
@@ -176,9 +178,11 @@ def test_prompt_session_label_defaults_to_append_for_smoke_batch(monkeypatch, tm
 
     def _run_sql(query, params=None, fetch=None):
         sql = " ".join(str(query).split()).lower()
-        if "count(*) from static_analysis_runs where session_label=%s" in sql:
+        if "select distinct coalesce" in sql:
+            return [("20260428-all-smoke10-full",), ("20260428-all-smoke10-full-2",)]
+        if "count(*) from static_analysis_runs where session_label=%s or session_stamp=%s" in sql:
             return (10,)
-        if "where session_label=%s and is_canonical=1" in sql:
+        if "where (session_label=%s or session_stamp=%s) and is_canonical=1" in sql:
             return (1076,)
         raise AssertionError(f"unexpected sql: {sql}")
 
@@ -195,7 +199,7 @@ def test_prompt_session_label_defaults_to_append_for_smoke_batch(monkeypatch, tm
     assert seen["default"] == "20260428-all-smoke10-full"
     assert seen["strategy_default"] == "2"
     assert updated.canonical_action == "append"
-    assert updated.session_stamp == "20260428-all-smoke10-full-11"
+    assert updated.session_stamp == "20260428-all-smoke10-full-3"
 
 
 # =============================================================================

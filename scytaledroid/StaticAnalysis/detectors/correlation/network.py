@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 
 from ...core.context import DetectorContext
 from ...modules.network_security.models import DomainPolicy, NetworkSecurityPolicy
 from .models import NetworkDiff, NetworkSnapshot
+from .runtime_state import cache_lookup, cache_store
 
 
 def policy_from_payload(payload: Mapping[str, object]) -> NetworkSecurityPolicy:
@@ -216,6 +217,29 @@ def previous_network_snapshot(report) -> NetworkSnapshot:
     return network_snapshot_from_metrics(metrics_payload, policy)
 
 
+def cached_previous_network_snapshot(
+    runtime_state: MutableMapping[str, object] | None,
+    *,
+    report_key: str,
+    report,
+) -> NetworkSnapshot:
+    """Return a cached previous-report network snapshot when runtime state is available."""
+
+    cache_name = "correlation_previous_network_snapshots"
+    found, cached = cache_lookup(
+        runtime_state,
+        cache_name,
+        report_key,
+        hit_counter="previous_network_snapshot_cache_hits",
+        miss_counter="previous_network_snapshot_cache_misses",
+    )
+    if found and isinstance(cached, NetworkSnapshot):
+        return cached
+    snapshot = previous_network_snapshot(report)
+    cache_store(runtime_state, cache_name, report_key, snapshot)
+    return snapshot
+
+
 __all__ = [
     "policy_from_payload",
     "network_snapshot_from_metrics",
@@ -223,4 +247,5 @@ __all__ = [
     "empty_network_snapshot",
     "current_network_snapshot",
     "previous_network_snapshot",
+    "cached_previous_network_snapshot",
 ]

@@ -16,7 +16,7 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, summary_cards
 from .models import HarvestPlan, ScopeSelection
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .summary import HarvestRunMetrics
+    from .report_model import HarvestRunMetrics
 
 
 def render_scope_overview(

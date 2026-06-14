@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.DeviceAnalysis.identity import normalize_hex_digest
 
 SUPPORTED_SIGNATURE_VERSIONS = {"v1"}
 SUPPORTED_PLAN_SCHEMA_VERSIONS = {"v1"}
@@ -288,10 +289,10 @@ def _enrich_legacy_plan(plan: dict[str, Any]) -> dict[str, Any]:
     if out.get("version_name") not in (None, "") and run_identity.get("version_name") in (None, ""):
         run_identity["version_name"] = out.get("version_name")
 
-    run_sig = str(run_identity.get("run_signature") or "").strip().lower()
-    signer_digest = str(run_identity.get("signer_digest") or "").strip().lower()
-    signer_set_hash = str(run_identity.get("signer_set_hash") or "").strip().lower()
-    if not signer_digest and len(run_sig) == 64:
+    run_sig = normalize_hex_digest(run_identity.get("run_signature"))
+    signer_digest = normalize_hex_digest(run_identity.get("signer_digest"))
+    signer_set_hash = normalize_hex_digest(run_identity.get("signer_set_hash"))
+    if not signer_digest and run_sig:
         signer_digest = run_sig
         run_identity["signer_digest"] = signer_digest
     if not signer_set_hash and signer_digest:

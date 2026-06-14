@@ -43,13 +43,30 @@ def test_html_report_labels_risk_as_heuristic_indicator_surface() -> None:
                 "surface_kind": "heuristic_static_indicator_summary",
                 "is_canonical_app_risk": False,
             },
-            "run": {"timestamp_utc": "2026-06-12 12:00", "profile": "full", "verbosity": "summary", "evidence_limit": 2, "toolchain": {}, "seed": "abc", "version": "test"},
+            "run": {
+                "timestamp_utc": "2026-06-12 12:00",
+                "profile": "full",
+                "verbosity": "summary",
+                "evidence_limit": 2,
+                "toolchain": {},
+                "parser_provenance": {
+                    "manifest_source": "androguard",
+                    "manifest_semantics_source": "androguard",
+                    "resource_open_source": "aapt2_metadata_fallback",
+                    "label_source": "aapt2",
+                    "string_index_source": "androguard",
+                },
+                "seed": "abc",
+                "version": "test",
+            },
         }
     )
 
     assert "Selected static risk indicators" in html
     assert "Heuristic surface: heuristic_static_indicator_summary" in html
     assert "Permission band" in html
+    assert "Parser provenance" in html
+    assert "resources=aapt2_metadata_fallback" in html
     assert "<th>Risk</th>" not in html
     assert "<h2>Risk</h2>" not in html
 

@@ -51,20 +51,17 @@ def _update_outcome_context_from_harvest_report(
 ) -> None:
     """Copy report-derived counters into workflow context."""
 
+    status_summary = getattr(report, "status_summary", None)
+    if status_summary is not None and hasattr(status_summary, "to_context_dict"):
+        outcome_context.update(status_summary.to_context_dict())
+    elif getattr(report, "status", None) is not None:
+        outcome_context["harvest_status"] = getattr(report, "status", None)
+
     metrics = getattr(report, "metrics", None)
     if metrics is None:
         return
     outcome_context.update(
         {
-            "harvest_status": getattr(report, "status", None),
-            "packages": getattr(metrics, "harvested_packages", None),
-            "packages_blocked": getattr(metrics, "blocked_packages", None),
-            "packages_reviewed": getattr(metrics, "reviewed_packages", None),
-            "packages_eligible": getattr(metrics, "eligible_packages", None),
-            "packages_executed": getattr(metrics, "executed_packages", None),
-            "packages_harvested": getattr(metrics, "harvested_packages", None),
-            "packages_blocked_preflight": getattr(metrics, "blocked_packages", None),
-            "packages_replanned": getattr(metrics, "replanned_packages", None),
             "artifacts_written": getattr(metrics, "artifacts_written", None),
             "artifacts_failed": getattr(metrics, "artifacts_failed", None),
         }

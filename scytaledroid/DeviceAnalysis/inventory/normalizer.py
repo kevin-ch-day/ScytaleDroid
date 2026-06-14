@@ -5,6 +5,7 @@ from __future__ import annotations
 from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 
 from .. import package_profiles
+from ..identity import compute_split_membership_hash
 
 
 def compose_inventory_entry(
@@ -78,6 +79,7 @@ def compose_inventory_entry(
 
     split_count = len(paths)
     apk_dirs = sorted({path.rsplit("/", 1)[0] for path in paths if "/" in path})
+    split_membership_hash = compute_split_membership_hash(paths)
     path_fidelity = maybe_str(metadata.get("path_fidelity")) or "pm_path"
 
     entry: dict[str, object] = {
@@ -112,6 +114,14 @@ def compose_inventory_entry(
         # owner/role derived from partition; kept separate from semantic category_name
         "owner_role": role,
     }
+    signer_cert_digest = maybe_str(metadata.get("signer_cert_digest"))
+    signer_set_hash = maybe_str(metadata.get("signer_set_hash"))
+    if signer_cert_digest:
+        entry["signer_cert_digest"] = signer_cert_digest
+    if signer_set_hash:
+        entry["signer_set_hash"] = signer_set_hash
+    if split_membership_hash:
+        entry["split_membership_hash"] = split_membership_hash
 
     entry["split_count"] = split_count  # type: ignore[index]
 

@@ -7,13 +7,13 @@ immutability anchor.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DeviceAnalysis.identity import compute_signer_set_hash, extract_signer_digests
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 
@@ -124,7 +124,7 @@ class TargetManager:
         first_install_time = self._extract_value(package_dump, r"firstInstallTime=(.+)")
         last_update_time = self._extract_value(package_dump, r"lastUpdateTime=(.+)")
         installer_package_name = self._extract_value(package_dump, r"installerPackageName=(\S+)")
-        signer_digests = self._extract_signer_digests(package_dump)
+        signer_digests = extract_signer_digests(package_dump)
         package_paths = self._read_package_paths(run_ctx)
         metadata = {
             "package_name": run_ctx.package_name,
@@ -136,7 +136,7 @@ class TargetManager:
             "installer_package_name": installer_package_name,
             "apk_paths": package_paths,
             "signer_primary_digest": signer_digests[0] if signer_digests else None,
-            "signer_set_hash": self._compute_signer_set_hash(signer_digests),
+            "signer_set_hash": compute_signer_set_hash(signer_digests),
             "package_info_artifact": str(path.relative_to(run_ctx.run_dir)),
         }
         artifact = self._artifact_record(run_ctx, path, "target_package_info")
@@ -215,24 +215,5 @@ class TargetManager:
 
     def _extract_version_code(self, package_dump: str, package_name: str) -> str | None:
         return extract_version_code_from_dump(package_dump, package_name)
-
-    def _extract_signer_digests(self, package_dump: str) -> list[str]:
-        digests: list[str] = []
-        for line in package_dump.splitlines():
-            low = line.lower()
-            if ("sha-256" not in low) and ("sha256" not in low) and ("sign" not in low):
-                continue
-            for match in re.finditer(r"([0-9A-Fa-f:]{64,95})", line):
-                raw = match.group(1).replace(":", "").strip().lower()
-                if len(raw) == 64 and all(ch in "0123456789abcdef" for ch in raw):
-                    digests.append(raw)
-        return sorted(set(digests))
-
-    def _compute_signer_set_hash(self, digests: list[str]) -> str | None:
-        if not digests:
-            return None
-        payload = "|".join(sorted(digests)).encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()
-
 
 __all__ = ["TargetManager", "TargetSnapshot", "extract_version_code_from_dump"]

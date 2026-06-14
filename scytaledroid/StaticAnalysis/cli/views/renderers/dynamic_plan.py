@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from hashlib import sha256
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.identity import compute_signer_set_hash, normalize_hex_digest
 from scytaledroid.StaticAnalysis.core import ManifestFlags, StaticAnalysisReport
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
@@ -310,16 +310,6 @@ def _high_value_permissions(declared: Sequence[str]) -> list[str]:
     return sorted({perm for perm in declared if perm in high_value})
 
 
-def _normalize_hex_digest(value: object) -> str | None:
-    raw = str(value or "").strip().lower().replace(":", "")
-    if not raw:
-        return None
-    allowed = set("0123456789abcdef")
-    if any(ch not in allowed for ch in raw):
-        return None
-    return raw
-
-
 def _build_static_features_snapshot(
     *,
     report: StaticAnalysisReport,
@@ -444,10 +434,13 @@ def build_dynamic_plan(
     # Keep a dedicated schema version so we can evolve the plan format without relying
     # on DB schema versions or implicit assumptions.
     generated_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    signatures = sorted(str(value).strip() for value in (report.signatures or ()) if str(value).strip())
-    normalized_signers = [value for value in (_normalize_hex_digest(item) for item in signatures) if value]
+    normalized_signers = sorted(
+        value
+        for value in (normalize_hex_digest(item) for item in (report.signatures or ()))
+        if value
+    )
     signer_primary = normalized_signers[0] if normalized_signers else None
-    signer_set_hash = sha256(json.dumps(sorted(normalized_signers)).encode("utf-8")).hexdigest() if normalized_signers else "UNKNOWN"
+    signer_set_hash = compute_signer_set_hash(normalized_signers) or "UNKNOWN"
     signer_digest = signer_set_hash
     package_name_lc = str(metadata.get("package") or "").strip().lower()
 

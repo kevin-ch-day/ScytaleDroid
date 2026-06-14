@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution, SnapshotContext
 from scytaledroid.DeviceAnalysis.apk.workflow import run_apk_pull
 from scytaledroid.DeviceAnalysis.harvest.models import HarvestPlan, InventoryRow, PackagePlan, ScopeSelection
+from scytaledroid.DeviceAnalysis.harvest.status import HarvestRunStatus
 
 
 def _inventory_row(package_name: str = "com.example.app") -> InventoryRow:
@@ -58,6 +59,44 @@ def _snapshot() -> SnapshotContext:
     )
 
 
+def _status_summary(
+    *,
+    status: str,
+    status_reason: str,
+    packages_reviewed: int,
+    packages_eligible: int,
+    packages_executed: int,
+    packages_harvested: int,
+    packages_blocked_preflight: int,
+    packages_replanned: int,
+    packages_path_stale: int = 0,
+    packages_failed: int = 0,
+    packages_partial: int = 0,
+    packages_drifted: int = 0,
+    level: str = "info",
+) -> HarvestRunStatus:
+    return HarvestRunStatus(
+        packages_total=packages_reviewed,
+        packages_reviewed=packages_reviewed,
+        eligible_count=packages_eligible,
+        attempted_count=packages_executed,
+        harvested_count=packages_harvested,
+        blocked_preflight_count=packages_blocked_preflight,
+        skipped_count=0,
+        failed_count=packages_failed,
+        partial_count=packages_partial,
+        drifted_count=packages_drifted,
+        path_stale_count=packages_path_stale,
+        replanned_count=packages_replanned,
+        replan_success_count=max(packages_replanned - packages_failed, 0),
+        replan_failed_count=packages_failed,
+        status=status,
+        status_reason=status_reason,
+        status_level=level,
+        operator_summary="test summary",
+    )
+
+
 def test_run_apk_pull_returns_partial_when_harvest_aborts(monkeypatch, tmp_path: Path) -> None:
     from scytaledroid.DeviceAnalysis import harvest
     from scytaledroid.DeviceAnalysis.apk import workflow
@@ -84,6 +123,17 @@ def test_run_apk_pull_returns_partial_when_harvest_aborts(monkeypatch, tmp_path:
         "build_harvest_run_report",
         lambda *args, **kwargs: SimpleNamespace(
             status="aborted_device_unavailable",
+            status_summary=_status_summary(
+                status="aborted_device_unavailable",
+                status_reason="device_unavailable",
+                packages_reviewed=2,
+                packages_eligible=1,
+                packages_executed=1,
+                packages_harvested=0,
+                packages_blocked_preflight=1,
+                packages_replanned=1,
+                level="error",
+            ),
             metrics=SimpleNamespace(
                 reviewed_packages=2,
                 eligible_packages=1,
@@ -111,6 +161,7 @@ def test_run_apk_pull_returns_partial_when_harvest_aborts(monkeypatch, tmp_path:
     assert result.context["packages_harvested"] == 0
     assert result.context["packages_blocked_preflight"] == 1
     assert result.context["packages_replanned"] == 1
+    assert result.context["harvest_status_reason"] == "device_unavailable"
     assert result.context["artifacts_failed"] == 1
 
 
@@ -139,6 +190,17 @@ def test_run_apk_pull_keeps_report_counts_when_summary_render_fails(
         "build_harvest_run_report",
         lambda *args, **kwargs: SimpleNamespace(
             status="partial",
+            status_summary=_status_summary(
+                status="partial",
+                status_reason="package_failures_or_drift",
+                packages_reviewed=10,
+                packages_eligible=7,
+                packages_executed=7,
+                packages_harvested=5,
+                packages_blocked_preflight=3,
+                packages_replanned=2,
+                level="warn",
+            ),
             metrics=SimpleNamespace(
                 reviewed_packages=10,
                 eligible_packages=7,
@@ -174,8 +236,75 @@ def test_run_apk_pull_keeps_report_counts_when_summary_render_fails(
     assert result.context["packages_harvested"] == 5
     assert result.context["packages_blocked_preflight"] == 3
     assert result.context["packages_replanned"] == 2
+    assert result.context["harvest_status_reason"] == "package_failures_or_drift"
     assert result.context["artifacts_written"] == 9
     assert result.context["artifacts_failed"] == 4
+
+
+def test_run_apk_pull_prefers_authoritative_status_summary_for_package_counts(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from scytaledroid.DeviceAnalysis import harvest
+    from scytaledroid.DeviceAnalysis.apk import workflow
+
+    dest_root = tmp_path / "artifacts"
+    monkeypatch.setattr(workflow.adb_client, "is_available", lambda: True)
+    monkeypatch.setattr(workflow.adb_client, "get_adb_binary", lambda: "adb")
+    monkeypatch.setattr(workflow, "ensure_inventory_snapshot", lambda _serial: _snapshot())
+    monkeypatch.setattr(workflow, "device_is_rooted", lambda _serial: False)
+    monkeypatch.setattr(workflow, "resolve_harvest_plan", lambda **_kwargs: _resolution())
+    monkeypatch.setattr(
+        workflow.artifact_store,
+        "compose_harvest_run_destination",
+        lambda **_kwargs: (dest_root, "RUNSTAMP"),
+    )
+    monkeypatch.setattr(workflow.log, "harvest_adapter", lambda *args, **kwargs: None)
+    monkeypatch.setattr(workflow.log, "close_harvest_adapter", lambda *args, **kwargs: None)
+    monkeypatch.setattr(harvest, "execute_harvest", lambda **_kwargs: [])
+    monkeypatch.setattr(harvest, "render_harvest_summary", lambda *args, **kwargs: None)
+    monkeypatch.setattr(harvest, "is_harvest_simple_mode", lambda: True)
+    monkeypatch.setattr(workflow.ui, "maybe_save_watchlist", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        harvest,
+        "build_harvest_run_report",
+        lambda *args, **kwargs: SimpleNamespace(
+            status="partial",
+            status_summary=_status_summary(
+                status="partial",
+                status_reason="package_failures_or_drift",
+                packages_reviewed=12,
+                packages_eligible=8,
+                packages_executed=7,
+                packages_harvested=6,
+                packages_blocked_preflight=4,
+                packages_replanned=2,
+                packages_path_stale=2,
+                level="warn",
+            ),
+            metrics=SimpleNamespace(
+                reviewed_packages=999,
+                eligible_packages=999,
+                executed_packages=999,
+                harvested_packages=999,
+                blocked_packages=999,
+                replanned_packages=999,
+                artifacts_written=11,
+                artifacts_failed=2,
+            ),
+        ),
+    )
+
+    result = run_apk_pull("SERIAL123")
+
+    assert result.context["packages_reviewed"] == 12
+    assert result.context["packages_eligible"] == 8
+    assert result.context["packages_executed"] == 7
+    assert result.context["packages_harvested"] == 6
+    assert result.context["packages_blocked_preflight"] == 4
+    assert result.context["packages_replanned"] == 2
+    assert result.context["packages_path_stale"] == 2
+    assert result.context["artifacts_written"] == 11
+    assert result.context["artifacts_failed"] == 2
 
 
 def test_run_apk_pull_returns_partial_when_report_build_fails(monkeypatch, tmp_path: Path) -> None:
@@ -230,11 +359,14 @@ def test_harvest_run_context_detail_lines_include_status_and_counts() -> None:
     lines = _harvest_run_context_detail_lines(
         {
             "harvest_status": "aborted_device_unavailable",
+            "harvest_status_reason": "device_unavailable",
+            "harvest_operator_summary": "reviewed 2/2 · eligible 1 · attempted 1 · harvested 0 · blocked before pull 1 · issues (failed=1 drifted=0 partial=0)",
             "packages_reviewed": 2,
             "packages_eligible": 1,
             "packages_executed": 1,
             "packages_harvested": 0,
             "packages_blocked_preflight": 1,
+            "packages_path_stale": 1,
             "packages_replanned": 1,
             "artifacts_written": 0,
             "artifacts_failed": 1,
@@ -243,11 +375,14 @@ def test_harvest_run_context_detail_lines_include_status_and_counts() -> None:
     )
 
     assert "Harvest status: aborted_device_unavailable" in lines
+    assert "Harvest status reason: device_unavailable" in lines
+    assert "Harvest summary: reviewed 2/2 · eligible 1 · attempted 1 · harvested 0 · blocked before pull 1 · issues (failed=1 drifted=0 partial=0)" in lines
     assert "Packages reviewed: 2" in lines
     assert "Packages eligible: 1" in lines
     assert "Packages executed: 1" in lines
     assert "Packages harvested: 0" in lines
     assert "Packages blocked before pull: 1" in lines
+    assert "Packages with path drift: 1" in lines
     assert "Packages replanned: 1" in lines
     assert "Artifacts written: 0" in lines
     assert "Artifacts failed: 1" in lines

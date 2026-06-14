@@ -87,58 +87,21 @@ def _noise_tag(value: str, source: str | None, policy) -> str | None:
     return None
 
 
-def analyse_strings(
-    apk_path: str,
+def _analyse_strings_from_index(
+    index,
     *,
-    mode: str = "both",
-    min_entropy: float = 4.8,
-    max_samples: int | None = None,
-    cleartext_only: bool = False,
-    include_https_risk: bool | None = None,
+    mode: str,
+    min_entropy: float,
+    max_samples: int | None,
+    cleartext_only: bool,
+    include_https_risk: bool | None,
+    warnings: list[str] | None = None,
+    resource_strings_skipped: bool = False,
 ) -> Mapping[str, object]:
-    """Return baseline string buckets for the APK at *apk_path*."""
-
-    try:
-        apk, initial_warnings = open_apk_safely(apk_path)
-    except Exception:
-        return {"counts": {bucket: 0 for bucket in BUCKET_ORDER}, "samples": {}, "aggregates": {}}
-
-    bounds_warnings: list[str] = []
-    if initial_warnings:
-        bounds_warnings.extend(initial_warnings)
+    bounds_warnings = list(warnings or [])
     config = get_config()
-    skip_resources_on_warn = bool(config.skip_resources_on_arsc_warn)
-    include_resources = not (skip_resources_on_warn and bool(initial_warnings))
-    try:
-        buffer = io.StringIO()
-        with redirect_stdout(buffer), redirect_stderr(buffer):
-            index, fd_output = _run_with_fd_capture(
-                lambda: build_string_index(apk, include_resources=include_resources)
-            )
-        captured = buffer.getvalue() + fd_output
-        bounds_warnings.extend(_extract_bounds_warnings(captured))
-        if bounds_warnings:
-            deduped = list(dict.fromkeys(bounds_warnings))
-            summary = _summarize_bounds_warnings(deduped)
-            logging_engine.get_error_logger().warning(
-                "Resource table parsing emitted bounds warnings",
-                extra=logging_engine.ensure_trace(
-                    {
-                        "event": "strings.resource_bounds_warning",
-                        "apk_path": apk_path,
-                        "warning_lines": summary["lines"],
-                        "count_values": summary["count_values"],
-                    }
-                ),
-            )
-    except Exception:
-        return {
-            "counts": {bucket: 0 for bucket in BUCKET_ORDER},
-            "samples": {},
-            "aggregates": {},
-            "warnings": bounds_warnings,
-            "resource_strings_skipped": bool(skip_resources_on_warn and initial_warnings),
-        }
+    if include_https_risk is None:
+        include_https_risk = bool(config.include_https_risk)
 
     entries = sorted(
         index.strings,
@@ -157,9 +120,6 @@ def analyse_strings(
             for entry in entries
             if entry.origin_type in {"resource", "raw", "asset"}
         ]
-
-    if include_https_risk is None:
-        include_https_risk = bool(config.include_https_risk)
 
     counts: dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
     counts.setdefault("trailing_punct_trimmed", 0)
@@ -473,7 +433,7 @@ def analyse_strings(
         "aggregates": aggregates,
         "structured": structured,
         "warnings": bounds_warnings,
-        "resource_strings_skipped": bool(skip_resources_on_warn and initial_warnings),
+        "resource_strings_skipped": bool(resource_strings_skipped),
         "options": {
             "max_samples": max_samples,
             "cleartext_only": cleartext_only,
@@ -484,4 +444,69 @@ def analyse_strings(
     }
 
 
-__all__ = ["analyse_strings"]
+def analyse_strings(
+    apk_path: str,
+    *,
+    mode: str = "both",
+    min_entropy: float = 4.8,
+    max_samples: int | None = None,
+    cleartext_only: bool = False,
+    include_https_risk: bool | None = None,
+) -> Mapping[str, object]:
+    """Return baseline string buckets for the APK at *apk_path*."""
+
+    try:
+        apk, initial_warnings = open_apk_safely(apk_path)
+    except Exception:
+        return {"counts": {bucket: 0 for bucket in BUCKET_ORDER}, "samples": {}, "aggregates": {}}
+
+    bounds_warnings: list[str] = []
+    if initial_warnings:
+        bounds_warnings.extend(initial_warnings)
+    config = get_config()
+    skip_resources_on_warn = bool(config.skip_resources_on_arsc_warn)
+    include_resources = not (skip_resources_on_warn and bool(initial_warnings))
+    try:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer), redirect_stderr(buffer):
+            index, fd_output = _run_with_fd_capture(
+                lambda: build_string_index(apk, include_resources=include_resources)
+            )
+        captured = buffer.getvalue() + fd_output
+        bounds_warnings.extend(_extract_bounds_warnings(captured))
+        if bounds_warnings:
+            deduped = list(dict.fromkeys(bounds_warnings))
+            summary = _summarize_bounds_warnings(deduped)
+            logging_engine.get_error_logger().warning(
+                "Resource table parsing emitted bounds warnings",
+                extra=logging_engine.ensure_trace(
+                    {
+                        "event": "strings.resource_bounds_warning",
+                        "apk_path": apk_path,
+                        "warning_lines": summary["lines"],
+                        "count_values": summary["count_values"],
+                    }
+                ),
+            )
+    except Exception:
+        return {
+            "counts": {bucket: 0 for bucket in BUCKET_ORDER},
+            "samples": {},
+            "aggregates": {},
+            "warnings": bounds_warnings,
+            "resource_strings_skipped": bool(skip_resources_on_warn and initial_warnings),
+        }
+
+    return _analyse_strings_from_index(
+        index,
+        mode=mode,
+        min_entropy=min_entropy,
+        max_samples=max_samples,
+        cleartext_only=cleartext_only,
+        include_https_risk=include_https_risk,
+        warnings=bounds_warnings,
+        resource_strings_skipped=bool(skip_resources_on_warn and initial_warnings),
+    )
+
+
+__all__ = ["analyse_strings", "_analyse_strings_from_index"]

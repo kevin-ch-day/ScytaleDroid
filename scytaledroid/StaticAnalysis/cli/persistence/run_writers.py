@@ -437,6 +437,7 @@ def create_static_run_ledger(
     catalog_versions: str | None = None,
     study_tag: str | None = None,
     apk_set_id: int | None = None,
+    static_session_id: int | None = None,
 ) -> int | None:
     if is_canonical and session_label:
         try:
@@ -479,14 +480,16 @@ def create_static_run_ledger(
         canonical_set_at_utc = None
         canonical_reason = "identity_conflict"
     resolved_apk_set_id = apk_set_id or resolve_apk_set_id_for_artifact_set_hash(artifact_set_hash)
-    resolved_header = ensure_static_session_shell(
-        session_stamp=session_stamp,
-        scope_label=scope_label,
-        session_label=session_label or None,
-        tool_semver=tool_semver,
-        tool_git_commit=tool_git_commit,
-        schema_version=schema_version,
-    )
+    resolved_header = static_session_id
+    if resolved_header is None:
+        resolved_header = ensure_static_session_shell(
+            session_stamp=session_stamp,
+            scope_label=scope_label,
+            session_label=session_label or None,
+            tool_semver=tool_semver,
+            tool_git_commit=tool_git_commit,
+            schema_version=schema_version,
+        )
     static_run_id = _create_static_run(
         app_version_id=app_version_id,
         apk_set_id=resolved_apk_set_id,

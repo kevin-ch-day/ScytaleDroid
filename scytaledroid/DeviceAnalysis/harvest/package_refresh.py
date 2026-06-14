@@ -106,6 +106,8 @@ def refresh_inventory_row_from_device(serial: str, inventory: InventoryRow) -> I
             "primary_path": refreshed_paths[0] if refreshed_paths else None,
             "apk_paths": list(refreshed_paths),
             "split_count": len(refreshed_paths),
+            "signer_cert_digest": metadata.get("signer_cert_digest") or raw.get("signer_cert_digest"),
+            "signer_set_hash": metadata.get("signer_set_hash") or raw.get("signer_set_hash"),
         }
     )
     return InventoryRow(
@@ -141,6 +143,24 @@ def artifact_plan_identity(artifact: ArtifactPlan) -> tuple[str, str, bool]:
     return (artifact.artifact, artifact.file_name, bool(artifact.is_split_member))
 
 
+def written_artifacts_fit_plan(
+    refreshed_plan: PackagePlan,
+    written: Sequence[ArtifactResult],
+) -> bool:
+    """Return true when already-written artifacts still belong to the refreshed plan."""
+
+    allowed = {artifact_plan_identity(artifact) for artifact in refreshed_plan.artifacts}
+    for artifact in written:
+        candidate = (
+            str(artifact.artifact_label or "").strip() or "base",
+            str(artifact.file_name or "").strip(),
+            not bool(artifact.is_base) if artifact.is_base is not None else False,
+        )
+        if candidate not in allowed:
+            return False
+    return True
+
+
 def maybe_str(value: object) -> str | None:
     if value is None:
         return None
@@ -152,4 +172,5 @@ __all__ = [
     "next_unwritten_artifact_index",
     "replan_package_after_stale_path",
     "refresh_inventory_row_from_device",
+    "written_artifacts_fit_plan",
 ]

@@ -153,6 +153,8 @@ def _hydrate_missing_rows_from_adb(
             "version_name": meta.get("version_name") or vname or None,
             "version_code": meta.get("version_code") or vcode or None,
             "installer": meta.get("installer") or None,
+            "signer_cert_digest": meta.get("signer_cert_digest") or None,
+            "signer_set_hash": meta.get("signer_set_hash") or None,
         }
         hydrated.append(
             InventoryRow(

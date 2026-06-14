@@ -6,6 +6,7 @@ from pathlib import Path
 from scytaledroid.DeviceAnalysis.inventory.determinism import (
     build_snapshot_payload,
     compare_inventory_payloads,
+    normalize_inventory_row,
 )
 
 
@@ -70,3 +71,21 @@ def test_inventory_comparator_fails_when_required_row_key_missing():
     assert result.passed is False
     assert result.payload["result"]["fail_reason"] == "validation_error"
     assert "left.missing_row_keys" in result.payload["result"]["validation_issues"]
+
+
+def test_normalize_inventory_row_reads_top_level_identity_fields() -> None:
+    row = normalize_inventory_row(
+        {
+            "package_name": "com.example.app",
+            "version_code": "123",
+            "primary_path": "/data/app/example/base.apk",
+            "split_count": 2,
+            "signer_cert_digest": "AA" * 32,
+            "split_membership_hash": "BB" * 32,
+        }
+    )
+
+    assert row["signer_cert_digest"] == ("AA" * 32)
+    assert row["split_membership_hash"] == ("BB" * 32)
+    assert row["primary_path"] == "/data/app/example/base.apk"
+    assert row["split_count"] == 2

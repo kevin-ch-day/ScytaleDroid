@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -73,6 +74,36 @@ def test_save_html_report_both_mode_writes_latest_and_archive(tmp_path: Path) ->
     assert path == latest
     assert latest.exists()
     assert archive.exists()
+
+
+def test_save_html_report_uses_sha_suffix_for_non_base_split_paths(tmp_path: Path) -> None:
+    report_a = replace(
+        _sample_report(),
+        file_name="split_config.apk",
+        hashes={"sha256": "a" * 64},
+        metadata={
+            "artifact": "split_config.apk",
+            "session_stamp": "20260328-rda-full",
+        },
+    )
+    report_b = replace(
+        _sample_report(),
+        file_name="split_config.apk",
+        hashes={"sha256": "b" * 64},
+        metadata={
+            "artifact": "split_config.apk",
+            "session_stamp": "20260328-rda-full",
+        },
+    )
+
+    path_a = save_html_report(report_a, output_root=tmp_path, mode="both")
+    path_b = save_html_report(report_b, output_root=tmp_path, mode="both")
+
+    assert path_a.name == "split_config-aaaaaaaaaaaa.html"
+    assert path_b.name == "split_config-bbbbbbbbbbbb.html"
+    assert path_a != path_b
+    assert path_a.exists()
+    assert path_b.exists()
 
 
 def test_clean_static_analysis_artifacts_prunes_legacy_and_new_html_roots(

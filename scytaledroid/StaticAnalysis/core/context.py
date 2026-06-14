@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,6 +69,7 @@ class DetectorContext:
     permission_catalog: PermissionCatalog | None = None
     intermediate_results: Sequence[DetectorResult] = field(default_factory=tuple)
     config: AnalysisConfig = field(default_factory=AnalysisConfig)
+    runtime_state: MutableMapping[str, object] = field(default_factory=dict)
     # Optional hook for callers that want stage-level progress without changing detector semantics.
     # Expected signature: fn(payload: Mapping[str, object]) -> None
     stage_observer: object | None = None

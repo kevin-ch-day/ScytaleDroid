@@ -14,10 +14,12 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...core import StaticAnalysisReport
 from ...core.repository import load_display_name_map
+from ...persistence.reports import StoredReport
 from ..core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
 from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
 from ..persistence.run_writers import resolve_apk_set_id_for_artifact_set_hash
+from ..persistence.static_session_summary import ensure_static_session_shell
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .operator_display_label import resolve_operator_app_label
@@ -110,6 +112,41 @@ def _apply_harvest_contract(app_result: AppRunResult, group) -> tuple[bool, tupl
     return bool(app_result.research_usable), reasons
 
 
+def _remember_runtime_saved_report(
+    runtime_state: dict[str, object],
+    *,
+    package_name: str,
+    report: StaticAnalysisReport,
+    saved_path: str | None,
+) -> None:
+    if not saved_path:
+        return
+    metadata = getattr(report, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return
+    split_group_id = metadata.get("split_group_id")
+    if split_group_id is None:
+        return
+    capture_id = None
+    for key in ("capture_id", "session_stamp"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            capture_id = value.strip()
+            break
+    if not capture_id:
+        return
+    package_norm = str(package_name or "").strip().lower()
+    if not package_norm:
+        return
+    split_key = (package_norm, capture_id, str(split_group_id))
+    split_reports = runtime_state.setdefault("saved_reports_by_split", {})
+    if not isinstance(split_reports, dict):
+        return
+    split_reports.setdefault(split_key, []).append(
+        StoredReport(path=Path(saved_path), report=report)
+    )
+
+
 def execute_scan(
     selection: ScopeSelection,
     params: RunParameters,
@@ -182,6 +219,16 @@ def execute_scan(
     archive_reports_written = 0
     agg_checks: Counter[str] = Counter()
     recent_completions: deque[str] = deque(maxlen=3)
+    cached_static_session_id: int | None = None
+    if not params.dry_run and bool(getattr(params, "persistence_ready", True)):
+        try:
+            cached_static_session_id = ensure_static_session_shell(
+                session_stamp=params.session_stamp or "",
+                scope_label=params.scope_label or selection.label,
+                session_label=params.session_label or params.session_stamp or "",
+            )
+        except Exception:
+            cached_static_session_id = None
     compact_session_display = (params.session_label or params.session_stamp or "").strip() or None
     compact_scope_display = f"{params.scope} - {selection.label}"
     config_hash = _compute_config_hash(params)
@@ -398,6 +445,7 @@ def execute_scan(
                     analysis_version=getattr(params, "analysis_version", None),
                     catalog_versions=getattr(params, "catalog_versions", None),
                     study_tag=getattr(params, "study_tag", None),
+                    static_session_id=cached_static_session_id,
                     run_started_utc=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     dry_run=False,
                 )
@@ -423,6 +471,7 @@ def execute_scan(
             except Exception:
                 pass
         app_start = time.monotonic()
+        app_runtime_state: dict[str, object] = {}
         artifact_extra_meta = {
             "artifact_manifest_sha256": manifest_sha256,
             "config_hash": config_hash,
@@ -513,6 +562,7 @@ def execute_scan(
                     base_dir,
                     extra_metadata=artifact_extra_meta,
                     phase_timing_sink=artifact_phase_timings,
+                    runtime_state=app_runtime_state,
                     precomputed_report=pre_report if isinstance(pre_report, StaticAnalysisReport) else None,
                 )
             except Exception as exc:
@@ -594,6 +644,12 @@ def execute_scan(
                     artifact.display_path,
                 )
                 last_report_for_app = report
+                _remember_runtime_saved_report(
+                    app_runtime_state,
+                    package_name=group.package_name,
+                    report=report,
+                    saved_path=summary.saved_path,
+                )
             if report is not None:
                 progress.finish(completed_artifacts, artifact_label)
                 try:
@@ -644,12 +700,21 @@ def execute_scan(
         last_elapsed_for_progress = app_result.duration_seconds
         base_report_for_app = app_result.base_report()
         if base_report_for_app is not None and app_result.base_string_data is None:
-            app_result.base_string_data = analyse_string_payload(
-                base_report_for_app.file_path,
-                params=params,
-                package_name=app_result.package_name,
-                warning_sink=warnings,
+            report_metadata = getattr(base_report_for_app, "metadata", None)
+            cached_payload = (
+                report_metadata.get("post_run_string_payload")
+                if isinstance(report_metadata, Mapping)
+                else None
             )
+            if isinstance(cached_payload, Mapping):
+                app_result.base_string_data = cached_payload
+            else:
+                app_result.base_string_data = analyse_string_payload(
+                    base_report_for_app.file_path,
+                    params=params,
+                    package_name=app_result.package_name,
+                    warning_sink=warnings,
+                )
         if not _abort_state()[0]:
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts

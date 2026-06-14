@@ -6,9 +6,10 @@ from collections.abc import Mapping, Sequence
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, EvidencePointer, Finding, MasvsCategory, SeverityLevel
-from ...persistence.reports import StoredReport, list_reports
+from ...persistence.reports import StoredReport, reports_for_package
 from .models import NetworkSnapshot
-from .network import previous_network_snapshot
+from .network import cached_previous_network_snapshot
+from .runtime_state import cache_lookup, cache_store
 from .utils import report_pointer
 
 
@@ -22,6 +23,39 @@ def _capture_id_from_metadata(metadata: Mapping[str, object] | None) -> str | No
     return None
 
 
+def _runtime_related_reports(
+    context: DetectorContext,
+    *,
+    package_name: str | None,
+    capture_id: str | None,
+    split_id: str,
+    current_sha: str | None,
+) -> list[StoredReport]:
+    runtime_state = getattr(context, "runtime_state", None)
+    if not isinstance(runtime_state, Mapping) or not package_name or not capture_id:
+        return []
+    split_reports = runtime_state.get("saved_reports_by_split")
+    if not isinstance(split_reports, Mapping):
+        return []
+    split_key = ((package_name or "").strip().lower(), capture_id, split_id)
+    reports = split_reports.get(split_key)
+    if not isinstance(reports, list):
+        return []
+    return [
+        stored
+        for stored in reports
+        if isinstance(stored, StoredReport) and stored.report.hashes.get("sha256") != current_sha
+    ]
+
+
+def _split_cache_key(*, package_name: str | None, capture_id: str | None, split_id: str) -> tuple[str, str, str] | None:
+    package_norm = (package_name or "").strip().lower()
+    capture_norm = str(capture_id or "").strip()
+    if not package_norm or not capture_norm:
+        return None
+    return (package_norm, capture_norm, split_id)
+
+
 def _collect_related_reports(
     context: DetectorContext,
     split_id: str,
@@ -33,9 +67,34 @@ def _collect_related_reports(
     if not capture_id:
         # Strict default: no historical or cross-session joins without an active capture boundary.
         return []
+    cache_key = _split_cache_key(package_name=package_name, capture_id=capture_id, split_id=split_id)
+    runtime_state = getattr(context, "runtime_state", None)
+    if cache_key is not None:
+        found, cached = cache_lookup(
+            runtime_state,
+            "split_related_reports",
+            cache_key,
+            hit_counter="split_related_reports_cache_hits",
+            miss_counter="split_related_reports_cache_misses",
+        )
+        if found and isinstance(cached, list):
+            return [
+                stored
+                for stored in cached
+                if isinstance(stored, StoredReport) and stored.report.hashes.get("sha256") != current_sha
+            ]
+    runtime_reports = _runtime_related_reports(
+        context,
+        package_name=package_name,
+        capture_id=capture_id,
+        split_id=split_id,
+        current_sha=current_sha,
+    )
+    if runtime_reports:
+        return runtime_reports
     related_reports: list[StoredReport] = []
     package_norm = (package_name or "").strip().lower()
-    for stored in list_reports():
+    for stored in reports_for_package(package_norm):
         report = stored.report
         metadata = getattr(report, "metadata", {})
         if not isinstance(metadata, Mapping):
@@ -43,16 +102,75 @@ def _collect_related_reports(
         report_capture_id = _capture_id_from_metadata(metadata)
         if report_capture_id != capture_id:
             continue
-        report_package = getattr(getattr(report, "manifest", None), "package_name", None)
-        if isinstance(report_package, str) and report_package.strip() and package_norm:
-            if report_package.strip().lower() != package_norm:
-                continue
         if str(metadata.get("split_group_id")) != split_id:
             continue
         if report.hashes.get("sha256") == current_sha:
             continue
         related_reports.append(stored)
+    if cache_key is not None:
+        cache_store(runtime_state, "split_related_reports", cache_key, list(related_reports))
     return related_reports
+
+
+def _build_related_group_cache(
+    context: DetectorContext,
+    *,
+    package_name: str | None,
+    capture_id: str | None,
+    split_id: str,
+    related_reports: Sequence[StoredReport],
+) -> dict[str, object]:
+    runtime_state = getattr(context, "runtime_state", None)
+    cache_key = _split_cache_key(package_name=package_name, capture_id=capture_id, split_id=split_id)
+    if cache_key is not None:
+        found, cached = cache_lookup(
+            runtime_state,
+            "split_related_group_cache",
+            cache_key,
+            hit_counter="split_related_group_cache_hits",
+            miss_counter="split_related_group_cache_misses",
+        )
+        if found and isinstance(cached, dict):
+            return cached
+
+    component_union = {
+        "activities": set(),
+        "services": set(),
+        "receivers": set(),
+        "providers": set(),
+    }
+    http_union: set[str] = set()
+    cleartext_union: set[str] = set()
+    pinned_union: set[str] = set()
+    snapshot_by_report_path: dict[str, NetworkSnapshot] = {}
+
+    for stored in related_reports:
+        exported = stored.report.exported_components
+        component_union["activities"].update(exported.activities)
+        component_union["services"].update(exported.services)
+        component_union["receivers"].update(exported.receivers)
+        component_union["providers"].update(exported.providers)
+        report_key = str(getattr(stored, "path", ""))
+        snapshot = cached_previous_network_snapshot(
+            getattr(context, "runtime_state", None),
+            report_key=report_key,
+            report=stored.report,
+        )
+        snapshot_by_report_path[report_key] = snapshot
+        http_union.update(snapshot.http_hosts)
+        cleartext_union.update(snapshot.cleartext_domains)
+        pinned_union.update(snapshot.pinned_domains)
+
+    payload = {
+        "related_component_union": {key: tuple(sorted(values)) for key, values in component_union.items()},
+        "related_http_hosts": tuple(sorted(http_union)),
+        "related_cleartext_domains": tuple(sorted(cleartext_union)),
+        "related_pinned_domains": tuple(sorted(pinned_union)),
+        "snapshot_by_report_path": snapshot_by_report_path,
+    }
+    if cache_key is not None:
+        cache_store(runtime_state, "split_related_group_cache", cache_key, payload)
+    return payload
 
 
 def split_findings_and_metrics(
@@ -93,19 +211,27 @@ def split_findings_and_metrics(
         for stored in related_reports
     )
 
-    component_union = {
-        "activities": set(context.exported_components.activities),
-        "services": set(context.exported_components.services),
-        "receivers": set(context.exported_components.receivers),
-        "providers": set(context.exported_components.providers),
+    group_cache = _build_related_group_cache(
+        context,
+        package_name=package_name,
+        capture_id=current_capture_id,
+        split_id=split_id,
+        related_reports=related_reports,
+    )
+    related_component_union = {
+        key: set(values)
+        for key, values in (
+            group_cache.get("related_component_union", {})
+            if isinstance(group_cache.get("related_component_union"), Mapping)
+            else {}
+        ).items()
     }
-
-    for stored in related_reports:
-        exported = stored.report.exported_components
-        component_union["activities"].update(exported.activities)
-        component_union["services"].update(exported.services)
-        component_union["receivers"].update(exported.receivers)
-        component_union["providers"].update(exported.providers)
+    component_union = {
+        "activities": set(context.exported_components.activities) | related_component_union.get("activities", set()),
+        "services": set(context.exported_components.services) | related_component_union.get("services", set()),
+        "receivers": set(context.exported_components.receivers) | related_component_union.get("receivers", set()),
+        "providers": set(context.exported_components.providers) | related_component_union.get("providers", set()),
+    }
 
     metrics["union_exported"] = {key: sorted(values) for key, values in component_union.items()}
 
@@ -153,12 +279,15 @@ def split_findings_and_metrics(
     http_union = set(current_snapshot.http_hosts)
     cleartext_union = set(current_snapshot.cleartext_domains)
     pinned_union = set(current_snapshot.pinned_domains)
-
-    for stored in related_reports:
-        snapshot = previous_network_snapshot(stored.report)
-        http_union.update(snapshot.http_hosts)
-        cleartext_union.update(snapshot.cleartext_domains)
-        pinned_union.update(snapshot.pinned_domains)
+    related_http_hosts = group_cache.get("related_http_hosts", ())
+    related_cleartext = group_cache.get("related_cleartext_domains", ())
+    related_pinned = group_cache.get("related_pinned_domains", ())
+    if isinstance(related_http_hosts, Sequence):
+        http_union.update(str(item) for item in related_http_hosts)
+    if isinstance(related_cleartext, Sequence):
+        cleartext_union.update(str(item) for item in related_cleartext)
+    if isinstance(related_pinned, Sequence):
+        pinned_union.update(str(item) for item in related_pinned)
 
     metrics["union_http_hosts"] = sorted(http_union)
     metrics["union_cleartext_domains"] = sorted(cleartext_union)
@@ -166,9 +295,20 @@ def split_findings_and_metrics(
 
     extra_http = sorted(http_union - set(current_snapshot.http_hosts))
     if extra_http:
+        snapshot_by_report_path = (
+            group_cache.get("snapshot_by_report_path")
+            if isinstance(group_cache.get("snapshot_by_report_path"), Mapping)
+            else {}
+        )
         evidence = []
         for stored in related_reports:
-            snapshot = previous_network_snapshot(stored.report)
+            snapshot = snapshot_by_report_path.get(str(getattr(stored, "path", "")))
+            if not isinstance(snapshot, NetworkSnapshot):
+                snapshot = cached_previous_network_snapshot(
+                    getattr(context, "runtime_state", None),
+                    report_key=str(getattr(stored, "path", "")),
+                    report=stored.report,
+                )
             overlap = sorted(set(snapshot.http_hosts) & set(extra_http))
             if not overlap:
                 continue

@@ -290,6 +290,7 @@ def _execute_single_artifact(
     extra_metadata: Mapping[str, object] | None = None,
     phase_timing_sink: MutableMapping[str, float] | None = None,
     precomputed_report: StaticAnalysisReport | None = None,
+    runtime_state: MutableMapping[str, object] | None = None,
 ):
     """Run analysis for a single APK artifact and return report plus scan summary."""
 
@@ -307,6 +308,7 @@ def _execute_single_artifact(
             params,
             extra_metadata=extra_metadata,
             phase_timing_sink=phase_timing_sink,
+            runtime_state=runtime_state,
         )
 
     if skipped:
@@ -430,7 +432,10 @@ def finish_report_after_analysis(
             pass
 
         t1 = time.monotonic()
-        saved_paths = save_report(report)
+        saved_paths = save_report(
+            report,
+            execution_id=getattr(params, "execution_id", None),
+        )
         if phase_timing_sink is not None:
             phase_timing_sink["persist_wall_s"] = phase_timing_sink.get("persist_wall_s", 0.0) + (
                 time.monotonic() - t1
@@ -461,6 +466,7 @@ def generate_report(
     *,
     extra_metadata: Mapping[str, object] | None = None,
     phase_timing_sink: MutableMapping[str, float] | None = None,
+    runtime_state: MutableMapping[str, object] | None = None,
 ):
     """Generate and optionally persist one static analysis report."""
     metadata_payload = build_scan_report_metadata_payload(
@@ -504,6 +510,7 @@ def generate_report(
             metadata=metadata_payload,
             storage_root=base_dir,
             config=build_analysis_config(params),
+            runtime_state=runtime_state,
             stage_observer=stage_observer,
         )
         if phase_timing_sink is not None:

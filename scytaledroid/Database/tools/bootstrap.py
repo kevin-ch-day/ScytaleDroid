@@ -26,7 +26,10 @@ def _normalize_sqlite(sql: str) -> str:
     # Drop ENGINE/CHARSET fragments
     sql = re.sub(r"ENGINE=InnoDB[^;]*", "", sql, flags=re.IGNORECASE)
     sql = re.sub(r"DEFAULT CHARSET=\w+", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\bCHARACTER SET\s+\w+", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\bCOLLATE\s+\w+", "", sql, flags=re.IGNORECASE)
     sql = sql.replace("AUTO_INCREMENT", "")
+    sql = re.sub(r"\s+ON\s+UPDATE\s+CURRENT_TIMESTAMP", "", sql, flags=re.IGNORECASE)
 
     replacements = [
         (r"BIGINT\s+UNSIGNED", "INTEGER"),
@@ -71,14 +74,27 @@ def _normalize_sqlite(sql: str) -> str:
     return sql.strip().rstrip(";") + ";"
 
 
+def _should_skip_sqlite_statement(stmt: str) -> bool:
+    """Return True for MySQL-only schema statements not needed in relaxed SQLite tests."""
+
+    upper = stmt.upper()
+    if "ALTER TABLE" in upper:
+        return True
+    if "CREATE INDEX" in upper:
+        return True
+    if "CREATE OR REPLACE" in upper and "VIEW" in upper:
+        return True
+    return False
+
+
 def _execute_statements(statements: Iterable[str], *, dialect: str) -> None:
     strict = os.environ.get("SCYTALEDROID_DB_BOOTSTRAP_STRICT", "0").strip().lower() in {"1", "true", "yes"}
     for idx, stmt in enumerate(statements, start=1):
         sql = stmt
         if dialect == "sqlite":
-            # Skip some MySQL-only ALTERs that SQLite cannot parse even after replacements
-            upper = stmt.upper()
-            if "ALTER TABLE" in upper:
+            # SQLite bootstrap is intentionally relaxed for tests: keep core
+            # tables only and skip MySQL-only views/index churn.
+            if _should_skip_sqlite_statement(stmt):
                 continue
             sql = _normalize_sqlite(stmt)
         try:

@@ -55,6 +55,7 @@ def _write_manifest(
             "app_label": "Example",
             "version_name": "1.0",
             "version_code": "100",
+            "signer_cert_digest": "a" * 64,
             "device_serial": "SERIAL123",
             "session_label": "20260328",
         },
@@ -131,6 +132,8 @@ def test_replay_package_manifest_repairs_mirror_failed_package(tmp_path: Path, m
     assert payload["repairs"][-1]["status"] == "replayed"
     assert any(call[0] == "ensure_app_definition" for call in fake_repo.calls)
     assert any(call[0] == "upsert_apk_record" for call in fake_repo.calls)
+    upsert_calls = [call for call in fake_repo.calls if call[0] == "upsert_apk_record"]
+    assert upsert_calls[0][1][0]["signer_fingerprint"] == "a" * 64
     assert any(call[0] == "upsert_artifact_path" for call in fake_repo.calls)
     assert any(call[0] == "upsert_source_path" for call in fake_repo.calls)
 

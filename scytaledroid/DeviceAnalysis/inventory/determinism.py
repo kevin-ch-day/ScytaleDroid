@@ -16,10 +16,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Any
 
 from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+from scytaledroid.DeviceAnalysis.identity import (
+    compute_split_membership_hash,
+    decode_mapping,
+    resolve_text_field,
+)
 
 SNAPSHOT_REQUIRED_FIELDS = (
     "device_serial",
@@ -46,13 +50,6 @@ ALLOWED_DIFF_FIELDS = (
 class CompareResult:
     payload: dict[str, Any]
     passed: bool
-
-
-def _json_hash(value: Any) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return sha256(payload.encode("utf-8")).hexdigest()
-
-
 def _normalize_maybe_json(value: Any) -> Any:
     if isinstance(value, str):
         text = value.strip()
@@ -69,18 +66,6 @@ def _normalize_maybe_json(value: Any) -> Any:
     return value
 
 
-def _extract_extra(entry: dict[str, Any], key: str) -> str | None:
-    extras_raw = entry.get("extras")
-    extras = _normalize_maybe_json(extras_raw)
-    if not isinstance(extras, dict):
-        return None
-    value = extras.get(key)
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
 def normalize_inventory_row(entry: dict[str, Any]) -> dict[str, Any]:
     package_name = str(entry.get("package_name") or "").strip()
     package_name_lc = normalize_package_name(package_name, context="inventory") or package_name.lower()
@@ -89,11 +74,27 @@ def normalize_inventory_row(entry: dict[str, Any]) -> dict[str, Any]:
 
     apk_paths = _normalize_maybe_json(entry.get("apk_paths"))
     if isinstance(apk_paths, list):
-        split_membership_hash = _json_hash(sorted(str(path) for path in apk_paths))
+        split_membership_hash = compute_split_membership_hash(apk_paths)
     else:
-        split_membership_hash = _extract_extra(entry, "split_membership_hash")
+        split_membership_hash = resolve_text_field(entry, "split_membership_hash")
 
-    signer_cert_digest = _extract_extra(entry, "signer_cert_digest")
+    signer_cert_digest = resolve_text_field(
+        entry,
+        "signer_cert_digest",
+        "signer_fingerprint",
+        "signer_primary_digest",
+    )
+
+    extras = decode_mapping(entry.get("extras"))
+    primary_path = str(entry.get("primary_path") or "").strip()
+    split_count = int(entry.get("split_count") or 1)
+    if not primary_path and isinstance(extras, dict):
+        primary_path = str(extras.get("primary_path") or "").strip()
+    if int(split_count or 0) <= 0 and isinstance(extras, dict):
+        try:
+            split_count = int(extras.get("split_count") or 1)
+        except Exception:
+            split_count = 1
 
     return {
         "package_name_lc": package_name_lc,
@@ -101,8 +102,8 @@ def normalize_inventory_row(entry: dict[str, Any]) -> dict[str, Any]:
         "app_label": entry.get("app_label"),
         "version_name": entry.get("version_name"),
         "installer": entry.get("installer"),
-        "primary_path": entry.get("primary_path"),
-        "split_count": int(entry.get("split_count") or 1),
+        "primary_path": primary_path or None,
+        "split_count": split_count,
         "signer_cert_digest": signer_cert_digest,
         "split_membership_hash": split_membership_hash,
     }
