@@ -72,6 +72,25 @@ def test_static_run_audit_counts_permission_matrix_by_static_run_id():
     assert cursor.last_params == (555,)
 
 
+def test_db_verification_treats_missing_legacy_run_id_as_bridge_gap_when_canonical_exists():
+    audit = SimpleNamespace(
+        is_group_scope=False,
+        run_id=None,
+        is_orphan=True,
+        static_run_id=4007,
+    )
+
+    status = db_verification._status_from_audit(
+        audit=audit,
+        missing=(),
+        run_status="COMPLETED",
+        abort_reason=None,
+        abort_signal=None,
+    )
+
+    assert status == "OK (canonical static persistence; legacy run_id bridge absent)"
+
+
 def test_group_diagnostic_warnings_dedupes():
     warnings = [
         ("Linkage", "pkg.alpha", "UNAVAILABLE: no run_map; no db link"),

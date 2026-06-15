@@ -298,7 +298,10 @@ def _status_from_audit(
             else "ERROR (missing " + ", ".join(sorted(missing)) + ")"
         )
     elif audit.run_id is None:
-        status = "ORPHAN (run_id missing)" if audit.is_orphan else "SKIPPED (run_id missing)"
+        if audit.is_orphan and audit.static_run_id:
+            status = "OK (canonical static persistence; legacy run_id bridge absent)"
+        else:
+            status = "SKIPPED (run_id missing)"
     elif missing:
         status = "ERROR (missing " + ", ".join(sorted(missing)) + ")"
     else:
@@ -763,8 +766,10 @@ def _render_persistence_footer(
     if audit and audit.run_id is None:
         if audit.is_group_scope:
             lines.append(("run_linkage", "Group scope (run_id not required)"))
+        elif audit.is_orphan and getattr(audit, "static_run_id", None):
+            lines.append(("run_linkage", "legacy run_id bridge absent (canonical static_run_id present)"))
         elif audit.is_orphan:
-            lines.append(("run_linkage", "ORPHAN (run_id missing)"))
+            lines.append(("run_linkage", "run_id missing"))
         else:
             lines.append(("run_linkage", "run_id missing"))
 
@@ -822,8 +827,10 @@ def _render_persistence_footer(
         reason_token = abort_reason or abort_signal or "SIGINT"
         print(f"  {'status'.ljust(width)} : FAILED ({reason_token}) - counts may be partial")
     elif audit and audit.run_id is None and not audit.is_group_scope:
-        if audit.is_orphan:
-            print(f"  {'status'.ljust(width)} : WARN (orphan run_id missing)")
+        if audit.is_orphan and getattr(audit, "static_run_id", None):
+            print(f"  {'status'.ljust(width)} : OK (canonical static persistence; legacy run_id bridge absent)")
+        elif audit.is_orphan:
+            print(f"  {'status'.ljust(width)} : WARN (run_id missing)")
         else:
             print(f"  {'status'.ljust(width)} : WARN (run_id missing)")
     elif canonical_failures:

@@ -206,6 +206,45 @@ def test_reports_for_package_uses_cached_package_index(tmp_path: Path, monkeypat
     assert reports[0].report.manifest.package_name == "com.example.app"
 
 
+def test_reports_for_package_uses_persistent_index_after_cold_start(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "both")
+    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
+
+    save_report(_sample_report())
+    save_report(
+        StaticAnalysisReport(
+            file_path="/tmp/other.apk",
+            relative_path=None,
+            file_name="other.apk",
+            file_size=321,
+            hashes={"sha256": "c" * 64},
+            manifest=ManifestSummary(
+                package_name="com.other.app",
+                version_code="1",
+                version_name="1.0",
+                app_label="Other",
+            ),
+            metadata={"artifact": "other.apk", "session_stamp": "20260328-rda-full"},
+            generated_at="2026-03-30T15:58:13+00:00",
+        )
+    )
+    reports_store._clear_report_cache()
+
+    monkeypatch.setattr(
+        reports_store,
+        "list_reports",
+        lambda: (_ for _ in ()).throw(AssertionError("persistent package index should satisfy cold lookup")),
+    )
+
+    reports = reports_for_package("com.example.app")
+
+    assert len(reports) == 1
+    assert reports[0].report.manifest.package_name == "com.example.app"
+
+
 def test_save_report_enriches_metadata_with_normalized_and_manifest_package_names(
     tmp_path: Path, monkeypatch
 ) -> None:
