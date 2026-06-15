@@ -43,6 +43,7 @@ def persist_dynamic_summary(
     netstats_rows = _extract_netstats_rows(payload)
     netstats_missing_rows = _extract_netstats_missing_rows(payload)
     pcap_meta = _extract_pcap_meta(payload, result.evidence_path)
+    dataset_truth = _extract_dataset_truth(payload, result.evidence_path, config=config)
     profile_key = None
     if isinstance(plan_payload, dict):
         profile_key = plan_payload.get("profile_key") or plan_payload.get("profile")
@@ -82,10 +83,9 @@ def persist_dynamic_summary(
         "operator_messaging_activity": config.messaging_activity,
         "scenario_id": config.scenario_id,
         "tier": config.tier,
-        # Dataset tracker owns final validity; capture the intent here for indexing.
-        "countable": 1 if getattr(config, "counts_toward_completion", None) is True else (0 if getattr(config, "counts_toward_completion", None) is False else None),
-        "valid_dataset_run": None,
-        "invalid_reason_code": None,
+        "countable": dataset_truth["countable"],
+        "valid_dataset_run": dataset_truth["valid_dataset_run"],
+        "invalid_reason_code": dataset_truth["invalid_reason_code"],
         "duration_seconds": duration_seconds,
         "sampling_duration_seconds": sampling_duration_seconds,
         "clock_alignment_delta_s": clock_alignment_delta_s,
@@ -518,27 +518,12 @@ def _load_artifact_registry(dynamic_run_id: str | None) -> list[dict[str, Any]]:
 
 
 def _issues_from_manifest(dynamic_run_id: str, evidence_path: str | None) -> list[dict[str, Any]]:
-    if not evidence_path:
-        return []
-    resolved = resolve_evidence_path(evidence_path)
-    if not resolved:
-        _LOGGER.warning(
-            "Dynamic manifest lookup failed (missing evidence path)",
-            extra={"dynamic_run_id": dynamic_run_id, "evidence_path": evidence_path},
-        )
-        return []
-    manifest_path = resolved / "run_manifest.json"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        _LOGGER.warning(
-            "Dynamic manifest read failed while collecting issues",
-            extra={
-                "dynamic_run_id": dynamic_run_id,
-                "evidence_path": str(resolved),
-                "error": str(exc),
-            },
-        )
+    manifest = _read_manifest_from_evidence_path(
+        evidence_path,
+        context="collecting issues",
+        dynamic_run_id=dynamic_run_id,
+    )
+    if not manifest:
         return []
     observers = manifest.get("observers") or []
     issues: list[dict[str, Any]] = []
@@ -569,6 +554,91 @@ def _issues_from_manifest(dynamic_run_id: str, evidence_path: str | None) -> lis
             }
         )
     return issues
+
+
+def _read_manifest_from_evidence_path(
+    evidence_path: str | None,
+    *,
+    context: str,
+    dynamic_run_id: str | None = None,
+) -> dict[str, Any] | None:
+    if not evidence_path:
+        return None
+    resolved = resolve_evidence_path(evidence_path)
+    if not resolved:
+        _LOGGER.warning(
+            "Dynamic manifest lookup failed (missing evidence path)",
+            extra={
+                "dynamic_run_id": dynamic_run_id,
+                "evidence_path": evidence_path,
+                "context": context,
+            },
+        )
+        return None
+    manifest_path = resolved / "run_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _LOGGER.warning(
+            "Dynamic manifest read failed",
+            extra={
+                "dynamic_run_id": dynamic_run_id,
+                "evidence_path": str(resolved),
+                "context": context,
+                "error": str(exc),
+            },
+        )
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def _dataset_bool_to_db(value: object) -> int | None:
+    if value is True:
+        return 1
+    if value is False:
+        return 0
+    return None
+
+
+def _extract_dataset_truth(
+    payload: Mapping[str, Any],
+    evidence_path: str | None,
+    *,
+    config: DynamicSessionConfig,
+) -> dict[str, int | str | None]:
+    manifest = _read_manifest_from_evidence_path(
+        evidence_path,
+        context="extracting dataset truth",
+        dynamic_run_id=str(payload.get("dynamic_run_id") or "") or None,
+    )
+    manifest_dataset = manifest.get("dataset") if isinstance(manifest, dict) and isinstance(manifest.get("dataset"), dict) else {}
+    payload_dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+    dataset = dict(manifest_dataset or {})
+    if payload_dataset:
+        for key, value in payload_dataset.items():
+            dataset.setdefault(str(key), value)
+
+    if dataset:
+        countable = _dataset_bool_to_db(dataset.get("countable"))
+        valid_dataset_run = _dataset_bool_to_db(dataset.get("valid_dataset_run"))
+        invalid_reason_code = str(dataset.get("invalid_reason_code") or "").strip() or None
+    else:
+        countable = None
+        valid_dataset_run = None
+        invalid_reason_code = None
+
+    if countable is None:
+        counts_toward_completion = getattr(config, "counts_toward_completion", None)
+        countable = _dataset_bool_to_db(counts_toward_completion)
+
+    if countable is None and str(getattr(config, "tier", "") or "").lower() == "dataset":
+        countable = 1
+
+    return {
+        "countable": countable,
+        "valid_dataset_run": valid_dataset_run,
+        "invalid_reason_code": invalid_reason_code,
+    }
 
 
 def _map_observer_issue(observer_id: object, status: object, error: object) -> str | None:

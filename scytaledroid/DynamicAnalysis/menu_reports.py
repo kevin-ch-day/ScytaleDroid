@@ -8,6 +8,11 @@ import subprocess
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    resolve_dataset_freeze_read_path,
+    resolve_dataset_plan_read_path,
+)
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
@@ -31,11 +36,11 @@ def _count_tracker_runs(apps: object) -> int:
 
 
 def _tracker_path() -> Path:
-    return Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    return resolve_dataset_plan_read_path()
 
 
 def _freeze_path() -> Path:
-    return Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    return resolve_dataset_freeze_read_path()
 
 
 def _capture_environment_summary() -> dict[str, object]:
@@ -95,6 +100,7 @@ def _capture_environment_summary() -> dict[str, object]:
 
 def run_freeze_readiness_audit_report() -> None:
     summary = run_freeze_readiness_audit()
+    cohort_label = active_research_cohort_label()
     print()
     menu_utils.print_header("Freeze Readiness Audit")
     menu_utils.print_hint(
@@ -118,7 +124,7 @@ def run_freeze_readiness_audit_report() -> None:
             print(
                 status_messages.status(
                     "No dynamic evidence packs are present. This is expected after workspace cleanup; "
-                    "run Guided cohort run first, then rerun State summary and Freeze readiness audit.",
+                    f"run cohort ({cohort_label}) first, then rerun State summary and Archive readiness.",
                     level="info",
                 )
             )
@@ -163,12 +169,12 @@ def run_freeze_readiness_audit_report() -> None:
         )
     if "NO_EVIDENCE_PACKS_FOUND" in summary.reasons and summary.tracker_runs_hint <= 0:
         print(
-            status_messages.status(
-                "No dynamic evidence packs are present. This is expected after workspace cleanup; "
-                "run Guided cohort run first, then rerun State summary and Freeze readiness audit.",
-                level="info",
+                status_messages.status(
+                    "No dynamic evidence packs are present. This is expected after workspace cleanup; "
+                    f"run cohort ({cohort_label}) first, then rerun State summary and Archive readiness.",
+                    level="info",
+                )
             )
-        )
     if summary.missing_run_manifest_dirs > 0:
         print(
             status_messages.status(
@@ -207,6 +213,8 @@ def render_dataset_status() -> None:
     menu_utils.print_hint(
         "Review cohort progress from local evidence packs and tracker state without starting collection."
     )
+    cohort_label = active_research_cohort_label()
+    print(status_messages.status(f"Active research cohort: {cohort_label}", level="info"))
     summary = run_freeze_readiness_audit()
     state_payload = build_state_summary()
     handoff = (
@@ -224,6 +232,7 @@ def render_dataset_status() -> None:
     tracker_rows = _count_tracker_runs(apps)
     if not tracker_rows:
         rows = [
+            ("Research cohort", cohort_label),
             ("Cohort runs", "none recorded"),
             ("Evidence packs", str(int(summary.total_runs))),
             ("Tracker", "present" if tracker_exists else "missing"),
@@ -233,7 +242,7 @@ def render_dataset_status() -> None:
                 f"ready {int(handoff.get('dataset_packages_with_plan') or 0)}/"
                 f"{int(handoff.get('dataset_packages_total') or 0)}",
             ),
-            ("Next", "run Guided cohort"),
+            ("Next", f"run cohort ({cohort_label})"),
         ]
         table_utils.render_table(["Signal", "Status"], rows, compact=False)
         if int(summary.total_runs) == 0:
@@ -332,6 +341,7 @@ def run_state_summary_report(
     verbose = ui_level in {"details", "debug"}
     if not verbose:
         env = _capture_environment_summary()
+        cohort_label = active_research_cohort_label()
         total_runs = int(getattr(summary, "total_runs", 0) or 0)
         valid_runs = int(getattr(summary, "valid_runs", 0) or 0)
         missing_run_manifest_dirs = int(getattr(summary, "missing_run_manifest_dirs", 0) or 0)
@@ -354,6 +364,12 @@ def run_state_summary_report(
                 if int(row.get("tracker_countable") or 0) != int(row.get("evidence_eligible_countable") or 0):
                     mismatches += 1
         sections = [
+            (
+                "Research cohort",
+                [
+                    ("active cohort", cohort_label),
+                ],
+            ),
             (
                 "Environment",
                 [
@@ -494,7 +510,7 @@ def run_state_summary_report(
     )
     if handoff:
         print()
-        menu_utils.print_header("Static Handoff Plans")
+        menu_utils.print_header("Static Prep")
         hrows = [
             ("Plan dir exists", str(bool(handoff.get("plan_dir_exists"))).lower()),
             ("Dynamic plan files", str(int(handoff.get("dynamic_plan_files") or 0))),
@@ -506,7 +522,7 @@ def run_state_summary_report(
                 f"{int(handoff.get('dataset_packages_total') or 0)}",
             ),
             ("Dataset apps missing plan", str(int(handoff.get("dataset_packages_missing_plan") or 0))),
-            ("Ready for guided dataset run", str(bool(handoff.get("ready_for_guided_dataset_run"))).lower()),
+            ("Ready for run", str(bool(handoff.get("ready_for_guided_dataset_run"))).lower()),
         ]
         table_utils.render_table(["Metric", "Value"], hrows, compact=False)
         missing_pkgs = handoff.get("missing_packages") if isinstance(handoff.get("missing_packages"), list) else []
@@ -643,6 +659,10 @@ def render_cohort_status_details(
     dataset_apps_total: int,
     dataset_apps_complete: int,
     dataset_valid_runs_total: int,
+    historical_valid_runs_total: int,
+    historical_build_count_total: int,
+    mixed_identity_app_count: int,
+    legacy_only_app_count: int,
     expected_runs: int,
     evidence_summary: dict[str, object] | None,
 ) -> None:
@@ -654,12 +674,18 @@ def render_cohort_status_details(
     evidence_summary = evidence_summary or {}
     print("Tracker (informational)")
     print(f"  Apps satisfied  : {dataset_apps_complete} / {dataset_apps_total}")
-    print(f"  Valid runs      : {dataset_valid_runs_total} / {expected_runs}")
+    print(f"  Quota-counted   : {dataset_valid_runs_total} / {expected_runs}")
     print("Evidence (authoritative)")
     print(f"  Apps satisfied  : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
     print(f"  Eligible counted: {int(evidence_summary.get('quota_runs_counted', 0))} / {expected_runs}")
     print(f"  Eligible found  : {int(evidence_summary.get('paper_eligible_runs', 0))}")
     print(f"  Extras          : {int(evidence_summary.get('extra_eligible_runs', 0))}")
+    if historical_valid_runs_total > 0 or historical_build_count_total > 0:
+        print("Historical context (informational)")
+        print(f"  Mixed apps      : {mixed_identity_app_count}")
+        print(f"  Legacy-only apps: {legacy_only_app_count}")
+        print(f"  Legacy valid    : {historical_valid_runs_total}")
+        print(f"  Older builds    : {historical_build_count_total}")
     print(f"  Excluded        : {int(evidence_summary.get('excluded_runs', 0))}")
     if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
         print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (flagged)")
@@ -670,7 +696,7 @@ def render_cohort_status_details(
 
 def render_cohort_build_history(build_rows: list[list[str]]) -> None:
     print()
-    menu_utils.print_header("Build History Details")
+    menu_utils.print_header("History", "Build and legacy linkage details")
     table_utils.render_table(
         ["App", "Identity (vc/base)", "Active Runs", "Legacy Runs", "Legacy Builds"],
         build_rows,
@@ -682,22 +708,22 @@ def render_cohort_build_history(build_rows: list[list[str]]) -> None:
 def render_cohort_status_help() -> None:
     print()
     menu_utils.print_header("Help", "Legend (short)")
-    print("Baseline / Interactive = countable valid runs for active build")
-    print("Scripted / Manual      = interactive run breakdown (countable(+extra))")
-    print("(+N)                   = extra valid runs (not quota-counted)")
-    print("Need                   = remaining quota slots for this package")
-    print("Next                   = deterministic suggestion from Need")
-    print("Build                  = CUR(current build) | OLD(legacy only) | MIX(both)")
-    print("Total                  = technically valid evidence packs found (includes excluded/exploratory)")
-    print("QA                     = latest tracker QA status (may include identity mismatch note)")
+    print("Baseline / Manual      = active-build valid runs shown against required quota")
+    print("Scripted               = optional repeatable interaction (legacy/support path)")
+    print("Next action            = deterministic next run suggestion from quota state")
+    print("Static prep            = static handoff/build readiness for this package")
+    print("Quota                  = quota-counted progress toward archive/freeze readiness")
+    print("Supplemental runs      = extra valid runs from the current build kept outside quota")
+    print("Historical context     = valid legacy-build runs retained for comparison only")
+    print("Last QA                = latest tracker QA status (may include identity mismatch note)")
     prompt_utils.press_enter_to_continue()
 
 
 def render_cohort_status_debug(rows: list[list[str]]) -> None:
     print()
-    menu_utils.print_header("Debug", "Full table + legacy/QA fields")
+    menu_utils.print_header("Diagnostics", "Full table including legacy and QA fields")
     table_utils.render_table(
-        ["#", "App", "Baseline", "Interactive", "Need", "Next Action", "Build", "Total", "Legacy", "Last QA"],
+        ["#", "App", "Baseline", "Manual", "Need", "Next Action", "Build", "Quota", "Legacy", "Last QA"],
         rows,
         compact=False,
     )

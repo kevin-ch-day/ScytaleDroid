@@ -6,7 +6,7 @@
 # It checks:
 # - Host PCAP tools required for dataset-tier runs (tshark + capinfos)
 # - DB baseline schema gates (static + dynamic)
-# - Presence of static plans for Research Dataset Alpha packages
+# - Presence of static plans for the active research cohort packages
 #
 # Exit codes:
 #   0  ready
@@ -73,10 +73,10 @@ fi
 hr
 echo "Static plans for active research cohort"
 python - <<'PY' || exit 1
-from scytaledroid.Database.db_func.research_cohorts import resolve_research_cohort_context
 from scytaledroid.DynamicAnalysis import plan_selection
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_context
 
-cohort = resolve_research_cohort_context()
+cohort = active_research_cohort_context()
 label = str(cohort.get("display_name") or "Research cohort")
 pkgs = [str(p).strip() for p in cohort.get("packages", ()) if str(p).strip()]
 missing = []

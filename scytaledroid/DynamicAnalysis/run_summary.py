@@ -9,6 +9,7 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
+from scytaledroid.DynamicAnalysis.utils.time_utils import format_seconds
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
 
@@ -23,7 +24,8 @@ def print_run_summary(result, duration_label: str) -> None:
     lines = [
         ("Package", result.package_name or "unknown"),
         ("Run ID", result.dynamic_run_id or "unknown"),
-        ("Session wall-clock", f"{duration_label} ({duration_seconds}s)"),
+        ("Run mode", duration_label),
+        ("Session wall-clock", format_seconds(duration_seconds) if duration_seconds is not None else "unknown"),
         ("Status", status),
     ]
     if manifest:

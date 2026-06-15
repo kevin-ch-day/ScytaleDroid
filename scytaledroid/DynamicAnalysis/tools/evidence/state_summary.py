@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import load_dataset_packages
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
@@ -27,6 +26,8 @@ from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -98,7 +99,7 @@ def build_static_handoff_plan_summary() -> dict[str, Any]:
     """
 
     plan_dir = Path(app_config.DATA_DIR) / "static_analysis" / "dynamic_plan"
-    dataset_pkgs = sorted({str(pkg).strip().lower() for pkg in load_dataset_packages() if str(pkg).strip()})
+    dataset_pkgs = sorted({str(pkg).strip().lower() for pkg in active_research_cohort_packages() if str(pkg).strip()})
     by_pkg: dict[str, list[dict[str, Any]]] = {pkg: [] for pkg in dataset_pkgs}
     dynamic_plan_files = 0
     valid_plan_files = 0
@@ -165,7 +166,7 @@ def build_repeatability_summary() -> dict[str, Any]:
     """Summarize evidence-pack repeatability/readiness using on-disk contracts only."""
 
     root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    archive_dir = resolve_dataset_freeze_read_path().parent
     publication_manifests = Path(app_config.OUTPUT_DIR) / "publication" / "manifests"
     canonical_freeze = inspect_canonical_freeze(archive_dir=archive_dir, evidence_root=root)
 
@@ -424,7 +425,7 @@ def _tracker_vs_evidence_per_app() -> list[dict[str, Any]]:
     cfg = DatasetTrackerConfig()
     tracker = load_dataset_tracker()
     tracker_apps = tracker.get("apps") if isinstance(tracker.get("apps"), dict) else {}
-    dataset_pkgs = {str(pkg).strip().lower() for pkg in load_dataset_packages() if str(pkg).strip()}
+    dataset_pkgs = {str(pkg).strip().lower() for pkg in active_research_cohort_packages() if str(pkg).strip()}
     root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     per_pkg: dict[str, dict[str, int]] = {}
     for pkg in dataset_pkgs:

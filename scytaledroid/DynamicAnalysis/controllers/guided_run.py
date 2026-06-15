@@ -1,4 +1,4 @@
-"""Guided dataset run controller."""
+"""Guided cohort run controller."""
 
 from __future__ import annotations
 
@@ -28,13 +28,16 @@ from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.core.target_manager import extract_version_code_from_dump
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
     MESSAGING_PACKAGES,
-    load_dataset_packages,
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
 from scytaledroid.DynamicAnalysis.plan_selection import (
     ensure_plan_or_error,
     print_plan_selection_banner,
+)
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
+    active_research_cohort_label,
+    active_research_cohort_packages,
 )
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
@@ -253,6 +256,28 @@ def _run_profile_label(run_profile: str | None) -> str:
     if profile == "interaction_manual":
         return "manual interaction"
     return str(run_profile or "interaction").strip() or "interaction"
+
+
+def _interactive_phase_label(cfg: Any) -> str:
+    profile = str(getattr(cfg, "interactive_profile", "") or "").strip().lower()
+    if profile == "interaction_manual":
+        return "Manual runs"
+    return "Interactive runs"
+
+
+def _scripted_template_available(package_name: str) -> bool:
+    return bool(resolved_template_for_package(package_name))
+
+
+def _suggested_menu_key(run_profile: str | None) -> str:
+    profile = str(run_profile or "").strip().lower()
+    if profile.startswith("baseline"):
+        return "1"
+    if profile == "interaction_scripted":
+        return "2"
+    if profile == "interaction_manual":
+        return "3"
+    return "1"
 
 
 def _read_battery_level(device_serial: str) -> int | None:
@@ -504,7 +529,8 @@ def run_guided_dataset_run(
     pcapdroid_api_key: str | None = None,
 ) -> None:
     print()
-    menu_utils.print_header("Guided Dataset Run")
+    cohort_label = active_research_cohort_label()
+    menu_utils.print_header("Dynamic Cohort Run", cohort_label)
     _print_paper_mode_constants()
     selected = select_device()
     if not selected:
@@ -515,15 +541,41 @@ def run_guided_dataset_run(
         prompt_utils.press_enter_to_continue()
         return
 
+    while True:
+        keep_running = _run_guided_dataset_iteration(
+            cohort_label=cohort_label,
+            device_serial=device_serial,
+            device_label=device_label,
+            select_package_from_groups=select_package_from_groups,
+            select_observers=select_observers,
+            print_tier1_qa_result=print_tier1_qa_result,
+            observer_prompts_enabled=observer_prompts_enabled,
+            pcapdroid_api_key=pcapdroid_api_key,
+        )
+        if not keep_running:
+            return
+
+
+def _run_guided_dataset_iteration(
+    *,
+    cohort_label: str,
+    device_serial: str,
+    device_label: str,
+    select_package_from_groups: Callable[[object, str], str | None],
+    select_observers: Callable[[str, str], list[str]],
+    print_tier1_qa_result: Callable[[str], None] | None = None,
+    observer_prompts_enabled: bool = False,
+    pcapdroid_api_key: str | None = None,
+) -> bool:
     scenario_id = "basic_usage"
     duration_seconds = 0
-    label = "Dataset (guided)"
+    label = "Cohort"
 
     groups = group_artifacts()
-    dataset_pkgs = {pkg.lower() for pkg in load_dataset_packages()}
+    dataset_pkgs = {pkg.lower() for pkg in active_research_cohort_packages()}
     if not dataset_pkgs:
-        print(status_messages.status("Research Dataset Alpha profile has no apps.", level="warn"))
-        return
+        print(status_messages.status(f"{cohort_label} has no apps.", level="warn"))
+        return False
 
     available = {group.package_name.lower() for group in groups if group.package_name}
     scoped_groups = tuple(
@@ -535,22 +587,38 @@ def run_guided_dataset_run(
     if not scoped_groups:
         print(
             status_messages.status(
-                "No APK artifacts available for Research Dataset Alpha. Execute Harvest or use Custom package name.",
+                f"No APK artifacts available for {cohort_label}. Execute Harvest or use Custom package name.",
                 level="warn",
             )
         )
-        return
+        return False
 
-    package_name = select_package_from_groups(scoped_groups, title="Research Dataset Alpha apps")
+    package_name = select_package_from_groups(
+        scoped_groups,
+        title="App Queue",
+        subtitle=f"{cohort_label} · {device_label}",
+    )
     if not package_name:
-        return
+        return False
     pkg_lc = str(package_name or "").strip().lower()
+    display_label = package_name
+    try:
+        display_map = {
+            str(g.package_name or "").strip().lower(): (g.display_name or g.package_name)
+            for g in groups
+            if getattr(g, "package_name", None)
+        }
+        display_label = display_map.get(pkg_lc) or package_name
+    except Exception:
+        display_label = package_name
     print(
         status_messages.status(
-            f"Selected package key: {package_name} (quota/accounting is package-specific).",
+            f"Selected app: {display_label}",
             level="info",
         )
     )
+    if display_label != package_name:
+        print(status_messages.status(f"Package: {package_name}", level="info"))
     meta_family_note = bool(pkg_lc in _META_FAMILY_PACKAGES)
 
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
@@ -559,100 +627,32 @@ def run_guided_dataset_run(
     state = load_dataset_run_state(package_name, config=cfg)
     total_required = int(state.total_required)
     counts = state.counts
-    suggested_profile = (state.effective_suggested_profile or "interaction_scripted").strip()
+    scripted_template_ready = _scripted_template_available(package_name)
+    suggested_profile = (
+        state.effective_suggested_profile
+        or str(getattr(cfg, "interactive_profile", "") or "interaction_manual")
+    ).strip()
     suggested_slot = state.suggested_slot
     paper_eligible_local = int(state.paper_eligible_local)
     quota_counted_local = int(state.quota_counted_local)
+    extra_valid_local = int(counts.extra_valid_runs)
+    historical_valid_local = int(state.historical_valid_runs)
+    historical_build_count = int(state.historical_build_count)
+    interactive_label = _interactive_phase_label(cfg)
     if int(counts.baseline_valid_runs) < int(cfg.baseline_required):
         suggested_profile = _canonical_baseline_profile_for_package(package_name)
         suggested_slot = max(1, min(int(counts.baseline_valid_runs) + 1, int(cfg.baseline_required)))
-
-    print()
-    display_label = package_name
-    try:
-        display_map = {g.package_name: g.display_name for g in groups}
-        display_label = display_map.get(package_name) or package_name
-    except Exception:
-        display_label = package_name
-    print(f"{display_label} progress:")
-    print(f"  Baseline: {_progress_label(counts.baseline_valid_runs, int(cfg.baseline_required))}")
     baseline_complete = int(counts.baseline_valid_runs) >= int(cfg.baseline_required)
-    if baseline_complete:
-        print(f"  Interactive: {_progress_label(counts.interactive_valid_runs, int(cfg.interactive_required))}")
-    else:
-        print("  Interactive: locked until baseline complete")
-    if int(state.local_evidence_dir_count) == int(paper_eligible_local):
-        print(f"  Evidence packs: {paper_eligible_local} valid")
-    else:
-        print(f"  Evidence packs: {paper_eligible_local} valid / {state.local_evidence_dir_count} local")
-    print(f"  Quota: {quota_counted_local}/{total_required} complete")
     if counts.quota_met:
-        print("  Next run: optional extra")
         suggested_slot = None
-    elif suggested_slot:
-        print(f"  Next run: {_run_profile_label(suggested_profile)}")
-    response = prompt_utils.prompt_text(
-        "Press Enter to continue, V to view details, or B to go back",
-        required=False,
-    ).strip().lower()
-    if response in {"b", "back"}:
-        return
-    if response in {"v", "view", "y", "yes", "details"}:
-        if meta_family_note:
-            print(
-                status_messages.status(
-                    "Meta-family app detected. Note: Facebook, Messenger, Instagram, and WhatsApp are tracked as separate apps.",
-                    level="info",
-                )
-            )
-        print()
-        print("Runs recorded (details):")
-        print(
-            f"  tracker={counts.total_runs}\ttracker_countable={counts.valid_runs}/{total_required}\n"
-            f"  paper_eligible(local)={paper_eligible_local}\tquota_counted(local)={quota_counted_local}/{total_required}\n"
-            f"  baseline={counts.baseline_valid_runs}/{cfg.baseline_required}\t"
-            f"interactive={counts.interactive_valid_runs}/{cfg.interactive_required}\n"
-            f"  quota_met={int(counts.quota_met)}\tlocal_evidence={state.local_evidence_dir_count}"
-        )
-        if state.exclusion_reason_top:
-            reason_line = ", ".join([f"{k}={v}" for k, v in state.exclusion_reason_top])
-            print(f"  local_exclusion_top: {reason_line}")
-        if counts.quota_met:
-            print("Quota met. Additional runs are allowed and retained as supplemental evidence.")
-        elif suggested_slot:
-            print(f"Suggested by quota (counts toward completion): {_run_profile_label(suggested_profile)}")
-        print(f"Freeze cohort quota: baseline={cfg.baseline_required}, interaction={cfg.interactive_required}.")
-        baseline_recommended = max(
-            int(cfg.baseline_required),
-            int(getattr(app_config, "DYNAMIC_DATASET_BASELINE_RECOMMENDED_RUNS", 3)),
-        )
-        if baseline_recommended > int(cfg.baseline_required):
-            print(
-                "Baseline replicates recommended: "
-                f"{baseline_recommended} (extras are retained for exploratory/baseline stability analysis)."
-            )
-        suggested_counts = _intent_counts_toward_quota(
-            run_profile=suggested_profile,
-            baseline_valid_runs=int(counts.baseline_valid_runs),
-            interactive_valid_runs=int(counts.interactive_valid_runs),
-            cfg=cfg,
-        )
-        if counts.quota_met:
-            print("Default suggestion countability: supplemental evidence (not quota-counted).")
-        else:
-            print(
-                "Default suggestion countability: "
-                + ("COUNTABLE" if suggested_counts else "supplemental evidence (not quota-counted)")
-                + f" ({suggested_profile})."
-            )
-    print()
 
     suggested_is_interactive = _is_interactive_profile(suggested_profile)
+    suggested_default_key = _suggested_menu_key(suggested_profile)
 
     def _badge_for(key: str) -> str | None:
         if not suggested_slot:
             return None
-        return "suggested" if key == ("2" if suggested_is_interactive else "1") else None
+        return "suggested" if key == suggested_default_key else None
 
     can_reset = bool(state.reset_available)
     protocol_options = [
@@ -679,24 +679,38 @@ def run_guided_dataset_run(
             "2",
             "Scripted Interaction",
             description=(
-                "Purpose: repeatable stimulus. run_profile=interaction_scripted | "
-                + (
-                    "Counts toward quota: YES (if VALID)"
-                    if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)
-                    else (
-                        "Counts toward quota: NO (baseline requirement not complete)"
-                        if not baseline_complete
-                        else "Counts toward quota: NO (interactive quota met; saved as supplemental evidence)"
+                (
+                    "Purpose: optional template-backed repeatable stimulus. run_profile=interaction_scripted | "
+                    + (
+                        "Counts toward quota: YES (if VALID)"
+                        if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)
+                        else (
+                            "Counts toward quota: NO (baseline requirement not complete)"
+                            if not baseline_complete
+                            else "Counts toward quota: NO (interactive quota met; saved as supplemental evidence)"
+                        )
                     )
                 )
+                if scripted_template_ready
+                else "Unavailable for this app: no scripted interaction template is defined. Use Manual Interaction for dynamic stimulus."
             ),
             badge=_badge_for("2"),
+            disabled=(not scripted_template_ready),
         ),
         menu_utils.MenuOption(
             "3",
             "Manual Interaction",
             description=(
-                "Purpose: operator-driven stimulus. run_profile=interaction_manual | "
+                (
+                    "Purpose: operator-driven dynamic stimulus. Standard cohort interaction path for paper #3. "
+                    if str(getattr(cfg, "interactive_profile", "") or "").strip().lower() == "interaction_manual"
+                    else (
+                        "Purpose: operator-driven dynamic stimulus. Recommended when no scripted template exists. "
+                        if not scripted_template_ready
+                        else "Purpose: operator-driven dynamic stimulus. "
+                    )
+                )
+                + "run_profile=interaction_manual | "
                 + (
                     "Counts toward quota: YES (if VALID)"
                     if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)
@@ -707,7 +721,7 @@ def run_guided_dataset_run(
                     )
                 )
             ),
-            badge=None,
+            badge=_badge_for("3"),
         ),
         menu_utils.MenuOption("4", "Test app (Dry Run/No Saving)", description="no capture; checks plan + tools", badge=None),
         menu_utils.MenuOption(
@@ -724,10 +738,36 @@ def run_guided_dataset_run(
     ]
 
     menu_utils.print_header("Select Run Intent")
+    if meta_family_note:
+        print(
+            status_messages.status(
+                "Meta-family app: Facebook, Messenger, Instagram, and WhatsApp are tracked as separate apps.",
+                level="info",
+            )
+        )
+    if historical_valid_local > 0:
+        build_text = (
+            f" across {historical_build_count} older build(s)"
+            if historical_build_count > 0
+            else ""
+        )
+        print(
+            status_messages.status(
+                f"Historical context: {historical_valid_local} legacy valid run(s){build_text} retained for comparison; not counted toward current quota.",
+                level="info",
+            )
+        )
+    if extra_valid_local > 0:
+        print(
+            status_messages.status(
+                f"Supplemental current-build evidence: {extra_valid_local} extra valid run(s) retained outside quota.",
+                level="info",
+            )
+        )
     menu_utils.render_menu(
         menu_utils.MenuSpec(
             items=protocol_options,
-            default="2" if suggested_is_interactive else "1",
+            default=suggested_default_key if suggested_is_interactive else "1",
             exit_label="Exit",
             show_exit=True,
             show_descriptions=True,
@@ -736,14 +776,14 @@ def run_guided_dataset_run(
     )
     selected_protocol = prompt_utils.get_choice(
         menu_utils.selectable_keys(protocol_options, include_exit=True),
-        default="2" if suggested_is_interactive else "1",
+        default=suggested_default_key if suggested_is_interactive else "1",
         casefold=True,
         invalid_message="Choose 0-4 or D.",
         disabled=[option.key for option in protocol_options if option.disabled],
     )
     selected_protocol = selected_protocol.upper()
     if selected_protocol == "0":
-        return
+        return True
     if selected_protocol == "D":
         local = find_dynamic_run_dirs(package_name)
         print(
@@ -760,13 +800,13 @@ def run_guided_dataset_run(
                 )
             )
             prompt_utils.press_enter_to_continue()
-            return
+            return True
         confirmed = prompt_utils.prompt_yes_no(
             f"Delete local evidence packs AND reset dataset tracker entry for {package_name}?",
             default=False,
         )
         if not confirmed:
-            return
+            return True
         deleted = delete_dynamic_evidence_packs(package_name)
         reset_package_dataset_tracker(package_name)
         remaining = len(find_dynamic_run_dirs(package_name))
@@ -777,7 +817,7 @@ def run_guided_dataset_run(
             )
         )
         prompt_utils.press_enter_to_continue()
-        return
+        return True
     if selected_protocol == "4":
         # Preflight-only test: do not capture or write evidence packs.
         missing = missing_required_tools(tier="dataset")
@@ -814,7 +854,7 @@ def run_guided_dataset_run(
             except Exception as exc:
                 print(status_messages.status(f"Template preview unavailable: {exc}", level="warn"))
         prompt_utils.press_enter_to_continue()
-        return
+        return True
 
     # Show recent history before starting capture so operator can sanity-check state.
     recent = state.recent_runs
@@ -852,7 +892,7 @@ def run_guided_dataset_run(
             print(
                 status_messages.status(
                     "Recent baseline_idle runs were VALID but LOW_SIGNAL_IDLE. "
-                    "For messaging/chat-like apps, collect scripted interaction next to avoid non-countable baselines.",
+                    "For messaging/chat-like apps, collect manual interaction next to avoid non-countable baselines.",
                     level="warn",
                 )
             )
@@ -889,15 +929,15 @@ def run_guided_dataset_run(
         )
         print(status_messages.status("Recommended next run is baseline.", level="warn"))
         if not prompt_utils.prompt_yes_no("Proceed with interaction anyway?", default=False):
-            return
+            return True
     counts_toward_completion = _intent_counts_toward_quota(
         run_profile=run_profile,
         baseline_valid_runs=int(counts.baseline_valid_runs),
         interactive_valid_runs=int(counts.interactive_valid_runs),
         cfg=cfg,
     )
-    suggested_key = "2" if suggested_is_interactive else "1"
-    if selected_protocol in {"1", "2"} and selected_protocol != suggested_key and not counts_toward_completion:
+    suggested_key = suggested_default_key if suggested_is_interactive else "1"
+    if selected_protocol in {"1", "2", "3"} and selected_protocol != suggested_key and not counts_toward_completion:
         print(
             status_messages.status(
                 "Selected intent is not quota-suggested and will be saved as supplemental evidence (not quota-counted).",
@@ -907,7 +947,7 @@ def run_guided_dataset_run(
         proceed = prompt_utils.prompt_yes_no("Proceed with supplemental run anyway?", default=False)
         if not proceed:
             print(status_messages.status("Run canceled. Choose the suggested intent to fill quota.", level="info"))
-            return
+            return True
 
     # Manual runs can be quota-counted (by policy), so do not gate behind an
     # "EXPLORATORY" confirmation.
@@ -1006,9 +1046,11 @@ def run_guided_dataset_run(
                     level="warn",
                 )
             )
-            if prompt_utils.prompt_yes_no("Switch to scripted interaction now?", default=True):
-                run_profile = "interaction_scripted"
-                interaction_level = "scripted"
+            fallback_interaction = "interaction_manual"
+            fallback_label = "manual interaction"
+            if prompt_utils.prompt_yes_no(f"Switch to {fallback_label} now?", default=True):
+                run_profile = fallback_interaction
+                interaction_level = "manual"
                 messaging_activity = "none"
                 counts_toward_completion = _intent_counts_toward_quota(
                     run_profile=run_profile,
@@ -1016,7 +1058,7 @@ def run_guided_dataset_run(
                     interactive_valid_runs=int(counts.interactive_valid_runs),
                     cfg=cfg,
                 )
-                print(status_messages.status("Switched to scripted interaction.", level="info"))
+                print(status_messages.status(f"Switched to {fallback_label}.", level="info"))
             else:
                 print(
                     status_messages.status(
@@ -1024,7 +1066,7 @@ def run_guided_dataset_run(
                         level="info",
                     )
                 )
-                return
+                return True
 
     # Template policy determines scripted countability (messaging activity is only a tag).
     if _is_messaging_package_or_category(package_name) and str(run_profile or "").strip().lower() == "interaction_scripted":
@@ -1049,9 +1091,7 @@ def run_guided_dataset_run(
 
     # Operator-facing paper quota impact label (avoid generic "countable" wording).
     prof_lc = str(run_profile or "").strip().lower()
-    if "manual" in prof_lc:
-        paper_impact_label = "Cohort quota impact: NO (manual is exploratory by policy)"
-    elif counts_toward_completion:
+    if counts_toward_completion:
         paper_impact_label = "Cohort quota impact: YES (if VALID)"
     else:
         paper_impact_label = "Cohort quota impact: NO (supplemental evidence / policy)"
@@ -1066,7 +1106,7 @@ def run_guided_dataset_run(
 
     if not observer_ids:
         print(status_messages.status("Select at least one observer.", level="error"))
-        return
+        return True
 
     # Dataset mode is deterministic about plan choice, but interactive about gating:
     # if no plan exists yet, offer a single prompt to run static now.
@@ -1077,7 +1117,7 @@ def run_guided_dataset_run(
         run_static_callback=_auto_run_static_for_package,
     )
     if not plan_selection:
-        return
+        return True
     plan_path = plan_selection["plan_path"]
     static_run_id = plan_selection["static_run_id"]
     print_plan_selection_banner(plan_selection)
@@ -1088,7 +1128,7 @@ def run_guided_dataset_run(
         observer_ids=observer_ids,
     ):
         prompt_utils.press_enter_to_continue()
-        return
+        return True
     print(status_messages.status(f"Stabilizing environment ({_STABILIZATION_WAIT_S}s)...", level="info"))
     time.sleep(_STABILIZATION_WAIT_S)
     clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
@@ -1102,7 +1142,7 @@ def run_guided_dataset_run(
                 )
             )
             prompt_utils.press_enter_to_continue()
-            return
+            return True
 
     spec = build_dynamic_run_spec(
         package_name=package_name,
@@ -1131,6 +1171,7 @@ def run_guided_dataset_run(
     if result.dynamic_run_id and print_tier1_qa_result:
         print_tier1_qa_result(result.dynamic_run_id)
     _capture_protocol_fit_feedback(result=result, run_profile=run_profile, package_name=package_name)
+    return True
 
 
 def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: str | None) -> None:

@@ -17,12 +17,11 @@ def test_default_seed_payload_defines_alpha_and_beta_without_duplicates() -> Non
     assert alpha_packages == list(CANONICAL_PACKAGES)
     assert len(beta_packages) == len(set(beta_packages))
     assert beta_packages[: len(alpha_packages)] == alpha_packages
-    assert beta_packages[-5:] == [
+    assert beta_packages[-4:] == [
         "bbc.mobile.news.ww",
         "com.cnn.mobile.android.phone",
         "com.guardian",
         "com.espn.score_center",
-        "com.android.chrome",
     ]
 
 
@@ -120,7 +119,7 @@ def test_apply_research_cohort_tables_migration_seeds_and_preserves_existing_sta
         "research_dataset_beta",
     ]
     assert len(seeded_members["research_dataset_alpha"]) == len(CANONICAL_PACKAGES)
-    assert len(seeded_members["research_dataset_beta"]) == len(CANONICAL_PACKAGES) + 5
+    assert len(seeded_members["research_dataset_beta"]) == len(CANONICAL_PACKAGES) + 4
     assert len({row["package_name"] for row in seeded_members["research_dataset_beta"]}) == len(
         seeded_members["research_dataset_beta"]
     )

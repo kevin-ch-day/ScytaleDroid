@@ -160,7 +160,7 @@ def test_write_static_session_prune_receipts(tmp_path: Path) -> None:
         apply_delete_sql="y",
         expected_count_match=True,
     )
-    paths = prune.write_static_session_prune_receipts(
+    prune.write_static_session_prune_receipts(
         tmp_path,
         stem="artifact_registry_static_session_prune_test",
         proposal=proposal,

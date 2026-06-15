@@ -5,7 +5,8 @@ Paper #2 contract:
 - The DB is a derived index/cache to help query and compare patterns across apps.
 
 This module builds minimal `dynamic_sessions` rows from `run_manifest.json` and
-`inputs/static_dynamic_plan.json`, then (optionally) indexes network indicators.
+`inputs/static_dynamic_plan.json`, then (optionally) indexes rebuildable
+network-indicator and domain-context tables.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.DynamicAnalysis.storage.domain_context_index import index_dynamic_domain_context_for_run
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
 from scytaledroid.DynamicAnalysis.storage.network_indicators import index_network_indicators_for_run
@@ -534,6 +536,7 @@ def index_dynamic_evidence_pack_to_db(run_dir: Path) -> dict[str, Any]:
     if not row:
         return {"ok": False, "reason": "missing_manifest_or_package"}
     rid = str(row.get("dynamic_run_id") or "")
+    pkg = str(row.get("package_name") or "")
     try:
         upsert_dynamic_session_row(row)
     except Exception as exc:
@@ -553,11 +556,18 @@ def index_dynamic_evidence_pack_to_db(run_dir: Path) -> dict[str, Any]:
         indicators = index_network_indicators_for_run(rid, run_dir)
     except Exception:
         indicators = 0
+    domain_context = 0
+    try:
+        if pkg:
+            domain_context = index_dynamic_domain_context_for_run(rid, pkg, run_dir)
+    except Exception:
+        domain_context = 0
     return {
         "ok": True,
         "dynamic_run_id": rid,
         "network_features_upserted": features_upserted,
         "indicators_indexed": indicators,
+        "domain_context_indexed": domain_context,
     }
 
 
@@ -568,6 +578,7 @@ def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
     ok = 0
     features = 0
     indicators = 0
+    domain_context = 0
     errors: list[str] = []
     for rd in run_dirs:
         if not rd.is_dir():
@@ -581,6 +592,7 @@ def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
             ok += 1
             indicators += int(res.get("indicators_indexed") or 0)
             features += int(res.get("network_features_upserted") or 0)
+            domain_context += int(res.get("domain_context_indexed") or 0)
         else:
             errors.append(str(res.get("reason") or "error"))
     return {
@@ -588,6 +600,7 @@ def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
         "ok": ok,
         "network_features_upserted": features,
         "indicators_indexed": indicators,
+        "domain_context_indexed": domain_context,
         "errors": errors[:20],
     }
 

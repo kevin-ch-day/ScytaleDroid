@@ -15,7 +15,10 @@ from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_for_run
-from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    resolve_dataset_plan_read_path,
+    write_dataset_plan_payload,
+)
 
 MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
@@ -46,7 +49,7 @@ class DatasetTrackerConfig:
         default_factory=lambda: int(getattr(app_config, "DYNAMIC_DATASET_INTERACTIVE_RUNS", INTERACTION_REQUIRED))
     )
     baseline_profile: str = "baseline_idle"
-    interactive_profile: str = "interaction_scripted"
+    interactive_profile: str = "interaction_manual"
 
 
 def _is_baseline_profile(profile: object, cfg: DatasetTrackerConfig) -> bool:
@@ -98,7 +101,7 @@ def update_dataset_tracker(
     package = (manifest.target.get("package_name") or "_unknown").strip()
     if not package:
         package = "_unknown"
-    tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    tracker_path = resolve_dataset_plan_read_path()
     tracker_path.parent.mkdir(parents=True, exist_ok=True)
     payload = _load(tracker_path)
     apps = payload.setdefault("apps", {})
@@ -238,7 +241,7 @@ def update_dataset_tracker(
     )
     app_entry["overlap_stats"] = _compute_overlap_stats(runs_list)
     payload["updated_at"] = datetime.now(UTC).isoformat()
-    atomic_write_text(tracker_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tracker_path = write_dataset_plan_payload(payload)
     _log(
         event_logger,
         "dataset_tracker_update",
@@ -254,7 +257,7 @@ def update_dataset_tracker(
 
 
 def load_dataset_tracker() -> dict[str, Any]:
-    tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    tracker_path = resolve_dataset_plan_read_path()
     payload = _load(tracker_path)
     dirty: list[bool] = [False]
     normalized = _normalize_tracker_payload(payload, DatasetTrackerConfig(), dirty=dirty)
@@ -263,7 +266,7 @@ def load_dataset_tracker() -> dict[str, Any]:
     # read the raw JSON (ad-hoc scripts) see consistent results.
     if dirty[0] and tracker_path.exists():
         try:
-            atomic_write_text(tracker_path, json.dumps(normalized, indent=2, sort_keys=True) + "\n")
+            write_dataset_plan_payload(normalized)
         except OSError:
             # Best-effort; callers can still reindex explicitly.
             pass
@@ -472,15 +475,12 @@ def recompute_dataset_tracker(*, config: DatasetTrackerConfig | None = None) -> 
     output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     if not output_root.exists():
         return None
-    tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    tracker_path = resolve_dataset_plan_read_path()
     tracker_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Rebuild from evidence packs only. This intentionally drops tracker entries for
     # evidence packs that were deleted locally (e.g., removing invalid runs).
-    tracker_path.write_text(
-        json.dumps({"apps": {}, "updated_at": datetime.now(UTC).isoformat()}, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    tracker_path = write_dataset_plan_payload({"apps": {}, "updated_at": datetime.now(UTC).isoformat()})
 
     # Iterate all evidence packs and re-run the tracker update.
     for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):

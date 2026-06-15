@@ -8,7 +8,6 @@ from math import isclose
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import permission_intel as intel_db
-from ...db_core import run_sql
 from ...db_core.schema_introspection import table_exists as app_table_exists
 
 _ALLOWED_BANDS = {"critical", "high", "medium", "low", "none"}

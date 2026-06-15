@@ -14,7 +14,16 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     _is_interactive_profile,
     _normalize_tracker_payload,
 )
-from scytaledroid.DynamicAnalysis.templates.category_map import category_for_package
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_plan_read_path
+from scytaledroid.DynamicAnalysis.tracker_scope import (
+    build_scoped_dataset_counts,
+    default_resolve_tracker_run_identity,
+    scope_tracker_runs_to_active_identity,
+)
+from scytaledroid.DynamicAnalysis.templates.category_map import (
+    category_for_package,
+    resolved_template_for_package,
+)
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import PackageRunCounts, find_dynamic_run_dirs
 
 
@@ -53,6 +62,8 @@ class DatasetRunState:
     baseline_idle_pcap_missing_streak: int
     baseline_idle_low_signal_streak: int
     baseline_connected_insufficient_duration_streak: int
+    historical_valid_runs: int = 0
+    historical_build_count: int = 0
 
 
 def _is_messaging_package_or_category(package_name: str) -> bool:
@@ -71,8 +82,21 @@ def _canonical_baseline_profile_for_package(package_name: str) -> str:
     return "baseline_idle"
 
 
+def _preferred_interactive_profile_for_package(
+    package_name: str,
+    *,
+    config: DatasetTrackerConfig,
+) -> str:
+    preferred = str(getattr(config, "interactive_profile", "") or "").strip().lower()
+    if preferred == "interaction_scripted":
+        if resolved_template_for_package(package_name):
+            return "interaction_scripted"
+        return "interaction_manual"
+    return preferred or "interaction_manual"
+
+
 def _tracker_path() -> Path:
-    return Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    return resolve_dataset_plan_read_path()
 
 
 def _load_tracker_payload(
@@ -148,13 +172,13 @@ def _protocol_from_runs(
         suggested_profile = cfg.baseline_profile
         suggested_slot = min(baseline_valid + 1, int(cfg.baseline_required))
     elif interactive_valid < int(cfg.interactive_required):
-        suggested_profile = cfg.interactive_profile
+        suggested_profile = _preferred_interactive_profile_for_package(package_name, config=cfg)
         suggested_slot = int(cfg.baseline_required) + min(interactive_valid + 1, int(cfg.interactive_required))
     else:
-        suggested_profile = cfg.interactive_profile
+        suggested_profile = _preferred_interactive_profile_for_package(package_name, config=cfg)
     if str(suggested_profile).strip().lower() == "baseline_idle":
         suggested_profile = _canonical_baseline_profile_for_package(package_name)
-    return str(suggested_profile or "interaction_scripted").strip(), suggested_slot
+    return str(suggested_profile or "interaction_manual").strip(), suggested_slot
 
 
 def _status_label(row: DatasetRunRecentSummary) -> str:
@@ -323,14 +347,35 @@ def load_dataset_run_state(
     apps = payload.get("apps") if isinstance(payload, dict) else {}
     entry = apps.get(package) if isinstance(apps, dict) else None
     runs = entry.get("runs") if isinstance(entry, dict) and isinstance(entry.get("runs"), list) else []
-
-    counts = _counts_from_entry(entry)
+    scoped_runs = scope_tracker_runs_to_active_identity(
+        package,
+        runs if isinstance(runs, list) else [],
+        resolve_tracker_run_identity_fn=default_resolve_tracker_run_identity,
+    )
+    active_runs = list(scoped_runs["active_runs"])
+    scoped_counts = build_scoped_dataset_counts(
+        package,
+        runs if isinstance(runs, list) else [],
+        cfg=cfg,
+        resolve_tracker_run_identity_fn=default_resolve_tracker_run_identity,
+    )
+    counts = PackageRunCounts(
+        total_runs=int(scoped_counts["technical_valid_active"]),
+        valid_runs=int(scoped_counts["baseline_countable"]) + int(scoped_counts["interactive_countable"]),
+        baseline_valid_runs=int(scoped_counts["baseline_countable"]),
+        interactive_valid_runs=int(scoped_counts["interactive_countable"]),
+        quota_met=(
+            int(scoped_counts["baseline_countable"]) >= int(cfg.baseline_required)
+            and int(scoped_counts["interactive_countable"]) >= int(cfg.interactive_required)
+        ),
+        extra_valid_runs=int(scoped_counts["baseline_extra"]) + int(scoped_counts["interactive_extra"]),
+    )
     suggested_profile_from_tracker, suggested_slot = _protocol_from_runs(
         package_name=package,
-        runs=runs if isinstance(runs, list) else [],
+        runs=active_runs,
         cfg=cfg,
     )
-    recent_runs = _recent_run_summaries(runs if isinstance(runs, list) else [], limit=recent_limit)
+    recent_runs = _recent_run_summaries(active_runs, limit=recent_limit)
     baseline_idle_pcap_missing_streak = _baseline_idle_pcap_missing_streak(recent_runs)
     baseline_idle_low_signal_streak = _baseline_idle_low_signal_streak(recent_runs)
     baseline_connected_insufficient_duration_streak = _baseline_connected_insufficient_duration_streak(
@@ -342,11 +387,9 @@ def load_dataset_run_state(
         baseline_connected_insufficient_duration_streak >= 2
         and counts.baseline_valid_runs >= int(cfg.baseline_required)
     ):
-        effective_suggested_profile = "interaction_scripted"
+        effective_suggested_profile = _preferred_interactive_profile_for_package(package, config=cfg)
 
-    paper_eligible_local, quota_counted_local, exclusion_reason_top = _local_rollups(
-        runs if isinstance(runs, list) else []
-    )
+    paper_eligible_local, quota_counted_local, exclusion_reason_top = _local_rollups(active_runs)
     evidence_status, local_evidence_dir_count = _evidence_state(package)
 
     return DatasetRunState(
@@ -375,6 +418,8 @@ def load_dataset_run_state(
         baseline_idle_pcap_missing_streak=baseline_idle_pcap_missing_streak,
         baseline_idle_low_signal_streak=baseline_idle_low_signal_streak,
         baseline_connected_insufficient_duration_streak=baseline_connected_insufficient_duration_streak,
+        historical_valid_runs=int(scoped_counts.get("legacy_valid") or scoped_runs.get("legacy_valid") or 0),
+        historical_build_count=int(scoped_counts.get("legacy_builds") or scoped_runs.get("legacy_builds") or 0),
     )
 
 

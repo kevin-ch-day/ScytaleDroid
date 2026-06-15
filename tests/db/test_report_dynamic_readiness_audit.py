@@ -119,6 +119,24 @@ def test_match_baseline_for_plan_uses_repo_filename_pattern(tmp_path: Path) -> N
     assert report._match_baseline_for_plan(plan_path, baseline_dir) == str(target)
 
 
+def test_load_freeze_manifest_prefers_active_research_cohort_anchor(monkeypatch, tmp_path: Path) -> None:
+    freeze_path = tmp_path / "archive" / "research_cohorts" / "research_dataset_beta" / "dataset_freeze.json"
+    freeze_path.parent.mkdir(parents=True, exist_ok=True)
+    freeze_path.write_text(
+        json.dumps({"included_run_ids": ["run-beta-1"]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.research_cohort_archive.resolve_dataset_freeze_read_path",
+        lambda: freeze_path,
+    )
+
+    ids, notes = report._load_freeze_manifest(tmp_path)
+
+    assert ids == {"run-beta-1"}
+    assert notes == []
+
+
 def test_main_generates_summary_contract_and_output_bundle_without_dynamic_evidence(
     tmp_path: Path,
     monkeypatch,

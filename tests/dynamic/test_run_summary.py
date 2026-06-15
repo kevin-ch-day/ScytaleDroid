@@ -59,6 +59,16 @@ def test_print_run_summary_falls_back_to_result_errors_when_event_missing(tmp_pa
     assert "Session blocked by plan validation. fallback blocker" in out
 
 
+def test_print_run_summary_separates_run_mode_from_wall_clock(tmp_path, capsys) -> None:
+    print_run_summary(_blocked_result(tmp_path), "Cohort")
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Run mode" in out
+    assert "Cohort" in out
+    assert "Session wall-clock" in out
+    assert "Cohort (30s)" not in out
+
+
 def test_print_run_summary_distinguishes_missing_tools_blockers(tmp_path, capsys) -> None:
     notes_dir = tmp_path / "notes"
     notes_dir.mkdir(parents=True, exist_ok=True)

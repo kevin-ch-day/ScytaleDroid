@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from scytaledroid.Database.db_utils.phase_a_typed_replacements import backfill_typed_replacement_columns
+from scytaledroid.Database.db_queries import canonical as canonical_queries
+from scytaledroid.Database.db_queries import dynamic as dynamic_queries
 from scytaledroid.Database.db_utils.schema_migration_registry import (
     build_schema_migration_report,
     attach_receipt_path_to_latest_migration,
@@ -28,7 +30,20 @@ def test_schema_migration_registry_has_no_duplicate_ids() -> None:
     assert duplicate_registry_ids() == {}
     assert len(registered_migrations()) >= 3
     assert registry_version_chain_issues() == []
-    assert latest_registered_schema_version() == "0.3.7-research-cohorts"
+    assert latest_registered_schema_version() == "0.3.11-dynamic-service-signals"
+
+
+def test_runtime_schema_version_ddl_matches_live_hotfix_contract() -> None:
+    canonical_schema_text = canonical_queries.schema.__file__
+    dynamic_schema_text = dynamic_queries.schema.__file__
+    assert canonical_schema_text
+    assert dynamic_schema_text
+    canonical_source = Path(canonical_schema_text).read_text(encoding="utf-8")
+    dynamic_source = Path(dynamic_schema_text).read_text(encoding="utf-8")
+    assert "schema_version VARCHAR(64) DEFAULT NULL" in canonical_source
+    assert "schema_version     VARCHAR(64)  DEFAULT NULL" in dynamic_source
+    assert "schema_version VARCHAR(32) DEFAULT NULL" not in canonical_source
+    assert "schema_version     VARCHAR(32)  DEFAULT NULL" not in dynamic_source
 
 
 def test_schema_version_gte_handles_semantic_and_branch_like_versions() -> None:

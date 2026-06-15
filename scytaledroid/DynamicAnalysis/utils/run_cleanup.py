@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    resolve_dataset_plan_read_path,
+    write_dataset_plan_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -169,7 +173,7 @@ def prune_incomplete_dynamic_run_dirs() -> int:
 
 def reset_package_dataset_tracker(package_name: str) -> bool:
     """Remove the package entry from dataset_plan.json if present."""
-    tracker_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    tracker_path = resolve_dataset_plan_read_path()
     if not tracker_path.exists():
         return True
     payload = _load_json(tracker_path)
@@ -179,7 +183,7 @@ def reset_package_dataset_tracker(package_name: str) -> bool:
     if package_name not in apps:
         return True
     del apps[package_name]
-    tracker_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    write_dataset_plan_payload(payload)
     return True
 
 

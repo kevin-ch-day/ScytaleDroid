@@ -12,6 +12,9 @@ import shutil
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    resolve_dataset_freeze_read_path,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 
@@ -21,14 +24,14 @@ def _dynamic_evidence_root() -> Path:
 def _canonical_profile_v2_freeze_anchor_path() -> Path:
     """Return the canonical Profile v2 freeze anchor path.
 
-    Prefer the stable filename `data/archive/dataset_freeze.json`. Fall back to
+    Prefer the active cohort freeze anchor. Fall back to
     the historically pinned timestamped filename if present.
     """
 
-    archive = Path(app_config.DATA_DIR) / "archive"
-    stable = archive / "dataset_freeze.json"
+    stable = resolve_dataset_freeze_read_path()
     if stable.exists():
         return stable
+    archive = Path(app_config.DATA_DIR) / "archive"
     legacy = archive / "dataset_freeze-20260208T201527Z.json"
     return legacy
 
@@ -586,7 +589,7 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
 
 def evidence_verify_freeze_immutability(*, pause: bool = True) -> None:
     """Verify the frozen inputs for included runs have not changed since freeze."""
-    out_dir = Path(app_config.DATA_DIR) / "archive"
+    out_dir = resolve_dataset_freeze_read_path().parent
     # Paper #2 (PM-locked): always prefer the canonical checksummed freeze anchor
     # used by Phase E. Only fall back to other freeze files if that anchor is absent.
     from scytaledroid.DynamicAnalysis.ml.ml_parameters_profile import FREEZE_CANONICAL_FILENAME

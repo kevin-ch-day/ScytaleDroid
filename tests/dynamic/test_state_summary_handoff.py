@@ -33,7 +33,7 @@ def test_static_handoff_plan_summary_reports_dataset_readiness(monkeypatch, tmp_
     _write_plan(plan_dir / "com.example.bad-plan.json", "com.example.bad", valid=False)
 
     monkeypatch.setattr(state_summary.app_config, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(state_summary, "load_dataset_packages", lambda: ["com.example.one", "com.example.two"])
+    monkeypatch.setattr(state_summary, "active_research_cohort_packages", lambda: ("com.example.one", "com.example.two"))
 
     out = state_summary.build_static_handoff_plan_summary()
 
@@ -50,7 +50,7 @@ def test_static_handoff_plan_summary_lists_missing_dataset_plans(monkeypatch, tm
     (tmp_path / "static_analysis" / "dynamic_plan").mkdir(parents=True)
 
     monkeypatch.setattr(state_summary.app_config, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(state_summary, "load_dataset_packages", lambda: ["com.example.missing"])
+    monkeypatch.setattr(state_summary, "active_research_cohort_packages", lambda: ("com.example.missing",))
 
     out = state_summary.build_static_handoff_plan_summary()
 

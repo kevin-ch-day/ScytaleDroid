@@ -138,7 +138,7 @@ def test_write_dynamic_prune_receipts(tmp_path: Path) -> None:
         expected_count_match=True,
         expected_run_count_match=True,
     )
-    paths = prune.write_dynamic_prune_receipts(tmp_path, stem="artifact_registry_dynamic_prune_test", proposal=proposal, apply_requested=False)
+    prune.write_dynamic_prune_receipts(tmp_path, stem="artifact_registry_dynamic_prune_test", proposal=proposal, apply_requested=False)
     assert (tmp_path / "artifact_registry_dynamic_prune_test.json").is_file()
     assert (tmp_path / "artifact_registry_dynamic_prune_test.csv").is_file()
     assert (tmp_path / "artifact_registry_dynamic_prune_test.sql").is_file()

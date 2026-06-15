@@ -29,12 +29,18 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2  # noqa: E402
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (  # noqa: E402
+    resolve_dataset_freeze_read_path,
+)
 
-FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
 OUT_DIR = REPO_ROOT / "output" / "publication" / "qa"
 OUT_JSON = OUT_DIR / "ml_audit_report_v1.json"
 OUT_CSV = OUT_DIR / "ml_audit_report_v1.csv"
+
+
+def _freeze_path() -> Path:
+    return resolve_dataset_freeze_read_path()
 
 
 def _print_help() -> None:
@@ -143,9 +149,10 @@ class RunAuditRow:
 
 
 def main() -> int:
-    if not FREEZE.exists():
-        raise SystemExit(f"Missing freeze anchor: {FREEZE}")
-    freeze = _rjson(FREEZE) or {}
+    freeze_path = _freeze_path()
+    if not freeze_path.exists():
+        raise SystemExit(f"Missing freeze anchor: {freeze_path}")
+    freeze = _rjson(freeze_path) or {}
     included = [str(x) for x in (freeze.get("included_run_ids") or [])]
     if not included:
         raise SystemExit("Freeze manifest has no included_run_ids")
