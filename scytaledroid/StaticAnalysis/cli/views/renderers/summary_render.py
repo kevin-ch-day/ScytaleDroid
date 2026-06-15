@@ -1000,29 +1000,99 @@ def _string_lines(string_payload: Mapping[str, object], *, verbose_output: bool)
         if remaining_vendors > 0:
             lines.append(f"    (+{remaining_vendors} more)")
 
+    pair_payload = []
+    actionable_payload = []
+    exploratory_payload = []
+    posture_counts = {}
+    if isinstance(aggregates, Mapping):
+        pair_entries = aggregates.get("pair_matches")
+        if isinstance(pair_entries, Sequence):
+            pair_payload = [entry for entry in pair_entries if isinstance(entry, Mapping)]
+        actionable_entries = aggregates.get("actionable_strings")
+        if isinstance(actionable_entries, Sequence):
+            actionable_payload = [entry for entry in actionable_entries if isinstance(entry, Mapping)]
+        exploratory_entries = aggregates.get("exploratory_strings")
+        if isinstance(exploratory_entries, Sequence):
+            exploratory_payload = [entry for entry in exploratory_entries if isinstance(entry, Mapping)]
+        posture_map = aggregates.get("posture_counts")
+        if isinstance(posture_map, Mapping):
+            posture_counts = posture_map
+
+    if pair_payload:
+        lines.append("")
+        lines.append("  String Pair Matches")
+        for entry in pair_payload[:sample_limit]:
+            pair_group = str(entry.get("pair_group") or "pair")
+            pair_type = str(entry.get("pair_type") or "match")
+            roots = entry.get("matched_endpoint_roots")
+            root_text = ""
+            if isinstance(roots, Sequence) and not isinstance(roots, (str, bytes, bytearray)):
+                cleaned = [str(item) for item in roots if str(item or "").strip()]
+                if cleaned:
+                    root_text = f"  roots={', '.join(cleaned[:3])}"
+            detail = f"{pair_group} [{pair_type}]{root_text}"
+            lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
+
+    if actionable_payload:
+        lines.append("")
+        lines.append(
+            "  Actionable String Signals"
+            + (
+                f" ({int(posture_counts.get('actionable', len(actionable_payload)) or len(actionable_payload))})"
+                if posture_counts
+                else ""
+            )
+        )
+        for entry in actionable_payload[:sample_limit]:
+            bucket = str(entry.get("bucket") or "string")
+            masked = str(entry.get("value_masked") or "(hidden)")
+            src = str(entry.get("src") or "string")
+            root = str(entry.get("root_domain") or "").strip()
+            pair_group = str(entry.get("pair_group") or "").strip()
+            context = str(entry.get("api_context") or "").strip()
+            detail = f"{bucket}: {masked}  Src: {src}"
+            extras = [item for item in (root, context, pair_group) if item]
+            if extras:
+                detail += "  [" + " · ".join(extras) + "]"
+            lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
+
     entropy_samples = []
     if isinstance(aggregates, Mapping):
         entropy_entries = aggregates.get("entropy_high_samples")
         if isinstance(entropy_entries, Sequence):
             entropy_samples = [entry for entry in entropy_entries if isinstance(entry, Mapping)]
 
-    if entropy_samples:
+    if entropy_samples or exploratory_payload:
         total_entropy = _count_value("entropy_high", source=extra) or len(entropy_samples)
         lines.append("")
-        lines.append("  High-Entropy Strings")
+        lines.append("  Exploratory String Signals")
+        if exploratory_payload:
+            shown_exploratory = min(len(exploratory_payload), sample_limit)
+            for entry in exploratory_payload[:shown_exploratory]:
+                bucket = str(entry.get("bucket") or "string")
+                masked = str(entry.get("value_masked") or "(hidden)")
+                src = str(entry.get("src") or "string")
+                ownership = str(entry.get("ownership_class") or "").strip()
+                context = str(entry.get("api_context") or "").strip()
+                detail = f"{bucket}: {masked}  Src: {src}"
+                extras = [item for item in (ownership, context) if item]
+                if extras:
+                    detail += "  [" + " · ".join(extras) + "]"
+                lines.extend(_wrap_lines(detail, indent=4, subsequent_indent=6))
         shown = min(len(entropy_samples), max(2, sample_limit))
         try:
             min_entropy = float(options.get("min_entropy", 5.5))
         except Exception:
             min_entropy = 5.5
-        lines.append(
-            f"    {shown} samples shown (entropy ≥{min_entropy:.2f}); +{max(total_entropy - shown, 0)} more total"
-        )
-        for entry in entropy_samples[:shown]:
-            masked = str(entry.get("masked") or "(hidden)")
-            src = str(entry.get("src") or "string")
-            detail = f"      {masked}                         Src: {src}"
-            lines.extend(_wrap_lines(detail, indent=6, subsequent_indent=8))
+        if entropy_samples:
+            lines.append(
+                f"    High-entropy subset: {shown} shown (entropy ≥{min_entropy:.2f}); +{max(total_entropy - shown, 0)} more total"
+            )
+            for entry in entropy_samples[:shown]:
+                masked = str(entry.get("masked") or "(hidden)")
+                src = str(entry.get("src") or "string")
+                detail = f"      {masked}                         Src: {src}"
+                lines.extend(_wrap_lines(detail, indent=6, subsequent_indent=8))
 
     return lines
 

@@ -44,6 +44,13 @@ class AnalysisConfig:
     enable_string_index: bool = True
     #: When false, string indexing skips ``res`` table strings (dex/assets only; faster on large APKs).
     string_index_include_resources: bool = True
+    #: Split-member indexing policy. Base APKs always keep the full-fidelity path.
+    split_member_string_index_policy: str = "lightweight"
+    post_run_string_mode: str = "both"
+    post_run_string_min_entropy: float = 4.8
+    post_run_string_max_samples: int | None = None
+    post_run_string_cleartext_only: bool = False
+    post_run_string_include_https_risk: bool | None = None
     secrets_sampler: SecretsSamplerConfig | None = None
 
 

@@ -36,6 +36,7 @@ from .constants import (
     SCHEME_PREFIXES,
 )
 from .indexing import IndexedString, StringIndex, build_string_index
+from .origins import is_code_origin
 from .parsing.host_normalizer import NormalizedHost, normalize_host
 from .parsing.punctuation import strip_wrap_punct
 from .parsing.url_tokenizer import Candidate, extract_candidates
@@ -427,7 +428,7 @@ def _reconstruct_constant_hosts(entries: Sequence[IndexedString]) -> tuple[Index
     seen_values = {entry.value.strip() for entry in entries}
     grouped: MutableMapping[tuple[str, str | None], list[IndexedString]] = {}
     for entry in entries:
-        if entry.origin_type != "dex" or entry.byte_offset is None:
+        if not is_code_origin(entry.origin_type) or entry.byte_offset is None:
             continue
         key = (entry.origin, entry.source_sha256)
         grouped.setdefault(key, []).append(entry)
@@ -1191,7 +1192,7 @@ def _should_skip_regex(value: str) -> bool:
 
 
 def _looks_obfuscated(entry: IndexedString) -> bool:
-    if entry.origin_type != "dex":
+    if not is_code_origin(entry.origin_type):
         return False
     token = entry.value
     if not token or len(token) > 48:

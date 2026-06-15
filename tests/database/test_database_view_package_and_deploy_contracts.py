@@ -45,7 +45,7 @@ def test_apk_suffix_package_is_quarantined_not_rejected() -> None:
 def test_web_app_directory_prefers_completed_canonical_static_rows() -> None:
     sql = views.CREATE_V_WEB_APP_DIRECTORY
     assert (
-        "SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name\n"
+        "SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name\n"
         "  FROM apps\n  UNION" in sql
     )
     assert "UPPER(COALESCE(sar2.status, '')) = 'COMPLETED'" in sql

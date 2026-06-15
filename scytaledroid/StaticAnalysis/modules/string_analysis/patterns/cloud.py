@@ -16,6 +16,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Google",
         tags=("api_key", "google"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("aiza",),
     ),
     StringPattern(
         name="google_oauth_client",
@@ -25,6 +26,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Google",
         tags=("oauth", "client_id"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=(".apps.googleusercontent.com",),
     ),
     StringPattern(
         name="firebase_database",
@@ -34,6 +36,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Firebase",
         tags=("url", "database"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("firebaseio.com", "firebasedatabase.app"),
     ),
     StringPattern(
         name="firebase_storage",
@@ -43,6 +46,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Firebase",
         tags=("storage", "bucket"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("gs://", ".appspot.com"),
     ),
     StringPattern(
         name="firebase_fcm_sender_id",
@@ -52,6 +56,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Firebase",
         tags=("messaging", "id"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("gcm", "fcm", "projectnumber", "project_number"),
     ),
     StringPattern(
         name="firebase_api_key",
@@ -61,6 +66,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Firebase",
         tags=("api_key", "firebase"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("aizasy",),
     ),
     # AWS
     StringPattern(
@@ -71,6 +77,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="AWS",
         tags=("api_key", "aws"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("akia",),
     ),
     StringPattern(
         name="aws_secret_access_key",
@@ -81,6 +88,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         tags=("secret", "aws"),
         min_length=40,
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("aws", "aws_secret_access_key"),
     ),
     StringPattern(
         name="aws_session_token",
@@ -90,6 +98,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="AWS",
         tags=("session", "aws"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("asia",),
     ),
     StringPattern(
         name="aws_s3_endpoint",
@@ -99,6 +108,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="AWS",
         tags=("storage", "endpoint"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("amazonaws.com", "s3."),
     ),
     # Azure / GCP
     StringPattern(
@@ -112,6 +122,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Azure",
         tags=("connection", "storage"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("defaultendpointsprotocol=", "accountname=", "accountkey="),
     ),
     StringPattern(
         name="gcp_service_account",
@@ -121,6 +132,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Google Cloud",
         tags=("service_account", "email"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=(".iam.gserviceaccount.com",),
     ),
 )
 

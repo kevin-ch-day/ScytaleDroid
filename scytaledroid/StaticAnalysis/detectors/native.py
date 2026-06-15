@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Sequence
 
 from ..core.context import DetectorContext
 from ..core.findings import (
@@ -14,6 +15,7 @@ from ..core.findings import (
     MasvsCategory,
     SeverityLevel,
 )
+from ..modules.string_analysis.origins import canonical_origin_type
 from .base import BaseDetector, register_detector
 
 _SUSPICIOUS_TOKENS = (
@@ -28,6 +30,8 @@ _SUSPICIOUS_TOKENS = (
     "ptrace",
     "gadget",
 )
+_ENTROPY_SAMPLE_BYTES = 131072
+_HASH_SAMPLE_BYTES = 8192
 
 
 @register_detector
@@ -54,9 +58,10 @@ class NativeHardeningDetector(BaseDetector):
                 findings=tuple(),
             )
 
-        suspicious_hits = _scan_suspicious_tokens(libs)
-        for entry in libs:
-            entry.pop("blob", None)
+        suspicious_hits = _scan_suspicious_tokens(
+            libs,
+            string_index=getattr(context, "string_index", None),
+        )
         entropy_samples = sorted(libs, key=lambda item: item["entropy"], reverse=True)[:5]
 
         evidence: list[EvidencePointer] = []
@@ -93,6 +98,10 @@ class NativeHardeningDetector(BaseDetector):
             "jni_density": _calc_jni_density(libs),
             "suspicious_hits": len(suspicious_hits),
             "entropy_top": entropy_samples,
+            "entropy_sampling_bytes": _ENTROPY_SAMPLE_BYTES,
+            "suspicious_scan_source": "string_index"
+            if getattr(context, "string_index", None) is not None
+            else "binary_fallback",
         }
 
         return DetectorResult(
@@ -122,33 +131,99 @@ def _collect_native_libraries(apk) -> list[dict[str, object]]:
             continue
         if not blob:
             continue
+        sample = _sample_blob(blob, max_bytes=_ENTROPY_SAMPLE_BYTES)
         libs.append(
             {
                 "path": name,
                 "size_bytes": len(blob),
-                "entropy": round(_shannon_entropy(blob), 3),
-                "hash_short": _short_hash(blob),
-                "blob": blob,
+                "entropy": round(_shannon_entropy(sample), 3),
+                "hash_short": _short_hash(sample),
+                "scan_sample": sample,
             }
         )
     return libs
 
 
-def _scan_suspicious_tokens(libs: list[dict[str, object]]) -> list[dict[str, object]]:
+def _sample_blob(blob: bytes, *, max_bytes: int) -> bytes:
+    if len(blob) <= max_bytes:
+        return blob
+    segment = max(max_bytes // 3, 1)
+    middle = max_bytes - (segment * 2)
+    middle = max(middle, 1)
+    mid_start = max((len(blob) // 2) - (middle // 2), 0)
+    return b"".join(
+        (
+            blob[:segment],
+            blob[mid_start : mid_start + middle],
+            blob[-segment:],
+        )
+    )
+
+
+def _scan_suspicious_tokens(
+    libs: list[dict[str, object]],
+    *,
+    string_index=None,
+) -> list[dict[str, object]]:
+    if string_index is not None and not string_index.is_empty():
+        hits = _scan_suspicious_tokens_from_index(libs, string_index.strings)
+        if hits:
+            return hits
+    return _scan_suspicious_tokens_from_samples(libs)
+
+
+def _scan_suspicious_tokens_from_index(
+    libs: list[dict[str, object]],
+    entries: Sequence[object],
+) -> list[dict[str, object]]:
+    lib_paths = {str(lib.get("path") or "") for lib in libs}
+    if not lib_paths:
+        return []
+
     hits: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in entries:
+        origin = str(getattr(entry, "origin", "") or "")
+        if origin not in lib_paths:
+            continue
+        if canonical_origin_type(getattr(entry, "origin_type", None)) != "native":
+            continue
+        lowered = str(getattr(entry, "value", "") or "").lower()
+        if not lowered:
+            continue
+        for token in _SUSPICIOUS_TOKENS:
+            if token not in lowered:
+                continue
+            key = (origin, token)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append({"path": origin, "token": token})
+    return hits
+
+
+def _scan_suspicious_tokens_from_samples(libs: list[dict[str, object]]) -> list[dict[str, object]]:
+    hits: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
     for lib in libs:
-        blob = lib.get("blob")
+        blob = lib.get("scan_sample")
         if not isinstance(blob, (bytes, bytearray)):
             continue
         text = blob.decode("utf-8", errors="ignore").lower()
         for token in _SUSPICIOUS_TOKENS:
-            if token in text:
-                hits.append({"path": lib["path"], "token": token})
+            if token not in text:
+                continue
+            key = (str(lib.get("path") or ""), token)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append({"path": lib.get("path"), "token": token})
     return hits
 
 
 def _short_hash(blob: bytes) -> str:
-    return f"{sum(blob) % 65536:04x}"
+    sample = blob[:_HASH_SAMPLE_BYTES]
+    return f"{sum(sample) % 65536:04x}"
 
 
 def _calc_jni_density(libs: list[dict[str, object]]) -> float:

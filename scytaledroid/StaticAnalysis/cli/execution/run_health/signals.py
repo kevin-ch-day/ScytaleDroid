@@ -12,18 +12,25 @@ def string_summary_signals(
     *,
     discovered_artifacts: int,
 ) -> dict[str, object]:
-    """Describe post-run analyse_string_payload rollup (base APK only when splits exist)."""
-    scope = "base_apk_only"
+    """Describe post-run string payload rollup semantics for this app."""
+    scope = "single_artifact"
     warning: str | None = None
     if discovered_artifacts > 1:
+        scope = "base_apk_only"
         warning = (
-            "split_specific_strings_not_in_post_summary: post-run analyse_string_payload uses "
-            "the base APK path only"
+            "split_specific_strings_not_in_post_summary: post-run string summary does not yet "
+            "confirm merged split coverage"
         )
 
     warnings_list: Sequence[object] = ()
     ok = True
     if isinstance(base_string_data, Mapping):
+        scope_token = str(base_string_data.get("aggregation_scope") or "").strip().lower()
+        if scope_token == "artifact_merged":
+            scope = "artifact_merged"
+            warning = None
+        elif scope_token == "single_artifact" and discovered_artifacts <= 1:
+            scope = "single_artifact"
         raw_w = base_string_data.get("warnings")
         if isinstance(raw_w, list):
             warnings_list = tuple(raw_w)

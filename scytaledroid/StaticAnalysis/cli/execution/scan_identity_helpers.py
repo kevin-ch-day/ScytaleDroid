@@ -182,6 +182,10 @@ def select_group_artifacts(group, *, scan_splits: bool) -> list:
 
     artifacts = _dedupe_artifacts(getattr(group, "artifacts", ()) or ())
     if scan_splits:
+        base_artifact = getattr(group, "base_artifact", None)
+        if base_artifact is not None and len(artifacts) > 1:
+            split_members = [artifact for artifact in artifacts if artifact is not base_artifact]
+            return split_members + [base_artifact]
         return artifacts
     base_artifact = getattr(group, "base_artifact", None)
     if base_artifact is not None:

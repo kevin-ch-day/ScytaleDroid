@@ -21,12 +21,22 @@ class StringPattern:
     min_length: int = 0
     preferred_origins: tuple[str, ...] | None = None
     context_keywords: tuple[str, ...] = ()
+    required_substrings: tuple[str, ...] = ()
 
-    def iter_matches(self, value: str) -> tuple[str, ...]:
+    def iter_matches(
+        self,
+        value: str,
+        *,
+        lowered_value: str | None = None,
+    ) -> tuple[str, ...]:
         """Return de-duplicated regex matches for *value*."""
 
         if not value or (self.min_length and len(value) < self.min_length):
             return tuple()
+        if self.required_substrings:
+            lowered = lowered_value if lowered_value is not None else value.lower()
+            if not any(token in lowered for token in self.required_substrings):
+                return tuple()
 
         seen: set[str] = set()
         matches: list[str] = []

@@ -432,10 +432,18 @@ def finish_report_after_analysis(
             pass
 
         t1 = time.monotonic()
-        saved_paths = save_report(
-            report,
-            execution_id=getattr(params, "execution_id", None),
-        )
+        execution_id = getattr(params, "execution_id", None)
+        try:
+            saved_paths = save_report(
+                report,
+                execution_id=execution_id,
+            )
+        except TypeError as exc:
+            # Compatibility bridge for older test doubles / wrappers that still expose
+            # the legacy save_report(report) signature.
+            if "unexpected keyword argument 'execution_id'" not in str(exc):
+                raise
+            saved_paths = save_report(report)
         if phase_timing_sink is not None:
             phase_timing_sink["persist_wall_s"] = phase_timing_sink.get("persist_wall_s", 0.0) + (
                 time.monotonic() - t1
@@ -555,6 +563,7 @@ def build_analysis_config(params: RunParameters) -> AnalysisConfig:
     enable_string_index = params.profile not in {"metadata", "permissions"}
     # Quick pipeline presets skip ARSC resource strings unless the operator picked the strings preset.
     string_index_include_resources = profile == "full" or params.profile == "strings"
+    split_member_string_index_policy = "full" if params.profile == "strings" else "lightweight"
 
     sampler = SecretsSamplerConfig(
         entropy_threshold=max(0.0, float(params.secrets_entropy)),
@@ -568,6 +577,12 @@ def build_analysis_config(params: RunParameters) -> AnalysisConfig:
         enabled_detectors=enabled_detectors or None,
         enable_string_index=enable_string_index,
         string_index_include_resources=string_index_include_resources,
+        split_member_string_index_policy=split_member_string_index_policy,
+        post_run_string_mode=params.strings_mode,
+        post_run_string_min_entropy=float(params.string_min_entropy),
+        post_run_string_max_samples=params.string_max_samples,
+        post_run_string_cleartext_only=bool(params.string_cleartext_only),
+        post_run_string_include_https_risk=params.string_include_https_risk,
         secrets_sampler=sampler,
     )
 

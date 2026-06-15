@@ -5,6 +5,10 @@ from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.core import pipeline
 from scytaledroid.StaticAnalysis.core.models import ManifestFlags
+from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.models import (
+    IndexedString,
+    StringIndex,
+)
 
 
 def test_resolve_hashes_for_analysis_reuses_trusted_canonical_metadata(
@@ -78,7 +82,7 @@ def test_resolve_hashes_for_analysis_falls_back_when_metadata_provenance_breaks(
     assert meta["hash_provenance_reason"] == "file_size_mismatch"
 
 
-def test_analyze_apk_records_timing_metadata_and_cached_base_string_payload(
+def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split_and_base_artifacts(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -169,7 +173,15 @@ def test_analyze_apk_records_timing_metadata_and_cached_base_string_payload(
     monkeypatch.setattr(pipeline, "load_permission_catalog", lambda: _FakePermissionCatalog())
     monkeypatch.setattr(pipeline, "_safe_tuple", lambda _callable, _meta, _key: ())
     monkeypatch.setattr(pipeline, "extract_network_security_policy", lambda *_a, **_k: None)
-    monkeypatch.setattr(pipeline, "build_string_index", lambda *_a, **_k: SimpleNamespace(strings=[]))
+    fake_index = StringIndex(
+        strings=(
+            IndexedString(value="const token", origin="classes.dex", origin_type="code"),
+            IndexedString(value="https://example.com", origin="res/values/strings.xml", origin_type="resource"),
+            IndexedString(value="libfoo", origin="lib/arm64-v8a/libfoo.so", origin_type="native"),
+            IndexedString(value="config-value", origin="assets/config.json", origin_type="asset"),
+        )
+    )
+    monkeypatch.setattr(pipeline, "build_string_index", lambda *_a, **_k: fake_index)
     monkeypatch.setattr(
         pipeline,
         "_analyse_strings_from_index",
@@ -179,13 +191,30 @@ def test_analyze_apk_records_timing_metadata_and_cached_base_string_payload(
     monkeypatch.setattr(pipeline, "run_detector_pipeline", lambda _context: ())
     monkeypatch.setattr(pipeline, "assemble_pipeline_artifacts", lambda _context: fake_artifacts)
 
-    report = pipeline.analyze_apk(apk_path, metadata={"is_split_member": False}, storage_root=tmp_path)
+    for is_split_member in (False, True):
+        report = pipeline.analyze_apk(
+            apk_path,
+            metadata={"is_split_member": is_split_member},
+            storage_root=tmp_path,
+        )
 
-    assert report.metadata["hash_seconds"] >= 0.0
-    assert report.metadata["string_index_seconds"] >= 0.0
-    assert report.metadata["artifact_total_wall_s"] >= 0.0
-    assert report.metadata["post_run_string_payload"] == {
-        "counts": {"endpoints": 1},
-        "samples": {},
-        "selected_samples": {},
-    }
+        assert report.metadata["hash_seconds"] >= 0.0
+        assert report.metadata["string_index_seconds"] >= 0.0
+        assert report.metadata["artifact_total_wall_s"] >= 0.0
+        assert report.metadata["string_index_total_strings"] == 4
+        assert report.metadata["string_index_by_origin_type"] == {
+            "code": 1,
+            "resource": 1,
+            "native": 1,
+            "asset": 1,
+        }
+        assert report.metadata["string_index_code_strings"] == 1
+        assert report.metadata["string_index_resource_strings"] == 1
+        assert report.metadata["string_index_native_strings"] == 1
+        assert report.metadata["string_index_asset_strings"] == 1
+        assert report.metadata["post_run_string_payload"] == {
+            "counts": {"endpoints": 1},
+            "samples": {},
+            "selected_samples": {},
+            "aggregation_scope": "single_artifact",
+        }

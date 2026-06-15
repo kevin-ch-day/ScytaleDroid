@@ -328,7 +328,7 @@ def render_app_completion(
                 print(
                     status_messages.status(
                         "Impact: detectors scan base and split APK rows when split scan is on; "
-                        "string payload rollup after the run is base-APK only for now.",
+                        "post-run string payloads are merged across scanned APK artifacts.",
                         level="info",
                         show_icon=False,
                         show_prefix=False,
@@ -337,7 +337,7 @@ def render_app_completion(
             else:
                 print(
                     status_messages.status(
-                        "Split scan: each APK artifact is scanned; string rollup stays base-APK for now.",
+                        "Split scan: each APK artifact is scanned; post-run string payloads are merged per app.",
                         level="info",
                         show_icon=False,
                         show_prefix=False,
@@ -456,7 +456,7 @@ def render_app_completion(
             if artifact_count > 1 and not suppress_per_app_cohort_echoes(params, app_total):
                 print(
                     status_messages.status(
-                        "String rollup note: analyse_string_payload is base-APK only for this app row.",
+                        "String rollup note: this app has multiple APK artifacts; post-run string summary coverage is tracked in run_health.json.",
                         level="info",
                         show_icon=False,
                         show_prefix=False,

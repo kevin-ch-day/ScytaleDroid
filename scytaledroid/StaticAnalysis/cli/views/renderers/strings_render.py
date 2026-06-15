@@ -89,6 +89,44 @@ def string_lines(string_payload: Mapping[str, object]) -> list[str]:
                     f"    {label_name}: total={data.get('total', 0)}, unique={data.get('unique', 0)}"
                 )
 
+    if isinstance(aggregates, Mapping):
+        posture_counts = aggregates.get("posture_counts")
+        if isinstance(posture_counts, Mapping) and posture_counts:
+            lines.append("")
+            lines.append("  String posture")
+            for key in ("actionable", "exploratory", "unknown"):
+                if key in posture_counts:
+                    lines.append(f"    {key:<24} {posture_counts.get(key)}")
+
+        pair_matches = aggregates.get("pair_matches")
+        if isinstance(pair_matches, Sequence):
+            pair_rows = [entry for entry in pair_matches if isinstance(entry, Mapping)]
+            if pair_rows:
+                lines.append("")
+                lines.append("  Pair matches")
+                for entry in pair_rows[: output_prefs.get_string_sample_limit()]:
+                    group = str(entry.get("pair_group") or "pair")
+                    pair_type = str(entry.get("pair_type") or "match")
+                    lines.extend(_wrap_lines(f"{group} [{pair_type}]", indent=4, subsequent_indent=6))
+
+        actionable = aggregates.get("actionable_strings")
+        if isinstance(actionable, Sequence):
+            actionable_rows = [entry for entry in actionable if isinstance(entry, Mapping)]
+            if actionable_rows:
+                lines.append("")
+                lines.append("  Actionable strings")
+                for entry in actionable_rows[: output_prefs.get_string_sample_limit()]:
+                    bucket = str(entry.get("bucket") or "string")
+                    masked = str(entry.get("value_masked") or "(hidden)")
+                    src = str(entry.get("src") or "string")
+                    lines.extend(
+                        _wrap_lines(
+                            f"{bucket}: {masked}  Src: {src}",
+                            indent=4,
+                            subsequent_indent=6,
+                        )
+                    )
+
     entropy_samples = []
     if isinstance(aggregates, Mapping):
         entropy_entries = aggregates.get("entropy_high_samples")
@@ -98,7 +136,7 @@ def string_lines(string_payload: Mapping[str, object]) -> list[str]:
     if entropy_samples:
         total_entropy = _count_value("entropy_high", source=extra) or len(entropy_samples)
         lines.append("")
-        lines.append("  High-Entropy Strings")
+        lines.append("  High-Entropy Strings (exploratory unless corroborated)")
         sample_limit = output_prefs.get_string_sample_limit()
         shown = min(len(entropy_samples), max(2, sample_limit))
         try:

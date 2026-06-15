@@ -15,11 +15,9 @@ from .static_analysis_menu_helpers import (
     apply_command_overrides,
     ask_run_controls,
     collect_view_options,
-    describe_last_selection,
     prompt_run_setup,
     render_reset_outcome,
     render_version_diff,
-    resolve_last_selection,
 )
 from .static_analysis_menu_ops import (
     choose_all_scope_variant as _choose_all_scope_variant,
@@ -219,8 +217,6 @@ def static_analysis_menu() -> None:
             prompt_utils.press_enter_to_continue()
             return
 
-        last_info = describe_last_selection(groups)
-
         print()
         if colors.colors_enabled():
             text_blocks.print_accent_rule(width=min(56, max(28, get_terminal_width() - 4)))
@@ -263,16 +259,15 @@ def static_analysis_menu() -> None:
         menu_utils.print_section("Run")
         print("  1) Analyze all apps — full analysis")
         print("  2) Analyze by profile")
-        print("  8) Analyze research cohort")
-        print("  3) Analyze one app")
-        print("  4) Re-analyze last app")
-        print("  7) Analyze exact APK hash from dynamic/static worklist")
+        print("  3) Analyze research cohort")
+        print("  4) Analyze one app")
+        print("  5) Analyze exact APK hash from dynamic/static worklist")
         menu_utils.print_section("Customize")
         print("  A) Advanced all-app run — choose size & preset")
 
         menu_utils.print_section("Review")
-        print("  5) View previous static runs")
-        print("  6) Compare two app versions")
+        print("  6) View previous static runs")
+        print("  7) Compare two app versions")
         print("  D) APK drilldown")
         print("  L) Library details")
         menu_utils.print_section("MASVS (database-backed)")
@@ -284,7 +279,7 @@ def static_analysis_menu() -> None:
         print("0) Back")
 
         choice = prompt_utils.get_choice(
-            ["1", "A", "2", "8", "3", "4", "5", "6", "7", "D", "L", "M", "V", "E", "0"],
+            ["1", "2", "3", "4", "5", "6", "7", "A", "D", "L", "M", "V", "E", "0"],
             default="1",
             casefold=True,
         )
@@ -292,7 +287,7 @@ def static_analysis_menu() -> None:
         if choice == "0":
             break
 
-        if choice == "5":
+        if choice == "6":
             render_static_diagnostics_menu()
             continue
 
@@ -318,20 +313,7 @@ def static_analysis_menu() -> None:
             apk_library_menu()
             continue
 
-        if choice == "4":
-            command = get_command("3")
-            selection = resolve_last_selection(groups)
-            if command is None or selection is None:
-                print(status_messages.status("No prior app is available to re-analyze.", level="warn"))
-                prompt_utils.press_enter_to_continue()
-                continue
-            if last_info.get("label"):
-                print()
-                menu_utils.print_header("Re-analyze Last App", str(last_info.get("label") or ""))
-            _dispatch_run(command, selection)
-            continue
-
-        if choice == "6":
+        if choice == "7":
             selection = _search_app_scope(groups)
             if selection is None:
                 continue
@@ -340,7 +322,7 @@ def static_analysis_menu() -> None:
             prompt_utils.press_enter_to_continue()
             continue
 
-        if choice == "7":
+        if choice == "5":
             selected = _choose_exact_dynamic_worklist_target()
             if selected is None:
                 continue
@@ -418,9 +400,9 @@ def static_analysis_menu() -> None:
             )
         elif choice == "2":
             selection = select_category_scope(groups)
-        elif choice == "8":
-            selection = _choose_research_cohort_scope(groups)
         elif choice == "3":
+            selection = _choose_research_cohort_scope(groups)
+        elif choice == "4":
             selection = _search_app_scope(groups)
         else:
             print(status_messages.status("Unsupported option selected.", level="warn"))

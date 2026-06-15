@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from collections import Counter, defaultdict
 from collections.abc import Mapping, MutableMapping
 from contextlib import redirect_stderr, redirect_stdout
@@ -17,9 +18,12 @@ from scytaledroid.Utils.LoggingUtils import logging_engine
 from ..modules.string_analysis import (
     BUCKET_ORDER,
     StringHit,
+    apply_pair_enrichment,
     build_aggregates,
     build_bucket_overview,
     build_string_index,
+    enrich_hit,
+    should_skip_split_regex_work,
 )
 from ..modules.string_analysis.allowlist import DEFAULT_POLICY_ROOT, load_noise_policy
 from ..modules.string_analysis.constants import (
@@ -27,6 +31,7 @@ from ..modules.string_analysis.constants import (
     DOCUMENTARY_ROOTS,
     FILE_URI_PATTERN,
 )
+from ..modules.string_analysis.origins import is_code_origin, is_resource_origin
 from ..modules.string_analysis.selection import select_samples
 from .strings_capture import (
     _extract_bounds_warnings,
@@ -48,6 +53,17 @@ from .strings_helpers import (
     _source_type_for,
 )
 from .strings_runtime import get_config
+
+_SECRET_TOKEN_CHAR_PATTERN = re.compile(r"^[A-Za-z0-9_:/+=.@$,\-]+$")
+_SCRIPT_BLOB_HINTS = (
+    "function(",
+    "=>{",
+    "module.exports",
+    "object.defineproperty",
+    "sourceMappingURL".lower(),
+    "webpack",
+    "__esmodule",
+)
 
 
 def _shannon_entropy(value: str) -> float:
@@ -87,6 +103,81 @@ def _noise_tag(value: str, source: str | None, policy) -> str | None:
     return None
 
 
+def _looks_script_blob(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    lowered = stripped.lower()
+    if any(marker in lowered for marker in _SCRIPT_BLOB_HINTS):
+        return True
+    punctuation = sum(
+        1 for char in stripped if not char.isalnum() and not char.isspace()
+    )
+    whitespace = sum(1 for char in stripped if char.isspace())
+    length = len(stripped)
+    if length >= 256 and whitespace > 0:
+        return True
+    if length >= 128 and punctuation / max(length, 1) > 0.22:
+        return True
+    return False
+
+
+def _looks_secret_shaped(value: str) -> bool:
+    stripped = value.strip()
+    if len(stripped) < 16:
+        return False
+    if len(stripped) > 512:
+        return False
+    if any(char.isspace() for char in stripped):
+        return False
+    if not _SECRET_TOKEN_CHAR_PATTERN.fullmatch(stripped):
+        return False
+    alnum = sum(1 for char in stripped if char.isalnum())
+    if alnum < 12:
+        return False
+    allowed = sum(
+        1 for char in stripped if char.isalnum() or char in "_:/+=.@$,-"
+    )
+    return allowed / len(stripped) >= 0.9
+
+
+def _looks_split_native_entropy_noise(
+    *,
+    src: str,
+    source_type: str | None,
+    artifact_context: Mapping[str, object] | None,
+) -> bool:
+    if not artifact_context or not bool(artifact_context.get("is_split_member")):
+        return False
+    if source_type not in {"asset", "native"}:
+        return False
+    lowered_src = str(src or "").strip().lower()
+    return lowered_src.startswith("lib/")
+
+
+def _should_emit_high_entropy_hit(
+    value: str,
+    *,
+    src: str,
+    source_type: str | None,
+    artifact_context: Mapping[str, object] | None = None,
+) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    if _looks_split_native_entropy_noise(
+        src=src,
+        source_type=source_type,
+        artifact_context=artifact_context,
+    ):
+        return False
+    if _looks_script_blob(stripped):
+        return False
+    if not _looks_secret_shaped(stripped):
+        return False
+    return True
+
+
 def _analyse_strings_from_index(
     index,
     *,
@@ -95,6 +186,7 @@ def _analyse_strings_from_index(
     max_samples: int | None,
     cleartext_only: bool,
     include_https_risk: bool | None,
+    artifact_context: Mapping[str, object] | None = None,
     warnings: list[str] | None = None,
     resource_strings_skipped: bool = False,
 ) -> Mapping[str, object]:
@@ -106,19 +198,19 @@ def _analyse_strings_from_index(
     entries = sorted(
         index.strings,
         key=lambda entry: (
-            0 if entry.origin_type == "code" else 1,
+            0 if is_code_origin(entry.origin_type) else 1,
             entry.origin,
             entry.value,
         ),
     )
 
     if mode == "dex":
-        entries = [entry for entry in entries if entry.origin_type == "code"]
+        entries = [entry for entry in entries if is_code_origin(entry.origin_type)]
     elif mode == "resources":
         entries = [
             entry
             for entry in entries
-            if entry.origin_type in {"resource", "raw", "asset"}
+            if is_resource_origin(entry.origin_type) or entry.origin_type == "asset"
         ]
 
     counts: dict[str, int] = {bucket: 0 for bucket in BUCKET_ORDER}
@@ -140,6 +232,7 @@ def _analyse_strings_from_index(
     cloud_hits: list[tuple[StringHit, str | None]] = []
     api_key_hits: list[StringHit] = []
     entropy_high_samples: list[StringHit] = []
+    package_name = str((artifact_context or {}).get("package_name") or "").strip() or None
 
     for entry in entries:
         value = entry.value
@@ -147,6 +240,12 @@ def _analyse_strings_from_index(
         source_type = _source_type_for(entry.origin_type)
         noise_tag = _noise_tag(value, entry.origin, policy)
         skip_regex = _should_skip_regex(value) or bool(noise_tag)
+        if not skip_regex and should_skip_split_regex_work(
+            entry,
+            artifact_context=artifact_context,
+        ):
+            skip_regex = True
+            extra_counts["split_exploratory_regex_skipped"] += 1
         if skip_regex:
             regex_skipped += 1
         if noise_tag:
@@ -176,6 +275,7 @@ def _analyse_strings_from_index(
                     source_type=source_type,
                     sample_hash=sample_hash,
                 )
+                hit = enrich_hit(hit, context=entry.context, package_name=package_name)
                 samples["endpoints"].append(hit)
                 counts["endpoints"] += 1
                 endpoint_totals.update(endpoint.categories)
@@ -208,6 +308,11 @@ def _analyse_strings_from_index(
                         resource_name=None,
                         source_type=source_type,
                         sample_hash=sample_hash,
+                    )
+                    clear_hit = enrich_hit(
+                        clear_hit,
+                        context=entry.context,
+                        package_name=package_name,
                     )
                     samples["http_cleartext"].append(clear_hit)
                     counts["http_cleartext"] += 1
@@ -244,6 +349,7 @@ def _analyse_strings_from_index(
                 source_type=source_type,
                 sample_hash=_short_hash(value),
             )
+            hit = enrich_hit(hit, context=entry.context, package_name=package_name)
             samples["uris"].append(hit)
             counts["uris"] += 1
             extra_counts[tag] += 1
@@ -267,6 +373,7 @@ def _analyse_strings_from_index(
                     source_type=source_type,
                     sample_hash=_short_hash(cloud.raw),
                 )
+                hit = enrich_hit(hit, context=entry.context, package_name=package_name)
                 samples["cloud_refs"].append(hit)
                 counts["cloud_refs"] += 1
                 cloud_hits.append((hit, cloud.region))
@@ -291,6 +398,7 @@ def _analyse_strings_from_index(
                     source_type=source_type,
                     sample_hash=_short_hash(token.value),
                 )
+                hit = enrich_hit(hit, context=entry.context, package_name=package_name)
                 samples["api_keys"].append(hit)
                 counts["api_keys"] += 1
                 api_key_hits.append(hit)
@@ -314,12 +422,21 @@ def _analyse_strings_from_index(
                     source_type=source_type,
                     sample_hash=_short_hash(analytic.identifier),
                 )
+                hit = enrich_hit(hit, context=entry.context, package_name=package_name)
                 samples["analytics_ids"].append(hit)
                 counts["analytics_ids"] += 1
                 analytics_vendor_ids[analytic.vendor][src].add(analytic.identifier)
 
         bucket, entropy_value = _entropy_bucket(value, minimum=min_entropy)
         if bucket:
+            if not _should_emit_high_entropy_hit(
+                value,
+                src=entry.origin,
+                source_type=source_type,
+                artifact_context=artifact_context,
+            ):
+                extra_counts["entropy_suppressed_noise"] += 1
+                continue
             hit = StringHit(
                 bucket="high_entropy",
                 value=value,
@@ -337,6 +454,7 @@ def _analyse_strings_from_index(
                 source_type=source_type,
                 sample_hash=_short_hash(value),
             )
+            hit = enrich_hit(hit, context=entry.context, package_name=package_name)
             samples["high_entropy"].append(hit)
             counts["high_entropy"] += 1
             extra_counts[f"entropy_{bucket}"] += 1
@@ -361,9 +479,16 @@ def _analyse_strings_from_index(
                 source_type=source_type,
                 sample_hash=_short_hash(value),
             )
+            hit = enrich_hit(hit, context=entry.context, package_name=package_name)
             samples["api_keys"].append(hit)
             counts["api_keys"] += 1
             extra_counts["jwt_candidate"] += 1
+
+    enriched_sample_hits, pair_matches = apply_pair_enrichment(samples)
+    samples = defaultdict(list, {bucket: list(hits) for bucket, hits in enriched_sample_hits.items()})
+    entropy_high_samples = [hit for hit in samples.get("high_entropy", []) if hit.tag == "entropy_high"]
+    api_key_hits = list(samples.get("api_keys", []))
+    endpoint_cleartext = list(samples.get("http_cleartext", []))
 
     raw_samples: dict[str, list[StringHit]] = {
         bucket: list(samples.get(bucket, []))
@@ -397,6 +522,13 @@ def _analyse_strings_from_index(
                 "resource_name": hit.resource_name,
                 "source_type": hit.source_type,
                 "sample_hash": hit.sample_hash,
+                "xref_context": hit.xref_context,
+                "api_context": hit.api_context,
+                "posture": hit.posture,
+                "ownership_class": hit.ownership_class,
+                "pair_group": hit.pair_group,
+                "verification_status": hit.verification_status,
+                "dynamic_corroboration": hit.dynamic_corroboration,
             }
             for hit in ordered
         ]
@@ -412,6 +544,8 @@ def _analyse_strings_from_index(
         cloud_hits=cloud_hits,
         analytics_vendor_ids=analytics_vendor_ids,
         entropy_high_samples=entropy_high_samples,
+        sample_hits=raw_samples,
+        pair_matches=pair_matches,
     )
 
     counts["trailing_punct_trimmed"] = extra_counts.get("trailing_punct_trimmed", 0)
@@ -452,6 +586,7 @@ def analyse_strings(
     max_samples: int | None = None,
     cleartext_only: bool = False,
     include_https_risk: bool | None = None,
+    artifact_context: Mapping[str, object] | None = None,
 ) -> Mapping[str, object]:
     """Return baseline string buckets for the APK at *apk_path*."""
 
@@ -470,7 +605,12 @@ def analyse_strings(
         buffer = io.StringIO()
         with redirect_stdout(buffer), redirect_stderr(buffer):
             index, fd_output = _run_with_fd_capture(
-                lambda: build_string_index(apk, include_resources=include_resources)
+                lambda: build_string_index(
+                    apk,
+                    include_resources=include_resources,
+                    is_split_member=bool(artifact_context and artifact_context.get("is_split_member")),
+                    split_member_policy="lightweight",
+                )
             )
         captured = buffer.getvalue() + fd_output
         bounds_warnings.extend(_extract_bounds_warnings(captured))
@@ -504,6 +644,7 @@ def analyse_strings(
         max_samples=max_samples,
         cleartext_only=cleartext_only,
         include_https_risk=include_https_risk,
+        artifact_context=artifact_context,
         warnings=bounds_warnings,
         resource_strings_skipped=bool(skip_resources_on_warn and initial_warnings),
     )

@@ -114,6 +114,24 @@ def test_correlation_exception_is_error(monkeypatch):
     assert "error" in (result.metrics or {})
 
 
+def test_correlation_split_member_defers_to_base_artifact() -> None:
+    ctx = SimpleNamespace(
+        intermediate_results=tuple(),
+        metadata={
+            "is_split_member": True,
+            "group_has_base_artifact": True,
+            "group_artifact_total": 3,
+        },
+    )
+
+    result = CorrelationDetector().run(ctx)
+
+    assert result.status is Badge.SKIPPED
+    assert "reason_codes" in (result.metrics or {})
+    assert "deferred_to_base_artifact" in (result.metrics or {}).get("reason_codes", [])
+    assert not result.findings
+
+
 # =============================================================================
 # Former tests/static_analysis/test_split_correlation_capture_boundary.py
 # =============================================================================

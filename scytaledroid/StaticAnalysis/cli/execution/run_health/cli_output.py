@@ -148,6 +148,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
 
     sr = doc.get("status_reasons") if isinstance(doc.get("status_reasons"), Mapping) else {}
     roll = doc.get("run_rollups") if isinstance(doc.get("run_rollups"), Mapping) else {}
+    string_note = doc.get("string_summary_note") if isinstance(doc.get("string_summary_note"), Mapping) else {}
     path = _run_health_display_path(doc)
 
     lines: list[str] = [
@@ -234,6 +235,17 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         ]
     )
 
+    if string_note:
+        string_scope = str(string_note.get("string_summary_scope") or "").strip() or "unknown"
+        max_artifacts = _safe_int_token(string_note.get("discovered_max_artifacts_per_app"))
+        lines.append(
+            "String summary   : "
+            f"{string_scope} | max_artifacts_per_app={max_artifacts}"
+        )
+        warning = str(string_note.get("string_summary_warning") or "").strip()
+        if warning:
+            lines.append(f"String note      : {warning}")
+
     if (
         detector_posture_status in {"partial", "warnings", "policy_or_finding_gates"}
         and det_exec == 0
@@ -242,13 +254,14 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
     ):
         lines.append(
             "Operator note    : Workflow completion and DB persistence finished successfully. "
-            "The internal session/app rollup may still use 'partial' for compatibility when detector "
-            "warnings and/or policy-finding gates fired; execution_errors=0 means no analyzer/pipeline crashes."
+            "Legacy compatibility counters may still record detector-warning/gate apps under 'partial'; "
+            "prefer workflow_completion_status, detector_posture, and apps_with_caveats. "
+            "execution_errors=0 means no analyzer/pipeline crashes."
         )
     if findings_capped > 0:
         lines.append(
             "Fidelity warning : "
-            f"PARTIAL - {findings_capped} runtime findings were capped before canonical DB persistence."
+            f"CAPPED - {findings_capped} runtime findings were capped before canonical DB persistence."
         )
         lines.append(
             "Persistence note : Some detector findings were intentionally omitted from canonical DB inserts "

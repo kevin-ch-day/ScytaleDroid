@@ -14,6 +14,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         category="auth",
         tags=("jwt", "token"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("eyj",),
     ),
     StringPattern(
         name="generic_bearer",
@@ -24,6 +25,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         category="auth",
         tags=("bearer", "token"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("bearer", "api token", "api-token", "api_token", "access token", "access-token", "access_token"),
     ),
     StringPattern(
         name="generic_api_assignment",
@@ -32,6 +34,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         category="auth",
         tags=("secret", "assignment"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("secret",),
     ),
     StringPattern(
         name="basic_auth_url",
@@ -40,6 +43,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         category="auth",
         tags=("basic_auth", "url"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("http://", "https://", "@"),
     ),
     StringPattern(
         name="private_key_block",
@@ -48,6 +52,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         category="crypto",
         tags=("private_key",),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("private key",),
     ),
 )
 

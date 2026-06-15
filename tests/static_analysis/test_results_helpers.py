@@ -488,7 +488,9 @@ def test_render_persistence_audit_summary_section_displays_reconciliation(monkey
             "reports": {
               "json_report_paths": 120,
               "latest_json_paths": 120,
-              "archive_json_paths": 120
+              "recorded_archive_json_paths": 0,
+              "archive_json_paths": 120,
+              "archive_dir": "data/static_analysis/reports/archive/sess-audit"
             }
           }
         }
@@ -511,8 +513,10 @@ def test_render_persistence_audit_summary_section_displays_reconciliation(monkey
     assert "Run statuses      : {'COMPLETED': 120}" in out
     assert "Findings (rows)   : 3368" in out
     assert "Legacy mirror (removed)" in out
-    assert "Reports (paths recorded on artifacts)" in out
-    assert "Under archive/    : 120" in out
+    assert "Reports" in out
+    assert "Recorded under latest/    : 120" in out
+    assert "Recorded under archive/   : 0" in out
+    assert "Filesystem archive count  : 120" in out
     assert "Gaps     : none" in out
 
 

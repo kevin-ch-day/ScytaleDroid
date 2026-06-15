@@ -66,6 +66,14 @@ def compute_static_context(plan_payload: dict[str, Any] | None, *, policy: Stati
     for item in domain_sources:
         if not isinstance(item, dict):
             continue
+        sources = item.get("sources")
+        if isinstance(sources, list):
+            for src in sources:
+                norm = str(src or "").strip().lower()
+                if not norm:
+                    continue
+                src_counts[norm] = src_counts.get(norm, 0) + 1
+            continue
         src = str(item.get("source") or "").strip().lower()
         if not src:
             continue

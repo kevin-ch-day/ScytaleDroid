@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunParameters
 from scytaledroid.StaticAnalysis.cli.execution.results_persistence import merge_persistence_metadata
@@ -9,6 +11,8 @@ from scytaledroid.StaticAnalysis.persistence import reports as reports_store
 from scytaledroid.StaticAnalysis.persistence.reports import (
     list_reports,
     refresh_saved_report_json,
+    rebuild_report_package_index,
+    report_package_index_path,
     reports_for_package,
     save_report,
 )
@@ -243,6 +247,106 @@ def test_reports_for_package_uses_persistent_index_after_cold_start(tmp_path: Pa
 
     assert len(reports) == 1
     assert reports[0].report.manifest.package_name == "com.example.app"
+
+
+def test_reports_for_package_bootstraps_persistent_index_without_full_report_scan(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "both")
+    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
+
+    save_report(_sample_report())
+    save_report(
+        StaticAnalysisReport(
+            file_path="/tmp/other.apk",
+            relative_path=None,
+            file_name="other.apk",
+            file_size=321,
+            hashes={"sha256": "c" * 64},
+            manifest=ManifestSummary(
+                package_name="com.other.app",
+                version_code="1",
+                version_name="1.0",
+                app_label="Other",
+            ),
+            metadata={"artifact": "other.apk", "session_stamp": "20260328-rda-full"},
+            generated_at="2026-03-30T15:58:13+00:00",
+        )
+    )
+
+    index_path = Path("data") / "static_analysis" / "reports" / "_cache" / "package_index_v1.json"
+    index_path.unlink()
+    reports_store._clear_report_cache()
+
+    monkeypatch.setattr(
+        reports_store,
+        "list_reports",
+        lambda: (_ for _ in ()).throw(AssertionError("cold package lookup should bootstrap the persistent index before a full report-object scan")),
+    )
+
+    reports = reports_for_package("com.example.app")
+
+    assert len(reports) == 1
+    assert reports[0].report.manifest.package_name == "com.example.app"
+    assert index_path.exists()
+
+
+def test_persistence_reports_imports_cleanly_in_fresh_interpreter() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from scytaledroid.StaticAnalysis.persistence import reports as reports_store; print(reports_store.__name__)",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "scytaledroid.StaticAnalysis.persistence.reports" in result.stdout
+
+
+def test_rebuild_report_package_index_returns_stats_and_writes_cache(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "both")
+    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
+
+    save_report(_sample_report())
+    save_report(
+        StaticAnalysisReport(
+            file_path="/tmp/other.apk",
+            relative_path=None,
+            file_name="other.apk",
+            file_size=321,
+            hashes={"sha256": "c" * 64},
+            manifest=ManifestSummary(
+                package_name="com.other.app",
+                version_code="1",
+                version_name="1.0",
+                app_label="Other",
+            ),
+            metadata={"artifact": "other.apk", "session_stamp": "20260328-rda-full"},
+            generated_at="2026-03-30T15:58:13+00:00",
+        )
+    )
+
+    index_path = report_package_index_path()
+    if index_path.exists():
+        index_path.unlink()
+
+    stats = rebuild_report_package_index(clear_warm_cache=True)
+
+    assert stats["row_count"] == 2
+    assert stats["package_count"] == 2
+    assert stats["elapsed_seconds"] >= 0.0
+    assert index_path.exists()
+    assert stats["bytes"] == index_path.stat().st_size
 
 
 def test_save_report_enriches_metadata_with_normalized_and_manifest_package_names(

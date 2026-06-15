@@ -49,7 +49,11 @@ DOCUMENTARY_ROOTS = frozenset(
         "bouncycastle.org",
         "gnu.org",
         "creativecommons.org",
+        "example.com",
+        "github.com",
+        "internalfb.com",
         "ietf.org",
+        "xmlpull.org",
         "googlesource.com",
         "lolengine.net",
         "schema.org",
@@ -81,10 +85,10 @@ ANALYTICS_PATTERNS: Mapping[str, tuple[str, re.Pattern[str]]] = {
     "gtag": ("gtag", re.compile(r"G-[A-Z0-9]{6,}", re.IGNORECASE)),
     "firebase": ("firebase", re.compile(r"1:[0-9]{8,}:[a-z0-9]{10,}", re.IGNORECASE)),
     "admob": ("admob", re.compile(r"ca-app-pub-[0-9]{16}/[0-9]{10}", re.IGNORECASE)),
-    "adjust": ("adjust", re.compile(r"[0-9a-f]{8}[0-9a-z]{8}", re.IGNORECASE)),
-    "appsflyer": ("appsflyer", re.compile(r"[0-9a-f]{32}af", re.IGNORECASE)),
-    "segment": ("segment", re.compile(r"[A-Za-z0-9]{32}\.[A-Za-z0-9]{32}", re.IGNORECASE)),
-    "mixpanel": ("mixpanel", re.compile(r"[0-9a-f]{24}", re.IGNORECASE)),
+    "adjust": ("adjust", re.compile(r"(?<![A-Za-z0-9])[0-9a-f]{8}[0-9a-z]{8}(?![A-Za-z0-9])", re.IGNORECASE)),
+    "appsflyer": ("appsflyer", re.compile(r"(?<![A-Za-z0-9])[0-9a-f]{32}af(?![A-Za-z0-9])", re.IGNORECASE)),
+    "segment": ("segment", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9]{32}\.[A-Za-z0-9]{32}(?![A-Za-z0-9])", re.IGNORECASE)),
+    "mixpanel": ("mixpanel", re.compile(r"(?<![A-Za-z0-9])[0-9a-f]{24}(?![A-Za-z0-9])", re.IGNORECASE)),
 }
 
 API_KEY_PATTERNS: Mapping[str, re.Pattern[str]] = {

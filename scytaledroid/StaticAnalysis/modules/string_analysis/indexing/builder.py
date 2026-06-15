@@ -13,7 +13,7 @@ from scytaledroid.StaticAnalysis._androguard import APK
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import StringIndex
-from .sources import collect_file_strings
+from .sources import collect_file_strings, collect_resource_table_strings
 
 _BOUNDS_WARNING_SEEN: set[str] = set()
 
@@ -67,12 +67,27 @@ def _run_with_fd_capture(callable_obj):
     return result, raw.decode("utf-8", errors="replace")
 
 
-def build_string_index(apk: APK, *, include_resources: bool = True) -> StringIndex:
+def build_string_index(
+    apk: APK,
+    *,
+    include_resources: bool = True,
+    is_split_member: bool = False,
+    split_member_policy: str = "full",
+) -> StringIndex:
     """Extract strings from *apk* and return a searchable index."""
+
+    indexing_mode = "split_lightweight" if is_split_member and split_member_policy == "lightweight" else "full"
+    include_resource_table = include_resources and indexing_mode == "full"
+
+    def _collect() -> tuple:
+        file_entries = collect_file_strings(apk, mode=indexing_mode)
+        if not include_resource_table:
+            return file_entries
+        return file_entries + collect_resource_table_strings(apk)
 
     buffer = io.StringIO()
     with redirect_stdout(buffer), redirect_stderr(buffer):
-        collected, fd_output = _run_with_fd_capture(lambda: collect_file_strings(apk))
+        collected, fd_output = _run_with_fd_capture(_collect)
     captured = buffer.getvalue() + fd_output
     warnings = _extract_bounds_warnings(captured)
     if warnings:
@@ -92,8 +107,10 @@ def build_string_index(apk: APK, *, include_resources: bool = True) -> StringInd
                 },
             )
 
-    if not include_resources:
-        filtered = tuple(entry for entry in collected if entry.origin_type not in {"res"})
+    if not include_resource_table:
+        filtered = tuple(
+            entry for entry in collected if entry.origin_type != "resource"
+        )
     else:
         filtered = collected
 

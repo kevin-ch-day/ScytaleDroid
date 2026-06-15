@@ -22,6 +22,7 @@ from ..engine import aapt2_fallback
 from ..engine.strings import _analyse_strings_from_index
 from ..detectors.correlation.runtime_state import snapshot_runtime_stats
 from ..modules import build_string_index
+from ..modules.string_analysis.origins import is_code_origin, is_resource_origin
 from ..modules.network_security import extract_network_security_policy
 from ..modules.permissions import load_permission_catalog
 from .context import AnalysisConfig
@@ -292,6 +293,43 @@ def _coerce_bool(value: object) -> bool:
     return False
 
 
+def _summarize_string_index_metadata(string_index: object) -> dict[str, object]:
+    strings = tuple(getattr(string_index, "strings", tuple()) or tuple())
+    by_origin_type: Mapping[str, int]
+    if hasattr(string_index, "counts_by_origin_type"):
+        counts = getattr(string_index, "counts_by_origin_type")()
+        by_origin_type = dict(counts) if isinstance(counts, Mapping) else {}
+    else:
+        rolled: MutableMapping[str, int] = {}
+        for entry in strings:
+            origin_type = str(getattr(entry, "origin_type", "unknown") or "unknown")
+            rolled[origin_type] = rolled.get(origin_type, 0) + 1
+        by_origin_type = dict(rolled)
+
+    code_strings = 0
+    resource_strings = 0
+    native_strings = 0
+    asset_strings = 0
+    for origin_type, count in by_origin_type.items():
+        if is_code_origin(origin_type):
+            code_strings += int(count)
+        elif is_resource_origin(origin_type):
+            resource_strings += int(count)
+        elif origin_type == "native":
+            native_strings += int(count)
+        elif origin_type == "asset":
+            asset_strings += int(count)
+
+    return {
+        "string_index_total_strings": len(strings),
+        "string_index_by_origin_type": by_origin_type,
+        "string_index_code_strings": code_strings,
+        "string_index_resource_strings": resource_strings,
+        "string_index_native_strings": native_strings,
+        "string_index_asset_strings": asset_strings,
+    }
+
+
 def _resolve_trusted_metadata_hashes(apk_path: Path, metadata: Mapping[str, object]) -> tuple[dict[str, str] | None, str]:
     digests: dict[str, str] = {}
     for algo, expected_length in _HASH_DIGEST_LENGTHS.items():
@@ -491,26 +529,40 @@ def analyze_apk(
     # String index (optional & resilient)
     string_index = None
     if analysis_config.enable_string_index:
+        is_split_member = bool(report_metadata.get("is_split_member"))
+        split_member_policy = str(analysis_config.split_member_string_index_policy or "full")
         report_metadata["string_index_include_resources"] = bool(
             analysis_config.string_index_include_resources
+        )
+        report_metadata["string_index_split_member_policy"] = split_member_policy
+        report_metadata["string_index_mode"] = (
+            "split_lightweight" if is_split_member and split_member_policy == "lightweight" else "full"
         )
         string_index_started = time.monotonic()
         try:
             string_index = build_string_index(
                 apk,
                 include_resources=analysis_config.string_index_include_resources,
+                is_split_member=is_split_member,
+                split_member_policy=split_member_policy,
             )
             report_metadata["string_index_seconds"] = time.monotonic() - string_index_started
-            if string_index is not None and not _coerce_bool(report_metadata.get("is_split_member")):
+            if string_index is not None:
+                report_metadata.update(_summarize_string_index_metadata(string_index))
                 try:
-                    report_metadata["post_run_string_payload"] = _analyse_strings_from_index(
+                    payload = _analyse_strings_from_index(
                         string_index,
-                        mode="both",
-                        min_entropy=4.8,
-                        max_samples=None,
-                        cleartext_only=False,
-                        include_https_risk=None,
+                        mode=analysis_config.post_run_string_mode,
+                        min_entropy=analysis_config.post_run_string_min_entropy,
+                        max_samples=analysis_config.post_run_string_max_samples,
+                        cleartext_only=analysis_config.post_run_string_cleartext_only,
+                        include_https_risk=analysis_config.post_run_string_include_https_risk,
+                        artifact_context=report_metadata,
                     )
+                    if isinstance(payload, Mapping):
+                        payload = dict(payload)
+                        payload.setdefault("aggregation_scope", "single_artifact")
+                    report_metadata["post_run_string_payload"] = payload
                 except Exception as exc:
                     report_metadata["post_run_string_payload_error"] = str(exc)
         except Exception as e:

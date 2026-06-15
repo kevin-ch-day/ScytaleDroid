@@ -148,9 +148,10 @@ def _print_workload_summary_lines(
     scoped: Sequence[ArtifactGroup],
     older_excluded: int,
     rule_line: str,
+    scope_noun: str = "Profile",
 ) -> None:
     _ = scoped, older_excluded, rule_line
-    print(f"Profile: {profile_title}")
+    print(f"{scope_noun}: {profile_title}")
     print("Newest harvested capture per package is selected automatically.")
 
 

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
+from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.commands.models import Command
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
+from scytaledroid.StaticAnalysis.cli.menus import static_analysis_menu_helpers as helpers
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
+from scytaledroid.StaticAnalysis.persistence.reports import StoredReport
 
 
 def _dummy_group(
@@ -70,11 +73,6 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
         "scytaledroid.Database.db_utils.schema_gate.static_schema_gate",
         lambda: (True, None, None),
     )
-    monkeypatch.setattr(
-        menu_module,
-        "describe_last_selection",
-        lambda _groups: {"available": True, "label": "Example | com.example.app", "source": "static-run"},
-    )
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.static_analysis_menu()
@@ -94,7 +92,8 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
     assert "Analyze by profile" in out
     assert "Analyze research cohort" in out
     assert "Analyze one app" in out
-    assert "Re-analyze last app" in out
+    assert "Re-analyze last app" not in out
+    assert "Analyze exact APK hash from dynamic/static worklist" in out
     assert "Review" in out
     assert "View previous static runs" in out
     assert "MASVS (database-backed)" in out
@@ -104,6 +103,25 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
     assert "Compare two app versions" in out
     assert "APK drilldown" in out
     assert "Library details" in out
+
+    run_order = [
+        "1) Analyze all apps — full analysis",
+        "2) Analyze by profile",
+        "3) Analyze research cohort",
+        "4) Analyze one app",
+        "5) Analyze exact APK hash from dynamic/static worklist",
+    ]
+    positions = [out.index(label) for label in run_order]
+    assert positions == sorted(positions)
+
+    review_order = [
+        "6) View previous static runs",
+        "7) Compare two app versions",
+        "D) APK drilldown",
+        "L) Library details",
+    ]
+    review_positions = [out.index(label) for label in review_order]
+    assert review_positions == sorted(review_positions)
 
 
 def test_static_menu_m_routes_to_masvs_summary(monkeypatch):
@@ -126,11 +144,6 @@ def test_static_menu_m_routes_to_masvs_summary(monkeypatch):
     monkeypatch.setattr(
         "scytaledroid.Database.db_utils.schema_gate.static_schema_gate",
         lambda: (True, None, None),
-    )
-    monkeypatch.setattr(
-        menu_module,
-        "describe_last_selection",
-        lambda _groups: {"available": True, "label": "Example | com.example.app", "source": "static-run"},
     )
     choices = iter(["m", "0"])
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: next(choices))
@@ -268,6 +281,109 @@ def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) 
     assert reset_mode == "session"
 
 
+def _stored_report(*, package_name: str, version_code: str, version_name: str, sha256: str, generated_at: str):
+    report = SimpleNamespace(
+        manifest=SimpleNamespace(
+            package_name=package_name,
+            version_code=version_code,
+            version_name=version_name,
+        ),
+        generated_at=generated_at,
+        hashes={"sha256": sha256},
+        exported_components=SimpleNamespace(
+            activities=tuple(),
+            services=tuple(),
+            receivers=tuple(),
+            providers=tuple(),
+        ),
+        permissions=SimpleNamespace(dangerous=tuple()),
+        manifest_flags=SimpleNamespace(to_dict=lambda: {}),
+    )
+    return StoredReport(path=Path(f"/tmp/{sha256}.json"), report=report)
+
+
+def test_diff_last_available_uses_package_scoped_report_lookup(monkeypatch) -> None:
+    monkeypatch.setattr(helpers, "_get_last_static_package", lambda: "com.example.app")
+
+    def _unexpected_list_reports():
+        raise AssertionError("full report scan should not be used for single-package lookup")
+
+    scoped_reports = [
+        _stored_report(
+            package_name="com.example.app",
+            version_code="1",
+            version_name="1.0",
+            sha256="a" * 64,
+            generated_at="2026-06-14T10:00:00+00:00",
+        ),
+        _stored_report(
+            package_name="com.example.app",
+            version_code="2",
+            version_name="2.0",
+            sha256="b" * 64,
+            generated_at="2026-06-14T11:00:00+00:00",
+        ),
+    ]
+
+    from scytaledroid.StaticAnalysis.persistence import reports as reports_store
+
+    monkeypatch.setattr(reports_store, "list_reports", _unexpected_list_reports)
+    monkeypatch.setattr(reports_store, "reports_for_package", lambda package_name: scoped_reports if package_name == "com.example.app" else [])
+
+    available, package_name = helpers.diff_last_available(tuple())
+
+    assert available is True
+    assert package_name == "com.example.app"
+
+
+def test_render_version_diff_uses_package_scoped_report_lookup(monkeypatch, capsys) -> None:
+    old_report = _stored_report(
+        package_name="com.example.app",
+        version_code="1",
+        version_name="1.0",
+        sha256="a" * 64,
+        generated_at="2026-06-14T10:00:00+00:00",
+    )
+    new_report = _stored_report(
+        package_name="com.example.app",
+        version_code="2",
+        version_name="2.0",
+        sha256="b" * 64,
+        generated_at="2026-06-14T11:00:00+00:00",
+    )
+
+    from scytaledroid.StaticAnalysis.persistence import reports as reports_store
+
+    monkeypatch.setattr(
+        reports_store,
+        "list_reports",
+        lambda: (_ for _ in ()).throw(AssertionError("full report scan should not be used for version diff")),
+    )
+    monkeypatch.setattr(
+        reports_store,
+        "reports_for_package",
+        lambda package_name: [old_report, new_report] if package_name == "com.example.app" else [],
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.detectors.correlation.diffing.compare_components",
+        lambda current, previous: {},
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.detectors.correlation.diffing.compare_permissions",
+        lambda current_permissions, previous_permissions: tuple(),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.detectors.correlation.diffing.compare_flags",
+        lambda current_flags, previous_flags: {},
+    )
+
+    helpers.render_version_diff("com.example.app")
+
+    out = capsys.readouterr().out
+    assert "Version diff" in out
+    assert "com.example.app (1 → 2)" in out
+
+
 def test_run_setup_change_options_routes_to_advanced(monkeypatch) -> None:
     actions = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.actions")
     selection = ScopeSelection("app", "Signal", (_dummy_group("org.thoughtcrime.securesms"),))
@@ -377,7 +493,6 @@ def test_static_menu_shows_persistence_warning_when_schema_is_unavailable(monkey
         "scytaledroid.Database.db_utils.schema_gate.static_schema_gate",
         lambda: (False, "Static Analysis schema unavailable.", "offline"),
     )
-    monkeypatch.setattr(menu_module, "describe_last_selection", lambda _groups: {"available": False, "label": "", "source": "none"})
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.static_analysis_menu()
@@ -417,7 +532,6 @@ def test_static_menu_renders_library_size_not_internal_state(monkeypatch, capsys
     monkeypatch.setattr(menu_module.static_scope_service, "prune_missing_paths", lambda *_a, **_k: 0)
     monkeypatch.setattr("scytaledroid.Database.db_utils.schema_gate.check_base_schema", lambda: (True, None, None))
     monkeypatch.setattr("scytaledroid.Database.db_utils.schema_gate.static_schema_gate", lambda: (True, None, None))
-    monkeypatch.setattr(menu_module, "describe_last_selection", lambda _groups: {"available": False, "label": "", "source": "none"})
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.static_analysis_menu()

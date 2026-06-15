@@ -12,7 +12,11 @@ def test_compute_static_context_basic_tags() -> None:
             "request_legacy_external_storage": True,
             "allow_backup": True,
         },
-        "network_targets": {"domains": ["example.com"], "cleartext_domains": [], "domain_sources": []},
+        "network_targets": {
+            "domains": ["example.com"],
+            "cleartext_domains": [],
+            "domain_sources": [{"domain": "example.com", "sources": ["strings", "nsc"]}],
+        },
     }
     ctx = compute_static_context(plan)
     tags = ctx.get("tags")
@@ -22,4 +26,6 @@ def test_compute_static_context_basic_tags() -> None:
     assert "NETWORK_CLEARTEXT_ALLOWED" in tags
     assert "LEGACY_STORAGE" in tags
     assert "ALLOW_BACKUP" in tags
-
+    expectations = ctx.get("network_expectations") or {}
+    assert expectations.get("domain_sources_counts", {}).get("strings") == 1
+    assert expectations.get("domain_sources_counts", {}).get("nsc") == 1

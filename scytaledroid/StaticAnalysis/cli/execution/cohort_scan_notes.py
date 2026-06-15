@@ -14,7 +14,7 @@ from .scan_report import _summarize_app_pipeline
 def suppress_per_app_cohort_echoes(params: RunParameters, app_total: int | None) -> bool:
     """When True, per-app CLI blocks defer to the cohort footer printed once at end of scan."""
     return bool(
-        params.scope in {"all", "profile"}
+        params.scope in {"all", "profile", "research_cohort"}
         and (app_total or 0) >= 2
         and not params.verbose_output
     )
@@ -31,7 +31,7 @@ def emit_post_scan_cohort_notes(
         return
     if outcome.aborted:
         return
-    if params.scope not in {"all", "profile"}:
+    if params.scope not in {"all", "profile", "research_cohort"}:
         return
     if len(outcome.results) < 2:
         return
@@ -98,15 +98,25 @@ def _emit_uniform_placeholder_skips(apps: Sequence[AppRunResult]) -> None:
 
 
 def _emit_string_rollup_cohort_line(apps: Sequence[AppRunResult], *, total: int) -> None:
-    split_apps = sum(1 for a in apps if int(getattr(a, "discovered_artifacts", 0) or 0) > 1)
-    if split_apps <= 0:
+    split_apps = [
+        a for a in apps if int(getattr(a, "discovered_artifacts", 0) or 0) > 1
+    ]
+    if not split_apps:
         return
+    merged_apps = sum(
+        1
+        for app in split_apps
+        if str(
+            ((getattr(app, "base_string_data", {}) or {}).get("aggregation_scope") if isinstance(getattr(app, "base_string_data", None), Mapping) else "")
+        ).strip().lower()
+        == "artifact_merged"
+    )
     print(
         status_messages.status(
             (
-                "String rollup caveat: split APKs were scanned per configuration, but post-run "
-                "analyse_string_payload summaries are base-APK only.\n"
-                f"Affected apps: {split_apps}/{total} (captures with multiple APK files)."
+                "String rollup summary: split APKs were scanned per configuration and post-run "
+                "string payloads are merged per app when artifact payload coverage is available.\n"
+                f"Split-app coverage: merged={merged_apps}/{len(split_apps)} across {total} app(s) in this cohort."
             ),
             level="info",
             show_icon=False,

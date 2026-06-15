@@ -15,6 +15,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="OpenAI",
         tags=("api_key", "openai"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("sk-",),
     ),
 )
 

@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping
 from scytaledroid.StaticAnalysis._androguard import APK, FileNotPresent
 
 from .models import IndexedString
+from ..origins import canonical_origin_type
 from .utils import (
     StringFragment,
     looks_textual,
@@ -22,6 +23,32 @@ from .utils import (
 
 _DEX_ID_PATTERN = re.compile(r"classes(?P<index>\d+)?\.dex", re.IGNORECASE)
 _LOCALE_PATTERN = re.compile(r"res/(?:values|xml|raw|layout)(?:-([\w-]+))?/")
+_TEXT_FORWARD_SUFFIXES: tuple[str, ...] = (
+    ".json",
+    ".js",
+    ".txt",
+    ".xml",
+    ".html",
+    ".htm",
+    ".properties",
+    ".conf",
+    ".cfg",
+    ".ini",
+    ".csv",
+    ".md",
+    ".bundle",
+    ".map",
+)
+_TEXT_FORWARD_TOKENS: tuple[str, ...] = (
+    "config",
+    "manifest",
+    "endpoint",
+    "url",
+    "domain",
+    "host",
+    "policy",
+    "settings",
+)
 
 
 def iterate_resource_strings(resources: object) -> Iterable[str]:
@@ -33,12 +60,7 @@ def iterate_resource_strings(resources: object) -> Iterable[str]:
         public = None
 
     if isinstance(public, Mapping):
-        for value in public.values():
-            if not value:
-                continue
-            string_value = str(value)
-            if string_value.strip():
-                yield string_value
+        yield from _iter_nested_string_values(public)
 
     if hasattr(resources, "get_string_resources"):  # pragma: no cover - optional API
         try:
@@ -46,12 +68,21 @@ def iterate_resource_strings(resources: object) -> Iterable[str]:
         except Exception:
             entries = None
         if isinstance(entries, Mapping):
-            for value in entries.values():
-                if not value:
-                    continue
-                string_value = str(value)
-                if string_value.strip():
-                    yield string_value
+            yield from _iter_nested_string_values(entries)
+
+
+def _iter_nested_string_values(node: object) -> Iterable[str]:
+    if isinstance(node, Mapping):
+        for value in node.values():
+            yield from _iter_nested_string_values(value)
+        return
+    if isinstance(node, (list, tuple, set)):
+        for value in node:
+            yield from _iter_nested_string_values(value)
+        return
+    if isinstance(node, str):
+        if node.strip():
+            yield node
 
 
 def _apk_sha256(apk: APK) -> str | None:
@@ -127,7 +158,35 @@ def _should_scan_binary(origin_type: str, blob: bytes) -> bool:
     return _is_probable_protobuf(blob)
 
 
-def collect_file_strings(apk: APK) -> tuple[IndexedString, ...]:
+def _should_skip_split_member_entry(name: str, origin_type: str, blob: bytes) -> bool:
+    lowered = name.lower()
+    if origin_type == "native":
+        return True
+    if origin_type == "resource":
+        return True
+    if origin_type == "rn_bundle":
+        return not looks_textual(blob)
+    if origin_type in {"asset", "raw"}:
+        if lowered.endswith(_TEXT_FORWARD_SUFFIXES):
+            return False
+        if any(token in lowered for token in _TEXT_FORWARD_TOKENS) and looks_textual(blob):
+            return False
+        return True
+    return False
+
+
+def _allow_utf_expansion(mode: str, origin_type: str, name: str) -> bool:
+    if mode != "split_lightweight":
+        return True
+    lowered = name.lower()
+    if origin_type == "code":
+        return True
+    if origin_type == "rn_bundle":
+        return lowered.endswith(".json")
+    return False
+
+
+def collect_file_strings(apk: APK, *, mode: str = "full") -> tuple[IndexedString, ...]:
     """Extract UTF-8 string fragments from APK file entries."""
 
     try:
@@ -153,6 +212,8 @@ def collect_file_strings(apk: APK) -> tuple[IndexedString, ...]:
 
         if not blob:
             continue
+        if mode == "split_lightweight" and _should_skip_split_member_entry(name, origin_type, blob):
+            continue
 
         blob_hash = hashlib.sha256(blob).hexdigest()
         sha_short = blob_hash[:8]
@@ -166,25 +227,28 @@ def collect_file_strings(apk: APK) -> tuple[IndexedString, ...]:
             if looks_textual(blob):
                 fragments = strings_from_text(blob)
             elif _should_scan_binary(origin_type, blob):
+                if mode == "split_lightweight" and origin_type in {"asset", "raw", "rn_bundle"}:
+                    continue
                 fragments = strings_from_binary(blob)
                 confidence = "low"
             else:
                 continue
 
-        utf16_fragments = strings_from_utf16(blob)
-        utf32_fragments = strings_from_utf32(blob)
-        if utf16_fragments or utf32_fragments:
-            fragments = tuple(
-                {
-                    (frag.start, frag.end): frag
-                    for frag in fragments + utf16_fragments + utf32_fragments
-                }.values()
-            )
-            confidence = "low"
+        if _allow_utf_expansion(mode, origin_type, name):
+            utf16_fragments = strings_from_utf16(blob)
+            utf32_fragments = strings_from_utf32(blob)
+            if utf16_fragments or utf32_fragments:
+                fragments = tuple(
+                    {
+                        (frag.start, frag.end): frag
+                        for frag in fragments + utf16_fragments + utf32_fragments
+                    }.values()
+                )
+                confidence = "low"
 
         for fragment in fragments:
             locale_qualifier = _locale_from_path(name)
-            dex_id = _dex_id_from_name(name) if origin_type == "dex" else None
+            dex_id = _dex_id_from_name(name) if origin_type == "code" else None
             collected.append(
                 IndexedString(
                     value=fragment.value,
@@ -222,16 +286,68 @@ def classify_origin_type(path: str) -> str | None:
     if lowered.startswith("assets/"):
         return "asset"
     if lowered.startswith("res/raw"):
-        return "res"
+        return "raw"
     if lowered.startswith("lib/") and lowered.endswith(".so"):
         return "native"
     if lowered.endswith(".so"):
         return "native"
     if lowered.endswith(".dex"):
-        return "dex"
+        return "code"
     if lowered == "resources.arsc":
-        return "res"
+        return "resource"
     return None
 
 
-__all__ = ["iterate_resource_strings", "collect_file_strings", "classify_origin_type"]
+def collect_resource_table_strings(apk: APK) -> tuple[IndexedString, ...]:
+    """Extract resolved resource-table strings from *apk* when available."""
+
+    getter = getattr(apk, "get_android_resources", None)
+    if not callable(getter):
+        return tuple()
+
+    try:
+        resources = getter()
+    except Exception:
+        return tuple()
+    if resources is None:
+        return tuple()
+
+    apk_hash = _apk_sha256(apk)
+    split_id = _infer_split_id(apk)
+    seen: set[str] = set()
+    collected: list[IndexedString] = []
+
+    for value in iterate_resource_strings(resources):
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        collected.append(
+            IndexedString(
+                value=normalized,
+                origin="resources.arsc",
+                origin_type=canonical_origin_type("resource"),
+                confidence="normal",
+                byte_offset=None,
+                source_sha256=None,
+                source_sha_short=None,
+                context="resolved resource string",
+                apk_sha256=apk_hash,
+                split_id=split_id,
+                apk_offset_kind="resource_table",
+                dex_id=None,
+                locale_qualifier=None,
+                synthetic=False,
+                derived_from=None,
+            )
+        )
+
+    return tuple(collected)
+
+
+__all__ = [
+    "iterate_resource_strings",
+    "collect_file_strings",
+    "collect_resource_table_strings",
+    "classify_origin_type",
+]
