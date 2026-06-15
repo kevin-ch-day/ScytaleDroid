@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scytaledroid.Database.db_core.db_queries import run_sql, run_sql_write
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
 
 
 def _resolve_evidence_path(p: str, *, repo_root: Path) -> Path:
@@ -104,19 +105,20 @@ def delete_dynamic_sessions_by_id(dynamic_run_ids: list[str]) -> int:
 def find_dangling_dynamic_static_links() -> list[dict[str, object]]:
     """Return dynamic-session rows whose static_run_id no longer resolves."""
 
+    resolved_static_run_id = resolved_dynamic_session_static_run_id("ds")
     rows = run_sql(
-        """
+        f"""
         SELECT
           ds.dynamic_run_id,
           ds.package_name,
-          ds.static_run_id,
+          {resolved_static_run_id} AS static_run_id,
           ds.static_handoff_hash,
           ds.started_at_utc,
           ds.evidence_path
         FROM dynamic_sessions ds
         LEFT JOIN static_analysis_runs sar
-          ON sar.id = ds.static_run_id
-        WHERE ds.static_run_id IS NOT NULL
+          ON sar.id = {resolved_static_run_id}
+        WHERE {resolved_static_run_id} IS NOT NULL
           AND sar.id IS NULL
         ORDER BY ds.started_at_utc DESC, ds.dynamic_run_id ASC
         """,
@@ -142,6 +144,7 @@ def clear_dangling_dynamic_static_links(dynamic_run_ids: list[str]) -> int:
 
     if not dynamic_run_ids:
         return 0
+    resolved_static_run_id = resolved_dynamic_session_static_run_id("ds")
     repaired = 0
     chunk = 100
     for i in range(0, len(dynamic_run_ids), chunk):
@@ -151,9 +154,9 @@ def clear_dangling_dynamic_static_links(dynamic_run_ids: list[str]) -> int:
             SELECT COUNT(*)
             FROM dynamic_sessions ds
             LEFT JOIN static_analysis_runs sar
-              ON sar.id = ds.static_run_id
+              ON sar.id = {resolved_static_run_id}
             WHERE ds.dynamic_run_id IN ({placeholders})
-              AND ds.static_run_id IS NOT NULL
+              AND {resolved_static_run_id} IS NOT NULL
               AND sar.id IS NULL
         """
         try:
@@ -164,10 +167,11 @@ def clear_dangling_dynamic_static_links(dynamic_run_ids: list[str]) -> int:
         sql = f"""
             UPDATE dynamic_sessions ds
             LEFT JOIN static_analysis_runs sar
-              ON sar.id = ds.static_run_id
-            SET ds.static_run_id = NULL
+              ON sar.id = {resolved_static_run_id}
+            SET ds.static_run_id = NULL,
+                ds.static_run_id_u = NULL
             WHERE ds.dynamic_run_id IN ({placeholders})
-              AND ds.static_run_id IS NOT NULL
+              AND {resolved_static_run_id} IS NOT NULL
               AND sar.id IS NULL
         """
         run_sql_write(sql, tuple(batch))

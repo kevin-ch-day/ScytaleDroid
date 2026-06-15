@@ -59,7 +59,7 @@ def test_fetch_analysis_integrity_summary_includes_dynamic_retention_counts(monk
             return 5
         if "static_run_id_u" in sql or "CAST(ds.static_run_id AS UNSIGNED)" in sql:
             return 0
-        if "FROM artifact_registry ar" in sql and "ar.run_type = 'dynamic'" in sql:
+        if "FROM v_artifact_registry_integrity" in sql and "link_state = 'dangling_dynamic_run'" in sql:
             return 0
         if "FROM artifact_registry ar" in sql and "ar.run_type = 'static'" in sql:
             return 0

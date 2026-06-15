@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
+from scytaledroid.DeviceAnalysis.adb import package_manager as adb_package_manager
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 
 def list_packages(serial: str) -> list[str]:
-    """Return package names via ``pm list packages``."""
-    completed = adb_client.run_shell_command(serial, ["pm", "list", "packages"], timeout=15)
-    if completed.returncode != 0:
-        return []
-
-    packages: list[str] = []
-    for line in completed.stdout.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("package:"):
-            packages.append(stripped.split(":", 1)[1].strip())
-    return packages
+    """Return package names via package-manager list commands."""
+    for command in adb_package_manager.list_packages_commands():
+        completed = adb_client.run_shell_command(serial, command, timeout=15)
+        if completed.returncode != 0 or adb_package_manager.completed_indicates_unsupported(completed):
+            continue
+        packages: list[str] = []
+        for line in completed.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("package:"):
+                packages.append(stripped.split(":", 1)[1].strip())
+        if packages:
+            return packages
+    return []
 
 
 def list_packages_with_versions(
@@ -33,18 +36,17 @@ def list_packages_with_versions(
     """
 
     try:
-        completed = adb_client.run_shell_command(
-            serial,
-            ["pm", "list", "packages", "--show-versioncode"],
-            timeout=20,
-        )
+        completed = None
+        for command in adb_package_manager.list_packages_commands("--show-versioncode"):
+            candidate = adb_client.run_shell_command(serial, command, timeout=20)
+            if candidate.returncode != 0 or adb_package_manager.completed_indicates_unsupported(candidate):
+                continue
+            parsed = _parse_package_listing(candidate.stdout)
+            if parsed:
+                return parsed
+            completed = candidate
     except RuntimeError:
         completed = None
-
-    if completed is not None and completed.returncode == 0:
-        parsed = _parse_package_listing(completed.stdout)
-        if parsed:
-            return parsed
 
     # Fallback to basic package names if versionCode listing is unsupported.
     if not allow_fallbacks:

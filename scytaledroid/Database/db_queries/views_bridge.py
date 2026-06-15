@@ -13,7 +13,7 @@ SELECT
   r.version_code,
   r.target_sdk,
   r.ts,
-  r.session_stamp,
+  CONVERT(r.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci AS session_stamp,
   SUM(b.points) AS total_points,
   SUM(b.cap)    AS total_cap
 FROM runs AS r

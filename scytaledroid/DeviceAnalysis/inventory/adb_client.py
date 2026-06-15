@@ -81,6 +81,10 @@ def list_package_bulk_entries(serial: str) -> list[adb_bulk.BulkPackageEntry]:
     return adb_bulk.list_packages_bulk(serial)
 
 
+def get_package_metadata_bulk(serial: str) -> dict[str, dict[str, object]]:
+    return adb_bulk.dumpsys_package_bulk(serial)
+
+
 def clear_package_caches(serial: str) -> None:
     adb_cache.PACKAGE_PATH_CACHE.clear(serial=serial)
     adb_cache.PACKAGE_META_CACHE.clear(serial=serial)

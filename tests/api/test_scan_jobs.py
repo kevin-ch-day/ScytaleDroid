@@ -150,3 +150,27 @@ def test_scan_job_marks_ok_when_execution_completes_without_run_outcome(monkeypa
     assert status["detail"] is None
     assert status["session_stamp"] == "resolved-ok-session"
     assert status["package_name"] == "com.example.permissions"
+
+
+def test_finalize_stale_prefers_typed_started_at_expression(monkeypatch) -> None:
+    testclient = require_fastapi_testclient()
+    monkeypatch.delenv("SCYTALEDROID_API_KEY", raising=False)
+
+    captured: dict[str, object] = {}
+
+    def _fake_rowcount(sql, params=(), **_kwargs):
+        captured["sql"] = sql
+        captured["params"] = params
+        return 4
+
+    monkeypatch.setattr(api_service.core_q, "run_sql_rowcount", _fake_rowcount)
+
+    client = testclient.TestClient(api_service.build_api_app())
+    response = client.post("/maintenance/finalize_stale?minutes=90")
+
+    assert response.status_code == 200
+    assert response.json()["updated"] == 4
+    assert captured["params"] == (90,)
+    sql = str(captured["sql"])
+    assert "run_started_at_utc" in sql
+    assert "UTC_TIMESTAMP() - INTERVAL %s MINUTE" in sql

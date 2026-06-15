@@ -87,6 +87,31 @@ def format_inventory_elapsed(seconds: float | None, *, absent: str = "") -> str:
     return f"{secs}s"
 
 
+def format_inventory_age_display(seconds: float | None, *, absent: str = "") -> str:
+    """Expanded age wording for snapshot metadata cards."""
+
+    if seconds is None or seconds < 0:
+        return absent
+    total = max(0, int(round(float(seconds))))
+    mins, secs = divmod(total, 60)
+    hours, mins = divmod(mins, 60)
+    days, hours = divmod(hours, 24)
+    if days > 0:
+        day_label = "Day" if days == 1 else "Days"
+        hour_label = "hr" if hours == 1 else "hrs"
+        min_label = "min" if mins == 1 else "mins"
+        return f"{days} {day_label} {hours} {hour_label} {mins} {min_label}"
+    if hours > 0:
+        hour_label = "hr" if hours == 1 else "hrs"
+        min_label = "min" if mins == 1 else "mins"
+        return f"{hours} {hour_label} {mins} {min_label}"
+    if mins > 0:
+        min_label = "min" if mins == 1 else "mins"
+        return f"{mins} {min_label}"
+    sec_label = "sec" if secs == 1 else "secs"
+    return f"{secs} {sec_label}"
+
+
 def _format_rate(pkg_per_s: float) -> str:
     if pkg_per_s <= 0:
         return "— pkg/s"
@@ -316,7 +341,7 @@ def render_snapshot_block(
         )
         is_stale = age_seconds >= INVENTORY_STALE_SECONDS
         status_text = "STALE" if is_stale else "FRESH"
-        age_text = format_inventory_elapsed(age_seconds)
+        age_text = format_inventory_age_display(age_seconds)
         snapshot_count = getattr(previous_meta, "package_count", None)
         # Keep the pre-run snapshot card side-effect free. Live device-vs-snapshot drift is
         # computed elsewhere; this banner should report the recorded snapshot state only.

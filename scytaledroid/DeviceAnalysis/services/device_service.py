@@ -148,7 +148,7 @@ def _compute_inventory_status(
     """Compute a unified InventoryStatus from metadata or snapshot."""
     # Local import to avoid circular dependency when services are used headless.
     from scytaledroid.DeviceAnalysis.device_analysis_settings import INVENTORY_STALE_SECONDS
-    from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
+    from scytaledroid.DeviceAnalysis.inventory.progress import format_inventory_age_display
 
     ts = None
     pkg_count = None
@@ -205,7 +205,11 @@ def _compute_inventory_status(
     else:
         status_label = "FRESH"
 
-    age_display = humanize_seconds(age_seconds) if age_seconds is not None else "unknown"
+    age_display = (
+        format_inventory_age_display(age_seconds, absent="unknown")
+        if age_seconds is not None
+        else "unknown"
+    )
 
     return InventoryStatus(
         last_run_ts=ts if isinstance(ts, datetime) else None,

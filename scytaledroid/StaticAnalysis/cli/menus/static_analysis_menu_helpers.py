@@ -5,6 +5,10 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from scytaledroid.Database.db_queries.sql_typed_reads import (
+    resolved_static_run_started_at_utc,
+    resolved_static_run_started_utc_text,
+)
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
@@ -206,13 +210,14 @@ def _find_group_by_sha(groups, sha256):
 def _get_last_static_package():
     if core_q is None:
         return None
+    started_at_expr = resolved_static_run_started_at_utc("sar")
     row = core_q.run_sql(
-        """
+        f"""
         SELECT a.package_name
         FROM static_analysis_runs sar
         JOIN app_versions av ON av.id = sar.app_version_id
         JOIN apps a ON a.id = av.app_id
-        ORDER BY COALESCE(sar.ended_at_utc, sar.run_started_utc, sar.id) DESC
+        ORDER BY COALESCE(sar.ended_at_utc, {started_at_expr}, sar.id) DESC
         LIMIT 1
         """,
         fetch="one",
@@ -225,8 +230,10 @@ def _get_last_static_package():
 def _get_last_static_run_info():
     if core_q is None:
         return None
+    started_at_expr = resolved_static_run_started_at_utc("sar")
+    started_text_expr = resolved_static_run_started_utc_text("sar")
     row = core_q.run_sql(
-        """
+        f"""
         SELECT
             a.package_name,
             av.version_name,
@@ -235,11 +242,11 @@ def _get_last_static_run_info():
             sar.status,
             sar.run_class,
             sar.session_stamp,
-            COALESCE(sar.ended_at_utc, sar.run_started_utc) AS completed_or_started_at
+            COALESCE(sar.ended_at_utc, {started_text_expr}) AS completed_or_started_at
         FROM static_analysis_runs sar
         JOIN app_versions av ON av.id = sar.app_version_id
         JOIN apps a ON a.id = av.app_id
-        ORDER BY COALESCE(sar.ended_at_utc, sar.run_started_utc, sar.id) DESC
+        ORDER BY COALESCE(sar.ended_at_utc, {started_at_expr}, sar.id) DESC
         LIMIT 1
         """,
         fetch="one",

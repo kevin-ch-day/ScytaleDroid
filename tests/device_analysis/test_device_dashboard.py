@@ -60,7 +60,7 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     assert "moto g 5G - 2024 (ZY22JK89DR) | Physical | Motorola" not in out
     assert "Motorola" in out and "Android 15" in out and "Physical" in out and "NON-ROOT" in out
     assert "Inv" in out and "Har" in out and "Ev" in out
-    assert "546 pkgs" in out and "14h 39m ago" in out
+    assert "546 pkgs" in out and "14 hrs 39 mins ago" in out
     assert "Inv FRESH" in out and "harvest-ready" in out
     # Compact pipeline strip: word labels (operator-readable) vs legacy "117 hv" tokens
     assert "117" in out and "411" in out and "18" in out
@@ -154,7 +154,7 @@ def test_print_device_details_shows_moved_pipeline_and_evidence_blocks(monkeypat
     assert "Battery" in out
     assert "Root access" in out
     assert "Inventory and Harvest" in out
-    assert "Status       : FRESH | Last sync : 14h 39m ago | Packages : 546" in out
+    assert "Status       : FRESH | Last sync : 14 hrs 39 mins ago | Packages : 546" in out
     assert "Inventory    : 546 inventoried | 546 in scope | 117 eligible" in out
     assert "Harvest      : 117 scheduled | 117 harvested | 546 receipts" in out
     assert "Blocked      : 411 policy | 18 scope" in out

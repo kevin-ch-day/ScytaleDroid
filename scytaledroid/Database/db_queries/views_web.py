@@ -19,12 +19,14 @@ SELECT
     latest_static.summary_created_at,
     latest_static_run.created_at
   ) AS last_scanned,
-  COALESCE(
-    latest_static.session_stamp,
-    latest_static_run.session_stamp,
-    latest_risk.permission_audit_session_stamp,
-    latest_risk.session_stamp
-  ) AS session_stamp,
+  CONVERT(
+    COALESCE(
+      latest_static.session_stamp,
+      latest_static_run.session_stamp,
+      latest_risk.permission_audit_session_stamp,
+      latest_risk.session_stamp
+    ) USING utf8mb4
+  ) COLLATE utf8mb4_unicode_ci AS session_stamp,
   COALESCE(latest_static.canonical_high, 0) AS high,
   COALESCE(latest_static.canonical_med, 0) AS med,
   COALESCE(latest_static.canonical_low, 0) AS low,
@@ -44,13 +46,13 @@ SELECT
     ELSE 'catalog_only'
   END AS source_state
 FROM (
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name
   FROM apps
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name
   FROM v_static_risk_surfaces_v1
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name
   FROM vw_static_finding_surfaces_latest
 ) pkg
 LEFT JOIN apps a
@@ -871,7 +873,7 @@ CREATE_V_WEB_APP_COMPONENTS = """
 CREATE OR REPLACE VIEW v_web_app_components AS
 SELECT
   package_name,
-  session_stamp,
+  CONVERT(session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci AS session_stamp,
   scope_label,
   authority,
   provider_name,
@@ -890,7 +892,7 @@ CREATE_V_WEB_APP_COMPONENT_SUMMARY = """
 CREATE OR REPLACE VIEW v_web_app_component_summary AS
 SELECT
   fp.package_name,
-  fp.session_stamp,
+  CONVERT(fp.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci AS session_stamp,
   COUNT(*) AS providers,
   SUM(CASE WHEN COALESCE(fp.exported, 0) = 1 THEN 1 ELSE 0 END) AS exported_providers,
   SUM(
@@ -919,7 +921,7 @@ CREATE_V_WEB_APP_COMPONENT_ACL = """
 CREATE OR REPLACE VIEW v_web_app_component_acl AS
 SELECT
   package_name,
-  session_stamp,
+  CONVERT(session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci AS session_stamp,
   authority,
   provider_name,
   path,
@@ -939,7 +941,7 @@ CREATE OR REPLACE VIEW v_web_app_report_summary AS
 SELECT
   sessions.package_name,
   sessions.static_run_id,
-  sessions.session_stamp,
+  CONVERT(sessions.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci AS session_stamp,
   sessions.created_at,
   sessions.run_status,
   sessions.profile,
@@ -1008,7 +1010,9 @@ SELECT
   latest_apk.version_code AS latest_version_code,
   latest_apk.harvested_at AS latest_harvested_at,
   COALESCE(latest_static_run.id, latest_static.static_run_id, latest_risk.static_run_id) AS latest_static_run_id,
-  COALESCE(latest_static.session_stamp, latest_static_run.session_stamp, latest_risk.session_stamp) AS latest_static_session_stamp,
+  CONVERT(
+    COALESCE(latest_static.session_stamp, latest_static_run.session_stamp, latest_risk.session_stamp) USING utf8mb4
+  ) COLLATE utf8mb4_unicode_ci AS latest_static_session_stamp,
   CASE
     WHEN latest_static.package_name IS NOT NULL AND latest_risk.package_name IS NOT NULL THEN 'static+permission_audit'
     WHEN latest_static.package_name IS NOT NULL THEN 'static'
@@ -1075,15 +1079,15 @@ SELECT
     ELSE 'catalog_only'
   END AS summary_state
 FROM (
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM apps
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM apps
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM vw_static_finding_surfaces_latest
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM vw_static_finding_surfaces_latest
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM v_static_risk_surfaces_v1
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM v_static_risk_surfaces_v1
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM dynamic_sessions
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM dynamic_sessions
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_general_ci AS package_name FROM analysis_risk_regime_summary
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM analysis_risk_regime_summary
 ) pkg
 LEFT JOIN apps a
   ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci

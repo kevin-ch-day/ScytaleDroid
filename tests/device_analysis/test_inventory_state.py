@@ -90,6 +90,33 @@ def test_render_snapshot_block_formats_last_sync_age(monkeypatch, capsys) -> Non
     assert "Last sync    : " in out and "ago" in out
 
 
+def test_render_snapshot_block_uses_expanded_day_hour_minute_age(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(progress.colors, "colors_enabled", lambda: False)
+    monkeypatch.setattr(
+        progress,
+        "INVENTORY_STALE_SECONDS",
+        24 * 60 * 60,
+    )
+
+    captured = datetime.now(UTC) - timedelta(days=1, hours=2, minutes=49)
+    meta = SimpleNamespace(
+        captured_at=captured,
+        snapshot_id=57,
+        package_count=578,
+    )
+
+    progress.render_snapshot_block(
+        meta,
+        mode="baseline",
+        serial="ZY22JK89DR",
+        allow_fallbacks=True,
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Inventory    : STALE" in out
+    assert "Last sync    : 1 Day 2 hrs 49 mins ago" in out
+
+
 def test_prune_inventory_files_keeps_last_n_snapshots(tmp_path, monkeypatch):
     serial = "TESTSERIAL"
     inv_dir = tmp_path / serial / "inventory"

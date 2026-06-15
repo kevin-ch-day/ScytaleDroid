@@ -143,7 +143,12 @@ def database_menu() -> None:
     while True:
         maybe_clear_screen()
         schema_ver = diagnostics.get_schema_version() or "<unknown>"
-        expected_schema = "0.2.6"
+        from scytaledroid.Database.db_utils.schema_migration_registry import (
+            latest_registered_schema_version,
+            schema_version_gte,
+        )
+
+        expected_schema = latest_registered_schema_version() or "0.2.6"
         connection_ok = diagnostics.check_connection()
         server_info = diagnostics.get_server_info() if connection_ok else {}
         target_database = server_info.get("database") or "<unknown>"
@@ -161,7 +166,7 @@ def database_menu() -> None:
                 ("Target DB", target_database),
             ]
         )
-        if schema_ver != expected_schema and schema_ver != "<unknown>":
+        if schema_ver != "<unknown>" and not schema_version_gte(schema_ver, expected_schema):
             print(status_messages.status(f"Schema baseline mismatch: expected {expected_schema}.", level="warn"))
             menu_utils.print_hint(
                 "Open Maintenance, repair, and migrations (option 7) to apply schema updates before DB-backed workflows."

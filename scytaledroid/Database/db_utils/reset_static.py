@@ -73,6 +73,7 @@ class ResetOutcome:
     skipped_protected: list[str]
     skipped_missing: list[str]
     failed: list[tuple[str, str]]
+    static_run_ids: tuple[int, ...] = ()
 
     def as_lines(self) -> Iterable[str]:
         if self.truncated:
@@ -290,6 +291,7 @@ def _reset_static_analysis_session_scoped(
             skipped_protected=[],
             skipped_missing=[],
             failed=[("session_scope", "session_label required for session-scoped reset")],
+            static_run_ids=(),
         )
 
     candidate_tables: list[str] = list(STATIC_ANALYSIS_TABLES)
@@ -394,6 +396,7 @@ def _reset_static_analysis_session_scoped(
         skipped_protected=[],
         skipped_missing=skipped_missing,
         failed=failed,
+        static_run_ids=tuple(static_ids),
     )
 
 
@@ -500,7 +503,11 @@ def _clear_local_session_metadata(session_label: str) -> None:
     shutil.rmtree(session_dir)
 
 
-def purge_static_session_artifacts(session_label: str) -> ArtifactPurgeOutcome:
+def purge_static_session_artifacts(
+    session_label: str,
+    *,
+    static_run_ids: Sequence[int] | None = None,
+) -> ArtifactPurgeOutcome:
     """Delete session-scoped static artifacts so the session can be re-run cleanly."""
 
     target_session = str(session_label or "").strip()
@@ -511,16 +518,17 @@ def purge_static_session_artifacts(session_label: str) -> ArtifactPurgeOutcome:
             failed=[("artifact_purge", "session_label required")],
         )
 
-    static_ids: list[int] = []
-    try:
-        with database_session(reuse_connection=False) as engine:
-            rows = engine.fetch_all(
-                "SELECT id FROM static_analysis_runs WHERE session_label=%s",
-                (target_session,),
-            )
-            static_ids = [int(row[0]) for row in rows if row and row[0] is not None]
-    except RuntimeError:
-        static_ids = []
+    static_ids = [int(value) for value in (static_run_ids or ()) if value is not None]
+    if not static_ids:
+        try:
+            with database_session(reuse_connection=False) as engine:
+                rows = engine.fetch_all(
+                    "SELECT id FROM static_analysis_runs WHERE session_label=%s",
+                    (target_session,),
+                )
+                static_ids = [int(row[0]) for row in rows if row and row[0] is not None]
+        except RuntimeError:
+            static_ids = []
 
     candidates: list[Path] = [
         Path(app_config.DATA_DIR) / "sessions" / target_session,
@@ -659,7 +667,10 @@ def prune_static_sessions(
             removed_sessions.append(session_label)
 
         if purge_artifacts:
-            artifact_outcome = purge_static_session_artifacts(session_label)
+            artifact_outcome = purge_static_session_artifacts(
+                session_label,
+                static_run_ids=outcome.static_run_ids,
+            )
             removed_artifacts.extend(artifact_outcome.removed)
             missing_artifacts.extend(artifact_outcome.missing)
             failed_sessions.extend((session_label, reason) for _name, reason in artifact_outcome.failed)
