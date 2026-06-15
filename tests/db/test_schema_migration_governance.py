@@ -28,7 +28,7 @@ def test_schema_migration_registry_has_no_duplicate_ids() -> None:
     assert duplicate_registry_ids() == {}
     assert len(registered_migrations()) >= 3
     assert registry_version_chain_issues() == []
-    assert latest_registered_schema_version() == "0.3.6-schema-version-width-hotfix"
+    assert latest_registered_schema_version() == "0.3.7-research-cohorts"
 
 
 def test_schema_version_gte_handles_semantic_and_branch_like_versions() -> None:

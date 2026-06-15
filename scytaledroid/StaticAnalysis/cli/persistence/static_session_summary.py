@@ -156,6 +156,38 @@ def _as_db_datetime(value: object) -> str | None:
     return text or None
 
 
+def _latest_session_run_provenance(session_stamp: str, scope_label: str) -> tuple[str | None, str | None, str | None]:
+    row = core_q.run_sql(
+        """
+        SELECT
+          NULLIF(TRIM(BOTH FROM sar.tool_semver), '') AS tool_semver,
+          NULLIF(TRIM(BOTH FROM sar.tool_git_commit), '') AS tool_git_commit,
+          NULLIF(TRIM(BOTH FROM sar.schema_version), '') AS schema_version
+        FROM static_analysis_runs sar
+        WHERE sar.session_stamp = %s
+          AND COALESCE(TRIM(BOTH FROM sar.scope_label), '') = %s
+        ORDER BY sar.id DESC
+        LIMIT 1
+        """,
+        (session_stamp, scope_label),
+        fetch="one",
+        query_name="static_session.latest_run_provenance",
+    )
+    if not row:
+        return (None, None, None)
+    if isinstance(row, dict):
+        return (
+            str(row.get("tool_semver")).strip() if row.get("tool_semver") else None,
+            str(row.get("tool_git_commit")).strip() if row.get("tool_git_commit") else None,
+            str(row.get("schema_version")).strip() if row.get("schema_version") else None,
+        )
+    vals = list(row) if isinstance(row, (list, tuple)) else [row]
+    tool_semver = str(vals[0]).strip() if len(vals) > 0 and vals[0] else None
+    tool_git_commit = str(vals[1]).strip() if len(vals) > 1 and vals[1] else None
+    schema_version = str(vals[2]).strip() if len(vals) > 2 and vals[2] else None
+    return (tool_semver, tool_git_commit, schema_version)
+
+
 def ensure_static_session_shell(
     *,
     session_stamp: str,
@@ -343,6 +375,7 @@ def refresh_static_analysis_session_summary(
     links = _scalar_child_count(_FETCH_SESSION_LINK_ROWS, (stamp,))
     rollup_n = _scalar_child_count(_FETCH_ROLLUP_ROWS, (stamp, scope))
     persist_fail = _scalar_child_count(_FETCH_PERSISTENCE_FAILURE_ROWS, (stamp, scope))
+    tool_semver, tool_git_commit, schema_version = _latest_session_run_provenance(stamp, scope)
 
     core_q.run_sql(
         """
@@ -365,6 +398,9 @@ def refresh_static_analysis_session_summary(
           session_link_rows = %s,
           rollup_rows = %s,
           persistence_failure_rows = %s,
+          tool_semver = COALESCE(%s, tool_semver),
+          tool_git_commit = COALESCE(%s, tool_git_commit),
+          schema_version = COALESCE(%s, schema_version),
           first_created_at = %s,
           last_ended_at = %s
         WHERE static_session_id = %s
@@ -386,6 +422,9 @@ def refresh_static_analysis_session_summary(
             links,
             rollup_n,
             persist_fail,
+            tool_semver,
+            tool_git_commit,
+            schema_version,
             rollups.first_created_at,
             rollups.last_ended_at,
             int(sid),

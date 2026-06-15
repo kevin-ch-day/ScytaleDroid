@@ -24,82 +24,122 @@ from ..core.models import ScopeSelection
 from .profile_prior_session import (
     PriorProfileSessionSnapshot,
     fetch_prior_profile_session_snapshot,
-    format_audit_session_command,
 )
 
 _INACTIVE_PROFILE_LABELS = frozenset({"Profile v3 Structural Cohort"})
+_RESEARCH_PROFILE_LABELS = frozenset({"Research Dataset Alpha", "Research Dataset Beta"})
 
 _DEFAULT_CAPTURE_RULE = "Newest harvest capture per package"
-_LARGE_SPLIT_APK_THRESHOLD = 20  # flag outlier workload before run setup
 # Future selection modes (longitudinal / per-app capture / base-only / completeness filters)
 # should extend ScopeSelection metadata and this module without renaming operator-visible harvest terms.
 
 
-def _skipped_count_map(skipped_details: Sequence[tuple[str, str, int]]) -> dict[str, int]:
-    return {pkg: count for pkg, _stamp, count in skipped_details}
+def _research_profile_labels() -> set[str]:
+    labels = {label.casefold() for label in _RESEARCH_PROFILE_LABELS}
+    try:
+        from scytaledroid.Database.db_func.research_cohorts import list_active_research_cohorts
+
+        for row in list_active_research_cohorts():
+            label = str(row.get("display_name") or "").strip()
+            if label:
+                labels.add(label.casefold())
+    except Exception:
+        pass
+    return labels
 
 
-def _format_version_line(group: ArtifactGroup) -> str:
-    base = group.base_artifact
-    if base is None:
-        return "—"
-    meta = base.metadata if isinstance(base.metadata, dict) else {}
-    name = meta.get("version_name")
-    code = meta.get("version_code")
-    parts: list[str] = []
-    if isinstance(name, str) and name.strip():
-        parts.append(name.strip())
-    if code is not None and str(code).strip():
-        parts.append(f"({code})")
-    return " ".join(parts) if parts else "—"
+def _is_research_profile_entry(*, label: object = None, profile_key: object = None, cohort_key: object = None) -> bool:
+    normalized_label = str(label or "").strip().casefold()
+    normalized_profile_key = str(profile_key or "").strip().upper()
+    normalized_cohort_key = str(cohort_key or "").strip().lower()
+    if normalized_label and normalized_label in _research_profile_labels():
+        return True
+    if normalized_profile_key.startswith("RESEARCH_DATASET_"):
+        return True
+    if normalized_cohort_key.startswith("research_dataset_"):
+        return True
+    return False
 
 
-def _format_capture_time(group: ArtifactGroup) -> str:
-    stamp = group.session_stamp or ""
-    if stamp.strip():
-        return stamp.strip()
-    base = group.base_artifact
-    if base is None:
-        return "unknown"
-    meta = base.metadata if isinstance(base.metadata, dict) else {}
-    for key in ("captured_at_utc", "snapshot_captured_at", "harvest_completed_at"):
-        raw = meta.get(key)
-        if isinstance(raw, str) and raw.strip():
-            return raw.strip()[:32]
-    return "unknown"
+def _build_profile_options(groups: Sequence[ArtifactGroup]) -> list[dict[str, object]]:
+    categories = [
+        (category, count)
+        for category, count in list_categories(groups)
+        if category not in _INACTIVE_PROFILE_LABELS
+        and not _is_research_profile_entry(label=category)
+    ]
+    options: list[dict[str, object]] = [
+        {
+            "label": category,
+            "count": int(count),
+            "profile_key": None,
+            "packages": None,
+        }
+        for category, count in categories
+    ]
+    seen_labels = {str(item["label"]).casefold() for item in options}
 
+    try:
+        from scytaledroid.DynamicAnalysis import profile_loader
 
-def _base_sha_prefix(group: ArtifactGroup) -> str:
-    base = group.base_artifact
-    if base is None:
-        return "—"
-    sha = getattr(base, "sha256", None) or (
-        base.metadata.get("sha256") if isinstance(base.metadata, dict) else None
-    )
-    if isinstance(sha, str) and len(sha) >= 16:
-        return f"{sha[:16]}…"
-    if isinstance(sha, str) and sha.strip():
-        return f"{sha.strip()[:16]}…"
-    return "—"
+        db_profiles = profile_loader.load_operational_profiles()
+    except Exception:
+        db_profiles = []
 
+    available_packages = {
+        str(getattr(group, "package_name", "") or "").strip().lower()
+        for group in groups
+        if str(getattr(group, "package_name", "") or "").strip()
+    }
+    for profile in db_profiles:
+        label = str(profile.get("display_name") or profile.get("profile_key") or "").strip()
+        profile_key = str(profile.get("profile_key") or "").strip()
+        if (
+            not label
+            or not profile_key
+            or label in _INACTIVE_PROFILE_LABELS
+            or _is_research_profile_entry(
+                label=label,
+                profile_key=profile_key,
+                cohort_key=profile.get("cohort_key"),
+            )
+        ):
+            continue
+        try:
+            from scytaledroid.DynamicAnalysis import profile_loader
 
-def _capture_status_word(group: ArtifactGroup) -> str:
-    if group.base_artifact is None:
-        return "missing base"
-    splits = sum(1 for a in group.artifacts if getattr(a, "is_split_member", False))
-    reasons = group.harvest_non_canonical_reasons
-    if reasons:
-        return "partial / " + ", ".join(reasons[:3])
-    if splits >= 15:
-        return "complete (split-heavy)"
-    return "complete"
+            packages = {
+                str(package).strip().lower()
+                for package in profile_loader.load_profile_packages(profile_key)
+                if str(package).strip()
+            }
+        except Exception:
+            packages = set()
+        available_count = len(available_packages.intersection(packages))
+        if available_count <= 0:
+            continue
+        label_key = label.casefold()
+        if label_key in seen_labels:
+            for item in options:
+                if str(item["label"]).casefold() == label_key:
+                    if not item.get("profile_key"):
+                        item["profile_key"] = profile_key
+                        item["packages"] = packages
+                    item["count"] = max(int(item.get("count") or 0), available_count)
+                    break
+            continue
+        seen_labels.add(label_key)
+        options.append(
+            {
+                "label": label,
+                "count": available_count,
+                "profile_key": profile_key,
+                "packages": packages,
+            }
+        )
 
-
-def _rule_display(rule_line: str) -> str:
-    s = (rule_line or "").strip()
-    if not s:
-        return ""
-    return s[0].lower() + s[1:]
+    options.sort(key=lambda item: str(item["label"]).casefold())
+    return options
 
 
 def _print_workload_summary_lines(
@@ -109,22 +149,9 @@ def _print_workload_summary_lines(
     older_excluded: int,
     rule_line: str,
 ) -> None:
+    _ = scoped, older_excluded, rule_line
     print(f"Profile: {profile_title}")
-    print(f"Rule   : {_rule_display(rule_line)}")
-    if older_excluded > 0:
-        print(
-            f"Older captures excluded from this run: {older_excluded} "
-            "(other captures remain in the library for comparison)"
-        )
-    print("Final package and APK counts are shown in Run Setup.")
-
-
-def _print_research_workflow_block() -> None:
-    print()
-    print("Research workflow")
-    print("  Static scan writes canonical DB rows and handoff records.")
-    print("  After run, audit with scripts/db/audit_static_session.py.")
-    print("  Dynamic planning can use v_static_handoff_v1 when handoff rows are present.")
+    print("Newest harvested capture per package is selected automatically.")
 
 
 def _print_prior_profile_session_snapshot(snapshot: PriorProfileSessionSnapshot | None) -> None:
@@ -140,26 +167,6 @@ def _print_prior_profile_session_snapshot(snapshot: PriorProfileSessionSnapshot 
     print(f"{pad}{'Handoff rows':<{lw}}: {snapshot.handoff_rows}")
     ready, total = snapshot.dynamic_ready
     print(f"{pad}{'Dynamic-ready apps':<{lw}}: {ready}/{total}")
-    print(f"{pad}{'Audit (latest cohort)':<{lw}}: {format_audit_session_command(snapshot.session_stamp)}")
-
-
-def _maybe_print_large_split_warnings(scoped: Sequence[ArtifactGroup], display_map: dict[str, str]) -> None:
-    outliers: list[tuple[str, str, int, int, int]] = []
-    for group in scoped:
-        total = len(group.artifacts)
-        splits = sum(1 for a in group.artifacts if getattr(a, "is_split_member", False))
-        base_n = total - splits
-        if total < _LARGE_SPLIT_APK_THRESHOLD:
-            continue
-        pkg = group.package_name
-        label = display_map.get(pkg.lower()) or pkg
-        outliers.append((label, pkg, total, base_n, splits))
-    if not outliers:
-        return
-    print()
-    print("Large split workload")
-    for label, _pkg, total, base_n, splits in sorted(outliers, key=lambda row: row[2], reverse=True):
-        print(f"  {label} — {total} APK files ({base_n} base + {splits} split)")
 
 
 def format_scope_target(selection: ScopeSelection) -> str:
@@ -191,9 +198,8 @@ def select_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 def _select_all_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
     if not groups:
         return ScopeSelection("all", "All apps", tuple())
-    grouped, scoped, skipped_details = _collapse_latest_by_package(groups)
+    _grouped, scoped, skipped_details = _collapse_latest_by_package(groups)
     older_excluded = sum(count for _, _, count in skipped_details)
-    _maybe_prompt_selection_details(grouped, scoped, skipped_details)
 
     return ScopeSelection(
         "all",
@@ -257,12 +263,8 @@ def select_app_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
 
 
 def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
-    categories = [
-        (category, count)
-        for category, count in list_categories(groups)
-        if category not in _INACTIVE_PROFILE_LABELS
-    ]
-    if not categories:
+    profile_options = _build_profile_options(groups)
+    if not profile_options:
         print(status_messages.status("No profile data available.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return ScopeSelection("all", "All apps", tuple(groups))
@@ -274,44 +276,73 @@ def select_category_scope(groups: Sequence[ArtifactGroup]) -> ScopeSelection:
         "the next screen summarizes workload.",
     )
     print()
-    rows = [[str(idx), category, str(count)] for idx, (category, count) in enumerate(categories, start=1)]
+    rows = [
+        [str(idx), str(item["label"]), str(int(item["count"]))]
+        for idx, item in enumerate(profile_options, start=1)
+    ]
     table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True, padding=2)
     print()
-    print(f"Profiles: {len(categories)}")
+    print(f"Profiles: {len(profile_options)}")
 
-    if len(categories) == 1:
-        category_name, _ = categories[0]
+    if len(profile_options) == 1:
+        selected = profile_options[0]
+        category_name = str(selected["label"])
         print(
             status_messages.status(
                 f"Only one active profile is available; selecting {category_name}.",
                 level="info",
             )
         )
-        return resolve_profile_scope(groups, category_name)
+        return resolve_profile_scope(
+            groups,
+            category_name,
+            profile_key=str(selected.get("profile_key") or "") or None,
+            packages=selected.get("packages"),
+        )
 
-    index = _resolve_index("Select profile #", [category for category, _ in categories])
-    category_name, _ = categories[index]
-    return resolve_profile_scope(groups, category_name)
+    index = _resolve_index("Select profile #", [str(item["label"]) for item in profile_options])
+    selected = profile_options[index]
+    category_name = str(selected["label"])
+    return resolve_profile_scope(
+        groups,
+        category_name,
+        profile_key=str(selected.get("profile_key") or "") or None,
+        packages=selected.get("packages"),
+    )
 
 
 def resolve_profile_scope(
     groups: Sequence[ArtifactGroup],
     category_name: str,
+    *,
+    profile_key: str | None = None,
+    packages: object | None = None,
 ) -> ScopeSelection:
-    profile_map = load_profile_map(groups)
-    scoped_all = tuple(
-        group
-        for group in groups
-        if (
-            profile_map.get(group.package_name.lower())
-            or group.category
-            or "Uncategorized"
+    package_filter = {
+        str(package).strip().lower()
+        for package in (packages or set())
+        if str(package).strip()
+    }
+    if profile_key and package_filter:
+        scoped_all = tuple(
+            group
+            for group in groups
+            if str(getattr(group, "package_name", "") or "").strip().lower() in package_filter
         )
-        == category_name
-    )
-    grouped, scoped, skipped_details = _collapse_latest_by_package(scoped_all)
+    else:
+        profile_map = load_profile_map(groups)
+        scoped_all = tuple(
+            group
+            for group in groups
+            if (
+                profile_map.get(group.package_name.lower())
+                or group.category
+                or "Uncategorized"
+            )
+            == category_name
+        )
+    _grouped, scoped, skipped_details = _collapse_latest_by_package(scoped_all)
     older_excluded = sum(count for _, _, count in skipped_details)
-    _maybe_prompt_selection_details(grouped, scoped, skipped_details)
 
     if scoped:
         display_map = load_display_name_map(scoped)
@@ -326,7 +357,6 @@ def resolve_profile_scope(
             older_excluded=older_excluded,
             rule_line=_DEFAULT_CAPTURE_RULE,
         )
-        _print_research_workflow_block()
         cohort_packages = frozenset(
             g.package_name.strip().lower()
             for g in scoped
@@ -337,10 +367,8 @@ def resolve_profile_scope(
         )
         print()
         _render_profile_selection_table(scoped)
-        _maybe_print_large_split_warnings(scoped, display_map)
         print()
-        print("Workload depends on the preset and split scan settings; Run Setup shows the final counts.")
-        print("Use Advanced / edit run options (from Run Setup) for base-only or reduced workload.")
+        print("Final package and APK totals depend on preset and split scan settings; Run Setup shows the exact counts.")
     return ScopeSelection(
         "profile",
         category_name,
@@ -418,32 +446,6 @@ def _collapse_latest_by_package(
             stamp = newest.session_stamp or "undated"
             skipped_details.append((package, stamp, skipped))
     return grouped, tuple(collapsed), skipped_details
-
-
-def _maybe_prompt_selection_details(
-    grouped: dict[str, list[ArtifactGroup]],
-    scoped: Sequence[ArtifactGroup],
-    skipped_details: Sequence[tuple[str, str, int]],
-) -> None:
-    if not skipped_details:
-        return
-    total_packages = len(skipped_details)
-    total_skipped = sum(count for _, _, count in skipped_details)
-    summary = (
-        f"Selected newest harvest capture for each of {total_packages} package"
-        f"{'s' if total_packages != 1 else ''}. "
-        f"Excluded {total_skipped} older capture{'s' if total_skipped != 1 else ''} from this run "
-        "(older captures remain stored for comparison)."
-    )
-    print(status_messages.status(summary, level="info"))
-    response = prompt_utils.prompt_text(
-        "Press D for selection details, or Enter to continue",
-        required=False,
-    ).strip().lower()
-    if response == "d":
-        _render_selection_details(grouped, scoped, skipped_details)
-
-
 def _resolve_index(prompt: str, labels: Sequence[str]) -> int:
     valid_range = f"1..{len(labels)}"
     while True:
@@ -524,58 +526,6 @@ def select_latest_groups(groups: Sequence[ArtifactGroup]) -> tuple[ArtifactGroup
         contemporaries = [group for group in groups if _group_recency_key(group)[:6] == prefix]
         return tuple(contemporaries) if contemporaries else (best_group,)
     return (best_group,)
-
-
-def _render_selection_details(
-    grouped: dict[str, list[ArtifactGroup]],
-    selected: Sequence[ArtifactGroup],
-    skipped_details: Sequence[tuple[str, str, int]],
-) -> None:
-    print()
-    print("Selection details (per package)")
-    print("-" * 80)
-    skipped_map = _skipped_count_map(skipped_details)
-    display_map = load_display_name_map(selected)
-
-    lines: list[tuple[str, str, ArtifactGroup]] = []
-    for group in selected:
-        pkg = group.package_name
-        label = display_map.get(pkg.lower()) or pkg
-        lines.append((label.lower(), label, group))
-    lines.sort(key=lambda row: row[0])
-
-    for _sort_key, label, group in lines:
-        pkg = group.package_name
-        total = len(group.artifacts)
-        splits = sum(1 for a in group.artifacts if getattr(a, "is_split_member", False))
-        base_n = total - splits
-        apk_breakdown = f"{total} ({base_n} base + {splits} split)" if splits else str(total)
-        older = skipped_map.get(pkg, 0)
-        print(f"{label}")
-        print(f"  Package             : {pkg}")
-        print(f"  Selected capture    : {_format_capture_time(group)}")
-        print(f"  Version             : {_format_version_line(group)}")
-        print(f"  APK files           : {apk_breakdown}")
-        print(f"  Base SHA-256 prefix : {_base_sha_prefix(group)}")
-        print(
-            f"  Older captures      : {older} excluded from this run"
-            if older
-            else "  Older captures      : none excluded"
-        )
-        print(f"  Capture status      : {_capture_status_word(group)}")
-        print()
-
-    total_packages = len(skipped_details)
-    total_skipped = sum(count for _, _, count in skipped_details)
-    if total_skipped > 0:
-        print(
-            f"Summary: {total_skipped} older capture{'s' if total_skipped != 1 else ''} excluded "
-            f"across {total_packages} package{'s' if total_packages != 1 else ''}."
-        )
-    else:
-        print("Summary: no older captures excluded (one capture per package in scope).")
-
-
 def _group_recency_key(group: ArtifactGroup) -> tuple[int, str, float]:
     """Deterministic ordering key for "latest" group selection.
 

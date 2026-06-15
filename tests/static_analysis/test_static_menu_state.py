@@ -92,6 +92,7 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
     assert "Analyze all apps — full analysis" in out
     assert "choose size & preset" in out
     assert "Analyze by profile" in out
+    assert "Analyze research cohort" in out
     assert "Analyze one app" in out
     assert "Re-analyze last app" in out
     assert "Review" in out
@@ -158,9 +159,7 @@ def test_choose_run_profile_full_shows_pipeline_summary_after_selection(monkeypa
     assert command is not None
     assert command.profile == "full"
     out = capsys.readouterr().out
-    assert "Preset            : Full analysis" in out
-    assert "Analyzer modules  : 9" in out
-    assert "Detector stages   :" in out and "ordered" in out
+    assert "Preset            : Full analysis · 9 modules · 20 detector stages" in out
 
 
 def test_choose_run_profile_exposes_focused_validation_modes(monkeypatch) -> None:
@@ -256,7 +255,7 @@ def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) 
     assert "Run Setup" in out
     assert "Scope" in out and "Preset" in out
     assert "Full — 9 modules, 20 detector stages" in out
-    assert "Post-run audit" in out
+    assert "Audit" in out
     assert "PYTHONPATH=. python scripts/db/audit_static_session.py" in out
     assert "report_static_session_grain_integrity.py" in out
     assert "Existing session" in out
@@ -318,7 +317,7 @@ def test_run_setup_split_heavy_guidance_tracks_base_only_override(monkeypatch, c
     out = capsys.readouterr().out
     assert "APK files          : 54 (1 base + 53 split)" in out
     assert "Large split apps   : com.zhiliaoapp.musically (54 APK files)" in out
-    assert "Recommendation     : 3) Advanced / edit run options -> Split APK scan off (base APK only)" in out
+    assert "Hint               : 3) Advanced -> Split APK scan off (base APK only)" in out
 
     actions.prompt_run_setup(
         RunParameters(
@@ -333,7 +332,33 @@ def test_run_setup_split_heavy_guidance_tracks_base_only_override(monkeypatch, c
     out = capsys.readouterr().out
     assert "APK files          : 1 (1 base + 0 split)" in out
     assert "Large split apps" not in out
-    assert "Recommendation     :" not in out
+    assert "Hint               :" not in out
+
+
+def test_run_setup_prunes_zero_signal_default_rows(monkeypatch, capsys) -> None:
+    actions = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.actions")
+    selection = ScopeSelection("profile", "Research Dataset Beta", (_dummy_group("bbc.mobile.news.ww"),))
+    params = RunParameters(profile="full", scope="profile", scope_label="Research Dataset Beta")
+    command = Command(
+        id="1",
+        title="Run Static Pipeline (Full)",
+        description="Run full static profile.",
+        kind="scan",
+        profile="full",
+    )
+
+    monkeypatch.setattr(actions, "_lookup_existing_session_state", lambda _stamp: (False, 0, None))
+    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *_a, **_k: "0")
+
+    actions.prompt_run_setup(params, selection, command)
+    out = capsys.readouterr().out
+    assert "Selection rule" not in out
+    assert "Older captures" not in out
+    assert "Existing session" not in out
+    assert "Post-run audit" not in out
+    assert "Audit command" not in out
+    assert "Audit" in out and "audit_static_session.py" in out
+    assert "Grain triage" in out and "report_static_session_grain_integrity.py" in out
 
 
 def test_static_menu_shows_persistence_warning_when_schema_is_unavailable(monkeypatch, capsys):

@@ -5,6 +5,7 @@ from collections import Counter
 from scytaledroid.StaticAnalysis.cli.persistence.run_summary import (
     _FindingPreparationAccumulator,
     _build_findings_persistence_context,
+    _finding_cap_for_detector,
 )
 
 
@@ -42,3 +43,11 @@ def test_persisted_totals_fallback_baseline_when_no_runtime_findings() -> None:
 
     assert ctx.persisted_totals.get("High", 0) == 1
     assert ctx.persisted_totals.get("Info", 0) == 3
+
+
+def test_ipc_components_uses_high_cap_override() -> None:
+    assert _finding_cap_for_detector("ipc_components") == 500
+
+
+def test_unknown_detector_uses_default_cap() -> None:
+    assert _finding_cap_for_detector("some_future_detector") == 20

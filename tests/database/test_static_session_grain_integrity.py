@@ -221,6 +221,49 @@ def test_collect_session_grain_mock_happy_path() -> None:
     assert out["top_packages"][0]["package_name"] == "com.heavy"
 
 
+def test_collect_session_grain_artifact_registry_query_uses_both_typed_and_legacy_linkage() -> None:
+    captured_sql: list[str] = []
+
+    def run_sql(sql: str, params=None, fetch="one", dictionary=False, **_kwargs):  # type: ignore[no-untyped-def]
+        normalized = " ".join(str(sql).split())
+        captured_sql.append(normalized)
+        if fetch == "one":
+            if "COUNT(*) FROM static_analysis_runs r WHERE r.session_stamp" in normalized and "GROUP BY" not in normalized:
+                return (1,)
+            if "FROM static_analysis_findings" in normalized:
+                return (1,)
+            if "FROM static_permission_matrix" in normalized:
+                return (1,)
+            if "FROM static_permission_risk_vnext" in normalized:
+                return (1,)
+            if "FROM static_string_summary s" in normalized and "INNER JOIN static_analysis_runs r" in normalized:
+                return (1,)
+            if "FROM static_string_samples" in normalized:
+                return (1,)
+            if "FROM static_correlation_results" in normalized:
+                return (1,)
+            if "FROM static_session_run_links" in normalized:
+                return (1,)
+            if "FROM static_session_rollups" in normalized:
+                return (1,)
+            if "FROM static_persistence_failures" in normalized:
+                return (0,)
+            if "FROM artifact_registry ar" in normalized:
+                assert "ar.static_run_id IN" in normalized
+                assert "ar.static_run_id IS NULL" in normalized
+                assert "CAST(r.id AS CHAR)" in normalized
+                return (2,)
+        if fetch == "all" and "GROUP BY COALESCE" in normalized:
+            return [("COMPLETED", 1)]
+        if fetch == "all" and dictionary and "FROM static_analysis_runs r" in normalized and "JOIN app_versions" in normalized:
+            return []
+        raise AssertionError((sql, params, fetch, dictionary))
+
+    out = collect_session_grain(run_sql, session_stamp="sess", scope_label="Scope", top_packages=1)
+    assert out["artifact_registry_rows_static"] == 2
+    assert any("FROM artifact_registry ar" in sql for sql in captured_sql)
+
+
 def test_format_grain_integrity_cli_command_escapes_quotes() -> None:
     cmd = format_grain_integrity_cli_command(
         "sess'1",

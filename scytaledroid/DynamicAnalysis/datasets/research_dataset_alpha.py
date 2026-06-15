@@ -38,7 +38,18 @@ MESSAGING_PACKAGES: tuple[str, ...] = (
 
 
 def load_dataset_packages() -> Sequence[str]:
-    """Prefer DB profile mapping; fall back to the canonical list if unavailable."""
+    """Prefer DB research cohort membership; fall back to legacy profile/Python sources."""
+    try:
+        from scytaledroid.Database.db_func.research_cohorts import (
+            ALPHA_COHORT_KEY,
+            fetch_active_research_cohort_packages,
+        )
+
+        pkgs = [p for p in fetch_active_research_cohort_packages(ALPHA_COHORT_KEY) if isinstance(p, str) and p.strip()]
+        if pkgs:
+            return pkgs
+    except Exception:
+        pass
     try:
         from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 

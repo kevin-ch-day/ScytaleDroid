@@ -357,9 +357,18 @@ def collect_session_grain(
             ar.static_run_id IN (SELECT r.id FROM static_analysis_runs r WHERE r.session_stamp=%s"""
         + scope_extra
         + """)
-            OR (ar.static_run_id IS NULL AND ar.run_id IN (SELECT CAST(r.id AS CHAR) FROM static_analysis_runs r WHERE r.session_stamp=%s"""
+            OR (
+              ar.static_run_id IS NULL
+              AND ar.run_id IN (
+                SELECT CAST(r.id AS CHAR)
+                FROM static_analysis_runs r
+                WHERE r.session_stamp=%s"""
         + scope_extra
-        + ")",
+        + """
+              )
+            )
+          )
+        """,
         params_base + params_base,
     )
 

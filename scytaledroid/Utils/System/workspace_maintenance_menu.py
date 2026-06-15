@@ -190,11 +190,14 @@ def _show_dashboard() -> None:
     dyn_size = _dir_size_bytes(dyn_root)
 
     # Dataset app coverage: which apps have >=1 run on disk.
+    cohort_label = "Research cohort"
     dataset_pkgs: list[str] = []
     try:
-        from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+        from scytaledroid.Database.db_func.research_cohorts import resolve_research_cohort_context
 
-        dataset_pkgs = [p for p in load_profile_packages("RESEARCH_DATASET_ALPHA") if str(p).strip()]
+        cohort_ctx = resolve_research_cohort_context()
+        cohort_label = str(cohort_ctx.get("display_name") or cohort_label)
+        dataset_pkgs = [str(p).strip() for p in cohort_ctx.get("packages", ()) if str(p).strip()]
     except Exception:
         dataset_pkgs = []
     dataset_set = {p.strip() for p in dataset_pkgs}
@@ -299,6 +302,7 @@ def _show_dashboard() -> None:
 
     print()
     print(text_blocks.headline("Collection Dashboard", width=display_settings.default_width(80)))
+    print(f"Cohort: {cohort_label}")
     print(f"Dynamic evidence: {packs} pack(s), {_humanize_bytes(dyn_size)}")
     if apps_total:
         print(f"Dataset apps with runs: {apps_with_runs}/{apps_total}")

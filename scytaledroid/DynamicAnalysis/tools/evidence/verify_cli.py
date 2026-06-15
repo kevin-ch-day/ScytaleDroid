@@ -802,16 +802,19 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
         print(f"invalid  : {invalid_cnt}")
 
     # If this is a dataset collection workspace, show which dataset apps have no runs yet.
+    dataset_label = "Research cohort"
     try:
-        from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+        from scytaledroid.Database.db_func.research_cohorts import resolve_research_cohort_context
 
-        dataset_pkgs = {p.strip() for p in load_profile_packages("RESEARCH_DATASET_ALPHA") if str(p).strip()}
+        cohort_ctx = resolve_research_cohort_context()
+        dataset_label = str(cohort_ctx.get("display_name") or dataset_label)
+        dataset_pkgs = {str(p).strip() for p in cohort_ctx.get("packages", ()) if str(p).strip()}
     except Exception:
         dataset_pkgs = set()
     if dataset_pkgs:
         present = {p for p in packages if p in dataset_pkgs}
         missing_apps = sorted([p for p in dataset_pkgs if p not in present])
-        print(f"dataset  : {len(present)}/{len(dataset_pkgs)} apps have >=1 run")
+        print(f"dataset  : {dataset_label} · {len(present)}/{len(dataset_pkgs)} apps have >=1 run")
         if missing_apps:
             preview = ", ".join(labels.get(p, p) for p in missing_apps[:8])
             suffix = " ..." if len(missing_apps) > 8 else ""

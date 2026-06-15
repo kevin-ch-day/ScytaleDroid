@@ -10,27 +10,27 @@ def test_select_inventory_sync_profile_auto_selects_single_active_profile(monkey
 
     monkeypatch.setattr(
         profile_loader,
-        "load_db_profiles",
+        "load_operational_profiles",
         lambda: [
             {
-                "profile_key": "RESEARCH_DATASET_ALPHA",
-                "display_name": "Research Dataset Alpha",
-                "app_count": 12,
+                "profile_key": "NEWS",
+                "display_name": "News",
+                "app_count": 5,
             }
         ],
     )
     monkeypatch.setattr(
         profile_loader,
         "load_profile_packages",
-        lambda profile_key: {"com.example.alpha"} if profile_key == "RESEARCH_DATASET_ALPHA" else set(),
+        lambda profile_key: {"com.example.alpha"} if profile_key == "NEWS" else set(),
     )
     monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
 
     selected = actions._select_inventory_sync_profile()
 
     assert selected is not None
-    assert selected["profile_key"] == "RESEARCH_DATASET_ALPHA"
-    assert selected["scope_id"] == "profile::research_dataset_alpha"
+    assert selected["profile_key"] == "NEWS"
+    assert selected["scope_id"] == "profile::news"
     out = capsys.readouterr().out
     assert "Only one active profile is available" in out
 
@@ -65,12 +65,12 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
 
     monkeypatch.setattr(
         profile_loader,
-        "load_db_profiles",
+        "load_operational_profiles",
         lambda: [
             {
-                "profile_key": "RESEARCH_DATASET_ALPHA",
-                "display_name": "Research Dataset Alpha",
-                "app_count": 12,
+                "profile_key": "NEWS",
+                "display_name": "News",
+                "app_count": 2,
             }
         ],
     )
@@ -78,7 +78,7 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
         profile_loader,
         "load_profile_packages",
         lambda profile_key: {"com.example.alpha", "com.example.beta"}
-        if profile_key == "RESEARCH_DATASET_ALPHA"
+        if profile_key == "NEWS"
         else set(),
     )
 
@@ -102,7 +102,7 @@ def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels
     ]
     assert captured_menu["show_descriptions"] is True
     assert scoped_call["serial"] == "SERIAL123"
-    assert scoped_call["scope_id"] == "profile::research_dataset_alpha"
+    assert scoped_call["scope_id"] == "profile::news"
     assert scoped_call["packages"] == {"com.example.alpha", "com.example.beta"}
     assert scoped_call["mode"] == "bulk"
 
@@ -191,7 +191,7 @@ def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, 
     actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
 
     out = capsys.readouterr().out
-    assert "Snapshot already fresh (34s · 546 pkgs)" in out
+    assert "Snapshot already fresh (34 secs · 546 pkgs)" in out
     assert prompted["prompt"] == "Continue"
     assert prompted["default"] is False
 

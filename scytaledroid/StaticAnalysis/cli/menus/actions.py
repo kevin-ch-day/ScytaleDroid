@@ -134,13 +134,6 @@ def _compact_preset_summary_for_run_setup(params: RunParameters, command: Comman
     return f"{title} — up to {stages} detector stages (profile may skip stages)"
 
 
-def _selection_rule_display(rule: str | None) -> str:
-    s = (rule or "").strip()
-    if not s:
-        return ""
-    return s[0].lower() + s[1:]
-
-
 def _scope_token(params: RunParameters) -> str:
     scope = (params.scope or "").strip().lower()
     label = (params.scope_label or "").strip().lower()
@@ -442,8 +435,6 @@ def prompt_run_setup(
         groups,
         scan_splits=scan_splits_enabled,
     )
-    older_excluded = int(getattr(selection, "older_captures_excluded", 0) or 0)
-    selection_rule = getattr(selection, "selection_rule_summary", None)
     target = getattr(selection, "label", None) or "selected scope"
     if package_count == 1 and groups:
         group = groups[0]
@@ -459,16 +450,12 @@ def prompt_run_setup(
     menu_utils.print_section("Run Setup")
     _run_setup_kv("Scope", target)
     _run_setup_kv("Preset", _compact_preset_summary_for_run_setup(params, command))
-    if selection_rule:
-        _run_setup_kv("Selection rule", _selection_rule_display(selection_rule))
     _run_setup_kv("Packages", str(package_count))
     base_apk_total = artifact_count - split_apk_total
     _run_setup_kv(
         "APK files",
         f"{artifact_count} ({base_apk_total} base + {split_apk_total} split)",
     )
-    if older_excluded > 0:
-        _run_setup_kv("Older captures", f"{older_excluded} excluded")
     scan_splits_note = "on" if scan_splits_enabled else "off"
     _run_setup_kv("Split APK scan", scan_splits_note)
     heavy = _large_split_groups(groups)
@@ -481,8 +468,8 @@ def prompt_run_setup(
         top_txt = "; ".join(parts)
         _run_setup_kv("Large split apps", top_txt)
         _run_setup_kv(
-            "Recommendation",
-            "3) Advanced / edit run options -> Split APK scan off (base APK only)",
+            "Hint",
+            "3) Advanced -> Split APK scan off (base APK only)",
         )
     _run_setup_kv("Session", session_stamp)
     if has_existing:
@@ -491,12 +478,9 @@ def prompt_run_setup(
             _run_setup_kv("Canonical run", f"static_run_id={canonical_id}")
         elif attempts is not None:
             _run_setup_kv("App rows", str(attempts))
-    else:
-        _run_setup_kv("Existing session", "none")
-    _run_setup_kv("Post-run audit", "after run completes")
-    _run_setup_kv("Audit command", format_audit_session_command(session_stamp))
+    _run_setup_kv("Audit", format_audit_session_command(session_stamp))
     _run_setup_kv(
-        "Grain / split triage",
+        "Grain triage",
         format_grain_integrity_session_command(session_stamp, count_archive=True, aggregate_json=False),
     )
     print()
