@@ -13,9 +13,6 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
-    load_dataset_packages,
-)
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
@@ -23,10 +20,12 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
     load_dataset_tracker,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
     inspect_canonical_freeze,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
 
 
 @dataclass(frozen=True)
@@ -91,6 +90,7 @@ def _compute_evidence_quota(
 ) -> tuple[int, int]:
     """Return (quota_runs_counted, apps_satisfied) from evidence packs."""
     per_pkg: dict[str, dict[str, int]] = {}
+    per_pkg_rows: dict[str, list[dict[str, object]]] = {}
     quota_runs_counted = 0
     for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
         manifest = _read_json(run_dir / "run_manifest.json")
@@ -114,18 +114,29 @@ def _compute_evidence_quota(
         bucket = _run_profile_bucket(str(dataset.get("run_profile") or operator.get("run_profile") or ""))
         if bucket == "unknown":
             continue
-        # Low-signal *idle* baseline rule: retained but must not satisfy quota.
-        # baseline_connected must remain quota-eligible (low_signal is a tag, not an invalidation).
-        prof_lc = str(dataset.get("run_profile") or operator.get("run_profile") or "").strip().lower()
-        if bucket == "baseline" and prof_lc == "baseline_idle" and bool(dataset.get("low_signal")):
-            continue
+        per_pkg_rows.setdefault(package, []).append(
+            {
+                "bucket": bucket,
+                "run_profile": str(dataset.get("run_profile") or operator.get("run_profile") or ""),
+                "low_signal": bool(dataset.get("low_signal")),
+                "sort_key": str(manifest.get("ended_at") or manifest.get("started_at") or run_dir.name),
+            }
+        )
+    for package, rows in per_pkg_rows.items():
         counts = per_pkg.setdefault(package, {"baseline": 0, "interactive": 0})
-        needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
-        if bucket == "interactive" and int(counts.get("baseline", 0)) < int(cfg.baseline_required):
-            continue
-        if int(counts.get(bucket, 0)) < needed:
-            counts[bucket] = int(counts.get(bucket, 0)) + 1
-            quota_runs_counted += 1
+        for row in sorted(rows, key=lambda item: str(item.get("sort_key") or "")):
+            bucket = str(row.get("bucket") or "")
+            # Low-signal *idle* baseline rule: retained but must not satisfy quota.
+            # baseline_connected must remain quota-eligible (low_signal is a tag, not an invalidation).
+            prof_lc = str(row.get("run_profile") or "").strip().lower()
+            if bucket == "baseline" and prof_lc == "baseline_idle" and bool(row.get("low_signal")):
+                continue
+            needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
+            if bucket == "interactive" and int(counts.get("baseline", 0)) < int(cfg.baseline_required):
+                continue
+            if int(counts.get(bucket, 0)) < needed:
+                counts[bucket] = int(counts.get(bucket, 0)) + 1
+                quota_runs_counted += 1
     apps_satisfied = sum(
         1
         for counts in per_pkg.values()
@@ -147,7 +158,10 @@ def run_freeze_readiness_audit(
 
     required_policy = int(getattr(profile_config, "PAPER_CONTRACT_VERSION", 1))
     min_window_count = int(MIN_WINDOWS_PER_RUN)
-    archive_dir = Path(app_config.DATA_DIR) / "archive"
+    cfg = DatasetTrackerConfig()
+    dataset_pkgs = active_research_cohort_packages()
+    dataset_pkgs_lc = {str(p).strip().lower() for p in dataset_pkgs if str(p).strip()}
+    archive_dir = resolve_dataset_freeze_read_path().parent
     demotion = (
         demote_noncanonical_canonical_freeze(archive_dir=archive_dir, evidence_root=root)
         if evidence_root is None
@@ -168,6 +182,9 @@ def run_freeze_readiness_audit(
     exclusion_top_offenders: dict[str, list[dict[str, str]]] = defaultdict(list)
 
     run_rows: list[dict[str, Any]] = []
+    workspace_total_runs = 0
+    workspace_valid_runs = 0
+    workspace_paper_eligible_runs = 0
     total_runs = 0
     valid_runs = 0
     paper_eligible_runs = 0
@@ -181,27 +198,35 @@ def run_freeze_readiness_audit(
             if not isinstance(manifest, dict):
                 issues["missing_run_manifest_dirs"].append(str(run_dir.name))
                 continue
-            total_runs += 1
+            workspace_total_runs += 1
             run_id = str(manifest.get("dynamic_run_id") or run_dir.name)
             operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
             target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
             dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
+            package_name = str(target.get("package_name") or "").strip()
+            package_lc = package_name.lower()
+            track_this_run = (not dataset_pkgs_lc) or (package_lc in dataset_pkgs_lc)
             version_code = str(
                 target.get("version_code")
                 or (target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}).get("version_code")
                 or ""
             ).strip()
             if dataset.get("valid_dataset_run") is True:
-                valid_runs += 1
+                workspace_valid_runs += 1
+                if track_this_run:
+                    valid_runs += 1
+
+            if track_this_run:
+                total_runs += 1
 
             cpv_raw = operator.get("capture_policy_version")
             try:
                 cpv = int(cpv_raw)
             except Exception:
                 cpv = None
-            if cpv is None:
+            if track_this_run and cpv is None:
                 issues["missing_capture_policy_version"].append(run_id)
-            elif cpv != required_policy:
+            elif track_this_run and cpv != required_policy:
                 issues["capture_policy_version_mismatch"].append(run_id)
 
             signer_set_hash = str(
@@ -209,7 +234,7 @@ def run_freeze_readiness_audit(
                 or (target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}).get("signer_set_hash")
                 or ""
             ).strip()
-            if not signer_set_hash:
+            if track_this_run and not signer_set_hash:
                 issues["missing_signer_set_hash"].append(run_id)
 
             plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
@@ -220,19 +245,21 @@ def run_freeze_readiness_audit(
                 required_capture_policy_version=required_policy,
             )
             if eligibility.paper_eligible:
-                paper_eligible_runs += 1
-            else:
+                workspace_paper_eligible_runs += 1
+                if track_this_run:
+                    paper_eligible_runs += 1
+            elif track_this_run:
                 reason = str(eligibility.reason_code or "EXCLUDED_INTERNAL_ERROR")
                 exclusion_reason_counts[reason] += 1
                 if len(exclusion_top_offenders[reason]) < 5:
                     exclusion_top_offenders[reason].append(
                         {
                             "run_id": run_id,
-                            "package_name": str(target.get("package_name") or ""),
+                            "package_name": package_name,
                             "version_code": version_code,
                         }
                     )
-            if "EXCLUDED_IDENTITY_MISMATCH" in set(eligibility.all_reason_codes):
+            if track_this_run and "EXCLUDED_IDENTITY_MISMATCH" in set(eligibility.all_reason_codes):
                 issues["identity_mismatch"].append(run_id)
 
             wc_raw = dataset.get("window_count")
@@ -240,28 +267,26 @@ def run_freeze_readiness_audit(
                 wc = int(wc_raw)
             except Exception:
                 wc = None
-            if wc is None:
+            if track_this_run and wc is None:
                 issues["missing_window_count"].append(run_id)
-            elif wc < min_window_count:
+            elif track_this_run and wc < min_window_count:
                 issues["window_count_below_min"].append(run_id)
 
-            run_rows.append(
-                {
-                    "run_id": run_id,
-                    "package_name": target.get("package_name"),
-                    "version_code": version_code,
-                    "valid_dataset_run": dataset.get("valid_dataset_run"),
-                    "capture_policy_version": cpv,
-                    "signer_set_hash_present": bool(signer_set_hash),
-                    "window_count": wc,
-                    "min_window_count": min_window_count,
-                }
-            )
+            if track_this_run:
+                run_rows.append(
+                    {
+                        "run_id": run_id,
+                        "package_name": package_name,
+                        "version_code": version_code,
+                        "valid_dataset_run": dataset.get("valid_dataset_run"),
+                        "capture_policy_version": cpv,
+                        "signer_set_hash_present": bool(signer_set_hash),
+                        "window_count": wc,
+                        "min_window_count": min_window_count,
+                    }
+                )
 
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    cfg = DatasetTrackerConfig()
-    dataset_pkgs = load_dataset_packages()
-    dataset_pkgs_lc = {str(p).strip().lower() for p in dataset_pkgs if str(p).strip()}
     if dataset_pkgs:
         expected_valid_runs = len(dataset_pkgs) * (
             int(cfg.baseline_required) + int(cfg.interactive_required)
@@ -358,6 +383,9 @@ def run_freeze_readiness_audit(
             "total_runs": total_runs,
             "valid_runs": valid_runs,
             "paper_eligible_runs": paper_eligible_runs,
+            "workspace_total_runs": workspace_total_runs,
+            "workspace_valid_runs": workspace_valid_runs,
+            "workspace_paper_eligible_runs": workspace_paper_eligible_runs,
             "quota_runs_counted": int(quota_runs_counted),
             "apps_satisfied": int(apps_satisfied),
             "missing_run_manifest_dirs": len(issues["missing_run_manifest_dirs"]),

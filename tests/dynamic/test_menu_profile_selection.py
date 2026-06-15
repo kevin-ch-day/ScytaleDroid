@@ -82,9 +82,9 @@ def test_select_profile_package_selects_from_operational_profile(monkeypatch) ->
     monkeypatch.setattr(
         menu,
         "_select_package_from_groups",
-        lambda scoped_groups, *, title: (
+        lambda scoped_groups, *, title, subtitle=None: (
             "com.example.news"
-            if title == "News apps" and [group.package_name for group in scoped_groups] == ["com.example.news"]
+            if [group.package_name for group in scoped_groups] == ["com.example.news"]
             else None
         ),
     )

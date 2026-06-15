@@ -22,6 +22,7 @@ from .static_analysis.static_permission_risk import (
 from .views import (
     CREATE_V_ARTIFACT_REGISTRY_INTEGRITY,
     CREATE_V_CURRENT_ARTIFACT_REGISTRY,
+    CREATE_V_DYNAMIC_RUN_CONTEXT_V1,
     CREATE_V_PAPER_DYNAMIC_COHORT_V1,
     CREATE_V_RUN_IDENTITY,
     CREATE_V_RUN_OVERVIEW,
@@ -183,6 +184,7 @@ def ordered_schema_statements() -> list[str]:
     statements.append(CREATE_V_STATIC_MASVS_SESSION_SUMMARY_V1)
     statements.append(CREATE_V_RUNTIME_DYNAMIC_COHORT_STATUS_V1)
     statements.append(CREATE_V_PAPER_DYNAMIC_COHORT_V1)
+    statements.append(CREATE_V_DYNAMIC_RUN_CONTEXT_V1)
     statements.append(CREATE_V_WEB_APP_DIRECTORY)
     statements.append(CREATE_V_WEB_STATIC_DYNAMIC_APP_SUMMARY)
     statements.append(CREATE_V_WEB_APP_MASVS_LATEST_V1)

@@ -398,7 +398,7 @@ def _run_stopwatch() -> datetime:
         prompt_utils.press_enter_to_continue("Press Enter when finished (timer stops)...")
         return datetime.now(UTC)
     start = time.monotonic()
-    line_width = 32
+    line_width = 56
     print(status_messages.status("Press Enter when finished. S+Enter=Stop&Finalize, A+Enter=Abort&Discard.", level="info"))
     last_rendered = None
     while True:

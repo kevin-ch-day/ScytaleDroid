@@ -129,9 +129,65 @@ RESEARCH_COHORT_MIGRATIONS: tuple[MigrationSpec, ...] = (
     ),
 )
 
+DYNAMIC_DOMAIN_CONTEXT_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260615_dynamic_domain_context_tables_v1",
+        migration_name="Dynamic domain context reference and observation tables",
+        schema_version_before="0.3.7-research-cohorts",
+        schema_version_after="0.3.8-dynamic-domain-context",
+        statements=(),
+        description="Adds DB-backed background domain reference intel and rebuildable per-run dynamic domain context observations.",
+        apply_mode="manual_script",
+        stage="dynamic_context",
+    ),
+    MigrationSpec(
+        migration_id="20260615_dynamic_domain_context_collation_hotfix_v1",
+        migration_name="Dynamic domain context dynamic_run_id collation hotfix",
+        schema_version_before="0.3.8-dynamic-domain-context",
+        schema_version_after="0.3.9-dynamic-domain-context-collation-hotfix",
+        statements=(),
+        description="Align dynamic_domain_observations.dynamic_run_id collation with dynamic_sessions.dynamic_run_id for natural joins.",
+        apply_mode="manual_script",
+        stage="dynamic_context",
+    ),
+)
+
+DYNAMIC_SERVICE_CONTEXT_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260615_dynamic_service_context_tables_v1",
+        migration_name="Dynamic service context catalog and domain map tables",
+        schema_version_before="0.3.9-dynamic-domain-context-collation-hotfix",
+        schema_version_after="0.3.10-dynamic-service-context",
+        statements=(),
+        description="Adds DB-backed provider/service catalog context and domain-to-service mappings for dynamic traffic interpretation.",
+        apply_mode="manual_script",
+        stage="dynamic_context",
+    ),
+)
+
+DYNAMIC_SERVICE_SIGNAL_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260615_dynamic_service_signal_tables_v1",
+        migration_name="Dynamic service signal taxonomy and service-signal map tables",
+        schema_version_before="0.3.10-dynamic-service-context",
+        schema_version_after="0.3.11-dynamic-service-signals",
+        statements=(),
+        description="Adds DB-backed privacy/security/context signal taxonomy on top of dynamic service context.",
+        apply_mode="manual_script",
+        stage="dynamic_context",
+    ),
+)
+
 
 def registered_migrations() -> tuple[MigrationSpec, ...]:
-    return PHASE_A_MIGRATIONS + PHASE_B_MIGRATIONS + RESEARCH_COHORT_MIGRATIONS
+    return (
+        PHASE_A_MIGRATIONS
+        + PHASE_B_MIGRATIONS
+        + RESEARCH_COHORT_MIGRATIONS
+        + DYNAMIC_DOMAIN_CONTEXT_MIGRATIONS
+        + DYNAMIC_SERVICE_CONTEXT_MIGRATIONS
+        + DYNAMIC_SERVICE_SIGNAL_MIGRATIONS
+    )
 
 
 def latest_registered_schema_version() -> str | None:
@@ -529,6 +585,8 @@ __all__ = [
     "PHASE_A_MIGRATIONS",
     "PHASE_B_MIGRATIONS",
     "RESEARCH_COHORT_MIGRATIONS",
+    "DYNAMIC_DOMAIN_CONTEXT_MIGRATIONS",
+    "DYNAMIC_SERVICE_SIGNAL_MIGRATIONS",
     "attach_receipt_path_to_latest_migration",
     "append_schema_version",
     "build_schema_migration_report",

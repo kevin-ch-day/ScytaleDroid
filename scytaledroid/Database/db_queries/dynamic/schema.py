@@ -66,7 +66,7 @@ _DDL_STATEMENTS: list[str] = [
       pcap_validated_at_utc DATETIME DEFAULT NULL,
       tool_semver        VARCHAR(32)  DEFAULT NULL,
       tool_git_commit    VARCHAR(40)  DEFAULT NULL,
-      schema_version     VARCHAR(32)  DEFAULT NULL,
+      schema_version     VARCHAR(64)  DEFAULT NULL,
       grade              VARCHAR(16)  DEFAULT NULL,
       grade_reasons_json JSON         DEFAULT NULL,
       created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -99,7 +99,7 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS static_handoff_hash CHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS tool_semver VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS tool_git_commit VARCHAR(40) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS schema_version VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS schema_version VARCHAR(64) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS grade VARCHAR(16) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS grade_reasons_json JSON DEFAULT NULL;
     """,
@@ -192,6 +192,31 @@ _DDL_STATEMENTS: list[str] = [
         FOREIGN KEY (dynamic_run_id)
         REFERENCES dynamic_sessions (dynamic_run_id)
         ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS dynamic_domain_observations (
+      observation_id       BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      dynamic_run_id       CHAR(36) COLLATE utf8mb4_general_ci NOT NULL,
+      package_name         VARCHAR(255)    NOT NULL,
+      indicator_type       VARCHAR(32)     NOT NULL,
+      observed_domain      VARCHAR(255)    NOT NULL,
+      root_domain          VARCHAR(255)    NOT NULL,
+      indicator_count      INT             DEFAULT NULL,
+      indicator_source     VARCHAR(32)     DEFAULT NULL,
+      owner_class          VARCHAR(32)     NOT NULL,
+      role_class           VARCHAR(64)     NOT NULL,
+      confidence           VARCHAR(16)     NOT NULL,
+      classification_basis VARCHAR(64)     NOT NULL,
+      package_name_scope   VARCHAR(255)    NOT NULL DEFAULT '',
+      match_type           VARCHAR(16)     DEFAULT NULL,
+      is_first_party       TINYINT(1)      NOT NULL DEFAULT 0,
+      created_at           TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (observation_id),
+      UNIQUE KEY ux_dyn_domain_obs (dynamic_run_id, indicator_type, observed_domain, indicator_source),
+      KEY ix_dyn_domain_obs_pkg (package_name, dynamic_run_id),
+      KEY ix_dyn_domain_obs_root (root_domain),
+      KEY ix_dyn_domain_obs_owner_role (owner_class, role_class)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     """,
     """

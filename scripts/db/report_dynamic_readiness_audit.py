@@ -371,7 +371,12 @@ def _init_optional_db() -> tuple[dict[int, DbStaticRunRow], set[int], dict[str, 
 
 def _load_freeze_manifest(data_dir: Path) -> tuple[set[str], list[str]]:
     notes: list[str] = []
-    path = data_dir / "archive" / "dataset_freeze.json"
+    try:
+        from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
+
+        path = resolve_dataset_freeze_read_path()
+    except Exception:
+        path = data_dir / "archive" / "dataset_freeze.json"
     payload = _read_json(path)
     if not isinstance(payload, dict):
         notes.append("freeze_manifest_absent")

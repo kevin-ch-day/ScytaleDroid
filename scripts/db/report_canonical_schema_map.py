@@ -80,6 +80,7 @@ EVIDENCE_TABLES = {
 }
 
 AUTHORITY_TABLES = {
+    "dynamic_domain_reference",
     "permission_audit_apps",
     "permission_audit_snapshots",
     "permission_signal_observations",
@@ -95,6 +96,7 @@ DERIVED_TABLES = {
     "analysis_risk_regime_summary",
     "analysis_signature_deltas",
     "analysis_static_exposure",
+    "dynamic_domain_observations",
     "dynamic_network_features",
     "dynamic_network_indicators",
     "masvs_control_coverage",
@@ -148,6 +150,8 @@ MANUAL_RELATIONSHIPS: dict[str, str] = {
     "apk_set_members": "parent apk_sets.apk_set_id; soft child static_analysis_runs.apk_set_id",
     "artifact_registry": "soft links to static_analysis_runs.id via static_run_id and dynamic_sessions.dynamic_run_id via dynamic_run_uuid; remain FK-loose ledger",
     "device_inventory": "parent device_inventory_snapshots.snapshot_id; soft link to apps.package_name and harvested APK library",
+    "dynamic_domain_observations": "soft parent dynamic_sessions.dynamic_run_id; rebuildable context rows over observed DNS/SNI domains",
+    "dynamic_domain_reference": "repo-owned background classification reference used to interpret dynamic observed domains",
     "dynamic_sessions": "soft parent static_analysis_runs.id via static_run_id_u; children dynamic_telemetry_* and dynamic_session_issues",
     "dynamic_telemetry_network": "parent dynamic_sessions.dynamic_run_id",
     "dynamic_telemetry_process": "parent dynamic_sessions.dynamic_run_id",
@@ -184,6 +188,7 @@ NATURAL_KEY_OVERRIDES: dict[str, str] = {
     "apk_split_groups": "package_name",
     "artifact_registry": "none; append-only ledger keyed by artifact_id",
     "device_inventory": "(snapshot_id, package_name)",
+    "dynamic_domain_reference": "(package_name_scope, domain_pattern, match_type)",
     "dynamic_sessions": "dynamic_run_id",
     "permission_audit_apps": "(snapshot_id, package_name)",
     "permission_audit_snapshots": "static_run_id or snapshot_key",
@@ -204,6 +209,8 @@ WRITE_SURFACE_OVERRIDES: dict[str, str] = {
     "analysis_static_exposure": "report_script",
     "artifact_registry": "runtime_code",
     "db_ops_log": "runtime_code",
+    "dynamic_domain_observations": "report_script",
+    "dynamic_domain_reference": "migration_code",
     "dynamic_network_features": "report_script",
     "dynamic_network_indicators": "report_script",
     "dynamic_session_issues": "runtime_code",

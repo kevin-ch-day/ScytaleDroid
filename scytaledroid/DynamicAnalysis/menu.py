@@ -16,12 +16,7 @@ from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.adb import status as adb_status
 from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
 from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
-from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
-    PROFILE_KEY as _DATASET_PROFILE_KEY,
-)
-from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import (
-    load_dataset_packages as _load_dataset_packages,
-)
+from scytaledroid.DynamicAnalysis.controllers.sandbox_run import run_sandbox_dynamic_run
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.menu_views import (
     build_dynamic_menu_sections,
@@ -40,6 +35,14 @@ from scytaledroid.DynamicAnalysis.menu_selection import (
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.profile_loader import load_operational_profiles, load_profile_packages
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
+    active_research_cohort_key,
+    active_research_cohort_label,
+    active_research_cohort_packages,
+    chooseable_active_research_cohorts,
+    persist_active_research_cohort_key,
+)
 from scytaledroid.DynamicAnalysis.services.observer_service import (
     select_observers as _service_select_observers,
 )
@@ -146,6 +149,7 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         return out
 
     per_pkg: dict[str, dict[str, int]] = {}
+    per_pkg_rows: dict[str, list[dict[str, object]]] = {}
     for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
         manifest_path = run_dir / "run_manifest.json"
         if not manifest_path.exists():
@@ -176,32 +180,40 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
             out["excluded_runs"] = int(out["excluded_runs"]) + 1
             continue
         out["paper_eligible_runs"] = int(out["paper_eligible_runs"]) + 1
-        bucket = _run_profile_bucket(
-            str(dataset.get("run_profile") or operator.get("run_profile") or "")
-        )
+        bucket = _run_profile_bucket(str(dataset.get("run_profile") or operator.get("run_profile") or ""))
         if bucket == "unknown":
             continue
-        # PM lock: low-signal *idle* baselines are retained but exploratory-only.
-        # baseline_connected remains quota-eligible (low_signal is a tag, not an invalidation).
-        prof_lc = str(dataset.get("run_profile") or operator.get("run_profile") or "").strip().lower()
-        if bucket == "baseline" and prof_lc == "baseline_idle" and bool(dataset.get("low_signal")):
-            out["low_signal_exploratory_runs"] = int(out["low_signal_exploratory_runs"]) + 1
-            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
-            continue
+        per_pkg_rows.setdefault(package, []).append(
+            {
+                "bucket": bucket,
+                "run_profile": str(dataset.get("run_profile") or operator.get("run_profile") or ""),
+                "low_signal": bool(dataset.get("low_signal")),
+                "protocol_fit": str(operator.get("protocol_fit") or "").strip().lower(),
+                "sort_key": str(payload.get("ended_at") or payload.get("started_at") or run_dir.name),
+            }
+        )
+    for package, rows in per_pkg_rows.items():
         pkg_counts = per_pkg.setdefault(package, {"baseline": 0, "interactive": 0})
-        # Protocol-fit feedback is an operational flag only; it must not prevent
-        # an otherwise paper-eligible run from satisfying quota.
-        if bucket == "interactive" and str(operator.get("protocol_fit") or "").strip().lower() == "poor":
-            out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
-        needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
-        if bucket == "interactive" and int(pkg_counts.get("baseline", 0)) < int(cfg.baseline_required):
-            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
-            continue
-        if int(pkg_counts.get(bucket, 0)) < needed:
-            pkg_counts[bucket] = int(pkg_counts.get(bucket, 0)) + 1
-            out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
-        else:
-            out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+        for row in sorted(rows, key=lambda item: str(item.get("sort_key") or "")):
+            bucket = str(row.get("bucket") or "")
+            prof_lc = str(row.get("run_profile") or "").strip().lower()
+            if bucket == "interactive" and str(row.get("protocol_fit") or "") == "poor":
+                out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
+            # PM lock: low-signal *idle* baselines are retained but exploratory-only.
+            # baseline_connected remains quota-eligible (low_signal is a tag, not an invalidation).
+            if bucket == "baseline" and prof_lc == "baseline_idle" and bool(row.get("low_signal")):
+                out["low_signal_exploratory_runs"] = int(out["low_signal_exploratory_runs"]) + 1
+                out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+                continue
+            needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
+            if bucket == "interactive" and int(pkg_counts.get("baseline", 0)) < int(cfg.baseline_required):
+                out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+                continue
+            if int(pkg_counts.get(bucket, 0)) < needed:
+                pkg_counts[bucket] = int(pkg_counts.get(bucket, 0)) + 1
+                out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
+            else:
+                out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
     out["apps_satisfied"] = sum(
         1
         for counts in per_pkg.values()
@@ -697,6 +709,33 @@ def _legacy_structural_archive_menu(*, pause_if_verbose) -> None:
             continue
 
 
+def _dynamic_maintenance_menu(*, pause_if_verbose) -> None:
+    options = [
+        MenuOption("1", "Reindex tracker from evidence packs"),
+        MenuOption("2", "Prune incomplete evidence dirs"),
+        MenuOption("3", "Legacy structural tools"),
+    ]
+
+    while True:
+        print()
+        menu_utils.print_header("Maintenance Tools")
+        menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
+        choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        if choice == "0":
+            return
+        if choice == "1":
+            _repair_reindex_tracker()
+            pause_if_verbose()
+            continue
+        if choice == "2":
+            _prune_incomplete_dynamic_evidence_dirs()
+            pause_if_verbose()
+            continue
+        if choice == "3":
+            _legacy_structural_archive_menu(pause_if_verbose=pause_if_verbose)
+            continue
+
+
 def dynamic_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
     ok, message, detail = schema_gate.dynamic_schema_gate()
@@ -735,12 +774,13 @@ def dynamic_analysis_menu() -> None:
         print()
         menu_utils.print_section("Run")
         menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Validate")
+        print()
+        menu_utils.print_section("Review")
         menu_utils.print_menu(sections.validation, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Maintenance")
+        print()
+        menu_utils.print_section("Tools")
         menu_utils.print_menu(sections.maintenance, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_section("Archive / Export")
-        menu_utils.print_menu(sections.archive_export, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
+        menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(options, include_exit=True),
             disabled=[option.key for option in options if option.disabled],
@@ -751,12 +791,15 @@ def dynamic_analysis_menu() -> None:
 
         if choice == "1":
             _warn_if_code_changed()
-            _run_guided_dataset_run(ui_defaults)
+            _run_focused_app_run(ui_defaults)
             _pause_if_verbose()
             continue
 
         if choice == "2":
-            _render_dataset_status()
+            selected = _choose_active_research_cohort()
+            if isinstance(selected, dict):
+                _warn_if_code_changed()
+                _run_guided_dataset_run(ui_defaults)
             _pause_if_verbose()
             continue
 
@@ -776,28 +819,8 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "6":
-            _repair_reindex_tracker()
+            _dynamic_maintenance_menu(pause_if_verbose=_pause_if_verbose)
             _pause_if_verbose()
-            continue
-
-        if choice == "7":
-            _prune_incomplete_dynamic_evidence_dirs()
-            _pause_if_verbose()
-            continue
-
-        if choice == "8":
-            # Single canonical frozen-cohort export surface lives in Reporting.
-            try:
-                from scytaledroid.Reporting.menu_actions import handle_export_freeze_anchored_csvs
-
-                handle_export_freeze_anchored_csvs()
-            except Exception:
-                print(status_messages.status("Failed to open export helper (Reporting).", level="error"))
-            _pause_if_verbose()
-            continue
-
-        if choice == "9":
-            _legacy_structural_archive_menu(pause_if_verbose=_pause_if_verbose)
             continue
 
 
@@ -869,7 +892,7 @@ def _repair_reindex_tracker() -> None:
     if not evidence_root.exists():
         print(status_messages.status("No dynamic evidence root found.", level="info"))
         print(status_messages.status("Nothing to reindex yet.", level="info"))
-        print(status_messages.status("Run Guided cohort first to create evidence packs.", level="info"))
+        print(status_messages.status("Run Guided research cohort first to create evidence packs.", level="info"))
         return
     if not os.access(evidence_root, os.R_OK):
         print(status_messages.status(f"Evidence root exists but is not readable: {evidence_root}", level="error"))
@@ -878,13 +901,13 @@ def _repair_reindex_tracker() -> None:
     if not evidence_dirs:
         print(status_messages.status("No dynamic evidence packs found under the evidence root.", level="info"))
         print(status_messages.status("Nothing to reindex yet.", level="info"))
-        print(status_messages.status("Run Guided cohort first to create evidence packs.", level="info"))
+        print(status_messages.status("Run Guided research cohort first to create evidence packs.", level="info"))
         return
     complete_dirs = [p for p in evidence_dirs if (p / "run_manifest.json").exists()]
     if not complete_dirs:
         print(status_messages.status("No complete dynamic evidence packs found.", level="info"))
         print(status_messages.status(f"Incomplete evidence dirs found: {len(evidence_dirs)}", level="warn"))
-        print(status_messages.status("Nothing to reindex yet. Use option 7 to review/prune incomplete dirs, or run Guided cohort.", level="info"))
+        print(status_messages.status("Nothing to reindex yet. Use Maintenance tools to review/prune incomplete dirs, or run a cohort.", level="info"))
         return
 
     if before_runs > 0:
@@ -917,7 +940,7 @@ def _repair_reindex_tracker() -> None:
                 level="info",
             )
         )
-        print(status_messages.status("Next: run option 1 (Guided cohort run) to create evidence packs.", level="info"))
+        print(status_messages.status("Next: use option 1 (Focused app run) or option 2 (Cohort run) to create evidence packs.", level="info"))
         return
 
     tracker_after = load_dataset_tracker()
@@ -958,10 +981,10 @@ def _repair_reindex_tracker() -> None:
                 missing_paper_identity_count += 1
 
     evidence_summary = _summarize_evidence_quota(
-        {pkg.lower() for pkg in _load_dataset_packages()},
+        {pkg.lower() for pkg in active_research_cohort_packages()},
         cfg,
     )
-    expected_runs = len(_load_dataset_packages()) * (int(cfg.baseline_required) + int(cfg.interactive_required))
+    expected_runs = len(active_research_cohort_packages()) * (int(cfg.baseline_required) + int(cfg.interactive_required))
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     report_path = Path(app_config.OUTPUT_DIR) / "audit" / "dynamic" / f"tracker_reindex_{stamp}.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1052,7 +1075,7 @@ def _compute_tracker_vs_evidence_deltas() -> list[dict[str, object]]:
     cfg = DatasetTrackerConfig()
     tracker = load_dataset_tracker()
     tracker_apps = tracker.get("apps") if isinstance(tracker.get("apps"), dict) else {}
-    dataset_pkgs = {str(pkg).strip().lower() for pkg in _load_dataset_packages() if str(pkg).strip()}
+    dataset_pkgs = {str(pkg).strip().lower() for pkg in active_research_cohort_packages() if str(pkg).strip()}
     root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     per_pkg: dict[str, dict[str, int]] = {}
     for pkg in dataset_pkgs:
@@ -1141,20 +1164,37 @@ def _next_action_from_need(need_baseline: int, need_interactive: int) -> str:
     if nb > 0:
         return "baseline"
     if ni > 0:
-        return "scripted interaction"
+        return "manual interaction"
     # Quota satisfied: avoid implying additional action is required.
     return "—"
 
 
-def _quota_progress_label(count: int, required: int) -> str:
+def _quota_progress_label(count: int, required: int, *, extra_count: int = 0) -> str:
     count_i = max(0, int(count))
     required_i = max(0, int(required))
+    extra_i = max(0, int(extra_count))
     missing = max(0, required_i - count_i)
     if required_i <= 0:
-        return str(count_i)
+        return str(count_i + extra_i)
     if missing == 0:
-        return f"{count_i}/{required_i} complete"
-    return f"{count_i}/{required_i} need {missing}"
+        suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
+        return f"{count_i}/{required_i} complete{suffix}"
+    suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
+    return f"{count_i}/{required_i} need {missing}{suffix}"
+
+
+def _bucket_progress_label(count: int, required: int, *, extra_count: int = 0) -> str:
+    count_i = max(0, int(count))
+    required_i = max(0, int(required))
+    extra_i = max(0, int(extra_count))
+    missing = max(0, required_i - count_i)
+    if required_i <= 0:
+        return str(count_i + extra_i)
+    if missing == 0:
+        suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
+        return f"{count_i}/{required_i} complete{suffix}"
+    suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
+    return f"{count_i}/{required_i} need {missing}{suffix}"
 
 
 def _static_build_label(active_runs: int, legacy_valid: int) -> str:
@@ -1178,7 +1218,7 @@ def _export_pcap_features_csv() -> None:
 
     print()
     menu_utils.print_header("PCAP Features Export")
-    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    freeze_path = resolve_dataset_freeze_read_path()
     try:
         output_path = export_pcap_features_csv(freeze_path=freeze_path, require_freeze=True)
     except RuntimeError as exc:
@@ -1199,7 +1239,7 @@ def _export_dynamic_run_summary_csv() -> None:
 
     print()
     menu_utils.print_header("Run Summary Export")
-    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    freeze_path = resolve_dataset_freeze_read_path()
     try:
         output_path = export_dynamic_run_summary_csv(freeze_path=freeze_path, require_freeze=True)
     except RuntimeError as exc:
@@ -1220,7 +1260,7 @@ def _export_protocol_ledger_csv() -> None:
 
     print()
     menu_utils.print_header("Protocol Ledger Export")
-    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    freeze_path = resolve_dataset_freeze_read_path()
     try:
         output_path = export_protocol_ledger_csv(freeze_path=freeze_path, require_freeze=True)
     except RuntimeError as exc:
@@ -1275,7 +1315,7 @@ def _select_dynamic_target() -> tuple[str, str] | None:
     groups = group_artifacts()
     dataset_pkgs: set[str] = set()
     try:
-        dataset_pkgs = {pkg.lower() for pkg in _load_dataset_packages()}
+        dataset_pkgs = {pkg.lower() for pkg in active_research_cohort_packages()}
     except Exception:
         dataset_pkgs = set()
 
@@ -1283,8 +1323,9 @@ def _select_dynamic_target() -> tuple[str, str] | None:
         package_name = _select_package_from_groups(groups, title="App selection")
         if package_name:
             if package_name.lower() in dataset_pkgs:
+                cohort_label = active_research_cohort_label()
                 run_as_dataset = prompt_utils.prompt_yes_no(
-                    "This app is in Research Dataset Alpha. Run as dataset tier?",
+                    f"This app is in {cohort_label}. Run as dataset tier?",
                     default=True,
                 )
                 return (package_name, "dataset" if run_as_dataset else "exploration")
@@ -1298,7 +1339,7 @@ def _select_dynamic_target() -> tuple[str, str] | None:
         profile_selection = _select_profile_package(groups)
         if profile_selection:
             package_name, profile_key = profile_selection
-            tier = "dataset" if profile_key == _DATASET_PROFILE_KEY else "exploration"
+            tier = "dataset" if str(profile_key or "").strip().upper().startswith("RESEARCH_DATASET_") else "exploration"
             return (package_name, tier)
         package_name = _prompt_custom_package()
         if package_name:
@@ -1342,6 +1383,70 @@ def _run_guided_dataset_run(ui_defaults: _DynamicUiDefaults) -> None:
         observer_prompts_enabled=bool(ui_defaults.observer_prompts_enabled),
         pcapdroid_api_key=ui_defaults.pcapdroid_api_key,
     )
+
+
+def _run_focused_app_run(ui_defaults: _DynamicUiDefaults) -> None:
+    run_sandbox_dynamic_run(
+        select_dynamic_target=_select_dynamic_target,
+        select_observers=lambda device_serial, mode: _service_select_observers(
+            device_serial,
+            mode=mode,
+            prompt_enabled=bool(ui_defaults.observer_prompts_enabled),
+        ),
+        print_root_status=_print_root_status,
+        print_network_status=_print_network_status,
+        observer_prompts_enabled=bool(ui_defaults.observer_prompts_enabled),
+        pcapdroid_api_key=ui_defaults.pcapdroid_api_key,
+    )
+
+
+def _choose_active_research_cohort() -> None:
+    rows = chooseable_active_research_cohorts()
+    if not rows:
+        print(status_messages.status("No active app cohorts are defined in the DB.", level="warn"))
+        return None
+
+    print()
+    menu_utils.print_header(
+        "Select Cohort",
+        "Choose the DB-backed app cohort used for dynamic runs and readiness review.",
+    )
+    preferred_key = active_research_cohort_key()
+    table_rows = [
+        [
+            str(idx),
+            str(row.get("display_name") or row.get("cohort_key") or ""),
+            str(int(row.get("active_member_count") or 0)),
+            "active" if str(row.get("cohort_key") or "").strip().lower() == str(preferred_key or "").strip().lower() else "",
+        ]
+        for idx, row in enumerate(rows, start=1)
+    ]
+    table_utils.render_table(["#", "Cohort", "Apps", "State"], table_rows, compact=True, padding=2)
+    default_choice = "1"
+    for idx, row in enumerate(rows, start=1):
+        if str(row.get("cohort_key") or "").strip().lower() == str(preferred_key or "").strip().lower():
+            default_choice = str(idx)
+            break
+    print()
+    choice = prompt_utils.get_choice(
+        [str(index) for index in range(1, len(rows) + 1)] + ["0"],
+        default=default_choice,
+        prompt="Select cohort #",
+    )
+    if choice == "0":
+        print(status_messages.status("Cohort selection canceled.", level="info"))
+        return None
+    selected = rows[int(choice) - 1]
+    cohort_key = str(selected.get("cohort_key") or "").strip().lower()
+    label = str(selected.get("display_name") or cohort_key).strip() or cohort_key
+    member_count = int(selected.get("active_member_count") or 0)
+    if cohort_key == str(preferred_key or "").strip().lower():
+        return dict(selected)
+    else:
+        receipt = persist_active_research_cohort_key(cohort_key, label=label)
+        print(status_messages.status(f"Active cohort set to {label} ({member_count} apps).", level="success"))
+        print(status_messages.status(f"Saved under {receipt}", level="info"))
+    return dict(selected)
 
 
 def _print_tier1_qa_result(dynamic_run_id: str) -> None:
@@ -1424,8 +1529,9 @@ def _safe_ratio(captured: object, expected: object) -> float | None:
 
 def _resolve_custom_tier(package_name: str, dataset_pkgs: set[str]) -> tuple[str, str]:
     if package_name.lower() in dataset_pkgs:
+        cohort_label = active_research_cohort_label()
         run_as_dataset = prompt_utils.prompt_yes_no(
-            "This app is in Research Dataset Alpha. Run as dataset tier?",
+            f"This app is in {cohort_label}. Run as dataset tier?",
             default=True,
         )
         return (package_name, "dataset" if run_as_dataset else "exploration")
@@ -1493,7 +1599,11 @@ def _select_profile_package(groups) -> tuple[str, str | None] | None:
                 )
             )
             return None
-        package_name = _select_package_from_groups(scoped_groups, title=f"{selected['label']} apps")
+        package_name = _select_package_from_groups(
+            scoped_groups,
+            title="App Queue",
+            subtitle=f"{selected['label']} · dynamic run queue",
+        )
         if not package_name:
             return None
         return (package_name, profile_key)
@@ -1518,20 +1628,20 @@ def _select_profile_package(groups) -> tuple[str, str | None] | None:
     return (package_name, None)
 
 
-def _select_package_from_groups(groups, *, title: str) -> str | None:
+def _select_package_from_groups(groups, *, title: str, subtitle: str | None = None) -> str | None:
     prepared = _prepare_package_selection_view(groups)
     if prepared is None:
         print(status_messages.status("No apps available for selection.", level="warn"))
         return None
     print()
-    menu_utils.print_header(title)
+    menu_utils.print_header(title, subtitle)
     return _run_package_selection_menu(prepared)
 
 
 def _prepare_package_selection_view(groups) -> _PreparedPackageSelectionView | None:
     return _prepare_package_selection_view_impl(
         groups,
-        load_dataset_packages=_load_dataset_packages,
+        load_dataset_packages=active_research_cohort_packages,
         list_packages_fn=list_packages,
         summarize_evidence_quota_fn=_summarize_evidence_quota,
         build_package_selection_row_fn=_build_package_selection_row,
@@ -1548,7 +1658,6 @@ def _build_package_selection_row(
     tracker_apps,
     cfg,
     recent_tracker_runs,
-    text_blocks,
 ) -> _PreparedPackageSelectionRow:
     return _build_package_selection_row_impl(
         idx=idx,
@@ -1560,6 +1669,7 @@ def _build_package_selection_row(
         cfg=cfg,
         recent_tracker_runs=recent_tracker_runs,
         truncate_visible_fn=text_blocks.truncate_visible,
+        bucket_progress_label_fn=_bucket_progress_label,
         quota_progress_label_fn=_quota_progress_label,
         static_build_label_fn=_static_build_label,
         next_action_from_need_fn=_next_action_from_need,

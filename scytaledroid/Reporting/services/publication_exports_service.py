@@ -37,6 +37,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_paths  # noqa: E402
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (  # noqa: E402
+    resolve_dataset_freeze_read_path,
+)
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance  # noqa: E402
 from scytaledroid.Utils.LatexUtils import (  # noqa: E402
     LatexTableSpec,
@@ -45,7 +48,6 @@ from scytaledroid.Utils.LatexUtils import (  # noqa: E402
     render_tabular_only,
 )
 
-FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
 
 PUB_ROOT = REPO_ROOT / "output" / "publication"
@@ -84,6 +86,10 @@ CSV_PHASE_DISPERSION_STATS = PUB_TABLES / "phase_dispersion_stats_summary.csv"
 TEX_PHASE_DISPERSION_STATS = PUB_TABLES / "table_phase_dispersion_stats_v1.tex"
 
 FIG_DELTA_DISTRIBUTION_PNG = PUB_ROOT / "figures" / "fig_delta_distribution.png"
+
+
+def _freeze_path() -> Path:
+    return resolve_dataset_freeze_read_path()
 
 
 def _sha256_file(path: Path) -> str:
@@ -834,15 +840,16 @@ class PublicationResultsV1:
 
 
 def generate_publication_exports() -> int:
-    for p in (FREEZE, TABLE_1, TABLE_5_MASVS, TABLE_6_STATIC, TABLE_7):
+    freeze_path = _freeze_path()
+    for p in (freeze_path, TABLE_1, TABLE_5_MASVS, TABLE_6_STATIC, TABLE_7):
         if not p.exists():
             raise SystemExit(f"Missing required input: {p}")
 
     PUB_TABLES.mkdir(parents=True, exist_ok=True)
     PUB_MANIFESTS.mkdir(parents=True, exist_ok=True)
 
-    freeze = json.loads(FREEZE.read_text(encoding="utf-8"))
-    freeze_sha = _sha256_file(FREEZE)
+    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    freeze_sha = _sha256_file(freeze_path)
     freeze_dataset_hash = freeze.get("freeze_dataset_hash")
 
     order = []
@@ -1374,7 +1381,7 @@ def generate_publication_exports() -> int:
     out = PublicationResultsV1(
         schema_version=1,
         generated_at_utc=datetime.now(UTC).isoformat(),
-        freeze_anchor=str(FREEZE.relative_to(REPO_ROOT)),
+        freeze_anchor=str(freeze_path.relative_to(REPO_ROOT)),
         freeze_sha256=freeze_sha,
         freeze_dataset_hash=str(freeze_dataset_hash) if freeze_dataset_hash else None,
         metric_name="RDI",

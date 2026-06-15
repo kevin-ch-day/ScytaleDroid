@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.tracker_scope import (
+    build_scoped_dataset_counts as _build_scoped_dataset_counts_shared,
+    resolve_tracker_run_identity as _resolve_tracker_run_identity_shared,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
-from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 
 @dataclass(frozen=True)
@@ -21,8 +26,12 @@ class PreparedPackageSelectionView:
     dataset_apps_total: int
     dataset_apps_complete: int
     dataset_valid_runs_total: int
-    expected_runs: int
-    evidence_summary: dict[str, int | bool] | None
+    historical_valid_runs_total: int = 0
+    historical_build_count_total: int = 0
+    mixed_identity_app_count: int = 0
+    legacy_only_app_count: int = 0
+    expected_runs: int = 0
+    evidence_summary: dict[str, int | bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +42,9 @@ class PreparedPackageSelectionRow:
     dataset_app_count: int
     dataset_complete_count: int
     dataset_valid_runs_count: int
+    historical_valid_runs_count: int = 0
+    historical_build_count: int = 0
+    build_state: str = "—"
 
 
 def prepare_package_selection_view(
@@ -70,6 +82,10 @@ def prepare_package_selection_view(
     dataset_apps_total = 0
     dataset_apps_complete = 0
     dataset_valid_runs_total = 0
+    historical_valid_runs_total = 0
+    historical_build_count_total = 0
+    mixed_identity_app_count = 0
+    legacy_only_app_count = 0
     evidence_summary: dict[str, int | bool] | None = None
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
         prepared_row = build_package_selection_row_fn(
@@ -85,6 +101,12 @@ def prepare_package_selection_view(
         dataset_apps_total += prepared_row.dataset_app_count
         dataset_apps_complete += prepared_row.dataset_complete_count
         dataset_valid_runs_total += prepared_row.dataset_valid_runs_count
+        historical_valid_runs_total += prepared_row.historical_valid_runs_count
+        historical_build_count_total += prepared_row.historical_build_count
+        if prepared_row.build_state == "mixed":
+            mixed_identity_app_count += 1
+        elif prepared_row.build_state == "legacy":
+            legacy_only_app_count += 1
         rows.append(prepared_row.full_row)
         op_rows.append(prepared_row.op_row)
         if prepared_row.build_row is not None:
@@ -105,6 +127,10 @@ def prepare_package_selection_view(
         dataset_apps_total=dataset_apps_total,
         dataset_apps_complete=dataset_apps_complete,
         dataset_valid_runs_total=dataset_valid_runs_total,
+        historical_valid_runs_total=historical_valid_runs_total,
+        historical_build_count_total=historical_build_count_total,
+        mixed_identity_app_count=mixed_identity_app_count,
+        legacy_only_app_count=legacy_only_app_count,
         expected_runs=expected_runs,
         evidence_summary=evidence_summary,
     )
@@ -121,6 +147,7 @@ def build_package_selection_row(
     cfg,
     recent_tracker_runs,
     truncate_visible_fn,
+    bucket_progress_label_fn,
     quota_progress_label_fn,
     static_build_label_fn,
     next_action_from_need_fn,
@@ -146,6 +173,9 @@ def build_package_selection_row(
     dataset_app_count = 0
     dataset_complete_count = 0
     dataset_valid_runs_count = 0
+    historical_valid_runs_count = 0
+    historical_build_count = 0
+    build_state = "—"
 
     if package.lower() in dataset_pkgs:
         dataset_app_count = 1
@@ -156,10 +186,6 @@ def build_package_selection_row(
         base_extra = int(scoped["baseline_extra"])
         inter_countable = int(scoped["interactive_countable"])
         inter_extra = int(scoped["interactive_extra"])
-        scripted_countable = int(scoped.get("interactive_scripted_countable") or 0)
-        scripted_extra = int(scoped.get("interactive_scripted_extra") or 0)
-        manual_countable = int(scoped.get("interactive_manual_countable") or 0)
-        manual_extra = int(scoped.get("interactive_manual_extra") or 0)
         legacy_valid = int(scoped["legacy_valid"])
         legacy_builds = int(scoped["legacy_builds"])
         active_version = str(scoped.get("active_version_code") or "—")
@@ -171,10 +197,18 @@ def build_package_selection_row(
             active_build = "unknown (tracker-only)"
         active_runs = base_countable + base_extra + inter_countable + inter_extra
 
-        base_label = quota_progress_label_fn(base_countable, int(cfg.baseline_required))
+        base_label = bucket_progress_label_fn(
+            base_countable,
+            int(cfg.baseline_required),
+            extra_count=base_extra,
+        )
         baseline_complete = base_countable >= int(cfg.baseline_required)
         inter_label = (
-            quota_progress_label_fn(inter_countable, int(cfg.interactive_required))
+            bucket_progress_label_fn(
+                inter_countable,
+                int(cfg.interactive_required),
+                extra_count=inter_extra,
+            )
             if baseline_complete
             else "locked"
         )
@@ -193,9 +227,16 @@ def build_package_selection_row(
         else:
             need_label = "0"
         total_required = int(cfg.baseline_required) + int(cfg.interactive_required)
-        total_label = f"{base_countable + inter_countable}/{total_required}"
+        total_label = quota_progress_label_fn(
+            base_countable + inter_countable,
+            total_required,
+            extra_count=base_extra + inter_extra,
+        )
         legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
         build_label = static_build_label_fn(active_runs, legacy_valid)
+        build_state = build_label
+        historical_valid_runs_count = legacy_valid
+        historical_build_count = legacy_builds
 
         recent = recent_tracker_runs(package, limit=1)
         if recent:
@@ -262,123 +303,202 @@ def build_package_selection_row(
         dataset_app_count=dataset_app_count,
         dataset_complete_count=dataset_complete_count,
         dataset_valid_runs_count=dataset_valid_runs_count,
+        historical_valid_runs_count=historical_valid_runs_count,
+        historical_build_count=historical_build_count,
+        build_state=build_state,
     )
 
 
 def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summarize_evidence_quota_fn) -> str | None:
     evidence_summary = prepared.evidence_summary
-    if prepared.dataset_apps_total > 0:
-        evidence_summary = evidence_summary or summarize_evidence_quota_fn(prepared.dataset_pkgs, prepared.cfg)
-        quota = int(evidence_summary.get("quota_runs_counted", 0)) if evidence_summary else 0
-        apps_ok = int(evidence_summary.get("apps_satisfied", 0)) if evidence_summary else 0
-        freeze_ok = (
-            bool(evidence_summary.get("evidence_root_exists"))
-            and quota >= int(prepared.expected_runs)
-            and apps_ok >= int(prepared.dataset_apps_total)
-        ) if evidence_summary else False
-        remaining = max(0, int(prepared.expected_runs) - int(quota))
-        print(f"Progress: {quota} / {prepared.expected_runs} required runs complete")
-        print(f"Apps complete: {apps_ok} / {prepared.dataset_apps_total}")
-        if freeze_ok:
-            print("Freeze/export: ready")
-        else:
-            print(f"Freeze/export: blocked — {remaining} runs remaining")
-        next_row = next((row for row in prepared.op_rows if len(row) >= 8 and row[7] != "—"), None)
-        if next_row:
-            print(f"Next recommended run: {next_row[1]} — {next_row[7]}")
-        print()
-
-    render_package_table(
-        prepared.op_rows,
-        headers=[
-            "#",
-            "App",
-            "Baseline",
-            "Interactive",
-            "Total",
-            "Static",
-            "QA",
-            "Next run",
-        ],
-    )
+    show_all = False
 
     while True:
-        print()
-        menu_utils.print_header("Options")
-        print("1) Run App")
-        print("2) View Details")
-        print("3) Build history")
-        print("4) Help")
-        print("5) Debug")
-        print("0) Return to Dynamic Analysis")
-        choice = prompt_utils.prompt_text("Select", required=False).strip()
+        if prepared.dataset_apps_total > 0:
+            evidence_summary = evidence_summary or summarize_evidence_quota_fn(prepared.dataset_pkgs, prepared.cfg)
+            quota = int(evidence_summary.get("quota_runs_counted", 0)) if evidence_summary else 0
+            apps_ok = int(evidence_summary.get("apps_satisfied", 0)) if evidence_summary else 0
+            freeze_ok = (
+                bool(evidence_summary.get("evidence_root_exists"))
+                and quota >= int(prepared.expected_runs)
+                and apps_ok >= int(prepared.dataset_apps_total)
+            ) if evidence_summary else False
+            remaining = max(0, int(prepared.expected_runs) - int(quota))
+            print(f"Runs complete     : {quota} / {prepared.expected_runs}")
+            print(f"Apps complete     : {apps_ok} / {prepared.dataset_apps_total}")
+            if freeze_ok:
+                print("Archive readiness : ready")
+            else:
+                print(f"Archive readiness : blocked — {remaining} runs remaining")
+            extra_runs = int(evidence_summary.get("extra_eligible_runs", 0)) if evidence_summary else 0
+            if extra_runs > 0:
+                print(f"Supplemental runs : {extra_runs} extra valid run(s) retained outside quota")
+            next_row = next((row for row in prepared.op_rows if len(row) >= 8 and row[7] != "—"), None)
+            if next_row:
+                print(f"Recommended next  : {next_row[1]} — {next_row[7]}")
+            print()
 
-        if choice in {"", "1"}:
+        truncated = render_package_table(
+            prepared.op_rows,
+            headers=[
+                "#",
+                "App",
+                "Baseline",
+                "Manual",
+                "Quota",
+                "Static prep",
+                "Last QA",
+                "Next action",
+            ],
+            show_all=show_all,
+        )
+        print()
+        print("Select an app by number or name.")
+        shortcuts = ["S summary", "Y history", "H help", "D diagnostics", "B back"]
+        if truncated and not show_all:
+            shortcuts.insert(0, "L full list")
+        print(f"Shortcuts         : {' | '.join(shortcuts)}")
+        choice = prompt_utils.prompt_text("Choose app # / name", required=False).strip()
+
+        if not choice:
             index = choose_package_selection(prepared)
             if index is None:
                 return None
             package_name, _, _, _ = prepared.packages[index]
             return package_name
-        if choice == "2":
+        choice_lc = choice.lower()
+        if choice_lc in {"l", "list", "full"} and truncated and not show_all:
+            show_all = True
+            print()
+            continue
+        if choice_lc in {"s", "summary"}:
             from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_details
 
             render_cohort_status_details(
                 dataset_apps_total=prepared.dataset_apps_total,
                 dataset_apps_complete=prepared.dataset_apps_complete,
                 dataset_valid_runs_total=prepared.dataset_valid_runs_total,
+                historical_valid_runs_total=prepared.historical_valid_runs_total,
+                historical_build_count_total=prepared.historical_build_count_total,
+                mixed_identity_app_count=prepared.mixed_identity_app_count,
+                legacy_only_app_count=prepared.legacy_only_app_count,
                 expected_runs=prepared.expected_runs,
                 evidence_summary=evidence_summary,
             )
             continue
-        if choice == "3":
+        if choice_lc in {"y", "history"}:
             from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_build_history
 
             render_cohort_build_history(prepared.build_rows)
             continue
-        if choice == "4":
+        if choice_lc in {"h", "help"}:
             from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_help
 
             render_cohort_status_help()
             continue
-        if choice == "5":
+        if choice_lc in {"d", "debug", "diagnostics"}:
             from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_debug
 
             render_cohort_status_debug(prepared.rows)
             continue
-        if choice == "0":
+        if choice_lc in {"0", "b", "back", "cancel"}:
             return None
-        print(status_messages.status("Invalid option. Choose 0-5.", level="warn"))
+        index = resolve_package_selection(choice, prepared)
+        if index is not None:
+            package_name, _, _, _ = prepared.packages[index]
+            return package_name
+        print(status_messages.status("Invalid choice. Enter an app number/name or use S, Y, H, D, or B.", level="warn"))
 
 
-def render_package_table(rows, *, headers: list[str] | None = None, max_preview: int = 15) -> None:
+def render_package_table(
+    rows,
+    *,
+    headers: list[str] | None = None,
+    max_preview: int = 15,
+    show_all: bool = False,
+) -> bool:
     headers = list(headers) if headers else ["#", "App"]
-    selection_headers = ["#", "App", "Baseline", "Interactive", "Total", "Static", "QA", "Next run"]
-    if headers == selection_headers and get_terminal_width() < 96:
-        rendered = rows if len(rows) <= max_preview else rows[:max_preview]
-        for row in rendered:
-            print(
-                f"{row[0]}) {row[1]} | Baseline: {row[2]} | Interactive: {row[3]} | "
-                f"Total: {row[4]} | Static: {row[5]} | QA: {row[6]}"
-            )
-            print(f"   Next run: {row[7]}")
-        if len(rows) > max_preview:
-            response = prompt_utils.prompt_text("[L] List all | [Enter] Continue", required=False)
-            if response.strip().lower() == "l":
-                for row in rows:
-                    print(
-                        f"{row[0]}) {row[1]} | Baseline: {row[2]} | Interactive: {row[3]} | "
-                        f"Total: {row[4]} | Static: {row[5]} | QA: {row[6]}"
-                    )
-                    print(f"   Next run: {row[7]}")
-        return
-    if len(rows) <= max_preview:
-        table_utils.render_table(headers, rows, compact=False)
-        return
-    preview = rows[:max_preview]
-    table_utils.render_table(headers, preview, compact=False)
-    response = prompt_utils.prompt_text("[L] List all | [Enter] Continue", required=False)
-    if response.strip().lower() == "l":
-        table_utils.render_table(headers, rows, compact=False)
+    selection_headers = ["#", "App", "Baseline", "Manual", "Quota", "Static prep", "Last QA", "Next action"]
+    # Avoid a pointless "show full list" branch when only a single row would be hidden.
+    effective_preview = max_preview + 1 if len(rows) == (max_preview + 1) else max_preview
+    truncated = len(rows) > effective_preview and not show_all
+    rendered_rows = rows if show_all or len(rows) <= effective_preview else rows[:effective_preview]
+    if headers == selection_headers:
+        compact_headers = ["#", "App", "Base", "Manual", "Quota", "Prep", "QA", "Next"]
+        table_utils.render_table(compact_headers, _compact_selection_rows(rendered_rows), compact=False)
+    else:
+        table_utils.render_table(headers, rendered_rows, compact=False)
+    if truncated:
+        print(f"Showing first {effective_preview} of {len(rows)} apps.")
+    return truncated
+
+
+def _compact_selection_rows(rows: list[list[str]]) -> list[list[str]]:
+    return [
+        [
+            row[0],
+            row[1],
+            _compact_progress_label(row[2]),
+            _compact_progress_label(row[3]),
+            _compact_progress_label(row[4]),
+            _compact_prep_label(row[5]),
+            _compact_qa_label(row[6]),
+            _compact_next_action(row[7]),
+        ]
+        for row in rows
+    ]
+
+
+def _compact_progress_label(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or text == "—":
+        return text or "—"
+    if text == "locked":
+        return "locked"
+    complete_match = re.fullmatch(r"(\d+)/(\d+)\s+complete(?:\s+\(\+(\d+)\s+extra\))?", text)
+    if complete_match:
+        count = int(complete_match.group(1))
+        required = int(complete_match.group(2))
+        extra = int(complete_match.group(3) or 0)
+        if extra > 0:
+            return f"{count + extra}/{required}"
+        return f"{count}/{required}"
+    need_match = re.fullmatch(r"(\d+)/(\d+)\s+need\s+(\d+)(?:\s+\(\+(\d+)\s+extra\))?", text)
+    if need_match:
+        count = int(need_match.group(1))
+        required = int(need_match.group(2))
+        missing = int(need_match.group(3))
+        return f"{count}/{required} n{missing}"
+    return text
+
+
+def _compact_next_action(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if text == "manual interaction":
+        return "manual"
+    return str(value or "").strip() or "—"
+
+
+def _compact_prep_label(value: str) -> str:
+    text = str(value or "").strip().lower()
+    mapping = {
+        "current": "current",
+        "mixed": "mixed",
+        "legacy": "legacy",
+        "ready": "ready",
+    }
+    return mapping.get(text, str(value or "").strip() or "—")
+
+
+def _compact_qa_label(value: str) -> str:
+    text = str(value or "").strip()
+    if text == "valid (L)":
+        return "valid+L"
+    if text == "valid (id_mismatch) (L)":
+        return "valid+id+L"
+    if text == "valid (id_mismatch)":
+        return "valid+id"
+    return text or "—"
 
 
 def build_scoped_dataset_counts(
@@ -388,97 +508,12 @@ def build_scoped_dataset_counts(
     cfg: object | None = None,
     resolve_tracker_run_identity_fn,
 ) -> dict[str, int | str]:
-    valid_runs: list[dict] = []
-    for r in runs:
-        if not isinstance(r, dict):
-            continue
-        if r.get("valid_dataset_run") is not True:
-            continue
-        valid_runs.append(r)
-
-    active_identity: tuple[str | None, str | None] | None = None
-    for r in sorted(valid_runs, key=lambda row: str(row.get("ended_at") or row.get("started_at") or ""), reverse=True):
-        ident = resolve_tracker_run_identity_fn(package_name, r)
-        if ident[0] or ident[1]:
-            active_identity = ident
-            break
-
-    out = {
-        "baseline_countable": 0,
-        "baseline_extra": 0,
-        "interactive_countable": 0,
-        "interactive_extra": 0,
-        "interactive_scripted_countable": 0,
-        "interactive_scripted_extra": 0,
-        "interactive_manual_countable": 0,
-        "interactive_manual_extra": 0,
-        "interactive_other_countable": 0,
-        "interactive_other_extra": 0,
-        "legacy_valid": 0,
-        "legacy_builds": 0,
-        "technical_valid_total": 0,
-        "technical_valid_active": 0,
-        "active_version_code": "",
-        "active_base_sha": "",
-    }
-    legacy_identity_seen: set[tuple[str, str]] = set()
-    if active_identity is not None:
-        out["active_version_code"] = active_identity[0] or ""
-        out["active_base_sha"] = active_identity[1] or ""
-    active_runs: list[dict] = []
-    for r in valid_runs:
-        ident = resolve_tracker_run_identity_fn(package_name, r)
-        ident_key = (ident[0] or "", ident[1] or "")
-        if active_identity is not None and ident != active_identity:
-            out["legacy_valid"] += 1
-            if ident_key != ("", ""):
-                legacy_identity_seen.add(ident_key)
-            continue
-        active_runs.append(r)
-    out["technical_valid_total"] = len(valid_runs)
-    out["technical_valid_active"] = len(active_runs)
-
-    baseline_needed = max(0, int(getattr(cfg, "baseline_required", 1)))
-    interactive_needed = max(0, int(getattr(cfg, "interactive_required", 2)))
-    baseline_seen = 0
-    interactive_seen = 0
-    indexed: list[tuple[int, dict]] = [(i, r) for i, r in enumerate(active_runs)]
-    indexed.sort(
-        key=lambda item: (
-            str(item[1].get("ended_at") or item[1].get("started_at") or ""),
-            item[0],
-        )
+    return _build_scoped_dataset_counts_shared(
+        package_name,
+        runs,
+        cfg=cfg,
+        resolve_tracker_run_identity_fn=resolve_tracker_run_identity_fn,
     )
-    for _, r in indexed:
-        prof = str(r.get("run_profile") or "").strip().lower()
-        paper_eligible = r.get("paper_eligible")
-        if paper_eligible is False:
-            continue
-        is_baseline = prof.startswith("baseline") or ("baseline" in prof) or ("idle" in prof)
-        is_interactive = ("interaction" in prof) or ("interactive" in prof)
-        if is_baseline:
-            if baseline_seen < baseline_needed:
-                baseline_seen += 1
-                out["baseline_countable"] += 1
-            else:
-                out["baseline_extra"] += 1
-            continue
-        if is_interactive:
-            kind = "other"
-            if "interaction_manual" in prof or prof.endswith("_manual") or "manual" in prof:
-                kind = "manual"
-            elif "interaction_scripted" in prof or "scripted" in prof or "script" in prof:
-                kind = "scripted"
-            if interactive_seen < interactive_needed:
-                interactive_seen += 1
-                out["interactive_countable"] += 1
-                out[f"interactive_{kind}_countable"] += 1
-            else:
-                out["interactive_extra"] += 1
-                out[f"interactive_{kind}_extra"] += 1
-            continue
-    out["legacy_builds"] = len(legacy_identity_seen)
-    return out
 
 
 def resolve_tracker_run_identity(
@@ -488,57 +523,39 @@ def resolve_tracker_run_identity(
     run_identity_cache: dict[str, tuple[str | None, str | None]],
     output_dir: str,
 ) -> tuple[str | None, str | None]:
-    version_code = str(
-        run.get("version_code")
-        or run.get("observed_version_code")
-        or ""
-    ).strip() or None
-    base_sha = str(
-        run.get("base_apk_sha256")
-        or ""
-    ).strip().lower() or None
-    if version_code or base_sha:
-        return (version_code, base_sha)
-
-    run_id = str(run.get("run_id") or "").strip()
-    if not run_id:
-        return (None, None)
-    cached = run_identity_cache.get(run_id)
-    if cached is not None:
-        return cached
-
-    manifest_path = Path(output_dir) / "evidence" / "dynamic" / run_id / "run_manifest.json"
-    if not manifest_path.exists():
-        run_identity_cache[run_id] = (None, None)
-        return (None, None)
-    try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except Exception:
-        run_identity_cache[run_id] = (None, None)
-        return (None, None)
-
-    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
-    ident = target.get("run_identity") if isinstance(target.get("run_identity"), dict) else {}
-    pkg = str(target.get("package_name") or package_name or "").strip().lower()
-    if pkg and pkg != package_name.strip().lower():
-        run_identity_cache[run_id] = (None, None)
-        return (None, None)
-
-    version_code = str(
-        ident.get("version_code")
-        or target.get("version_code")
-        or ""
-    ).strip() or None
-    base_sha = str(
-        ident.get("base_apk_sha256")
-        or ""
-    ).strip().lower() or None
-    resolved = (version_code, base_sha)
-    run_identity_cache[run_id] = resolved
-    return resolved
+    return _resolve_tracker_run_identity_shared(
+        package_name,
+        run,
+        run_identity_cache=run_identity_cache,
+        output_dir=output_dir,
+    )
 
 
 def choose_package_selection(prepared: PreparedPackageSelectionView) -> int | None:
+    total = len(prepared.packages)
+    if total <= 0:
+        return None
+    while True:
+        raw = prompt_utils.prompt_text(
+            "Select app number or app name",
+            required=False,
+        ).strip()
+        if not raw:
+            return 0
+        if raw.lower() in {"0", "b", "back", "cancel"}:
+            return None
+        resolved = resolve_package_selection(raw, prepared)
+        if resolved is not None:
+            return resolved
+        print(
+            status_messages.status(
+                f"No matching app found. Enter a number from 1-{total} or an app name like Facebook.",
+                level="warn",
+            )
+        )
+
+
+def resolve_package_selection(raw: str, prepared: PreparedPackageSelectionView) -> int | None:
     total = len(prepared.packages)
     if total <= 0:
         return None
@@ -556,28 +573,13 @@ def choose_package_selection(prepared: PreparedPackageSelectionView) -> int | No
             if display_lc:
                 lookup[display_lc] = idx
 
-    while True:
-        raw = prompt_utils.prompt_text(
-            "Select app number or app name",
-            required=False,
-        ).strip()
-        if not raw:
-            return 0
-        choice = raw.lower()
-        if choice in {"0", "b", "back", "cancel"}:
-            return None
-        if choice in lookup:
-            return lookup[choice]
-        matches = [idx for key, idx in lookup.items() if choice and choice in key and not key.isdigit()]
-        matches = sorted(set(matches))
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            print(status_messages.status(f"Multiple apps matched \"{raw}\". Please enter the app number.", level="warn"))
-            continue
-        print(
-            status_messages.status(
-                f"No matching app found. Enter a number from 1-{total} or an app name like Facebook.",
-                level="warn",
-            )
-        )
+    choice = raw.strip().lower()
+    if choice in lookup:
+        return lookup[choice]
+    matches = [idx for key, idx in lookup.items() if choice and choice in key and not key.isdigit()]
+    matches = sorted(set(matches))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        print(status_messages.status(f"Multiple apps matched \"{raw}\". Please enter the app number.", level="warn"))
+    return None

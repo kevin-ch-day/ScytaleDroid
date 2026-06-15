@@ -39,6 +39,124 @@ CREATE TABLE IF NOT EXISTS external_sdk_tracker_intel (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
+CREATE_DYNAMIC_DOMAIN_REFERENCE = """
+CREATE TABLE IF NOT EXISTS dynamic_domain_reference (
+  reference_id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  package_name_scope     VARCHAR(255)    NOT NULL DEFAULT '',
+  domain_pattern         VARCHAR(255)    NOT NULL,
+  match_type             VARCHAR(16)     NOT NULL,
+  owner_class            VARCHAR(32)     NOT NULL,
+  role_class             VARCHAR(64)     NOT NULL,
+  confidence             VARCHAR(16)     NOT NULL,
+  classification_basis   VARCHAR(64)     NOT NULL,
+  source_label           VARCHAR(64)     NOT NULL DEFAULT 'repo_seed',
+  source_url             TEXT            DEFAULT NULL,
+  notes                  TEXT            DEFAULT NULL,
+  is_active              TINYINT(1)      NOT NULL DEFAULT 1,
+  created_at_utc         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at_utc         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (reference_id),
+  UNIQUE KEY uq_dynamic_domain_reference (package_name_scope, domain_pattern, match_type),
+  KEY ix_dynamic_domain_reference_active (is_active, match_type),
+  KEY ix_dynamic_domain_reference_pattern (domain_pattern),
+  KEY ix_dynamic_domain_reference_scope (package_name_scope)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+CREATE_DYNAMIC_SERVICE_CATALOG = """
+CREATE TABLE IF NOT EXISTS dynamic_service_catalog (
+  service_id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  service_key           VARCHAR(128)    NOT NULL,
+  display_name          VARCHAR(191)    NOT NULL,
+  owner_name            VARCHAR(191)    NOT NULL,
+  owner_class           VARCHAR(32)     NOT NULL,
+  service_category      VARCHAR(64)     NOT NULL,
+  primary_use_case      VARCHAR(128)    DEFAULT NULL,
+  documentation_url     TEXT            DEFAULT NULL,
+  privacy_policy_url    TEXT            DEFAULT NULL,
+  source_label          VARCHAR(64)     NOT NULL DEFAULT 'repo_seed',
+  source_url            TEXT            DEFAULT NULL,
+  confidence            VARCHAR(16)     NOT NULL,
+  notes                 TEXT            DEFAULT NULL,
+  is_active             TINYINT(1)      NOT NULL DEFAULT 1,
+  created_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (service_id),
+  UNIQUE KEY uq_dynamic_service_catalog_key (service_key),
+  KEY ix_dynamic_service_catalog_active (is_active, owner_class, service_category)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+CREATE_DYNAMIC_SERVICE_DOMAIN_MAP = """
+CREATE TABLE IF NOT EXISTS dynamic_service_domain_map (
+  service_domain_map_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  service_id            BIGINT UNSIGNED NOT NULL,
+  package_name_scope    VARCHAR(255)    NOT NULL DEFAULT '',
+  domain_pattern        VARCHAR(255)    NOT NULL,
+  match_type            VARCHAR(16)     NOT NULL,
+  role_class            VARCHAR(64)     DEFAULT NULL,
+  source_label          VARCHAR(64)     NOT NULL DEFAULT 'repo_seed',
+  source_url            TEXT            DEFAULT NULL,
+  confidence            VARCHAR(16)     NOT NULL,
+  notes                 TEXT            DEFAULT NULL,
+  is_active             TINYINT(1)      NOT NULL DEFAULT 1,
+  created_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (service_domain_map_id),
+  UNIQUE KEY uq_dynamic_service_domain_map (service_id, package_name_scope, domain_pattern, match_type),
+  KEY ix_dynamic_service_domain_map_active (is_active, match_type, package_name_scope),
+  KEY ix_dynamic_service_domain_map_pattern (domain_pattern),
+  CONSTRAINT fk_dynamic_service_domain_map_service FOREIGN KEY (service_id)
+    REFERENCES dynamic_service_catalog (service_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+CREATE_DYNAMIC_SIGNAL_CATALOG = """
+CREATE TABLE IF NOT EXISTS dynamic_signal_catalog (
+  signal_id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  signal_key            VARCHAR(128)    NOT NULL,
+  display_name          VARCHAR(191)    NOT NULL,
+  signal_family         VARCHAR(64)     NOT NULL,
+  focus_area            VARCHAR(32)     NOT NULL,
+  severity_hint         VARCHAR(16)     NOT NULL,
+  description           TEXT            DEFAULT NULL,
+  analyst_guidance      TEXT            DEFAULT NULL,
+  source_label          VARCHAR(64)     NOT NULL DEFAULT 'repo_seed',
+  source_url            TEXT            DEFAULT NULL,
+  notes                 TEXT            DEFAULT NULL,
+  is_active             TINYINT(1)      NOT NULL DEFAULT 1,
+  created_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (signal_id),
+  UNIQUE KEY uq_dynamic_signal_catalog_key (signal_key),
+  KEY ix_dynamic_signal_catalog_active (is_active, focus_area, severity_hint)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+CREATE_DYNAMIC_SERVICE_SIGNAL_MAP = """
+CREATE TABLE IF NOT EXISTS dynamic_service_signal_map (
+  service_signal_map_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  service_id            BIGINT UNSIGNED NOT NULL,
+  signal_id             BIGINT UNSIGNED NOT NULL,
+  signal_strength       VARCHAR(16)     NOT NULL,
+  confidence            VARCHAR(16)     NOT NULL,
+  rationale             TEXT            DEFAULT NULL,
+  source_label          VARCHAR(64)     NOT NULL DEFAULT 'repo_seed',
+  source_url            TEXT            DEFAULT NULL,
+  notes                 TEXT            DEFAULT NULL,
+  is_active             TINYINT(1)      NOT NULL DEFAULT 1,
+  created_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at_utc        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (service_signal_map_id),
+  UNIQUE KEY uq_dynamic_service_signal_map (service_id, signal_id),
+  KEY ix_dynamic_service_signal_map_active (is_active, signal_strength, confidence),
+  CONSTRAINT fk_dynamic_service_signal_map_service FOREIGN KEY (service_id)
+    REFERENCES dynamic_service_catalog (service_id),
+  CONSTRAINT fk_dynamic_service_signal_map_signal FOREIGN KEY (signal_id)
+    REFERENCES dynamic_signal_catalog (signal_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
 CREATE_RESEARCH_COHORTS = """
 CREATE TABLE IF NOT EXISTS research_cohorts (
   cohort_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -135,6 +253,11 @@ _DDL_STATEMENTS: list[str] = [
     CREATE_RESEARCH_COHORTS,
     CREATE_RESEARCH_COHORT_MEMBERS,
     CREATE_EXTERNAL_SDK_TRACKER_INTEL,
+    CREATE_DYNAMIC_DOMAIN_REFERENCE,
+    CREATE_DYNAMIC_SERVICE_CATALOG,
+    CREATE_DYNAMIC_SERVICE_DOMAIN_MAP,
+    CREATE_DYNAMIC_SIGNAL_CATALOG,
+    CREATE_DYNAMIC_SERVICE_SIGNAL_MAP,
     # Apps and Versions
     """
     CREATE TABLE IF NOT EXISTS apps (
@@ -275,7 +398,7 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS device_serial VARCHAR(128) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS tool_semver VARCHAR(32) DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS tool_git_commit VARCHAR(40) DEFAULT NULL,
-      ADD COLUMN IF NOT EXISTS schema_version VARCHAR(32) DEFAULT NULL;
+      ADD COLUMN IF NOT EXISTS schema_version VARCHAR(64) DEFAULT NULL;
     """,
     """
     ALTER TABLE static_analysis_runs
@@ -480,7 +603,7 @@ _DDL_STATEMENTS: list[str] = [
       superseded_by_session_id BIGINT UNSIGNED DEFAULT NULL,
       tool_semver VARCHAR(32) DEFAULT NULL,
       tool_git_commit VARCHAR(40) DEFAULT NULL,
-      schema_version VARCHAR(32) DEFAULT NULL,
+      schema_version VARCHAR(64) DEFAULT NULL,
       first_created_at DATETIME DEFAULT NULL,
       last_ended_at DATETIME DEFAULT NULL,
       refreshed_at_utc TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP

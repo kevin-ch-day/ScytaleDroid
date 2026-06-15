@@ -38,9 +38,16 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     MIN_WINDOWS_PER_RUN,
 )
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    active_research_cohort_archive_dir,
+    active_dataset_freeze_path,
+    resolve_dataset_plan_read_path,
+    write_dataset_freeze_payload,
+)
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 
 
 @dataclass(frozen=True)
@@ -493,7 +500,7 @@ def build_dataset_freeze_manifest(
         "reason_taxonomy_version": int(paper_config.REASON_TAXONOMY_VERSION),
         "plan_schema_version_required": required_plan_schema_version,
         "plan_paper_contract_version_required": required_plan_paper_contract_version,
-        "dataset_id": "Research Dataset Alpha",
+        "dataset_id": active_research_cohort_label(),
         "dataset_version": "paper2_v1",
         "created_at_utc": datetime.now(UTC).isoformat(),
         "tool_semver": app_config.APP_VERSION,
@@ -556,7 +563,7 @@ def write_dataset_freeze_manifest(
     create it as a copy. Never overwrite an existing canonical freeze file.
     """
 
-    dataset_plan_path = Path(app_config.DATA_DIR) / "archive" / "dataset_plan.json"
+    dataset_plan_path = resolve_dataset_plan_read_path()
     payload = build_dataset_freeze_manifest(dataset_plan_path=dataset_plan_path, evidence_root=evidence_root)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -566,9 +573,11 @@ def write_dataset_freeze_manifest(
 
     if also_write_canonical:
         demote_noncanonical_canonical_freeze(archive_dir=out_dir, evidence_root=evidence_root)
-        canonical = out_dir / "dataset_freeze.json"
-        if not canonical.exists():
-            canonical.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        canonical = active_dataset_freeze_path()
+        if out_dir.resolve() == active_research_cohort_archive_dir().resolve():
+            write_dataset_freeze_payload(payload)
+        elif not canonical.exists():
+            write_dataset_freeze_payload(payload)
 
     # First-class paper contract artifact for this freeze (dataset identity anchor).
     contract_payload = {

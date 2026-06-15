@@ -9,11 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.ml.seed_identity import derive_seed
 
 
 def _freeze_path() -> Path:
-    return Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    return resolve_dataset_freeze_read_path()
 
 
 def _evidence_root() -> Path:

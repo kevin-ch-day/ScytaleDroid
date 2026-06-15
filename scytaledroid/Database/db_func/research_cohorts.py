@@ -55,6 +55,26 @@ def _resolve_run_sql_many(run_sql_many_fn):
     return run_sql_many_fn or run_sql_many
 
 
+def _cohort_member_count(row: dict[str, object]) -> int:
+    try:
+        return int(row.get("active_member_count") or 0)
+    except Exception:
+        return 0
+
+
+def _largest_active_research_cohort_key(active_rows: Sequence[dict[str, object]]) -> str | None:
+    candidates: list[tuple[int, str]] = []
+    for row in active_rows:
+        key = normalize_research_cohort_key(row.get("cohort_key"))
+        if not key:
+            continue
+        candidates.append((_cohort_member_count(row), key))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-int(item[0]), str(item[1])))
+    return str(candidates[0][1])
+
+
 def list_active_research_cohorts(*, run_sql_fn=None) -> list[dict[str, object]]:
     sql_runner = _resolve_run_sql(run_sql_fn)
     if sql_runner is None:
@@ -205,18 +225,22 @@ def resolve_preferred_research_cohort_key(
         for row in active_rows
         if normalize_research_cohort_key(row.get("cohort_key"))
     }
-    candidates = [
+    explicit_candidates = [
         normalize_research_cohort_key(preferred_key),
         configured_research_cohort_key(env=env),
-        DEFAULT_RESEARCH_COHORT_KEY,
     ]
-    for candidate in candidates:
+    for candidate in explicit_candidates:
         if candidate and candidate in active_keys:
             return candidate
     if active_rows:
-        first = normalize_research_cohort_key(active_rows[0].get("cohort_key"))
-        if first:
-            return first
+        largest = _largest_active_research_cohort_key(active_rows)
+        if largest:
+            return largest
+    candidates = [*explicit_candidates, DEFAULT_RESEARCH_COHORT_KEY]
+    for candidate in candidates:
+        if candidate:
+            if not active_keys or candidate in active_keys:
+                return candidate
     for candidate in candidates:
         if candidate:
             return candidate

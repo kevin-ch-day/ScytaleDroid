@@ -414,7 +414,7 @@ CREATE TABLE IF NOT EXISTS static_analysis_sessions (
   superseded_by_session_id BIGINT UNSIGNED NULL,
   tool_semver              VARCHAR(32) NULL,
   tool_git_commit          VARCHAR(40) NULL,
-  schema_version           VARCHAR(32) NULL,
+  schema_version           VARCHAR(64) NULL,
   created_at_utc           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   closed_at_utc            DATETIME NULL,
   PRIMARY KEY (static_session_id),

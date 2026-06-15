@@ -29,25 +29,30 @@ class DynamicMenuSections:
         ]
 
 
+def _quota_reason_text(summary) -> str:
+    reason = _humanize_code(summary.first_failing_reason)
+    expected = int(getattr(summary, "expected_valid_runs", 0) or 0)
+    valid = int(getattr(summary, "valid_runs", 0) or 0)
+    if str(getattr(summary, "first_failing_reason", "") or "").strip().upper() == "QUOTA_NOT_SATISFIED" and expected > 0:
+        return f"{reason} ({valid}/{expected} valid runs)"
+    return reason
+
+
 def build_dynamic_menu_sections() -> DynamicMenuSections:
     return DynamicMenuSections(
         primary_actions=[
-            MenuOption("1", "Guided cohort run (Research Dataset Alpha)"),
-            MenuOption("2", "Cohort status overview"),
+            MenuOption("1", "Focused app run"),
+            MenuOption("2", "Cohort run"),
         ],
         validation=[
             MenuOption("3", "State summary"),
-            MenuOption("4", "Freeze readiness audit (evidence packs)"),
-            MenuOption("5", "Verify capture environment"),
+            MenuOption("4", "Archive readiness"),
         ],
         maintenance=[
-            MenuOption("6", "Reindex tracker from evidence packs"),
-            MenuOption("7", "Prune incomplete evidence dirs"),
+            MenuOption("5", "Verify capture environment"),
+            MenuOption("6", "Maintenance tools"),
         ],
-        archive_export=[
-            MenuOption("8", "Export frozen archive CSVs (Reporting)"),
-            MenuOption("9", "Archived structural cohort tools"),
-        ],
+        archive_export=[],
     )
 
 
@@ -80,24 +85,16 @@ def render_dynamic_menu_overview() -> None:
         handoff_ready = int(handoff.get("dataset_packages_with_plan") or 0)
         handoff_total = int(handoff.get("dataset_packages_total") or 0)
         if handoff_total and handoff_ready == handoff_total:
-            handoff_status = "ready"
+            handoff_status = f"ready ({handoff_ready}/{handoff_total} plans)"
         elif handoff_total:
-            handoff_status = f"partial ({handoff_ready}/{handoff_total})"
+            handoff_status = f"partial ({handoff_ready}/{handoff_total} plans)"
     evidence_text = (
         "none yet"
         if int(summary.total_runs) == 0
         else f"{summary.total_runs} packs ({summary.valid_runs} valid)"
     )
     freeze_text = "ready" if summary.can_freeze else "blocked"
-    reason_text = _humanize_code(summary.first_failing_reason)
-    next_step = "run Guided cohort"
-    if int(summary.total_runs) > 0 and not summary.can_freeze:
-        next_step = "run State summary"
-    if summary.can_freeze:
-        next_step = "export frozen archive"
-    if handoff and not bool(handoff.get("ready_for_guided_dataset_run")):
-        next_step = "run State summary"
-
+    reason_text = _quota_reason_text(summary)
     state_items = [
         summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
         summary_cards.summary_item(
@@ -107,11 +104,10 @@ def render_dynamic_menu_overview() -> None:
         ),
         summary_cards.summary_item("Reason", reason_text, value_style="muted"),
         summary_cards.summary_item(
-            "Current static handoff",
+            "Static prep",
             handoff_status,
             value_style="success" if handoff_status == "ready" else "warning",
         ),
-        summary_cards.summary_item("Next", next_step, value_style="text"),
     ]
     footer = None
     if int(summary.total_runs) == 0:

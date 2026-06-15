@@ -8,7 +8,6 @@ from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.menus import (
     catalog_hygiene_menu,
     db_health_integrity_menu,
-    health_checks,
     permission_intel_snapshot_menu,
     query_runner,
     static_session_diagnostics_menu,

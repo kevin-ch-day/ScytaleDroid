@@ -188,7 +188,7 @@ def test_write_static_prune_receipts(tmp_path: Path) -> None:
         apply_delete_sql="y",
         expected_count_match=True,
     )
-    paths = prune.write_static_prune_receipts(tmp_path, stem="artifact_registry_static_prune_test", proposal=proposal, apply_requested=False)
+    prune.write_static_prune_receipts(tmp_path, stem="artifact_registry_static_prune_test", proposal=proposal, apply_requested=False)
     assert (tmp_path / "artifact_registry_static_prune_test.json").is_file()
     assert (tmp_path / "artifact_registry_static_prune_test.csv").is_file()
     assert (tmp_path / "artifact_registry_static_prune_test.sql").is_file()

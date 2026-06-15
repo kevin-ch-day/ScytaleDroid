@@ -29,19 +29,25 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (  # noqa: E402
+    resolve_dataset_freeze_read_path,
+)
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance  # noqa: E402
 from scytaledroid.Utils.LatexUtils import RawLatex, render_tabular_only  # noqa: E402
 
 PUB_ROOT = REPO_ROOT / "output" / "publication"
 PUBLICATION_RESULTS = PUB_ROOT / "manifests" / "publication_results_v1.json"
 LEGACY_PUBLICATION_RESULTS = PUB_ROOT / "manifests" / "paper_results_v1.json"
-FREEZE = REPO_ROOT / "data" / "archive" / "dataset_freeze.json"
 TABLE_6 = PUB_ROOT / "tables" / "table_6_static_posture_scores.csv"
 TABLE_5 = PUB_ROOT / "tables" / "table_5_masvs_coverage.csv"
 PCAP_FEATURES = REPO_ROOT / "data" / "archive" / "pcap_features.csv"
 
 DEFAULT_OUT_DIR = REPO_ROOT / "output" / "experimental" / "analysis" / "risk_scoring"
 LEGACY_OUT_DIR = REPO_ROOT / "output" / "experimental" / "paper2"
+
+
+def _freeze_path() -> Path:
+    return resolve_dataset_freeze_read_path()
 
 
 def _read_csv_skip_comments(path: Path) -> list[dict[str, str]]:
@@ -186,11 +192,12 @@ def main(argv: list[str] | None = None) -> int:
     FIG_RANK_PNG = out_dir / "ranked_fused_scores.png"
 
     results_path = PUBLICATION_RESULTS if PUBLICATION_RESULTS.exists() else LEGACY_PUBLICATION_RESULTS
-    for p in (TABLE_6, TABLE_5, PCAP_FEATURES, results_path, FREEZE):
+    freeze_path = _freeze_path()
+    for p in (TABLE_6, TABLE_5, PCAP_FEATURES, results_path, freeze_path):
         if not p.exists():
             raise SystemExit(f"Missing required input: {p}")
 
-    freeze = json.loads(FREEZE.read_text(encoding="utf-8"))
+    freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
     freeze_hash = str(freeze.get("freeze_dataset_hash") or "")
 
     t6_by_pkg = _row_by_pkg(_read_csv_skip_comments(TABLE_6))

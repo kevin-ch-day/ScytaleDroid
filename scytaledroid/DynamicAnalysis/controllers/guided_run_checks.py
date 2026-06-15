@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import tempfile
 from pathlib import Path
@@ -251,11 +250,9 @@ def pre_run_scientific_checks(
         else:
             rows.append(["Signer identity", "OK", expected_signer[:12]])
     elif observed_signer:
-        warnings.append("Plan signer identity unavailable; signer drift comparison skipped")
-        rows.append(["Signer identity", "WARN", f"observed={observed_signer[:12]} expected=unavailable"])
+        rows.append(["Signer identity", "INFO", f"observed={observed_signer[:12]} (plan unavailable; drift check skipped)"])
     else:
-        warnings.append("Signer identity unavailable")
-        rows.append(["Signer identity", "WARN", "plan and device signer unavailable"])
+        rows.append(["Signer identity", "INFO", "plan and device signer unavailable"])
 
     if "pcapdroid_capture" not in observer_ids:
         hard_failures.append("Required observer missing: pcapdroid_capture")

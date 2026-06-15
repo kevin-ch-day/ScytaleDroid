@@ -41,8 +41,8 @@ def test_scientific_checks_warn_when_plan_signer_unknown(monkeypatch, tmp_path, 
 
     out = capsys.readouterr().out
     assert ok is True
-    assert "WARN" in out
-    assert "Plan signer identity unavailable" in out
+    assert "Plan signer identity unavailable" not in out
+    assert "INFO" in out
     assert "Status: READY" in out
 
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import csv
 import json
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -68,7 +68,6 @@ def _beta_manual_additions() -> tuple[str, ...]:
         "com.cnn.mobile.android.phone",
         "com.guardian",
         "com.espn.score_center",
-        "com.android.chrome",
     )
 
 

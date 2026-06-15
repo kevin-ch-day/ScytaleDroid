@@ -12,12 +12,13 @@ from pathlib import Path
 
 import scipy.stats
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_paths
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance
 
 
 def _freeze_path() -> Path:
-    return Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    return resolve_dataset_freeze_read_path()
 
 
 def _evidence_root() -> Path:

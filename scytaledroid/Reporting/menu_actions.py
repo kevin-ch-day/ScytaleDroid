@@ -14,6 +14,9 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.menus import health_checks
 from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    resolve_dataset_freeze_read_path,
+)
 from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
     index_dynamic_evidence_packs_to_db,
 )
@@ -1017,7 +1020,7 @@ def fetch_publication_status() -> dict[str, object]:
         status["analysis_cohort_label"] = str(analysis_snapshot.get("cohort_id") or "").strip() or None
 
     # Freeze anchor (canonical for publication exports).
-    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    freeze_path = resolve_dataset_freeze_read_path()
     if freeze_path.exists():
         try:
             payload = json.loads(freeze_path.read_text(encoding="utf-8"))
@@ -1090,7 +1093,7 @@ def handle_export_freeze_anchored_csvs() -> None:
         export_protocol_ledger_csv,
     )
 
-    freeze_path = Path(app_config.DATA_DIR) / "archive" / "dataset_freeze.json"
+    freeze_path = resolve_dataset_freeze_read_path()
     if not freeze_path.exists():
         print(status_messages.status(f"Missing freeze anchor: {relative_path(freeze_path)}", level="error"))
         return
@@ -1323,7 +1326,7 @@ def handle_refresh_phase_e_bundle() -> None:
     )
 
     archive_dir = Path(app_config.DATA_DIR) / "archive"
-    freeze_path = archive_dir / "dataset_freeze.json"
+    freeze_path = resolve_dataset_freeze_read_path()
     if not freeze_path.exists():
         print(status_messages.status(f"Missing freeze anchor: {relative_path(freeze_path)}", level="error"))
         return
