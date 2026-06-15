@@ -147,21 +147,21 @@ LEFT JOIN (
 
 CREATE_VW_STATIC_MODULE_COVERAGE = """
 CREATE OR REPLACE VIEW vw_static_module_coverage AS
-SELECT package_name,
+SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
        'strings' AS module_key,
-       MAX(session_stamp) AS last_session
+       CONVERT(MAX(session_stamp) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS last_session
 FROM static_string_summary
 GROUP BY package_name
 UNION
-SELECT package_name,
+SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
        'dynload' AS module_key,
-       MAX(session_stamp) AS last_session
+       CONVERT(MAX(session_stamp) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS last_session
 FROM static_dynload_events
 GROUP BY package_name
 UNION
-SELECT package_name,
+SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
        'storage_surface' AS module_key,
-       MAX(session_stamp) AS last_session
+       CONVERT(MAX(session_stamp) USING utf8mb4) COLLATE utf8mb4_unicode_ci AS last_session
 FROM static_fileproviders
 GROUP BY package_name;
 """
@@ -169,7 +169,7 @@ GROUP BY package_name;
 CREATE_VW_STORAGE_SURFACE_RISK = """
 CREATE OR REPLACE VIEW vw_storage_surface_risk AS
 SELECT fp.package_name,
-       fp.session_stamp,
+       CONVERT(fp.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci AS session_stamp,
        fp.scope_label,
        fp.authority,
        fp.provider_name,
@@ -187,7 +187,8 @@ SELECT fp.package_name,
 FROM static_fileproviders AS fp
 LEFT JOIN static_provider_acl AS acl
   ON fp.package_name = acl.package_name
- AND fp.session_stamp = acl.session_stamp
+ AND CONVERT(fp.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   = CONVERT(acl.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
  AND fp.authority = acl.authority;
 """
 
@@ -879,7 +880,8 @@ LEFT JOIN apps a
 LEFT JOIN risk_scores rs
   ON LOWER(CONVERT(rs.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
    = LOWER(CONVERT(latest.package_name USING utf8mb4)) COLLATE utf8mb4_unicode_ci
- AND rs.session_stamp = latest.session_stamp
+ AND CONVERT(rs.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   = CONVERT(latest.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN permission_audit_apps audit
   ON audit.static_run_id = latest.static_run_id
 LEFT JOIN permission_audit_snapshots audit_snapshot

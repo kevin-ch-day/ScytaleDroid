@@ -26,7 +26,7 @@ def get_package_paths(
     *,
     allow_fallbacks: bool = False,
 ) -> list[str]:
-    """Return canonical APK paths for a package using pm path."""
+    """Return canonical APK paths for a package using package-manager path commands."""
     return package_info.get_package_paths(
         serial,
         package_name,
@@ -40,7 +40,7 @@ def get_package_metadata(
     package_name: str,
     refresh: bool = False,
 ) -> dict[str, str | None]:
-    """Return metadata for a package via pm dump (cached)."""
+    """Return metadata for a package via package-specific dump surfaces (cached)."""
     return package_info.get_package_metadata(serial, package_name, refresh=refresh)
 
 

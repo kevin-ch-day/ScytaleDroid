@@ -259,18 +259,9 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
         dynamic_artifact_orphan_rows=scalar(
             """
             SELECT COUNT(*)
-            FROM artifact_registry ar
-            LEFT JOIN dynamic_sessions ds
-              ON ds.dynamic_run_id = COALESCE(
-                ar.dynamic_run_id,
-                CASE
-                  WHEN ar.run_type = 'dynamic' AND TRIM(COALESCE(ar.run_id, '')) <> ''
-                    THEN ar.run_id
-                  ELSE NULL
-                END
-              )
-            WHERE ar.run_type = 'dynamic'
-              AND ds.dynamic_run_id IS NULL
+            FROM v_artifact_registry_integrity
+            WHERE run_type = 'dynamic'
+              AND link_state = 'dangling_dynamic_run'
             """
         ),
         static_artifact_orphan_rows=scalar(

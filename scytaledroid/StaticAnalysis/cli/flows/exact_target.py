@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from scytaledroid.DeviceAnalysis.services import artifact_store
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from ...core.repository import ArtifactGroup, RepositoryArtifact, group_artifacts
@@ -445,12 +446,13 @@ def count_linkable_dynamic_sessions_for_hash(base_apk_sha256: str) -> int | None
     sha = _normalize_sha256(base_apk_sha256)
     if not sha:
         return None
+    resolved_static_run_id = resolved_dynamic_session_static_run_id("ds")
     try:
         row = core_q.run_sql(
-            """
+            f"""
             SELECT COUNT(*) AS c
             FROM dynamic_sessions ds
-            WHERE ds.static_run_id IS NULL
+            WHERE {resolved_static_run_id} IS NULL
               AND ds.base_apk_sha256 = %s
               AND EXISTS (
                 SELECT 1

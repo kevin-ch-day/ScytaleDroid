@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_static_run_started_at_utc
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
 from scytaledroid.StaticAnalysis.persistence import list_reports
@@ -712,17 +713,15 @@ def build_api_app() -> FastAPI:
         if core_q is None:
             return {"status": "db_unavailable"}
         threshold = max(1, int(minutes))
-        query = """
+        started_at_expr = resolved_static_run_started_at_utc("static_analysis_runs")
+        query = f"""
         UPDATE static_analysis_runs
         SET status='FAILED',
             ended_at_utc=UTC_TIMESTAMP(),
             abort_reason='stale_finalize'
         WHERE status='RUNNING'
           AND ended_at_utc IS NULL
-          AND COALESCE(
-                STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s.%f'),
-                STR_TO_DATE(REPLACE(REPLACE(run_started_utc,'T',' '),'Z',''), '%Y-%m-%d %H:%i:%s')
-              ) < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
+          AND {started_at_expr} < (UTC_TIMESTAMP() - INTERVAL %s MINUTE)
         """
         updated = core_q.run_sql_rowcount(query, (threshold,), query_name="api.finalize_stale")
         return {"status": "ok", "updated": updated, "threshold_minutes": threshold}

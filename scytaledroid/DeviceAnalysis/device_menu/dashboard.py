@@ -9,12 +9,14 @@ cards are discoverable via menu actions rather than always-on panels.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
+from scytaledroid.DeviceAnalysis.inventory.progress import format_inventory_age_display
 from scytaledroid.DeviceAnalysis.services import artifact_store, device_service
 from scytaledroid.Utils.DisplayUtils import (
     colors,
@@ -553,6 +555,8 @@ def _format_summary_value(value: object, *, fallback: str = "—") -> str:
 
 def _compact_age_display(age_display: object) -> str:
     text = _format_summary_value(age_display, fallback="unknown").strip()
+    if text in {"", "unknown", "never"}:
+        return text
     replacements = {
         " Days ": "d ",
         " Day ": "d ",
@@ -565,6 +569,20 @@ def _compact_age_display(age_display: object) -> str:
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
+    compact_match = re.fullmatch(
+        r"(?:(?P<days>\d+)\s*d(?:\s+)?)?(?:(?P<hours>\d+)\s*h(?:\s+)?)?(?:(?P<minutes>\d+)\s*m(?:\s+)?)?(?:(?P<seconds>\d+)\s*s)?",
+        text,
+        re.IGNORECASE,
+    )
+    if compact_match and compact_match.group(0):
+        total_seconds = (
+            int(compact_match.group("days") or 0) * 86400
+            + int(compact_match.group("hours") or 0) * 3600
+            + int(compact_match.group("minutes") or 0) * 60
+            + int(compact_match.group("seconds") or 0)
+        )
+        if total_seconds > 0 or text.lower() == "0s":
+            return format_inventory_age_display(total_seconds, absent="unknown")
     return text
 
 

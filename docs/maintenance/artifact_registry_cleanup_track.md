@@ -4,6 +4,10 @@ Read-only reporting:
 
 - `scripts/db/report_artifact_registry_integrity.py` — counts and dangling breakdowns.
 - `scripts/db/report_artifact_registry_cleanup_candidates.py` — policy buckets (no DML).
+- `scripts/db/report_artifact_registry_static_dangling.py` — static dangling row reason audit.
+- `scripts/db/report_artifact_registry_static_legacy_overlap.py` — static dangling rows that still overlap legacy `runs`.
+- `scripts/db/report_artifact_registry_static_session_retirement.py` — session-scoped retirement queue for the remaining legacy-overlap static rows.
+- `scripts/db/report_artifact_registry_static_blocked_file_presence.py` — file-presence correlation for blocked static legacy sessions.
 
 **Write-capable prune (implemented):** `scripts/db/prune_artifact_registry_dangling.py` — age-gated
 dangling rows only, lightweight JSON/CSV/SQL receipt, ``DELETE`` only with ``--apply`` (never
@@ -95,7 +99,24 @@ interactive prompts — suitable only for small, deliberate repairs.
 
 **Read-only triage:** `PYTHONPATH=. python scripts/db/report_artifact_registry_cleanup_candidates.py`
 
+**Static legacy closeout triage:** after a static-only prune reduces the truly detached rows, use
+`report_artifact_registry_static_dangling.py` to classify what remains, then
+`report_artifact_registry_static_legacy_overlap.py` and
+`report_artifact_registry_static_session_retirement.py` to decide which legacy
+session stamps are safe small-batch retirement candidates versus blocked by
+still-present host files. For the blocked cohort, use
+`report_artifact_registry_static_blocked_file_presence.py` before any further
+delete planning.
+
 **Scoped prune (preferred for bulk debt):** `PYTHONPATH=. python scripts/db/prune_artifact_registry_dangling.py` — see §4.
+
+**Session-scoped static legacy prune (candidate sessions only):**
+`PYTHONPATH=. python scripts/db/prune_artifact_registry_static_legacy_sessions.py`
+targets only `artifact_registry` rows for static legacy-overlap session stamps
+already classified by `report_artifact_registry_static_session_retirement.py`
+as candidate retirement sessions. It writes a JSON/CSV/SQL/txt receipt bundle
+first and refuses apply if any targeted row still has a present host file, any
+selected session is blocked, or any row still overlaps canonical static tables.
 
 `reset_static.py` intentionally omits `artifact_registry` from `STATIC_ANALYSIS_TABLES` (see
 comment in that module). Expanding reset scope to the registry requires an explicit product

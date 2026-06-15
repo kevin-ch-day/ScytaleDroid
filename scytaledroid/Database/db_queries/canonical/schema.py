@@ -10,6 +10,35 @@ import re
 
 from ...db_core import db_queries as core_q
 
+CREATE_EXTERNAL_SDK_TRACKER_INTEL = """
+CREATE TABLE IF NOT EXISTS external_sdk_tracker_intel (
+  intel_id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  intel_source         VARCHAR(64)     NOT NULL,
+  tracker_id_external  VARCHAR(64)     NOT NULL,
+  tracker_name         VARCHAR(191)    NOT NULL,
+  code_signature       VARCHAR(255)    DEFAULT NULL,
+  network_signature    TEXT            DEFAULT NULL,
+  website              TEXT            DEFAULT NULL,
+  description          LONGTEXT        DEFAULT NULL,
+  categories_json      JSON            DEFAULT NULL,
+  documentation_json   JSON            DEFAULT NULL,
+  creation_date        DATE            DEFAULT NULL,
+  snapshot_date        DATE            NOT NULL,
+  source_url           TEXT            DEFAULT NULL,
+  source_terms_note    VARCHAR(255)    DEFAULT NULL,
+  fetched_at_utc       DATETIME        DEFAULT NULL,
+  is_active            TINYINT(1)      NOT NULL DEFAULT 1,
+  created_at           TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (intel_id),
+  UNIQUE KEY ux_external_sdk_tracker_snapshot (intel_source, tracker_id_external, snapshot_date),
+  KEY ix_external_sdk_tracker_name (tracker_name),
+  KEY ix_external_sdk_tracker_code_signature (code_signature),
+  KEY ix_external_sdk_tracker_snapshot (snapshot_date),
+  KEY ix_external_sdk_tracker_source_snapshot (intel_source, snapshot_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
 _DDL_STATEMENTS: list[str] = [
     # Core dictionaries used by many flows (device inventory, profiles, publishers).
     """
@@ -64,6 +93,7 @@ _DDL_STATEMENTS: list[str] = [
       KEY idx_pub_rules_publisher (publisher_key)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+    CREATE_EXTERNAL_SDK_TRACKER_INTEL,
     # Apps and Versions
     """
     CREATE TABLE IF NOT EXISTS apps (

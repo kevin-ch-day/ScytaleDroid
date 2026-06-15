@@ -410,7 +410,9 @@ def ensure_dynamic_tier_migrations(
 
 
 def _tier1_schema_version() -> str:
-    return "0.2.6"
+    from scytaledroid.Database.db_utils.schema_migration_registry import latest_registered_schema_version
+
+    return latest_registered_schema_version() or "0.2.6"
 
 
 def _ensure_db_ops_log_table(*, core_q) -> None:

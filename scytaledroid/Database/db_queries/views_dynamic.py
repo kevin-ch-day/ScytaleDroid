@@ -5,7 +5,7 @@ from __future__ import annotations
 CREATE_VW_DYNLOAD_HOTSPOTS = """
 CREATE OR REPLACE VIEW vw_dynload_hotspots AS
 SELECT e.package_name,
-       e.session_stamp,
+       CONVERT(e.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci AS session_stamp,
        e.apk_id,
        SUM(CASE WHEN e.event_type = 'classloader' THEN 1 ELSE 0 END) AS classloader_events,
        SUM(CASE WHEN e.event_type = 'native' THEN 1 ELSE 0 END) AS native_loads,
@@ -13,7 +13,8 @@ SELECT e.package_name,
 FROM static_dynload_events AS e
 LEFT JOIN static_reflection_calls AS r
   ON e.package_name = r.package_name
- AND e.session_stamp = r.session_stamp
+ AND CONVERT(e.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   = CONVERT(r.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
  AND (e.apk_id = r.apk_id OR (e.apk_id IS NULL AND r.apk_id IS NULL))
 GROUP BY e.package_name, e.session_stamp, e.apk_id
 HAVING classloader_events > 0 AND reflection_calls > 0;

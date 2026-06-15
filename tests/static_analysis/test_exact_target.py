@@ -322,3 +322,22 @@ def test_headless_exact_mode_uses_exact_resolver(monkeypatch, tmp_path):
     spec = captured["spec"]
     assert spec.selection.groups == (group,)
     assert spec.params.profile == "lightweight"
+
+
+def test_count_linkable_dynamic_sessions_for_hash_uses_typed_static_run_expression(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_run_sql(sql, params=(), **_kwargs):
+        captured["sql"] = sql
+        captured["params"] = params
+        return {"c": 7}
+
+    monkeypatch.setattr(exact_target, "core_q", SimpleNamespace(run_sql=_fake_run_sql))
+
+    count = exact_target.count_linkable_dynamic_sessions_for_hash("a" * 64)
+
+    assert count == 7
+    assert captured["params"] == ("a" * 64,)
+    sql = str(captured["sql"])
+    assert "ds.static_run_id_u" in sql
+    assert "CAST(ds.static_run_id AS UNSIGNED)" in sql

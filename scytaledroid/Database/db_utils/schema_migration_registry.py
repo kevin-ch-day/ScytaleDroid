@@ -6,6 +6,7 @@ import csv
 import getpass
 import hashlib
 import json
+import re
 import socket
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -82,9 +83,69 @@ PHASE_A_MIGRATIONS: tuple[MigrationSpec, ...] = (
     ),
 )
 
+PHASE_B_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260614_phase_b1_join_key_collation_width_normalization",
+        migration_name="Phase B1 join-key collation and width normalization",
+        schema_version_before="0.3.3-typed-backfill",
+        schema_version_after="0.3.4-b1-join-key-normalization",
+        statements=(),
+        description="Normalize the first-wave canonical join-key columns to the repo-specific B1 contract.",
+        apply_mode="manual_script",
+        stage="phase_b1",
+    ),
+    MigrationSpec(
+        migration_id="20260614_phase_b1_session_stamp_backlog_normalization",
+        migration_name="Phase B1 session-stamp backlog normalization",
+        schema_version_before="0.3.4-b1-join-key-normalization",
+        schema_version_after="0.3.5-b1-session-stamp-backlog-normalization",
+        statements=(),
+        description="Normalize the remaining legacy and derived session_stamp columns to the repo-specific B1 contract.",
+        apply_mode="manual_script",
+        stage="phase_b1",
+    ),
+    MigrationSpec(
+        migration_id="20260614_schema_version_width_hotfix_v1",
+        migration_name="Schema-version width hotfix for runtime base tables",
+        schema_version_before="0.3.5-b1-session-stamp-backlog-normalization",
+        schema_version_after="0.3.6-schema-version-width-hotfix",
+        statements=(),
+        description="Widen runtime schema_version columns from VARCHAR(32) to VARCHAR(64) without changing view contracts.",
+        apply_mode="manual_script",
+        stage="hotfix",
+    ),
+)
+
 
 def registered_migrations() -> tuple[MigrationSpec, ...]:
-    return PHASE_A_MIGRATIONS
+    return PHASE_A_MIGRATIONS + PHASE_B_MIGRATIONS
+
+
+def latest_registered_schema_version() -> str | None:
+    migrations = registered_migrations()
+    if not migrations:
+        return None
+    value = str(migrations[-1].schema_version_after or "").strip()
+    return value or None
+
+
+def schema_version_gte(current: str | None, minimum: str | None) -> bool:
+    """Return True when `current` parses as greater than or equal to `minimum`."""
+
+    def _parse(value: str | None) -> tuple[int, ...]:
+        if not value:
+            return ()
+        parts = re.findall(r"\d+", str(value))
+        return tuple(int(part) for part in parts) if parts else ()
+
+    current_tuple = _parse(current)
+    minimum_tuple = _parse(minimum)
+    if not current_tuple or not minimum_tuple:
+        return False
+    max_len = max(len(current_tuple), len(minimum_tuple))
+    current_tuple += (0,) * (max_len - len(current_tuple))
+    minimum_tuple += (0,) * (max_len - len(minimum_tuple))
+    return current_tuple >= minimum_tuple
 
 
 def duplicate_registry_ids() -> dict[str, int]:
@@ -201,14 +262,18 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
     latest_by_id = latest_rows_by_migration(run_sql)
 
     applied_counts: dict[str, int] = {}
+    attempt_counts: dict[str, int] = {}
     status_counts: dict[str, int] = {}
     for row in applied_rows:
         migration_id = str(row.get("migration_id") or "").strip()
         status = str(row.get("status") or "").strip() or "<blank>"
         status_counts[status] = status_counts.get(status, 0) + 1
         if migration_id:
-            applied_counts[migration_id] = applied_counts.get(migration_id, 0) + 1
+            attempt_counts[migration_id] = attempt_counts.get(migration_id, 0) + 1
+            if status.lower() == "applied":
+                applied_counts[migration_id] = applied_counts.get(migration_id, 0) + 1
     db_dupes = {key: value for key, value in applied_counts.items() if value > 1}
+    retry_histories = {key: value for key, value in attempt_counts.items() if value > 1}
 
     registered_payload: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -260,6 +325,7 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
         "missing_migration_count": len(missing),
         "duplicate_registry_id_count": len(registry_dupes),
         "duplicate_applied_migration_id_count": len(db_dupes),
+        "migration_retry_history_count": len(retry_histories),
         "registry_chain_issue_count": len(chain_issues),
         "checksum_mismatch_count": len(checksum_mismatches),
         "unregistered_applied_row_count": len(unregistered_applied_rows),
@@ -272,6 +338,7 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
         "missing_migrations": missing,
         "duplicate_registry_ids": registry_dupes,
         "duplicate_applied_migration_ids": db_dupes,
+        "migration_retry_histories": retry_histories,
         "registry_chain_issues": chain_issues,
         "checksum_mismatches": checksum_mismatches,
         "unregistered_applied_rows": unregistered_applied_rows,
@@ -290,6 +357,10 @@ def write_schema_migration_report_bundle(report: Mapping[str, Any], output_dir: 
     csv_sections = {
         f"{base}_registered_migrations.csv": report.get("registered_migrations") or [],
         f"{base}_applied_rows.csv": report.get("applied_rows") or [],
+        f"{base}_migration_retry_histories.csv": [
+            {"migration_id": key, "attempt_count": value}
+            for key, value in (report.get("migration_retry_histories") or {}).items()
+        ],
         f"{base}_chain_issues.csv": report.get("registry_chain_issues") or [],
         f"{base}_checksum_mismatches.csv": report.get("checksum_mismatches") or [],
         f"{base}_unregistered_applied_rows.csv": report.get("unregistered_applied_rows") or [],
@@ -443,16 +514,19 @@ def ensure_governance_baseline(run_sql: RunSql) -> bool:
 __all__ = [
     "MigrationSpec",
     "PHASE_A_MIGRATIONS",
+    "PHASE_B_MIGRATIONS",
     "attach_receipt_path_to_latest_migration",
     "append_schema_version",
     "build_schema_migration_report",
     "duplicate_registry_ids",
     "ensure_governance_baseline",
+    "latest_registered_schema_version",
     "latest_rows_by_migration",
     "latest_schema_version",
     "load_schema_migration_rows",
     "record_schema_migration",
     "registry_version_chain_issues",
     "registered_migrations",
+    "schema_version_gte",
     "write_schema_migration_report_bundle",
 ]

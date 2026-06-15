@@ -12,7 +12,7 @@ from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .. import inventory_meta
-from . import adb_client, normalizer, snapshot_io
+from . import adb_bulk, adb_client, normalizer, snapshot_io
 from .errors import InventoryCollectionError
 
 
@@ -50,6 +50,11 @@ _TARGET_RESEARCH_PROFILES = frozenset(
         "NEWS",
     }
 )
+# Live Android 15 validation on the research device showed that one bulk
+# `dumpsys package packages` call is materially faster than per-package `pm dump`
+# even for single-package and small profile refreshes, so baseline inventory
+# should preload bulk metadata for any non-empty cohort.
+_BASELINE_BULK_METADATA_THRESHOLD = 1
 
 
 def _is_bulk_path_relevant_for_enrichment(
@@ -67,6 +72,21 @@ def _is_bulk_path_relevant_for_enrichment(
     if profile_key in _TARGET_RESEARCH_PROFILES:
         return True
     return False
+
+
+def _bulk_metadata_is_complete(metadata: dict[str, object] | None) -> bool:
+    if not metadata:
+        return False
+    required_fields = ("version_name", "last_update", "first_install", "user_id")
+    for field in required_fields:
+        value = str(metadata.get(field) or "").strip()
+        if not value:
+            return False
+    return True
+
+
+def _has_full_path_fidelity(row: dict[str, object]) -> bool:
+    return str(row.get("path_fidelity") or "").strip() in {"pm_path", "dumpsys_reconstructed"}
 
 
 @dataclass
@@ -184,6 +204,25 @@ def collect_inventory(
         if isinstance(version_code, str) and version_code.strip():
             version_by_package[canonical_name] = version_code.strip()
 
+    dumpsys_metadata_map: dict[str, dict[str, object]] = {}
+    should_preload_dumpsys_metadata = bulk_used or total >= _BASELINE_BULK_METADATA_THRESHOLD
+    if should_preload_dumpsys_metadata:
+        try:
+            dumpsys_metadata_map = {
+                (
+                    normalize_package_name(package_name, context="inventory")
+                    or package_name.strip().lower()
+                ): dict(metadata)
+                for package_name, metadata in adb_client.get_package_metadata_bulk(serial).items()
+                if package_name
+            }
+        except Exception as exc:
+            log.warning(
+                f"Failed to preload baseline inventory metadata from dumpsys package packages: {exc}",
+                category="inventory",
+            )
+            dumpsys_metadata_map = {}
+
     # Progress cadence: for small scoped cohorts (e.g., paper profiles with ~19-21 packages),
     # emit every package. For full-device runs, target roughly 40 visible completions so the
     # operator sees regular forward motion even on slow non-root devices.
@@ -221,6 +260,8 @@ def collect_inventory(
                     active=True,
                 )
                 bulk_entry = bulk_entry_map.get(package_key)
+                bulk_dump_metadata = dict(dumpsys_metadata_map.get(package_key) or {})
+                reconstructed_paths = adb_bulk.reconstruct_apk_paths(bulk_dump_metadata)
                 bulk_base_path = str(getattr(bulk_entry, "apk_path", "")).strip() or None
                 # If the package is present in the authoritative bulk version list but
                 # missing from the parsed bulk-entry map, prefer `pm path` over
@@ -232,27 +273,32 @@ def collect_inventory(
                     bulk_base_path=bulk_base_path,
                 )
                 if should_enrich_paths:
-                    stage = "paths"
-                    _emit_progress(
-                        progress_cb,
-                        processed=index - 1,
-                        total=total,
-                        elapsed=time.time() - scan_start,
-                        eta=None,
-                        split_apks=split_processed,
-                        current_package=package_name,
-                        current_stage="pm path",
-                        bulk_rows_completed=profile_bulk_rows,
-                        path_calls_completed=profile_calls_paths,
-                        metadata_calls_completed=profile_calls_metadata,
-                        active=True,
-                    )
-                    paths = adb_client.get_package_paths(
-                        serial, package_name, allow_fallbacks=allow_fallbacks
-                    )
-                    path_fidelity = "pm_path"
-                    t_paths = time.time() - t0
-                    profile_calls_paths += 1
+                    if reconstructed_paths:
+                        paths = reconstructed_paths
+                        path_fidelity = "dumpsys_reconstructed"
+                        t_paths = time.time() - t0
+                    else:
+                        stage = "paths"
+                        _emit_progress(
+                            progress_cb,
+                            processed=index - 1,
+                            total=total,
+                            elapsed=time.time() - scan_start,
+                            eta=None,
+                            split_apks=split_processed,
+                            current_package=package_name,
+                            current_stage="pm path",
+                            bulk_rows_completed=profile_bulk_rows,
+                            path_calls_completed=profile_calls_paths,
+                            metadata_calls_completed=profile_calls_metadata,
+                            active=True,
+                        )
+                        paths = adb_client.get_package_paths(
+                            serial, package_name, allow_fallbacks=allow_fallbacks
+                        )
+                        path_fidelity = "pm_path"
+                        t_paths = time.time() - t0
+                        profile_calls_paths += 1
                 else:
                     paths = [bulk_base_path] if bulk_base_path else []
                     path_fidelity = "bulk_base_only"
@@ -264,50 +310,70 @@ def collect_inventory(
                     "user_id": str(getattr(bulk_entry, "uid")) if getattr(bulk_entry, "uid", None) is not None else None,
                     "path_fidelity": path_fidelity,
                 }
+                metadata.update(bulk_dump_metadata)
+                metadata["path_fidelity"] = path_fidelity
                 t_meta = 0.0
                 profile_bulk_rows += 1
             else:
-                _emit_progress(
-                    progress_cb,
-                    processed=index - 1,
-                    total=total,
-                    elapsed=time.time() - scan_start,
-                    eta=None,
-                    split_apks=split_processed,
-                    current_package=package_name,
-                    current_stage="pm path",
-                    bulk_rows_completed=None,
-                    path_calls_completed=profile_calls_paths,
-                    metadata_calls_completed=profile_calls_metadata,
-                    active=True,
-                )
-                paths = adb_client.get_package_paths(
-                    serial, package_name, allow_fallbacks=allow_fallbacks
-                )
-                t_paths = time.time() - t0
-                stage = "metadata"
-                profile_calls_paths += 1
-                _emit_progress(
-                    progress_cb,
-                    processed=index - 1,
-                    total=total,
-                    elapsed=time.time() - scan_start,
-                    eta=None,
-                    split_apks=split_processed,
-                    current_package=package_name,
-                    current_stage="pm dump",
-                    bulk_rows_completed=None,
-                    path_calls_completed=profile_calls_paths,
-                    metadata_calls_completed=profile_calls_metadata,
-                    active=True,
-                )
-                metadata = adb_client.get_package_metadata(serial, package_name)
-                t_meta = time.time() - t0 - t_paths
+                bulk_metadata = dict(dumpsys_metadata_map.get(package_key) or {})
+                reconstructed_paths = adb_bulk.reconstruct_apk_paths(bulk_metadata)
+                path_fidelity = "dumpsys_reconstructed"
+                if reconstructed_paths:
+                    paths = reconstructed_paths
+                    t_paths = time.time() - t0
+                else:
+                    _emit_progress(
+                        progress_cb,
+                        processed=index - 1,
+                        total=total,
+                        elapsed=time.time() - scan_start,
+                        eta=None,
+                        split_apks=split_processed,
+                        current_package=package_name,
+                        current_stage="pm path",
+                        bulk_rows_completed=None,
+                        path_calls_completed=profile_calls_paths,
+                        metadata_calls_completed=profile_calls_metadata,
+                        active=True,
+                    )
+                    paths = adb_client.get_package_paths(
+                        serial, package_name, allow_fallbacks=allow_fallbacks
+                    )
+                    t_paths = time.time() - t0
+                    profile_calls_paths += 1
+                    path_fidelity = "pm_path"
+                if bulk_metadata:
+                    bulk_metadata.setdefault("package_name", package_name)
+                bulk_metadata["path_fidelity"] = path_fidelity
+                should_enrich_deep_metadata = not _bulk_metadata_is_complete(bulk_metadata)
+                if should_enrich_deep_metadata:
+                    stage = "metadata"
+                    _emit_progress(
+                        progress_cb,
+                        processed=index - 1,
+                        total=total,
+                        elapsed=time.time() - scan_start,
+                        eta=None,
+                        split_apks=split_processed,
+                        current_package=package_name,
+                        current_stage="pm dump",
+                        bulk_rows_completed=None,
+                        path_calls_completed=profile_calls_paths,
+                        metadata_calls_completed=profile_calls_metadata,
+                        active=True,
+                    )
+                    metadata = bulk_metadata
+                    metadata.update(adb_client.get_package_metadata(serial, package_name))
+                    metadata["path_fidelity"] = path_fidelity
+                    t_meta = time.time() - t0 - t_paths
+                else:
+                    metadata = bulk_metadata or {"package_name": package_name}
+                    t_meta = 0.0
         except Exception as exc:
             raise InventoryCollectionError(
                 package=package_name, index=index, total=total, stage=stage, original=exc
             ) from exc
-        if not bulk_used:
+        if not bulk_used and t_meta > 0.0:
             profile_calls_metadata += 1
         entry = normalizer.compose_inventory_entry(package_name, paths, metadata, canonical_entry)
         canonical_name = str(entry.get("package_name") or "").strip().lower()
@@ -412,7 +478,7 @@ def collect_inventory(
         new_packages=0,  # computed in runner using previous snapshot
         removed_packages=0,  # computed in runner using previous snapshot
         elapsed_seconds=elapsed_total,
-        path_enriched_packages=sum(1 for row in rows if row.get("path_fidelity") == "pm_path"),
+        path_enriched_packages=sum(1 for row in rows if _has_full_path_fidelity(row)),
         bulk_identity_only_packages=sum(1 for row in rows if row.get("path_fidelity") == "bulk_base_only"),
         package_hash=package_hash,
         package_list_hash=package_list_hash,

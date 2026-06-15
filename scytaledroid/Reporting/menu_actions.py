@@ -730,9 +730,11 @@ def handle_tier1_end_to_end() -> None:
 def fetch_tier1_status() -> dict[str, object]:
     """Return a compact Baseline readiness snapshot for the reporting menu."""
 
+    from scytaledroid.Database.db_utils.schema_migration_registry import latest_registered_schema_version
+
     status: dict[str, object] = {
         "schema_version": None,
-        "expected_schema": "0.2.6",
+        "expected_schema": latest_registered_schema_version() or "0.2.6",
         "tier1_ready_runs": 0,
         "last_export_path": None,
         "last_export_at": None,

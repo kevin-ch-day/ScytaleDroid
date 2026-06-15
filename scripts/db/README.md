@@ -214,6 +214,8 @@ Do not strip inline finding evidence until all of the following are true:
 | `report_dynamic_static_recovery_plan.py` | Read-only exact-gap artifact recovery planner; default old-root posture is historical identity only; writes only a non-destructive JSON receipt when `--write-receipt` is passed. |
 | `report_dynamic_static_pairing_eligibility.py` | Read-only dynamic-session dataset eligibility report for strict paired analysis, historical identity only, reharvest, and current-byte states. |
 | `report_current_corpus_preflight.py` | Read-only current-corpus preflight after fresh inventory/harvest: repository rows, canonical store files, apk_sets, split metadata, and static target states. |
+| `refresh_external_sdk_tracker_intel.py` | Dry-run default refresh of repo-owned external tracker/SDK reference intel from the Exodus public API; `--apply` upserts additive rows and can write a receipt bundle. |
+| `report_external_tracker_context.py` | Read-only overlap audit between external tracker intel and selected static endpoint root domains; separates specific overlaps from generic-root/infrastructure-root overlap. |
 | `backfill_apk_sets_from_receipts.py` | Dry-run default install-set spine backfill from receipt-backed harvest artifacts; `--apply` writes additive rows. |
 | `backfill_apk_set_links.py` | Dry-run default `apk_set_id` link backfill for static/dynamic rows with unique artifact-set matches; `--apply` writes nullable links only. |
 | `smoke_web_db.sh` | Wraps **`ScytaleDroid-Web/scripts/sd_web_db_smoke.php`** (PDO read smoke). |

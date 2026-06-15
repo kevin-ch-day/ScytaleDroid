@@ -83,7 +83,44 @@ def test_list_packages_with_versions_uses_portable_versioncode_only_probe(monkey
 
     rows = package_inventory.list_packages_with_versions("SER123", allow_fallbacks=False)
 
-    assert calls == [["pm", "list", "packages", "--show-versioncode"]]
+    assert calls == [["cmd", "package", "list", "packages", "--show-versioncode", "--user", "0"]]
+    assert rows == [("com.example.app", "42", None)]
+
+
+def test_list_packages_with_versions_falls_back_from_cmd_to_pm_when_cmd_is_unsupported(monkeypatch):
+    calls: list[list[str]] = []
+
+    def _run_shell_command(_serial, command, timeout=20):
+        calls.append(command)
+        if command[:3] == ["cmd", "package", "list"]:
+            return SimpleNamespace(returncode=0, stdout="Unknown option: --user\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="package:com.example.app versionCode:42\n", stderr="")
+
+    monkeypatch.setattr(package_inventory.adb_client, "run_shell_command", _run_shell_command)
+
+    rows = package_inventory.list_packages_with_versions("SER123", allow_fallbacks=False)
+
+    assert calls == [
+        ["cmd", "package", "list", "packages", "--show-versioncode", "--user", "0"],
+        ["cmd", "package", "list", "packages", "--show-versioncode"],
+        ["pm", "list", "packages", "--show-versioncode", "--user", "0"],
+    ]
+    assert rows == [("com.example.app", "42", None)]
+
+
+def test_list_packages_with_versions_honors_configured_user_override(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setenv("SCYTALEDROID_ADB_PACKAGE_USER_ID", "10")
+
+    def _run_shell_command(_serial, command, timeout=20):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="package:com.example.app versionCode:42\n", stderr="")
+
+    monkeypatch.setattr(package_inventory.adb_client, "run_shell_command", _run_shell_command)
+
+    rows = package_inventory.list_packages_with_versions("SER123", allow_fallbacks=False)
+
+    assert calls == [["cmd", "package", "list", "packages", "--show-versioncode", "--user", "10"]]
     assert rows == [("com.example.app", "42", None)]
 
 
@@ -118,6 +155,20 @@ def test_collect_inventory_uses_raw_package_for_adb_and_normalized_hash(monkeypa
         ),
     )
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            "com.example.baseline": {
+                "package_name": "com.example.baseline",
+                "code_path": "/data/app/~~abc/com.example.baseline",
+                "split_names": ["base", "config.en"],
+                "version_name": "3.9",
+                "last_update": "2026-06-14 00:40:13",
+                "first_install": "2026-05-08 16:33:35",
+            }
+        },
+    )
     monkeypatch.setattr(
         package_collection.adb_client,
         "get_package_paths",
@@ -181,6 +232,107 @@ def test_parse_bulk_package_listing_tolerates_missing_uid():
     assert entry.version_code == "77"
 
 
+def test_parse_dumpsys_package_extracts_inventory_relevant_metadata():
+    parsed = adb_bulk.parse_dumpsys_package(
+        """
+  Package [com.example.one] (abc123):
+    appId=10234
+    versionCode=77 minSdk=26 targetSdk=35
+    versionName=7.7.0
+    lastUpdateTime=2026-06-14 00:40:13
+    installerPackageName=com.android.vending
+    User 0: ceDataInode=123 installed=true
+      firstInstallTime=2026-05-08 16:33:35
+  Package [com.example.two] (def456):
+    appId=10001
+    versionName=1.0
+    lastUpdateTime=2026-06-01 10:11:12
+    installerPackageName=null
+    User 0: ceDataInode=456 installed=true
+      firstInstallTime=2026-06-01 10:11:12
+        """
+    )
+
+    assert parsed["com.example.one"]["package_name"] == "com.example.one"
+    assert parsed["com.example.one"]["user_id"] == "10234"
+    assert parsed["com.example.one"]["version_code"] == "77"
+    assert parsed["com.example.one"]["version_name"] == "7.7.0"
+    assert parsed["com.example.one"]["last_update"] == "2026-06-14 00:40:13"
+    assert parsed["com.example.one"]["installer"] == "com.android.vending"
+    assert parsed["com.example.one"]["first_install"] == "2026-05-08 16:33:35"
+    assert parsed["com.example.two"]["installer"] is None
+
+
+def test_parse_dumpsys_package_prefers_better_duplicate_section_for_updated_system_app():
+    parsed = adb_bulk.parse_dumpsys_package(
+        """
+  Package [com.android.vending] (old111):
+    appId=10273
+    versionCode=84502130 minSdk=32 targetSdk=37
+    versionName=45.0.21-31 [0] [PR] 728331212
+    lastUpdateTime=1969-12-31 17:59:59
+    installerPackageName=null
+    User 0: ceDataInode=123 installed=true
+      firstInstallTime=1969-12-31 17:59:59
+  Package [com.android.vending] (new222):
+    appId=10273
+    versionCode=85180930 minSdk=32 targetSdk=37
+    versionName=51.8.09-31 [0] [PR] 927580062
+    lastUpdateTime=2026-06-11 13:43:29
+    installerPackageName=com.android.vending
+    User 0: ceDataInode=456 installed=true
+      firstInstallTime=2008-12-31 18:00:00
+        """
+    )
+
+    assert parsed["com.android.vending"]["version_code"] == "85180930"
+    assert parsed["com.android.vending"]["version_name"] == "51.8.09-31 [0] [PR] 927580062"
+    assert parsed["com.android.vending"]["last_update"] == "2026-06-11 13:43:29"
+    assert parsed["com.android.vending"]["installer"] == "com.android.vending"
+    assert parsed["com.android.vending"]["first_install"] == "2008-12-31 18:00:00"
+
+
+def test_reconstruct_apk_paths_for_data_app_splits():
+    paths = adb_bulk.reconstruct_apk_paths(
+        {
+            "code_path": "/data/app/~~abc/com.example.app-123",
+            "split_names": ["base", "config.arm64_v8a", "feature.chat"],
+        }
+    )
+
+    assert paths == [
+        "/data/app/~~abc/com.example.app-123/base.apk",
+        "/data/app/~~abc/com.example.app-123/split_config.arm64_v8a.apk",
+        "/data/app/~~abc/com.example.app-123/split_feature.chat.apk",
+    ]
+
+
+def test_reconstruct_apk_paths_for_system_base_only_package():
+    paths = adb_bulk.reconstruct_apk_paths(
+        {
+            "code_path": "/system/priv-app/SoundPicker",
+            "split_names": ["base"],
+        }
+    )
+
+    assert paths == ["/system/priv-app/SoundPicker/SoundPicker.apk"]
+
+
+def test_reconstruct_apk_paths_refuses_overlay_and_apex_guessing():
+    assert adb_bulk.reconstruct_apk_paths(
+        {
+            "code_path": "/product/overlay/DisplayCutoutEmulationNoCutout",
+            "split_names": ["base"],
+        }
+    ) is None
+    assert adb_bulk.reconstruct_apk_paths(
+        {
+            "code_path": "/apex/com.android.tethering/priv-app/TetheringGoogle@361524140",
+            "split_names": ["base"],
+        }
+    ) is None
+
+
 def test_collect_inventory_bulk_mode_uses_bulk_metadata_and_enriches_data_app_paths(monkeypatch):
     calls: list[str] = []
 
@@ -209,6 +361,21 @@ def test_collect_inventory_bulk_mode_uses_bulk_metadata_and_enriches_data_app_pa
             )
         ],
     )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            "com.example.bulk": {
+                "package_name": "com.example.bulk",
+                "code_path": "/data/app/~~abc/pkg-base",
+                "split_names": ["base"],
+                "version_name": "7.7",
+                "last_update": "2026-06-14 00:40:13",
+                "first_install": "2026-05-08 16:33:35",
+                "installer": "com.android.vending",
+            }
+        },
+    )
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
     monkeypatch.setattr(
         package_collection.adb_client,
@@ -225,15 +392,15 @@ def test_collect_inventory_bulk_mode_uses_bulk_metadata_and_enriches_data_app_pa
 
     rows, stats = package_collection.collect_inventory("SER123", use_bulk=True, allow_fallbacks=False)
 
-    assert calls == ["com.example.bulk"]
+    assert calls == []
     assert rows[0]["package_name"] == "com.example.bulk"
     assert rows[0]["version_code"] == "77"
     assert rows[0]["installer"] == "com.android.vending"
     assert rows[0]["primary_path"] == "/data/app/~~abc/pkg-base/base.apk"
     assert rows[0]["apk_paths"] == ["/data/app/~~abc/pkg-base/base.apk"]
     assert rows[0]["split_count"] == 1
-    assert rows[0]["path_fidelity"] == "pm_path"
-    assert rows[0]["version_name"] is None
+    assert rows[0]["path_fidelity"] == "dumpsys_reconstructed"
+    assert rows[0]["version_name"] == "7.7"
     assert stats.identity_quality == "strict"
     assert stats.collection_mode == "bulk"
 
@@ -265,6 +432,17 @@ def test_collect_inventory_bulk_mode_skips_pm_path_for_non_relevant_blocked_pack
                 version_code="1",
             )
         ],
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            "com.example.profiled": {
+                "package_name": "com.example.profiled",
+                "code_path": "/product/app/Profiled",
+                "split_names": ["base", "config.en"],
+            }
+        },
     )
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
     monkeypatch.setattr(
@@ -314,6 +492,17 @@ def test_collect_inventory_bulk_mode_enriches_profiled_package_even_when_not_dat
             )
         ],
     )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            "com.example.profiled": {
+                "package_name": "com.example.profiled",
+                "code_path": "/product/app/Profiled",
+                "split_names": ["base", "config.en"],
+            }
+        },
+    )
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
     monkeypatch.setattr(
         package_collection.adb_client,
@@ -342,9 +531,9 @@ def test_collect_inventory_bulk_mode_enriches_profiled_package_even_when_not_dat
 
     rows, _stats = package_collection.collect_inventory("SER123", use_bulk=True, allow_fallbacks=False)
 
-    assert calls == ["com.example.profiled"]
+    assert calls == []
     assert rows[0]["split_count"] == 2
-    assert rows[0]["path_fidelity"] == "pm_path"
+    assert rows[0]["path_fidelity"] == "dumpsys_reconstructed"
 
 
 def test_collect_inventory_bulk_mode_progress_reports_bulk_rows_not_metadata(monkeypatch):
@@ -374,6 +563,20 @@ def test_collect_inventory_bulk_mode_progress_reports_bulk_rows_not_metadata(mon
                 version_code="77",
             )
         ],
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            "com.example.bulk": {
+                "package_name": "com.example.bulk",
+                "code_path": "/data/app/~~abc/pkg-base",
+                "split_names": ["base"],
+                "version_name": "7.7",
+                "last_update": "2026-06-14 00:40:13",
+                "first_install": "2026-05-08 16:33:35",
+            }
+        },
     )
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
     monkeypatch.setattr(
@@ -417,7 +620,7 @@ def test_collect_inventory_bulk_mode_progress_reports_bulk_rows_not_metadata(mon
     completion_events = [event for event in events if event.get("current_stage") == "complete"]
     assert completion_events
     assert completion_events[-1]["bulk_rows_completed"] == 1
-    assert completion_events[-1]["path_calls_completed"] == 1
+    assert completion_events[-1]["path_calls_completed"] == 0
     assert completion_events[-1]["metadata_calls_completed"] is None
 
 
@@ -436,6 +639,7 @@ def test_collect_inventory_bulk_mode_falls_back_to_pm_path_when_bulk_entry_missi
         ),
     )
     monkeypatch.setattr(package_collection.adb_client, "list_package_bulk_entries", lambda _serial: [])
+    monkeypatch.setattr(package_collection.adb_client, "get_package_metadata_bulk", lambda _serial: {})
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
     monkeypatch.setattr(
         package_collection.adb_client,
@@ -498,6 +702,20 @@ def test_collect_inventory_bulk_mode_counters_match_enriched_vs_bulk_only_rows(m
             ),
         ],
     )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            "com.example.userapp": {
+                "package_name": "com.example.userapp",
+                "code_path": "/data/app/~~abc/com.example.userapp",
+                "split_names": ["base", "config.en"],
+                "version_name": "7.7",
+                "last_update": "2026-06-14 00:40:13",
+                "first_install": "2026-05-08 16:33:35",
+            }
+        },
+    )
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
     monkeypatch.setattr(
         package_collection.adb_client,
@@ -540,13 +758,13 @@ def test_collect_inventory_bulk_mode_counters_match_enriched_vs_bulk_only_rows(m
         progress_cb=_progress_cb,
     )
 
-    assert [row["path_fidelity"] for row in rows] == ["pm_path", "bulk_base_only"]
+    assert [row["path_fidelity"] for row in rows] == ["dumpsys_reconstructed", "bulk_base_only"]
     assert stats.path_enriched_packages == 1
     assert stats.bulk_identity_only_packages == 1
     completion_events = [event for event in events if event.get("current_stage") == "complete"]
     assert completion_events
     assert completion_events[-1]["bulk_rows_completed"] == 2
-    assert completion_events[-1]["path_calls_completed"] == 1
+    assert completion_events[-1]["path_calls_completed"] == 0
     assert completion_events[-1]["metadata_calls_completed"] is None
 
 
@@ -566,6 +784,7 @@ def test_collect_inventory_baseline_mode_keeps_full_diagnostic_metadata_path(mon
         ),
     )
     monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
+    monkeypatch.setattr(package_collection.adb_client, "get_package_metadata_bulk", lambda _serial: {})
     monkeypatch.setattr(
         package_collection.adb_client,
         "get_package_paths",
@@ -615,8 +834,163 @@ def test_collect_inventory_baseline_mode_keeps_full_diagnostic_metadata_path(mon
     assert metadata_calls == ["com.example.baseline"]
     assert rows[0]["version_name"] == "4.2"
     assert rows[0]["split_count"] == 2
+    assert rows[0]["path_fidelity"] == "pm_path"
     assert stats.collection_mode == "baseline"
     completion_events = [event for event in events if event.get("current_stage") == "complete"]
     assert completion_events
     assert completion_events[-1]["path_calls_completed"] == 1
     assert completion_events[-1]["metadata_calls_completed"] == 1
+
+
+def test_collect_inventory_baseline_mode_preloads_bulk_metadata_even_for_single_package(
+    monkeypatch,
+):
+    metadata_calls: list[str] = []
+    path_calls: list[str] = []
+    bulk_calls: list[str] = []
+
+    monkeypatch.setattr(package_collection.adb_client, "clear_package_caches", lambda _serial: None)
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "list_packages",
+        lambda _serial, _use_bulk, allow_fallbacks=False: (
+            [("com.example.single", "42", None)],
+            ["com.example.single"],
+            False,
+            False,
+        ),
+    )
+    monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: bulk_calls.append(_serial)
+        or {
+            "com.example.single": {
+                "package_name": "com.example.single",
+                "code_path": "/data/app/~~abc/com.example.single",
+                "split_names": ["base", "config.en"],
+                "user_id": "10123",
+                "version_name": "4.2",
+                "last_update": "2026-06-14 00:40:13",
+                "first_install": "2026-05-08 16:33:35",
+                "installer": "com.android.vending",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_paths",
+        lambda _serial, package_name, allow_fallbacks=False: path_calls.append(package_name) or [],
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata",
+        lambda _serial, package_name: metadata_calls.append(package_name) or {},
+    )
+    monkeypatch.setattr(package_collection.snapshot_io, "load_canonical_metadata", lambda _names: {})
+
+    rows, stats = package_collection.collect_inventory(
+        "SER123",
+        use_bulk=False,
+        allow_fallbacks=False,
+    )
+
+    assert bulk_calls == ["SER123"]
+    assert path_calls == []
+    assert metadata_calls == []
+    assert stats.collection_mode == "baseline"
+    assert rows[0]["path_fidelity"] == "dumpsys_reconstructed"
+    assert rows[0]["apk_paths"] == [
+        "/data/app/~~abc/com.example.single/base.apk",
+        "/data/app/~~abc/com.example.single/split_config.en.apk",
+    ]
+    assert rows[0]["version_name"] == "4.2"
+    assert rows[0]["installer"] == "com.android.vending"
+
+
+def test_collect_inventory_baseline_mode_uses_bulk_metadata_and_skips_pm_dump_for_non_relevant_package(
+    monkeypatch,
+):
+    metadata_calls: list[str] = []
+
+    monkeypatch.setattr(package_collection.adb_client, "clear_package_caches", lambda _serial: None)
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "list_packages",
+        lambda _serial, _use_bulk, allow_fallbacks=False: (
+            [(f"com.example.pkg{i}", str(i), None) for i in range(30)],
+            [f"com.example.pkg{i}" for i in range(30)],
+            False,
+            False,
+        ),
+    )
+    monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_paths",
+        lambda _serial, package_name, allow_fallbacks=False: [
+            f"/product/app/{package_name}/base.apk"
+        ],
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            f"com.example.pkg{i}": {
+                "package_name": f"com.example.pkg{i}",
+                "code_path": (
+                    f"/product/app/com.example.pkg{i}"
+                    if i == 0
+                    else f"/system/app/com.example.pkg{i}"
+                ),
+                "split_names": ["base", "config.en"] if i == 0 else ["base"],
+                "user_id": str(10000 + i),
+                "version_name": f"{i}.0",
+                "last_update": "2026-06-14 00:40:13",
+                "first_install": "2026-05-08 16:33:35",
+                "installer": None,
+            }
+            for i in range(30)
+        },
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata",
+        lambda _serial, package_name: metadata_calls.append(package_name)
+        or {
+            "app_label": f"Label for {package_name}",
+            "installer": "com.android.vending",
+            "version_name": "deep",
+            "signer_cert_digest": "a" * 64,
+            "signer_set_hash": "b" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        package_collection.snapshot_io,
+        "load_canonical_metadata",
+        lambda _names: {
+            "com.example.pkg0": {
+                "profile_key": "SOCIAL",
+                "profile_name": "Social",
+            }
+        },
+    )
+
+    rows, stats = package_collection.collect_inventory(
+        "SER123",
+        use_bulk=False,
+        allow_fallbacks=False,
+    )
+
+    assert stats.collection_mode == "baseline"
+    assert metadata_calls == []
+    by_package = {row["package_name"]: row for row in rows}
+    assert by_package["com.example.pkg0"]["version_name"] == "0.0"
+    assert "signer_set_hash" not in by_package["com.example.pkg0"]
+    assert by_package["com.example.pkg1"]["version_name"] == "1.0"
+    assert by_package["com.example.pkg1"]["first_install"] == "2026-05-08 16:33:35"
+    assert by_package["com.example.pkg1"]["app_label"] == "com.example.pkg1"
+    assert by_package["com.example.pkg1"]["path_fidelity"] == "dumpsys_reconstructed"
+    assert by_package["com.example.pkg1"]["apk_paths"] == ["/system/app/com.example.pkg1/com.example.pkg1.apk"]
+    assert "signer_set_hash" not in by_package["com.example.pkg1"]

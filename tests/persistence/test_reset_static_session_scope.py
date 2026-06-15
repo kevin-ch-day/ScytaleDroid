@@ -98,6 +98,7 @@ def test_reset_static_session_scoped_unlinks_dynamic_sessions_before_static_dele
     )
 
     assert not outcome.failed
+    assert outcome.static_run_ids == (57, 58)
     assert executed[0] == (
         "UPDATE dynamic_sessions SET static_run_id=NULL WHERE static_run_id IN (%s,%s)",
         (57, 58),
@@ -152,6 +153,71 @@ def test_purge_static_session_artifacts_removes_session_archive_and_audits(monke
     assert any("sess-1_reconcile_audit.json" in path for path in outcome.removed)
 
 
+def test_purge_static_session_artifacts_uses_provided_static_run_ids_after_db_delete(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(reset_mod.app_config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(reset_mod.app_config, "OUTPUT_DIR", str(tmp_path / "output"))
+
+    session_dir = tmp_path / "data" / "sessions" / "sess-2"
+    archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-2"
+    legacy_evidence = tmp_path / "evidence" / "static_runs" / "77"
+    output_evidence = tmp_path / "output" / "evidence" / "static_runs" / "77"
+    for path in (session_dir, archive_dir, legacy_evidence, output_evidence):
+        path.mkdir(parents=True, exist_ok=True)
+    (session_dir / "run_map.json").write_text("{}", encoding="utf-8")
+    (archive_dir / "a.json").write_text("{}", encoding="utf-8")
+    (legacy_evidence / "static_handoff.json").write_text("{}", encoding="utf-8")
+    (output_evidence / "static_handoff.json").write_text("{}", encoding="utf-8")
+
+    class _FakeEngine:
+        def fetch_all(self, sql, params=None, *_args, **_kwargs):
+            if "SELECT id FROM static_analysis_runs" in sql:
+                return []
+            raise AssertionError(f"unexpected query: {sql!r} {params!r}")
+
+    @contextmanager
+    def _fake_session(**_kwargs):
+        yield _FakeEngine()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(reset_mod, "database_session", _fake_session)
+
+    outcome = purge_static_session_artifacts("sess-2", static_run_ids=(77,))
+
+    assert not outcome.failed
+    assert not legacy_evidence.exists()
+    assert not output_evidence.exists()
+
+
+def test_prune_static_sessions_passes_deleted_static_ids_to_artifact_purge(monkeypatch):
+    seen_static_ids: list[tuple[int, ...]] = []
+
+    monkeypatch.setattr(
+        reset_mod,
+        "reset_static_analysis_data",
+        lambda **kwargs: reset_mod.ResetOutcome(
+            [],
+            ["static_analysis_runs"],
+            [],
+            [],
+            [],
+            static_run_ids=(101, 102),
+        ),
+    )
+    monkeypatch.setattr(
+        reset_mod,
+        "purge_static_session_artifacts",
+        lambda session_label, *, static_run_ids=None: (
+            seen_static_ids.append(tuple(static_run_ids or ()))
+            or reset_mod.ArtifactPurgeOutcome([f"/tmp/{session_label}"], [], [])
+        ),
+    )
+
+    outcome = prune_static_sessions(["sess-101"])
+
+    assert outcome.failed_sessions == []
+    assert seen_static_ids == [(101, 102)]
+
+
 def test_classify_static_session_type_marks_hidden_defaults():
     assert classify_static_session_type("qa-risk-facebook-rerun-2") == ("qa", True)
     assert classify_static_session_type("interrupt-smoke-4") == ("qa", True)
@@ -202,7 +268,7 @@ def test_prune_static_sessions_calls_reset_and_artifact_purge(monkeypatch):
     monkeypatch.setattr(
         reset_mod,
         "purge_static_session_artifacts",
-        lambda session_label: (
+        lambda session_label, *, static_run_ids=None: (
             seen_artifacts.append(str(session_label))
             or reset_mod.ArtifactPurgeOutcome([f"/tmp/{session_label}"], [], [])
         ),

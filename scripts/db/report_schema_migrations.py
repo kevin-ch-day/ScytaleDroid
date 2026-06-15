@@ -73,6 +73,10 @@ def main(argv: list[str] | None = None) -> int:
         "duplicate_applied_migration_ids: "
         + json.dumps(payload.get("duplicate_applied_migration_ids") or {}, sort_keys=True)
     )
+    print(
+        "migration_retry_histories: "
+        + json.dumps(payload.get("migration_retry_histories") or {}, sort_keys=True)
+    )
     print(f"registry_chain_issue_count: {summary.get('registry_chain_issue_count')}")
     print(f"checksum_mismatch_count: {summary.get('checksum_mismatch_count')}")
     print(f"unregistered_applied_row_count: {summary.get('unregistered_applied_row_count')}")

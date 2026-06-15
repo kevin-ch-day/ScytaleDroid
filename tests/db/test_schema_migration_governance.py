@@ -11,9 +11,11 @@ from scytaledroid.Database.db_utils.schema_migration_registry import (
     build_schema_migration_report,
     attach_receipt_path_to_latest_migration,
     duplicate_registry_ids,
+    latest_registered_schema_version,
     latest_schema_version,
     registry_version_chain_issues,
     registered_migrations,
+    schema_version_gte,
     write_schema_migration_report_bundle,
 )
 from scytaledroid.Database.db_utils.type_normalization_preflight import (
@@ -26,6 +28,13 @@ def test_schema_migration_registry_has_no_duplicate_ids() -> None:
     assert duplicate_registry_ids() == {}
     assert len(registered_migrations()) >= 3
     assert registry_version_chain_issues() == []
+    assert latest_registered_schema_version() == "0.3.6-schema-version-width-hotfix"
+
+
+def test_schema_version_gte_handles_semantic_and_branch_like_versions() -> None:
+    assert schema_version_gte("0.3.5-b1-session-stamp-backlog-normalization", "0.3.5-b1-session-stamp-backlog-normalization") is True
+    assert schema_version_gte("0.3.5-b1-session-stamp-backlog-normalization", "0.2.6") is True
+    assert schema_version_gte("0.3.4-b1-join-key-normalization", "0.3.5-b1-session-stamp-backlog-normalization") is False
 
 
 def test_report_schema_migrations_help_is_safe() -> None:

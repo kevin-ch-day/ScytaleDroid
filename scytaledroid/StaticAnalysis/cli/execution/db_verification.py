@@ -18,6 +18,7 @@ from datetime import datetime
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
+from scytaledroid.Database.db_queries.sql_typed_reads import resolved_static_run_started_utc_text
 from scytaledroid.Database.db_scripts.static_run_audit import (
     GROUP_SCOPE_VERIFICATION_GUIDANCE,
     collect_static_run_counts,
@@ -371,10 +372,11 @@ def _render_attempt_history(session_label: str | None) -> None:
     if not session_label:
         return
 
+    started_text_expr = resolved_static_run_started_utc_text("static_analysis_runs")
     try:
         rows = core_q.run_sql(
-            """
-            SELECT id, COALESCE(run_started_utc, ended_at_utc, created_at) AS ts, is_canonical,
+            f"""
+            SELECT id, COALESCE({started_text_expr}, ended_at_utc, created_at) AS ts, is_canonical,
                    COALESCE(NULLIF(status, ''), 'UNKNOWN') AS run_status,
                    COALESCE(abort_reason, '') AS abort_reason
             FROM static_analysis_runs

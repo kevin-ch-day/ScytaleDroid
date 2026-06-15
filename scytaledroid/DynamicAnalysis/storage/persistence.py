@@ -495,11 +495,11 @@ def _load_artifact_registry(dynamic_run_id: str | None) -> list[dict[str, Any]]:
         rows = core_q.run_sql(
             """
             SELECT artifact_type, origin, pull_status, sha256, host_path
-            FROM artifact_registry
+            FROM v_artifact_registry_integrity
             WHERE run_type='dynamic'
-              AND (dynamic_run_id=%s OR ((dynamic_run_id IS NULL OR TRIM(dynamic_run_id)='') AND run_id=%s))
+              AND resolved_dynamic_run_id=%s
             """,
-            (dynamic_run_id, dynamic_run_id),
+            (dynamic_run_id,),
             fetch="all",
         )
     except Exception:

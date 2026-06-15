@@ -367,13 +367,14 @@ def _print_tier1_status_banner() -> dict[str, object]:
     # Collection/default mode: stay quiet — routine publication/freeze state is
     # irrelevant for most runs. Surface only an actionable schema drift hint.
     from scytaledroid.Database.db_core import db_config
+    from scytaledroid.Database.db_utils.schema_migration_registry import schema_version_gte
 
     schema_ver = tier1.get("schema_version") or "<unknown>"
     expected_schema = tier1.get("expected_schema") or "<unknown>"
     if (
         schema_ver
         and expected_schema
-        and schema_ver != expected_schema
+        and not schema_version_gte(schema_ver, expected_schema)
         and not (schema_ver == "<unknown>" and not db_config.db_enabled())
     ):
         menu_utils.print_hint(f"DB schema mismatch: {schema_ver} (expects {expected_schema})")
