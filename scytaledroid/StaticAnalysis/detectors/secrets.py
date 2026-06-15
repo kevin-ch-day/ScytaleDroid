@@ -26,6 +26,11 @@ from ..modules.string_analysis.matcher import (
     MatchRecord,
     StringMatcher,
 )
+from ..modules.string_analysis.origins import canonical_origin_type
+from ..modules.string_analysis.split_policy import (
+    is_split_member_context,
+    should_skip_split_regex_work,
+)
 from .base import BaseDetector, register_detector
 
 
@@ -317,24 +322,43 @@ def _build_metrics(
     secret_types: dict[str, dict[str, object]] = {}
     validated_total = 0
 
-    for pattern_name, group in sorted(batch.groups.items()):
-        pattern = group.pattern
+    pattern_names = sorted(
+        set(batch.pattern_scan_stats.keys()) | set(batch.groups.keys())
+    )
+
+    for pattern_name in pattern_names:
+        group = batch.groups.get(pattern_name)
         info = prepared.get(pattern_name)
+        if group is not None:
+            pattern = group.pattern
+            filtered_count = group.filtered_count
+            accepted_count = group.accepted_count
+            filter_reasons = sorted(
+                {
+                    reason
+                    for match in group.filtered
+                    for reason in match.reasons
+                    if reason
+                }
+            )
+        else:
+            pattern = getattr(batch.pattern_scan_stats.get(pattern_name), "pattern", None)
+            if pattern is None:
+                continue
+            filtered_count = 0
+            accepted_count = 0
+            filter_reasons = []
+
+        scan_stats = batch.pattern_scan_stats.get(pattern_name)
         accepted_after_validation = len(info["matches"]) if info else 0
         validated_total += accepted_after_validation
-        validator_dropped = info.get("validator_dropped") if info else group.accepted_count
-        filter_reasons = sorted(
-            {
-                reason
-                for match in group.filtered
-                for reason in match.reasons
-                if reason
-            }
-        )
+        validator_dropped = info.get("validator_dropped") if info else accepted_count
 
         entry_metrics: dict[str, object] = {
-            "found": group.accepted_count,
-            "filtered": group.filtered_count,
+            "candidate_entries": int(getattr(scan_stats, "candidate_count", 0) or 0),
+            "raw_regex_matches": int(getattr(scan_stats, "raw_match_count", 0) or 0),
+            "found": accepted_count,
+            "filtered": filtered_count,
             "accepted_after_validation": accepted_after_validation,
             "validator_dropped": int(validator_dropped or 0),
             "category": pattern.category,
@@ -362,6 +386,49 @@ def _build_metrics(
         "real_strings": batch.accepted_total,
         "filtered_strings": batch.filtered_total,
         "validated_strings": validated_total,
+    }
+
+
+def _filter_index_for_split_secrets(
+    index,
+    *,
+    artifact_context: Mapping[str, object] | None,
+):
+    if index is None or index.is_empty() or not is_split_member_context(artifact_context):
+        return index, {
+            "split_prefilter_active": False,
+            "prefilter_scanned_entries": len(getattr(index, "strings", ()) or ()),
+            "prefilter_skipped_entries": 0,
+        }
+
+    retained = []
+    skipped = 0
+    for entry in index.strings:
+        if should_skip_split_regex_work(entry, artifact_context=artifact_context):
+            skipped += 1
+            continue
+        retained.append(entry)
+
+    if skipped <= 0:
+        return index, {
+            "split_prefilter_active": False,
+            "prefilter_scanned_entries": len(index.strings),
+            "prefilter_skipped_entries": 0,
+        }
+
+    filtered_index = index.__class__(strings=tuple(retained))
+    retained_origin_types = sorted(
+        {
+            canonical_origin_type(entry.origin_type)
+            for entry in retained
+        }
+    )
+    return filtered_index, {
+        "split_prefilter_active": True,
+        "prefilter_scanned_entries": len(index.strings),
+        "prefilter_retained_entries": len(retained),
+        "prefilter_skipped_entries": skipped,
+        "prefilter_retained_origin_types": retained_origin_types,
     }
 
 
@@ -394,6 +461,22 @@ class SecretsDetector(BaseDetector):
                 evidence=tuple(),
             )
 
+        filtered_index, prefilter_metrics = _filter_index_for_split_secrets(
+            index,
+            artifact_context=context.metadata,
+        )
+        index = filtered_index
+        if index is None or index.is_empty():
+            return make_detector_result(
+                detector_id=self.detector_id,
+                section_key=self.section_key,
+                status=Badge.INFO,
+                started_at=started,
+                findings=tuple(),
+                metrics=prefilter_metrics,
+                evidence=tuple(),
+            )
+
         sampler_config = context.config.secrets_sampler
         allowed_types: tuple[str, ...] | None = None
         hits_limit: int | None = None
@@ -418,6 +501,7 @@ class SecretsDetector(BaseDetector):
         )
         prepared = _prepare_group_insights(batch.groups)
         metrics = _build_metrics(batch, prepared)
+        metrics.update(prefilter_metrics)
         findings = _build_findings(prepared, apk_path=context.apk_path)
         evidence = _collect_result_evidence(
             prepared,

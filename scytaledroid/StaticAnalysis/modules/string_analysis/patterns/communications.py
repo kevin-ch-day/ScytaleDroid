@@ -46,6 +46,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="SendGrid",
         tags=("api_key", "sendgrid"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("sg.",),
     ),
     # Collaboration / chat
     StringPattern(
@@ -56,6 +57,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Slack",
         tags=("webhook", "url"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("hooks.slack.com/services/",),
     ),
     StringPattern(
         name="slack_token",
@@ -65,6 +67,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Slack",
         tags=("token", "slack"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("xox",),
     ),
     StringPattern(
         name="discord_webhook",
@@ -74,6 +77,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Discord",
         tags=("webhook", "url"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("discord.com/api/webhooks/", "discordapp.com/api/webhooks/"),
     ),
 )
 

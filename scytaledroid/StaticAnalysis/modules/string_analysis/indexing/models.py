@@ -7,6 +7,7 @@ from collections.abc import Callable, Collection, Mapping, MutableMapping, Seque
 from dataclasses import dataclass, field
 from re import Pattern
 
+from ..origins import canonical_origin_type, origin_matches
 from .utils import ensure_pattern
 
 
@@ -33,6 +34,7 @@ class IndexedString:
 
     def __post_init__(self) -> None:  # pragma: no cover - simple hashing
         object.__setattr__(self, "sha256", hashlib.sha256(self.value.encode("utf-8")).hexdigest())
+        object.__setattr__(self, "origin_type", canonical_origin_type(self.origin_type))
         if self.source_sha256 and not self.source_sha_short:
             object.__setattr__(self, "source_sha_short", self.source_sha256[:8])
 
@@ -125,7 +127,7 @@ class StringIndex:
         compiled = ensure_pattern(pattern)
         matches: list[IndexedString] = []
         for entry in self.strings:
-            if origin_types and entry.origin_type not in origin_types:
+            if origin_types and not origin_matches(entry.origin_type, origin_types):
                 continue
             if min_length and len(entry.value) < min_length:
                 continue

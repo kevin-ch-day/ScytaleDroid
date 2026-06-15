@@ -7,9 +7,11 @@ from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from itertools import chain
 from typing import Literal
 
 from .extractor import IndexedString, StringIndex
+from .origins import canonical_origin_type, origin_matches
 from .patterns import DEFAULT_PATTERNS, StringPattern
 
 
@@ -50,6 +52,8 @@ class MatchGroup:
     pattern: StringPattern
     accepted: tuple[EvaluatedMatch, ...]
     filtered: tuple[EvaluatedMatch, ...]
+    candidate_count: int = 0
+    raw_match_count: int = 0
     accepted_count: int = field(init=False)
     filtered_count: int = field(init=False)
 
@@ -63,11 +67,21 @@ class MatchGroup:
 
 
 @dataclass(frozen=True)
+class PatternScanStats:
+    """Pre/post-regex scan counters for one pattern."""
+
+    pattern: StringPattern
+    candidate_count: int = 0
+    raw_match_count: int = 0
+
+
+@dataclass(frozen=True)
 class MatchBatch:
     """Aggregate result produced by :class:`StringMatcher`."""
 
     evaluated: tuple[EvaluatedMatch, ...]
     groups: Mapping[str, MatchGroup]
+    pattern_scan_stats: Mapping[str, PatternScanStats] = field(default_factory=dict)
     accepted_total: int = field(init=False)
     filtered_total: int = field(init=False)
 
@@ -108,8 +122,10 @@ class StringMatcher:
         filters: Sequence[FilterFunc] | None = None,
     ) -> None:
         self._index = index
+        self._strings = tuple(getattr(index, "strings", ()) or ())
         self._patterns = tuple(patterns or DEFAULT_PATTERNS)
         self._filters = tuple(filters or ())
+        self._strings_by_origin: Mapping[str, tuple[IndexedString, ...]] = self._build_origin_buckets()
 
     def match(
         self,
@@ -118,21 +134,46 @@ class StringMatcher:
         max_hits_per_pattern: int | None = None,
         min_entropy: float | None = None,
     ) -> MatchBatch:
-        evaluated = self._evaluate_matches()
+        evaluated, candidate_counts, raw_match_counts = self._evaluate_matches()
         evaluated = _apply_sampler_policy(
             evaluated,
             allowed_origin_types=allowed_origin_types,
             max_hits_per_pattern=max_hits_per_pattern,
             min_entropy=min_entropy,
         )
-        groups = _group_by_pattern(evaluated)
-        return MatchBatch(evaluated=evaluated, groups=groups)
+        groups = _group_by_pattern(
+            evaluated,
+            candidate_counts=candidate_counts,
+            raw_match_counts=raw_match_counts,
+        )
+        pattern_scan_stats = {
+            pattern.name: PatternScanStats(
+                pattern=pattern,
+                candidate_count=int(candidate_counts.get(pattern.name, 0) or 0),
+                raw_match_count=int(raw_match_counts.get(pattern.name, 0) or 0),
+            )
+            for pattern in self._patterns
+            if int(candidate_counts.get(pattern.name, 0) or 0) > 0
+            or int(raw_match_counts.get(pattern.name, 0) or 0) > 0
+        }
+        return MatchBatch(
+            evaluated=evaluated,
+            groups=groups,
+            pattern_scan_stats=pattern_scan_stats,
+        )
 
-    def _evaluate_matches(self) -> tuple[EvaluatedMatch, ...]:
+    def _evaluate_matches(
+        self,
+    ) -> tuple[tuple[EvaluatedMatch, ...], Mapping[str, int], Mapping[str, int]]:
         seen: set[tuple[str, str, str]] = set()
         evaluated: list[EvaluatedMatch] = []
+        candidate_counts: MutableMapping[str, int] = defaultdict(int)
+        raw_match_counts: MutableMapping[str, int] = defaultdict(int)
 
-        for record in self._iter_records():
+        for record in self._iter_records(
+            candidate_counts=candidate_counts,
+            raw_match_counts=raw_match_counts,
+        ):
             key = (record.pattern.name, record.string_entry.sha256, record.fragment)
             if key in seen:
                 continue
@@ -159,21 +200,21 @@ class StringMatcher:
                 EvaluatedMatch(record=record, status=status, reasons=tuple(reasons))
             )
 
-        return tuple(evaluated)
+        return tuple(evaluated), dict(candidate_counts), dict(raw_match_counts)
 
-    def _iter_records(self) -> Iterable[MatchRecord]:
+    def _iter_records(
+        self,
+        *,
+        candidate_counts: MutableMapping[str, int],
+        raw_match_counts: MutableMapping[str, int],
+    ) -> Iterable[MatchRecord]:
         for pattern in self._patterns:
-            candidates = self._index.search(
-                pattern.pattern,
-                origin_types=pattern.preferred_origins,
-                min_length=pattern.min_length,
-            )
-            for entry in candidates:
-                if pattern.context_keywords:
-                    haystack = f"{entry.origin}:{entry.value}".lower()
-                    if not any(keyword in haystack for keyword in pattern.context_keywords):
-                        continue
-                for fragment in pattern.iter_matches(entry.value):
+            candidates = self._candidate_entries(pattern)
+            for entry, lowered_value in candidates:
+                candidate_counts[pattern.name] += 1
+                fragments = pattern.iter_matches(entry.value, lowered_value=lowered_value)
+                raw_match_counts[pattern.name] += len(fragments)
+                for fragment in fragments:
                     if not _is_fragment_valid(pattern.name, fragment):
                         continue
                     yield MatchRecord(
@@ -182,8 +223,52 @@ class StringMatcher:
                         fragment=fragment,
                     )
 
+    def _build_origin_buckets(self) -> Mapping[str, tuple[IndexedString, ...]]:
+        buckets: MutableMapping[str, list[IndexedString]] = defaultdict(list)
+        for entry in self._strings:
+            buckets[canonical_origin_type(entry.origin_type)].append(entry)
+        return {origin: tuple(entries) for origin, entries in buckets.items()}
 
-def _group_by_pattern(matches: Sequence[EvaluatedMatch]) -> Mapping[str, MatchGroup]:
+    def _candidate_entries(self, pattern: StringPattern) -> Iterable[tuple[IndexedString, str]]:
+        if pattern.preferred_origins:
+            origin_keys = tuple(
+                dict.fromkeys(canonical_origin_type(origin) for origin in pattern.preferred_origins)
+            )
+            entries: Iterable[IndexedString] = chain.from_iterable(
+                self._strings_by_origin.get(origin, ()) for origin in origin_keys
+            )
+        else:
+            entries = self._strings
+
+        for entry in entries:
+            value = entry.value
+            if pattern.min_length and len(value) < pattern.min_length:
+                continue
+
+            lowered_value = value.lower()
+            if pattern.required_substrings and not any(
+                token in lowered_value for token in pattern.required_substrings
+            ):
+                continue
+
+            if pattern.context_keywords:
+                haystack = " ".join(
+                    part
+                    for part in (entry.origin, value, str(entry.context or ""))
+                    if part
+                ).lower()
+                if not any(keyword in haystack for keyword in pattern.context_keywords):
+                    continue
+
+            yield entry, lowered_value
+
+
+def _group_by_pattern(
+    matches: Sequence[EvaluatedMatch],
+    *,
+    candidate_counts: Mapping[str, int] | None = None,
+    raw_match_counts: Mapping[str, int] | None = None,
+) -> Mapping[str, MatchGroup]:
     grouped: MutableMapping[str, dict[str, object]] = {}
     for match in matches:
         pattern = match.record.pattern
@@ -199,6 +284,8 @@ def _group_by_pattern(matches: Sequence[EvaluatedMatch]) -> Mapping[str, MatchGr
             pattern=data["pattern"],
             accepted=tuple(data["accepted"]),
             filtered=tuple(data["filtered"]),
+            candidate_count=int((candidate_counts or {}).get(name, 0) or 0),
+            raw_match_count=int((raw_match_counts or {}).get(name, 0) or 0),
         )
         for name, data in grouped.items()
     }
@@ -235,10 +322,6 @@ def _apply_sampler_policy(
     if not matches:
         return tuple()
 
-    allowed_set = None
-    if allowed_origin_types is not None:
-        allowed_set = {value.lower() for value in allowed_origin_types}
-
     limit = max_hits_per_pattern if max_hits_per_pattern and max_hits_per_pattern > 0 else None
     threshold = min_entropy if min_entropy and min_entropy > 0 else None
 
@@ -250,9 +333,9 @@ def _apply_sampler_policy(
         reasons = list(match.reasons)
         pattern_name = match.record.pattern.name
         entry = match.record.string_entry
-        origin_type = (entry.origin_type or "").lower()
+        origin_type = canonical_origin_type(entry.origin_type)
 
-        if allowed_set is not None and origin_type not in allowed_set:
+        if not origin_matches(origin_type, allowed_origin_types):
             status = MatchStatus.FILTERED
             if "origin_scope" not in reasons:
                 reasons.append("origin_scope")
@@ -344,5 +427,6 @@ __all__ = [
     "MatchGroup",
     "MatchRecord",
     "MatchStatus",
+    "PatternScanStats",
     "StringMatcher",
 ]

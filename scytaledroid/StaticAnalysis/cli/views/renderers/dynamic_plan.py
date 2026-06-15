@@ -270,21 +270,78 @@ def _extract_nsc_domains(report: StaticAnalysisReport) -> tuple[list[str], list[
     return sorted(nsc_domains), sorted(nsc_cleartext)
 
 
+def _domain_metadata_from_string_payload(
+    string_payload: Mapping[str, object],
+) -> dict[str, dict[str, set[str]]]:
+    samples = string_payload.get("samples")
+    if not isinstance(samples, Mapping):
+        samples = string_payload.get("selected_samples")
+    metadata: dict[str, dict[str, set[str]]] = {}
+    if not isinstance(samples, Mapping):
+        return metadata
+    for bucket_name, rows in samples.items():
+        if not isinstance(rows, Sequence):
+            continue
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            domain = _normalize_domain(row.get("root_domain"))
+            if not domain:
+                continue
+            target = metadata.setdefault(
+                domain,
+                {
+                    "sources": set(),
+                    "buckets": set(),
+                    "postures": set(),
+                    "ownership_classes": set(),
+                    "api_contexts": set(),
+                    "pair_groups": set(),
+                    "verification_statuses": set(),
+                },
+            )
+            target["sources"].add("strings")
+            target["buckets"].add(str(bucket_name))
+            for output_key, field_name in (
+                ("postures", "posture"),
+                ("ownership_classes", "ownership_class"),
+                ("api_contexts", "api_context"),
+                ("pair_groups", "pair_group"),
+                ("verification_statuses", "verification_status"),
+            ):
+                value = str(row.get(field_name) or "").strip()
+                if value:
+                    target[output_key].add(value)
+    return metadata
+
+
 def _merge_domain_sources(
     *,
     string_domains: Sequence[str],
     nsc_domains: Sequence[str],
+    string_payload: Mapping[str, object],
 ) -> tuple[list[str], list[dict[str, object]]]:
-    sources: dict[str, set[str]] = {}
+    metadata = _domain_metadata_from_string_payload(string_payload)
     for domain in string_domains:
-        sources.setdefault(domain, set()).add("strings")
+        metadata.setdefault(domain, {}).setdefault("sources", set()).add("strings")
     for domain in nsc_domains:
-        sources.setdefault(domain, set()).add("nsc")
-    merged_domains = sorted(sources)
-    domain_sources = [
-        {"domain": domain, "sources": sorted(list(tags))}
-        for domain, tags in sorted(sources.items())
-    ]
+        metadata.setdefault(domain, {}).setdefault("sources", set()).add("nsc")
+    merged_domains = sorted(metadata)
+    domain_sources: list[dict[str, object]] = []
+    for domain in merged_domains:
+        row = metadata.get(domain) or {}
+        domain_sources.append(
+            {
+                "domain": domain,
+                "sources": sorted(row.get("sources", set())),
+                "buckets": sorted(row.get("buckets", set())),
+                "postures": sorted(row.get("postures", set())),
+                "ownership_classes": sorted(row.get("ownership_classes", set())),
+                "api_contexts": sorted(row.get("api_contexts", set())),
+                "pair_groups": sorted(row.get("pair_groups", set())),
+                "verification_statuses": sorted(row.get("verification_statuses", set())),
+            }
+        )
     return merged_domains, domain_sources
 
 
@@ -410,6 +467,7 @@ def build_dynamic_plan(
     domains, domain_sources = _merge_domain_sources(
         string_domains=string_domains,
         nsc_domains=nsc_domains,
+        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
     )
     cleartext_domains = sorted(set(string_cleartext).union(nsc_cleartext))
     declared = sorted(set(permissions.declared))

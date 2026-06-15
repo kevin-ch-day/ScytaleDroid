@@ -61,7 +61,7 @@ from .scan_view import (
     reset_split_heavy_session_notice,
     show_copy_markers,
 )
-from .string_analysis_payload import analyse_string_payload
+from .string_analysis_payload import analyse_string_payload, merge_string_analysis_payloads
 
 _abort_requested = False
 _abort_reason: str | None = None
@@ -488,6 +488,8 @@ def execute_scan(
             "research_usable": harvest_research_usable,
             "exploratory_only": bool(harvest_block_reasons),
             "harvest_non_canonical_reasons": list(harvest_block_reasons),
+            "group_artifact_total": len(planned_artifacts),
+            "group_has_base_artifact": bool(getattr(group, "base_artifact", None)),
         }
         parallel_precomputed: dict[str, StaticAnalysisReport] = {}
         try:
@@ -696,20 +698,34 @@ def execute_scan(
         last_elapsed_for_progress = app_result.duration_seconds
         base_report_for_app = app_result.base_report()
         if base_report_for_app is not None and app_result.base_string_data is None:
-            report_metadata = getattr(base_report_for_app, "metadata", None)
-            cached_payload = (
-                report_metadata.get("post_run_string_payload")
-                if isinstance(report_metadata, Mapping)
-                else None
-            )
-            if isinstance(cached_payload, Mapping):
-                app_result.base_string_data = cached_payload
-            else:
-                app_result.base_string_data = analyse_string_payload(
-                    base_report_for_app.file_path,
+            payloads: list[Mapping[str, object]] = []
+            for artifact in app_result.artifacts:
+                report = getattr(artifact, "report", None)
+                if report is None:
+                    continue
+                report_metadata = getattr(report, "metadata", None)
+                cached_payload = (
+                    report_metadata.get("post_run_string_payload")
+                    if isinstance(report_metadata, Mapping)
+                    else None
+                )
+                if isinstance(cached_payload, Mapping):
+                    payloads.append(cached_payload)
+                    continue
+                payloads.append(
+                    analyse_string_payload(
+                        report.file_path,
+                        params=params,
+                        package_name=app_result.package_name,
+                        warning_sink=warnings,
+                    )
+                )
+            if len(payloads) == 1:
+                app_result.base_string_data = payloads[0]
+            elif payloads:
+                app_result.base_string_data = merge_string_analysis_payloads(
+                    payloads,
                     params=params,
-                    package_name=app_result.package_name,
-                    warning_sink=warnings,
                 )
         if not _abort_state()[0]:
             progress.flush_line()

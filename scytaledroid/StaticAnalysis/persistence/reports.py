@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 from scytaledroid.Config import app_config
@@ -13,7 +14,7 @@ from scytaledroid.Database.db_utils.package_utils import resolve_package_identit
 from scytaledroid.Utils.LoggingUtils import logging_events
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from ..core import StaticAnalysisReport
+from ..core.models import StaticAnalysisReport
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     # Import from package to align with runtime import and re-exports
@@ -127,10 +128,14 @@ def _package_index_entry(entry: StoredReport) -> dict[str, object]:
 
 
 def _write_report_package_index(entries: list[StoredReport]) -> None:
+    _write_report_package_index_rows([_package_index_entry(entry) for entry in entries])
+
+
+def _write_report_package_index_rows(rows: list[dict[str, object]]) -> None:
     index_path = _report_package_index_path()
     payload = {
         "schema_version": _REPORT_PACKAGE_INDEX_VERSION,
-        "entries": [_package_index_entry(entry) for entry in entries],
+        "entries": rows,
     }
     index_path.parent.mkdir(parents=True, exist_ok=True)
     index_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -227,6 +232,96 @@ def _stored_reports_from_index(package_name: str) -> list[StoredReport] | None:
         entries.append(StoredReport(path=path, report=report))
     entries.sort(key=_sort_key, reverse=True)
     return entries
+
+
+def _index_identity_from_row(row: dict[str, object]) -> tuple[str, str, str, str, str]:
+    return (
+        str(row.get("sha256") or ""),
+        str(row.get("session_stamp") or ""),
+        str(row.get("package_name") or "").strip().lower(),
+        str(row.get("generated_at") or ""),
+        str(row.get("file_name") or ""),
+    )
+
+
+def _read_report_index_row(path: Path) -> dict[str, object] | None:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    manifest = payload.get("manifest")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    metadata = payload.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    package_name = (
+        str(metadata.get("normalized_package_name") or "")
+        or str(metadata.get("package_name") or "")
+        or str(manifest.get("package_name") or "")
+    ).strip().lower()
+    if not package_name:
+        return None
+    return {
+        "path": str(path),
+        "package_name": package_name,
+        "sha256": str((payload.get("hashes") or {}).get("sha256") or ""),
+        "session_stamp": str(metadata.get("session_stamp") or ""),
+        "generated_at": str(payload.get("generated_at") or ""),
+        "version_code": str(manifest.get("version_code") or ""),
+        "file_name": str(payload.get("file_name") or path.name),
+    }
+
+
+def _build_report_package_index_from_corpus() -> list[dict[str, object]]:
+    rows_by_identity: dict[tuple[str, str, str, str, str], dict[str, object]] = {}
+    for path in _iter_report_paths():
+        row = _read_report_index_row(path)
+        if row is None:
+            continue
+        identity = _index_identity_from_row(row)
+        rows_by_identity.setdefault(identity, row)
+    rows = list(rows_by_identity.values())
+    rows.sort(
+        key=lambda row: (
+            1 if str(row.get("generated_at") or "") else 0,
+            str(row.get("generated_at") or ""),
+            1 if str(row.get("session_stamp") or "") else 0,
+            str(row.get("session_stamp") or ""),
+            int(str(row.get("version_code") or "-1")) if str(row.get("version_code") or "").isdigit() else -1,
+            str(row.get("path") or ""),
+        ),
+        reverse=True,
+    )
+    if rows:
+        _write_report_package_index_rows(rows)
+    return rows
+
+
+def rebuild_report_package_index(*, clear_warm_cache: bool = False) -> dict[str, object]:
+    """Rebuild the persistent package index from the on-disk report corpus."""
+
+    if clear_warm_cache:
+        _clear_report_cache()
+    started = perf_counter()
+    rows = _build_report_package_index_from_corpus()
+    elapsed = perf_counter() - started
+    packages = {str(row.get("package_name") or "").strip().lower() for row in rows if str(row.get("package_name") or "").strip()}
+    index_path = _report_package_index_path()
+    return {
+        "index_path": index_path,
+        "row_count": len(rows),
+        "package_count": len(packages),
+        "elapsed_seconds": elapsed,
+        "bytes": index_path.stat().st_size if index_path.exists() else 0,
+    }
+
+
+def report_package_index_path() -> Path:
+    """Return the persistent package-index path."""
+
+    return _report_package_index_path()
 
 
 def save_report(
@@ -439,6 +534,10 @@ def reports_for_package(package_name: str | None) -> list[StoredReport]:
     indexed_entries = _stored_reports_from_index(package_norm)
     if indexed_entries is not None:
         return indexed_entries
+    if _build_report_package_index_from_corpus():
+        indexed_entries = _stored_reports_from_index(package_norm)
+        if indexed_entries is not None:
+            return indexed_entries
     entries = list_reports()
     return [
         entry
@@ -542,6 +641,8 @@ __all__ = [
     "refresh_saved_report_json",
     "list_reports",
     "reports_for_package",
+    "rebuild_report_package_index",
+    "report_package_index_path",
     "load_report",
     "ReportStorageError",
     "StoredReport",

@@ -15,6 +15,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Sentry",
         tags=("dsn", "sentry"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=(".sentry.io/", "@o"),
     ),
     StringPattern(
         name="bugsnag_api_key",
@@ -24,6 +25,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Bugsnag",
         tags=("api_key", "bugsnag"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("bugsnag",),
     ),
     StringPattern(
         name="onesignal_app_id",
@@ -62,6 +64,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Datadog",
         tags=("api_key", "datadog"),
         preferred_origins=DEFAULT_ORIGINS,
+        context_keywords=("datadog", "dd-sdk", "dd_sdk"),
     ),
     StringPattern(
         name="newrelic_license_key",
@@ -71,6 +74,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="New Relic",
         tags=("license_key", "newrelic"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("nral-",),
     ),
 )
 

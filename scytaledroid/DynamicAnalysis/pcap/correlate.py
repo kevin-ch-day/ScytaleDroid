@@ -16,6 +16,18 @@ class OverlapConfig:
     max_samples: int = 20
 
 
+def _empty_domain_metadata() -> dict[str, set[str]]:
+    return {
+        "sources": set(),
+        "postures": set(),
+        "ownership_classes": set(),
+        "pair_groups": set(),
+        "api_contexts": set(),
+        "verification_statuses": set(),
+        "buckets": set(),
+    }
+
+
 def write_static_dynamic_overlap(
     manifest: RunManifest,
     run_dir: Path,
@@ -33,7 +45,7 @@ def write_static_dynamic_overlap(
     except (OSError, json.JSONDecodeError):
         _log(event_logger, "static_dynamic_overlap_skip", {"reason": "pcap_report_invalid"})
         return None
-    static_domains, static_sources = _static_domains(manifest, run_dir)
+    static_domains, static_sources, domain_metadata = _static_domains(manifest, run_dir)
     dynamic_domains = _dynamic_domains(report)
     overlap = sorted(static_domains.intersection(dynamic_domains))
     dynamic_only = sorted(dynamic_domains.difference(static_domains))
@@ -45,6 +57,18 @@ def write_static_dynamic_overlap(
     if dynamic_domains:
         dynamic_only_ratio = len(dynamic_only) / float(len(dynamic_domains))
     overlap_sources = _per_source_overlap(static_sources, dynamic_domains)
+    overlap_posture = _overlap_breakdown(domain_metadata, dynamic_domains, "postures")
+    overlap_ownership = _overlap_breakdown(domain_metadata, dynamic_domains, "ownership_classes")
+    actionable_static_domains, actionable_overlap_count = _actionable_overlap_counts(
+        domain_metadata,
+        dynamic_domains,
+    )
+    actionable_overlap_ratio = (
+        actionable_overlap_count / float(actionable_static_domains)
+        if actionable_static_domains
+        else None
+    )
+    corroborated_pair_groups = _corroborated_pair_groups(domain_metadata, dynamic_domains)
     # Stable top-level aliases for reporting/CSV exports.
     overlap_ratio_total = overlap_ratio
     overlap_ratio_nsc = (overlap_sources.get("nsc") or {}).get("overlap_ratio") if overlap_sources else None
@@ -61,9 +85,20 @@ def write_static_dynamic_overlap(
         "overlap_ratio_strings": overlap_ratio_strings,
         "dynamic_only_ratio": dynamic_only_ratio,
         "overlap_by_source": overlap_sources,
+        "overlap_by_posture": overlap_posture,
+        "overlap_by_ownership": overlap_ownership,
         "overlap_sample": overlap[: cfg.max_samples],
         "dynamic_only_sample": dynamic_only[: cfg.max_samples],
         "static_only_sample": static_only[: cfg.max_samples],
+        "actionable_static_domains_count": actionable_static_domains,
+        "actionable_overlap_count": actionable_overlap_count,
+        "actionable_overlap_ratio": actionable_overlap_ratio,
+        "corroborated_pair_groups": corroborated_pair_groups,
+        "corroborated_pair_group_count": len(corroborated_pair_groups),
+        "string_dynamic_correlation_note": (
+            "Actionable overlap highlights runtime observation of domains tied to higher-context "
+            "static string signals such as token/endpoint families; exploratory overlap is weaker evidence."
+        ),
         "interpretation": (
             "Overlap measures alignment between static hints and observed runtime behavior; "
             "it is not a correctness or safety verdict."
@@ -82,7 +117,10 @@ def write_static_dynamic_overlap(
     )
 
 
-def _static_domains(manifest: RunManifest, run_dir: Path) -> tuple[set[str], dict[str, set[str]]]:
+def _static_domains(
+    manifest: RunManifest,
+    run_dir: Path,
+) -> tuple[set[str], dict[str, set[str]], dict[str, dict[str, set[str]]]]:
     # Canonical static snapshot for dynamic runs is the embedded plan JSON inside the
     # evidence pack, not the lossy summary block.
     embedded_plan = _load_static_plan(manifest, run_dir=run_dir)
@@ -92,13 +130,14 @@ def _static_domains(manifest: RunManifest, run_dir: Path) -> tuple[set[str], dic
             manifest.target.get("static_plan_summary") if isinstance(manifest.target, dict) else None
         )
         if not isinstance(static_plan, dict):
-            return set(), {}
+            return set(), {}, {}
         domains = static_plan.get("network_targets_all")
         if not isinstance(domains, list):
             domains = static_plan.get("network_targets_sample") or []
         normalized = {_normalize_domain(item) for item in domains}
         normalized.discard("")
         sources: dict[str, set[str]] = {}
+        metadata: dict[str, dict[str, set[str]]] = {}
         for entry in static_plan.get("domain_sources") or []:
             if not isinstance(entry, dict):
                 continue
@@ -108,7 +147,9 @@ def _static_domains(manifest: RunManifest, run_dir: Path) -> tuple[set[str], dic
             tags = entry.get("sources") or []
             if isinstance(tags, list):
                 sources[domain] = {str(tag) for tag in tags if str(tag)}
-        return normalized, sources
+                meta = metadata.setdefault(domain, _empty_domain_metadata())
+                meta["sources"].update(sources[domain])
+        return normalized, sources, metadata
 
     network = embedded_plan.get("network_targets") if isinstance(embedded_plan.get("network_targets"), dict) else {}
     domains = network.get("domains") if isinstance(network.get("domains"), list) else []
@@ -117,16 +158,28 @@ def _static_domains(manifest: RunManifest, run_dir: Path) -> tuple[set[str], dic
     normalized = {_normalize_domain(item) for item in domains}
     normalized.discard("")
     sources: dict[str, set[str]] = {}
+    metadata: dict[str, dict[str, set[str]]] = {}
     for entry in domain_sources:
         if not isinstance(entry, dict):
             continue
         domain = _normalize_domain(entry.get("domain"))
         if not domain:
             continue
-        tags = entry.get("sources") or []
-        if isinstance(tags, list):
-            sources[domain] = {str(tag) for tag in tags if str(tag)}
-    return normalized, sources
+        meta = metadata.setdefault(domain, _empty_domain_metadata())
+        for key in (
+            "sources",
+            "postures",
+            "ownership_classes",
+            "pair_groups",
+            "api_contexts",
+            "verification_statuses",
+            "buckets",
+        ):
+            values = entry.get(key) or []
+            if isinstance(values, list):
+                meta[key].update(str(value) for value in values if str(value or "").strip())
+        sources[domain] = set(meta["sources"])
+    return normalized, sources, metadata
 
 
 def _normalize_domain(value: object) -> str:
@@ -221,6 +274,56 @@ def _per_source_overlap(
         bucket["static_domains_count"] = total
         bucket["overlap_count"] = overlap
     return per_source
+
+
+def _overlap_breakdown(
+    domain_metadata: dict[str, dict[str, set[str]]],
+    dynamic_domains: set[str],
+    key: str,
+) -> dict[str, dict[str, float | int | None]]:
+    result: dict[str, dict[str, float | int | None]] = {}
+    for domain, meta in domain_metadata.items():
+        for value in meta.get(key) or set():
+            bucket = result.setdefault(
+                str(value),
+                {"static_domains_count": 0, "overlap_count": 0, "overlap_ratio": None},
+            )
+            bucket["static_domains_count"] = int(bucket["static_domains_count"] or 0) + 1
+            if domain in dynamic_domains:
+                bucket["overlap_count"] = int(bucket["overlap_count"] or 0) + 1
+    for bucket in result.values():
+        total = int(bucket.get("static_domains_count") or 0)
+        overlap = int(bucket.get("overlap_count") or 0)
+        bucket["overlap_ratio"] = overlap / float(total) if total else None
+    return result
+
+
+def _actionable_overlap_counts(
+    domain_metadata: dict[str, dict[str, set[str]]],
+    dynamic_domains: set[str],
+) -> tuple[int, int]:
+    actionable_domains = {
+        domain
+        for domain, meta in domain_metadata.items()
+        if "actionable" in (meta.get("postures") or set())
+    }
+    return len(actionable_domains), len(actionable_domains.intersection(dynamic_domains))
+
+
+def _corroborated_pair_groups(
+    domain_metadata: dict[str, dict[str, set[str]]],
+    dynamic_domains: set[str],
+) -> list[str]:
+    groups: set[str] = set()
+    for domain, meta in domain_metadata.items():
+        if domain not in dynamic_domains:
+            continue
+        groups.update(
+            str(value)
+            for value in (meta.get("pair_groups") or set())
+            if str(value or "").strip()
+        )
+    return sorted(groups)
 
 
 def _sha256(path: Path) -> str:

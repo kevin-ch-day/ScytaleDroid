@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
-from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
+from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, ScopeSelection
+from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+from scytaledroid.StaticAnalysis.cli.execution.cohort_scan_notes import emit_post_scan_cohort_notes
 from scytaledroid.StaticAnalysis.cli.flows import research_cohort as flow
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 
@@ -144,3 +147,101 @@ def test_choose_research_cohort_scope_lists_db_backed_cohorts(monkeypatch, capsy
     assert "Research Dataset Alpha" in out
     assert "Research Dataset Beta" in out
     assert scoped is selection
+
+
+def test_render_research_cohort_workload_uses_research_cohort_wording(monkeypatch, capsys) -> None:
+    selection = ScopeSelection("research_cohort", "Research Dataset Beta", tuple())
+    prepared = flow.ResearchCohortPreparedSelection(
+        cohort_key="research_dataset_beta",
+        display_name="Research Dataset Beta",
+        description="Expanded paper cohort",
+        package_names=("com.example.alpha",),
+        missing_packages=tuple(),
+        selection=selection,
+        total_apk_files=1,
+        base_apk_count=1,
+        split_apk_count=0,
+        largest_split_heavy_apps=tuple(),
+    )
+    monkeypatch.setattr(flow.menu_utils, "print_header", lambda *args, **kwargs: None)
+    monkeypatch.setattr(flow, "_render_profile_selection_table", lambda *args, **kwargs: None)
+    monkeypatch.setattr(flow, "_print_prior_profile_session_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(flow, "fetch_prior_profile_session_snapshot", lambda *_args, **_kwargs: None)
+
+    flow.render_research_cohort_workload(prepared)
+
+    out = capsys.readouterr().out
+    assert "Research cohort: Research Dataset Beta" in out
+    assert "Profile: Research Dataset Beta" not in out
+
+
+def test_emit_post_scan_cohort_notes_reports_split_merge_coverage(capsys) -> None:
+    outcome = RunOutcome(
+        results=[
+            AppRunResult(
+                "com.example.one",
+                "News",
+                discovered_artifacts=3,
+                base_string_data={"aggregation_scope": "artifact_merged"},
+            ),
+            AppRunResult(
+                "com.example.two",
+                "News",
+                discovered_artifacts=2,
+                base_string_data={"aggregation_scope": "base_apk_only"},
+            ),
+        ],
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+        scope=ScopeSelection(scope="profile", label="Research Dataset Beta", groups=tuple()),
+        base_dir=Path("/tmp"),
+    )
+    params = RunParameters(
+        profile="full",
+        scope="profile",
+        scope_label="Research Dataset Beta",
+        verbose_output=False,
+        dry_run=False,
+    )
+
+    emit_post_scan_cohort_notes(outcome, params)
+
+    out = capsys.readouterr().out
+    assert "String rollup summary" in out
+    assert "merged=1/2" in out
+
+
+def test_emit_post_scan_cohort_notes_supports_research_cohort_scope(capsys) -> None:
+    outcome = RunOutcome(
+        results=[
+            AppRunResult(
+                "com.example.one",
+                "Research Dataset Beta",
+                discovered_artifacts=2,
+                base_string_data={"aggregation_scope": "artifact_merged"},
+            ),
+            AppRunResult(
+                "com.example.two",
+                "Research Dataset Beta",
+                discovered_artifacts=2,
+                base_string_data={"aggregation_scope": "artifact_merged"},
+            ),
+        ],
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+        scope=ScopeSelection(scope="research_cohort", label="Research Dataset Beta", groups=tuple()),
+        base_dir=Path("/tmp"),
+    )
+    params = RunParameters(
+        profile="full",
+        scope="research_cohort",
+        scope_label="Research Dataset Beta",
+        verbose_output=False,
+        dry_run=False,
+    )
+
+    emit_post_scan_cohort_notes(outcome, params)
+
+    out = capsys.readouterr().out
+    assert "String rollup summary" in out
+    assert "merged=2/2" in out

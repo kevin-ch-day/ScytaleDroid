@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping, MutableMapping, Sequence
 
+from .enrichment import posture_summary_rows
 from .hit_record import StringHit
 
 
@@ -122,6 +123,9 @@ def summarise_entropy(
         {
             "masked": _masked_value(hit),
             "src": hit.src,
+            "api_context": hit.api_context,
+            "ownership_class": hit.ownership_class,
+            "posture": hit.posture,
         }
         for hit in entropy_high_samples[:limit]
     ]
@@ -137,7 +141,14 @@ def build_aggregates(
     cloud_hits: Sequence[tuple[StringHit, str | None]],
     analytics_vendor_ids: Mapping[str, MutableMapping[str, set[str]]],
     entropy_high_samples: Sequence[StringHit],
+    sample_hits: Mapping[str, Sequence[StringHit]] | None = None,
+    pair_matches: Sequence[Mapping[str, object]] | None = None,
 ) -> Mapping[str, object]:
+    posture_counts = Counter(
+        str(hit.posture or "unknown")
+        for hits in (sample_hits or {}).values()
+        for hit in hits
+    )
     return {
         "endpoint_totals": dict(endpoint_totals),
         "endpoint_roots": summarise_endpoint_roots(endpoint_by_root, domain_sources),
@@ -146,6 +157,10 @@ def build_aggregates(
         "cloud_refs": summarise_cloud_refs(cloud_hits),
         "analytics_ids": summarise_analytics(analytics_vendor_ids),
         "entropy_high_samples": summarise_entropy(entropy_high_samples),
+        "pair_matches": [dict(row) for row in (pair_matches or ())],
+        "posture_counts": dict(posture_counts),
+        "actionable_strings": posture_summary_rows(sample_hits or {}, posture="actionable"),
+        "exploratory_strings": posture_summary_rows(sample_hits or {}, posture="exploratory"),
     }
 
 

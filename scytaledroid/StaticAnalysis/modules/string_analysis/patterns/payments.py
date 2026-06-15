@@ -16,6 +16,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         tags=("secret", "stripe"),
         min_length=32,
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("sk_live_", "sk_test_"),
     ),
     StringPattern(
         name="stripe_publishable_key",
@@ -25,6 +26,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Stripe",
         tags=("publishable_key", "stripe"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("pk_live_", "pk_test_"),
     ),
     StringPattern(
         name="braintree_access_token",
@@ -37,6 +39,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Braintree",
         tags=("access_token", "braintree"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("access_token$",),
     ),
     StringPattern(
         name="paypal_client_id",
@@ -46,6 +49,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="PayPal",
         tags=("client_id", "paypal"),
         preferred_origins=DEFAULT_ORIGINS,
+        context_keywords=("paypal",),
     ),
     StringPattern(
         name="square_access_token",
@@ -55,6 +59,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="Square",
         tags=("token", "square"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("sq0",),
     ),
 )
 

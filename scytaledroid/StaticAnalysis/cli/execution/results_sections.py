@@ -332,21 +332,24 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
 
     if reports:
         archive_n = _safe_int(reports.get("archive_json_paths"))
+        recorded_archive_n = _safe_int(reports.get("recorded_archive_json_paths"))
         print()
-        _print_heading("Reports (paths recorded on artifacts)", underline="-")
-        print(f"  JSON paths total  : {reports.get('json_report_paths', 0)}")
-        print(f"  Under latest/     : {reports.get('latest_json_paths', 0)}")
-        print(f"  Under archive/    : {archive_n}")
+        _print_heading("Reports", underline="-")
+        print(f"  JSON paths total          : {reports.get('json_report_paths', 0)}")
+        print(f"  Recorded under latest/    : {reports.get('latest_json_paths', 0)}")
+        print(f"  Recorded under archive/   : {recorded_archive_n}")
+        print(f"  Filesystem archive count  : {archive_n}")
+        archive_dir = reports.get("archive_dir")
+        if archive_dir:
+            print(f"  Archive dir               : {archive_dir}")
         print(
-            "  Path semantics    : these counts are paths *recorded on artifact outcomes* (dedupe storage is "
-            "typically under data/static_analysis/reports/latest/<sha>.json). That is not the same filesystem "
-            "tree as the grain report's optional count of *.json under "
-            "data/static_analysis/reports/archive/<session_stamp>/ (session archive when archive/both mode "
-            "writes there). Expect latest-path totals and per-session archive file counts to differ."
+            "  Path semantics            : recorded path counts come from artifact outcomes (usually latest/ "
+            "dedupe storage), while filesystem archive count is the actual number of *.json files under "
+            "data/static_analysis/reports/archive/<session_stamp>/."
         )
         if archive_n == 0:
             print(
-                "  Note              : outcomes usually record the latest/ JSON path; archive/ may still exist "
+                "  Note                      : outcomes usually record the latest/ JSON path; archive/ may still exist "
                 "on disk when SCYTALEDROID_STATIC_REPORT_JSON_MODE is archive or both. "
                 "Each JSON filename is keyed by SHA-256, so split APK reports do not overwrite one another."
             )

@@ -26,6 +26,13 @@ class StringHit:
     resource_name: str | None = None
     source_type: str | None = None
     sample_hash: str | None = None
+    xref_context: str | None = None
+    api_context: str | None = None
+    posture: str | None = None
+    ownership_class: str | None = None
+    pair_group: str | None = None
+    verification_status: str | None = None
+    dynamic_corroboration: str | None = None
 
 
 __all__ = ["StringHit"]

@@ -16,6 +16,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         tags=("token", "github"),
         min_length=40,
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("ghp_",),
     ),
     StringPattern(
         name="github_fine_grained_token",
@@ -26,6 +27,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         tags=("token", "github"),
         min_length=40,
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("gho_",),
     ),
     StringPattern(
         name="github_app_token",
@@ -36,6 +38,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         tags=("token", "github"),
         min_length=40,
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("ghs_",),
     ),
     StringPattern(
         name="github_user_token",
@@ -46,6 +49,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         tags=("token", "github"),
         min_length=40,
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("ghu_",),
     ),
     StringPattern(
         name="github_refresh_token",
@@ -56,6 +60,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         tags=("token", "github"),
         min_length=40,
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("ghr_",),
     ),
     StringPattern(
         name="gitlab_personal_token",
@@ -65,6 +70,7 @@ PATTERNS: tuple[StringPattern, ...] = (
         provider="GitLab",
         tags=("token", "gitlab"),
         preferred_origins=DEFAULT_ORIGINS,
+        required_substrings=("glpat-",),
     ),
 )
 

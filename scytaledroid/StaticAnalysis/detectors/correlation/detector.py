@@ -46,8 +46,38 @@ class CorrelationDetector(BaseDetector):
     default_profiles = ("quick", "full")
     section_key = "correlation_findings"
 
+    def _should_defer_split_member(self, context: DetectorContext) -> bool:
+        metadata = context.metadata or {}
+        if not isinstance(metadata, dict):
+            return False
+        if not bool(metadata.get("is_split_member")):
+            return False
+        if not bool(metadata.get("group_has_base_artifact")):
+            return False
+        try:
+            artifact_total = int(metadata.get("group_artifact_total") or 0)
+        except (TypeError, ValueError):
+            artifact_total = 0
+        return artifact_total > 1
+
     def run(self, context: DetectorContext) -> DetectorResult:
         started = perf_counter()
+        if self._should_defer_split_member(context):
+            return make_detector_result(
+                detector_id=self.detector_id,
+                section_key=self.section_key,
+                status=Badge.SKIPPED,
+                started_at=started,
+                findings=tuple(),
+                metrics={
+                    "reason_codes": ["deferred_to_base_artifact", "split_member_duplicate_avoidance"],
+                    "policy_gate": False,
+                },
+                evidence=tuple(),
+                notes=(
+                    "Correlation deferred for split member; base artifact will execute app-level correlation once sibling context is available.",
+                ),
+            )
         reason_codes: list[str] = []
         rule_failures: list[str] = []
         try:

@@ -88,6 +88,79 @@ def _finding_fidelity_status(
     return "unknown"
 
 
+def _app_db_persistence_status(
+    *,
+    persistence_enabled: bool,
+    persist_attempted: bool,
+    persisted_ok_app: bool,
+    app: object,
+) -> str:
+    if not persistence_enabled or not persist_attempted:
+        return "skipped"
+    if getattr(app, "persistence_failure_stage", None) or getattr(app, "persistence_exception_class", None):
+        return "failed"
+    if persisted_ok_app or getattr(app, "static_run_id", None):
+        return "ok"
+    return "partial"
+
+
+def _app_workflow_completion_status(
+    *,
+    app: object,
+    discovered_artifacts: int,
+    artifacts_scanned_ok: int,
+    artifacts_failed: int,
+    db_persistence_status: str,
+    persisted_ok_app: bool,
+) -> str:
+    legacy = str(getattr(app, "final_status", None) or "").strip().lower()
+    if legacy == "skipped":
+        return "skipped"
+    if legacy == "failed":
+        return "failed"
+    if artifacts_failed > 0 or (discovered_artifacts > 0 and artifacts_scanned_ok < discovered_artifacts):
+        return "partial"
+    if db_persistence_status == "failed":
+        return "partial"
+    if legacy == "complete":
+        return "complete"
+    if legacy == "partial" and (artifacts_scanned_ok > 0 or persisted_ok_app or getattr(app, "static_run_id", None)):
+        return "complete"
+    if artifacts_scanned_ok > 0:
+        return "complete"
+    return "unknown"
+
+
+def _app_detector_posture(
+    *,
+    detector_errors: int,
+    detector_warnings: int,
+    detector_failures: int,
+) -> str:
+    return _detector_posture(
+        detector_errors_total=detector_errors,
+        detector_warnings_total=detector_warnings,
+        detector_failures_total=detector_failures,
+    )
+
+
+def _app_finding_fidelity_status(
+    *,
+    runtime_total: int | None,
+    persisted_total: int | None,
+    capped_total: int | None,
+    db_persistence_status: str,
+) -> str:
+    if runtime_total is None and persisted_total is None and capped_total is None:
+        return "unknown"
+    return _finding_fidelity_status(
+        runtime_total=int(runtime_total or 0),
+        persisted_total=int(persisted_total or 0),
+        capped_total=int(capped_total or 0),
+        db_persistence_status=db_persistence_status,
+    )
+
+
 def build_run_health_document(
     outcome: RunOutcome,
     params: RunParameters,
@@ -192,6 +265,34 @@ def build_run_health_document(
             persistence_enabled=persisted,
             persist_attempted=persist_attempted,
         )
+        artifacts_scanned_ok = len(getattr(app, "artifacts", []) or ())
+        artifacts_failed = int(getattr(app, "failed_artifacts", 0) or 0)
+        discovered_artifacts = int(getattr(app, "discovered_artifacts", 0) or 0)
+        app_db_persistence_status = _app_db_persistence_status(
+            persistence_enabled=persisted,
+            persist_attempted=persist_attempted,
+            persisted_ok_app=persisted_ok_app,
+            app=app,
+        )
+        app_detector_posture = _app_detector_posture(
+            detector_errors=errs,
+            detector_warnings=int(summary.get("warn_count", 0) or 0),
+            detector_failures=int(summary.get("fail_count", 0) or 0),
+        )
+        app_workflow_completion_status = _app_workflow_completion_status(
+            app=app,
+            discovered_artifacts=discovered_artifacts,
+            artifacts_scanned_ok=artifacts_scanned_ok,
+            artifacts_failed=artifacts_failed,
+            db_persistence_status=app_db_persistence_status,
+            persisted_ok_app=persisted_ok_app,
+        )
+        app_finding_fidelity_status = _app_finding_fidelity_status(
+            runtime_total=rt_pf if isinstance(rt_pf, int) else None,
+            persisted_total=ps_pf if isinstance(ps_pf, int) else None,
+            capped_total=cap_pf if isinstance(cap_pf, int) else None,
+            db_persistence_status=app_db_persistence_status,
+        )
 
         apps_out.append(
             {
@@ -199,9 +300,13 @@ def build_run_health_document(
                 "app_label": getattr(app, "app_label", None),
                 "category": getattr(app, "category", None),
                 "final_status": getattr(app, "final_status", None),
-                "discovered_artifacts": int(getattr(app, "discovered_artifacts", 0) or 0),
-                "artifacts_scanned_ok": len(getattr(app, "artifacts", []) or ()),
-                "artifacts_failed": int(getattr(app, "failed_artifacts", 0) or 0),
+                "workflow_completion_status": app_workflow_completion_status,
+                "db_persistence_status": app_db_persistence_status,
+                "detector_posture": app_detector_posture,
+                "finding_fidelity_status": app_finding_fidelity_status,
+                "discovered_artifacts": discovered_artifacts,
+                "artifacts_scanned_ok": artifacts_scanned_ok,
+                "artifacts_failed": artifacts_failed,
                 "executed_artifact_attempts": int(getattr(app, "executed_artifacts", 0) or 0),
                 "detector_executed_agg": summary.get("detector_executed"),
                 "detector_skipped_agg": summary.get("detector_skipped"),
@@ -368,19 +473,34 @@ def build_run_health_document(
         },
     }
 
-    # Global string caveat applies whenever any profile app has splits.
-    max_splits = max(
-        ([int(getattr(a, "discovered_artifacts", 0) or 0) for a in outcome.results] + [1]),
-        default=1,
-    )
+    max_splits = max(([int(getattr(a, "discovered_artifacts", 0) or 0) for a in outcome.results] + [1]), default=1)
+    multi_artifact_scopes = [
+        str(
+            string_summary_signals(
+                getattr(app, "base_string_data", None),
+                discovered_artifacts=int(getattr(app, "discovered_artifacts", 0) or 0),
+            ).get("string_summary_scope")
+            or ""
+        )
+        for app in outcome.results
+        if int(getattr(app, "discovered_artifacts", 0) or 0) > 1
+    ]
+    session_string_scope = "single_artifact"
+    if multi_artifact_scopes:
+        if all(scope == "artifact_merged" for scope in multi_artifact_scopes):
+            session_string_scope = "artifact_merged"
+        elif all(scope == "base_apk_only" for scope in multi_artifact_scopes):
+            session_string_scope = "base_apk_only"
+        else:
+            session_string_scope = "mixed_legacy"
     sess_string_note: dict[str, object] = {
-        "string_summary_scope": "base_apk_only",
+        "string_summary_scope": session_string_scope,
         "discovered_max_artifacts_per_app": max_splits,
     }
-    if max_splits > 1:
+    if multi_artifact_scopes and session_string_scope != "artifact_merged":
         sess_string_note["string_summary_warning"] = (
-            "split_specific_strings_not_in_post_summary: analyse_string_payload is invoked on "
-            "the base APK only per app."
+            "split_specific_strings_not_in_post_summary: one or more split apps still lack a "
+            "merged post-run string summary."
         )
     payload["string_summary_note"] = sess_string_note
 

@@ -138,6 +138,7 @@ def render_research_cohort_workload(prepared: ResearchCohortPreparedSelection) -
         scoped=selection.groups,
         older_excluded=selection.older_captures_excluded,
         rule_line=selection.selection_rule_summary or "Newest harvest capture per package",
+        scope_noun="Research cohort",
     )
     _print_prior_profile_session_snapshot(
         fetch_prior_profile_session_snapshot(prepared.display_name, frozenset(prepared.package_names))

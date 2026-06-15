@@ -434,9 +434,9 @@ def diff_last_available(groups) -> tuple[bool, str]:
         return False, ""
 
     try:
-        from scytaledroid.StaticAnalysis.persistence.reports import list_reports
+        from scytaledroid.StaticAnalysis.persistence.reports import reports_for_package
 
-        reports = [stored for stored in list_reports() if stored.report.manifest.package_name == package_name]
+        reports = reports_for_package(package_name)
     except Exception:
         reports = []
 
@@ -504,9 +504,9 @@ def render_version_diff(package_name):
         compare_flags,
         compare_permissions,
     )
-    from scytaledroid.StaticAnalysis.persistence.reports import list_reports
+    from scytaledroid.StaticAnalysis.persistence.reports import reports_for_package
 
-    reports = [stored for stored in list_reports() if stored.report.manifest.package_name == package_name]
+    reports = reports_for_package(package_name)
     pair = _select_distinct_report_pair(reports)
     if pair is None:
         print(

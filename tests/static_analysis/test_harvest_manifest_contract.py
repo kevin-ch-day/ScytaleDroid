@@ -204,6 +204,136 @@ def test_execute_scan_reuses_cached_post_run_string_payload(monkeypatch, tmp_pat
     assert outcome.results[0].base_string_data == cached_payload
 
 
+def test_execute_scan_merges_split_artifact_string_payloads(monkeypatch, tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def _fake_generate_report(
+        artifact,
+        _base_dir,
+        _params,
+        *,
+        extra_metadata=None,
+        phase_timing_sink=None,
+        runtime_state=None,
+    ):
+        calls.append(str(artifact.path))
+        package_name = str(artifact.metadata.get("package_name") or "")
+        split_name = str(artifact.metadata.get("split_name") or "base")
+        merged_metadata = dict(extra_metadata or {})
+        merged_metadata["post_run_string_payload"] = {
+            "counts": {"endpoints": 1},
+            "samples": {
+                "endpoints": [
+                    {
+                        "value": f"https://{split_name}.{package_name}.example.com",
+                        "value_masked": None,
+                        "src": split_name,
+                        "tag": "https",
+                        "sha256": None,
+                        "finding_type": "endpoint",
+                        "provider": None,
+                        "risk_tag": None,
+                        "confidence": "high",
+                        "scheme": "https",
+                        "root_domain": f"{split_name}.{package_name}.example.com",
+                        "resource_name": None,
+                        "source_type": "code",
+                        "sample_hash": split_name,
+                    }
+                ]
+            },
+            "selected_samples": {},
+            "selection_params": {},
+            "extra_counts": {},
+            "regex_skipped": 0,
+            "noise_counts": {},
+            "aggregates": {
+                "endpoint_roots": [
+                    {
+                        "root_domain": f"{split_name}.{package_name}.example.com",
+                        "total": 1,
+                        "schemes": {"https": 1},
+                        "source_types": ["code"],
+                    }
+                ],
+                "endpoint_cleartext": [],
+                "api_keys_high": [],
+                "cloud_refs": [],
+                "analytics_ids": {},
+                "entropy_high_samples": [],
+            },
+            "structured": {},
+            "warnings": [],
+            "resource_strings_skipped": False,
+            "options": {
+                "max_samples": 2,
+                "cleartext_only": False,
+                "min_entropy": 4.8,
+                "mode": "both",
+                "https_in_risk": False,
+            },
+            "aggregation_scope": "single_artifact",
+        }
+        return _FakeReport(metadata=merged_metadata), None, None, False
+
+    monkeypatch.setattr(scan_flow, "load_display_name_map", lambda _groups: {})
+    monkeypatch.setattr(scan_flow, "finalize_open_static_runs", lambda *_a, **_k: 0)
+    monkeypatch.setattr(scan_flow, "create_static_run_ledger", lambda **_kwargs: None)
+    monkeypatch.setattr(scan_flow, "render_app_start", lambda **_kwargs: None)
+    monkeypatch.setattr(scan_flow, "render_app_completion", lambda **_kwargs: None)
+    monkeypatch.setattr(scan_flow, "render_resource_warnings", lambda *_a, **_k: None)
+    monkeypatch.setattr(scan_flow, "is_compact_card_mode", lambda *_a, **_k: False)
+    monkeypatch.setattr(scan_report_mod, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(
+        scan_flow,
+        "analyse_string_payload",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("fallback should not run")),
+    )
+
+    group = _make_group(
+        tmp_path,
+        package_name="com.example.split",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+        split_count=2,
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    outcome = scan_flow.execute_scan(
+        ScopeSelection(scope="app", label="Example", groups=(group,)),
+        params,
+        tmp_path,
+    )
+
+    merged = outcome.results[0].base_string_data
+    assert isinstance(merged, dict)
+    assert merged["aggregation_scope"] == "artifact_merged"
+    assert merged["counts"]["endpoints"] == 3
+    roots = merged["aggregates"]["endpoint_roots"]
+    assert isinstance(roots, list) and len(roots) == 3
+    assert {row["root_domain"] for row in roots} == {
+        "base.com.example.split.example.com",
+        "split_config.1.com.example.split.example.com",
+        "split_config.2.com.example.split.example.com",
+    }
+
+
 def test_execute_scan_reuses_one_static_session_header_for_all_packages(monkeypatch, tmp_path: Path) -> None:
     calls: list[str] = []
     captured_session_ids: list[int | None] = []

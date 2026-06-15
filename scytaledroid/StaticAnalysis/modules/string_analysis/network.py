@@ -49,7 +49,7 @@ def extract_endpoints(index: StringIndex) -> Sequence[EndpointMatch]:
     """Return HTTP(S) endpoints referenced in *index*."""
 
     matches: list[EndpointMatch] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
 
     for entry in index.strings:
         value = entry.value
@@ -65,7 +65,7 @@ def extract_endpoints(index: StringIndex) -> Sequence[EndpointMatch]:
             host = parsed.netloc.lower()
             if not host:
                 continue
-            dedupe_key = (parsed.scheme, entry.sha256)
+            dedupe_key = (parsed.scheme, host, candidate)
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
