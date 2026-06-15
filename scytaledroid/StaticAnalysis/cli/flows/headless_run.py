@@ -11,10 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_utils import schema_gate
+from scytaledroid.Database.db_func.research_cohorts import (
+    fetch_research_cohort,
+    normalize_research_cohort_key,
+    profile_key_for_research_cohort,
+)
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
+from scytaledroid.StaticAnalysis.cli.flows.research_cohort import prepare_research_cohort_scope
 from scytaledroid.StaticAnalysis.cli.flows.exact_target import (
     ExactTargetResolutionError,
     count_linkable_dynamic_sessions_for_hash,
@@ -225,39 +231,78 @@ def _run_exact_target(
         f"session={params.session_stamp} package={target.package_name} exact_hash={target.expected_base_sha256[:12]}..."
     )
     return 0
+def _display_name_for_cohort(cohort_key: str, legacy_profile_key: str | None = None) -> str:
+    row = fetch_research_cohort(cohort_key)
+    if isinstance(row, dict):
+        display_name = str(row.get("display_name") or "").strip()
+        if display_name:
+            return display_name
+    profile_key = str(legacy_profile_key or profile_key_for_research_cohort(cohort_key) or "").strip()
+    if profile_key:
+        return profile_key.replace("_", " ").title()
+    return str(cohort_key or "Research cohort").replace("_", " ").title()
 
 
-def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool, dry_run: bool) -> int:
+def _cohort_key_from_legacy_profile_key(profile_key: str | None) -> str | None:
+    normalized = normalize_research_cohort_key(profile_key)
+    if normalized and normalized.startswith("research_dataset_"):
+        return normalized
+    return None
+
+
+def _run_research_cohort(
+    *,
+    cohort_key: str,
+    session: str,
+    profile: str,
+    allow_session_reuse: bool,
+    dry_run: bool,
+    legacy_profile_key: str | None = None,
+) -> int:
     base_dir = artifact_store.analysis_apk_root()
     groups = tuple(group_artifacts())
-    dataset_pkgs = {pkg.lower() for pkg in load_profile_packages("RESEARCH_DATASET_ALPHA")}
-    if not dataset_pkgs:
-        raise SystemExit("Profile RESEARCH_DATASET_ALPHA has no packages.")
-    by_pkg: dict[str, ArtifactGroup] = {}
-    for group in groups:
-        pkg = str(getattr(group, "package_name", "")).lower()
-        if not pkg or pkg not in dataset_pkgs:
-            continue
-        if pkg not in by_pkg:
-            by_pkg[pkg] = group
-    selected = [by_pkg[pkg] for pkg in sorted(by_pkg.keys())]
+    prepared = prepare_research_cohort_scope(groups, cohort_key)
+    fallback_display_name: str | None = None
+    if prepared is None and legacy_profile_key:
+        dataset_pkgs = {pkg.lower() for pkg in load_profile_packages(legacy_profile_key)}
+        if dataset_pkgs:
+            by_pkg: dict[str, ArtifactGroup] = {}
+            for group in groups:
+                pkg = str(getattr(group, "package_name", "")).lower()
+                if not pkg or pkg not in dataset_pkgs:
+                    continue
+                if pkg not in by_pkg:
+                    by_pkg[pkg] = group
+            selected = tuple(by_pkg[pkg] for pkg in sorted(by_pkg.keys()))
+            prepared = ScopeSelection(
+                scope="research_cohort",
+                label=_display_name_for_cohort(cohort_key, legacy_profile_key),
+                groups=selected,
+            )
+            fallback_display_name = _display_name_for_cohort(cohort_key, legacy_profile_key)
+    if prepared is None:
+        raise SystemExit(f"Research cohort {cohort_key} is not available.")
+    if isinstance(prepared, ScopeSelection):
+        selection = prepared
+        selection_label = fallback_display_name or prepared.label
+    else:
+        selection = prepared.selection
+        selection_label = str(prepared.display_name)
+    selected = tuple(selection.groups)
     if not selected:
-        raise SystemExit("No local artifact groups found for RESEARCH_DATASET_ALPHA in the canonical receipt store.")
+        raise SystemExit(
+            f"No local artifact groups found for {cohort_key} in the canonical receipt store."
+        )
 
     cohort_session = normalize_session_stamp(session)
     for group in selected:
         pkg = str(group.package_name)
         _check_session_uniqueness(cohort_session, pkg, allow_session_reuse, dry_run=dry_run)
 
-    selection = ScopeSelection(
-        scope="profile",
-        label="Research Dataset Alpha",
-        groups=tuple(selected),
-    )
     params = RunParameters(
         profile=profile,
-        scope="profile",
-        scope_label=selection.label,
+        scope=selection.scope,
+        scope_label=selection_label,
         session_stamp=cohort_session,
         session_label=cohort_session,
         canonical_action="first_run",
@@ -274,7 +319,7 @@ def _run_dataset_alpha(*, session: str, profile: str, allow_session_reuse: bool,
     execute_run_spec(spec)
     print(
         "Static analysis completed: "
-        f"session={cohort_session} profile=research_dataset_alpha apps={len(selected)}"
+        f"session={cohort_session} research_cohort={cohort_key} apps={len(selected)}"
     )
     return 0
 
@@ -292,8 +337,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--profile-key",
-        choices=["research_dataset_alpha"],
-        help="Run a deterministic cohort profile headlessly.",
+        help="Legacy alias for --research-cohort-key <cohort_key>; accepts research_dataset_* values.",
+    )
+    parser.add_argument(
+        "--research-cohort-key",
+        help="Run a deterministic DB-backed research cohort headlessly.",
     )
     parser.add_argument("--session", help="Session stamp (defaults to generated)")
     parser.add_argument("--scope-label", help="Scope label (defaults to package name)")
@@ -307,10 +355,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-session-reuse", action="store_true", help="Permit reusing an existing session stamp")
     args = parser.parse_args(argv)
     exact_mode = bool(args.apk_id or args.base_apk_sha256)
-    selected_modes = sum(1 for enabled in (bool(args.apk), bool(args.profile_key), exact_mode) if enabled)
+    selected_modes = sum(
+        1 for enabled in (bool(args.apk), bool(args.profile_key), bool(args.research_cohort_key), exact_mode) if enabled
+    )
     if selected_modes != 1:
         raise SystemExit(
-            "Choose exactly one mode: --apk <path> OR --profile-key research_dataset_alpha "
+            "Choose exactly one mode: --apk <path> OR --profile-key research_dataset_* "
+            "OR --research-cohort-key <cohort_key> "
             "OR --apk-id/--base-apk-sha256 exact target."
         )
 
@@ -330,11 +381,31 @@ def main(argv: list[str] | None = None) -> int:
     if args.profile_key:
         if not args.session:
             raise SystemExit("--session is required when using --profile-key for deterministic cohort runs.")
-        return _run_dataset_alpha(
+        cohort_key = _cohort_key_from_legacy_profile_key(str(args.profile_key).strip())
+        if not cohort_key:
+            raise SystemExit(
+                "--profile-key is a legacy research cohort alias and must be a research_dataset_* key."
+            )
+        return _run_research_cohort(
+            cohort_key=cohort_key,
             session=args.session,
             profile=args.profile,
             allow_session_reuse=args.allow_session_reuse,
             dry_run=args.dry_run,
+            legacy_profile_key=str(args.profile_key).strip().upper(),
+        )
+    if args.research_cohort_key:
+        if not args.session:
+            raise SystemExit("--session is required when using --research-cohort-key for deterministic cohort runs.")
+        return _run_research_cohort(
+            cohort_key=str(args.research_cohort_key).strip(),
+            session=args.session,
+            profile=args.profile,
+            allow_session_reuse=args.allow_session_reuse,
+            dry_run=args.dry_run,
+            legacy_profile_key="RESEARCH_DATASET_ALPHA"
+            if str(args.research_cohort_key).strip().lower() == "research_dataset_alpha"
+            else None,
         )
     if exact_mode:
         return _run_exact_target(

@@ -20,6 +20,17 @@ def test_refresh_summary_update_omits_operator_owned_columns():
         assert col not in stmt
 
 
+def test_refresh_summary_update_propagates_runtime_provenance():
+    text = _summary_source()
+    u = text.find("UPDATE static_analysis_sessions")
+    w = text.find("WHERE static_session_id", u)
+    assert u != -1 and w != -1
+    stmt = text[u:w]
+    assert "tool_semver = COALESCE(%s, tool_semver)" in stmt
+    assert "tool_git_commit = COALESCE(%s, tool_git_commit)" in stmt
+    assert "schema_version = COALESCE(%s, schema_version)" in stmt
+
+
 def test_refresh_queries_normalize_scope_with_trim_and_alias_child_counts():
     text = _summary_source()
     assert "COALESCE(TRIM(BOTH FROM sar.scope_label), '')" in text

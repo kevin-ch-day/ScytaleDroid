@@ -448,6 +448,14 @@ def _detector_posture_readable(run_agg: str) -> str:
     t = str(run_agg or "").strip().lower()
     if t == "complete":
         return "CLEAR — no partial/failed package aggregate"
+    if t == "clean":
+        return "CLEAN — no detector warnings, gates, or execution errors"
+    if t == "warnings":
+        return "WARNINGS — detector warn-stage issues only (workflow still finished)"
+    if t == "policy_or_finding_gates":
+        return "POLICY / FINDING GATES — workflow still finished"
+    if t == "execution_errors":
+        return "EXECUTION ERRORS — analyzer/pipeline exceptions occurred"
     if t == "partial":
         return "PARTIAL — warnings or finding/policy gates (workflow still finished)"
     if t == "failed":

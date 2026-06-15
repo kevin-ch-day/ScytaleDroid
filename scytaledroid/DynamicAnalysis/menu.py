@@ -39,7 +39,7 @@ from scytaledroid.DynamicAnalysis.menu_selection import (
     run_package_selection_menu as _run_package_selection_menu_impl,
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
+from scytaledroid.DynamicAnalysis.profile_loader import load_operational_profiles, load_profile_packages
 from scytaledroid.DynamicAnalysis.services.observer_service import (
     select_observers as _service_select_observers,
 )
@@ -1438,7 +1438,7 @@ def _resolve_custom_tier(package_name: str, dataset_pkgs: set[str]) -> tuple[str
 
 def _select_profile_package(groups) -> tuple[str, str | None] | None:
     categories = list_categories(groups)
-    db_profiles = load_db_profiles()
+    db_profiles = load_operational_profiles()
     if not categories and not db_profiles:
         print(status_messages.status("No profile data available for selection.", level="warn"))
         return None
@@ -1467,12 +1467,7 @@ def _select_profile_package(groups) -> tuple[str, str | None] | None:
                 "available_count": count,
             }
         )
-    profile_rows.sort(
-        key=lambda row: (
-            0 if row.get("key") == "RESEARCH_DATASET_ALPHA" else 1,
-            row["label"].lower(),
-        )
-    )
+    profile_rows.sort(key=lambda row: row["label"].lower())
     rows = [
         [str(idx), row["label"], str(row["db_count"]), str(row["available_count"])]
         for idx, row in enumerate(profile_rows, start=1)
@@ -1484,18 +1479,6 @@ def _select_profile_package(groups) -> tuple[str, str | None] | None:
     selected = profile_rows[index]
     profile_key = selected.get("key")
     if profile_key:
-        if profile_key == "RESEARCH_DATASET_ALPHA":
-            try:
-                from scytaledroid.Database.db_utils.menu_actions import ensure_dynamic_tier_column
-
-                ensure_dynamic_tier_column(prompt_user=True)
-            except Exception:
-                print(
-                    status_messages.status(
-                        "Unable to verify dynamic_sessions.tier column; dataset tagging may be unavailable.",
-                        level="warn",
-                    )
-                )
         packages = load_profile_packages(profile_key)
         if not packages:
             print(status_messages.status("No apps found for that profile.", level="warn"))

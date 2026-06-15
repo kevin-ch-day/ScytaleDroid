@@ -116,9 +116,22 @@ PHASE_B_MIGRATIONS: tuple[MigrationSpec, ...] = (
     ),
 )
 
+RESEARCH_COHORT_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260615_research_cohort_tables_v1",
+        migration_name="Canonical research cohort tables",
+        schema_version_before="0.3.6-schema-version-width-hotfix",
+        schema_version_after="0.3.7-research-cohorts",
+        statements=(),
+        description="Introduces canonical DB-backed reusable research cohort definitions without changing apps.profile_key.",
+        apply_mode="manual_script",
+        stage="research",
+    ),
+)
+
 
 def registered_migrations() -> tuple[MigrationSpec, ...]:
-    return PHASE_A_MIGRATIONS + PHASE_B_MIGRATIONS
+    return PHASE_A_MIGRATIONS + PHASE_B_MIGRATIONS + RESEARCH_COHORT_MIGRATIONS
 
 
 def latest_registered_schema_version() -> str | None:
@@ -515,6 +528,7 @@ __all__ = [
     "MigrationSpec",
     "PHASE_A_MIGRATIONS",
     "PHASE_B_MIGRATIONS",
+    "RESEARCH_COHORT_MIGRATIONS",
     "attach_receipt_path_to_latest_migration",
     "append_schema_version",
     "build_schema_migration_report",

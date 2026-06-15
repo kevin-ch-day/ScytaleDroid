@@ -66,9 +66,29 @@ def compact_run_health_stdout_line(doc: Mapping[str, object]) -> str:
     """One-line roll-up; prefer ``format_run_health_stdout_lines`` for operator-facing detail."""
     roll = doc.get("run_rollups") if isinstance(doc.get("run_rollups"), Mapping) else {}
     path = _run_health_display_path(doc)
+    workflow = str(
+        doc.get("workflow_completion_status")
+        or doc.get("workflow_run_status")
+        or doc.get("final_run_status")
+        or "unknown"
+    )
+    posture = str(
+        doc.get("detector_posture")
+        or doc.get("detector_posture_status")
+        or roll.get("detector_posture")
+        or roll.get("detector_posture_status")
+        or "unknown"
+    )
+    fidelity = str(
+        doc.get("finding_fidelity_status")
+        or roll.get("finding_fidelity_status")
+        or "unknown"
+    )
 
     return (
-        f"Run health (compact): final_run_status={doc.get('final_run_status')} "
+        f"Run health (compact): workflow_completion_status={workflow} "
+        f"| detector_posture={posture} "
+        f"| finding_fidelity_status={fidelity} "
         f"| apps_complete={roll.get('apps_complete_final')} "
         f"apps_finding_partial={roll.get('apps_partial_final')} "
         f"apps_failed={roll.get('apps_failed_final')} "
@@ -138,6 +158,26 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         return lines
 
     exec_workflow = _workflow_execution_label(doc, sr, roll)
+    workflow_run_status = str(
+        doc.get("workflow_completion_status")
+        or doc.get("workflow_run_status")
+        or doc.get("final_run_status")
+        or exec_workflow
+        or ""
+    ).strip()
+    detector_posture_status = str(
+        doc.get("detector_posture")
+        or roll.get("detector_posture")
+        or doc.get("detector_posture_status")
+        or roll.get("detector_posture_status")
+        or doc.get("final_run_status")
+        or ""
+    ).strip()
+    finding_fidelity_status = str(
+        doc.get("finding_fidelity_status")
+        or roll.get("finding_fidelity_status")
+        or "unknown"
+    ).strip()
     gov_r = _truncate_stdout_token(sr.get("governance_reason"))
     pipe = sr.get("detector_pipeline_status") or sr.get("detector_status")
     det_exec = _safe_int_token(sr.get("detector_execution_errors") or sr.get("detector_errors"))
@@ -180,10 +220,12 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
                 f"{sr.get('governance_grade')} - {gov_r}"
             ),
             f"Run completion   : {_workflow_completion_stdout_label(exec_workflow)}",
+            f"Workflow status  : {workflow_run_status.upper() if workflow_run_status else '—'}",
             (
                 "Detector posture : "
-                f"{_detector_posture_readable(str(doc.get('final_run_status') or ''))}"
+                f"{_detector_posture_readable(detector_posture_status or str(pipe or ''))}"
             ),
+            f"Finding fidelity : {finding_fidelity_status} | runtime={findings_runtime} persisted_db={findings_persisted} capped_not_persisted={findings_capped}",
             (
                 "Counts           : "
                 f"parse_fallbacks={sr.get('parse_fallbacks')} "
@@ -193,7 +235,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
     )
 
     if (
-        str(doc.get("final_run_status") or "") == "partial"
+        detector_posture_status in {"partial", "warnings", "policy_or_finding_gates"}
         and det_exec == 0
         and exec_workflow == "complete"
         and str(sr.get("db_persistence_status") or "") in {"ok", "partial"}

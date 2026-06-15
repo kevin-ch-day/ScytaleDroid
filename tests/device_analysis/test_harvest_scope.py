@@ -26,11 +26,11 @@ def test_scope_profiles_auto_selects_single_active_profile(monkeypatch, capsys) 
 
     monkeypatch.setattr(
         profile_loader,
-        "load_db_profiles",
+        "load_operational_profiles",
         lambda: [
             {
-                "profile_key": "RESEARCH_DATASET_ALPHA",
-                "display_name": "Research Dataset Alpha",
+                "profile_key": "NEWS",
+                "display_name": "News",
                 "app_count": 1,
             }
         ],
@@ -38,7 +38,7 @@ def test_scope_profiles_auto_selects_single_active_profile(monkeypatch, capsys) 
     monkeypatch.setattr(
         profile_loader,
         "load_profile_packages",
-        lambda profile_key: {"com.example.alpha"} if profile_key == "RESEARCH_DATASET_ALPHA" else set(),
+        lambda profile_key: {"com.example.alpha"} if profile_key == "NEWS" else set(),
     )
 
     selection = scope._scope_profiles(
@@ -49,9 +49,9 @@ def test_scope_profiles_auto_selects_single_active_profile(monkeypatch, capsys) 
     )
 
     assert selection is not None
-    assert selection.label == "Research Dataset Alpha"
+    assert selection.label == "News"
     assert selection.kind == "profile_scope"
-    assert selection.metadata["scope_id"] == "profile::research_dataset_alpha"
+    assert selection.metadata["scope_id"] == "profile::news"
     out = capsys.readouterr().out
     assert "Only one active profile is available" in out
 

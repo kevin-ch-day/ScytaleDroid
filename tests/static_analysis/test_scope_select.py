@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+import scytaledroid.DynamicAnalysis as dynamic_analysis
 from scytaledroid.StaticAnalysis.cli.flows import selection as scope
 
 
@@ -38,6 +39,7 @@ def test_select_category_scope_keeps_newest_session(monkeypatch):
     monkeypatch.setattr(scope.prompt_utils, "prompt_text", lambda *args, **kwargs: "1")
     monkeypatch.setattr(scope.menu_utils, "print_header", lambda *args, **kwargs: None)
     monkeypatch.setattr(scope.table_utils, "render_table", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scope, "fetch_prior_profile_session_snapshot", lambda *_args, **_kwargs: None)
 
     logged: list[str] = []
 
@@ -55,7 +57,7 @@ def test_select_category_scope_keeps_newest_session(monkeypatch):
         "20251026-202635",
         "20251026-202635",
     ]
-    assert any("1 older capture" in message and "excluded" in message.lower() for message in logged)
+    assert all("older capture" not in message.lower() for message in logged)
 
 
 @pytest.mark.unit
@@ -112,7 +114,6 @@ def test_resolve_profile_scope_reuses_profile_selection_logic(monkeypatch):
 
     monkeypatch.setattr(scope, "load_profile_map", lambda _groups: {})
     monkeypatch.setattr(scope, "_group_latest_mtime", lambda group: 1.0 if group.session_stamp.endswith("000000") else 5.0)
-    monkeypatch.setattr(scope, "_maybe_prompt_selection_details", lambda *args, **kwargs: None)
     monkeypatch.setattr(scope.menu_utils, "print_header", lambda *args, **kwargs: None)
     monkeypatch.setattr(scope, "_render_profile_selection_table", lambda *args, **kwargs: None)
 
@@ -126,7 +127,7 @@ def test_resolve_profile_scope_reuses_profile_selection_logic(monkeypatch):
 @pytest.mark.unit
 def test_select_category_scope_filters_inactive_profiles(monkeypatch):
     groups = (
-        FakeGroup("pkg.alpha", "Research Dataset Alpha", "20251026-202635", artifacts=tuple()),
+        FakeGroup("pkg.alpha", "Social media", "20251026-202635", artifacts=tuple()),
     )
 
     captured_rows: dict[str, object] = {}
@@ -135,11 +136,17 @@ def test_select_category_scope_filters_inactive_profiles(monkeypatch):
         scope,
         "list_categories",
         lambda _groups: [
-            ("Research Dataset Alpha", 1),
+            ("Social media", 1),
             ("Profile v3 Structural Cohort", 12),
         ],
     )
-    monkeypatch.setattr(scope, "resolve_profile_scope", lambda _groups, category_name: scope.ScopeSelection("profile", category_name, tuple()))
+    monkeypatch.setattr(
+        scope,
+        "resolve_profile_scope",
+        lambda _groups, category_name, **_kwargs: scope.ScopeSelection(
+            "profile", category_name, tuple()
+        ),
+    )
     monkeypatch.setattr(scope.prompt_utils, "prompt_text", lambda *args, **kwargs: "1")
     monkeypatch.setattr(scope.status_messages, "status", lambda message, **kwargs: message)
     monkeypatch.setattr(scope.menu_utils, "print_header", lambda *args, **kwargs: None)
@@ -151,24 +158,26 @@ def test_select_category_scope_filters_inactive_profiles(monkeypatch):
 
     selection = scope.select_category_scope(groups)
 
-    assert selection.label == "Research Dataset Alpha"
-    assert captured_rows["rows"] == [["1", "Research Dataset Alpha", "1"]]
+    assert selection.label == "Social media"
+    assert captured_rows["rows"] == [["1", "Social media", "1"]]
 
 
 @pytest.mark.unit
 def test_select_category_scope_auto_selects_single_active_profile(monkeypatch):
     groups = (
-        FakeGroup("pkg.alpha", "Research Dataset Alpha", "20251026-202635", artifacts=tuple()),
+        FakeGroup("pkg.alpha", "Social media", "20251026-202635", artifacts=tuple()),
     )
 
     captured: dict[str, object] = {"prompted": False}
     notices: list[str] = []
 
-    monkeypatch.setattr(scope, "list_categories", lambda _groups: [("Research Dataset Alpha", 1)])
+    monkeypatch.setattr(scope, "list_categories", lambda _groups: [("Social media", 1)])
     monkeypatch.setattr(
         scope,
         "resolve_profile_scope",
-        lambda _groups, category_name: scope.ScopeSelection("profile", category_name, tuple()),
+        lambda _groups, category_name, **_kwargs: scope.ScopeSelection(
+            "profile", category_name, tuple()
+        ),
     )
     monkeypatch.setattr(scope.menu_utils, "print_header", lambda *args, **kwargs: None)
     monkeypatch.setattr(scope.table_utils, "render_table", lambda *args, **kwargs: None)
@@ -186,6 +195,110 @@ def test_select_category_scope_auto_selects_single_active_profile(monkeypatch):
 
     selection = scope.select_category_scope(groups)
 
-    assert selection.label == "Research Dataset Alpha"
+    assert selection.label == "Social media"
     assert captured["prompted"] is False
     assert any("Only one active profile is available" in notice for notice in notices)
+
+
+@pytest.mark.unit
+def test_select_category_scope_excludes_research_datasets(monkeypatch):
+    groups = (
+        FakeGroup("pkg.alpha", "Research Dataset Alpha", "20251026-202635", artifacts=tuple()),
+        FakeGroup("pkg.beta", "Research Dataset Beta", "20251026-202635", artifacts=tuple()),
+        FakeGroup("pkg.gamma", "Social media", "20251026-202635", artifacts=tuple()),
+    )
+
+    captured_rows: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        scope,
+        "list_categories",
+        lambda _groups: [
+            ("Research Dataset Alpha", 1),
+            ("Research Dataset Beta", 2),
+            ("Social media", 1),
+        ],
+    )
+    monkeypatch.setattr(scope.menu_utils, "print_header", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scope.status_messages, "status", lambda message, **kwargs: message)
+    monkeypatch.setattr(scope.prompt_utils, "prompt_text", lambda *args, **kwargs: "1")
+    monkeypatch.setattr(
+        scope.table_utils,
+        "render_table",
+        lambda _headers, rows, **_kwargs: captured_rows.setdefault("rows", rows),
+    )
+
+    resolved: dict[str, object] = {}
+
+    def _resolve(_groups, category_name, **kwargs):
+        resolved["category_name"] = category_name
+        resolved["profile_key"] = kwargs.get("profile_key")
+        resolved["packages"] = kwargs.get("packages")
+        return scope.ScopeSelection("profile", category_name, tuple())
+
+    monkeypatch.setattr(scope, "resolve_profile_scope", _resolve)
+
+    class _FakeProfileLoader:
+        @staticmethod
+        def load_operational_profiles():
+            return [
+                {
+                    "profile_key": "RESEARCH_DATASET_ALPHA",
+                    "display_name": "Research Dataset Alpha",
+                },
+                {
+                    "profile_key": "RESEARCH_DATASET_BETA",
+                    "display_name": "Research Dataset Beta",
+                },
+                {
+                    "profile_key": "SOCIAL_MEDIA",
+                    "display_name": "Social media",
+                },
+            ]
+
+        @staticmethod
+        def load_profile_packages(profile_key):
+            if profile_key == "SOCIAL_MEDIA":
+                return ("pkg.gamma",)
+            return tuple()
+
+    monkeypatch.setattr(dynamic_analysis, "profile_loader", _FakeProfileLoader, raising=False)
+
+    selection = scope.select_category_scope(groups)
+
+    assert selection.label == "Social media"
+    assert captured_rows["rows"] == [
+        ["1", "Social media", "1"],
+    ]
+    assert resolved["category_name"] == "Social media"
+    assert resolved["profile_key"] == "SOCIAL_MEDIA"
+    assert resolved["packages"] == {"pkg.gamma"}
+
+
+@pytest.mark.unit
+def test_resolve_profile_scope_prunes_redundant_workload_copy(monkeypatch, capsys):
+    groups = (
+        FakeGroup("pkg.alpha", "Research Dataset Beta", "20251025-000000", artifacts=tuple()),
+        FakeGroup("pkg.alpha", "Research Dataset Beta", "20251026-202635", artifacts=tuple()),
+        FakeGroup("pkg.beta", "Research Dataset Beta", "20251026-202635", artifacts=tuple()),
+    )
+
+    monkeypatch.setattr(scope, "load_profile_map", lambda _groups: {})
+    monkeypatch.setattr(
+        scope,
+        "_group_latest_mtime",
+        lambda group: 1.0 if group.session_stamp.endswith("000000") else 5.0,
+    )
+    monkeypatch.setattr(scope, "_render_profile_selection_table", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scope, "load_display_name_map", lambda _groups: {})
+    monkeypatch.setattr(scope.menu_utils, "print_header", lambda *args, **kwargs: None)
+
+    scope.resolve_profile_scope(groups, "Research Dataset Beta")
+
+    out = capsys.readouterr().out
+    assert "Profile: Research Dataset Beta" in out
+    assert "Newest harvested capture per package is selected automatically." in out
+    assert "Research workflow" not in out
+    assert "Rule   :" not in out
+    assert "Older captures excluded from this run" not in out
+    assert "Use Advanced / edit run options" not in out

@@ -50,6 +50,7 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
         "p1",
         "C",
         persisted_artifacts=1,
+        final_status="complete",
         persistence_runtime_findings=100,
         persistence_persisted_findings=75,
         persistence_findings_capped_total=25,
@@ -78,6 +79,12 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
     roll = doc["run_rollups"]
     assert isinstance(roll, dict)
     assert roll.get("scan_execution_complete") is True
+    assert doc["final_run_status"] == "complete"
+    assert doc["workflow_completion_status"] == "complete"
+    assert doc["workflow_run_status"] == "complete"
+    assert doc["detector_posture"] == "clean"
+    assert doc["detector_posture_status"] == "clean"
+    assert doc["finding_fidelity_status"] == "capped"
     assert roll["findings_runtime_total"] == 100
     assert roll["findings_persisted_db_total"] == 75
     assert roll["findings_capped_not_persisted_total"] == 25
@@ -114,7 +121,12 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
 
 def test_format_run_health_stdout_lines_partial_app_hints() -> None:
     doc = {
-        "final_run_status": "partial",
+        "final_run_status": "complete",
+        "workflow_completion_status": "complete",
+        "workflow_run_status": "complete",
+        "detector_posture": "policy_or_finding_gates",
+        "detector_posture_status": "policy_or_finding_gates",
+        "finding_fidelity_status": "unknown",
         "run_rollups": {
             "app_total": 1,
             "apps_complete_final": 0,
@@ -124,6 +136,8 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
             "detector_errors_total_estimate": 0,
             "detector_warnings_total_estimate": 3,
             "detector_failures_total_estimate": 1,
+            "detector_posture": "policy_or_finding_gates",
+            "detector_posture_status": "policy_or_finding_gates",
             "scan_execution_complete": True,
             "artifacts_scan_completed_counter": 5,
             "artifact_total_discovered_estimate": 5,
@@ -162,7 +176,12 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
 
 def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     doc = {
-        "final_run_status": "partial",
+        "final_run_status": "complete",
+        "workflow_completion_status": "complete",
+        "workflow_run_status": "complete",
+        "detector_posture": "policy_or_finding_gates",
+        "detector_posture_status": "policy_or_finding_gates",
+        "finding_fidelity_status": "capped",
         "run_rollups": {
             "app_total": 1,
             "apps_complete_final": 0,
@@ -172,6 +191,9 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
             "detector_errors_total_estimate": 0,
             "detector_warnings_total_estimate": 3,
             "detector_failures_total_estimate": 1,
+            "detector_posture": "policy_or_finding_gates",
+            "detector_posture_status": "policy_or_finding_gates",
+            "finding_fidelity_status": "capped",
             "scan_execution_complete": True,
             "artifacts_scan_completed_counter": 3,
             "artifact_total_discovered_estimate": 3,
@@ -202,9 +224,10 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "detector_warnings=3" in body
     assert "policy_failures=1" in body
     assert "execution_errors=0 (none - not analyzer crashes)" in body
-    assert "Finding fidelity : runtime=100 persisted_db=75 capped_not_persisted=25" in body
+    assert "Finding fidelity : capped | runtime=100 persisted_db=75 capped_not_persisted=25" in body
     assert "Run completion   : COMPLETE" in body
-    assert "Detector posture : PARTIAL" in body
+    assert "Workflow status  : COMPLETE" in body
+    assert "Detector posture : POLICY / FINDING GATES" in body
     assert "pipeline_token=warnings_and_policy_failures" in body
     assert "Operator note    :" in body
     assert "Detector posture / session rollup is 'partial'" in body
@@ -228,6 +251,11 @@ def test_attach_run_health_outputs_prefers_real_file_location_for_display(tmp_pa
     lines = format_run_health_stdout_lines(
         {
             "final_run_status": "complete",
+            "workflow_completion_status": "complete",
+            "workflow_run_status": "complete",
+            "detector_posture": "clean",
+            "detector_posture_status": "clean",
+            "finding_fidelity_status": "complete",
             "outputs": outputs,
             "status_reasons": {},
         }
@@ -236,6 +264,11 @@ def test_attach_run_health_outputs_prefers_real_file_location_for_display(tmp_pa
     compact = compact_run_health_stdout_line(
         {
             "final_run_status": "complete",
+            "workflow_completion_status": "complete",
+            "workflow_run_status": "complete",
+            "detector_posture": "clean",
+            "detector_posture_status": "clean",
+            "finding_fidelity_status": "complete",
             "outputs": outputs,
             "run_rollups": {
                 "apps_complete_final": 1,
@@ -245,6 +278,9 @@ def test_attach_run_health_outputs_prefers_real_file_location_for_display(tmp_pa
         }
     )
     assert str(path) in compact
+    assert "workflow_completion_status=complete" in compact
+    assert "detector_posture=clean" in compact
+    assert "finding_fidelity_status=complete" in compact
 
 
 def test_build_run_health_document_includes_string_summary_note() -> None:

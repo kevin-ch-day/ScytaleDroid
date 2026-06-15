@@ -146,6 +146,10 @@ HARVEST_META_FIELDS = (
 STATIC_FINDINGS_CAP_PER_DETECTOR = 20
 # Optional detector-specific overrides (detector_id -> cap).
 STATIC_FINDINGS_CAP_OVERRIDES: dict[str, int] = {
+    # IPC exposure is core manifest-surface evidence for modern apps and regularly
+    # exceeds the generic readability cap due to large alias/service inventories.
+    # Keep a higher bound so canonical DB persistence retains the component posture.
+    "ipc_components": 500,
     "strings_runtime": 20,
     "secrets": 20,
     "sdk_inventory": 20,

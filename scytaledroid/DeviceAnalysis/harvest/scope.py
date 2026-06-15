@@ -299,10 +299,10 @@ def _load_active_profile_scopes(
     *,
     device_serial: str,
 ) -> list[dict[str, object]]:
-    from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
+    from scytaledroid.DynamicAnalysis.profile_loader import load_operational_profiles, load_profile_packages
 
     scopes: list[dict[str, object]] = []
-    for profile in load_db_profiles():
+    for profile in load_operational_profiles():
         profile_key = str(profile.get("profile_key") or "").strip().upper()
         if not profile_key:
             continue

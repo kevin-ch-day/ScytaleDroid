@@ -71,12 +71,14 @@ if [[ $? -ne 0 ]]; then
 fi
 
 hr
-echo "Static plans for Research Dataset Alpha"
+echo "Static plans for active research cohort"
 python - <<'PY' || exit 1
-from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
+from scytaledroid.Database.db_func.research_cohorts import resolve_research_cohort_context
 from scytaledroid.DynamicAnalysis import plan_selection
 
-pkgs = [p for p in load_profile_packages("RESEARCH_DATASET_ALPHA") if p]
+cohort = resolve_research_cohort_context()
+label = str(cohort.get("display_name") or "Research cohort")
+pkgs = [str(p).strip() for p in cohort.get("packages", ()) if str(p).strip()]
 missing = []
 for pkg in sorted({p.lower(): p for p in pkgs}.values()):
     candidates, _ = plan_selection._load_plan_candidates(pkg)
@@ -84,12 +86,12 @@ for pkg in sorted({p.lower(): p for p in pkgs}.values()):
         missing.append(pkg)
 
 if missing:
-    print("[ERROR] Missing static plans for:")
+    print(f"[ERROR] Missing static plans for {label}:")
     for pkg in missing:
         print(f"  - {pkg}")
-    print("Fix: Static APK analysis -> Run Research Dataset Alpha (batch)")
+    print(f"Fix: Static APK analysis -> Analyze research cohort -> {label}")
     raise SystemExit(1)
-print(f"[OK] Plans present for {len(pkgs)} package(s).")
+print(f"[OK] {label}: plans present for {len(pkgs)} package(s).")
 raise SystemExit(0)
 PY
 if [[ $? -ne 0 ]]; then

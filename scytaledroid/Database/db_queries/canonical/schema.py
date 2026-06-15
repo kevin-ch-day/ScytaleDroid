@@ -39,6 +39,45 @@ CREATE TABLE IF NOT EXISTS external_sdk_tracker_intel (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
+CREATE_RESEARCH_COHORTS = """
+CREATE TABLE IF NOT EXISTS research_cohorts (
+  cohort_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  cohort_key       VARCHAR(128)    NOT NULL,
+  display_name     VARCHAR(191)    NOT NULL,
+  description      TEXT            DEFAULT NULL,
+  intended_use     VARCHAR(64)     NOT NULL DEFAULT 'research',
+  selection_rule   VARCHAR(64)     NOT NULL DEFAULT 'newest_harvest_capture_per_package',
+  is_active        TINYINT(1)      NOT NULL DEFAULT 1,
+  created_at_utc   TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at_utc   TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (cohort_id),
+  UNIQUE KEY uq_research_cohorts_key (cohort_key),
+  KEY idx_research_cohorts_active (is_active),
+  KEY idx_research_cohorts_use (intended_use)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+CREATE_RESEARCH_COHORT_MEMBERS = """
+CREATE TABLE IF NOT EXISTS research_cohort_members (
+  member_id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  cohort_id          BIGINT UNSIGNED NOT NULL,
+  package_name       VARCHAR(255)    NOT NULL,
+  member_source      VARCHAR(64)     NOT NULL DEFAULT 'manual',
+  source_cohort_key  VARCHAR(128)    DEFAULT NULL,
+  sort_order         INT UNSIGNED    NOT NULL DEFAULT 0,
+  is_active          TINYINT(1)      NOT NULL DEFAULT 1,
+  notes              TEXT            DEFAULT NULL,
+  created_at_utc     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at_utc     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (member_id),
+  UNIQUE KEY uq_research_cohort_member (cohort_id, package_name),
+  KEY idx_research_cohort_members_package (package_name),
+  KEY idx_research_cohort_members_active (cohort_id, is_active, sort_order, package_name),
+  CONSTRAINT fk_research_cohort_members_cohort FOREIGN KEY (cohort_id)
+    REFERENCES research_cohorts (cohort_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
 _DDL_STATEMENTS: list[str] = [
     # Core dictionaries used by many flows (device inventory, profiles, publishers).
     """
@@ -93,6 +132,8 @@ _DDL_STATEMENTS: list[str] = [
       KEY idx_pub_rules_publisher (publisher_key)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+    CREATE_RESEARCH_COHORTS,
+    CREATE_RESEARCH_COHORT_MEMBERS,
     CREATE_EXTERNAL_SDK_TRACKER_INTEL,
     # Apps and Versions
     """

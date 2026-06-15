@@ -498,9 +498,9 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
 
 
 def _select_inventory_sync_profile() -> dict[str, object] | None:
-    from scytaledroid.DynamicAnalysis.profile_loader import load_db_profiles, load_profile_packages
+    from scytaledroid.DynamicAnalysis.profile_loader import load_operational_profiles, load_profile_packages
 
-    raw_profiles = load_db_profiles()
+    raw_profiles = load_operational_profiles()
     profiles: list[dict[str, object]] = []
     for profile in raw_profiles:
         profile_key = str(profile.get("profile_key") or "").strip()

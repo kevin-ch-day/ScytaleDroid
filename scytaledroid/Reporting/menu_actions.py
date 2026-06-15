@@ -22,17 +22,73 @@ from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_mes
 from .menu_actions_cross_analysis_helpers import compact_gap, compact_regime
 
 
+def _choose_reporting_research_cohort() -> dict[str, object]:
+    from scytaledroid.Database.db_func.research_cohorts import (
+        list_active_research_cohorts,
+        resolve_research_cohort_context,
+        resolve_preferred_research_cohort_key,
+    )
+
+    cohorts = list_active_research_cohorts()
+    if not cohorts:
+        return resolve_research_cohort_context()
+
+    preferred_key = resolve_preferred_research_cohort_key()
+    if len(cohorts) == 1:
+        return resolve_research_cohort_context(str(cohorts[0].get("cohort_key") or ""))
+
+    print()
+    menu_utils.print_header(
+        "Select Research Cohort",
+        "Choose the DB-backed cohort used by this reporting view.",
+    )
+    rows = [
+        [
+            str(idx),
+            str(row.get("display_name") or row.get("cohort_key") or ""),
+            str(int(row.get("active_member_count") or 0)),
+        ]
+        for idx, row in enumerate(cohorts, start=1)
+    ]
+    table_utils.render_table(["#", "Research cohort", "Apps"], rows, compact=True, padding=2)
+    default_choice = "1"
+    for idx, row in enumerate(cohorts, start=1):
+        if str(row.get("cohort_key") or "").strip().lower() == str(preferred_key or "").strip().lower():
+            default_choice = str(idx)
+            break
+    print()
+    print(f"Research cohorts: {len(rows)}")
+    choice = prompt_utils.get_choice(
+        [str(index) for index in range(1, len(rows) + 1)] + ["0"],
+        default=default_choice,
+        prompt="Select research cohort #",
+    )
+    if choice == "0":
+        return {}
+    selected = cohorts[int(choice) - 1]
+    return resolve_research_cohort_context(str(selected.get("cohort_key") or ""))
+
+
 def handle_dataset_readiness_dashboard() -> None:
-    """Print a compact dataset readiness dashboard for RESEARCH_DATASET_ALPHA."""
+    """Print a compact research cohort readiness dashboard."""
 
     from scytaledroid.Reporting.services.dataset_readiness import (
         fetch_dataset_readiness_dashboard,
     )
 
-    analysis_snapshot, rows = fetch_dataset_readiness_dashboard()
+    cohort_ctx = _choose_reporting_research_cohort()
+    if not cohort_ctx:
+        return
+    analysis_snapshot, rows = fetch_dataset_readiness_dashboard(
+        profile_key=str(cohort_ctx.get("profile_key") or "") or None,
+        cohort_key=str(cohort_ctx.get("cohort_key") or "") or None,
+    )
 
     print()
-    menu_utils.print_header("Dataset readiness dashboard")
+    menu_utils.print_header(
+        "Dataset readiness dashboard",
+        str(cohort_ctx.get("display_name") or "Research cohort"),
+    )
     # Host toolchain check (dataset-tier dynamic QA requires these).
     missing = [tool for tool in ("capinfos", "tshark") if not shutil.which(tool)]
     if missing:
@@ -98,11 +154,20 @@ def handle_cross_analysis_summary() -> None:
         fetch_cross_analysis_summary_rows,
     )
 
+    cohort_ctx = _choose_reporting_research_cohort()
+    if not cohort_ctx:
+        return
     source_relation = current_cross_analysis_summary_source()
-    rows = fetch_cross_analysis_summary_rows(profile_key="RESEARCH_DATASET_ALPHA")
+    rows = fetch_cross_analysis_summary_rows(
+        profile_key=str(cohort_ctx.get("profile_key") or "") or None,
+        cohort_key=str(cohort_ctx.get("cohort_key") or "") or None,
+    )
 
     print()
-    menu_utils.print_header("Cross-Analysis Summary")
+    menu_utils.print_header(
+        "Cross-Analysis Summary",
+        str(cohort_ctx.get("display_name") or "Research cohort"),
+    )
     print(
         status_messages.status(
             f"Source: {source_relation} (transitional DB read contract)",
@@ -110,7 +175,7 @@ def handle_cross_analysis_summary() -> None:
         )
     )
     if not rows:
-        print(status_messages.status("No rows found for RESEARCH_DATASET_ALPHA.", level="warn"))
+        print(status_messages.status("No rows found for the active research cohort selection.", level="warn"))
         prompt_utils.press_enter_to_continue()
         return
 

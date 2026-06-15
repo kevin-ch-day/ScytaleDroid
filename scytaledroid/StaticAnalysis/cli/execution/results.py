@@ -1514,7 +1514,6 @@ def _render_run_results_impl(
             persistence_enabled=bool(persist_enabled),
             persist_attempted=bool(persist_enabled and not params.dry_run),
         )
-        health_doc["final_run_status"] = outcome.run_aggregate_status or health_doc.get("final_run_status")
         stamp_name = sanitize_session_stamp_for_filename(getattr(params, "session_stamp", None))
         health_target = outcome.base_dir / f"{stamp_name}_run_health.json"
         attach_run_health_outputs_on_document(

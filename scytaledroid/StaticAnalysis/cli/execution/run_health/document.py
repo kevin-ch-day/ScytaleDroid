@@ -17,6 +17,77 @@ from .signals import string_summary_signals, summarize_execution_signals_for_app
 from .status import compute_run_aggregate_status
 
 
+def _workflow_run_status(
+    *,
+    outcome: RunOutcome,
+    completed_ct: int,
+    failed_ct: int,
+    skipped_ct: int,
+    detector_posture_status: str,
+    db_persistence_status: str,
+    scan_execution_complete: bool,
+) -> str:
+    """Workflow completion status, distinct from detector/gate posture."""
+
+    if outcome.aborted:
+        if completed_ct > 0:
+            return "partial"
+        return "failed"
+    if db_persistence_status == "failed":
+        return "failed"
+    if failed_ct > 0:
+        if completed_ct > 0:
+            return "partial"
+        return "failed"
+    if skipped_ct > 0 and skipped_ct == len(outcome.results):
+        return "skipped"
+    if scan_execution_complete:
+        return "complete"
+    if detector_posture_status == "skipped":
+        return "skipped"
+    return "partial"
+
+
+def _detector_posture(
+    *,
+    detector_errors_total: int,
+    detector_warnings_total: int,
+    detector_failures_total: int,
+) -> str:
+    """Operational detector posture, independent of workflow completion."""
+
+    if int(detector_errors_total or 0) > 0:
+        return "execution_errors"
+    if int(detector_failures_total or 0) > 0:
+        return "policy_or_finding_gates"
+    if int(detector_warnings_total or 0) > 0:
+        return "warnings"
+    return "clean"
+
+
+def _finding_fidelity_status(
+    *,
+    runtime_total: int,
+    persisted_total: int,
+    capped_total: int,
+    db_persistence_status: str,
+) -> str:
+    """Session-level finding fidelity rollup."""
+
+    runtime = int(runtime_total or 0)
+    persisted = int(persisted_total or 0)
+    capped = int(capped_total or 0)
+    if capped > 0:
+        return "capped"
+    if runtime > 0 and persisted > 0 and persisted <= runtime:
+        return "complete"
+    if str(db_persistence_status or "").strip().lower() == "failed":
+        return "missing"
+    if runtime > 0 and persisted == 0:
+        return "missing"
+    return "unknown"
+
+
 def build_run_health_document(
     outcome: RunOutcome,
     params: RunParameters,
@@ -158,7 +229,7 @@ def build_run_health_document(
             }
         )
 
-    run_aggregate = getattr(outcome, "run_aggregate_status", None) or compute_run_aggregate_status(outcome)
+    detector_posture_status = getattr(outcome, "run_aggregate_status", None) or compute_run_aggregate_status(outcome)
 
     tot = int(artifact_rows_total or 0)
     done = int(scanned_success or 0)
@@ -190,6 +261,26 @@ def build_run_health_document(
         detector_warnings_total,
         detector_failures_total,
     )
+    workflow_completion_status = _workflow_run_status(
+        outcome=outcome,
+        completed_ct=completed_ct,
+        failed_ct=failed_ct,
+        skipped_ct=skipped_ct,
+        detector_posture_status=detector_posture_status,
+        db_persistence_status=db_persistence_status,
+        scan_execution_complete=scan_execution_complete,
+    )
+    detector_posture = _detector_posture(
+        detector_errors_total=detector_errors_total,
+        detector_warnings_total=detector_warnings_total,
+        detector_failures_total=detector_failures_total,
+    )
+    finding_fidelity_status = _finding_fidelity_status(
+        runtime_total=findings_runtime_total,
+        persisted_total=findings_persisted_total,
+        capped_total=findings_capped_total_sum,
+        db_persistence_status=db_persistence_status,
+    )
     string_session_status = "warnings" if string_warn_apps > 0 else "ok"
     governance_snapshot = infer_session_governance_snapshot(params)
 
@@ -207,7 +298,12 @@ def build_run_health_document(
         "preset_label": getattr(params, "profile_label", None),
         "scope_kind": getattr(selection, "scope", None),
         "scope_profile_label": getattr(selection, "label", None),
-        "final_run_status": run_aggregate,
+        "final_run_status": workflow_completion_status,
+        "workflow_completion_status": workflow_completion_status,
+        "workflow_run_status": workflow_completion_status,
+        "detector_posture": detector_posture,
+        "detector_posture_status": detector_posture,
+        "finding_fidelity_status": finding_fidelity_status,
         "aborted": bool(outcome.aborted),
         "persistence_requested": persistence_enabled,
         "persistence_ready_param": bool(getattr(params, "persistence_ready", False)),
@@ -224,6 +320,9 @@ def build_run_health_document(
             "parse_fallbacks": parse_fallback_total,
             "string_status": string_session_status,
             "db_persistence_status": db_persistence_status,
+            "workflow_completion_status": workflow_completion_status,
+            "detector_posture": detector_posture,
+            "finding_fidelity_status": finding_fidelity_status,
             "detector_pipeline_status": detector_pipeline_status,
             # Deprecated alias: historically named "status" but mixed policy-fail stages with execution errors.
             "detector_status": detector_pipeline_status,
@@ -251,9 +350,14 @@ def build_run_health_document(
             "p0_persisted_db_findings_total": p0_persisted_total,
             "p0_capped_not_persisted_total": p0_capped_total,
             "db_persistence_status": db_persistence_status,
+            "workflow_completion_status": workflow_completion_status,
+            "workflow_run_status": workflow_completion_status,
+            "detector_posture": detector_posture,
+            "detector_posture_status": detector_posture,
+            "finding_fidelity_status": finding_fidelity_status,
             "detector_pipeline_status": detector_pipeline_status,
             "detector_status": detector_pipeline_status,
-            "execution_status": run_aggregate,
+            "execution_status": workflow_completion_status,
             "scan_execution_complete": scan_execution_complete,
         },
         "outputs": {
@@ -287,8 +391,9 @@ def build_run_health_document(
         "semantics_note": (
             "MySQL session_usability aggregates DB row presence (findings, permissions, strings"
             "; v_web_static_session_health also audits and run links per app-run). "
-            "This document's ``final_run_status`` / ``final_status`` reflect scan/reconciliation "
-            "heuristics without querying those auxiliary tables."
+            "This document's ``workflow_completion_status`` / ``final_run_status`` describe workflow "
+            "completion, while ``detector_posture`` / app ``final_status`` preserve "
+            "scan/reconciliation posture without querying those auxiliary tables."
         ),
         "cli_can_approximate_mysql_columns": [
             "findings_ready",

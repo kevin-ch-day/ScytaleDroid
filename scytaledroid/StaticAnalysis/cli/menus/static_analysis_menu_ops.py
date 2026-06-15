@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
 from ...core.detector_runner import PIPELINE_STAGES
+from ..flows.research_cohort import choose_research_cohort_scope as _choose_research_cohort_scope
 from ..core.analysis_profiles import run_modules_for_profile
 
 if TYPE_CHECKING:
@@ -341,6 +342,10 @@ def choose_exact_dynamic_worklist_target() -> tuple[ScopeSelection, object] | No
     return target.selection, target
 
 
+def choose_research_cohort_scope(groups: tuple) -> ScopeSelection | None:
+    return _choose_research_cohort_scope(groups)
+
+
 def emit_selected_preset_summary(command: Command) -> None:
     """Summarize analyzer/pipeline sizing after a preset is chosen."""
     profile = str(command.profile or "full").lower()
@@ -353,17 +358,13 @@ def emit_selected_preset_summary(command: Command) -> None:
             (command.title or profile).strip(),
         )
     print()
-    print(f"  Preset            : {preset_label}")
+    summary = f"  Preset            : {preset_label}"
     if profile in {"full", "lightweight"}:
         mod_count = len(run_modules_for_profile(profile))
-        print(f"  Analyzer modules  : {mod_count}")
-        print(f"  Detector stages   : {len(PIPELINE_STAGES)} ordered")
+        summary += f" · {mod_count} modules · {len(PIPELINE_STAGES)} detector stages"
     else:
-        print(f"  Detector stages   : {len(PIPELINE_STAGES)} ordered max (profile narrows coverage)")
-    print(
-        "  Note — profile / detector applicability rules may skip some stages "
-        "(this is normal for focused presets)."
-    )
+        summary += f" · up to {len(PIPELINE_STAGES)} detector stages"
+    print(summary)
 
 
 def choose_run_profile() -> Command | None:
@@ -438,6 +439,7 @@ def choose_run_profile() -> Command | None:
 
 __all__ = [
     "choose_all_scope_variant",
+    "choose_research_cohort_scope",
     "choose_run_profile",
     "distinct_package_count",
     "emit_selected_preset_summary",

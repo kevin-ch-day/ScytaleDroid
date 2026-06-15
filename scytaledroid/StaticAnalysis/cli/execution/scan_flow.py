@@ -312,17 +312,13 @@ def execute_scan(
             scope_display=compact_scope_display,
             workers_display=str(params.workers),
             dry_run=bool(params.dry_run),
-            include_legend=True,
+            include_legend=bool(getattr(params, "verbose_output", False)),
             include_run_context=False,
             verbose_metrics=bool(getattr(params, "verbose_output", False)),
         )
         print()
         print(startup_card)
         print()
-        parts = ["APK reports are per artifact; DB roll-ups are per package."]
-        if total_artifacts > 0:
-            parts.append("Split APKs advance artifact counts faster than package counts.")
-        print(status_messages.status(" ".join(parts), level="info"))
     for app_index, group in enumerate(selection.groups, start=1):
         app_result = AppRunResult(group.package_name, getattr(group, "category", "Uncategorized"))
         harvest_research_usable, harvest_block_reasons = _apply_harvest_contract(app_result, group)
@@ -834,40 +830,6 @@ def execute_scan(
                 print(progress_text)
                 print()
                 banner_last_emit = now
-                last_activity_pulse = now
-            elif all_apps_compact_mode and total_apps > 0 and apps_completed < total_apps:
-                eta_text, eta_prelim_hb = _eta_snapshot(now)
-                next_group = selection.groups[apps_completed]
-                next_pkg = getattr(next_group, "package_name", None)
-                if next_pkg:
-                    next_meta = _artifact_group_metadata_mapping(next_group)
-                    next_label = resolve_operator_app_label(
-                        str(next_pkg), next_meta, v3_label_overrides, display_name_map
-                    )
-                else:
-                    next_label = None
-                hb_line1, hb_line2 = format_scan_progress_heartbeat_lines(
-                    apps_completed=apps_completed,
-                    total_apps=total_apps,
-                    artifacts_done=completed_artifacts,
-                    total_artifacts=total_artifacts,
-                    current_app_label=str(next_label) if next_label else None,
-                    current_package_name=str(next_pkg) if next_pkg else None,
-                    agg_checks=agg_checks,
-                    eta_text=eta_text,
-                    archive_reports_written=archive_reports_written,
-                    eta_preliminary=eta_prelim_hb,
-                )
-                hb_level2 = "error" if agg_checks.get("error", 0) > 0 else "info"
-                print(status_messages.status(hb_line1, level=hb_level2))
-                print(
-                    status_messages.status(
-                        _HEARTBEAT_CONTINUATION_INDENT + hb_line2,
-                        level=hb_level2,
-                        show_icon=False,
-                        show_prefix=False,
-                    )
-                )
                 last_activity_pulse = now
         if _abort_state()[0]:
             break

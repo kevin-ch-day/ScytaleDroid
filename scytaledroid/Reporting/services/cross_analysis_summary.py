@@ -6,6 +6,11 @@ from decimal import Decimal
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_func.research_cohorts import (
+    ALPHA_COHORT_KEY,
+    resolve_research_cohort_context,
+    resolve_research_cohort_packages,
+)
 from scytaledroid.Database.summary_surfaces import preferred_static_dynamic_summary_relation
 
 
@@ -34,14 +39,24 @@ def _as_float(value: Any) -> float | None:
 def fetch_cross_analysis_summary_rows(
     *,
     profile_key: str | None = None,
+    cohort_key: str | None = ALPHA_COHORT_KEY,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return rows from the transitional static/dynamic summary view."""
+    if not profile_key and not cohort_key:
+        cohort_ctx = resolve_research_cohort_context()
+        profile_key = str(cohort_ctx.get("profile_key") or "") or None
+        cohort_key = str(cohort_ctx.get("cohort_key") or "") or None
     source_relation = preferred_static_dynamic_summary_relation(runner=core_q.run_sql)
 
     clauses: list[str] = []
     params: list[Any] = []
-    if profile_key:
+    packages = resolve_research_cohort_packages(cohort_key, fallback_profile_key=profile_key)
+    if packages:
+        placeholders = ", ".join(["%s"] * len(packages))
+        clauses.append(f"LOWER(package_name) COLLATE utf8mb4_general_ci IN ({placeholders})")
+        params.extend(packages)
+    elif profile_key:
         clauses.append("profile_key = %s")
         params.append(profile_key)
 

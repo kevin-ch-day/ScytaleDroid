@@ -554,6 +554,51 @@ def test_execute_scan_compact_mode_omits_copy_marker_by_default(monkeypatch, tmp
     assert "[COPY] static_app_done" not in out
 
 
+def test_execute_scan_compact_mode_prunes_startup_legend_and_artifact_note(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    calls: list[str] = []
+    _configure_scan_flow(monkeypatch, calls=calls)
+    monkeypatch.setattr(scan_flow, "create_static_run_ledger", lambda **_kwargs: 321)
+    monkeypatch.setattr(scan_flow, "is_compact_card_mode", lambda *_a, **_k: True)
+
+    group = _make_group(
+        tmp_path,
+        package_name="com.example.alpha",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+    )
+    params = RunParameters(
+        profile="full",
+        scope="all",
+        scope_label="All apps",
+        session_stamp="sess-batch-pruned",
+        paper_grade_requested=False,
+        dry_run=False,
+        persistence_ready=True,
+    )
+
+    scan_flow.execute_scan(
+        ScopeSelection(scope="all", label="All apps", groups=(group,)),
+        params,
+        tmp_path,
+    )
+
+    out = capsys.readouterr().out
+    assert "Legend" not in out
+    assert "APK reports are per artifact; DB roll-ups are per package." not in out
+
+
 def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
     text = _format_compact_progress_text(
         apps_completed=27,

@@ -31,6 +31,9 @@ from .static_analysis_menu_ops import (
     choose_exact_dynamic_worklist_target as _choose_exact_dynamic_worklist_target,
 )
 from .static_analysis_menu_ops import (
+    choose_research_cohort_scope as _choose_research_cohort_scope,
+)
+from .static_analysis_menu_ops import (
     distinct_package_count as _distinct_package_count,
 )
 from .static_analysis_menu_ops import (
@@ -260,6 +263,7 @@ def static_analysis_menu() -> None:
         menu_utils.print_section("Run")
         print("  1) Analyze all apps — full analysis")
         print("  2) Analyze by profile")
+        print("  8) Analyze research cohort")
         print("  3) Analyze one app")
         print("  4) Re-analyze last app")
         print("  7) Analyze exact APK hash from dynamic/static worklist")
@@ -280,7 +284,7 @@ def static_analysis_menu() -> None:
         print("0) Back")
 
         choice = prompt_utils.get_choice(
-            ["1", "A", "2", "3", "4", "5", "6", "7", "D", "L", "M", "V", "E", "0"],
+            ["1", "A", "2", "8", "3", "4", "5", "6", "7", "D", "L", "M", "V", "E", "0"],
             default="1",
             casefold=True,
         )
@@ -414,6 +418,8 @@ def static_analysis_menu() -> None:
             )
         elif choice == "2":
             selection = select_category_scope(groups)
+        elif choice == "8":
+            selection = _choose_research_cohort_scope(groups)
         elif choice == "3":
             selection = _search_app_scope(groups)
         else:
