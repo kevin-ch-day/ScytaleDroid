@@ -90,7 +90,7 @@ def compact_run_health_stdout_line(doc: Mapping[str, object]) -> str:
         f"| detector_posture={posture} "
         f"| finding_fidelity_status={fidelity} "
         f"| apps_complete={roll.get('apps_complete_final')} "
-        f"apps_finding_partial={roll.get('apps_partial_final')} "
+        f"apps_with_caveats={roll.get('apps_with_caveats', roll.get('apps_partial_final'))} "
         f"apps_failed={roll.get('apps_failed_final')} "
         f"| run_health_json={path}"
     )
@@ -241,9 +241,9 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         and str(sr.get("db_persistence_status") or "") in {"ok", "partial"}
     ):
         lines.append(
-            "Operator note    : Detector posture / session rollup is 'partial' because detector warnings "
-            "and/or policy-finding gates fired. Run completion and DB persistence still finished; "
-            "execution_errors=0 means no analyzer/pipeline crashes."
+            "Operator note    : Workflow completion and DB persistence finished successfully. "
+            "The internal session/app rollup may still use 'partial' for compatibility when detector "
+            "warnings and/or policy-finding gates fired; execution_errors=0 means no analyzer/pipeline crashes."
         )
     if findings_capped > 0:
         lines.append(
@@ -277,7 +277,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             partial_hints.append(f"{pkg}: (see execution_signals in run_health.json)")
     if partial_hints:
         lines.append(
-            "Apps not strictly complete (partial outcomes): " + " | ".join(partial_hints[:4])
+            "Apps with detector/persistence caveats: " + " | ".join(partial_hints[:4])
         )
 
     return lines

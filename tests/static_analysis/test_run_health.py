@@ -85,6 +85,7 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
     assert doc["detector_posture"] == "clean"
     assert doc["detector_posture_status"] == "clean"
     assert doc["finding_fidelity_status"] == "capped"
+    assert roll["apps_with_caveats"] == 0
     assert roll["findings_runtime_total"] == 100
     assert roll["findings_persisted_db_total"] == 75
     assert roll["findings_capped_not_persisted_total"] == 25
@@ -168,7 +169,7 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
     }
     lines = format_run_health_stdout_lines(doc)
     assert len(lines) >= 3
-    assert "Apps not strictly complete" in lines[-1]
+    assert "Apps with detector/persistence caveats" in lines[-1]
     assert "com.foo.app" in lines[-1]
     gov_line = next(line for line in lines if line.startswith("Governance"))
     assert "…" in gov_line or "experimental" in gov_line
@@ -230,7 +231,7 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "Detector posture : POLICY / FINDING GATES" in body
     assert "pipeline_token=warnings_and_policy_failures" in body
     assert "Operator note    :" in body
-    assert "Detector posture / session rollup is 'partial'" in body
+    assert "internal session/app rollup may still use 'partial' for compatibility" in body
     assert "Fidelity warning : PARTIAL - 25 runtime findings were capped before canonical DB persistence." in body
     assert "High-priority fidelity warning: 2 P0 findings were capped before canonical DB persistence." in body
     assert "Persistence note :" in body
@@ -272,6 +273,7 @@ def test_attach_run_health_outputs_prefers_real_file_location_for_display(tmp_pa
             "outputs": outputs,
             "run_rollups": {
                 "apps_complete_final": 1,
+                "apps_with_caveats": 0,
                 "apps_partial_final": 0,
                 "apps_failed_final": 0,
             },
@@ -281,6 +283,7 @@ def test_attach_run_health_outputs_prefers_real_file_location_for_display(tmp_pa
     assert "workflow_completion_status=complete" in compact
     assert "detector_posture=clean" in compact
     assert "finding_fidelity_status=complete" in compact
+    assert "apps_with_caveats=0" in compact
 
 
 def test_build_run_health_document_includes_string_summary_note() -> None:

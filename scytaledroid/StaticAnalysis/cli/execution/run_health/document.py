@@ -335,6 +335,8 @@ def build_run_health_document(
             "artifacts_scan_completed_counter": scanned_success,
             "apps_complete_final": completed_ct,
             "apps_partial_final": partial_ct,
+            # Neutral/operator-facing alias for compatibility-only "partial" app rollups.
+            "apps_with_caveats": partial_ct,
             "apps_failed_final": failed_ct,
             "apps_skipped_final": skipped_ct,
             "detector_errors_total_estimate": detector_errors_total,
