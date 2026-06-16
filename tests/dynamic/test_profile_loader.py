@@ -48,7 +48,7 @@ def test_load_research_cohort_profiles_reads_db_backed_cohorts(monkeypatch) -> N
             {
                 "cohort_key": "research_dataset_beta",
                 "display_name": "Research Dataset Beta",
-                "active_member_count": 16,
+                "active_member_count": 15,
             },
         ],
     )
@@ -66,7 +66,7 @@ def test_load_research_cohort_profiles_reads_db_backed_cohorts(monkeypatch) -> N
         {
             "profile_key": "RESEARCH_DATASET_BETA",
             "display_name": "Research Dataset Beta",
-            "app_count": 16,
+            "app_count": 15,
             "source": "research_cohorts",
             "cohort_key": "research_dataset_beta",
         },
@@ -100,7 +100,7 @@ def test_load_db_profiles_keeps_legacy_merged_view(monkeypatch) -> None:
             {
                 "profile_key": "RESEARCH_DATASET_BETA",
                 "display_name": "Research Dataset Beta",
-                "app_count": 16,
+                "app_count": 15,
                 "source": "research_cohorts",
                 "cohort_key": "research_dataset_beta",
             },
@@ -114,7 +114,7 @@ def test_load_db_profiles_keeps_legacy_merged_view(monkeypatch) -> None:
     assert by_key["RESEARCH_DATASET_ALPHA"]["source"] == "research_cohorts"
     assert by_key["RESEARCH_DATASET_ALPHA"]["cohort_key"] == "research_dataset_alpha"
     assert by_key["RESEARCH_DATASET_BETA"]["display_name"] == "Research Dataset Beta"
-    assert by_key["RESEARCH_DATASET_BETA"]["app_count"] == 16
+    assert by_key["RESEARCH_DATASET_BETA"]["app_count"] == 15
     assert by_key["NEWS"]["display_name"] == "News"
 
 

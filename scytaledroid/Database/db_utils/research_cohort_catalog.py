@@ -67,7 +67,6 @@ def _beta_manual_additions() -> tuple[str, ...]:
         "bbc.mobile.news.ww",
         "com.cnn.mobile.android.phone",
         "com.guardian",
-        "com.espn.score_center",
     )
 
 

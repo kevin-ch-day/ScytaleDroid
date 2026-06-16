@@ -595,8 +595,8 @@ def _run_guided_dataset_iteration(
 
     package_name = select_package_from_groups(
         scoped_groups,
-        title="App Queue",
-        subtitle=f"{cohort_label} · {device_label}",
+        title=f"App Queue — {cohort_label}",
+        subtitle=f"Device: {device_label}",
     )
     if not package_name:
         return False
@@ -680,7 +680,8 @@ def _run_guided_dataset_iteration(
             "Scripted Interaction",
             description=(
                 (
-                    "Purpose: optional template-backed repeatable stimulus. run_profile=interaction_scripted | "
+                    "Purpose: guided timed prompts (not automation). Phase timestamps are saved for later PCAP correlation. "
+                    "run_profile=interaction_scripted | "
                     + (
                         "Counts toward quota: YES (if VALID)"
                         if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)

@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionResult
-from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
+from scytaledroid.DynamicAnalysis.run_summary import _build_evidence_lines, print_run_summary
 from scytaledroid.Utils.DisplayUtils import colors
 
 
@@ -118,3 +118,30 @@ def test_print_run_summary_ignores_malformed_event_lines_when_resolving_blocker(
     out = colors.strip(capsys.readouterr().out)
     assert "Session blocked by plan validation." in out
     assert "unsupported run_signature_version: v0" in out
+
+
+def test_build_evidence_lines_prefers_pcap_failure_summary_from_manifest(capsys) -> None:
+    lines = _build_evidence_lines(
+        run_dir=None,
+        summary_payload={
+            "capture": {
+                "pcap_valid": False,
+                "pcap_size_bytes": 0,
+                "capture_mode": "app_only",
+                "min_pcap_bytes": 50000,
+            }
+        },
+        pcap_report=None,
+        pcap_features=None,
+        artifacts=[],
+        manifest={
+            "dataset": {
+                "pcap_failure_summary": "Network traffic was observed by Android netstats, but the PCAP capture artifact is empty or unavailable."
+            }
+        },
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Network traffic was observed by Android netstats" in out
+    assert "PCAP invalid (0B < 50000B)" not in out
+    assert lines[0] == "PCAP: app_only | 0B | invalid"

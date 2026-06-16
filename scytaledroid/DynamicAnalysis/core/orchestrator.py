@@ -49,6 +49,9 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     update_dataset_tracker,
 )
 from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
+from scytaledroid.DynamicAnalysis.pcap.interaction_phases import (
+    write_interaction_timeline_artifact,
+)
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
@@ -745,6 +748,12 @@ class DynamicRunOrchestrator:
         event_artifact = event_logger.finalize()
         if event_artifact:
             manifest.add_artifacts([event_artifact])
+        interaction_timeline_artifact = write_interaction_timeline_artifact(
+            writer=writer,
+            manifest=manifest,
+        )
+        if interaction_timeline_artifact:
+            manifest.add_outputs([interaction_timeline_artifact])
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)

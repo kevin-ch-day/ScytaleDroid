@@ -307,21 +307,23 @@ class DynamicRunSummarizer:
 
     def _load_pcap_meta(self, manifest: RunManifest) -> dict[str, Any]:
         meta_path = None
+        pcap_artifact_present = False
         for artifact in manifest.artifacts:
+            if artifact.type == "pcapdroid_capture":
+                pcap_artifact_present = True
             if artifact.type == "pcapdroid_capture_meta":
                 meta_path = self.writer.run_dir / artifact.relative_path
-                break
         if not meta_path or not meta_path.exists():
-            return {}
+            return {"pcap_available": pcap_artifact_present}
         try:
             payload = json.loads(meta_path.read_text())
         except json.JSONDecodeError:
-            return {}
+            return {"pcap_available": pcap_artifact_present}
         meta: dict[str, Any] = {}
         for key in ("pcap_size_bytes", "pcap_valid", "min_pcap_bytes", "capture_mode"):
             if key in payload:
                 meta[key] = payload.get(key)
-        meta["pcap_available"] = bool(payload.get("pcap_name") or payload.get("resolved_pcap_name"))
+        meta["pcap_available"] = pcap_artifact_present
         return meta
 
 

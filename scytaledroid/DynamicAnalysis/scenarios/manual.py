@@ -74,6 +74,14 @@ BASELINE_PROTOCOL_ID_IDLE = "baseline_idle_v1"
 CALL_CONNECT_TIMEOUT_S = 30
 CALL_MIN_CONNECTED_DURATION_S = 90
 
+SCRIPT_LIMITATION_REASON_LABELS: tuple[tuple[str, str], ...] = (
+    ("paywall", "paywall / subscription wall"),
+    ("subscription_required", "subscription required"),
+    ("login_required", "login required"),
+    ("not_available", "not available in this UI/account"),
+    ("other", "other limitation"),
+)
+
 
 def _effective_min_sampling_seconds() -> int:
     configured = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
@@ -485,7 +493,13 @@ def _run_scripted_protocol(
     print(status_messages.status(f"Script template: {template_id} (protocol v{SCRIPT_PROTOCOL_VERSION})", level="info"))
     print(
         status_messages.status(
-            "Controls: Enter/D/C=step complete, N=Skip(not found), S=Stop&Finalize, A=Abort&Discard (then press Enter).",
+            "Controls: Enter/D=step complete, N=Skip(not found), S=Stop&Finalize, A=Abort&Discard (then press Enter). Avoid Ctrl+C during scripted steps.",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            "Scripted interaction uses guided timed prompts only; phase timestamps are saved for later PCAP correlation.",
             level="info",
         )
     )
@@ -512,6 +526,8 @@ def _run_scripted_protocol(
     try:
         for idx, (step_id, step_desc, expected_s) in enumerate(steps, start=1):
             step_outcome = "completed"
+            limitation_reason: str | None = None
+            operator_note: str | None = None
             print()
             print(status_messages.status(f"Step {idx}/{len(steps)}: {step_id}", level="info"))
             print(status_messages.status(f"  {step_desc}", level="info"))
@@ -519,7 +535,7 @@ def _run_scripted_protocol(
             print(
                 status_messages.status(
                     "  Press Enter when step is complete (in this terminal). "
-                    "If Enter feels flaky, type D+Enter. (N+Enter to skip if not found)",
+                    "If Enter feels flaky, type D+Enter. (L+Enter limited/blocked, N+Enter skip if not found; avoid Ctrl+C here)",
                     level="info",
                 )
             )
@@ -600,6 +616,8 @@ def _run_scripted_protocol(
                             "within_tolerance": True,
                             "step_variant": step_variant,
                             "step_outcome": step_outcome,
+                            "limitation_reason": limitation_reason,
+                            "operator_note": operator_note,
                         },
                     )
                 protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
@@ -638,6 +656,8 @@ def _run_scripted_protocol(
                                 "within_tolerance": True,
                                 "step_variant": step_variant,
                                 "step_outcome": step_outcome,
+                                "limitation_reason": limitation_reason,
+                                "operator_note": operator_note,
                             },
                         )
                     protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
@@ -681,12 +701,21 @@ def _run_scripted_protocol(
                     step_started_monotonic=step_start,
                     target_duration_s=int(target_duration_s),
                 )
+                if isinstance(step_outcome, tuple):
+                    step_outcome, limitation_reason, operator_note = step_outcome
                 step_elapsed = max(0.0, time.monotonic() - step_start)
                 if step_outcome == "skipped_not_found":
                     protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
                     print(status_messages.status(f"Step marked skipped_not_found: {step_id}", level="warn"))
                     if step_id == "go_live_start":
                         go_live_start_skipped = True
+                elif step_outcome == "limited":
+                    protocol["step_limited_count"] = int(protocol.get("step_limited_count") or 0) + 1
+                    if limitation_reason:
+                        key = f"limited_reason_{limitation_reason}_count"
+                        protocol[key] = int(protocol.get(key) or 0) + 1
+                    reason_text = limitation_reason or "unspecified"
+                    print(status_messages.status(f"Step marked limited: {step_id} ({reason_text})", level="warn"))
                 if step_id == "start_call":
                     protocol["call_attempted"] = True
                     connected = prompt_utils.prompt_yes_no("Did the call connect?", default=True)
@@ -719,6 +748,8 @@ def _run_scripted_protocol(
                         "within_tolerance": bool(within),
                         "step_variant": step_variant,
                         "step_outcome": step_outcome,
+                        "limitation_reason": limitation_reason,
+                        "operator_note": operator_note,
                     },
                 )
             protocol["step_count_completed"] = idx
@@ -1163,10 +1194,10 @@ def _wait_for_step_completion_with_stopwatch(
     script_started_monotonic: float,
     step_started_monotonic: float,
     target_duration_s: int,
-) -> str:
+) -> tuple[str, str | None, str | None]:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         prompt_utils.press_enter_to_continue("Press Enter when step is complete...")
-        return "completed"
+        return ("completed", None, None)
     # Operators asked for a single stopwatch view (avoid total + per-step dual timers).
     line_width = 82
     last_rendered = None
@@ -1178,7 +1209,7 @@ def _wait_for_step_completion_with_stopwatch(
             suffix = _pulse_marker(total_elapsed_i)
             msg = (
                 f"\rElapsed: {total_elapsed_fmt}/{target_fmt} | "
-                f"Step {step_index}/{step_count} {step_id} (Enter=done, N=skip){suffix}"
+                f"Step {step_index}/{step_count} {step_id} (Enter/D=done, L=limited, N=skip){suffix}"
             ).ljust(line_width)
             if msg != last_rendered:
                 sys.stdout.write(msg)
@@ -1198,11 +1229,16 @@ def _wait_for_step_completion_with_stopwatch(
                 if action == "enter":
                     _clear_status_line(line_width)
                     print()
-                    return "completed"
+                    return ("completed", None, None)
                 if action == "skip":
                     _clear_status_line(line_width)
                     print()
-                    return "skipped_not_found"
+                    return ("skipped_not_found", None, None)
+                if action == "limited":
+                    _clear_status_line(line_width)
+                    print()
+                    limitation_reason, operator_note = _prompt_scripted_limitation_details(step_id)
+                    return ("limited", limitation_reason, operator_note)
     except KeyboardInterrupt:
         _clear_status_line(line_width)
         print()
@@ -1211,7 +1247,24 @@ def _wait_for_step_completion_with_stopwatch(
         if strict:
             raise ScenarioAbortRequested("ABORT_DISCARD") from None
         raise _StopScriptEarly("STOP_FINALIZE") from None
-    return "completed"
+    return ("completed", None, None)
+
+
+def _prompt_scripted_limitation_details(step_id: str) -> tuple[str, str | None]:
+    print(status_messages.status(f"Step limitation for {step_id}:", level="warn"))
+    for idx, (_key, label) in enumerate(SCRIPT_LIMITATION_REASON_LABELS, start=1):
+        print(f"  {idx}) {label}")
+    choice = prompt_utils.get_choice(
+        [str(i) for i in range(1, len(SCRIPT_LIMITATION_REASON_LABELS) + 1)],
+        default="1",
+        invalid_message=f"Choose 1-{len(SCRIPT_LIMITATION_REASON_LABELS)}.",
+    )
+    limitation_reason = SCRIPT_LIMITATION_REASON_LABELS[int(choice) - 1][0]
+    operator_note = prompt_utils.prompt_text(
+        "Optional operator note",
+        required=False,
+    ).strip()
+    return limitation_reason, (operator_note or None)
 
 
 def _clear_status_line(line_width: int) -> None:

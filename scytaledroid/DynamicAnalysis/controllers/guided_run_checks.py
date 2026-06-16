@@ -409,6 +409,7 @@ def post_run_integrity_check(
     capinfos_ok = False
     tshark_ok = False
     features_ok = False
+    features_detail = "analysis/pcap_features.json"
     window_count = None
     report: dict[str, object] = {}
     dataset: dict[str, object] = {}
@@ -451,11 +452,27 @@ def post_run_integrity_check(
 
     try:
         features = json.loads(features_path.read_text(encoding="utf-8"))
-        features_ok = (
+        features_structured = (
             isinstance(features, dict)
             and isinstance(features.get("metrics"), dict)
             and isinstance(features.get("proxies"), dict)
         )
+        quality = features.get("quality") if isinstance(features, dict) else {}
+        if not isinstance(quality, dict):
+            quality = {}
+        feature_report_status = str(quality.get("report_status") or "").strip().lower()
+        enrichment = quality.get("pcap_enrichment") if isinstance(quality.get("pcap_enrichment"), dict) else {}
+        enrichment_status = str(enrichment.get("status") or "").strip().lower()
+        enrichment_reason = str(enrichment.get("reason") or "").strip()
+        features_ok = features_structured and feature_report_status == "ok" and enrichment_status != "skipped"
+        detail_parts = ["analysis/pcap_features.json"]
+        if feature_report_status:
+            detail_parts.append(f"report={feature_report_status}")
+        if enrichment_status:
+            detail_parts.append(f"enrichment={enrichment_status}")
+        if enrichment_reason:
+            detail_parts.append(f"reason={enrichment_reason}")
+        features_detail = " | ".join(detail_parts)
         ts = features.get("timeseries")
         if isinstance(ts, dict):
             wb = ts.get("windowing")
@@ -482,7 +499,7 @@ def post_run_integrity_check(
         ["PCAP size", "OK" if pcap_size_ok else "FAIL", f"{pcap_size_int} bytes (min {int(min_pcap_bytes)})"],
         ["capinfos parse", "OK" if capinfos_ok else "FAIL", ("parsed packet metadata" if capinfos_ok else "packet metadata unavailable")],
         ["tshark parse", "OK" if tshark_ok else "FAIL", f"report_status={report.get('report_status') if isinstance(report, dict) else 'missing'}"],
-        ["Feature extraction", "OK" if features_ok else "FAIL", "analysis/pcap_features.json"],
+        ["Feature extraction", "OK" if features_ok else "FAIL", features_detail],
         ["Window count", "OK" if window_count_ok else "FAIL", (f"{window_count} (min {min_windows})" if window_count is not None else f"unavailable (min {min_windows})")],
         ["Run verdict", "OK" if verdict == "VALID" else "FAIL", verdict],
     ]
@@ -495,5 +512,13 @@ def post_run_integrity_check(
         menu_utils.print_table(["Check", "Status", "Details"], rows)
     if verdict != "VALID":
         print(status_messages.status(f"Dataset validity: INVALID ({invalid_reason or 'PCAP_PARSE_ERROR'})", level="error"))
+        pcap_failure_summary = str(dataset.get("pcap_failure_summary") or "").strip()
+        pcap_failure_detail = str(dataset.get("pcap_failure_detail") or "").strip()
+        if pcap_failure_summary:
+            print(status_messages.status(pcap_failure_summary, level="warn"))
+            print(status_messages.status("This run is excluded from dataset quota.", level="warn"))
+            print(status_messages.status("Recommended action: verify PCAPdroid capture/export and recollect.", level="warn"))
+            if pcap_failure_detail:
+                print(status_messages.status(f"PCAP failure detail: {pcap_failure_detail}", level="warn"))
     else:
         print(status_messages.status("Dataset validity: VALID", level="success"))

@@ -17,19 +17,17 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-
-def percentile(sorted_values: list[float], p: float) -> float | None:
-    if not sorted_values:
-        return None
-    if p <= 0:
-        return float(sorted_values[0])
-    if p >= 100:
-        return float(sorted_values[-1])
-    # Deterministic discrete percentile:
-    # index = floor(p/100 * (n-1)) over a sorted series.
-    k = int((p / 100.0) * (len(sorted_values) - 1))
-    k = max(0, min(k, len(sorted_values) - 1))
-    return float(sorted_values[k])
+from .enrichment import (
+    PacketMetadata,
+    compute_burst_summary,
+    endpoint_label,
+    flow_key,
+    infer_direction_from_ports,
+    packet_metadata_command,
+    parse_packet_metadata_line,
+    percentile,
+    summarize_flows,
+)
 
 
 def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str | None = None) -> dict[str, Any]:
@@ -41,6 +39,10 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
       - burstiness_{bytes,packets}_p95_over_p50
       - unique_dst_ip_count
       - unique_dst_port_count
+      - direction_summary
+      - flow_summary
+      - burst_summary
+      - tls_quic_visibility
     """
     tp = tshark_path or shutil.which("tshark")
     if not tp:
@@ -48,31 +50,23 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
     if not pcap_path.exists():
         raise RuntimeError("pcap_missing")
 
-    cmd = [
-        tp,
-        "-r",
-        str(pcap_path),
-        "-T",
-        "fields",
-        "-E",
-        "separator=\t",
-        "-e",
-        "frame.time_relative",
-        "-e",
-        "frame.len",
-        "-e",
-        "ip.dst",
-        "-e",
-        "tcp.dstport",
-        "-e",
-        "udp.dstport",
-    ]
+    cmd = packet_metadata_command(tp, pcap_path)
 
     bytes_by_s: dict[int, int] = {}
     pkts_by_s: dict[int, int] = {}
     uniq_ip: set[str] = set()
     uniq_port: set[int] = set()
     max_sec = 0
+    flow_stats: dict[tuple[str, str], dict[str, Any]] = {}
+    direction_packets = {"outbound": 0, "inbound": 0, "unknown": 0}
+    direction_bytes = {"outbound": 0, "inbound": 0, "unknown": 0}
+    direction_methods = {"high": 0, "medium": 0, "unknown": 0}
+    tls_handshake_total = 0
+    tls_client_hello_count = 0
+    tls_server_hello_count = 0
+    tls_sni_values: set[str] = set()
+    tls_alpn_values: set[str] = set()
+    quic_candidate_packets = 0
 
     # tshark can be verbose on stderr for malformed captures; discard stderr in
     # this streaming path to avoid deadlocks. We only need deterministic stats.
@@ -80,38 +74,58 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
     assert proc.stdout is not None
     try:
         for line in proc.stdout:
-            parts = line.split("\t")
-            if len(parts) < 2:
+            packet = parse_packet_metadata_line(line)
+            if packet is None:
                 continue
-            t_s = parts[0].strip()
-            l_s = parts[1].strip()
-            if not t_s or not l_s:
-                continue
-            try:
-                t = float(t_s)
-                ln = int(l_s)
-            except Exception:
-                continue
-            sec = int(t) if t >= 0 else 0
+            sec = int(packet.t) if packet.t >= 0 else 0
             max_sec = max(max_sec, sec)
-            bytes_by_s[sec] = bytes_by_s.get(sec, 0) + max(ln, 0)
+            bytes_by_s[sec] = bytes_by_s.get(sec, 0) + max(packet.length, 0)
             pkts_by_s[sec] = pkts_by_s.get(sec, 0) + 1
 
-            if len(parts) >= 3:
-                ip = parts[2].strip()
-                if ip:
-                    uniq_ip.add(ip)
+            if packet.dst_ip:
+                uniq_ip.add(packet.dst_ip)
+            if packet.dst_port is not None:
+                uniq_port.add(packet.dst_port)
 
-            tcp_p = parts[3].strip() if len(parts) >= 4 else ""
-            udp_p = parts[4].strip() if len(parts) >= 5 else ""
-            port = tcp_p or udp_p
-            if port:
-                try:
-                    pi = int(port)
-                    if 0 <= pi <= 65535:
-                        uniq_port.add(pi)
-                except Exception:
-                    pass
+            direction_packets[packet.direction] = direction_packets.get(packet.direction, 0) + 1
+            direction_bytes[packet.direction] = direction_bytes.get(packet.direction, 0) + int(packet.length)
+            direction_methods[packet.direction_confidence] = direction_methods.get(packet.direction_confidence, 0) + 1
+
+            if packet.transport == "udp" and (
+                packet.src_port == 443 or packet.dst_port == 443 or packet.src_port == 80 or packet.dst_port == 80
+            ):
+                quic_candidate_packets += 1
+
+            if packet.tls_handshake_type:
+                tls_handshake_total += 1
+                if packet.tls_handshake_type == "1":
+                    tls_client_hello_count += 1
+                elif packet.tls_handshake_type == "2":
+                    tls_server_hello_count += 1
+            if packet.tls_sni:
+                tls_sni_values.add(packet.tls_sni)
+            if packet.tls_alpn:
+                tls_alpn_values.add(packet.tls_alpn)
+
+            key = flow_key(packet)
+            if key is None:
+                continue
+            entry = flow_stats.setdefault(
+                key,
+                {
+                    "protocol": packet.transport,
+                    "packets": 0,
+                    "bytes": 0,
+                    "endpoint_a": endpoint_label(packet.src_ip, packet.src_port),
+                    "endpoint_b": endpoint_label(packet.dst_ip, packet.dst_port),
+                    "outbound_packets": 0,
+                    "inbound_packets": 0,
+                    "unknown_packets": 0,
+                },
+            )
+            entry["packets"] += 1
+            entry["bytes"] += int(packet.length)
+            entry[f"{packet.direction}_packets"] += 1
     finally:
         try:
             proc.stdout.close()
@@ -155,6 +169,8 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
 
     burst_b = (float(b95) / float(b50)) if b50 and b95 is not None and b50 > 0 else None
     burst_p = (float(p95) / float(p50)) if p50 and p95 is not None and p50 > 0 else None
+    burst_summary = compute_burst_summary(bytes_by_s, pkts_by_s)
+    flow_summary = summarize_flows(flow_stats)
 
     return {
         "bytes_per_second_p50": b50,
@@ -167,6 +183,32 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
         "burstiness_packets_p95_over_p50": burst_p,
         "unique_dst_ip_count": len(uniq_ip) if uniq_ip else 0,
         "unique_dst_port_count": len(uniq_port) if uniq_port else 0,
+        "direction_summary": {
+            "method": "service_port_heuristic",
+            "outbound_packets": int(direction_packets["outbound"]),
+            "inbound_packets": int(direction_packets["inbound"]),
+            "unknown_packets": int(direction_packets["unknown"]),
+            "outbound_bytes": int(direction_bytes["outbound"]),
+            "inbound_bytes": int(direction_bytes["inbound"]),
+            "unknown_bytes": int(direction_bytes["unknown"]),
+            "confidence_counts": {
+                "high": int(direction_methods["high"]),
+                "medium": int(direction_methods["medium"]),
+                "unknown": int(direction_methods["unknown"]),
+            },
+        },
+        "flow_summary": flow_summary,
+        "burst_summary": burst_summary,
+        "tls_quic_visibility": {
+            "tls_handshake_packets": int(tls_handshake_total),
+            "tls_client_hello_packets": int(tls_client_hello_count),
+            "tls_server_hello_packets": int(tls_server_hello_count),
+            "tls_sni_unique_count": int(len(tls_sni_values)),
+            "tls_alpn_unique_count": int(len(tls_alpn_values)),
+            "quic_candidate_packets": int(quic_candidate_packets),
+            "tls_visible": bool(tls_handshake_total or tls_sni_values or tls_alpn_values),
+            "quic_visibility_basis": "udp_service_port_heuristic",
+        },
     }
 
 
@@ -176,6 +218,9 @@ def _resolve_tshark_timeout_s() -> float:
         return max(5.0, float(raw))
     except ValueError:
         return 120.0
-
-
-__all__ = ["scan_pcap_timeseries_and_destinations", "percentile"]
+__all__ = [
+    "PacketMetadata",
+    "infer_direction_from_ports",
+    "percentile",
+    "scan_pcap_timeseries_and_destinations",
+]

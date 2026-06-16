@@ -2,12 +2,16 @@
   "version": "v1",
   "categories": {
     "social_feed": "social_feed_basic_v2",
-    "messaging": "messaging_basic_v1"
+    "messaging": "messaging_basic_v1",
+    "news_reader": "news_reader_basic_v1"
   },
   "packages": {
+    "bbc.mobile.news.ww": "news_reader",
+    "com.cnn.mobile.android.phone": "news_reader",
     "com.zhiliaoapp.musically": "social_feed",
     "com.facebook.katana": "social_feed",
     "com.facebook.orca": "messaging",
+    "com.guardian": "news_reader",
     "com.instagram.android": "social_feed",
     "com.linkedin.android": "social_feed",
     "com.pinterest": "social_feed",

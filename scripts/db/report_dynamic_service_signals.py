@@ -43,6 +43,10 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 def generate_report(*, packages: list[str] | None = None, output_dir: Path | None = None) -> dict[str, Any]:
     from scytaledroid.Database.db_core import db_queries as core_q
     from scytaledroid.DynamicAnalysis.service_context import resolve_service_for_domain
+    from scytaledroid.DynamicAnalysis.service_signals import (
+        default_service_signal_map_seed_rows,
+        default_signal_catalog_seed_rows,
+    )
 
     package_filters = [str(value or "").strip().lower() for value in (packages or []) if str(value or "").strip()]
     where_sql = ""
@@ -163,6 +167,12 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
         query_name="dynamic.service_signals.report.service_signal_maps",
     ) or []
 
+    signal_rows = _merge_missing_seed_signals(signal_rows, default_signal_catalog_seed_rows())
+    service_signal_rows = _merge_missing_seed_service_signal_maps(
+        service_signal_rows,
+        default_service_signal_map_seed_rows(),
+    )
+
     service_tuple = tuple(dict(row) for row in service_rows if isinstance(row, Mapping))
     service_map_tuple = tuple(dict(row) for row in service_map_rows if isinstance(row, Mapping))
     signals_by_key = {str(row.get("signal_key") or ""): dict(row) for row in signal_rows if isinstance(row, Mapping)}
@@ -172,7 +182,7 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
             signals_by_service[str(row.get("service_key") or "")].append(dict(row))
 
     signal_observation_rows: list[dict[str, Any]] = []
-    unresolved_service_rows: list[dict[str, Any]] = []
+    services_without_signal_mappings_rows: list[dict[str, Any]] = []
     package_summary: dict[str, Counter[str]] = defaultdict(Counter)
     focus_area_counts = Counter()
     severity_counts = Counter()
@@ -190,11 +200,13 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
         )
         service_key = str(resolved.get("service_key") or "")
         if not service_key:
-            unresolved_service_rows.append(dict(row))
+            services_without_signal_mappings_rows.append(dict(row))
             continue
         signal_maps = signals_by_service.get(service_key) or []
         if not signal_maps:
-            unresolved_service_rows.append({**dict(row), "service_key": service_key, "service_display_name": resolved.get("service_display_name")})
+            services_without_signal_mappings_rows.append(
+                {**dict(row), "service_key": service_key, "service_display_name": resolved.get("service_display_name")}
+            )
             continue
         for signal_map in signal_maps:
             signal = signals_by_key.get(str(signal_map.get("signal_key") or ""))
@@ -243,7 +255,7 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
     output_root.mkdir(parents=True, exist_ok=True)
     _write_csv(output_root / "package_signal_rows.csv", signal_observation_rows)
     _write_csv(output_root / "package_signal_summary.csv", package_summary_rows)
-    _write_csv(output_root / "unresolved_service_signal_rows.csv", unresolved_service_rows)
+    _write_csv(output_root / "services_without_signal_mappings.csv", services_without_signal_mappings_rows)
 
     summary = {
         "generated_at": datetime.now(tz=UTC).isoformat(),
@@ -251,13 +263,16 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
         "packages_scanned": len({str(row.get('package_name') or '') for row in observation_rows}),
         "observation_rows": len(observation_rows),
         "signal_observation_rows": len(signal_observation_rows),
-        "unresolved_service_signal_rows": len(unresolved_service_rows),
+        "services_without_signal_mappings": len(services_without_signal_mappings_rows),
+        # Deprecated alias kept for one compatibility pass while downstream reads migrate.
+        "unresolved_service_signal_rows": len(services_without_signal_mappings_rows),
         "focus_area_hit_counts": dict(sorted(focus_area_counts.items())),
         "severity_hit_counts": dict(sorted(severity_counts.items())),
         "output_files": {
             "package_signal_rows_csv": str((output_root / "package_signal_rows.csv").resolve()),
             "package_signal_summary_csv": str((output_root / "package_signal_summary.csv").resolve()),
-            "unresolved_service_signal_rows_csv": str((output_root / "unresolved_service_signal_rows.csv").resolve()),
+            "services_without_signal_mappings_csv": str((output_root / "services_without_signal_mappings.csv").resolve()),
+            "unresolved_service_signal_rows_csv": str((output_root / "services_without_signal_mappings.csv").resolve()),
             "summary_json": str((output_root / "summary.json").resolve()),
         },
         "no_db_writes": True,
@@ -265,6 +280,47 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
     }
     (output_root / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return summary
+
+
+def _merge_missing_seed_signals(
+    db_rows: list[dict[str, Any]],
+    seed_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = [dict(row) for row in db_rows if isinstance(row, Mapping)]
+    seen = {str(row.get("signal_key") or "") for row in merged}
+    for row in seed_rows:
+        signal_key = str(row.get("signal_key") or "")
+        if signal_key and signal_key not in seen:
+            merged.append(dict(row))
+            seen.add(signal_key)
+    merged.sort(key=lambda row: (str(row.get("focus_area") or ""), str(row.get("severity_hint") or ""), str(row.get("signal_key") or "")))
+    return merged
+
+
+def _merge_missing_seed_service_signal_maps(
+    db_rows: list[dict[str, Any]],
+    seed_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = [dict(row) for row in db_rows if isinstance(row, Mapping)]
+    seen = {
+        (
+            str(row.get("service_key") or ""),
+            str(row.get("signal_key") or ""),
+            str(row.get("signal_strength") or ""),
+        )
+        for row in merged
+    }
+    for row in seed_rows:
+        key = (
+            str(row.get("service_key") or ""),
+            str(row.get("signal_key") or ""),
+            str(row.get("signal_strength") or ""),
+        )
+        if key[0] and key[1] and key not in seen:
+            merged.append(dict(row))
+            seen.add(key)
+    merged.sort(key=lambda row: (str(row.get("service_key") or ""), str(row.get("signal_key") or ""), str(row.get("signal_strength") or "")))
+    return merged
 
 
 def main(argv: list[str] | None = None) -> int:

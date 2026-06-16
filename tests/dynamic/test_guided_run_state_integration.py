@@ -270,7 +270,7 @@ def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch)
 
     assert select_device_calls["count"] == 1
     assert select_package_calls["count"] == 2
-    assert subtitles[0] == "Research Dataset Beta · moto"
+    assert subtitles[0] == "Device: moto"
 
 
 def test_guided_run_defaults_to_manual_when_script_template_missing(monkeypatch, capsys) -> None:

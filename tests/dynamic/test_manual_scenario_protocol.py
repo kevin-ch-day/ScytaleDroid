@@ -253,3 +253,14 @@ def test_facebook_uses_facebook_template_override(tmp_path: Path) -> None:
 def test_timing_action_parses_skip_aliases() -> None:
     assert _parse_timing_action("n\n") == "skip"
     assert _parse_timing_action("skip\n") == "skip"
+
+
+def test_timing_action_parses_limited_aliases() -> None:
+    assert _parse_timing_action("l\n") == "limited"
+    assert _parse_timing_action("limited\n") == "limited"
+
+
+def test_timing_action_accepts_d_done_but_not_c_alias() -> None:
+    assert _parse_timing_action("d\n") == "enter"
+    assert _parse_timing_action("done\n") == "enter"
+    assert _parse_timing_action("c\n") == "other"

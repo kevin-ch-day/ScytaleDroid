@@ -796,12 +796,19 @@ def _build_evidence_lines(
             if isinstance(dataset, dict):
                 min_bytes = dataset.get("min_pcap_bytes")
         threshold_label = f"{min_bytes}B" if min_bytes is not None else "unknown threshold"
-        print(
-            status_messages.status(
-                f"PCAP invalid ({size_label} < {threshold_label}); treated as unavailable for Tier-1.",
-                level="warn",
+        dataset = manifest.get("dataset") if isinstance(manifest, dict) else {}
+        pcap_failure_summary = ""
+        if isinstance(dataset, dict):
+            pcap_failure_summary = str(dataset.get("pcap_failure_summary") or "").strip()
+        if pcap_failure_summary:
+            print(status_messages.status(pcap_failure_summary, level="warn"))
+        else:
+            print(
+                status_messages.status(
+                    f"PCAP invalid ({size_label} < {threshold_label}); treated as unavailable for Tier-1.",
+                    level="warn",
+                )
             )
-        )
     artifact_types = {a.get("type") for a in artifacts if isinstance(a, dict)}
     lines.append("System log: yes" if "system_log_capture" in artifact_types else "System log: no")
 

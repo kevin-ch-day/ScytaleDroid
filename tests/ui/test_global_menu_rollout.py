@@ -321,7 +321,7 @@ def test_dynamic_choose_active_research_cohort_uses_simplified_wording(monkeypat
             {
                 "cohort_key": "research_dataset_beta",
                 "display_name": "Research Dataset Beta",
-                "active_member_count": 16,
+                "active_member_count": 15,
             },
         ],
     )

@@ -41,8 +41,10 @@ def parse_timing_action(raw: str | None) -> str:
     token = str(raw or "").strip().lower()
     if token == "":
         return "enter"
-    if token in {"d", "done", "c", "continue", "next"}:
+    if token in {"d", "done", "continue", "next"}:
         return "enter"
+    if token in {"l", "limited", "block", "blocked"}:
+        return "limited"
     if token in {"s", "stop"}:
         return "stop"
     if token in {"a", "abort"}:
