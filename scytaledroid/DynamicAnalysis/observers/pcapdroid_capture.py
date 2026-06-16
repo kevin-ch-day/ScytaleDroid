@@ -286,6 +286,11 @@ class PcapdroidCaptureObserver(Observer):
                     meta_payload["pcap_size_bytes"] = 0
                     meta_payload["pcap_valid"] = False
                     meta_payload["min_pcap_bytes"] = min_pcap_bytes
+                    meta_payload["failure_diagnostics"] = _capture_failure_diagnostics(
+                        run_ctx.device_serial,
+                        device_path,
+                        min_epoch=capture_start_epoch,
+                    )
                     meta_path.write_text(
                         json.dumps(meta_payload, indent=2, sort_keys=True),
                         encoding="utf-8",
@@ -451,6 +456,25 @@ def _pull_with_retries(
             return True
         time.sleep(delay_s)
     return False
+
+
+def _capture_failure_diagnostics(
+    device_serial: str,
+    device_path: str,
+    *,
+    min_epoch: float | None = None,
+) -> dict[str, object]:
+    diagnostics: dict[str, object] = {
+        "expected_device_path": device_path,
+        "expected_device_path_exists": _device_file_exists(device_serial, device_path),
+        "expected_device_path_size_bytes": _device_file_size(device_serial, device_path),
+    }
+    fallback_path = _latest_pcapdroid_capture(device_serial, min_epoch=min_epoch)
+    diagnostics["latest_fallback_path"] = fallback_path
+    if fallback_path:
+        diagnostics["latest_fallback_exists"] = _device_file_exists(device_serial, fallback_path)
+        diagnostics["latest_fallback_size_bytes"] = _device_file_size(device_serial, fallback_path)
+    return diagnostics
 
 
 def _latest_pcapdroid_capture(device_serial: str, *, min_epoch: float | None = None) -> str | None:

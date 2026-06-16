@@ -32,9 +32,10 @@ class DynamicMenuSections:
 def _quota_reason_text(summary) -> str:
     reason = _humanize_code(summary.first_failing_reason)
     expected = int(getattr(summary, "expected_valid_runs", 0) or 0)
-    valid = int(getattr(summary, "valid_runs", 0) or 0)
+    quota_valid = int(getattr(summary, "quota_runs_counted", 0) or 0)
     if str(getattr(summary, "first_failing_reason", "") or "").strip().upper() == "QUOTA_NOT_SATISFIED" and expected > 0:
-        return f"{reason} ({valid}/{expected} valid runs)"
+        remaining = max(0, expected - quota_valid)
+        return f"{reason} — {remaining} quota-valid runs remaining"
     return reason
 
 
@@ -93,10 +94,19 @@ def render_dynamic_menu_overview() -> None:
         if int(summary.total_runs) == 0
         else f"{summary.total_runs} packs ({summary.valid_runs} valid)"
     )
+    quota_valid = int(getattr(summary, "quota_runs_counted", 0) or 0)
+    expected_valid = int(getattr(summary, "expected_valid_runs", 0) or 0)
+    supplemental_valid = max(0, int(getattr(summary, "valid_runs", 0) or 0) - quota_valid)
     freeze_text = "ready" if summary.can_freeze else "blocked"
     reason_text = _quota_reason_text(summary)
     state_items = [
         summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
+        summary_cards.summary_item("Quota-valid runs", f"{quota_valid} / {expected_valid}", value_style="muted"),
+        *(
+            [summary_cards.summary_item("Supplemental valid", f"{supplemental_valid} outside quota", value_style="muted")]
+            if supplemental_valid > 0
+            else []
+        ),
         summary_cards.summary_item(
             "Freeze/export",
             freeze_text,

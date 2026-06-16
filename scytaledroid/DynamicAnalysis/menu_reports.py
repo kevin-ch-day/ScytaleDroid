@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -665,69 +666,245 @@ def render_cohort_status_details(
     legacy_only_app_count: int,
     expected_runs: int,
     evidence_summary: dict[str, object] | None,
+    row_models: list[object],
+    baseline_required: int,
+    interactive_required: int,
 ) -> None:
     print()
-    menu_utils.print_header("Details", "Tracker vs evidence (compact)")
+    menu_utils.print_header("Summary", "Operator-facing cohort status")
     if dataset_apps_total <= 0:
         prompt_utils.press_enter_to_continue()
         return
     evidence_summary = evidence_summary or {}
-    print("Tracker (informational)")
-    print(f"  Apps satisfied  : {dataset_apps_complete} / {dataset_apps_total}")
-    print(f"  Quota-counted   : {dataset_valid_runs_total} / {expected_runs}")
-    print("Evidence (authoritative)")
-    print(f"  Apps satisfied  : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
-    print(f"  Eligible counted: {int(evidence_summary.get('quota_runs_counted', 0))} / {expected_runs}")
-    print(f"  Eligible found  : {int(evidence_summary.get('paper_eligible_runs', 0))}")
-    print(f"  Extras          : {int(evidence_summary.get('extra_eligible_runs', 0))}")
+    quota_counted = int(evidence_summary.get("quota_runs_counted", 0))
+    quota_remaining = max(0, int(expected_runs) - quota_counted)
+    baseline_remaining = sum(max(0, int(getattr(row, "need_baseline", 0))) for row in row_models)
+    manual_remaining = sum(max(0, int(getattr(row, "need_interactive", 0))) for row in row_models)
+    print("Progress")
+    print(f"  Apps complete         : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
+    print(f"  Quota-valid remaining : {quota_remaining}")
+    print(f"  Baseline runs needed  : {baseline_remaining}")
+    print(f"  Manual runs needed    : {manual_remaining}")
+    print(
+        "  Archive readiness    : "
+        + ("ready" if int(evidence_summary.get("apps_satisfied", 0)) >= int(dataset_apps_total) and quota_counted >= int(expected_runs) else "blocked")
+    )
+    print()
+    print("Evidence-authoritative quota")
+    print(f"  Quota-valid runs      : {quota_counted} / {expected_runs}")
+    print(f"  Paper-eligible found  : {int(evidence_summary.get('paper_eligible_runs', 0))}")
+    print(f"  Supplemental extras   : {int(evidence_summary.get('extra_eligible_runs', 0))}")
+    print(f"  Excluded              : {int(evidence_summary.get('excluded_runs', 0))}")
+    print()
+    print("Tracker-scoped latest-run state")
+    print(f"  Apps satisfied        : {dataset_apps_complete} / {dataset_apps_total}")
+    print(f"  Active-build counted  : {dataset_valid_runs_total} / {expected_runs}")
+    print(f"  Baseline target       : {baseline_required} per app")
+    print(f"  Manual target         : {interactive_required} per app")
     if historical_valid_runs_total > 0 or historical_build_count_total > 0:
-        print("Historical context (informational)")
-        print(f"  Mixed apps      : {mixed_identity_app_count}")
-        print(f"  Legacy-only apps: {legacy_only_app_count}")
-        print(f"  Legacy valid    : {historical_valid_runs_total}")
-        print(f"  Older builds    : {historical_build_count_total}")
-    print(f"  Excluded        : {int(evidence_summary.get('excluded_runs', 0))}")
+        print()
+        print("Historical context")
+        print(f"  Mixed apps            : {mixed_identity_app_count}")
+        print(f"  Legacy-only apps      : {legacy_only_app_count}")
+        print(f"  Legacy valid runs     : {historical_valid_runs_total}")
+        print(f"  Older builds          : {historical_build_count_total}")
     if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
-        print(f"  Protocol fit poor: {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (flagged)")
+        print(f"  Protocol fit poor     : {int(evidence_summary.get('protocol_fit_poor_runs', 0))} (flagged)")
     if int(evidence_summary.get("low_signal_exploratory_runs", 0)) > 0:
-        print(f"  Low-signal (exploratory): {int(evidence_summary.get('low_signal_exploratory_runs', 0))}")
+        print(f"  Low-signal exploratory: {int(evidence_summary.get('low_signal_exploratory_runs', 0))}")
+    print()
+    print("Meaning")
+    print("  Evidence-authoritative quota drives archive/freeze readiness.")
+    print("  Tracker-scoped latest-run state describes active-build queue posture.")
     prompt_utils.press_enter_to_continue()
 
 
-def render_cohort_build_history(build_rows: list[list[str]]) -> None:
+def render_cohort_build_history(row_models: list[object], build_rows: list[list[str]]) -> None:
     print()
-    menu_utils.print_header("History", "Build and legacy linkage details")
-    table_utils.render_table(
-        ["App", "Identity (vc/base)", "Active Runs", "Legacy Runs", "Legacy Builds"],
-        build_rows,
-        compact=True,
-    )
+    menu_utils.print_header("History", "Build lineage and why an app looks current, mixed, or legacy")
+    summary_rows = []
+    for row in row_models:
+        notes: list[str] = []
+        if int(getattr(row, "baseline_extra", 0)) > 0:
+            notes.append("extra baseline outside quota")
+        if int(getattr(row, "interactive_extra", 0)) > 0:
+            notes.append("extra manual outside quota")
+        if int(getattr(row, "historical_valid_runs_count", 0)) > 0:
+            notes.append("legacy evidence present")
+        if str(getattr(row, "qa_label", "")).startswith("invalid"):
+            notes.append("latest QA invalid")
+        if "id_mismatch" in str(getattr(row, "qa_label", "")):
+            notes.append("identity mismatch")
+        summary_rows.append(
+            {
+                "app": getattr(row, "display_name", "—"),
+                "baseline": _history_progress_label(
+                    getattr(row, "baseline_countable", 0),
+                    getattr(row, "baseline_extra", 0),
+                    required=3,
+                    missing=getattr(row, "need_baseline", 0),
+                ),
+                "manual": (
+                    "locked"
+                    if int(getattr(row, "need_baseline", 0)) > 0
+                    else _history_progress_label(
+                        getattr(row, "interactive_countable", 0),
+                        getattr(row, "interactive_extra", 0),
+                        required=2,
+                        missing=getattr(row, "need_interactive", 0),
+                    )
+                ),
+                "prep": getattr(row, "prep_label", "—"),
+                "qa": getattr(row, "qa_label", "—"),
+                "notes": "; ".join(notes) or "—",
+            }
+        )
+    _render_history_summary_table(summary_rows)
+    if build_rows:
+        print()
+        print("Build identity detail")
+        table_utils.render_table(
+            ["App", "Identity (vc/base)", "Active Runs", "Legacy Runs", "Legacy Builds"],
+            build_rows,
+            compact=True,
+        )
     prompt_utils.press_enter_to_continue()
 
 
 def render_cohort_status_help() -> None:
     print()
-    menu_utils.print_header("Help", "Legend (short)")
-    print("Baseline / Manual      = active-build valid runs shown against required quota")
-    print("Scripted               = optional repeatable interaction (legacy/support path)")
-    print("Next action            = deterministic next run suggestion from quota state")
-    print("Static prep            = static handoff/build readiness for this package")
-    print("Quota                  = quota-counted progress toward archive/freeze readiness")
-    print("Supplemental runs      = extra valid runs from the current build kept outside quota")
-    print("Historical context     = valid legacy-build runs retained for comparison only")
-    print("Last QA                = latest tracker QA status (may include identity mismatch note)")
+    menu_utils.print_header("Help", "Queue legend")
+    print("Status   = high-level app bucket: complete, manual, baseline, blocked, or review.")
+    print("Missing  = what is missing now, e.g. base 0/3, manual 0/2, or review QA.")
+    print("Quota    = quota-valid runs against total quota; +N or + extra means supplemental valid runs outside quota.")
+    print("Build/QA = static prep state plus latest QA badge, e.g. current/✓, mixed/+L, ready/invalid.")
+    print("Template = scripted template availability: news, acct, generic, or none.")
+    print("Action   = the recommended next operator move shown on the queue.")
+    print("locked   = manual phase unavailable until baseline minimum is met.")
+    print("mixed    = current-build and legacy-build evidence both exist.")
+    print("valid+L  = latest QA valid, legacy evidence also exists.")
+    print("Evidence-authoritative quota = archive/freeze truth.")
+    print("Tracker-scoped latest-run state = queue-operating view of the active build.")
     prompt_utils.press_enter_to_continue()
 
 
-def render_cohort_status_debug(rows: list[list[str]]) -> None:
+def render_cohort_status_debug(rows: list[list[str]], row_models: list[object]) -> None:
     print()
-    menu_utils.print_header("Diagnostics", "Full table including legacy and QA fields")
+    menu_utils.print_header("Diagnostics", "Dense raw/debug view; lower-level tracker and queue fields")
+    print("This view preserves lower-level queue fields for debugging and the tracker-scoped latest-run state.")
     table_utils.render_table(
         ["#", "App", "Baseline", "Manual", "Need", "Next Action", "Build", "Quota", "Legacy", "Last QA"],
         rows,
         compact=False,
     )
+    if row_models:
+        print()
+        print("Raw state extract")
+        raw_rows = [
+            [
+                getattr(row, "display_name", "—"),
+                str(getattr(row, "baseline_countable", 0)),
+                str(getattr(row, "baseline_extra", 0)),
+                str(getattr(row, "interactive_countable", 0)),
+                str(getattr(row, "interactive_extra", 0)),
+                str(getattr(row, "historical_valid_runs_count", 0)),
+                str(getattr(row, "historical_build_count", 0)),
+                str(getattr(row, "need_baseline", 0)),
+                str(getattr(row, "need_interactive", 0)),
+            ]
+            for row in row_models
+        ]
+        table_utils.render_table(
+            ["App", "Base ct", "Base ex", "Manual ct", "Manual ex", "Legacy", "L builds", "Need B", "Need M"],
+            raw_rows,
+            compact=True,
+        )
     prompt_utils.press_enter_to_continue()
+
+
+def _history_progress_label(countable: object, extra: object, *, required: int, missing: object) -> str:
+    count_i = max(0, int(countable or 0))
+    extra_i = max(0, int(extra or 0))
+    required_i = max(0, int(required))
+    missing_i = max(0, int(missing or 0))
+    if missing_i == 0:
+        if extra_i > 0:
+            return f"{count_i}/{required_i} +{extra_i} extra"
+        return f"{count_i}/{required_i} complete"
+    return f"{count_i}/{required_i} need {missing_i}"
+
+
+def _render_history_summary_table(rows: list[dict[str, str]]) -> None:
+    terminal_width = max(80, shutil.get_terminal_size(fallback=(120, 40)).columns)
+    col_widths = {
+        "app": 18,
+        "baseline": 17,
+        "manual": 15,
+        "prep": 8,
+        "qa": 11,
+    }
+    note_width = max(
+        24,
+        terminal_width
+        - (
+            col_widths["app"]
+            + col_widths["baseline"]
+            + col_widths["manual"]
+            + col_widths["prep"]
+            + col_widths["qa"]
+            + 5
+        ),
+    )
+    print(
+        f"{'App':<{col_widths['app']}} "
+        f"{'Baseline':<{col_widths['baseline']}} "
+        f"{'Manual':<{col_widths['manual']}} "
+        f"{'Prep':<{col_widths['prep']}} "
+        f"{'QA':<{col_widths['qa']}} "
+        f"{'Notes'}"
+    )
+    print(
+        f"{'-' * col_widths['app']} "
+        f"{'-' * col_widths['baseline']} "
+        f"{'-' * col_widths['manual']} "
+        f"{'-' * col_widths['prep']} "
+        f"{'-' * col_widths['qa']} "
+        f"{'-' * min(note_width, 32)}"
+    )
+    for row in rows:
+        wrapped_notes = textwrap.wrap(
+            str(row.get("notes") or "—"),
+            width=note_width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or ["—"]
+        first_line = wrapped_notes[0]
+        print(
+            f"{_truncate_cell(row.get('app'), col_widths['app']):<{col_widths['app']}} "
+            f"{_truncate_cell(row.get('baseline'), col_widths['baseline']):<{col_widths['baseline']}} "
+            f"{_truncate_cell(row.get('manual'), col_widths['manual']):<{col_widths['manual']}} "
+            f"{_truncate_cell(row.get('prep'), col_widths['prep']):<{col_widths['prep']}} "
+            f"{_truncate_cell(row.get('qa'), col_widths['qa']):<{col_widths['qa']}} "
+            f"{first_line}"
+        )
+        for continuation in wrapped_notes[1:]:
+            print(
+                f"{'':<{col_widths['app']}} "
+                f"{'':<{col_widths['baseline']}} "
+                f"{'':<{col_widths['manual']}} "
+                f"{'':<{col_widths['prep']}} "
+                f"{'':<{col_widths['qa']}} "
+                f"{continuation}"
+            )
+
+
+def _truncate_cell(value: object, width: int) -> str:
+    text = str(value or "—")
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return text[:width]
+    return text[: width - 1] + "…"
 
 
 __all__.extend(

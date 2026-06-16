@@ -15,6 +15,23 @@ SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2: tuple[tuple[str, str, int], ...] = (
     ("search_nav", "Use search/navigation briefly and return.", 20),
 )
 
+SCRIPT_STEPS_NEWS_READER_BASIC_V1: tuple[tuple[str, str, int], ...] = (
+    ("open_home", "Open the app and wait on the main/home feed.", 30),
+    ("scroll_headlines", "Slowly scroll the main headline/feed list.", 45),
+    (
+        "open_article",
+        "Open one free article if available; if a paywall/subscription wall appears, stay on that screen and mark the step limited.",
+        45,
+    ),
+    (
+        "scroll_article",
+        "Scroll the visible article content; if article content is blocked by a paywall, mark the step limited and continue.",
+        45,
+    ),
+    ("return_home", "Return to the home/feed screen.", 20),
+    ("hold_foreground", "Remain on foreground until timer completes.", 55),
+)
+
 SCRIPT_STEPS_MESSAGING_IDLE_V1: tuple[tuple[str, str, int], ...] = (
     ("open_thread", "Open a recent conversation thread and keep it visible (stay in thread).", 25),
     ("scroll_thread", "Scroll slightly within the thread (no typing/sending).", 20),
@@ -326,6 +343,38 @@ V3_SCRIPTED_REPRO_TIPS: dict[str, tuple[str, ...]] = {
         "Scroll feed continuously; pause to watch a clip; open comments; return.",
         "Avoid external links; Inbox step is optional (skip if missing).",
     ),
+    "news_reader_basic_v1": (
+        "Use the public home/feed surface only; avoid login, comments, or sharing.",
+        "Open one article, scroll slowly, then return to the home/feed screen. If a paywall/subscription wall appears, mark the affected step limited rather than skipping.",
+    ),
+}
+
+_TEMPLATE_DEFINITIONS: dict[str, tuple[tuple[str, str, int], ...]] = {
+    "social_feed_basic_v2": SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2,
+    "news_reader_basic_v1": SCRIPT_STEPS_NEWS_READER_BASIC_V1,
+    "messaging_idle_v1": SCRIPT_STEPS_MESSAGING_IDLE_V1,
+    "messaging_text_v1": SCRIPT_STEPS_MESSAGING_TEXT_V1,
+    "messaging_voice_v1": SCRIPT_STEPS_MESSAGING_VOICE_V1,
+    "messaging_video_v1": SCRIPT_STEPS_MESSAGING_VIDEO_V1,
+    "messaging_call_basic_v1": SCRIPT_STEPS_MESSAGING_CALL_BASIC_V1,
+    "whatsapp_idle_v1": SCRIPT_STEPS_WHATSAPP_IDLE_V1,
+    "whatsapp_text_v1": SCRIPT_STEPS_WHATSAPP_TEXT_V1,
+    "whatsapp_voice_v1": SCRIPT_STEPS_WHATSAPP_VOICE_V1,
+    "whatsapp_video_v1": SCRIPT_STEPS_WHATSAPP_VIDEO_V1,
+    "facebook_basic_v2": SCRIPT_STEPS_FACEBOOK_BASIC_V2,
+    "snapchat_basic_v1": SCRIPT_STEPS_SNAPCHAT_BASIC_V1,
+    "x_twitter_full_session_v1": SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1,
+    "social_messaging_basic_v1": SCRIPT_STEPS_SOCIAL_MESSAGING_BASIC_V1,
+    "discord_basic_v1": SCRIPT_STEPS_DISCORD_BASIC_V1,
+    "tiktok_basic_v1": SCRIPT_STEPS_TIKTOK_BASIC_V1,
+    "tiktok_basic_v2": SCRIPT_STEPS_TIKTOK_BASIC_V2,
+    "cloud_productivity_basic_v1": SCRIPT_STEPS_CLOUD_PRODUCTIVITY_BASIC_V1,
+    "drive_browse_search_open_star_v1": SCRIPT_STEPS_DRIVE_BROWSE_SEARCH_OPEN_STAR_V1,
+    "docs_open_edit_comment_refresh_v1": SCRIPT_STEPS_DOCS_OPEN_EDIT_COMMENT_REFRESH_V1,
+    "sheets_open_edit_sort_row_refresh_v1": SCRIPT_STEPS_SHEETS_OPEN_EDIT_SORT_ROW_REFRESH_V1,
+    "rtc_collaboration_basic_v1": SCRIPT_STEPS_RTC_COLLABORATION_BASIC_V1,
+    "zoom_join_audio_only_v1": SCRIPT_STEPS_ZOOM_JOIN_AUDIO_ONLY_V1,
+    "meet_join_mic_on_cam_off_v1": SCRIPT_STEPS_MEET_JOIN_MIC_ON_CAM_OFF_V1,
 }
 
 
@@ -367,6 +416,8 @@ def resolve_script_template(
         return ("snapchat_basic_v1", SCRIPT_STEPS_SNAPCHAT_BASIC_V1)
     if template_id == "social_feed_basic_v2":
         return ("social_feed_basic_v2", SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2)
+    if template_id == "news_reader_basic_v1":
+        return ("news_reader_basic_v1", SCRIPT_STEPS_NEWS_READER_BASIC_V1)
     if template_id == "social_messaging_basic_v1":
         return ("social_messaging_basic_v1", SCRIPT_STEPS_SOCIAL_MESSAGING_BASIC_V1)
     if template_id == "discord_basic_v1":
@@ -397,10 +448,15 @@ def requested_script_template(*, package_name: str) -> str:
     return str(template_id or "unknown")
 
 
+def template_steps_for_id(template_id: str) -> tuple[tuple[str, str, int], ...] | None:
+    return _TEMPLATE_DEFINITIONS.get(str(template_id or "").strip())
+
+
 __all__ = [
     "SNAPCHAT_TEMPLATE_HINTS",
     "V3_BASELINE_REPRO_TIPS",
     "V3_SCRIPTED_REPRO_TIPS",
     "resolve_script_template",
     "requested_script_template",
+    "template_steps_for_id",
 ]

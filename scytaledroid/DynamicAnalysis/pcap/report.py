@@ -12,6 +12,9 @@ from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
+from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
+from scytaledroid.DynamicAnalysis.pcap.transport_health import summarize_transport_health
 
 _CAPINFOS_FIELDS = {
     "Number of packets": "packet_count",
@@ -60,6 +63,8 @@ def write_pcap_report(
             report_status = "partial"
 
     reason_codes: list[str] = []
+    target = manifest.target if isinstance(manifest.target, dict) else {}
+    package_name = str(target.get("package_name") or target.get("package") or "").strip().lower()
     if not pcap_artifact or not pcap_rel:
         reason_codes.append("pcap_artifact_missing")
         report_status = "skip"
@@ -100,6 +105,13 @@ def write_pcap_report(
         "dns_unique_count": None,
         "top1_sni_share": None,
         "top1_dns_share": None,
+        "direction_summary": {},
+        "flow_summary": {},
+        "burst_summary": {},
+        "tls_quic_visibility": {},
+        "transport_health": {},
+        "service_context": {},
+        "service_signals": {},
     }
 
     # capinfos-derived "no traffic" flag for interpretability and deterministic QA gating.
@@ -149,8 +161,29 @@ def write_pcap_report(
         report["dns_observation_count"] = dns.get("total_count")
         report["dns_unique_count"] = dns.get("unique_count")
         report["top1_dns_share"] = dns.get("top1_share")
+        try:
+            stats = scan_pcap_timeseries_and_destinations(pcap_path, tshark_path=tshark_path)
+        except Exception as exc:  # noqa: BLE001
+            _log(event_logger, "pcap_report_advanced_scan_failed", {"error": str(exc)})
+        else:
+            report["direction_summary"] = stats.get("direction_summary") or {}
+            report["flow_summary"] = stats.get("flow_summary") or {}
+            report["burst_summary"] = stats.get("burst_summary") or {}
+            report["tls_quic_visibility"] = stats.get("tls_quic_visibility") or {}
+        try:
+            report["transport_health"] = summarize_transport_health(pcap_path, tshark_path=tshark_path)
+        except Exception as exc:  # noqa: BLE001
+            _log(event_logger, "pcap_report_transport_health_failed", {"error": str(exc)})
     elif report_status != "skip" and not tshark_path:
         _log(event_logger, "pcap_report_partial", {"reason": "tshark_missing"})
+
+    try:
+        context_bundle = summarize_pcap_service_context(report, package_name=package_name)
+    except Exception as exc:  # noqa: BLE001
+        _log(event_logger, "pcap_report_service_context_failed", {"error": str(exc)})
+    else:
+        report["service_context"] = context_bundle.get("service_context") or {}
+        report["service_signals"] = context_bundle.get("service_signals") or {}
 
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return ArtifactRecord(

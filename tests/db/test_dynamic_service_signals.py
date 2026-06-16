@@ -151,3 +151,19 @@ def test_apply_dynamic_service_signal_migration_reseeds_when_already_applied() -
     assert payload["already_applied"] is True
     assert payload["signals_seeded"] == len(service_signals.default_signal_catalog_seed_rows())
     assert payload["service_signal_maps_seeded"] == len(service_signals.default_service_signal_map_seed_rows())
+
+
+def test_default_service_signal_map_seeds_cover_meta_sdk_and_microsoft_ads_atlas() -> None:
+    rows = service_signals.default_service_signal_map_seed_rows()
+    by_service: dict[str, set[str]] = {}
+    for row in rows:
+        service_key = str(row.get("service_key") or "")
+        signal_key = str(row.get("signal_key") or "")
+        by_service.setdefault(service_key, set()).add(signal_key)
+
+    assert "identity_or_tag_management" in by_service["meta_sdk"]
+    assert "third_party_advertising" in by_service["microsoft_ads_atlas"]
+    assert "ad_measurement_or_verification" in by_service["microsoft_ads_atlas"]
+    assert "first_party_social_platform" in by_service["x_platform"]
+    assert "first_party_social_platform" in by_service["x_media_cdn"]
+    assert "ad_measurement_or_verification" in by_service["x_ads_platform"]

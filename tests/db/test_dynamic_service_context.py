@@ -252,6 +252,33 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert atlas["service_key"] == "microsoft_ads_atlas"
     assert atlas["service_category"] == "adtech"
 
+    x_api = service_context.resolve_service_for_domain(
+        "api.x.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_api["service_key"] == "x_platform"
+    assert x_api["owner_class"] == "first_party"
+
+    x_ads = service_context.resolve_service_for_domain(
+        "ads-api.x.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_ads["service_key"] == "x_ads_platform"
+    assert x_ads["service_category"] == "adtech"
+
+    time_google = service_context.resolve_service_for_domain(
+        "time.google.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert time_google["service_key"] == "google_platform"
+    assert time_google["owner_name"] == "Google"
+
     espn = service_context.resolve_service_for_domain(
         "espn.api.edge.bamgrid.com",
         package_name="com.espn.score_center",
@@ -278,3 +305,39 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert nielsen["service_key"] == "nielsen_dcr"
     assert nielsen["service_category"] == "analytics"
+
+    x_api = service_context.resolve_service_for_domain(
+        "api.x.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_api["service_key"] == "x_platform"
+    assert x_api["owner_class"] == "first_party"
+
+    x_media = service_context.resolve_service_for_domain(
+        "pbs.twimg.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_media["service_key"] == "x_media_cdn"
+    assert x_media["service_category"] == "content_delivery"
+
+    x_ads = service_context.resolve_service_for_domain(
+        "ads-api.x.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_ads["service_key"] == "x_ads_platform"
+    assert x_ads["owner_class"] == "first_party"
+
+    google_time = service_context.resolve_service_for_domain(
+        "time.google.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert google_time["service_key"] == "google_platform"
+    assert google_time["service_category"] == "platform_infrastructure"

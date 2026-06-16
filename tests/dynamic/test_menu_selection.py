@@ -10,27 +10,94 @@ class _Cfg:
 
 
 def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monkeypatch, capsys) -> None:
+    rows = [
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=["1", "BBC News", "3/3 complete (+1 extra)", "2/2 complete", "0", "—", "current", "5/5 complete (+1 extra)", "0", "valid"],
+            op_row=["1", "BBC News", "3/3 complete (+1 extra)", "2/2 complete", "5/5 complete (+1 extra)", "current", "valid", "—"],
+            build_row=None,
+            dataset_app_count=1,
+            dataset_complete_count=1,
+            dataset_valid_runs_count=5,
+            package_name="bbc.mobile.news.ww",
+            display_name="BBC News",
+            baseline_countable=3,
+            baseline_extra=1,
+            interactive_countable=2,
+            interactive_extra=0,
+            need_baseline=0,
+            need_interactive=0,
+            prep_label="current",
+            qa_label="valid",
+            next_label="—",
+        ),
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=["2", "CNN", "3/3 complete", "0/2 need 2", "2I", "manual interaction", "current", "3/5 need 2", "0", "valid"],
+            op_row=["2", "CNN", "3/3 complete", "0/2 need 2", "3/5 need 2", "current", "valid", "manual interaction"],
+            build_row=None,
+            dataset_app_count=1,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=3,
+            package_name="com.cnn.mobile.android.phone",
+            display_name="CNN",
+            baseline_countable=3,
+            baseline_extra=0,
+            interactive_countable=0,
+            interactive_extra=0,
+            need_baseline=0,
+            need_interactive=2,
+            prep_label="current",
+            qa_label="valid",
+            next_label="manual interaction",
+        ),
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=["3", "ESPN", "0/3 need 3", "locked", "3B 2I", "baseline", "ready", "0/5 need 5", "0", "invalid"],
+            op_row=["3", "ESPN", "0/3 need 3", "locked", "0/5 need 5", "ready", "invalid", "baseline"],
+            build_row=None,
+            dataset_app_count=1,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=0,
+            package_name="com.espn.score_center",
+            display_name="ESPN",
+            baseline_countable=0,
+            baseline_extra=0,
+            interactive_countable=0,
+            interactive_extra=0,
+            need_baseline=3,
+            need_interactive=2,
+            prep_label="ready",
+            qa_label="invalid",
+            next_label="baseline",
+        ),
+    ]
     prepared = menu_selection.PreparedPackageSelectionView(
         packages=[("bbc.mobile.news.ww", None, None, "BBC News")],
         dataset_pkgs={"bbc.mobile.news.ww"},
         cfg=_Cfg(),
         rows=[],
-        op_rows=[["1", "BBC News", "0/3 need 3", "locked", "0/5", "ready", "—", "baseline"]],
+        op_rows=[row.op_row for row in rows],
         build_rows=[],
-        dataset_apps_total=1,
-        dataset_apps_complete=0,
-        dataset_valid_runs_total=0,
+        dataset_apps_total=3,
+        dataset_apps_complete=1,
+        dataset_valid_runs_total=8,
+        mixed_identity_app_count=0,
+        legacy_only_app_count=0,
+        row_models=rows,
         expected_runs=5,
         evidence_summary={
             "evidence_root_exists": True,
-            "quota_runs_counted": 1,
-            "apps_satisfied": 0,
+            "quota_runs_counted": 8,
+            "apps_satisfied": 1,
             "extra_eligible_runs": 2,
         },
     )
 
     monkeypatch.setattr(menu_selection.menu_utils, "print_header", lambda *_a, **_k: None)
-    monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
+    captured = {}
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rendered, **_k: captured.update({"headers": headers, "rows": rendered}),
+    )
     monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
 
     result = menu_selection.run_package_selection_menu(
@@ -40,11 +107,15 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
 
     assert result is None
     out = capsys.readouterr().out
-    assert "Runs complete     : 1 / 5" in out
-    assert "Apps complete     : 0 / 1" in out
-    assert "Archive readiness : blocked — 4 runs remaining" in out
-    assert "Supplemental runs : 2 extra valid run(s) retained outside quota" in out
-    assert "Recommended next  : BBC News — baseline" in out
+    assert "Quota: 8/5 valid | 1/3 complete | 0 remaining | 2 supplemental" in out
+    assert "Archive: blocked" in out
+    assert "Next : CNN — scripted interaction" in out
+    assert "Warnings: ESPN QA invalid. 1 app needs baseline." in out
+    assert "Attention needed" not in out
+    assert "Ready for manual interaction" not in out
+    assert "Needs baseline capture" not in out
+    assert "Complete / over-quota" not in out
+    assert "Legend" not in out
     assert "Freeze/export" not in out
     assert "Next recommended run" not in out
     assert "Select an app by number or name." in out
@@ -53,6 +124,10 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert "H help" in out
     assert "D diagnostics" in out
     assert "B back" in out
+    assert captured["headers"] == ["#", "App", "Status", "Missing", "Quota", "Build/QA", "Template", "Action"]
+    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "5/5 +1", "current/✓", "news", "—"]
+    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/5 n2", "current/✓", "news", "scripted"]
+    assert captured["rows"][2][1:] == ["ESPN", "review", "review QA", "0/5 n5", "ready/invalid", "none", "baseline"]
 
 
 def test_render_package_table_shows_full_list_when_only_one_row_exceeds_preview(monkeypatch, capsys) -> None:
@@ -161,3 +236,173 @@ def test_render_package_table_uses_manual_column_and_extra_counts(monkeypatch, c
         "valid",
         "manual",
     ]]
+
+
+def test_main_progress_label_prefers_extra_suffix_over_rolled_fraction() -> None:
+    assert menu_selection._main_progress_label(3, 1, required=3) == "3/3 +1 extra"
+    assert menu_selection._main_progress_label(5, 1, required=5) == "5/5 +1 extra"
+    assert menu_selection._main_progress_label(0, 0, required=2, missing=2) == "0/2 need 2"
+
+
+def test_manual_progress_label_uses_locked_until_baseline_complete() -> None:
+    row = menu_selection.PreparedPackageSelectionRow(
+        full_row=[],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=0,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=0,
+        need_baseline=1,
+        need_interactive=2,
+        interactive_countable=0,
+        interactive_extra=0,
+    )
+    assert menu_selection._manual_progress_label(row, interactive_required=2) == "locked"
+
+
+def test_compact_qa_label_captures_legacy_and_identity_variants() -> None:
+    assert menu_selection._compact_qa_label("valid (L)") == "valid+L"
+    assert menu_selection._compact_qa_label("valid (id_mismatch)") == "valid+id"
+    assert menu_selection._compact_qa_label("valid (id_mismatch) (L)") == "valid+id+L"
+
+
+def test_render_queue_section_table_preserves_mixed_validl_and_invalid_states(monkeypatch) -> None:
+    captured = {}
+
+    def _capture(headers, rows, **_kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+
+    monkeypatch.setattr(menu_selection.table_utils, "render_table", _capture)
+
+    menu_selection._render_queue_section_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["4"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="Facebook",
+                baseline_countable=3,
+                baseline_extra=1,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=2,
+                prep_label="mixed",
+                qa_label="valid (L)",
+                next_label="manual interaction",
+            ),
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["3"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="ESPN",
+                baseline_countable=0,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=3,
+                need_interactive=2,
+                prep_label="ready",
+                qa_label="invalid",
+                next_label="baseline",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+        show_all=True,
+    )
+
+    assert captured["headers"] == ["#", "App", "Baseline", "Manual", "Quota", "Prep", "QA", "Action"]
+    assert captured["rows"][0][2] == "3/3 +1 extra"
+    assert captured["rows"][0][3] == "0/2 need 2"
+    assert captured["rows"][0][5] == "mixed"
+    assert captured["rows"][0][6] == "valid+L"
+    assert captured["rows"][1][2] == "0/3 need 3"
+    assert captured["rows"][1][3] == "locked"
+    assert captured["rows"][1][6] == "invalid"
+
+
+def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["1"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="bbc.mobile.news.ww",
+                display_name="BBC News",
+                baseline_countable=3,
+                baseline_extra=1,
+                interactive_countable=2,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=0,
+                prep_label="current",
+                qa_label="valid",
+                next_label="—",
+            ),
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["2"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.facebook.katana",
+                display_name="Facebook",
+                baseline_countable=3,
+                baseline_extra=1,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=2,
+                prep_label="mixed",
+                qa_label="valid (L)",
+                next_label="manual interaction",
+            ),
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["3"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.espn.score_center",
+                display_name="ESPN",
+                baseline_countable=0,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=3,
+                need_interactive=2,
+                prep_label="ready",
+                qa_label="invalid",
+                next_label="baseline",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["headers"] == ["#", "App", "Status", "Missing", "Quota", "Build/QA", "Template", "Action"]
+    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "5/5 +1", "current/✓", "news", "—"]
+    assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "3/5 n2", "mixed/+L", "acct", "manual"]
+    assert captured["rows"][2] == ["3", "ESPN", "review", "review QA", "0/5 n5", "ready/invalid", "none", "baseline"]

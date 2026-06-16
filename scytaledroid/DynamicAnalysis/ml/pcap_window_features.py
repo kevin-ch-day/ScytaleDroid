@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.pcap.enrichment import infer_direction_from_ports, safe_port
+
 from .telemetry_windowing import WindowSpec, iter_windows
 
 
@@ -18,6 +20,8 @@ from .telemetry_windowing import WindowSpec, iter_windows
 class PacketRecord:
     t: float  # seconds from capture start (tshark frame.time_relative)
     length: int  # frame length in bytes
+    src_port: int | None = None
+    dst_port: int | None = None
 
 
 def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
@@ -26,6 +30,8 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
     Uses fields:
     - frame.time_relative
     - frame.len
+    - tcp.srcport / tcp.dstport
+    - udp.srcport / udp.dstport
     """
     # NOTE: Use tshark via PATH. Dataset-tier runs already gate missing tools.
     cmd = [
@@ -41,6 +47,14 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
         "frame.time_relative",
         "-e",
         "frame.len",
+        "-e",
+        "tcp.srcport",
+        "-e",
+        "tcp.dstport",
+        "-e",
+        "udp.srcport",
+        "-e",
+        "udp.dstport",
     ]
     # Avoid deadlocks if tshark emits lots of warnings to stderr. We direct stderr to a
     # temp file, then check returncode and include a tail snippet on failure.
@@ -54,8 +68,8 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
             line = line.strip()
             if not line:
                 continue
-            parts = line.split(",", 1)
-            if len(parts) != 2:
+            parts = line.split(",")
+            if len(parts) < 2:
                 continue
             try:
                 t = float(parts[0])
@@ -64,7 +78,13 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
                 continue
             if t < 0 or length < 0:
                 continue
-            yield PacketRecord(t=t, length=length)
+            tcp_src = safe_port(parts[2] if len(parts) >= 3 else "")
+            tcp_dst = safe_port(parts[3] if len(parts) >= 4 else "")
+            udp_src = safe_port(parts[4] if len(parts) >= 5 else "")
+            udp_dst = safe_port(parts[5] if len(parts) >= 6 else "")
+            src_port = tcp_src if tcp_src is not None or tcp_dst is not None else udp_src
+            dst_port = tcp_dst if tcp_src is not None or tcp_dst is not None else udp_dst
+            yield PacketRecord(t=t, length=length, src_port=src_port, dst_port=dst_port)
     finally:
         # Ensure process exits; ignore stderr unless we need it later.
         try:
@@ -123,6 +143,7 @@ def build_window_features(
     - packet_count
     - byte_count
     - avg_packet_size_bytes
+    - outbound/inbound/unknown packet and byte counts
     """
     windows, dropped = iter_windows(duration_s, spec)
     if not windows:
@@ -130,6 +151,12 @@ def build_window_features(
     # Initialize bins
     counts = [0 for _ in windows]
     bytes_ = [0 for _ in windows]
+    outbound_counts = [0 for _ in windows]
+    inbound_counts = [0 for _ in windows]
+    unknown_counts = [0 for _ in windows]
+    outbound_bytes = [0 for _ in windows]
+    inbound_bytes = [0 for _ in windows]
+    unknown_bytes = [0 for _ in windows]
 
     # Assignment for overlapping windows: a packet can contribute to multiple
     # windows when stride < window_size.
@@ -149,9 +176,19 @@ def build_window_features(
                 continue
             counts[j] += 1
             bytes_[j] += int(pkt.length)
+            direction, _, _ = infer_direction_from_ports(src_port=pkt.src_port, dst_port=pkt.dst_port)
+            if direction == "outbound":
+                outbound_counts[j] += 1
+                outbound_bytes[j] += int(pkt.length)
+            elif direction == "inbound":
+                inbound_counts[j] += 1
+                inbound_bytes[j] += int(pkt.length)
+            else:
+                unknown_counts[j] += 1
+                unknown_bytes[j] += int(pkt.length)
 
     rows: list[dict[str, Any]] = []
-    for (start, end), c, b in zip(windows, counts, bytes_, strict=True):
+    for idx, ((start, end), c, b) in enumerate(zip(windows, counts, bytes_, strict=True)):
         avg = (float(b) / float(c)) if c > 0 else 0.0
         rows.append(
             {
@@ -160,6 +197,12 @@ def build_window_features(
                 "packet_count": int(c),
                 "byte_count": int(b),
                 "avg_packet_size_bytes": float(avg),
+                "outbound_packet_count": int(outbound_counts[idx]),
+                "inbound_packet_count": int(inbound_counts[idx]),
+                "unknown_packet_count": int(unknown_counts[idx]),
+                "outbound_byte_count": int(outbound_bytes[idx]),
+                "inbound_byte_count": int(inbound_bytes[idx]),
+                "unknown_byte_count": int(unknown_bytes[idx]),
             }
         )
     return rows, dropped

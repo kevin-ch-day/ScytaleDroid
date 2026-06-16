@@ -83,6 +83,15 @@ _VALIDITY_ENUM = {
     "CAPTURE_INTERRUPTED",
 }
 
+_PCAP_FAILURE_DETAILS = {
+    "PCAP_DEVICE_FILE_MISSING",
+    "PCAP_DEVICE_FILE_EMPTY",
+    "PCAP_PULL_FAILED",
+    "PCAP_LOCAL_FILE_MISSING",
+    "PCAP_LOCAL_FILE_EMPTY",
+    "PCAP_PARSE_FAILED",
+}
+
 
 def update_dataset_tracker(
     manifest: RunManifest,
@@ -155,6 +164,7 @@ def update_dataset_tracker(
     }
     run_entry.update(_netstats_summary(run_dir))
     run_entry.update(_pcap_capture_stats(run_dir))
+    run_entry.update(_timeline_status(run_dir))
     # Recompute low-signal from evidence for tracker derivation so reindex picks
     # up policy improvements without mutating evidence manifests.
     ls = compute_low_signal_for_run(
@@ -705,6 +715,11 @@ def evaluate_dataset_validity(
     - flags: short_run, no_traffic_observed (ints 0/1)
     """
     flags: dict[str, int] = {"short_run": 0, "no_traffic_observed": 0}
+    timeline_state = _timeline_status(run_dir)
+    try:
+        netstats_total_bytes = int(entry.get("netstats_total_bytes") or 0)
+    except Exception:
+        netstats_total_bytes = 0
 
     # Dataset protocol metadata is part of the Paper #2 dataset contract.
     operator = manifest.operator if isinstance(manifest.operator, dict) else {}
@@ -739,7 +754,24 @@ def evaluate_dataset_validity(
         if getattr(obs, "observer_id", None) == "pcapdroid_capture":
             if str(getattr(obs, "status", "")).lower() == "failed":
                 if pcap_size_int <= 0:
-                    return _invalid("PCAP_MISSING", flags, run_dir)
+                    detail = _pcap_failure_detail(run_dir)
+                    return _invalid(
+                        "PCAP_MISSING",
+                        flags,
+                        run_dir,
+                        pcap_failure_detail=detail,
+                        pcap_failure_summary=_pcap_failure_summary(
+                            detail,
+                            netstats_total_bytes=netstats_total_bytes,
+                            timeline_available=bool(timeline_state.get("timeline_available")),
+                            timeline_complete=timeline_state.get("timeline_complete"),
+                        ),
+                        netstats_observed_bytes=netstats_total_bytes,
+                        pcap_available=False,
+                        pcap_size_bytes=pcap_size_int,
+                        timeline_available=bool(timeline_state.get("timeline_available")),
+                        timeline_complete=timeline_state.get("timeline_complete"),
+                    )
                 if pcap_size_int < min_bytes:
                     return _invalid("PCAP_TOO_SMALL", flags, run_dir)
                 return _invalid("CAPTURE_INTERRUPTED", flags, run_dir)
@@ -860,7 +892,24 @@ def evaluate_dataset_validity(
 
     # PCAP size policy.
     if pcap_size_int <= 0:
-        return _invalid("PCAP_MISSING", flags, run_dir)
+        detail = _pcap_failure_detail(run_dir)
+        return _invalid(
+            "PCAP_MISSING",
+            flags,
+            run_dir,
+            pcap_failure_detail=detail,
+            pcap_failure_summary=_pcap_failure_summary(
+                detail,
+                netstats_total_bytes=netstats_total_bytes,
+                timeline_available=bool(timeline_state.get("timeline_available")),
+                timeline_complete=timeline_state.get("timeline_complete"),
+            ),
+            netstats_observed_bytes=netstats_total_bytes,
+            pcap_available=False,
+            pcap_size_bytes=pcap_size_int,
+            timeline_available=bool(timeline_state.get("timeline_available")),
+            timeline_complete=timeline_state.get("timeline_complete"),
+        )
     if pcap_size_int < min_bytes:
         return _invalid("PCAP_TOO_SMALL", flags, run_dir)
 
@@ -891,6 +940,7 @@ def evaluate_dataset_validity(
             sampling_duration_seconds=telemetry_seconds,
         )
     if str(report_status).lower() == "skip":
+        detail = _pcap_failure_detail(run_dir)
         return _invalid(
             "PCAP_REPORT_SKIP",
             flags,
@@ -901,6 +951,18 @@ def evaluate_dataset_validity(
             actual_sampling_seconds=float(sampling_seconds),
             actual_sampling_seconds_source=sampling_source,
             sampling_duration_seconds=telemetry_seconds,
+            pcap_failure_detail=detail,
+            pcap_failure_summary=_pcap_failure_summary(
+                detail,
+                netstats_total_bytes=netstats_total_bytes,
+                timeline_available=bool(timeline_state.get("timeline_available")),
+                timeline_complete=timeline_state.get("timeline_complete"),
+            ),
+            netstats_observed_bytes=netstats_total_bytes,
+            pcap_available=False,
+            pcap_size_bytes=pcap_size_int,
+            timeline_available=bool(timeline_state.get("timeline_available")),
+            timeline_complete=timeline_state.get("timeline_complete"),
         )
 
     # Missing tools are a dataset-tier invalidation (environment not dataset-ready).
@@ -958,6 +1020,7 @@ def evaluate_dataset_validity(
     if not _features_ok(run_dir):
         # We intentionally map this to a report parse error-like code to avoid
         # expanding the locked enum set for Paper #2.
+        detail = "PCAP_PARSE_FAILED" if pcap_size_int > 0 else _pcap_failure_detail(run_dir)
         return _invalid(
             "PCAP_PARSE_ERROR",
             flags,
@@ -968,6 +1031,18 @@ def evaluate_dataset_validity(
             actual_sampling_seconds=float(sampling_seconds),
             actual_sampling_seconds_source=sampling_source,
             sampling_duration_seconds=telemetry_seconds,
+            pcap_failure_detail=detail,
+            pcap_failure_summary=_pcap_failure_summary(
+                detail,
+                netstats_total_bytes=netstats_total_bytes,
+                timeline_available=bool(timeline_state.get("timeline_available")),
+                timeline_complete=timeline_state.get("timeline_complete"),
+            ),
+            netstats_observed_bytes=netstats_total_bytes,
+            pcap_available=pcap_size_int > 0,
+            pcap_size_bytes=pcap_size_int,
+            timeline_available=bool(timeline_state.get("timeline_available")),
+            timeline_complete=timeline_state.get("timeline_complete"),
         )
 
     return {
@@ -977,6 +1052,13 @@ def evaluate_dataset_validity(
         "actual_sampling_seconds": float(sampling_seconds),
         "actual_sampling_seconds_source": sampling_source,
         "min_pcap_bytes": min_bytes,
+        "netstats_observed_bytes": netstats_total_bytes,
+        "pcap_available": True,
+        "pcap_size_bytes": pcap_size_int,
+        "pcap_failure_detail": None,
+        "pcap_failure_summary": None,
+        "timeline_available": bool(timeline_state.get("timeline_available")),
+        "timeline_complete": timeline_state.get("timeline_complete"),
         "window_count_original": int(window_count_original),
         "window_count_final": int(window_count_final),
         "window_count_source": window_count_source,
@@ -1022,6 +1104,91 @@ def _pcap_capture_stats(run_dir: Path) -> dict[str, Any]:
         "pcap_capture_duration_s": parsed.get("capture_duration_s"),
         "pcap_data_size_bytes": parsed.get("data_size_bytes"),
     }
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _timeline_status(run_dir: Path) -> dict[str, Any]:
+    timeline = _read_json(run_dir / "analysis" / "interaction_timeline.json")
+    if not isinstance(timeline, dict):
+        return {"timeline_available": False, "timeline_complete": None}
+    return {
+        "timeline_available": True,
+        "timeline_complete": bool(timeline.get("timeline_complete")),
+    }
+
+
+def _pcap_failure_detail(run_dir: Path) -> str | None:
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    local_pcaps = sorted(capture_dir.glob("*.pcap*"))
+    if local_pcaps:
+        local_size = max(int(p.stat().st_size) for p in local_pcaps)
+        if local_size <= 0:
+            return "PCAP_LOCAL_FILE_EMPTY"
+    meta = _read_json(capture_dir / "pcapdroid_capture_meta.json")
+    if not isinstance(meta, dict):
+        return None
+    diagnostics = meta.get("failure_diagnostics") if isinstance(meta.get("failure_diagnostics"), dict) else {}
+    expected_exists = diagnostics.get("expected_device_path_exists")
+    expected_size = diagnostics.get("expected_device_path_size_bytes")
+    fallback_exists = diagnostics.get("latest_fallback_exists")
+    fallback_size = diagnostics.get("latest_fallback_size_bytes")
+    if expected_exists is True:
+        try:
+            if int(expected_size or 0) <= 0:
+                return "PCAP_DEVICE_FILE_EMPTY"
+        except Exception:
+            return "PCAP_DEVICE_FILE_EMPTY"
+        if not local_pcaps:
+            return "PCAP_PULL_FAILED"
+    if fallback_exists is True:
+        try:
+            if int(fallback_size or 0) <= 0:
+                return "PCAP_DEVICE_FILE_EMPTY"
+        except Exception:
+            return "PCAP_DEVICE_FILE_EMPTY"
+        if not local_pcaps:
+            return "PCAP_PULL_FAILED"
+    if local_pcaps:
+        return "PCAP_PARSE_FAILED"
+    if expected_exists is False and not diagnostics.get("latest_fallback_path"):
+        return "PCAP_DEVICE_FILE_MISSING"
+    return "PCAP_LOCAL_FILE_MISSING"
+
+
+def _pcap_failure_summary(
+    detail: str | None,
+    *,
+    netstats_total_bytes: int | None = None,
+    timeline_available: bool = False,
+    timeline_complete: bool | None = None,
+) -> str | None:
+    if not detail:
+        return None
+    observed_traffic = False
+    try:
+        observed_traffic = int(netstats_total_bytes or 0) > 0
+    except Exception:
+        observed_traffic = False
+    if observed_traffic:
+        base = "Network traffic was observed by Android netstats, but the PCAP capture artifact is empty or unavailable."
+    else:
+        base = "PCAP capture artifact is empty or unavailable."
+    if timeline_available:
+        suffix = " Scripted interaction timeline is still available for protocol validation."
+        if timeline_complete is False:
+            suffix = " Scripted interaction timeline is present but incomplete."
+    else:
+        suffix = ""
+    return base + suffix
 
 
 def _derive_paper_eligibility_fields(
@@ -1232,9 +1399,18 @@ def _invalid(
     actual_sampling_seconds: float | None = None,
     actual_sampling_seconds_source: str | None = None,
     sampling_duration_seconds: float | None = None,
+    pcap_failure_detail: str | None = None,
+    pcap_failure_summary: str | None = None,
+    netstats_observed_bytes: int | None = None,
+    pcap_available: bool | None = None,
+    pcap_size_bytes: int | None = None,
+    timeline_available: bool | None = None,
+    timeline_complete: bool | None = None,
 ) -> dict[str, Any]:
     if code not in _VALIDITY_ENUM:
         code = "PCAP_PARSE_ERROR"
+    if pcap_failure_detail and pcap_failure_detail not in _PCAP_FAILURE_DETAILS:
+        pcap_failure_detail = None
     wc_final = window_count_final if window_count_final is not None else window_count
     wc_original = window_count_original if window_count_original is not None else window_count
     wc_source = str(window_count_source or "sampling_duration_seconds")
@@ -1246,6 +1422,13 @@ def _invalid(
         "actual_sampling_seconds": actual_sampling_seconds,
         "actual_sampling_seconds_source": actual_sampling_seconds_source,
         "min_pcap_bytes": int(MIN_PCAP_BYTES),
+        "netstats_observed_bytes": netstats_observed_bytes,
+        "pcap_available": pcap_available,
+        "pcap_size_bytes": pcap_size_bytes,
+        "pcap_failure_detail": pcap_failure_detail,
+        "pcap_failure_summary": pcap_failure_summary,
+        "timeline_available": timeline_available,
+        "timeline_complete": timeline_complete,
         "window_count_original": wc_original,
         "window_count_final": wc_final,
         "window_count_source": wc_source,

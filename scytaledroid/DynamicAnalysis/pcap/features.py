@@ -10,6 +10,7 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 
 
@@ -64,6 +65,7 @@ def _extract_features(
     operator: dict[str, Any] | None = None,
     target: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    package_name = str((target or {}).get("package_name") or (target or {}).get("package") or "").strip().lower()
     capinfos = (report.get("capinfos") or {}).get("parsed") or {}
     packet_count = _safe_int(capinfos.get("packet_count"))
     data_bytes = _safe_int(capinfos.get("data_size_bytes"))
@@ -180,6 +182,15 @@ def _extract_features(
             domains_per_min = None
             new_sni_rate_per_min = None
             new_dns_rate_per_min = None
+    transport_health = report.get("transport_health") or {}
+    issue_packet_ratio = _safe_float(transport_health.get("issue_packet_ratio")) if isinstance(transport_health, dict) else None
+    reset_packet_ratio = _safe_float(transport_health.get("reset_packet_ratio")) if isinstance(transport_health, dict) else None
+    context_bundle = summarize_pcap_service_context(report, package_name=package_name)
+    service_context = context_bundle.get("service_context") or {}
+    service_signals = context_bundle.get("service_signals") or {}
+    owner_hits = service_context.get("owner_class_hit_counts") if isinstance(service_context, dict) else {}
+    focus_hits = service_signals.get("focus_area_hit_counts") if isinstance(service_signals, dict) else {}
+    severity_hits = service_signals.get("severity_hit_counts") if isinstance(service_signals, dict) else {}
     return {
         # Backwards-compatible feature schema tag (Paper #2). New keys must only be
         # appended; existing key semantics must not change.
@@ -219,6 +230,12 @@ def _extract_features(
             "udp_ratio": udp_ratio,
             "quic_ratio": quic_ratio,
             "tls_ratio": tls_ratio,
+            "tcp_issue_packet_ratio": issue_packet_ratio,
+            "tcp_reset_packet_ratio": reset_packet_ratio,
+            "first_party_service_hits": _safe_int((owner_hits or {}).get("first_party")) if isinstance(owner_hits, dict) else None,
+            "third_party_service_hits": _safe_int((owner_hits or {}).get("third_party")) if isinstance(owner_hits, dict) else None,
+            "privacy_signal_hits": _safe_int((focus_hits or {}).get("privacy")) if isinstance(focus_hits, dict) else None,
+            "high_severity_signal_hits": _safe_int((severity_hits or {}).get("high")) if isinstance(severity_hits, dict) else None,
         },
         "quality": {
             "report_status": report.get("report_status"),
@@ -240,6 +257,34 @@ def _extract_features(
                 "note": "Static context is advisory and excluded from behavioral modeling.",
             },
             "note": "Fields under quality are excluded from behavioral modeling.",
+        },
+        "direction": {
+            "status": "not_attempted",
+            "summary": {},
+        },
+        "flows": {
+            "status": "not_attempted",
+            "summary": {},
+        },
+        "bursts": {
+            "status": "not_attempted",
+            "summary": {},
+        },
+        "visibility": {
+            "status": "not_attempted",
+            "summary": {},
+        },
+        "transport_health": {
+            "status": "from_report" if isinstance(transport_health, dict) and transport_health else "not_attempted",
+            "summary": transport_health if isinstance(transport_health, dict) else {},
+        },
+        "service_context": {
+            "status": str(service_context.get("status") or "not_attempted") if isinstance(service_context, dict) else "not_attempted",
+            "summary": service_context if isinstance(service_context, dict) else {},
+        },
+        "service_signals": {
+            "status": str(service_signals.get("status") or "not_attempted") if isinstance(service_signals, dict) else "not_attempted",
+            "summary": service_signals if isinstance(service_signals, dict) else {},
         },
     }
 
@@ -301,6 +346,22 @@ def _enrich_features_from_pcap(
     if not isinstance(proxies, dict):
         proxies = {}
         features["proxies"] = proxies
+    direction = features.get("direction")
+    if not isinstance(direction, dict):
+        direction = {"status": "not_attempted", "summary": {}}
+        features["direction"] = direction
+    flows = features.get("flows")
+    if not isinstance(flows, dict):
+        flows = {"status": "not_attempted", "summary": {}}
+        features["flows"] = flows
+    bursts = features.get("bursts")
+    if not isinstance(bursts, dict):
+        bursts = {"status": "not_attempted", "summary": {}}
+        features["bursts"] = bursts
+    visibility = features.get("visibility")
+    if not isinstance(visibility, dict):
+        visibility = {"status": "not_attempted", "summary": {}}
+        features["visibility"] = visibility
 
     metrics.update(
         {
@@ -320,6 +381,14 @@ def _enrich_features_from_pcap(
             "unique_dst_port_count": stats.get("unique_dst_port_count"),
         }
     )
+    direction["status"] = "ok"
+    direction["summary"] = stats.get("direction_summary") or {}
+    flows["status"] = "ok"
+    flows["summary"] = stats.get("flow_summary") or {}
+    bursts["status"] = "ok"
+    bursts["summary"] = stats.get("burst_summary") or {}
+    visibility["status"] = "ok"
+    visibility["summary"] = stats.get("tls_quic_visibility") or {}
     enrich["status"] = "ok"
     enrich["reason"] = None
 

@@ -9,7 +9,7 @@ def test_resolve_preferred_research_cohort_key_prefers_largest_active_cohort(mon
         "list_active_research_cohorts",
         lambda **_kwargs: [
             {"cohort_key": "research_dataset_alpha", "active_member_count": 12},
-            {"cohort_key": "research_dataset_beta", "active_member_count": 16},
+            {"cohort_key": "research_dataset_beta", "active_member_count": 15},
         ],
     )
 

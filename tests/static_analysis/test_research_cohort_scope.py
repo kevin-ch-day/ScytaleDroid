@@ -118,7 +118,7 @@ def test_choose_research_cohort_scope_lists_db_backed_cohorts(monkeypatch, capsy
             {
                 "cohort_key": "research_dataset_beta",
                 "display_name": "Research Dataset Beta",
-                "active_member_count": 18,
+                "active_member_count": 15,
             },
         ],
     )
