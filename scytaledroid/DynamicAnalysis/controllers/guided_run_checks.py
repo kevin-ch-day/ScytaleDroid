@@ -11,6 +11,78 @@ from pathlib import Path
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages
 
 
+def _read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _infer_pcap_failure_detail(run_dir: Path, *, pcap_size_int: int) -> str | None:
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    local_pcaps = [path for path in capture_dir.glob("*.pcap*") if path.is_file()]
+    if local_pcaps:
+        try:
+            if max(path.stat().st_size for path in local_pcaps) <= 0:
+                return "PCAP_LOCAL_FILE_EMPTY"
+        except Exception:
+            return "PCAP_LOCAL_FILE_EMPTY"
+    meta = _read_json(capture_dir / "pcapdroid_capture_meta.json") or {}
+    diagnostics = meta.get("failure_diagnostics") if isinstance(meta.get("failure_diagnostics"), dict) else {}
+    expected_exists = diagnostics.get("expected_device_path_exists")
+    expected_size = diagnostics.get("expected_device_path_size_bytes")
+    fallback_exists = diagnostics.get("latest_fallback_exists")
+    fallback_size = diagnostics.get("latest_fallback_size_bytes")
+    if expected_exists is True:
+        try:
+            if int(expected_size or 0) <= 0:
+                return "PCAP_DEVICE_FILE_EMPTY"
+        except Exception:
+            return "PCAP_DEVICE_FILE_EMPTY"
+        if not local_pcaps:
+            return "PCAP_PULL_FAILED"
+    if fallback_exists is True:
+        try:
+            if int(fallback_size or 0) <= 0:
+                return "PCAP_DEVICE_FILE_EMPTY"
+        except Exception:
+            return "PCAP_DEVICE_FILE_EMPTY"
+        if not local_pcaps:
+            return "PCAP_PULL_FAILED"
+    if pcap_size_int > 0:
+        return "PCAP_PARSE_FAILED"
+    if expected_exists is False and not diagnostics.get("latest_fallback_path"):
+        return "PCAP_DEVICE_FILE_MISSING"
+    return "PCAP_LOCAL_FILE_MISSING"
+
+
+def _derive_pcap_failure_summary(run_dir: Path, *, pcap_size_int: int) -> tuple[str | None, str | None]:
+    detail = _infer_pcap_failure_detail(run_dir, pcap_size_int=pcap_size_int)
+    summary = _read_json(run_dir / "analysis" / "summary.json") or {}
+    telemetry = summary.get("telemetry") if isinstance(summary.get("telemetry"), dict) else {}
+    stats = telemetry.get("stats") if isinstance(telemetry.get("stats"), dict) else {}
+    try:
+        netstats_total_bytes = int(stats.get("netstats_bytes_in_total") or 0) + int(stats.get("netstats_bytes_out_total") or 0)
+    except Exception:
+        netstats_total_bytes = 0
+    timeline = _read_json(run_dir / "analysis" / "interaction_timeline.json") or {}
+    timeline_available = bool(timeline)
+    timeline_complete = timeline.get("timeline_complete") if isinstance(timeline, dict) else None
+    if netstats_total_bytes > 0:
+        base = "Network traffic was observed by Android netstats, but the PCAP capture artifact is empty or unavailable."
+    else:
+        base = "PCAP capture artifact is empty or unavailable."
+    if timeline_available:
+        if timeline_complete is False:
+            base += " Scripted interaction timeline is present but incomplete."
+        else:
+            base += " Scripted interaction timeline is still available for protocol validation."
+    return detail, base
+
+
 def read_observed_version_code_details(
     device_serial: str,
     package_name: str,
@@ -514,6 +586,11 @@ def post_run_integrity_check(
         print(status_messages.status(f"Dataset validity: INVALID ({invalid_reason or 'PCAP_PARSE_ERROR'})", level="error"))
         pcap_failure_summary = str(dataset.get("pcap_failure_summary") or "").strip()
         pcap_failure_detail = str(dataset.get("pcap_failure_detail") or "").strip()
+        if not pcap_failure_summary and str(invalid_reason or "").startswith("PCAP_"):
+            pcap_failure_detail, pcap_failure_summary = _derive_pcap_failure_summary(
+                run_dir,
+                pcap_size_int=pcap_size_int,
+            )
         if pcap_failure_summary:
             print(status_messages.status(pcap_failure_summary, level="warn"))
             print(status_messages.status("This run is excluded from dataset quota.", level="warn"))

@@ -142,3 +142,79 @@ def test_post_run_integrity_explains_netstats_seen_but_pcap_missing(capsys, tmp_
     assert "excluded from dataset quota" in out
     assert "verify PCAPdroid capture/export and recollect" in out
     assert "PCAP failure detail: PCAP_DEVICE_FILE_EMPTY" in out
+
+
+def test_post_run_integrity_derives_pcap_failure_summary_for_historical_run(capsys, tmp_path: Path) -> None:
+    run_dir = tmp_path / "evidence" / "dynamic" / "run-4"
+    _write(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": False,
+                "invalid_reason_code": "PCAP_MISSING",
+                "pcap_size_bytes": 0,
+            }
+        },
+    )
+    _write(
+        run_dir / "analysis" / "summary.json",
+        {
+            "telemetry": {
+                "stats": {
+                    "netstats_bytes_in_total": 24942882,
+                    "netstats_bytes_out_total": 1494954,
+                }
+            }
+        },
+    )
+    _write(
+        run_dir / "analysis" / "interaction_timeline.json",
+        {
+            "timeline_complete": True,
+            "planned_step_count": 6,
+            "completed_step_count": 6,
+        },
+    )
+    _write(
+        run_dir / "analysis" / "pcap_report.json",
+        {
+            "report_status": "skip",
+            "pcap_size_bytes": 0,
+            "capinfos": {"parsed": {}},
+        },
+    )
+    _write(
+        run_dir / "analysis" / "pcap_features.json",
+        {
+            "metrics": {},
+            "proxies": {},
+            "quality": {
+                "report_status": "skip",
+                "pcap_enrichment": {
+                    "status": "skipped",
+                    "reason": "pcap_path_missing",
+                },
+            },
+        },
+    )
+    _write(
+        run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json",
+        {
+            "pcap_size_bytes": 0,
+            "pcap_valid": False,
+            "failure_diagnostics": {
+                "expected_device_path_exists": False,
+                "expected_device_path_size_bytes": None,
+                "latest_fallback_path": None,
+            },
+        },
+    )
+
+    _post_run_integrity_check(
+        SimpleNamespace(dynamic_run_id="run-4", evidence_path=str(run_dir))
+    )
+    out = capsys.readouterr().out
+    assert "Dataset validity: INVALID (PCAP_MISSING)" in out
+    assert "Network traffic was observed by Android netstats" in out
+    assert "Scripted interaction timeline is still available for protocol validation" in out
+    assert "PCAP failure detail: PCAP_DEVICE_FILE_MISSING" in out

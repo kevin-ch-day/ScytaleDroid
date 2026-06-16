@@ -755,6 +755,18 @@ def _render_run_results_impl(
                     app_result=app_result,
                     params=params,
                 )
+                try:
+                    refresh_saved_report_json(base_report)
+                except Exception as exc:
+                    print(
+                        status_messages.status(
+                            (
+                                "Report fidelity metadata refresh failed for "
+                                f"{app_result.package_name} (base report): {exc}"
+                            ),
+                            level="warn",
+                        )
+                    )
                 for artifact in app_result.artifacts:
                     try:
                         merge_persistence_metadata(

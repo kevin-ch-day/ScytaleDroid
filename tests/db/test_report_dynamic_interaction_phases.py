@@ -291,3 +291,34 @@ def test_generate_report_keeps_timeline_rows_when_pcap_missing(tmp_path: Path, m
     with (out_dir / "phase_packet_transport_summary.csv").open(encoding="utf-8") as handle:
         transport_rows = list(csv.DictReader(handle))
     assert transport_rows == []
+
+
+def test_main_prints_pcap_counters(capsys, monkeypatch, tmp_path: Path) -> None:
+    summary_path = tmp_path / "summary.json"
+    monkeypatch.setattr(
+        report,
+        "generate_report",
+        lambda output_dir=None: {
+            "scripted_runs_seen": 1,
+            "timeline_complete_runs": 1,
+            "timeline_incomplete_runs": 0,
+            "phase_rows_exported": 6,
+            "transport_rows_exported": 0,
+            "scripted_runs_valid_pcap": 0,
+            "scripted_runs_invalid_pcap": 1,
+            "scripted_runs_with_timeline_but_no_pcap": 1,
+            "transport_rows_skipped_missing_pcap": 6,
+            "output_files": {"summary_json": str(summary_path)},
+        },
+    )
+
+    rc = report.main([])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "scripted_runs_seen=1" in out
+    assert "phase_rows_exported=6 transport_rows_exported=0" in out
+    assert "scripted_runs_valid_pcap=0" in out
+    assert "scripted_runs_invalid_pcap=1" in out
+    assert "scripted_runs_with_timeline_but_no_pcap=1" in out
+    assert "transport_rows_skipped_missing_pcap=6" in out
