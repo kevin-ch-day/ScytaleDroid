@@ -1139,6 +1139,129 @@ def test_render_run_results_hides_diagnostics_prompt_after_persistence_exception
 
 
 @pytest.mark.unit
+def test_render_run_results_refreshes_base_report_after_persistence_even_without_saved_artifact_paths(
+    monkeypatch, tmp_path
+):
+    now = datetime.now(UTC)
+    manifest = SimpleNamespace(app_label="Example", package_name="com.example.app")
+    base_report = SimpleNamespace(
+        manifest=manifest,
+        exported_components=SimpleNamespace(providers=[]),
+        detector_results=[],
+        file_path="/tmp/example.apk",
+        metadata={"duration_seconds": 0.5},
+        hashes={},
+        analysis_version="1.0",
+        detector_metrics={},
+    )
+    artifact = ArtifactOutcome(
+        label="base.apk",
+        report=base_report,
+        severity=Counter(),
+        duration_seconds=0.5,
+        saved_path=None,
+        started_at=now,
+        finished_at=now,
+        metadata={},
+    )
+    app_result = AppRunResult(
+        package_name="com.example.app",
+        category="Test",
+        artifacts=[artifact],
+        app_label="Example",
+    )
+    outcome = RunOutcome(
+        results=[app_result],
+        started_at=now,
+        finished_at=now,
+        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
+        base_dir=tmp_path,
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        dry_run=False,
+        verbose_output=False,
+        persistence_ready=True,
+        session_stamp="sess-refresh-base",
+    )
+
+    monkeypatch.setattr(results, "_derive_highlight_stats", lambda *_a, **_k: {"providers": 0, "nsc_guard": 0, "secrets_suppressed": 0})
+    monkeypatch.setattr(results, "_build_permission_profile", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_component_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_build_static_risk_row", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_secret_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_collect_masvs_profile", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_collect_finding_signatures", lambda *_a, **_k: {})
+    monkeypatch.setattr(results, "_bulk_trend_deltas", lambda *_a, **_k: [])
+    monkeypatch.setattr(results, "_apply_display_names", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_persist_cohort_rollup", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_db_masvs_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_db_severity_table", lambda *_a, **_k: False)
+    monkeypatch.setattr(results, "_render_persistence_footer", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_post_run_views", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "_render_cross_app_insights", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        results,
+        "_collect_static_output_context",
+        lambda *_a, **_k: {
+            "session_id": "sess-refresh-base",
+            "device_serial": "n/a",
+            "snapshot_id": None,
+            "scope_analyzed": "Harvested APK artifacts only",
+            "mode_label": "Canonical",
+            "analyzed_apps": 1,
+            "planned_artifacts": 1,
+            "observed_artifacts": 1,
+            "acquisition": {},
+        },
+    )
+    monkeypatch.setattr(AppRunResult, "base_artifact_outcome", lambda self: self.artifacts[0], raising=False)
+    monkeypatch.setattr(
+        results,
+        "render_app_result",
+        lambda *_a, **_k: (
+            ["line"],
+            {"baseline": {"findings": []}},
+            {"High": 1, "Medium": 0, "Low": 0, "Info": 0},
+        ),
+    )
+    monkeypatch.setattr(
+        results,
+        "persist_run_summary",
+        lambda *_a, **_k: SimpleNamespace(
+            success=True,
+            runtime_findings=4,
+            persisted_findings=4,
+            findings_capped_total=0,
+            runtime_p0_findings=1,
+            persisted_p0_findings=1,
+            capped_p0_findings=0,
+            findings_capped_by_detector={},
+            string_samples_persisted=0,
+            persistence_warnings=[],
+            static_run_id=321,
+        ),
+    )
+    monkeypatch.setattr(results, "finalize_static_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "publish_persisted_artifacts", lambda *_a, **_k: None)
+    monkeypatch.setattr(results, "ingest_baseline_payload", lambda *_a, **_k: True)
+
+    refreshed_reports: list[object] = []
+    monkeypatch.setattr(
+        results,
+        "refresh_saved_report_json",
+        lambda report: refreshed_reports.append(report),
+    )
+
+    results.render_run_results(outcome, params)
+
+    assert refreshed_reports
+    assert refreshed_reports[0] is base_report
+
+
+@pytest.mark.unit
 def test_detail_buffer_compacts_leading_and_repeated_blank_lines() -> None:
     buffer = DetailBuffer()
     buffer.add("")

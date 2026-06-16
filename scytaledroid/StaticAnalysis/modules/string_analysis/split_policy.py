@@ -59,6 +59,20 @@ _STRONG_SIGNAL_TOKENS: tuple[str, ...] = (
 )
 
 
+def _contains_secret_prefix_fragment(value: str, prefix: str) -> bool:
+    start = 0
+    while True:
+        index = value.find(prefix, start)
+        if index < 0:
+            return False
+        before_ok = index == 0 or not value[index - 1].isalnum()
+        after_index = index + len(prefix)
+        after_ok = after_index >= len(value) or not value[after_index].isalnum()
+        if before_ok and after_ok:
+            return True
+        start = index + 1
+
+
 def is_split_member_context(artifact_context: Mapping[str, object] | None) -> bool:
     """Return whether *artifact_context* represents a split-member artifact."""
 
@@ -73,7 +87,11 @@ def has_strong_secret_signal(entry: IndexedString) -> bool:
         return False
 
     lowered_value = value.lower()
-    if any(lowered_value.startswith(prefix) for prefix in _DIRECT_SECRET_PREFIXES):
+    if any(
+        lowered_value.startswith(prefix)
+        or _contains_secret_prefix_fragment(lowered_value, prefix)
+        for prefix in _DIRECT_SECRET_PREFIXES
+    ):
         return True
     if "-----begin " in lowered_value and " private key-----" in lowered_value:
         return True
@@ -88,6 +106,24 @@ def has_strong_secret_signal(entry: IndexedString) -> bool:
         if part
     )
     return any(token in combined for token in _STRONG_SIGNAL_TOKENS)
+
+
+def should_skip_split_secret_entry(
+    entry: IndexedString,
+    *,
+    artifact_context: Mapping[str, object] | None,
+) -> bool:
+    """Return whether a split-member string entry should skip secret matching entirely."""
+
+    if not is_split_member_context(artifact_context):
+        return False
+
+    origin_type = canonical_origin_type(entry.origin_type)
+    if origin_type == "code":
+        return False
+    if has_strong_secret_signal(entry):
+        return False
+    return origin_type in {"native", "asset", "rn_bundle", "resource", "raw"}
 
 
 def should_skip_split_regex_work(
@@ -116,5 +152,6 @@ def should_skip_split_regex_work(
 __all__ = [
     "has_strong_secret_signal",
     "is_split_member_context",
+    "should_skip_split_secret_entry",
     "should_skip_split_regex_work",
 ]

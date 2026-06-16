@@ -29,6 +29,7 @@ from ..modules.string_analysis.matcher import (
 from ..modules.string_analysis.origins import canonical_origin_type
 from ..modules.string_analysis.split_policy import (
     is_split_member_context,
+    should_skip_split_secret_entry,
     should_skip_split_regex_work,
 )
 from .base import BaseDetector, register_detector
@@ -404,6 +405,9 @@ def _filter_index_for_split_secrets(
     retained = []
     skipped = 0
     for entry in index.strings:
+        if should_skip_split_secret_entry(entry, artifact_context=artifact_context):
+            skipped += 1
+            continue
         if should_skip_split_regex_work(entry, artifact_context=artifact_context):
             skipped += 1
             continue

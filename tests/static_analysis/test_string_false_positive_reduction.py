@@ -221,6 +221,27 @@ def test_secrets_detector_prefilters_low_value_split_native_entries() -> None:
     assert result.metrics["prefilter_retained_entries"] == 0
 
 
+def test_secrets_detector_prefilters_split_resource_noise_without_secret_context() -> None:
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value='{"feature_flag":"headline_banner","cdn":"images.example.net"}',
+                origin="res/raw/feature_config.json",
+                origin_type="raw",
+                confidence="low",
+            ),
+        )
+    )
+
+    result = SecretsDetector().run(_secrets_context(index, is_split_member=True))
+
+    assert result.findings == ()
+    assert result.metrics["split_prefilter_active"] is True
+    assert result.metrics["prefilter_scanned_entries"] == 1
+    assert result.metrics["prefilter_skipped_entries"] == 1
+    assert result.metrics["prefilter_retained_entries"] == 0
+
+
 def test_secrets_detector_keeps_split_code_origin_secret_candidates() -> None:
     index = StringIndex(
         strings=(
@@ -238,6 +259,26 @@ def test_secrets_detector_keeps_split_code_origin_secret_candidates() -> None:
     assert result.findings
     assert result.metrics["split_prefilter_active"] is False
     assert result.metrics["validated_strings"] >= 1
+    google_metrics = result.metrics["secret_types"]["google_api_key"]
+    assert google_metrics["candidate_entries"] == 1
+    assert google_metrics["raw_regex_matches"] >= 1
+
+
+def test_secrets_detector_keeps_split_raw_secret_candidates_with_embedded_key_prefix() -> None:
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value='{"apiKey":"AIza0123456789abcdefghijklmnopqrstuvwxy"}',
+                origin="res/raw/firebase_config.json",
+                origin_type="raw",
+                confidence="low",
+            ),
+        )
+    )
+
+    result = SecretsDetector().run(_secrets_context(index, is_split_member=True))
+
+    assert result.metrics["split_prefilter_active"] is False
     google_metrics = result.metrics["secret_types"]["google_api_key"]
     assert google_metrics["candidate_entries"] == 1
     assert google_metrics["raw_regex_matches"] >= 1

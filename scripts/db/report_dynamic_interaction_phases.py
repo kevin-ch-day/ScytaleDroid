@@ -275,6 +275,13 @@ def main(argv: list[str] | None = None) -> int:
         f"{summary['phase_rows_exported']} "
         f"transport_rows_exported={summary['transport_rows_exported']}"
     )
+    print(
+        "scripted_runs_valid_pcap="
+        f"{summary['scripted_runs_valid_pcap']} "
+        f"scripted_runs_invalid_pcap={summary['scripted_runs_invalid_pcap']} "
+        f"scripted_runs_with_timeline_but_no_pcap={summary['scripted_runs_with_timeline_but_no_pcap']} "
+        f"transport_rows_skipped_missing_pcap={summary['transport_rows_skipped_missing_pcap']}"
+    )
     return 0
 
 
