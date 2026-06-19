@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
+from scytaledroid.DeviceAnalysis.inventory.mode_labels import inventory_mode_label
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
 from scytaledroid.DeviceAnalysis.inventory.progress import format_inventory_age_display
 from scytaledroid.DeviceAnalysis.services import artifact_store, device_service
@@ -137,19 +138,6 @@ def _inventory_status_text(status_label: str) -> str:
     elif status_label not in {"FRESH", "STALE"}:
         tone = "muted"
     return _styled_summary_value(status_label, tone=tone)
-
-
-def _inventory_mode_label(mode: object) -> str | None:
-    value = str(mode or "").strip().lower()
-    if not value:
-        return None
-    if value == "bulk":
-        return "harvest-ready"
-    if value == "baseline":
-        return "baseline-full"
-    if value == "user_only":
-        return "profile-only"
-    return value.replace("_", "-")
 
 
 def _identity_quality_label(value: object) -> str | None:
@@ -598,10 +586,10 @@ def _evidence_alignment_text(
     if harvest_snapshot_id is None:
         return "snapshot ?"
     if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
-        return f"OK @ {harvest_snapshot_id}"
+        return f"aligned @ {harvest_snapshot_id}"
     if inventory_snapshot_id is not None:
-        return f"stale hv {harvest_snapshot_id} vs inv {inventory_snapshot_id}"
-    return f"hv @ {harvest_snapshot_id}"
+        return f"mismatch hv {harvest_snapshot_id} vs inv {inventory_snapshot_id}"
+    return f"harvest @ {harvest_snapshot_id}"
 
 
 def _summary_next_step(
@@ -630,7 +618,7 @@ def _render_compact_status(
     status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
     age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
     pkg_count = getattr(inventory_metadata, "package_count", None)
-    inventory_mode = _inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
+    inventory_mode = inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
     harvested_count = pipeline.get("harvested")
     blocked_policy = pipeline.get("blocked_policy")
     blocked_scope = pipeline.get("blocked_scope")
@@ -655,7 +643,12 @@ def _render_compact_status(
     inv_bits.append(f"{_styled_count_phrase(pkg_count, 'pkgs', tone='accent')}")
     inv_bits.append(colors.apply(f"{age_display} ago", colors.style("muted")))
     inv_part = " · ".join(inv_bits)
-    harvest_token = "none" if harvested_count in (None, 0) else str(harvested_count)
+    if harvested_count in (None, 0):
+        harvest_token = "none"
+    elif int(harvested_count) == 1:
+        harvest_token = "1 run"
+    else:
+        harvest_token = f"{harvested_count} runs"
     harvest_styled = colors.apply(
         harvest_token,
         colors.style("success" if harvested_count not in (None, 0) else "muted"),
@@ -665,7 +658,7 @@ def _render_compact_status(
     pol_txt = _format_summary_value(blocked_policy)
     sc_txt = _format_summary_value(blocked_scope)
     har_part = (
-        f"{colors.apply('Harvest', palette.muted, bold=True)} {harvest_styled} · "
+        f"{harvest_styled} · "
         f"{colors.apply('pullable', palette.muted)} {pullable_txt} · "
         f"{colors.apply('policy-blocked', palette.muted)} {pol_txt} · "
         f"{colors.apply('scope-blocked', palette.muted)} {sc_txt}"
@@ -724,7 +717,7 @@ def print_device_details(
     status_label = str(getattr(inventory_metadata, "status_label", "UNKNOWN")).upper()
     age_display = _compact_age_display(getattr(inventory_metadata, "age_display", None) or "unknown")
     pkg_count = getattr(inventory_metadata, "package_count", None)
-    inventory_mode = _inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
+    inventory_mode = inventory_mode_label(getattr(inventory_metadata, "collection_mode", None))
     identity_source = str(getattr(inventory_metadata, "identity_source", "") or "").strip()
     identity_quality = _identity_quality_label(getattr(inventory_metadata, "identity_quality", None))
     path_enriched = getattr(inventory_metadata, "path_enriched_packages", None)

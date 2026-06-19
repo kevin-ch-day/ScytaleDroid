@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.inventory.mode_labels import inventory_mode_label
 from scytaledroid.DeviceAnalysis.inventory import normalizer
 from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.Utils.DisplayUtils import (
@@ -116,19 +117,6 @@ def _summary_pairs(summary: dict[str, str | None]) -> list[tuple[str, str]]:
     ]
 
 
-def _collection_mode_label(payload: dict[str, object]) -> str | None:
-    mode = str(payload.get("collection_mode") or "").strip().lower()
-    if not mode:
-        return None
-    if mode == "bulk":
-        return "harvest-ready"
-    if mode == "baseline":
-        return "baseline-full"
-    if mode == "user_only":
-        return "profile-only"
-    return mode.replace("_", "-")
-
-
 def _snapshot_overview_pairs(payload: dict[str, object]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     snapshot_id = payload.get("snapshot_id")
@@ -137,7 +125,7 @@ def _snapshot_overview_pairs(payload: dict[str, object]) -> list[tuple[str, str]
     generated_at = payload.get("generated_at")
     if generated_at:
         pairs.append(("Captured", str(generated_at)))
-    mode_label = _collection_mode_label(payload)
+    mode_label = inventory_mode_label(payload.get("collection_mode"))
     if mode_label:
         pairs.append(("Inventory mode", mode_label))
     identity_quality = str(payload.get("identity_quality") or "").strip()

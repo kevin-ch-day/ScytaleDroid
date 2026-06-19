@@ -69,6 +69,14 @@ class RunPhaseCoverage:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", default=None, help="Optional explicit output directory.")
+    parser.add_argument(
+        "--overlay-latest-static",
+        action="store_true",
+        help=(
+            "Read-only reanalysis mode: synthesize a temporary static plan from the latest "
+            "matching stored static report instead of relying only on the embedded dynamic evidence plan."
+        ),
+    )
     return parser
 
 
@@ -368,6 +376,67 @@ def _corroboration_from_plan_and_report(
     }
 
 
+def _plan_overlay_bundle(
+    *,
+    package: str,
+    embedded_plan: Mapping[str, Any] | None,
+    static_run_id: int | None,
+    overlay_latest_static: bool,
+) -> dict[str, Any]:
+    embedded_enrichment = _plan_enrichment(embedded_plan)
+    bundle: dict[str, Any] = {
+        "plan": embedded_plan if isinstance(embedded_plan, Mapping) else {},
+        "plan_source": "embedded_plan",
+        "overlay_static_report_path": None,
+        "embedded_domains_count": int(embedded_enrichment["static_domain_count"]),
+        "overlay_domains_count": int(embedded_enrichment["static_domain_count"]),
+        "embedded_enriched_metadata_present": bool(embedded_enrichment["enriched_domain_metadata_present"]),
+        "overlay_enriched_metadata_present": bool(embedded_enrichment["enriched_domain_metadata_present"]),
+        "embedded_plan_stale": False,
+        "overlay_applied": False,
+    }
+    if not overlay_latest_static:
+        return bundle
+
+    from scripts.db import report_static_string_dynamic_corroboration as corroboration_report
+
+    overlay_plan, overlay_static_report_path, overlay_plan_source = corroboration_report._overlay_plan_from_static_report(
+        package,
+        embedded_plan=embedded_plan,
+        static_run_id=static_run_id,
+    )
+    if not isinstance(overlay_plan, Mapping):
+        return bundle
+
+    overlay_enrichment = _plan_enrichment(overlay_plan)
+    embedded_signature = (
+        int(embedded_enrichment["static_domain_count"]),
+        bool(embedded_enrichment["enriched_domain_metadata_present"]),
+        int(embedded_enrichment["actionable_static_domain_rows"]),
+        int(embedded_enrichment["exploratory_static_domain_rows"]),
+        int(embedded_enrichment["pair_group_count"]),
+    )
+    overlay_signature = (
+        int(overlay_enrichment["static_domain_count"]),
+        bool(overlay_enrichment["enriched_domain_metadata_present"]),
+        int(overlay_enrichment["actionable_static_domain_rows"]),
+        int(overlay_enrichment["exploratory_static_domain_rows"]),
+        int(overlay_enrichment["pair_group_count"]),
+    )
+    bundle.update(
+        {
+            "plan": dict(overlay_plan),
+            "plan_source": str(overlay_plan_source or "overlay_latest_static"),
+            "overlay_static_report_path": overlay_static_report_path,
+            "overlay_domains_count": int(overlay_enrichment["static_domain_count"]),
+            "overlay_enriched_metadata_present": bool(overlay_enrichment["enriched_domain_metadata_present"]),
+            "embedded_plan_stale": embedded_signature != overlay_signature,
+            "overlay_applied": True,
+        }
+    )
+    return bundle
+
+
 def _pcap_artifact_info(
     *,
     run_dir: Path,
@@ -527,7 +596,7 @@ def _phase_coverage(
     )
 
 
-def _collect_run_records(output_root: Path) -> list[dict[str, Any]]:
+def _collect_run_records(output_root: Path, *, overlay_latest_static: bool = False) -> list[dict[str, Any]]:
     from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
     from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import verify_dynamic_evidence_packs
 
@@ -552,11 +621,28 @@ def _collect_run_records(output_root: Path) -> list[dict[str, Any]]:
         report = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
         features = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
         summary_payload = _read_json(run_dir / "analysis" / "summary.json") or {}
-        plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
+        embedded_plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json") or {}
         verify_row = verify_by_run.get(run_id, {})
         evidence_status = _norm_text(verify_row.get("status"))
         if not evidence_status:
             evidence_status = "valid" if verify_row.get("valid_dataset_run") is True else "invalid"
+        static_run_id = _safe_int(
+            target.get("static_run_id")
+            or (
+                (embedded_plan.get("run_identity") or {}).get("static_run_id")
+                if isinstance(embedded_plan, Mapping) and isinstance(embedded_plan.get("run_identity"), Mapping)
+                else embedded_plan.get("static_run_id")
+                if isinstance(embedded_plan, Mapping)
+                else None
+            )
+        )
+        plan_bundle = _plan_overlay_bundle(
+            package=package,
+            embedded_plan=embedded_plan,
+            static_run_id=static_run_id,
+            overlay_latest_static=overlay_latest_static,
+        )
+        plan = plan_bundle["plan"] if isinstance(plan_bundle.get("plan"), Mapping) else {}
         service_bundle = summarize_pcap_service_context(report, package_name=package)
         service_context = service_bundle.get("service_context") if isinstance(service_bundle.get("service_context"), Mapping) else {}
         service_signals = service_bundle.get("service_signals") if isinstance(service_bundle.get("service_signals"), Mapping) else {}
@@ -579,13 +665,25 @@ def _collect_run_records(output_root: Path) -> list[dict[str, Any]]:
             netstats_observed_bytes=int(telemetry["netstats_observed_bytes"]),
         )
         phase = _phase_coverage(run_dir=run_dir, manifest=manifest, pcap_present=bool(pcap_info["pcap_present"]))
-        corroboration = _corroboration_from_plan_and_report(
+        embedded_corroboration = _corroboration_from_plan_and_report(
             run_id=run_id,
             package=package,
-            plan=plan,
+            plan=embedded_plan,
             report=report,
             run_dir=run_dir,
         )
+        overlay_corroboration = (
+            _corroboration_from_plan_and_report(
+                run_id=run_id,
+                package=package,
+                plan=plan,
+                report=report,
+                run_dir=run_dir,
+            )
+            if bool(plan_bundle.get("overlay_applied"))
+            else None
+        )
+        corroboration = overlay_corroboration or embedded_corroboration
         dynamic_domains = _collect_dynamic_domains(report)
         service_rows = [dict(row) for row in (service_context.get("services") or []) if isinstance(row, Mapping)]
         signal_rows = [dict(row) for row in (service_signals.get("signals") or []) if isinstance(row, Mapping)]
@@ -609,7 +707,15 @@ def _collect_run_records(output_root: Path) -> list[dict[str, Any]]:
                 "features": features,
                 "summary_payload": summary_payload,
                 "plan": plan,
+                "embedded_plan": embedded_plan,
                 "static_plan": plan,
+                "plan_source": str(plan_bundle.get("plan_source") or "embedded_plan"),
+                "overlay_static_report_path": plan_bundle.get("overlay_static_report_path"),
+                "embedded_plan_stale": bool(plan_bundle.get("embedded_plan_stale")),
+                "embedded_domains_count": _safe_int(plan_bundle.get("embedded_domains_count"), default=0),
+                "overlay_domains_count": _safe_int(plan_bundle.get("overlay_domains_count"), default=0),
+                "embedded_enriched_metadata_present": bool(plan_bundle.get("embedded_enriched_metadata_present")),
+                "overlay_enriched_metadata_present": bool(plan_bundle.get("overlay_enriched_metadata_present")),
                 "pcap_info": pcap_info,
                 "telemetry": telemetry,
                 "pcap_netstats_consistency": consistency,
@@ -632,6 +738,8 @@ def _collect_run_records(output_root: Path) -> list[dict[str, Any]]:
                     if isinstance(item, Mapping)
                 ),
                 "corroboration": corroboration,
+                "embedded_corroboration": embedded_corroboration,
+                "overlay_corroboration": overlay_corroboration,
                 "phase": phase,
                 "template_id": phase.template_id,
             }
@@ -951,6 +1059,13 @@ def _score_run(run: Mapping[str, Any], join_row: Mapping[str, Any] | None) -> di
         "unresolved_signal_count": _safe_int(run.get("unresolved_signal_count")),
         "timeline_available": int(bool(getattr(phase, "timeline_available", False))),
         "timeline_complete": int(bool(getattr(phase, "timeline_complete", False))),
+        "plan_source": _norm_text(run.get("plan_source")) or "embedded_plan",
+        "overlay_static_report_path": _norm_text(run.get("overlay_static_report_path")),
+        "embedded_plan_stale": int(bool(run.get("embedded_plan_stale"))),
+        "embedded_domains_count": _safe_int(run.get("embedded_domains_count")),
+        "overlay_domains_count": _safe_int(run.get("overlay_domains_count")),
+        "embedded_enriched_metadata_present": int(bool(run.get("embedded_enriched_metadata_present"))),
+        "overlay_enriched_metadata_present": int(bool(run.get("overlay_enriched_metadata_present"))),
         "dynamic_evidence_limitations": "; ".join(deduped_limitations),
         "pcap_failure_detail": _norm_text(pcap_info.get("pcap_failure_detail")),
         "service_resolution_rate": service_rate,
@@ -1841,9 +1956,9 @@ def _paper_pattern_summary_rows(
     return rows
 
 
-def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
+def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bool = False) -> dict[str, Any]:
     root = _dynamic_root()
-    run_rows = _collect_run_records(root)
+    run_rows = _collect_run_records(root, overlay_latest_static=overlay_latest_static)
     app_profiles = _load_app_profiles(str(row["package"]) for row in run_rows)
     for row in run_rows:
         package = str(row["package"])
@@ -1904,6 +2019,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
     summary = {
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "dynamic_root": str(root.resolve()),
+        "plan_analysis_mode": "overlay_latest_static" if overlay_latest_static else "embedded_plan",
         "runs_scanned": len(run_rows_sorted),
         "valid_runs": sum(1 for row in run_rows_sorted if int(row["valid_pack"]) == 1),
         "invalid_or_skipped_runs": sum(1 for row in run_rows_sorted if int(row["valid_pack"]) != 1),
@@ -1984,6 +2100,52 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             sorted(Counter(str(row["recommended_run_intent"]) for row in recommendation_rows_sorted).items())
         ),
     }
+    if overlay_latest_static:
+        embedded_enriched = sum(
+            1
+            for run in run_rows
+            if bool(((run.get("embedded_corroboration") or {}).get("enriched_domain_metadata_present")))
+        )
+        overlay_enriched = sum(
+            1
+            for run in run_rows
+            if bool(((run.get("overlay_corroboration") or {}).get("enriched_domain_metadata_present")))
+        )
+        embedded_actionable = sum(
+            1
+            for run in run_rows
+            if _safe_int((run.get("embedded_corroboration") or {}).get("corroborated_actionable_domains")) > 0
+        )
+        overlay_actionable = sum(
+            1
+            for run in run_rows
+            if _safe_int((run.get("overlay_corroboration") or {}).get("corroborated_actionable_domains")) > 0
+        )
+        overlay_actionable_static = sum(
+            1
+            for run in run_rows
+            if _safe_int((run.get("overlay_corroboration") or {}).get("actionable_static_domain_rows")) > 0
+        )
+        summary.update(
+            {
+                "runs_using_overlay_latest_static": sum(
+                    1 for run in run_rows if _norm_text(run.get("plan_source")) == "overlay_latest_static"
+                ),
+                "embedded_stale_plan_runs": sum(1 for run in run_rows if bool(run.get("embedded_plan_stale"))),
+                "runs_with_enriched_domain_metadata_embedded": embedded_enriched,
+                "runs_with_enriched_domain_metadata_overlay": overlay_enriched,
+                "runs_with_actionable_corroboration_embedded": embedded_actionable,
+                "runs_with_actionable_corroboration_overlay": overlay_actionable,
+                "actionable_corroboration_rate_overlay": (
+                    overlay_actionable / float(overlay_actionable_static)
+                    if overlay_actionable_static
+                    else None
+                ),
+            }
+        )
+        summary["known_limitations"] = list(summary.get("known_limitations") or []) + [
+            "overlay_latest_static is a read-only reanalysis mode and does not mutate historical embedded plans inside dynamic evidence packs.",
+        ]
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return summary
 
@@ -1991,7 +2153,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     output_dir = Path(args.output_dir).resolve() if args.output_dir else None
-    summary = generate_report(output_dir=output_dir)
+    summary = generate_report(output_dir=output_dir, overlay_latest_static=bool(args.overlay_latest_static))
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 

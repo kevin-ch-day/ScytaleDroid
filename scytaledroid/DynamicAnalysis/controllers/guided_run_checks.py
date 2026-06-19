@@ -8,6 +8,7 @@ import re
 import tempfile
 from pathlib import Path
 
+from scytaledroid.DeviceAnalysis.adb import package_manager as adb_package_manager
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages
 
 
@@ -90,15 +91,20 @@ def read_observed_version_code_details(
     run_shell_fn,
     extract_details_fn,
 ) -> dict[str, str]:
-    cmd_primary = ["dumpsys", "package", "--user", "0", package_name]
-    out = run_shell_fn(device_serial, cmd_primary)
-    if out and "Unknown option" not in out and "Bad argument" not in out:
-        dump = out
-        command_used = " ".join(cmd_primary)
+    result, command = adb_package_manager.read_supported_metadata_dump(
+        device_serial,
+        package_name,
+        run_command=lambda current: run_shell_fn(device_serial, list(current)),
+        is_successful=lambda value: bool(str(value or "").strip()),
+        extract_text=lambda value: str(value or ""),
+        accept_text=lambda text: adb_package_manager.output_looks_package_specific(text, package_name),
+    )
+    if result is None or command is None:
+        command = ["dumpsys", "package", package_name]
+        dump = run_shell_fn(device_serial, command)
     else:
-        cmd_fallback = ["dumpsys", "package", package_name]
-        dump = run_shell_fn(device_serial, cmd_fallback)
-        command_used = " ".join(cmd_fallback)
+        dump = str(result or "")
+    command_used = " ".join(command)
     parsed = extract_details_fn(dump, package_name)
     return {
         "version_code": parsed.get("version_code", ""),
@@ -169,14 +175,18 @@ def read_observed_signer_set_hash(
     *,
     run_shell_fn,
 ) -> str | None:
-    out = run_shell_fn(
+    result, command = adb_package_manager.read_supported_metadata_dump(
         device_serial,
-        ["dumpsys", "package", "--user", "0", package_name],
+        package_name,
+        run_command=lambda current: run_shell_fn(device_serial, list(current)),
+        is_successful=lambda value: bool(str(value or "").strip()),
+        extract_text=lambda value: str(value or ""),
+        accept_text=lambda text: adb_package_manager.output_looks_package_specific(text, package_name),
     )
-    if out and "Unknown option" not in out and "Bad argument" not in out:
-        dump = out
-    else:
+    if result is None or command is None:
         dump = run_shell_fn(device_serial, ["dumpsys", "package", package_name])
+    else:
+        dump = str(result or "")
     digests: list[str] = []
     for line in dump.splitlines():
         low = line.lower()

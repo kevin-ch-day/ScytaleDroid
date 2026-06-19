@@ -166,6 +166,11 @@ def default_service_signal_map_entries() -> tuple[ServiceSignalMapEntry, ...]:
         ServiceSignalMapEntry("optimizely", "audience_profiling_or_personalization", signal_strength="secondary", confidence="medium"),
         ServiceSignalMapEntry("optimizely", "third_party_analytics_measurement", signal_strength="secondary", confidence="medium"),
         ServiceSignalMapEntry("turner_cnn_legacy", "first_party_publisher_api", signal_strength="secondary", confidence="medium"),
+        ServiceSignalMapEntry("wbd_streaming_platform", "shared_platform_infrastructure", confidence="medium"),
+        ServiceSignalMapEntry("freewheel", "third_party_advertising"),
+        ServiceSignalMapEntry("freewheel", "ad_measurement_or_verification", signal_strength="secondary", confidence="medium"),
+        ServiceSignalMapEntry("mux_data", "third_party_analytics_measurement", confidence="medium"),
+        ServiceSignalMapEntry("brightline_ctv", "third_party_advertising"),
     )
 
 

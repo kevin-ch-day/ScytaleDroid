@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 
 from scytaledroid.DeviceAnalysis.device_menu.formatters import format_timestamp_utc
 from scytaledroid.DeviceAnalysis.services import device_service
-from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 from scytaledroid.Utils.DisplayUtils import (
     colors,
     display_settings,
@@ -16,23 +15,6 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
-
-
-def _inventory_badge(status: InventoryStatus | None) -> str:
-    if status is None or status.last_run_ts is None:
-        return "NONE (no snapshot)"
-    mode = str(getattr(status, "collection_mode", "") or "").strip().lower()
-    mode_label = ""
-    if mode == "bulk":
-        mode_label = " harvest-ready"
-    elif mode == "baseline":
-        mode_label = " baseline-full"
-    elif mode == "user_only":
-        mode_label = " profile-only"
-    count_text = (
-        f"{status.package_count} pkg" if status.package_count is not None else "unknown"
-    )
-    return f"{status.status_label}{mode_label} ({status.age_display}) {count_text}"
 
 
 def _render_header(adb_status: str, live_count: int) -> None:

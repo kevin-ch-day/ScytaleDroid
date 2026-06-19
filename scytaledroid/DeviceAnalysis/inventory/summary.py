@@ -44,7 +44,12 @@ def render_sync_summary_box(result) -> None:
         if split_packages <= 0:
             split_packages = sum(1 for row in rows if int((row or {}).get("split_count") or 1) > 1)
         if path_enriched <= 0 and bulk_only <= 0:
-            path_enriched = sum(1 for row in rows if (row or {}).get("path_fidelity") == "pm_path")
+            path_enriched = sum(
+                1
+                for row in rows
+                if (row or {}).get("path_fidelity")
+                in {"pm_path", "dumpsys_reconstructed", "bulk_single_path"}
+            )
             bulk_only = sum(1 for row in rows if (row or {}).get("path_fidelity") == "bulk_base_only")
 
     formatter.print_header(SUMMARY_BOX_TITLE)

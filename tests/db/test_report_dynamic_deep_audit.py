@@ -7,6 +7,14 @@ import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_deep_audit as report
+from scytaledroid.Config import app_config
+from scytaledroid.StaticAnalysis.core.models import (
+    ComponentSummary,
+    ManifestFlags,
+    ManifestSummary,
+    PermissionSummary,
+    StaticAnalysisReport,
+)
 
 
 def test_help() -> None:
@@ -494,7 +502,7 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
     }
 
     monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path / "output" / "evidence" / "dynamic")
-    monkeypatch.setattr(report, "_collect_run_records", lambda _root: runs)
+    monkeypatch.setattr(report, "_collect_run_records", lambda _root, overlay_latest_static=False: runs)
     monkeypatch.setattr(report, "_build_static_join_and_candidates", lambda _package_runs: (join_rows, {}))
     monkeypatch.setattr(
         report,
@@ -624,3 +632,207 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
     assert summary_json["top_recommended_actions"]["recollect_capture"] == 1
     assert summary_json["top_recommended_actions"]["repair_static_enrichment"] == 1
     assert summary_json["top_recommended_actions"]["repair_service_mapping"] == 1
+
+
+def test_overlay_latest_static_reanalysis_adds_provenance_without_mutating_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
+
+    reports_dir = tmp_path / "data" / "static_analysis" / "reports" / "latest"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    static_report = StaticAnalysisReport(
+        file_path="/tmp/base.apk",
+        relative_path=None,
+        file_name="base.apk",
+        file_size=123,
+        hashes={"sha256": "a" * 64},
+        manifest=ManifestSummary(
+            package_name="com.example.overlay",
+            version_name="1.0",
+            version_code="123",
+            app_label="Example Overlay",
+        ),
+        manifest_flags=ManifestFlags(),
+        permissions=PermissionSummary(),
+        components=ComponentSummary(),
+        exported_components=ComponentSummary(),
+        metadata={
+            "package": "com.example.overlay",
+            "version_name": "1.0",
+            "version_code": "123",
+            "base_apk_sha256": "deadbeef" * 8,
+            "artifact_set_hash": "feedface" * 8,
+            "run_signature": "cafebabe" * 8,
+            "session_stamp": "20260616-all-full",
+            "post_run_string_payload": {
+                "counts": {"api_keys": 1},
+                "samples": {
+                    "api_keys": [
+                        {
+                            "value": "AIzaSensitiveRawValueShouldNotSurface",
+                            "value_masked": "AIzaSens…",
+                            "src": "classes.dex",
+                            "root_domain": "auth.example.com",
+                            "source_type": "dex",
+                            "api_context": "auth_flow",
+                            "posture": "actionable",
+                            "ownership_class": "third_party",
+                            "pair_group": "google:token_endpoint_family",
+                            "verification_status": "supported_opt_in",
+                        }
+                    ]
+                },
+                "selected_samples": {},
+            },
+        },
+    )
+    (reports_dir / ("b" * 64 + ".json")).write_text(
+        json.dumps(static_report.to_dict(), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    output_root = tmp_path / "output" / "evidence" / "dynamic"
+    run_dir = output_root / "run-overlay"
+    (run_dir / "inputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "artifacts" / "pcapdroid_capture").mkdir(parents=True, exist_ok=True)
+    (run_dir / "artifacts" / "pcapdroid_capture" / "capture.pcap").write_bytes(b"pcap-bytes")
+    (run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json").write_text(
+        json.dumps({"pcap_size_bytes": 125000}),
+        encoding="utf-8",
+    )
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-overlay",
+                "target": {"package_name": "com.example.overlay", "static_run_id": 99},
+                "operator": {
+                    "run_profile": "baseline_idle",
+                    "interaction_level": "baseline",
+                    "actual_duration_s": 240,
+                    "telemetry_stats": {
+                        "netstats_available": True,
+                        "netstats_bytes_in_total": 2000000,
+                        "netstats_bytes_out_total": 300000,
+                        "netstats_rows": 10,
+                        "netstats_missing_rows": 0,
+                        "capture_ratio": 0.98,
+                        "max_gap_s": 1.0,
+                        "network_signal_quality": "strong",
+                    },
+                },
+                "dataset": {"run_profile": "baseline_idle", "min_pcap_bytes": 50000},
+                "artifacts": [
+                    {
+                        "type": "pcapdroid_capture",
+                        "relative_path": "artifacts/pcapdroid_capture/capture.pcap",
+                    }
+                ],
+                "observers": [{"status": "ok"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_plan = {
+        "run_identity": {
+            "base_apk_sha256": "deadbeef" * 8,
+            "artifact_set_hash": "feedface" * 8,
+            "run_signature": "cafebabe" * 8,
+            "static_handoff_hash": "b" * 64,
+        },
+        "network_targets": {
+            "domains": ["auth.example.com"],
+            "cleartext_domains": [],
+            "domain_sources": [
+                {
+                    "domain": "auth.example.com",
+                    "sources": ["strings"],
+                    "buckets": ["api_keys"],
+                    "postures": [],
+                    "ownership_classes": [],
+                    "api_contexts": [],
+                    "pair_groups": [],
+                    "verification_statuses": [],
+                }
+            ],
+        },
+    }
+    plan_path = run_dir / "inputs" / "static_dynamic_plan.json"
+    plan_path.write_text(json.dumps(original_plan, indent=2, sort_keys=True), encoding="utf-8")
+    original_bytes = plan_path.read_bytes()
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "capinfos": {"parsed": True},
+                "top_dns": [{"value": "auth.example.com", "count": 2}],
+                "top_sni": [],
+                "protocol_hierarchy": [{"protocol": "tcp", "frames": 10}],
+                "tls_quic_visibility": {"quic_candidate_packets": 0, "tls_visible": True},
+                "pcap_size_bytes": 125000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(json.dumps({"proxies": {"privacy_signal_hits": 1}}), encoding="utf-8")
+    (run_dir / "analysis" / "summary.json").write_text(json.dumps({}), encoding="utf-8")
+    (run_dir / "analysis" / "static_dynamic_overlap.json").write_text(json.dumps({}), encoding="utf-8")
+
+    monkeypatch.setattr(report, "_dynamic_root", lambda: output_root)
+    monkeypatch.setattr(
+        report,
+        "_build_static_join_and_candidates",
+        lambda _package_runs: (
+            {
+                "com.example.overlay": {
+                    "package": "com.example.overlay",
+                    "static_run_id": 99,
+                    "static_endpoint_inventory_status": "present",
+                    "provider_authority_count": 1,
+                    "providers_exported": 0,
+                    "uses_cleartext_traffic": 0,
+                    "static_http_endpoint_root_count": 0,
+                    "sdk_tracker_overlap_count": 0,
+                    "dynamic_signal_count": 2,
+                }
+            },
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        report,
+        "_load_app_profiles",
+        lambda _packages: {
+            "com.example.overlay": {"display_name": "Example Overlay", "profile_key": "TEST"},
+        },
+    )
+    monkeypatch.setattr(report, "_template_label", lambda _package: "none")
+
+    out_dir = tmp_path / "audit-overlay"
+    summary = report.generate_report(output_dir=out_dir, overlay_latest_static=True)
+
+    assert summary["plan_analysis_mode"] == "overlay_latest_static"
+    assert summary["runs_using_overlay_latest_static"] == 1
+    assert summary["embedded_stale_plan_runs"] == 1
+    assert summary["runs_with_enriched_domain_metadata_embedded"] == 0
+    assert summary["runs_with_enriched_domain_metadata_overlay"] == 1
+    assert summary["runs_with_actionable_corroboration_embedded"] == 0
+    assert summary["runs_with_actionable_corroboration_overlay"] == 1
+    assert summary["actionable_corroboration_rate_overlay"] == 1.0
+    assert plan_path.read_bytes() == original_bytes
+
+    with (out_dir / "run_evidence_quality.csv").open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["plan_source"] == "overlay_latest_static"
+    assert row["embedded_plan_stale"] == "1"
+    assert row["embedded_domains_count"] == "1"
+    assert row["overlay_domains_count"] == "1"
+    assert row["embedded_enriched_metadata_present"] == "0"
+    assert row["overlay_enriched_metadata_present"] == "1"
+    assert row["overlay_static_report_path"]
+    serialized = json.dumps(row, sort_keys=True)
+    assert "AIzaSensitiveRawValueShouldNotSurface" not in serialized

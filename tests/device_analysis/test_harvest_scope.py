@@ -161,3 +161,28 @@ def test_select_package_scope_menu_dedupes_profile_package_count(monkeypatch) ->
     assert app_profile_row[2] == 2  # Packages = device inventory rows
     assert app_profile_row[3] == scope._DASH  # Pullable unknown until a profile is chosen
     assert app_profile_row[4] == scope._DASH
+
+
+def test_select_package_scope_menu_marks_default_scope_recommended(monkeypatch) -> None:
+    captured_rows: dict[str, list[list[object]]] = {}
+    alpha = _row("com.example.alpha", "Alpha")
+
+    monkeypatch.setattr(scope, "_LAST_SCOPE", None)
+    monkeypatch.setattr(scope, "_render_scope_table", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scope, "_load_active_profile_scopes", lambda rows, device_serial: [])
+    monkeypatch.setattr(
+        scope.table_utils,
+        "render_table",
+        lambda headers, rows, **kwargs: captured_rows.setdefault("rows", rows),
+    )
+    monkeypatch.setattr(scope.prompt_utils, "get_choice", lambda *args, **kwargs: "2")
+
+    selection = scope.select_package_scope(
+        [alpha],
+        device_serial="SERIAL123",
+        is_rooted=False,
+    )
+
+    assert selection is not None
+    default_row = next(row for row in captured_rows["rows"] if str(row[1]) == "Play & user apps")
+    assert default_row[5] == "recommended"

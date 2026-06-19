@@ -341,3 +341,48 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert google_time["service_key"] == "google_platform"
     assert google_time["service_category"] == "platform_infrastructure"
+
+    mux = service_context.resolve_service_for_domain(
+        "out053a3bejgh7t0phqa0csou.litix.io",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert mux["service_key"] == "mux_data"
+    assert mux["owner_class"] == "third_party"
+
+    freewheel = service_context.resolve_service_for_domain(
+        "bea4.v.fwmrm.net",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert freewheel["service_key"] == "freewheel"
+    assert freewheel["service_category"] == "adtech"
+
+    brightline = service_context.resolve_service_for_domain(
+        "cdn-media.brightline.tv",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert brightline["service_key"] == "brightline_ctv"
+    assert brightline["owner_name"] == "BrightLine"
+
+    wbd = service_context.resolve_service_for_domain(
+        "default.any-any.prd.api.discomax.com",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert wbd["service_key"] == "wbd_streaming_platform"
+    assert wbd["owner_class"] == "first_party"
+
+    dianomi_worker = service_context.resolve_service_for_domain(
+        "gpp-decoder.dianomi.workers.dev",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert dianomi_worker["service_key"] == "dianomi"
+    assert dianomi_worker["service_category"] == "adtech"

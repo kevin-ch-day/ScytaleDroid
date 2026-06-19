@@ -254,17 +254,72 @@ def test_checkpoint_card_multiline_shape_default_table() -> None:
     )
     assert "Static progress" in card
     assert "Detector-stage events so far" in card
-    assert "Current package : Next App" in card
-    assert "Package id      : com.example.next" in card
-    assert "Packages" in card and "10 / 144" in card
-    assert "APK artifacts" in card and "120 / 531" in card
-    assert "APK reports saved" in card and "118 / 531" in card
-    assert "Warnings" in card
-    assert "Policy failures" in card
+    assert "Current package : Next App · com.example.next" in card
+    assert "Packages 10 / 144" in card
+    assert "APK artifacts 120 / 531" in card
+    assert "APK reports saved 118 / 531" in card
+    assert "Elapsed 18m 0s · ETA ~40m" in card
+    assert "Warnings 3" in card
+    assert "Policy failures 1" in card
+    assert "Finding failures 0" in card
+    assert "Execution errors 0" in card
+    assert "Skipped stages" not in card or "Skipped stages 0" not in card
     assert "OK detector stages" not in card
     assert "Skipped detector stages" not in card
     assert "Split note" in card
     assert "TikTok has 45 APK artifacts" in card
+
+
+def test_checkpoint_card_concise_pipeline_block_collapses_to_dense_lines() -> None:
+    card = format_scan_progress_checkpoint_card(
+        apps_completed=80,
+        total_apps=152,
+        artifacts_done=286,
+        total_artifacts=576,
+        current_app_label="Android Auto",
+        current_package_name="com.google.android.projection.gearhead",
+        agg_checks=Counter(
+            {
+                "warn": 475,
+                "policy_fail": 0,
+                "finding_fail": 94,
+                "error": 0,
+                "skipped_stages": 1424,
+                "parse_signals_est": 35,
+            }
+        ),
+        eta_text="15 mins 50 secs",
+        archive_reports_written=286,
+        elapsed_text="15 mins 37 secs",
+        verbose_metrics=False,
+    )
+
+    assert "Warnings 475 · Policy failures 0 · Finding failures 94 · Execution errors 0" in card
+    assert "Skipped stages 1424 · Parse/resource est. 35" in card
+    assert "Current package : Android Auto · com.google.android.projection.gearhead" in card
+    assert "Packages 80 / 152 · APK artifacts 286 / 576 · APK reports saved 286 / 576" in card
+    assert "Elapsed 15 mins 37 secs · ETA ~15 mins 50 secs" in card
+    assert "(skipped = profile/applicability skips; normal when detectors do not apply)" in card
+    assert "Metric" not in card
+
+
+def test_checkpoint_card_falls_back_to_separate_package_id_for_very_long_lines() -> None:
+    card = format_scan_progress_checkpoint_card(
+        apps_completed=1,
+        total_apps=10,
+        artifacts_done=3,
+        total_artifacts=10,
+        current_app_label="A Very Long Human Display Label That Should Force The Progress Card To Wrap Back",
+        current_package_name="com.example.this.package.name.is.long.enough.to.trigger.the.fallback.layout",
+        agg_checks=Counter({"warn": 1, "policy_fail": 0, "finding_fail": 0, "error": 0}),
+        eta_text="9m",
+        archive_reports_written=3,
+        elapsed_text="1m",
+        verbose_metrics=False,
+    )
+
+    assert "Current package : A Very Long Human Display Label That Should Force The Progress Card To Wrap Back" in card
+    assert "Package id      : com.example.this.package.name.is.long.enough.to.trigger.the.fallback.layout" in card
 
 
 def test_checkpoint_card_verbose_shows_full_table() -> None:

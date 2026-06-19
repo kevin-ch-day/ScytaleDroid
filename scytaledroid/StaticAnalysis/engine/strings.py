@@ -103,6 +103,54 @@ def _noise_tag(value: str, source: str | None, policy) -> str | None:
     return None
 
 
+def _source_in_policy_prefix_group(
+    source: str | None,
+    policy,
+    group_name: str,
+) -> bool:
+    if not source:
+        return False
+    prefixes = policy.source_prefix_groups.get(group_name)
+    if not prefixes:
+        return False
+    source_lower = source.replace("\\", "/").lower()
+    return any(source_lower.startswith(prefix) for prefix in prefixes)
+
+
+def _source_in_policy_exact_group(
+    source: str | None,
+    policy,
+    group_name: str,
+) -> bool:
+    if not source:
+        return False
+    exacts = policy.source_exact_groups.get(group_name)
+    if not exacts:
+        return False
+    source_lower = source.replace("\\", "/").lower()
+    return source_lower in exacts
+
+
+def _is_doc_like_network_source(source: str | None, policy) -> bool:
+    """Return whether *source* is a documentary/static-noise path for endpoint inventory.
+
+    The coarse ``noise`` gate intentionally treats many asset/resource origins as
+    low-value for expensive secret/regex work. For dynamic-plan bridge purposes we
+    still want endpoint roots from runtime-ish config/bundle sources, while keeping
+    obvious documentation/legal/media asset paths suppressed.
+    """
+
+    return _source_in_policy_prefix_group(
+        source,
+        policy,
+        "sources.doc_like_paths.prefix",
+    ) or _source_in_policy_exact_group(
+        source,
+        policy,
+        "sources.doc_like_paths.exact",
+    )
+
+
 def _looks_script_blob(value: str) -> bool:
     stripped = value.strip()
     if not stripped:
@@ -239,19 +287,24 @@ def _analyse_strings_from_index(
         src = _normalise_src(entry.origin, entry.origin_type, entry.sha256)
         source_type = _source_type_for(entry.origin_type)
         noise_tag = _noise_tag(value, entry.origin, policy)
-        skip_regex = _should_skip_regex(value) or bool(noise_tag)
-        if not skip_regex and should_skip_split_regex_work(
+        doc_like_network_source = _is_doc_like_network_source(entry.origin, policy)
+        low_signal_regex = _should_skip_regex(value)
+        endpoint_skip = low_signal_regex
+        if not endpoint_skip and should_skip_split_regex_work(
             entry,
             artifact_context=artifact_context,
         ):
-            skip_regex = True
+            endpoint_skip = True
             extra_counts["split_exploratory_regex_skipped"] += 1
-        if skip_regex:
+        if not endpoint_skip and noise_tag and doc_like_network_source:
+            endpoint_skip = True
+        if endpoint_skip:
             regex_skipped += 1
         if noise_tag:
             noise_counts[noise_tag] += 1
+        skip_regex = endpoint_skip or bool(noise_tag)
 
-        if not skip_regex:
+        if not endpoint_skip:
             for endpoint in _detect_endpoints(value):
                 sample_hash = _short_hash(endpoint.url)
                 if endpoint.root_domain:

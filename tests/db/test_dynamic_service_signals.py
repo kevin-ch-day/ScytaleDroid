@@ -167,3 +167,8 @@ def test_default_service_signal_map_seeds_cover_meta_sdk_and_microsoft_ads_atlas
     assert "first_party_social_platform" in by_service["x_platform"]
     assert "first_party_social_platform" in by_service["x_media_cdn"]
     assert "ad_measurement_or_verification" in by_service["x_ads_platform"]
+    assert "shared_platform_infrastructure" in by_service["wbd_streaming_platform"]
+    assert "third_party_advertising" in by_service["freewheel"]
+    assert "ad_measurement_or_verification" in by_service["freewheel"]
+    assert "third_party_analytics_measurement" in by_service["mux_data"]
+    assert "third_party_advertising" in by_service["brightline_ctv"]

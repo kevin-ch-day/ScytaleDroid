@@ -65,7 +65,9 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     # Compact pipeline strip: word labels (operator-readable) vs legacy "117 hv" tokens
     assert "117" in out and "411" in out and "18" in out
     assert "pullable" in out and "policy-blocked" in out and "scope-blocked" in out
-    assert "OK @ 26" in out
+    assert "117 runs" in out
+    assert "Harvest 117" not in out
+    assert "aligned @ 26" in out
     assert "Next: static analysis (menu 2)" in out
     assert "Device Capability" not in out
     assert "Pipeline State" not in out
@@ -219,5 +221,59 @@ def test_dashboard_next_step_explains_inventory_harvest_misalignment(monkeypatch
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "stale hv 30 vs inv 31" in out
+    assert "mismatch hv 30 vs inv 31" in out
     assert "Next: run harvest (2) to match latest inventory." in out
+
+
+def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monkeypatch, capsys) -> None:
+    active = {
+        "serial": "ZY22JK89DR",
+        "model": "moto g 5G - 2024",
+        "manufacturer": "Motorola",
+        "android_release": "15",
+        "device_type": "Physical",
+        "wifi_state": "On",
+        "battery_pct": "100",
+        "battery_status": "Charging",
+        "is_rooted": "NO",
+    }
+    inventory = SimpleNamespace(
+        status_label="STALE",
+        age_display="2 Days 22 Hrs 16 Mins",
+        package_count=578,
+        collection_mode="baseline",
+    )
+
+    monkeypatch.setattr(
+        dashboard,
+        "_compute_pipeline_state",
+        lambda _serial: {
+            "inventoried": 578,
+            "in_scope": 578,
+            "policy_eligible": 152,
+            "scheduled": 152,
+            "harvested": 1,
+            "receipts": 578,
+            "blocked_policy": 426,
+            "blocked_scope": 0,
+            "inventory_snapshot_id": 60,
+            "latest_harvest": {
+                "session_label": "20260615",
+                "snapshot_id": 60,
+            },
+        },
+    )
+    dashboard.print_dashboard(
+        summaries=[active],
+        active_details=active,
+        warnings=[],
+        last_refresh_ts=None,
+        serial_map={"ZY22JK89DR": active},
+        inventory_metadata=inventory,
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "full device" in out
+    assert "baseline-full" not in out
+    assert "aligned @ 60" in out
+    assert "1 run" in out

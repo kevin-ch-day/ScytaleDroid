@@ -188,6 +188,57 @@ def test_split_native_exploratory_regex_work_is_skipped_without_strong_context()
     assert payload["regex_skipped"] == 1
 
 
+def test_noise_tagged_runtime_asset_endpoint_survives_network_inventory() -> None:
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="https://cerebro.api.cnn.io/api/v1/config",
+                origin="assets/json/environments.json",
+                origin_type="asset",
+                confidence="low",
+            ),
+        )
+    )
+
+    payload = _analyse_strings_from_index(
+        index,
+        mode="both",
+        min_entropy=4.8,
+        max_samples=2,
+        cleartext_only=False,
+        include_https_risk=False,
+    )
+
+    assert payload["counts"]["endpoints"] == 1
+    assert payload["selected_samples"]["endpoints"][0]["root_domain"] == "cnn.io"
+    assert payload["selected_samples"]["endpoints"][0]["source_type"] == "asset"
+
+
+def test_noise_tagged_doc_like_asset_endpoint_stays_suppressed() -> None:
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="https://fonts.googleapis.com/css2?family=Roboto",
+                origin="assets/legal.html",
+                origin_type="asset",
+                confidence="low",
+            ),
+        )
+    )
+
+    payload = _analyse_strings_from_index(
+        index,
+        mode="both",
+        min_entropy=4.8,
+        max_samples=2,
+        cleartext_only=False,
+        include_https_risk=False,
+    )
+
+    assert payload["counts"]["endpoints"] == 0
+    assert payload["selected_samples"].get("endpoints") in (None, [])
+
+
 def _secrets_context(index: StringIndex, *, is_split_member: bool):
     return SimpleNamespace(
         apk_path=Path("/tmp/example.apk"),

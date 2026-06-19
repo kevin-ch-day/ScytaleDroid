@@ -363,26 +363,27 @@ def adb_pull(
     if completed.returncode != 0:
         stdout = (completed.stdout or "").strip()
         stderr = (completed.stderr or "").strip()
-        stderr = stderr or stdout or "adb pull failed"
-        if _is_stale_path_error(stderr):
+        failure_text = _preferred_adb_pull_failure_text(stdout=stdout, stderr=stderr)
+        match_text = "\n".join(part for part in (stderr, stdout) if part).strip() or failure_text
+        if _is_stale_path_error(match_text):
             log.warning(
                 f"adb pull hit stale path for {package_name}: {source_path}",
                 category="device",
             )
             return ArtifactError(source_path=source_path, reason="path_stale")
-        if _is_device_unavailable_error(stderr):
+        if _is_device_unavailable_error(match_text):
             log.warning(
-                f"adb pull aborted because the device became unavailable for {package_name}: {stderr}",
+                f"adb pull aborted because the device became unavailable for {package_name}: {match_text}",
                 category="device",
             )
             return ArtifactError(source_path=source_path, reason="device_unavailable")
         log.warning(
-            f"adb pull returned {completed.returncode} for {package_name}: {stderr}",
+            f"adb pull returned {completed.returncode} for {package_name}: {failure_text}",
             category="device",
         )
-        level = "warn" if "permission denied" in stderr.lower() else "error"
-        print(status_messages.status(f"adb pull failed: {stderr}", level=level))
-        reason = "permission denied" if "permission denied" in stderr.lower() else stderr
+        level = "warn" if "permission denied" in match_text.lower() else "error"
+        print(status_messages.status(f"adb pull failed: {failure_text}", level=level))
+        reason = "permission denied" if "permission denied" in match_text.lower() else failure_text
         return ArtifactError(source_path=source_path, reason=reason)
 
     return True
@@ -416,6 +417,34 @@ def _is_device_unavailable_error(message: str) -> bool:
             "failed to get feature set: device",
         )
     )
+
+
+def _preferred_adb_pull_failure_text(*, stdout: str, stderr: str) -> str:
+    """Return a stable operator/receipt message for a failed ``adb pull``.
+
+    ``adb pull`` sometimes emits partial progress lines to stdout before the device
+    disconnects. Those lines are not actionable failure reasons and should not leak
+    into receipts as the primary error text.
+    """
+
+    stderr = (stderr or "").strip()
+    stdout = (stdout or "").strip()
+    if stderr:
+        return stderr
+    if stdout and not _is_adb_pull_progress_only_output(stdout):
+        return stdout
+    return "adb pull failed"
+
+
+def _is_adb_pull_progress_only_output(text: str) -> bool:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    return all(_is_adb_pull_progress_line(line) for line in lines)
+
+
+def _is_adb_pull_progress_line(line: str) -> bool:
+    return bool(re.match(r"^\[\s*\d+%\]\s+/.+", line.strip()))
 
 
 def print_artifact_status(

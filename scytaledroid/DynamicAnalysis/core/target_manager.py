@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.DeviceAnalysis.adb import package_manager as adb_package_manager
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.identity import compute_signer_set_hash, extract_signer_digests
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
@@ -145,10 +146,18 @@ class TargetManager:
     def _read_package_dump(self, run_ctx: RunContext) -> str:
         serial = run_ctx.device_serial or ""
         package = run_ctx.package_name
-        # Paper contract: identity checks are pinned to user 0.
-        output = adb_shell.run_shell(serial, ["dumpsys", "package", "--user", "0", package])
-        if output and "Unknown option" not in output and "Bad argument" not in output and "Unknown argument" not in output:
-            return output
+        result, _command = adb_package_manager.read_supported_metadata_dump(
+            serial,
+            package,
+            run_command=lambda command: adb_shell.run_shell(serial, list(command)),
+            is_successful=lambda result: bool(str(result or "").strip()),
+            extract_text=lambda result: str(result or ""),
+            accept_text=lambda text: adb_package_manager.output_looks_package_specific(text, package),
+        )
+        if result is not None:
+            return str(result)
+        # Keep a plain dumpsys fallback for unexpected shell surfaces that return
+        # empty text through the shared helper.
         return adb_shell.run_shell(serial, ["dumpsys", "package", package])
 
     def _read_package_paths(self, run_ctx: RunContext) -> list[str]:

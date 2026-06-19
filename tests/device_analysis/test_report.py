@@ -76,3 +76,22 @@ def test_write_report_includes_inventory_snapshot_section(tmp_path: Path, monkey
     assert "| Inventory mode | harvest-ready |" in text
     assert "| Identity quality | strict |" in text
     assert "| Path fidelity | enriched=1  bulk_only=0 |" in text
+
+
+def test_write_report_uses_operator_friendly_full_refresh_label(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(report.app_config, "OUTPUT_DIR", str(tmp_path))
+
+    summary = {"serial": "SER123", "model": "Test Device"}
+    payload = {
+        "package_count": 0,
+        "packages": [],
+        "snapshot_id": 54,
+        "generated_at": "2026-06-18T12:00:00Z",
+        "collection_mode": "baseline",
+    }
+
+    path = report._write_report("SER123", summary, payload)
+    text = path.read_text(encoding="utf-8")
+
+    assert "| Inventory mode | full device |" in text
+    assert "baseline-full" not in text

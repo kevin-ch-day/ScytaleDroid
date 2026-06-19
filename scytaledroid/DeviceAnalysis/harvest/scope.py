@@ -469,7 +469,7 @@ def select_package_scope(
             packages=default_pkg,
             pullable=default_pkg if isinstance(default_pkg, int) else None,
             files=default_files,
-            note="default",
+            note="recommended",
             handler=lambda: _scope_default(rows, allow),
         )
         _add_entry(
@@ -629,7 +629,8 @@ def _render_scope_table(
     default_rows: Sequence[InventoryRow],
 ) -> None:
     print()
-    print("Execute harvest — inventory snapshot vs pull policy")
+    menu_utils.print_header("Harvest Scope")
+    print("Current inventory snapshot vs pull policy")
     print("-" * 86)
     candidates = len(rows)
     pullable_rows = _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)

@@ -58,7 +58,7 @@ def test_render_snapshot_block_uses_labeled_lines_and_compact_non_root_warning(m
     assert "Inventory    : none" in out
     assert "Last sync    : never" in out
     assert "Packages     : —" in out
-    assert "Mode         : baseline" in out
+    assert "Mode         : full device" in out
     assert "Policy       : Non-root paths (harvest/filtering may omit system APK paths)" in out
     assert "This run: ADB package inventory" in out
 
@@ -88,6 +88,7 @@ def test_render_snapshot_block_formats_last_sync_age(monkeypatch, capsys) -> Non
     out = colors.strip(capsys.readouterr().out)
     assert "Inventory    : FRESH" in out
     assert "Last sync    : " in out and "ago" in out
+    assert "Mode         : full device" in out
 
 
 def test_render_snapshot_block_uses_expanded_day_hour_minute_age(monkeypatch, capsys) -> None:
@@ -115,6 +116,7 @@ def test_render_snapshot_block_uses_expanded_day_hour_minute_age(monkeypatch, ca
     out = colors.strip(capsys.readouterr().out)
     assert "Inventory    : STALE" in out
     assert "Last sync    : 1 Day 2 hrs 49 mins ago" in out
+    assert "Mode         : full device" in out
 
 
 def test_prune_inventory_files_keeps_last_n_snapshots(tmp_path, monkeypatch):

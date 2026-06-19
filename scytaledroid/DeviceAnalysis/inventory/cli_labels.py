@@ -12,18 +12,11 @@ ERROR_SECTION = SECTION_HEADLINE
 # Pre-run CLI panel (distinct from SECTION_HEADLINE to avoid repeating the menu title).
 SNAPSHOT_PANEL_HEADLINE = "Current snapshot · before run"
 
-SCOPE_MENU_SUBTITLE = "Choose inventory depth and speed"
-PROFILE_MENU_SUBTITLE = "Choose profile"
-
 # Shown beside prior snapshot stats when opting into a slow full-device sync anyway.
 FULL_SYNC_WHILE_FRESH_PROMPT = (
     "Snapshot already fresh ({age} · {packages}). "
-    "Full baseline refresh is slower and runs per-package metadata. Continue anyway?"
+    "This reruns the full-device inventory and writes a new snapshot. Continue anyway?"
 )
-
-MENU_OPTION_FULL = "Full device (all packages, slowest)"
-MENU_OPTION_FAST = "Full device (harvest-ready)"
-MENU_OPTION_SCOPED = "Profile packages only (fastest, partial)"
 
 RUN_START_HEADER = "Refresh inventory · start"
 RUN_START_CARD_FOOTER = (

@@ -23,6 +23,9 @@ def _ctx(tmp_path: Path) -> RunContext:
 
 
 def test_read_package_dump_falls_back_when_unknown_argument(monkeypatch, tmp_path: Path) -> None:
+    from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
+
+    adb_cache.PACKAGE_COMMAND_SUPPORT_CACHE.clear()
     manager = TargetManager()
     ctx = _ctx(tmp_path)
     calls: list[list[str]] = []
@@ -41,6 +44,37 @@ def test_read_package_dump_falls_back_when_unknown_argument(monkeypatch, tmp_pat
     assert calls[1] == ["dumpsys", "package", "com.facebook.katana"]
 
 
+def test_read_package_dump_skips_user_scoped_probe_after_unsupported_cache(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
+
+    adb_cache.PACKAGE_COMMAND_SUPPORT_CACHE.clear()
+    manager = TargetManager()
+    first_ctx = _ctx(tmp_path)
+    second_ctx = _ctx(tmp_path)
+    second_ctx = RunContext(**{**second_ctx.__dict__, "package_name": "com.instagram.android"})
+    calls: list[list[str]] = []
+
+    def fake_run_shell(_serial: str, cmd: list[str]) -> str:
+        calls.append(cmd)
+        if cmd[:3] == ["dumpsys", "package", "--user"]:
+            return "Unknown argument: --user; use -h for help"
+        return "Package [com.instagram.android]\n  versionCode=123 minSdk=28 targetSdk=35\n"
+
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.core.target_manager.adb_shell.run_shell", fake_run_shell)
+    manager._read_package_dump(first_ctx)
+    out = manager._read_package_dump(second_ctx)
+
+    assert "versionCode=123" in out
+    assert calls == [
+        ["dumpsys", "package", "--user", "0", "com.facebook.katana"],
+        ["dumpsys", "package", "com.facebook.katana"],
+        ["dumpsys", "package", "com.instagram.android"],
+    ]
+
+
 def test_extract_version_code_scoped_to_package_block() -> None:
     manager = TargetManager()
     dump = """
@@ -51,3 +85,33 @@ Package [com.facebook.katana]
 """
     assert manager._extract_version_code(dump, "com.facebook.katana") == "468616494"
 
+
+def test_read_package_dump_falls_back_to_cmd_dump_package_when_plain_dumpsys_is_empty(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
+
+    adb_cache.PACKAGE_COMMAND_SUPPORT_CACHE.clear()
+    manager = TargetManager()
+    ctx = _ctx(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run_shell(_serial: str, cmd: list[str]) -> str:
+        calls.append(cmd)
+        if cmd[:2] == ["dumpsys", "package"]:
+            return "Packages:\n"
+        if cmd[:3] == ["cmd", "package", "dump-package"]:
+            return "Package [com.facebook.katana]\n  versionCode=468616494 minSdk=28 targetSdk=35\n"
+        return ""
+
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.core.target_manager.adb_shell.run_shell", fake_run_shell)
+
+    out = manager._read_package_dump(ctx)
+
+    assert "versionCode=468616494" in out
+    assert calls == [
+        ["dumpsys", "package", "--user", "0", "com.facebook.katana"],
+        ["dumpsys", "package", "com.facebook.katana"],
+        ["cmd", "package", "dump-package", "com.facebook.katana"],
+    ]

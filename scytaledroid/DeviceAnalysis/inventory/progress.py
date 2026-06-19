@@ -11,6 +11,7 @@ from scytaledroid.DeviceAnalysis.inventory.cli_labels import (
     PROGRESS_FOOTER_TIP,
     SNAPSHOT_PANEL_HEADLINE,
 )
+from scytaledroid.DeviceAnalysis.inventory.mode_labels import inventory_mode_label
 from scytaledroid.Utils.DisplayUtils import colors, status_messages, terminal, text_blocks
 from scytaledroid.Utils.DisplayUtils.colors import ansi
 
@@ -347,7 +348,7 @@ def render_snapshot_block(
         # computed elsewhere; this banner should report the recorded snapshot state only.
         pkg_text = str(snapshot_count if snapshot_count is not None else "—")
 
-    mode_text = (mode or "baseline").strip()
+    mode_text = inventory_mode_label(mode or "baseline") or str(mode or "baseline").strip()
     device_text = (serial or "unknown").strip()
     prev_id = getattr(previous_meta, "snapshot_id", None) if previous_meta else None
 

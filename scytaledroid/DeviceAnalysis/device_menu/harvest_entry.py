@@ -7,8 +7,6 @@ from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, text_blocks
 
-from .inventory_sync_feedback import print_inventory_run_feedback
-
 
 def inventory_live_drift(status: InventoryStatus | None) -> bool:
     """True when live device metadata disagrees with last snapshot (beyond age staleness)."""
@@ -32,7 +30,6 @@ def refresh_inventory_for_harvest_menu(serial: str) -> tuple[bool, InventoryStat
             ui_prefs=text_blocks.UI_PREFS,
             mode="bulk",
         )
-        print_inventory_run_feedback(result, mode_label="harvest-ready")
         return True, device_service.fetch_inventory_metadata(serial)
     except Exception as exc:
         print(

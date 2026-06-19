@@ -731,6 +731,8 @@ def render_cohort_build_history(row_models: list[object], build_rows: list[list[
             notes.append("extra manual outside quota")
         if int(getattr(row, "historical_valid_runs_count", 0)) > 0:
             notes.append("legacy evidence present")
+        if bool(getattr(row, "live_build_drift", False)):
+            notes.append("installed build needs static refresh")
         if str(getattr(row, "qa_label", "")).startswith("invalid"):
             notes.append("latest QA invalid")
         if "id_mismatch" in str(getattr(row, "qa_label", "")):
@@ -777,11 +779,12 @@ def render_cohort_status_help() -> None:
     print("Status   = high-level app bucket: complete, manual, baseline, blocked, or review.")
     print("Missing  = what is missing now, e.g. base 0/3, manual 0/2, or review QA.")
     print("Quota    = quota-valid runs against total quota; +N or + extra means supplemental valid runs outside quota.")
-    print("Build/QA = static prep state plus latest QA badge, e.g. current/✓, mixed/+L, ready/invalid.")
+    print("Build/QA = static prep state plus latest QA badge, e.g. current/✓, mixed/+L, stale/✓, ready/invalid.")
     print("Template = scripted template availability: news, acct, generic, or none.")
     print("Action   = the recommended next operator move shown on the queue.")
     print("locked   = manual phase unavailable until baseline minimum is met.")
     print("mixed    = current-build and legacy-build evidence both exist.")
+    print("stale    = installed device build drifted from the newest static plan; rerun harvest/static for this app.")
     print("valid+L  = latest QA valid, legacy evidence also exists.")
     print("Evidence-authoritative quota = archive/freeze truth.")
     print("Tracker-scoped latest-run state = queue-operating view of the active build.")
