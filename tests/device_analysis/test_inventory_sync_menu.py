@@ -5,109 +5,7 @@ from types import SimpleNamespace
 from scytaledroid.DeviceAnalysis.device_menu import actions, inventory_sync_feedback
 
 
-def test_select_inventory_sync_profile_auto_selects_single_active_profile(monkeypatch, capsys) -> None:
-    from scytaledroid.DynamicAnalysis import profile_loader
-
-    monkeypatch.setattr(
-        profile_loader,
-        "load_operational_profiles",
-        lambda: [
-            {
-                "profile_key": "NEWS",
-                "display_name": "News",
-                "app_count": 5,
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        profile_loader,
-        "load_profile_packages",
-        lambda profile_key: {"com.example.alpha"} if profile_key == "NEWS" else set(),
-    )
-    monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
-
-    selected = actions._select_inventory_sync_profile()
-
-    assert selected is not None
-    assert selected["profile_key"] == "NEWS"
-    assert selected["scope_id"] == "profile::news"
-    out = capsys.readouterr().out
-    assert "Only one active profile is available" in out
-
-
-def test_run_inventory_sync_menu_uses_profile_scoped_sync_and_drops_paper_labels(monkeypatch) -> None:
-    from scytaledroid.DeviceAnalysis import runtime_flags
-    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
-    from scytaledroid.DynamicAnalysis import profile_loader
-
-    captured_menu: dict[str, list[str]] = {}
-    scoped_call: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        actions.device_service,
-        "fetch_inventory_metadata",
-        lambda _serial: SimpleNamespace(status_label="STALE", is_stale=True),
-    )
-    monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
-    monkeypatch.setattr(actions.menu_utils, "print_header", lambda *args, **kwargs: None)
-
-    def _capture_menu(spec):
-        captured_menu["labels"] = [item.label for item in spec.items]
-        captured_menu["descriptions"] = [item.description for item in spec.items]
-        captured_menu["default"] = spec.default
-        captured_menu["show_descriptions"] = spec.show_descriptions
-
-    monkeypatch.setattr(actions.menu_utils, "render_menu", _capture_menu)
-    monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
-
-    prompts = iter(["3"])
-    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *args, **kwargs: next(prompts))
-
-    monkeypatch.setattr(
-        profile_loader,
-        "load_operational_profiles",
-        lambda: [
-            {
-                "profile_key": "NEWS",
-                "display_name": "News",
-                "app_count": 2,
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        profile_loader,
-        "load_profile_packages",
-        lambda profile_key: {"com.example.alpha", "com.example.beta"}
-        if profile_key == "NEWS"
-        else set(),
-    )
-
-    monkeypatch.setattr(
-        inventory_workflow,
-        "run_inventory_scoped_sync",
-        lambda **kwargs: scoped_call.update(kwargs),
-    )
-    monkeypatch.setattr(
-        inventory_workflow,
-        "run_inventory_sync",
-        lambda *args, **kwargs: None,
-    )
-
-    actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
-
-    assert captured_menu["labels"] == [
-        actions.inventory_cli_labels.MENU_OPTION_FULL,
-        actions.inventory_cli_labels.MENU_OPTION_FAST,
-        actions.inventory_cli_labels.MENU_OPTION_SCOPED,
-    ]
-    assert captured_menu["show_descriptions"] is True
-    assert scoped_call["serial"] == "SERIAL123"
-    assert scoped_call["scope_id"] == "profile::news"
-    assert scoped_call["packages"] == {"com.example.alpha", "com.example.beta"}
-    assert scoped_call["mode"] == "bulk"
-
-
-def test_run_inventory_sync_menu_uses_harvest_ready_full_sync_mode(monkeypatch) -> None:
+def test_run_inventory_sync_runs_full_baseline_mode_directly(monkeypatch) -> None:
     from scytaledroid.DeviceAnalysis import runtime_flags
     from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
 
@@ -119,10 +17,7 @@ def test_run_inventory_sync_menu_uses_harvest_ready_full_sync_mode(monkeypatch) 
         lambda _serial: SimpleNamespace(status_label="STALE", is_stale=True),
     )
     monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
-    monkeypatch.setattr(actions.menu_utils, "print_header", lambda *args, **kwargs: None)
-    monkeypatch.setattr(actions.menu_utils, "render_menu", lambda _spec: None)
     monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
-    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *args, **kwargs: "2")
     monkeypatch.setattr(
         inventory_workflow,
         "run_inventory_sync",
@@ -133,7 +28,7 @@ def test_run_inventory_sync_menu_uses_harvest_ready_full_sync_mode(monkeypatch) 
     actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
 
     assert captured["args"][0] == "SERIAL123"
-    assert captured["kwargs"]["mode"] == "bulk"
+    assert captured["kwargs"]["mode"] == "baseline"
 
 
 def test_build_main_menu_options_uses_pipeline_language(monkeypatch) -> None:
@@ -156,6 +51,7 @@ def test_build_main_menu_options_uses_pipeline_language(monkeypatch) -> None:
     assert "Browse harvested APKs" in labels
     assert "Export device summary" in labels
     assert "Manage harvest scope/watchlists" in labels
+    assert options[0].description == "Run a full-device inventory refresh and write a new snapshot."
 
 
 def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, capsys) -> None:
@@ -173,10 +69,7 @@ def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, 
         ),
     )
     monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
-    monkeypatch.setattr(actions.menu_utils, "print_header", lambda *args, **kwargs: None)
-    monkeypatch.setattr(actions.menu_utils, "render_menu", lambda _spec: None)
     monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
-    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
 
     prompted: dict[str, object] = {}
 
@@ -192,14 +85,16 @@ def test_run_inventory_sync_uses_compact_fresh_resync_confirmation(monkeypatch, 
 
     out = capsys.readouterr().out
     assert "Snapshot already fresh (34 secs · 546 pkgs)" in out
+    assert "This reruns the full-device inventory and writes a new snapshot." in out
     assert prompted["prompt"] == "Continue"
     assert prompted["default"] is False
 
 
-def test_run_inventory_sync_defaults_prompt_to_recommended_harvest_ready_mode(monkeypatch) -> None:
+def test_run_inventory_sync_does_not_show_scope_picker(monkeypatch) -> None:
     from scytaledroid.DeviceAnalysis import runtime_flags
+    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
 
-    captured: dict[str, object] = {}
+    captured: dict[str, object] = {"menu_rendered": False}
 
     monkeypatch.setattr(
         actions.device_service,
@@ -207,21 +102,20 @@ def test_run_inventory_sync_defaults_prompt_to_recommended_harvest_ready_mode(mo
         lambda _serial: SimpleNamespace(status_label="STALE", is_stale=True),
     )
     monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
-    monkeypatch.setattr(actions.menu_utils, "print_header", lambda *args, **kwargs: None)
-    monkeypatch.setattr(actions.menu_utils, "render_menu", lambda _spec: None)
     monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
-
-    def _capture_choice(_choices, **kwargs):
-        captured["default"] = kwargs.get("default")
-        captured["prompt"] = kwargs.get("prompt")
-        return "0"
-
-    monkeypatch.setattr(actions.prompt_utils, "get_choice", _capture_choice)
+    monkeypatch.setattr(actions.menu_utils, "render_menu", lambda _spec: captured.__setitem__("menu_rendered", True))
+    monkeypatch.setattr(
+        inventory_workflow,
+        "run_inventory_sync",
+        lambda *args, **kwargs: captured.update({"ran": True, "kwargs": kwargs})
+        or SimpleNamespace(stats=SimpleNamespace(total_packages=10), snapshot_id=1, elapsed_seconds=4.0),
+    )
 
     actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
 
-    assert captured["default"] == "2"
-    assert captured["prompt"] == "Scope [2]: "
+    assert captured["menu_rendered"] is False
+    assert captured["ran"] is True
+    assert captured["kwargs"]["mode"] == "baseline"
 
 
 def test_print_inventory_run_feedback_uses_single_compact_success_line(capsys) -> None:
@@ -251,3 +145,31 @@ def test_print_inventory_run_feedback_can_include_mode_label(capsys) -> None:
 
     out = capsys.readouterr().out
     assert "Refresh inventory (harvest-ready)" in out
+
+
+def test_run_inventory_sync_feedback_omits_internal_mode_label_for_default_path(monkeypatch, capsys) -> None:
+    from scytaledroid.DeviceAnalysis import runtime_flags
+    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
+
+    monkeypatch.setattr(
+        actions.device_service,
+        "fetch_inventory_metadata",
+        lambda _serial: SimpleNamespace(status_label="STALE", is_stale=True),
+    )
+    monkeypatch.setattr(runtime_flags, "set_allow_inventory_fallbacks", lambda _enabled: None)
+    monkeypatch.setattr(actions.prompt_utils, "press_enter_to_continue", lambda: None)
+    monkeypatch.setattr(
+        inventory_workflow,
+        "run_inventory_sync",
+        lambda *args, **kwargs: SimpleNamespace(
+            stats=SimpleNamespace(total_packages=578),
+            snapshot_id=61,
+            elapsed_seconds=7.0,
+        ),
+    )
+
+    actions._run_inventory_sync({"serial": "SERIAL123", "is_rooted": "Unknown"})
+
+    out = capsys.readouterr().out
+    assert "Refresh inventory · 578 pkgs · snap 61 · 7s" not in out
+    assert "baseline-full" not in out

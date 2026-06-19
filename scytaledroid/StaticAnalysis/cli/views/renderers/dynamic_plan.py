@@ -17,6 +17,18 @@ from .diagnostics_render import summarise_masvs_inline
 PLAN_SCHEMA_VERSION = "v1"
 PAPER_CONTRACT_VERSION = 1
 REASON_TAXONOMY_VERSION = 1
+_COMMON_TWO_PART_SUFFIXES = {
+    "co.uk",
+    "org.uk",
+    "gov.uk",
+    "ac.uk",
+    "com.au",
+    "net.au",
+    "org.au",
+    "edu.au",
+    "co.jp",
+    "com.br",
+}
 
 
 def _normalize_domain(value: object) -> str:
@@ -46,6 +58,19 @@ def _normalize_domain(value: object) -> str:
     if raw.startswith(".") or raw.endswith(".") or raw.startswith("-") or raw.endswith("-"):
         return ""
     return raw
+
+
+def _registrable_domain(value: object) -> str:
+    host = _normalize_domain(value)
+    if "." not in host:
+        return host
+    parts = [part for part in host.split(".") if part]
+    if len(parts) < 2:
+        return host
+    tail = ".".join(parts[-2:])
+    if len(parts) >= 3 and tail in _COMMON_TWO_PART_SUFFIXES:
+        return ".".join(parts[-3:])
+    return tail
 
 
 def _validate_plan_schema(plan: Mapping[str, object]) -> None:
@@ -190,6 +215,31 @@ def write_baseline_json(
     return path
 
 
+def _extract_network_surface_domains(report: StaticAnalysisReport) -> tuple[list[str], list[str]]:
+    detector_metrics = report.detector_metrics if isinstance(report.detector_metrics, Mapping) else {}
+    network_surface = detector_metrics.get("network_surface") if isinstance(detector_metrics, Mapping) else {}
+    surface = network_surface.get("surface") if isinstance(network_surface, Mapping) else {}
+    urls = surface.get("urls") if isinstance(surface, Mapping) else {}
+
+    domains: set[str] = set()
+    cleartext_domains: set[str] = set()
+    if not isinstance(urls, Mapping):
+        return [], []
+
+    for scheme_name, rows in urls.items():
+        scheme = str(scheme_name or "").strip().lower()
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
+            continue
+        for row in rows:
+            root = _registrable_domain(row)
+            if not root:
+                continue
+            domains.add(root)
+            if scheme == "http":
+                cleartext_domains.add(root)
+    return sorted(domains), sorted(cleartext_domains)
+
+
 def _extract_domains(string_payload: Mapping[str, object]) -> tuple[list[str], list[str]]:
     aggregates = string_payload.get("aggregates", {}) if isinstance(string_payload, Mapping) else {}
     samples = string_payload.get("selected_samples") if isinstance(string_payload, Mapping) else None
@@ -273,45 +323,46 @@ def _extract_nsc_domains(report: StaticAnalysisReport) -> tuple[list[str], list[
 def _domain_metadata_from_string_payload(
     string_payload: Mapping[str, object],
 ) -> dict[str, dict[str, set[str]]]:
-    samples = string_payload.get("samples")
-    if not isinstance(samples, Mapping):
-        samples = string_payload.get("selected_samples")
     metadata: dict[str, dict[str, set[str]]] = {}
-    if not isinstance(samples, Mapping):
-        return metadata
-    for bucket_name, rows in samples.items():
-        if not isinstance(rows, Sequence):
-            continue
-        for row in rows:
-            if not isinstance(row, Mapping):
+    sample_groups: list[Mapping[str, object]] = []
+    for field_name in ("samples", "selected_samples"):
+        raw = string_payload.get(field_name)
+        if isinstance(raw, Mapping) and raw:
+            sample_groups.append(raw)
+    for samples in sample_groups:
+        for bucket_name, rows in samples.items():
+            if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
                 continue
-            domain = _normalize_domain(row.get("root_domain"))
-            if not domain:
-                continue
-            target = metadata.setdefault(
-                domain,
-                {
-                    "sources": set(),
-                    "buckets": set(),
-                    "postures": set(),
-                    "ownership_classes": set(),
-                    "api_contexts": set(),
-                    "pair_groups": set(),
-                    "verification_statuses": set(),
-                },
-            )
-            target["sources"].add("strings")
-            target["buckets"].add(str(bucket_name))
-            for output_key, field_name in (
-                ("postures", "posture"),
-                ("ownership_classes", "ownership_class"),
-                ("api_contexts", "api_context"),
-                ("pair_groups", "pair_group"),
-                ("verification_statuses", "verification_status"),
-            ):
-                value = str(row.get(field_name) or "").strip()
-                if value:
-                    target[output_key].add(value)
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                domain = _normalize_domain(row.get("root_domain"))
+                if not domain:
+                    continue
+                target = metadata.setdefault(
+                    domain,
+                    {
+                        "sources": set(),
+                        "buckets": set(),
+                        "postures": set(),
+                        "ownership_classes": set(),
+                        "api_contexts": set(),
+                        "pair_groups": set(),
+                        "verification_statuses": set(),
+                    },
+                )
+                target["sources"].add("strings")
+                target["buckets"].add(str(bucket_name))
+                for output_key, field_name in (
+                    ("postures", "posture"),
+                    ("ownership_classes", "ownership_class"),
+                    ("api_contexts", "api_context"),
+                    ("pair_groups", "pair_group"),
+                    ("verification_statuses", "verification_status"),
+                ):
+                    value = str(row.get(field_name) or "").strip()
+                    if value:
+                        target[output_key].add(value)
     return metadata
 
 
@@ -319,6 +370,7 @@ def _merge_domain_sources(
     *,
     string_domains: Sequence[str],
     nsc_domains: Sequence[str],
+    network_surface_domains: Sequence[str],
     string_payload: Mapping[str, object],
 ) -> tuple[list[str], list[dict[str, object]]]:
     metadata = _domain_metadata_from_string_payload(string_payload)
@@ -326,6 +378,8 @@ def _merge_domain_sources(
         metadata.setdefault(domain, {}).setdefault("sources", set()).add("strings")
     for domain in nsc_domains:
         metadata.setdefault(domain, {}).setdefault("sources", set()).add("nsc")
+    for domain in network_surface_domains:
+        metadata.setdefault(domain, {}).setdefault("sources", set()).add("network_surface")
     merged_domains = sorted(metadata)
     domain_sources: list[dict[str, object]] = []
     for domain in merged_domains:
@@ -464,12 +518,16 @@ def build_dynamic_plan(
     string_cleartext = sorted({d for d in (_normalize_domain(item) for item in string_cleartext_raw) if d})
     nsc_domains = sorted({d for d in (_normalize_domain(item) for item in nsc_domains_raw) if d})
     nsc_cleartext = sorted({d for d in (_normalize_domain(item) for item in nsc_cleartext_raw) if d})
+    network_surface_domains_raw, network_surface_cleartext_raw = _extract_network_surface_domains(report)
+    network_surface_domains = sorted({d for d in (_normalize_domain(item) for item in network_surface_domains_raw) if d})
+    network_surface_cleartext = sorted({d for d in (_normalize_domain(item) for item in network_surface_cleartext_raw) if d})
     domains, domain_sources = _merge_domain_sources(
         string_domains=string_domains,
         nsc_domains=nsc_domains,
+        network_surface_domains=network_surface_domains,
         string_payload=string_payload if isinstance(string_payload, Mapping) else {},
     )
-    cleartext_domains = sorted(set(string_cleartext).union(nsc_cleartext))
+    cleartext_domains = sorted(set(string_cleartext).union(nsc_cleartext).union(network_surface_cleartext))
     declared = sorted(set(permissions.declared))
     dangerous = sorted(set(permissions.dangerous))
     high_value = _high_value_permissions(declared)

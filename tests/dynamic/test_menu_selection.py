@@ -406,3 +406,66 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
     assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "5/5 +1", "current/✓", "news", "—"]
     assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "3/5 n2", "mixed/+L", "acct", "manual"]
     assert captured["rows"][2] == ["3", "ESPN", "review", "review QA", "0/5 n5", "ready/invalid", "none", "baseline"]
+
+
+def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["4"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.facebook.katana",
+                display_name="Facebook",
+                baseline_countable=3,
+                baseline_extra=1,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=2,
+                prep_label="stale",
+                qa_label="valid (L)",
+                next_label="refresh static",
+                live_build_drift=True,
+                live_expected_version_code="472143276",
+                live_observed_version_code="472224766",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["headers"] == ["#", "App", "Status", "Missing", "Quota", "Build/QA", "Template", "Action"]
+    assert captured["rows"][0] == ["4", "Facebook", "refresh", "static refresh", "3/5 n2", "stale/+L", "acct", "refresh"]
+
+
+def test_compact_warning_line_mentions_static_refresh_need() -> None:
+    warning = menu_selection._compact_warning_line(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=[],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="Facebook",
+                live_build_drift=True,
+                prep_label="stale",
+                qa_label="valid (L)",
+                next_label="refresh static",
+            )
+        ]
+    )
+    assert warning == "Facebook needs static refresh."

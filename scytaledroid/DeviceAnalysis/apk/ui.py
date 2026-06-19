@@ -211,6 +211,27 @@ def render_plan_overview(resolution: PlanResolution, *, is_rooted: bool = False)
 
 def prompt_plan_action(resolution: PlanResolution) -> str:
     _ = resolution  # reserved for future plan-aware prompts
+    if is_harvest_simple_mode():
+        scheduled_packages = int(resolution.stats.get("scheduled_packages", 0))
+        scheduled_files = int(resolution.stats.get("scheduled_files", 0))
+        blocked_total = int(resolution.stats.get("blocked_packages", 0))
+        print()
+        print("Harvest action")
+        print("──────────────")
+        print(f"Ready: {scheduled_packages} package(s) · ~{scheduled_files} APK path(s)")
+        if blocked_total > 0:
+            print(f"Blocked before pull: {blocked_total} package(s)")
+        print("Enter = execute harvest · P = preview plan · 0 = cancel")
+        while True:
+            choice = prompt_utils.prompt_text("Choice", required=False).strip().lower()
+            if choice in {"", "1", "run", "execute", "go"}:
+                return "pull_snapshot"
+            if choice in {"p", "2", "preview"}:
+                return "dry-run"
+            if choice in {"0", "c", "cancel"}:
+                return "cancel"
+            print(status_messages.status("Invalid choice. Press Enter, P, or 0.", level="warn"))
+
     print("1) Execute harvest")
     print("2) Preview plan")
     print("0) Cancel")
@@ -237,7 +258,7 @@ def prompt_delta_filter_mode(summary: Mapping[str, object]) -> bool:
         )
     )
     print("1) Pull changed packages only (default)  - faster, avoids re-downloading unchanged APKs")
-    print("2) Pull all packages in selected scope   - forces a full refresh on disk")
+    print("2) Pull all packages in selected scope   - rewrites the full-device APK snapshot on disk")
     choice = prompt_utils.get_choice(["1", "2"], default="1", prompt="Select: ")
     return choice == "1"
 
@@ -419,7 +440,7 @@ def report_delta_scope_applied(delta_count: int) -> None:
 def report_full_refresh_scope_applied(selected_count: int) -> None:
     print(
         status_messages.status(
-            f"Full refresh scope: {selected_count} package(s) scheduled (changed-only mode disabled).",
+            f"Full-device scope: {selected_count} package(s) scheduled (changed-only mode disabled).",
             level="info",
         )
     )

@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
+    extract_version_code_details_from_dump,
+    read_observed_version_code_details,
+)
+from scytaledroid.DynamicAnalysis.plan_selection import load_plan_candidates
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     build_scoped_dataset_counts as _build_scoped_dataset_counts_shared,
@@ -59,6 +65,9 @@ class PreparedPackageSelectionRow:
     qa_label: str = "—"
     next_label: str = "—"
     technical_valid_active: int = 0
+    live_build_drift: bool = False
+    live_expected_version_code: str = ""
+    live_observed_version_code: str = ""
 
 
 def prepare_package_selection_view(
@@ -68,6 +77,7 @@ def prepare_package_selection_view(
     list_packages_fn,
     summarize_evidence_quota_fn,
     build_package_selection_row_fn,
+    device_serial: str | None = None,
 ) -> PreparedPackageSelectionView | None:
     packages = list_packages_fn(groups)
     if not packages:
@@ -77,6 +87,10 @@ def prepare_package_selection_view(
         dataset_pkgs = {pkg.lower() for pkg in load_dataset_packages()}
     except Exception:
         dataset_pkgs = set()
+    live_build_drift_map = _resolve_live_build_drift_map(
+        [package for package, _v, _c, _label in packages],
+        device_serial=device_serial,
+    )
 
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
         DatasetTrackerConfig,
@@ -112,6 +126,7 @@ def prepare_package_selection_view(
             tracker_apps=tracker_apps,
             cfg=cfg,
             recent_tracker_runs=recent_tracker_runs,
+            live_build_drift=live_build_drift_map.get(str(package or "").strip().lower()),
         )
         dataset_apps_total += prepared_row.dataset_app_count
         dataset_apps_complete += prepared_row.dataset_complete_count
@@ -163,6 +178,7 @@ def build_package_selection_row(
     tracker_apps,
     cfg,
     recent_tracker_runs,
+    live_build_drift=None,
     truncate_visible_fn,
     bucket_progress_label_fn,
     quota_progress_label_fn,
@@ -203,6 +219,9 @@ def build_package_selection_row(
     qa_label = "—"
     next_choice_label = "—"
     technical_valid_active = 0
+    live_build_drift_flag = False
+    live_expected_version_code = ""
+    live_observed_version_code = ""
 
     if package.lower() in dataset_pkgs:
         dataset_app_count = 1
@@ -311,6 +330,12 @@ def build_package_selection_row(
         if need_label == "0":
             next_label = "—"
         next_choice_label = next_label
+        if isinstance(live_build_drift, dict):
+            live_build_drift_flag = True
+            live_expected_version_code = str(live_build_drift.get("expected_version_code") or "").strip()
+            live_observed_version_code = str(live_build_drift.get("observed_version_code") or "").strip()
+            prep_label = "stale"
+            next_choice_label = "refresh static"
         build_row = [display, active_build, str(active_runs), str(legacy_valid), str(legacy_builds)]
 
     return PreparedPackageSelectionRow(
@@ -355,6 +380,9 @@ def build_package_selection_row(
         qa_label=qa_label,
         next_label=next_choice_label,
         technical_valid_active=technical_valid_active,
+        live_build_drift=live_build_drift_flag,
+        live_expected_version_code=live_expected_version_code,
+        live_observed_version_code=live_observed_version_code,
     )
 
 
@@ -452,6 +480,8 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
 
 
 def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
+    if row.live_build_drift:
+        return "installed build differs from newest static plan"
     if row.need_baseline > 0:
         return f"baseline runs needed: {row.need_baseline}"
     if row.need_interactive > 0:
@@ -464,11 +494,15 @@ def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
 
 def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
     issues: list[str] = []
+    drift_rows = [row.display_name for row in row_models if row.live_build_drift]
     mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
     invalid_rows = [row.display_name for row in row_models if str(row.qa_label).startswith("invalid")]
     mismatch_rows = [row.display_name for row in row_models if "id_mismatch" in str(row.qa_label)]
     baseline_needed = sum(1 for row in row_models if row.need_baseline > 0)
 
+    if drift_rows:
+        label = ", ".join(drift_rows[:2])
+        issues.append(f"{label} needs static refresh")
     if mixed_rows:
         label = ", ".join(mixed_rows[:2])
         issues.append(f"{label} mixed current/legacy evidence")
@@ -493,9 +527,15 @@ def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
 def _attention_items(row_models: list[PreparedPackageSelectionRow]) -> list[str]:
     items: list[str] = []
     baseline_needed = sum(1 for row in row_models if row.need_baseline > 0)
+    drift_rows = [row for row in row_models if row.live_build_drift]
     invalid_rows = [row for row in row_models if str(row.qa_label).startswith("invalid")]
     mixed_rows = [row for row in row_models if row.prep_label == "mixed"]
     mismatch_rows = [row for row in row_models if "id_mismatch" in str(row.qa_label)]
+    for row in drift_rows[:3]:
+        items.append(
+            f"{row.display_name}: installed build {row.live_observed_version_code or 'unknown'} "
+            f"drifted from static plan {row.live_expected_version_code or 'unknown'} — rerun harvest/static"
+        )
     for row in invalid_rows[:3]:
         items.append(f"{row.display_name}: QA invalid — review latest run before trusting quota credit")
     for row in mixed_rows[:3]:
@@ -539,6 +579,8 @@ def _render_compact_queue_table(
 
 
 def _queue_state_label(row: PreparedPackageSelectionRow) -> str:
+    if row.live_build_drift:
+        return "refresh"
     if str(row.qa_label).startswith("invalid"):
         return "review"
     if row.need_baseline > 0:
@@ -559,6 +601,8 @@ def _queue_need_label(
     interactive_required: int,
 ) -> str:
     state = _queue_state_label(row)
+    if row.live_build_drift:
+        return "static refresh"
     if state == "review":
         return "review QA"
     if state == "baseline":
@@ -631,6 +675,8 @@ def _queue_template_label(package_name: str) -> str:
 
 
 def _display_action_label(row: PreparedPackageSelectionRow) -> str:
+    if row.live_build_drift:
+        return "refresh"
     action = _main_action_label(row.next_label)
     if action != "manual":
         return action
@@ -652,12 +698,15 @@ def _display_next_line_action_label(row: PreparedPackageSelectionRow) -> str:
 def _group_queue_sections(
     row_models: list[PreparedPackageSelectionRow],
 ) -> list[tuple[str, list[PreparedPackageSelectionRow]]]:
+    needs_refresh: list[PreparedPackageSelectionRow] = []
     ready_manual: list[PreparedPackageSelectionRow] = []
     needs_baseline: list[PreparedPackageSelectionRow] = []
     complete_or_extra: list[PreparedPackageSelectionRow] = []
     other_blocked: list[PreparedPackageSelectionRow] = []
     for row in row_models:
-        if row.need_baseline > 0:
+        if row.live_build_drift:
+            needs_refresh.append(row)
+        elif row.need_baseline > 0:
             needs_baseline.append(row)
         elif row.need_interactive > 0 and row.next_label == "manual interaction":
             ready_manual.append(row)
@@ -666,6 +715,7 @@ def _group_queue_sections(
         else:
             other_blocked.append(row)
     sections: list[tuple[str, list[PreparedPackageSelectionRow]]] = []
+    sections.append(("Needs static refresh", needs_refresh))
     sections.append(("Ready for manual interaction", ready_manual))
     sections.append(("Needs baseline capture", needs_baseline))
     sections.append(("Complete / over-quota", complete_or_extra))
@@ -739,6 +789,8 @@ def _main_action_label(value: str) -> str:
     text = str(value or "").strip()
     if text == "manual interaction":
         return "manual"
+    if text == "refresh static":
+        return "refresh"
     return text or "—"
 
 
@@ -818,6 +870,7 @@ def _compact_prep_label(value: str) -> str:
         "mixed": "mixed",
         "legacy": "legacy",
         "ready": "ready",
+        "stale": "stale",
     }
     return mapping.get(text, str(value or "").strip() or "—")
 
@@ -831,6 +884,48 @@ def _compact_qa_label(value: str) -> str:
     if text == "valid (id_mismatch)":
         return "valid+id"
     return text or "—"
+
+
+def _resolve_live_build_drift_map(
+    packages: list[str],
+    *,
+    device_serial: str | None,
+) -> dict[str, dict[str, str]]:
+    if not str(device_serial or "").strip():
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for package_name in packages:
+        pkg = str(package_name or "").strip()
+        if not pkg:
+            continue
+        try:
+            candidates, _note = load_plan_candidates(pkg)
+        except Exception:
+            continue
+        if not candidates:
+            continue
+        newest = sorted(candidates, key=lambda row: row.get("generated_at") or "", reverse=True)[0]
+        identity = newest.get("identity") if isinstance(newest.get("identity"), dict) else {}
+        expected_vc = str(identity.get("version_code") or newest.get("version_code") or "").strip()
+        if not expected_vc:
+            continue
+        try:
+            observed = read_observed_version_code_details(
+                str(device_serial).strip(),
+                pkg,
+                run_shell_fn=lambda serial, command: adb_shell.run_shell(serial, list(command)),
+                extract_details_fn=extract_version_code_details_from_dump,
+            )
+        except Exception:
+            continue
+        observed_vc = str(observed.get("version_code") or "").strip()
+        if not observed_vc or observed_vc == expected_vc:
+            continue
+        out[pkg.lower()] = {
+            "expected_version_code": expected_vc,
+            "observed_version_code": observed_vc,
+        }
+    return out
 
 
 def build_scoped_dataset_counts(

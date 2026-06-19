@@ -156,6 +156,41 @@ def test_get_package_metadata_falls_back_when_user_scoped_dumpsys_is_unsupported
     assert metadata["version_name"] == "2.4.6"
 
 
+def test_get_package_metadata_caches_user_scoped_dumpsys_unsupported_per_serial(
+    monkeypatch,
+) -> None:
+    package_info.adb_cache.PACKAGE_META_CACHE.clear()
+    package_info.adb_cache.PACKAGE_COMMAND_SUPPORT_CACHE.clear()
+
+    calls: list[list[str]] = []
+
+    def _run_shell_command(_serial, command, timeout=25):
+        calls.append(command)
+        if command[:2] == ["dumpsys", "package"] and "--user" in command:
+            return SimpleNamespace(returncode=0, stdout="Unknown argument: --user; use -h for help", stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout="""
+  Package [com.example.one] (abc123):
+    appId=10234
+    versionName=2.4.6
+            """,
+        )
+
+    monkeypatch.setattr(package_info.adb_client, "run_shell_command", _run_shell_command)
+
+    first = package_info.get_package_metadata("SER123", "com.example.one", refresh=True)
+    second = package_info.get_package_metadata("SER123", "com.example.two", refresh=True)
+
+    assert first["version_name"] == "2.4.6"
+    assert second["version_name"] == "2.4.6"
+    assert calls == [
+        ["dumpsys", "package", "--user", "0", "com.example.one"],
+        ["dumpsys", "package", "com.example.one"],
+        ["dumpsys", "package", "com.example.two"],
+    ]
+
+
 def test_get_package_paths_prefers_user_scoped_cmd_path_and_falls_back(monkeypatch) -> None:
     monkeypatch.setattr(package_info.adb_cache.PACKAGE_PATH_CACHE, "get", lambda _key: None)
     monkeypatch.setattr(package_info.adb_cache.PACKAGE_PATH_CACHE, "set", lambda _key, _value: None)

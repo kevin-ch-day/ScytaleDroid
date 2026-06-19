@@ -259,17 +259,92 @@ def test_generate_report_recomputes_service_context_from_top_indicators(tmp_path
     assert summary["unresolved_signal_rows"] == 0
     assert summary["top_services_by_app"]["com.twitter.android"][0].startswith("x_media_cdn:")
 
+
+def test_generate_report_recomputes_cnn_streaming_and_adtech_context(tmp_path: Path, monkeypatch) -> None:
+    dynamic_root = tmp_path / "output" / "evidence" / "dynamic"
+
+    run_dir = dynamic_root / "run-cnn"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "dynamic_run_id": "run-cnn",
+            "status": "completed",
+            "target": {"package_name": "com.cnn.mobile.android.phone", "display_name": "CNN"},
+            "operator": {"run_profile": "interaction_manual", "interaction_level": "active"},
+            "dataset": {"valid_dataset_run": True},
+            "artifacts": [
+                {
+                    "relative_path": "artifacts/pcapdroid_capture/app.pcap",
+                    "type": "pcapdroid_capture",
+                    "produced_by": "pcapdroid_capture",
+                }
+            ],
+        },
+    )
+    (run_dir / "artifacts" / "pcapdroid_capture").mkdir(parents=True, exist_ok=True)
+    (run_dir / "artifacts" / "pcapdroid_capture" / "app.pcap").write_bytes(b"pcap")
+    _write_json(
+        run_dir / "analysis" / "pcap_report.json",
+        {
+            "report_status": "ok",
+            "protocol_hierarchy": [{"protocol": "tcp", "bytes": 10, "frames": 1}],
+            "top_dns": [
+                {"value": "out053a3bejgh7t0phqa0csou.litix.io", "count": 13},
+                {"value": "bea4.v.fwmrm.net", "count": 10},
+                {"value": "default.any-any.prd.api.discomax.com", "count": 4},
+                {"value": "gpp-decoder.dianomi.workers.dev", "count": 4},
+            ],
+            "top_sni": [
+                {"value": "cdn-media.brightline.tv", "count": 4},
+                {"value": "top.warnermediacdn.com", "count": 4},
+                {"value": "freeview.ngtv.io", "count": 8},
+            ],
+            "service_context": {
+                "observed_domain_count": 7,
+                "service_count": 0,
+                "unresolved_domain_count": 7,
+                "services": [],
+                "unresolved_domains": [
+                    {"domain": "out053a3bejgh7t0phqa0csou.litix.io", "root_domain": "litix.io", "total_hits": 13},
+                    {"domain": "bea4.v.fwmrm.net", "root_domain": "fwmrm.net", "total_hits": 10},
+                    {"domain": "default.any-any.prd.api.discomax.com", "root_domain": "discomax.com", "total_hits": 4},
+                    {"domain": "gpp-decoder.dianomi.workers.dev", "root_domain": "workers.dev", "total_hits": 4},
+                    {"domain": "cdn-media.brightline.tv", "root_domain": "brightline.tv", "total_hits": 4},
+                    {"domain": "top.warnermediacdn.com", "root_domain": "warnermediacdn.com", "total_hits": 4},
+                    {"domain": "freeview.ngtv.io", "root_domain": "ngtv.io", "total_hits": 8},
+                ],
+            },
+            "service_signals": {
+                "signal_count": 0,
+                "services_without_signal_mappings": [],
+                "signals": [],
+            },
+        },
+    )
+    _write_json(run_dir / "analysis" / "pcap_features.json", {"proxies": {}})
+
+    monkeypatch.setattr(report, "_dynamic_root", lambda: dynamic_root)
+    out_dir = tmp_path / "audit"
+    summary = report.generate_report(output_dir=out_dir)
+
+    assert summary["unresolved_service_rows"] == 0
+    assert summary["unresolved_signal_rows"] == 0
+    top_services = summary["top_services_by_app"]["com.cnn.mobile.android.phone"]
+    assert any(item.startswith("mux_data:") for item in top_services)
+    assert any(item.startswith("freewheel:") for item in top_services)
+    assert any(item.startswith("wbd_streaming_platform:") for item in top_services)
+
     with (out_dir / "per_run_summary.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     row = rows[0]
-    assert row["package"] == "com.twitter.android"
+    assert row["package"] == "com.cnn.mobile.android.phone"
     assert row["unresolved_service_count"] == "0"
-    assert row["service_count"] == "3"
+    assert row["service_count"] == "5"
 
     with (out_dir / "per_app_service_summary.csv").open(encoding="utf-8") as handle:
         service_rows = list(csv.DictReader(handle))
     service_keys = {row["service_key"] for row in service_rows}
-    assert {"x_platform", "x_media_cdn", "google_platform"} <= service_keys
+    assert {"mux_data", "freewheel", "wbd_streaming_platform", "dianomi", "brightline_ctv"} <= service_keys
 
 
 def test_generate_report_separates_x_ads_from_platform_traffic(tmp_path: Path, monkeypatch) -> None:

@@ -138,6 +138,76 @@ def test_adb_pull_normalizes_device_unavailable_error(
     assert capsys.readouterr().out == ""
 
 
+def test_adb_pull_ignores_progress_only_stdout_as_error_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scytaledroid.DeviceAnalysis.harvest import common
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError
+
+    dest = tmp_path / "base.apk"
+
+    monkeypatch.setattr(
+        common.adb_client,
+        "run_adb_command",
+        lambda *_args, **_kwargs: _Completed(
+            returncode=1,
+            stdout="[ 88%] /data/app/com.example/base.apk",
+            stderr="",
+        ),
+    )
+
+    result = common.adb_pull(
+        adb_path="adb",
+        serial="SERIAL",
+        source_path="/data/app/com.example/base.apk",
+        dest_path=dest,
+        package_name="pkg",
+        verbose=False,
+        overwrite_existing=False,
+    )
+
+    assert isinstance(result, ArtifactError)
+    assert result.reason == "adb pull failed"
+    assert "adb pull failed: adb pull failed" in capsys.readouterr().out
+
+
+def test_adb_pull_detects_device_unavailable_from_mixed_stdout_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scytaledroid.DeviceAnalysis.harvest import common
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError
+
+    dest = tmp_path / "base.apk"
+
+    monkeypatch.setattr(
+        common.adb_client,
+        "run_adb_command",
+        lambda *_args, **_kwargs: _Completed(
+            returncode=1,
+            stdout="[ 88%] /data/app/com.example/base.apk",
+            stderr="adb: error: failed to get feature set: device 'SERIAL' not found",
+        ),
+    )
+
+    result = common.adb_pull(
+        adb_path="adb",
+        serial="SERIAL",
+        source_path="/data/app/com.example/base.apk",
+        dest_path=dest,
+        package_name="pkg",
+        verbose=False,
+        overwrite_existing=False,
+    )
+
+    assert isinstance(result, ArtifactError)
+    assert result.reason == "device_unavailable"
+    assert capsys.readouterr().out == ""
+
+
 def test_iter_harvest_package_manifest_paths_sorted_and_skips_missing(tmp_path: Path) -> None:
     from scytaledroid.DeviceAnalysis.harvest import common
 

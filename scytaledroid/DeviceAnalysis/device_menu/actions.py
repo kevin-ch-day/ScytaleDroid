@@ -13,7 +13,6 @@ from scytaledroid.Utils.DisplayUtils import (
     menu_utils,
     prompt_utils,
     status_messages,
-    table_utils,
 )
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -21,7 +20,6 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from .dashboard import _compact_age_display
 from .harvest_entry import run_execute_harvest_menu_precheck
 from .inventory_guard import ensure_recent_inventory
-from .inventory_sync_feedback import print_inventory_run_feedback
 
 # Keep menu routing aligned with handle_choice to avoid accidental swaps in the CLI.
 _HELPER_ROUTES = {
@@ -164,7 +162,7 @@ def build_main_menu_options(
         menu_utils.MenuOption(
             "1",
             "Refresh inventory",
-            description="Refresh the current device inventory and snapshot state.",
+            description="Run a full-device inventory refresh and write a new snapshot.",
             badge=inv_badge or needs_active,
         ),
         menu_utils.MenuOption(
@@ -391,103 +389,37 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         root_state = (active_device or {}).get("is_rooted") or "Unknown"
         allow_fallbacks = str(root_state).strip().lower() != "yes"
         set_allow_inventory_fallbacks(allow_fallbacks)
+        if status and status.status_label.upper() == "FRESH" and not status.is_stale:
+            print()
+            age_raw = getattr(status, "age_display", None)
+            age_compact = _compact_age_display(age_raw) if age_raw else "recent"
+            pkg_note = (
+                f"{status.package_count} pkgs"
+                if getattr(status, "package_count", None) is not None
+                else "pkgs on snapshot"
+            )
+            print(
+                status_messages.status(
+                    inventory_cli_labels.FULL_SYNC_WHILE_FRESH_PROMPT.format(
+                        age=age_compact,
+                        packages=pkg_note,
+                    ),
+                    level="info",
+                )
+            )
+            if not prompt_utils.prompt_yes_no(
+                "Continue",
+                default=False,
+            ):
+                return
         print()
-        menu_utils.print_header(inventory_cli_labels.SECTION_HEADLINE, inventory_cli_labels.SCOPE_MENU_SUBTITLE)
-        sync_opts = [
-            menu_utils.MenuOption(
-                "1",
-                inventory_cli_labels.MENU_OPTION_FULL,
-                description="Uses per-package metadata collection. Best for deep diagnostics, but slow on non-root devices.",
-            ),
-            menu_utils.MenuOption(
-                "2",
-                inventory_cli_labels.MENU_OPTION_FAST,
-                description="Uses bulk package identity plus targeted pm path enrichment for harvest/static readiness.",
-                badge="recommended",
-            ),
-            menu_utils.MenuOption(
-                "3",
-                inventory_cli_labels.MENU_OPTION_SCOPED,
-                description="Refreshes only active profile packages. Fastest, but not a full-device snapshot.",
-            ),
-        ]
-        menu_utils.render_menu(
-            menu_utils.MenuSpec(items=sync_opts, exit_label="Back", show_exit=True, show_descriptions=True, compact=True)
+        result = inventory_workflow.run_inventory_sync(
+            serial,
+            ui_prefs=None,
+            progress_sink="cli",
+            mode="baseline",
+            allow_fallbacks=allow_fallbacks,
         )
-        choice = prompt_utils.get_choice(
-            menu_utils.selectable_keys(sync_opts, include_exit=True),
-            default="2",
-            prompt="Scope [2]: ",
-        )
-        if choice == "0":
-            return
-
-        if choice == "1":
-            # Full sync is the slow path; if the inventory is already fresh, ask once.
-            if status and status.status_label.upper() == "FRESH" and not status.is_stale:
-                print()
-                age_raw = getattr(status, "age_display", None)
-                age_compact = _compact_age_display(age_raw) if age_raw else "recent"
-                pkg_note = (
-                    f"{status.package_count} pkgs"
-                    if getattr(status, "package_count", None) is not None
-                    else "pkgs on snapshot"
-                )
-                print(
-                    status_messages.status(
-                        inventory_cli_labels.FULL_SYNC_WHILE_FRESH_PROMPT.format(
-                            age=age_compact,
-                            packages=pkg_note,
-                        ),
-                        level="info",
-                    )
-                )
-                if not prompt_utils.prompt_yes_no(
-                    "Continue",
-                    default=False,
-                ):
-                    return
-            print()
-            result = inventory_workflow.run_inventory_sync(
-                serial,
-                ui_prefs=None,
-                progress_sink="cli",
-                mode="baseline",
-                allow_fallbacks=allow_fallbacks,
-            )
-            print_inventory_run_feedback(result, mode_label="baseline-full")
-        elif choice == "2":
-            print()
-            result = inventory_workflow.run_inventory_sync(
-                serial,
-                ui_prefs=None,
-                progress_sink="cli",
-                mode="bulk",
-                allow_fallbacks=allow_fallbacks,
-            )
-            print_inventory_run_feedback(result, mode_label="harvest-ready")
-        else:
-            selected_profile = _select_inventory_sync_profile()
-            if selected_profile is None:
-                return
-            packages = set(selected_profile["packages"])
-            if not packages:
-                print(status_messages.status("Scoped refresh cancelled: selected profile has no packages.", level="warn"))
-                prompt_utils.press_enter_to_continue()
-                return
-            result = inventory_workflow.run_inventory_scoped_sync(
-                serial=serial,
-                scope_id=str(selected_profile["scope_id"]),
-                packages=packages,
-                ui_prefs=None,
-                progress_sink="cli",
-                mode="bulk",
-                allow_fallbacks=allow_fallbacks,
-            )
-            print_inventory_run_feedback(
-                result,
-                scoped_label=str(selected_profile["display_name"]),
-            )
     except Exception as exc:
         error_panels.print_error_panel(
             inventory_cli_labels.ERROR_SECTION,
@@ -495,65 +427,5 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
         )
         prompt_utils.press_enter_to_continue()
         return
-
-
-def _select_inventory_sync_profile() -> dict[str, object] | None:
-    from scytaledroid.DynamicAnalysis.profile_loader import load_operational_profiles, load_profile_packages
-
-    raw_profiles = load_operational_profiles()
-    profiles: list[dict[str, object]] = []
-    for profile in raw_profiles:
-        profile_key = str(profile.get("profile_key") or "").strip()
-        if not profile_key:
-            continue
-        display_name = str(profile.get("display_name") or profile_key).strip() or profile_key
-        packages = {
-            str(package).strip().lower()
-            for package in load_profile_packages(profile_key)
-            if str(package).strip()
-        }
-        profiles.append(
-            {
-                "profile_key": profile_key,
-                "display_name": display_name,
-                "scope_id": f"profile::{profile_key.lower()}",
-                "packages": packages,
-                "app_count": len(packages),
-            }
-        )
-
-    profiles = [profile for profile in profiles if profile["packages"]]
-    profiles.sort(key=lambda profile: str(profile["display_name"]).lower())
-
-    if not profiles:
-        print(status_messages.status("No active app profiles are available for scoped inventory refresh.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return None
-
-    if len(profiles) == 1:
-        selected = profiles[0]
-        print(
-            status_messages.status(
-                f"Only one active profile is available. Using {selected['display_name']}.",
-                level="info",
-            )
-        )
-        return selected
-
-    print()
-    menu_utils.print_header(f"{inventory_cli_labels.SECTION_HEADLINE} · profile")
-    rows = [
-        [str(idx), str(profile["display_name"]), str(int(profile["app_count"]))]
-        for idx, profile in enumerate(profiles, start=1)
-    ]
-    table_utils.render_table(["#", "Profile", "Apps"], rows, compact=True)
-    choice = prompt_utils.get_choice(
-        [str(index) for index in range(1, len(profiles) + 1)] + ["0"],
-        default="1",
-        prompt="Profile [1]: ",
-    )
-    if choice == "0":
-        return None
-    return profiles[int(choice) - 1]
 
 __all__ = ["handle_choice", "build_main_menu_options"]

@@ -1628,8 +1628,14 @@ def _select_profile_package(groups) -> tuple[str, str | None] | None:
     return (package_name, None)
 
 
-def _select_package_from_groups(groups, *, title: str, subtitle: str | None = None) -> str | None:
-    prepared = _prepare_package_selection_view(groups)
+def _select_package_from_groups(
+    groups,
+    *,
+    title: str,
+    subtitle: str | None = None,
+    device_serial: str | None = None,
+) -> str | None:
+    prepared = _prepare_package_selection_view(groups, device_serial=device_serial)
     if prepared is None:
         print(status_messages.status("No apps available for selection.", level="warn"))
         return None
@@ -1638,13 +1644,14 @@ def _select_package_from_groups(groups, *, title: str, subtitle: str | None = No
     return _run_package_selection_menu(prepared)
 
 
-def _prepare_package_selection_view(groups) -> _PreparedPackageSelectionView | None:
+def _prepare_package_selection_view(groups, device_serial: str | None = None) -> _PreparedPackageSelectionView | None:
     return _prepare_package_selection_view_impl(
         groups,
         load_dataset_packages=active_research_cohort_packages,
         list_packages_fn=list_packages,
         summarize_evidence_quota_fn=_summarize_evidence_quota,
         build_package_selection_row_fn=_build_package_selection_row,
+        device_serial=device_serial,
     )
 
 
@@ -1658,6 +1665,7 @@ def _build_package_selection_row(
     tracker_apps,
     cfg,
     recent_tracker_runs,
+    live_build_drift=None,
 ) -> _PreparedPackageSelectionRow:
     return _build_package_selection_row_impl(
         idx=idx,
@@ -1668,6 +1676,7 @@ def _build_package_selection_row(
         tracker_apps=tracker_apps,
         cfg=cfg,
         recent_tracker_runs=recent_tracker_runs,
+        live_build_drift=live_build_drift,
         truncate_visible_fn=text_blocks.truncate_visible,
         bucket_progress_label_fn=_bucket_progress_label,
         quota_progress_label_fn=_quota_progress_label,

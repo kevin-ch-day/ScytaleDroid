@@ -40,3 +40,4 @@ class TTLCache[T]:
 
 PACKAGE_PATH_CACHE: TTLCache[list[str]] = TTLCache()
 PACKAGE_META_CACHE: TTLCache[dict[str, str | None]] = TTLCache()
+PACKAGE_COMMAND_SUPPORT_CACHE: TTLCache[bool] = TTLCache()

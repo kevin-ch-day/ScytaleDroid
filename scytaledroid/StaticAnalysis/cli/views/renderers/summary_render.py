@@ -42,6 +42,29 @@ from .summary_format_helpers import preview_text, short_number
 _WIDTH = 78
 _HASH_ORDER = ("md5", "sha1", "sha256")
 _SEVERITY_ORDER = ("High", "Medium", "Low", "Info")
+_STRING_SAMPLE_FIELDS = (
+    "value",
+    "value_masked",
+    "src",
+    "tag",
+    "sha256",
+    "finding_type",
+    "provider",
+    "risk_tag",
+    "confidence",
+    "scheme",
+    "root_domain",
+    "resource_name",
+    "source_type",
+    "sample_hash",
+    "xref_context",
+    "api_context",
+    "posture",
+    "ownership_class",
+    "pair_group",
+    "verification_status",
+    "dynamic_corroboration",
+)
 
 
 def _normalise_baseline_severity(value: object) -> str:
@@ -476,9 +499,9 @@ def _render_hash_lines(hashes: Mapping[str, str]) -> list[str]:
 
 def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
     counts_payload = raw.get("counts") if isinstance(raw, Mapping) else {}
-    samples_payload = raw.get("selected_samples") if isinstance(raw, Mapping) else None
+    samples_payload = raw.get("samples") if isinstance(raw, Mapping) else None
     if not samples_payload:
-        samples_payload = raw.get("samples") if isinstance(raw, Mapping) else {}
+        samples_payload = raw.get("selected_samples") if isinstance(raw, Mapping) else {}
     selected_payload = raw.get("selected_samples") if isinstance(raw, Mapping) else {}
     selection_params_payload = raw.get("selection_params") if isinstance(raw, Mapping) else None
     extra_counts_payload = raw.get("extra_counts") if isinstance(raw, Mapping) else {}
@@ -497,24 +520,12 @@ def _normalise_string_data(raw: Mapping[str, object]) -> Mapping[str, object]:
                 for entry in entries:
                     if not isinstance(entry, Mapping):
                         continue
-                    normalised.append(
-                        {
-                            "value": entry.get("value"),
-                            "value_masked": entry.get("value_masked"),
-                            "src": entry.get("src"),
-                            "tag": entry.get("tag"),
-                            "sha256": entry.get("sha256"),
-                            "finding_type": entry.get("finding_type"),
-                            "provider": entry.get("provider"),
-                            "risk_tag": entry.get("risk_tag"),
-                            "confidence": entry.get("confidence"),
-                            "scheme": entry.get("scheme"),
-                            "root_domain": entry.get("root_domain"),
-                            "resource_name": entry.get("resource_name"),
-                            "source_type": entry.get("source_type"),
-                            "sample_hash": entry.get("sample_hash"),
-                        }
-                    )
+                    row = {
+                        field: entry.get(field)
+                        for field in _STRING_SAMPLE_FIELDS
+                        if entry.get(field) is not None
+                    }
+                    normalised.append(row)
                 if normalised:
                     normalised_samples[bucket] = normalised
         return normalised_samples

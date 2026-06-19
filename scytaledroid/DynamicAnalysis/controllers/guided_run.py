@@ -231,6 +231,49 @@ def _load_plan_identity(plan_path: str) -> dict[str, str]:
     }
 
 
+def _detect_static_plan_build_drift(
+    *,
+    device_serial: str,
+    package_name: str,
+) -> dict[str, str] | None:
+    """Return static-plan/device build drift details when dataset mode is already blocked.
+
+    This is a fast-fail UX probe for cohort/freeze workflows. It intentionally
+    reuses the same version-code identity rules as the later scientific checks,
+    but runs before the operator spends time choosing intent/observers.
+    """
+
+    plan_selection = ensure_plan_or_error(
+        package_name,
+        prompt_run_static=False,
+        deterministic=True,
+        run_static_callback=None,
+    )
+    if not plan_selection:
+        return None
+    try:
+        plan_identity = _load_plan_identity(str(plan_selection.get("plan_path") or ""))
+    except Exception:
+        return None
+    expected_vc = str(plan_identity.get("version_code") or plan_selection.get("version_code") or "").strip()
+    if not expected_vc:
+        return None
+    observed_details = _read_observed_version_code_details(device_serial, package_name)
+    observed_vc = str(observed_details.get("version_code") or "").strip()
+    if not observed_vc or observed_vc == expected_vc:
+        return None
+    return {
+        "plan_path": str(plan_selection.get("plan_path") or ""),
+        "static_run_id": str(plan_selection.get("static_run_id") or ""),
+        "expected_version_code": expected_vc,
+        "expected_version_name": str(plan_selection.get("version_name") or "").strip(),
+        "observed_version_code": observed_vc,
+        "observed_command": str(observed_details.get("command") or "").strip(),
+        "observed_pattern": str(observed_details.get("pattern") or "").strip(),
+        "observed_line": str(observed_details.get("matched_line") or "").strip(),
+    }
+
+
 def _known_signer_hash(value: object) -> str:
     text = str(value or "").strip().lower()
     if text in {"", "unknown", "none", "null"}:
@@ -593,11 +636,19 @@ def _run_guided_dataset_iteration(
         )
         return False
 
-    package_name = select_package_from_groups(
-        scoped_groups,
-        title=f"App Queue — {cohort_label}",
-        subtitle=f"Device: {device_label}",
-    )
+    try:
+        package_name = select_package_from_groups(
+            scoped_groups,
+            title=f"App Queue — {cohort_label}",
+            subtitle=f"Device: {device_label}",
+            device_serial=device_serial,
+        )
+    except TypeError:
+        package_name = select_package_from_groups(
+            scoped_groups,
+            title=f"App Queue — {cohort_label}",
+            subtitle=f"Device: {device_label}",
+        )
     if not package_name:
         return False
     pkg_lc = str(package_name or "").strip().lower()
@@ -620,6 +671,45 @@ def _run_guided_dataset_iteration(
     if display_label != package_name:
         print(status_messages.status(f"Package: {package_name}", level="info"))
     meta_family_note = bool(pkg_lc in _META_FAMILY_PACKAGES)
+
+    plan_drift = _detect_static_plan_build_drift(
+        device_serial=device_serial,
+        package_name=package_name,
+    )
+    if plan_drift is not None:
+        print()
+        menu_utils.print_header("Static Plan / Device Drift")
+        rows = [
+            ["App", display_label],
+            [
+                "Installed build",
+                f"{plan_drift.get('observed_version_code') or 'unknown'} "
+                f"({plan_drift.get('observed_command') or 'unknown'})",
+            ],
+            [
+                "Static plan build",
+                f"{plan_drift.get('expected_version_name') or 'unknown'} "
+                f"({plan_drift.get('expected_version_code') or 'unknown'})",
+            ],
+            ["Static run", plan_drift.get("static_run_id") or "unknown"],
+        ]
+        menu_utils.print_table(["Field", "Value"], rows)
+        if plan_drift.get("observed_pattern") or plan_drift.get("observed_line"):
+            print(
+                status_messages.status(
+                    "Observed build identity came from the live package dump and does not match the newest static plan.",
+                    level="warn",
+                )
+            )
+        print(
+            status_messages.status(
+                "Dataset-mode dynamic runs require the installed build to match the selected static plan. "
+                "Refresh harvest/static for this app or choose another app.",
+                level="error",
+            )
+        )
+        prompt_utils.press_enter_to_continue()
+        return True
 
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 

@@ -909,6 +909,84 @@ def test_collect_inventory_baseline_mode_preloads_bulk_metadata_even_for_single_
     assert rows[0]["installer"] == "com.android.vending"
 
 
+def test_collect_inventory_baseline_mode_uses_bulk_single_path_before_pm_path(
+    monkeypatch,
+):
+    metadata_calls: list[str] = []
+    path_calls: list[str] = []
+    bulk_calls: list[str] = []
+
+    monkeypatch.setattr(package_collection.adb_client, "clear_package_caches", lambda _serial: None)
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "list_packages",
+        lambda _serial, _use_bulk, allow_fallbacks=False: (
+            [("com.example.single", "42", None)],
+            ["com.example.single"],
+            False,
+            False,
+        ),
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "list_package_bulk_entries",
+        lambda _serial: bulk_calls.append(_serial)
+        or [
+            adb_bulk.BulkPackageEntry(
+                package_name="com.example.single",
+                apk_path="/product/app/Single/Single.apk",
+                user="0",
+                uid=10123,
+                installer=None,
+                version_code="42",
+            )
+        ],
+    )
+    monkeypatch.setattr(package_collection.adb_client, "get_device_properties", lambda _serial: {})
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata_bulk",
+        lambda _serial: {
+            "com.example.single": {
+                "package_name": "com.example.single",
+                "user_id": "10123",
+                "version_name": "4.2",
+                "last_update": "2026-06-14 00:40:13",
+                "first_install": "2026-05-08 16:33:35",
+                "installer": "com.android.vending",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_paths",
+        lambda _serial, package_name, allow_fallbacks=False: path_calls.append(package_name) or ["/should/not/be/used.apk"],
+    )
+    monkeypatch.setattr(
+        package_collection.adb_client,
+        "get_package_metadata",
+        lambda _serial, package_name: metadata_calls.append(package_name) or {},
+    )
+    monkeypatch.setattr(package_collection.snapshot_io, "load_canonical_metadata", lambda _names: {})
+
+    rows, stats = package_collection.collect_inventory(
+        "SER123",
+        use_bulk=False,
+        allow_fallbacks=False,
+    )
+
+    assert bulk_calls == ["SER123"]
+    assert path_calls == []
+    assert metadata_calls == []
+    assert stats.collection_mode == "baseline"
+    assert stats.path_enriched_packages == 1
+    assert stats.bulk_identity_only_packages == 0
+    assert rows[0]["path_fidelity"] == "bulk_single_path"
+    assert rows[0]["apk_paths"] == ["/product/app/Single/Single.apk"]
+    assert rows[0]["version_name"] == "4.2"
+    assert rows[0]["installer"] == "com.android.vending"
+
+
 def test_collect_inventory_baseline_mode_uses_bulk_metadata_and_skips_pm_dump_for_non_relevant_package(
     monkeypatch,
 ):

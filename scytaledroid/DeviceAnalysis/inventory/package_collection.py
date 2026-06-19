@@ -86,7 +86,11 @@ def _bulk_metadata_is_complete(metadata: dict[str, object] | None) -> bool:
 
 
 def _has_full_path_fidelity(row: dict[str, object]) -> bool:
-    return str(row.get("path_fidelity") or "").strip() in {"pm_path", "dumpsys_reconstructed"}
+    return str(row.get("path_fidelity") or "").strip() in {
+        "pm_path",
+        "dumpsys_reconstructed",
+        "bulk_single_path",
+    }
 
 
 @dataclass
@@ -129,8 +133,11 @@ def collect_inventory(
     packages_with_versions, package_names, bulk_used, fallback_used = adb_client.list_packages(
         serial, use_bulk, allow_fallbacks=allow_fallbacks
     )
+    total = len(package_names)
+
     bulk_entry_map: dict[str, object] = {}
-    if bulk_used:
+    should_preload_bulk_entries = bulk_used or total >= _BASELINE_BULK_METADATA_THRESHOLD
+    if should_preload_bulk_entries:
         try:
             bulk_entry_map = {
                 (
@@ -177,8 +184,6 @@ def collect_inventory(
             if canon in allowlist:
                 filtered_with_versions.append((pkg, version_code, third))
         packages_with_versions = filtered_with_versions
-
-    total = len(package_names)
 
     _emit_progress(progress_cb, processed=0, total=total, elapsed=0.0, eta=None, split_apks=0)
 
@@ -316,11 +321,17 @@ def collect_inventory(
                 profile_bulk_rows += 1
             else:
                 bulk_metadata = dict(dumpsys_metadata_map.get(package_key) or {})
+                bulk_entry = bulk_entry_map.get(package_key)
+                bulk_base_path = str(getattr(bulk_entry, "apk_path", "")).strip() or None
                 reconstructed_paths = adb_bulk.reconstruct_apk_paths(bulk_metadata)
                 path_fidelity = "dumpsys_reconstructed"
                 if reconstructed_paths:
                     paths = reconstructed_paths
                     t_paths = time.time() - t0
+                elif bulk_base_path:
+                    paths = [bulk_base_path]
+                    t_paths = time.time() - t0
+                    path_fidelity = "bulk_single_path"
                 else:
                     _emit_progress(
                         progress_cb,

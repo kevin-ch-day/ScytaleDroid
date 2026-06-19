@@ -70,27 +70,16 @@ def _append_pipeline_events_table(
         for label, val in rows:
             lines.append(f"  {label:<{label_w}}  {val:>{mw}}")
     else:
-        rows_min: list[tuple[str, int]] = [
-            ("Warnings", warn),
-            ("Policy failures", pol),
-            ("Finding failures", fnd),
-            ("Execution errors", err),
-        ]
-        if parse_est > 0:
-            rows_min.append(("Parse / resource signals (est.)", parse_est))
-        valw = max((len(str(v)) for _, v in rows_min), default=1)
-        mw = max(valw, len("Count"))
-        rule_w = 2 + label_w + 2 + mw
-        lines.append("-" * rule_w)
-        lines.append(f"  {'Metric':<{label_w}}  {'Count':>{mw}}")
-        lines.append("-" * rule_w)
-        for label, val in rows_min:
-            lines.append(f"  {label:<{label_w}}  {val:>{mw}}")
+        lines.append(
+            f"  Warnings {warn} · Policy failures {pol} · Finding failures {fnd} · Execution errors {err}"
+        )
+        detail_parts: list[str] = []
         if skip > 0:
-            lines.append(
-                f"  {'Skipped stages (cumulative)':<{label_w}}  {skip:>{mw}}  "
-                "(profile/applicability skips — normal when detectors do not apply)"
-            )
+            detail_parts.append(f"Skipped stages {skip}")
+        if parse_est > 0:
+            detail_parts.append(f"Parse/resource est. {parse_est}")
+        if detail_parts:
+            lines.append(f"  {' · '.join(detail_parts)}")
     if err == 0:
         lines.append(
             "  (no execution errors — analyzer/pipeline did not throw)"
@@ -103,7 +92,9 @@ def _append_pipeline_events_table(
             if concise
             else "  → investigate logs: execution_errors are analyzer/pipeline exceptions, not gates"
         )
-    if skip and verbose_metrics and concise:
+    if skip and not verbose_metrics:
+        lines.append("  (skipped = profile/applicability skips; normal when detectors do not apply)")
+    elif skip and verbose_metrics and concise:
         lines.append("  (skipped = detector stages not run; see per-app completion for reasons)")
     elif skip and verbose_metrics and not concise:
         lines.append(
@@ -312,13 +303,14 @@ def format_scan_progress_checkpoint_card(
     def _kv_top(label: str, value: str) -> str:
         return f"{label:<{_KV_W_TOP}}: {value}"
 
-    def _kv_sub(label: str, value: str) -> str:
-        return f"  {label:<{_KV_W_SUB}}: {value}"
-
     cur_pkg = str(current_package_name or "").strip()
     cur_lbl = str(current_app_label or "").strip() or cur_pkg or "—"
     disp_line = cur_lbl if (cur_lbl and cur_lbl != "—") else "—"
     id_line = cur_pkg if cur_pkg else "—"
+    combined_pkg_line = disp_line
+    if disp_line != "—" and id_line != "—" and disp_line.lower() != id_line.lower():
+        combined_pkg_line = f"{disp_line} · {id_line}"
+    collapse_pkg_line = len(combined_pkg_line) <= 100
     eta_raw = str(eta_text or "").strip()
     if eta_raw and eta_raw != "--":
         eta_line = f"~{eta_raw}"
@@ -331,19 +323,16 @@ def format_scan_progress_checkpoint_card(
         ac = 0 if archive_reports_written is None else int(archive_reports_written)
         arch_line = f"{ac} / {total_artifacts}"
     pkg_done = min(max(apps_completed, 0), total_apps) if total_apps > 0 else 0
-    lines = [
-        "Static progress",
-        "---------------",
-        _kv_top("Current package", disp_line),
-        _kv_top("Package id", id_line),
-        "",
-        "Progress",
-        _kv_sub("Packages", f"{pkg_done} / {total_apps}"),
-        _kv_sub("APK artifacts", f"{artifacts_done} / {total_artifacts}"),
-        _kv_sub("APK reports saved", arch_line),
-        _kv_sub("Elapsed", elapsed_text),
-        _kv_sub("ETA", eta_line),
-    ]
+    progress_line_1 = (
+        f"  Packages {pkg_done} / {total_apps} · "
+        f"APK artifacts {artifacts_done} / {total_artifacts} · "
+        f"APK reports saved {arch_line}"
+    )
+    progress_line_2 = f"  Elapsed {elapsed_text} · ETA {eta_line}"
+    lines = ["Static progress", "---------------", _kv_top("Current package", combined_pkg_line if collapse_pkg_line else disp_line)]
+    if not collapse_pkg_line:
+        lines.append(_kv_top("Package id", id_line))
+    lines.extend(["", "Progress", progress_line_1, progress_line_2])
     lines.append("")
     _append_pipeline_events_table(
         lines,

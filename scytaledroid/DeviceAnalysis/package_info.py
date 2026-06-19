@@ -142,18 +142,19 @@ def get_package_metadata(
             return cached
 
     metadata: dict[str, str | None] = {"package_name": package_name}
-    for command in adb_package_manager.metadata_dump_commands(package_name):
-        try:
-            completed = adb_client.run_shell_command(serial, command, timeout=25)
-        except RuntimeError:
-            continue
-        if completed.returncode != 0:
-            continue
-        if adb_package_manager.completed_indicates_unsupported(completed):
-            continue
+    completed, _command = adb_package_manager.read_supported_metadata_dump(
+        serial,
+        package_name,
+        run_command=lambda command: adb_client.run_shell_command(serial, command, timeout=25),
+        is_successful=lambda result: result.returncode == 0,
+        extract_text=lambda result: result.stdout,
+        is_unsupported=adb_package_manager.completed_indicates_unsupported,
+        accept_text=lambda text: _has_inventory_relevant_metadata(
+            _parse_package_metadata_output(package_name, text)
+        ),
+    )
+    if completed is not None:
         metadata = _parse_package_metadata_output(package_name, completed.stdout)
-        if _has_inventory_relevant_metadata(metadata):
-            break
 
     adb_cache.PACKAGE_META_CACHE.set(cache_key, metadata)
     return metadata
