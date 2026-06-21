@@ -60,6 +60,13 @@ def _harvest_plan_kv_lines(
     return lines
 
 
+def _compact_selection_label(label: str) -> str:
+    text = str(label or "").strip()
+    if text.endswith(" (full inventory)"):
+        return text.removesuffix(" (full inventory)")
+    return text
+
+
 def make_progress_callback(action_label: str) -> Callable[[dict[str, object]], bool]:
     last_reported = 0.0
 
@@ -210,20 +217,22 @@ def render_plan_overview(resolution: PlanResolution, *, is_rooted: bool = False)
 
 
 def prompt_plan_action(resolution: PlanResolution) -> str:
-    _ = resolution  # reserved for future plan-aware prompts
     if is_harvest_simple_mode():
+        selection_label = _compact_selection_label(getattr(resolution.selection, "label", ""))
         scheduled_packages = int(resolution.stats.get("scheduled_packages", 0))
         scheduled_files = int(resolution.stats.get("scheduled_files", 0))
         blocked_total = int(resolution.stats.get("blocked_packages", 0))
         print()
         print("Harvest action")
         print("──────────────")
+        if selection_label:
+            print(f"Scope: {selection_label}")
         print(f"Ready: {scheduled_packages} package(s) · ~{scheduled_files} APK path(s)")
         if blocked_total > 0:
             print(f"Blocked before pull: {blocked_total} package(s)")
         print("Enter = execute harvest · P = preview plan · 0 = cancel")
         while True:
-            choice = prompt_utils.prompt_text("Choice", required=False).strip().lower()
+            choice = prompt_utils.prompt_text("Action [Enter/P/0]", required=False).strip().lower()
             if choice in {"", "1", "run", "execute", "go"}:
                 return "pull_snapshot"
             if choice in {"p", "2", "preview"}:
@@ -525,32 +534,28 @@ def report_harvest_started(
             level="info",
         )
     )
+    detail_bits: list[str] = []
     if candidate_count != selected_count:
-        print(
-            status_messages.status(
-                f"Inventory (device): {int(candidate_count)} package(s) (pre-scope / pre-delta context)",
-                level="info",
-            )
+        detail_bits.append(
+            f"Inventory: {int(candidate_count)} pkgs (pre-scope / pre-delta context)"
         )
     elif selected_count != scheduled or blocked_policy or blocked_scope:
-        detail_bits = [f"inventory snapshot={int(selected_count)}"]
+        detail_bits.append(f"Inventory: {int(selected_count)} pkgs")
         if policy_eligible != scheduled:
-            detail_bits.append(f"pullable={int(policy_eligible)}")
+            detail_bits.append(f"Ready: {int(policy_eligible)}")
         else:
-            detail_bits.append(f"pullable={int(scheduled)}")
+            detail_bits.append(f"Ready: {int(scheduled)}")
         if blocked_policy:
-            detail_bits.append(f"policy-blocked={int(blocked_policy)}")
+            detail_bits.append(f"Policy-blocked: {int(blocked_policy)}")
         if blocked_scope:
-            detail_bits.append(f"scope-blocked={int(blocked_scope)}")
-        detail_bits.append(f"policy={policy_text}")
-        print(status_messages.status(" · ".join(detail_bits), level="info"))
-    tail_bits = []
+            detail_bits.append(f"Scope-blocked: {int(blocked_scope)}")
+        detail_bits.append(f"Policy: {policy_text}")
     if harvest_mode:
-        tail_bits.append(f"harvest_mode={harvest_mode}")
+        detail_bits.append(f"Mode: {harvest_mode}")
     if delta_filter_applied is not None:
-        tail_bits.append(f"delta={'on' if delta_filter_applied else 'off'}")
-    if tail_bits:
-        print(status_messages.status(" · ".join(tail_bits), level="info"))
+        detail_bits.append(f"Delta: {'on' if delta_filter_applied else 'off'}")
+    if detail_bits:
+        print(status_messages.status(" · ".join(detail_bits), level="info"))
 
 
 def pause_after_preview() -> None:

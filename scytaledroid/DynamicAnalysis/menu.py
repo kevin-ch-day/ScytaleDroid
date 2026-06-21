@@ -1666,6 +1666,7 @@ def _build_package_selection_row(
     cfg,
     recent_tracker_runs,
     live_build_drift=None,
+    db_lineage_context=None,
 ) -> _PreparedPackageSelectionRow:
     return _build_package_selection_row_impl(
         idx=idx,
@@ -1677,6 +1678,7 @@ def _build_package_selection_row(
         cfg=cfg,
         recent_tracker_runs=recent_tracker_runs,
         live_build_drift=live_build_drift,
+        db_lineage_context=db_lineage_context,
         truncate_visible_fn=text_blocks.truncate_visible,
         bucket_progress_label_fn=_bucket_progress_label,
         quota_progress_label_fn=_quota_progress_label,

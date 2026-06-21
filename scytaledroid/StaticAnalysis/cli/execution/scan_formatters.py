@@ -77,12 +77,12 @@ def _append_pipeline_events_table(
         if skip > 0:
             detail_parts.append(f"Skipped stages {skip}")
         if parse_est > 0:
-            detail_parts.append(f"Parse/resource est. {parse_est}")
+            detail_parts.append(f"Parse est. {parse_est}")
         if detail_parts:
             lines.append(f"  {' · '.join(detail_parts)}")
     if err == 0:
         lines.append(
-            "  (no execution errors — analyzer/pipeline did not throw)"
+            "  (execution OK — no analyzer/pipeline errors)"
             if concise
             else "  (no execution errors — these are not policy/finding gate failures)"
         )
@@ -93,7 +93,7 @@ def _append_pipeline_events_table(
             else "  → investigate logs: execution_errors are analyzer/pipeline exceptions, not gates"
         )
     if skip and not verbose_metrics:
-        lines.append("  (skipped = profile/applicability skips; normal when detectors do not apply)")
+        lines.append("  (skipped = profile/applicability skips; normal)")
     elif skip and verbose_metrics and concise:
         lines.append("  (skipped = detector stages not run; see per-app completion for reasons)")
     elif skip and verbose_metrics and not concise:
@@ -326,7 +326,7 @@ def format_scan_progress_checkpoint_card(
     progress_line_1 = (
         f"  Packages {pkg_done} / {total_apps} · "
         f"APK artifacts {artifacts_done} / {total_artifacts} · "
-        f"APK reports saved {arch_line}"
+        f"Reports {arch_line}"
     )
     progress_line_2 = f"  Elapsed {elapsed_text} · ETA {eta_line}"
     lines = ["Static progress", "---------------", _kv_top("Current package", combined_pkg_line if collapse_pkg_line else disp_line)]

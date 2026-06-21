@@ -660,10 +660,18 @@ def render_cohort_status_details(
     dataset_apps_total: int,
     dataset_apps_complete: int,
     dataset_valid_runs_total: int,
+    current_build_ready_count: int,
+    current_build_in_progress_count: int,
+    current_build_review_count: int,
+    stale_app_count: int,
+    current_build_db_only_count: int,
     historical_valid_runs_total: int,
     historical_build_count_total: int,
     mixed_identity_app_count: int,
     legacy_only_app_count: int,
+    historical_local_only_app_count: int,
+    historical_db_only_app_count: int,
+    no_evidence_anywhere_count: int,
     expected_runs: int,
     evidence_summary: dict[str, object] | None,
     row_models: list[object],
@@ -680,9 +688,11 @@ def render_cohort_status_details(
     quota_remaining = max(0, int(expected_runs) - quota_counted)
     baseline_remaining = sum(max(0, int(getattr(row, "need_baseline", 0))) for row in row_models)
     manual_remaining = sum(max(0, int(getattr(row, "need_interactive", 0))) for row in row_models)
+    static_refresh_needed = sum(1 for row in row_models if bool(getattr(row, "live_build_drift", False)))
     print("Progress")
     print(f"  Apps complete         : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
     print(f"  Quota-valid remaining : {quota_remaining}")
+    print(f"  Static refresh needed : {static_refresh_needed}")
     print(f"  Baseline runs needed  : {baseline_remaining}")
     print(f"  Manual runs needed    : {manual_remaining}")
     print(
@@ -698,14 +708,34 @@ def render_cohort_status_details(
     print()
     print("Tracker-scoped latest-run state")
     print(f"  Apps satisfied        : {dataset_apps_complete} / {dataset_apps_total}")
+    print(f"  Current-build complete: {current_build_ready_count} / {dataset_apps_total}")
+    if current_build_in_progress_count > 0:
+        print(f"  Current-build active  : {current_build_in_progress_count}")
+    if current_build_review_count > 0:
+        print(f"  Current-build review  : {current_build_review_count}")
+    print(f"  Current-build stale   : {stale_app_count}")
+    if current_build_db_only_count > 0:
+        print(f"  Current-build DB-only : {current_build_db_only_count}")
     print(f"  Active-build counted  : {dataset_valid_runs_total} / {expected_runs}")
     print(f"  Baseline target       : {baseline_required} per app")
     print(f"  Manual target         : {interactive_required} per app")
-    if historical_valid_runs_total > 0 or historical_build_count_total > 0:
+    if (
+        historical_valid_runs_total > 0
+        or historical_build_count_total > 0
+        or historical_local_only_app_count > 0
+        or historical_db_only_app_count > 0
+        or no_evidence_anywhere_count > 0
+    ):
         print()
         print("Historical context")
         print(f"  Mixed apps            : {mixed_identity_app_count}")
         print(f"  Legacy-only apps      : {legacy_only_app_count}")
+        if historical_local_only_app_count > 0:
+            print(f"  Historical local-only : {historical_local_only_app_count}")
+        if historical_db_only_app_count > 0:
+            print(f"  Historical DB-only    : {historical_db_only_app_count}")
+        if no_evidence_anywhere_count > 0:
+            print(f"  No evidence anywhere  : {no_evidence_anywhere_count}")
         print(f"  Legacy valid runs     : {historical_valid_runs_total}")
         print(f"  Older builds          : {historical_build_count_total}")
     if int(evidence_summary.get("protocol_fit_poor_runs", 0)) > 0:
@@ -716,6 +746,9 @@ def render_cohort_status_details(
     print("Meaning")
     print("  Evidence-authoritative quota drives archive/freeze readiness.")
     print("  Tracker-scoped latest-run state describes active-build queue posture.")
+    print("  Current-build stale means older evidence exists, but the installed app version needs fresh harvest/static.")
+    print("  Current-build DB-only means the DB knows current-build sessions, but the local evidence pack is not present.")
+    print("  Historical DB-only means older dynamic lineage exists in the DB, but the local evidence pack is not present.")
     prompt_utils.press_enter_to_continue()
 
 
@@ -724,19 +757,27 @@ def render_cohort_build_history(row_models: list[object], build_rows: list[list[
     menu_utils.print_header("History", "Build lineage and why an app looks current, mixed, or legacy")
     summary_rows = []
     for row in row_models:
-        notes: list[str] = []
+        reason, notes = _history_reason_and_notes(row)
         if int(getattr(row, "baseline_extra", 0)) > 0:
             notes.append("extra baseline outside quota")
         if int(getattr(row, "interactive_extra", 0)) > 0:
             notes.append("extra manual outside quota")
         if int(getattr(row, "historical_valid_runs_count", 0)) > 0:
             notes.append("legacy evidence present")
+        if str(getattr(row, "lineage_state", "")) == "historical_db_only":
+            notes.append("historical DB-only evidence")
+        if str(getattr(row, "lineage_state", "")) == "current_build_db_only":
+            notes.append("current-build DB-only evidence")
         if bool(getattr(row, "live_build_drift", False)):
             notes.append("installed build needs static refresh")
         if str(getattr(row, "qa_label", "")).startswith("invalid"):
             notes.append("latest QA invalid")
         if "id_mismatch" in str(getattr(row, "qa_label", "")):
             notes.append("identity mismatch")
+        note_text = reason
+        extras = [item for item in notes if item and item != reason]
+        if extras:
+            note_text = f"{reason}; " + "; ".join(extras)
         summary_rows.append(
             {
                 "app": getattr(row, "display_name", "—"),
@@ -758,7 +799,7 @@ def render_cohort_build_history(row_models: list[object], build_rows: list[list[
                 ),
                 "prep": getattr(row, "prep_label", "—"),
                 "qa": getattr(row, "qa_label", "—"),
-                "notes": "; ".join(notes) or "—",
+                "notes": note_text or "—",
             }
         )
     _render_history_summary_table(summary_rows)
@@ -773,18 +814,43 @@ def render_cohort_build_history(row_models: list[object], build_rows: list[list[
     prompt_utils.press_enter_to_continue()
 
 
+def _history_reason_and_notes(row: object) -> tuple[str, list[str]]:
+    lineage_state = str(getattr(row, "lineage_state", "") or "").strip()
+    qa_label = str(getattr(row, "qa_label", "") or "").strip().lower()
+    need_baseline = int(getattr(row, "need_baseline", 0) or 0)
+    need_interactive = int(getattr(row, "need_interactive", 0) or 0)
+    if bool(getattr(row, "live_build_drift", False)):
+        return "installed build drifted from newest static plan", []
+    if lineage_state == "current_build_db_only":
+        return "current-build evidence missing locally", []
+    if lineage_state == "historical_db_only":
+        return "only historical DB lineage exists", []
+    if lineage_state == "historical_local_only":
+        return "only legacy local evidence exists", []
+    if qa_label.startswith("invalid") and need_baseline <= 0 and need_interactive <= 0:
+        return "latest current-build QA invalid", []
+    if need_baseline > 0:
+        return "baseline quota not met", []
+    if need_interactive > 0:
+        return "interactive quota not met", []
+    return "current-build quota complete", []
+
+
 def render_cohort_status_help() -> None:
     print()
     menu_utils.print_header("Help", "Queue legend")
-    print("Status   = high-level app bucket: complete, manual, baseline, blocked, or review.")
-    print("Missing  = what is missing now, e.g. base 0/3, manual 0/2, or review QA.")
+    print("Status   = high-level app bucket: complete, manual, baseline, legacy, restore, refresh, blocked, or review.")
+    print("Missing  = what is missing now, e.g. base 0/3, manual 0/2, local pack, current build, or review QA.")
     print("Quota    = quota-valid runs against total quota; +N or + extra means supplemental valid runs outside quota.")
-    print("Build/QA = static prep state plus latest QA badge, e.g. current/✓, mixed/+L, stale/✓, ready/invalid.")
-    print("Template = scripted template availability: news, acct, generic, or none.")
-    print("Action   = the recommended next operator move shown on the queue.")
+    print("Build/QA = static prep state plus latest QA badge, e.g. current/✓, mixed/+L, stale/✓, ready/inv.")
+    print("Build/QA may also show db-only/— or hist-db/— when only DB-backed lineage exists without a local evidence pack.")
+    print("Template = scripted template availability: news, acct, gen, or none.")
+    print("Action   = the recommended next operator move shown on the queue: base, manual, script, review, refresh, or restore.")
     print("locked   = manual phase unavailable until baseline minimum is met.")
     print("mixed    = current-build and legacy-build evidence both exist.")
     print("stale    = installed device build drifted from the newest static plan; rerun harvest/static for this app.")
+    print("db-only  = current-build sessions exist in the DB, but the local evidence pack is not present.")
+    print("hist-db  = only historical DB-backed lineage exists; recollect current-build evidence.")
     print("valid+L  = latest QA valid, legacy evidence also exists.")
     print("Evidence-authoritative quota = archive/freeze truth.")
     print("Tracker-scoped latest-run state = queue-operating view of the active build.")
@@ -802,6 +868,23 @@ def render_cohort_status_debug(rows: list[list[str]], row_models: list[object]) 
     )
     if row_models:
         print()
+        print("Operator summary")
+        summary_rows = [
+            [
+                getattr(row, "display_name", "—"),
+                _diagnostic_status_label(row),
+                _history_reason_and_notes(row)[0],
+                _diagnostic_db_lineage_label(row),
+                str(getattr(row, "qa_label", "—") or "—"),
+            ]
+            for row in row_models
+        ]
+        table_utils.render_table(
+            ["App", "Status", "Reason", "DB lineage", "Latest QA"],
+            summary_rows,
+            compact=False,
+        )
+        print()
         print("Raw state extract")
         raw_rows = [
             [
@@ -814,15 +897,50 @@ def render_cohort_status_debug(rows: list[list[str]], row_models: list[object]) 
                 str(getattr(row, "historical_build_count", 0)),
                 str(getattr(row, "need_baseline", 0)),
                 str(getattr(row, "need_interactive", 0)),
+                str(getattr(row, "lineage_state", "")),
+                str(getattr(row, "db_active_sessions", 0)),
+                str(getattr(row, "db_historical_sessions", 0)),
             ]
             for row in row_models
         ]
         table_utils.render_table(
-            ["App", "Base ct", "Base ex", "Manual ct", "Manual ex", "Legacy", "L builds", "Need B", "Need M"],
+            ["App", "Base ct", "Base ex", "Manual ct", "Manual ex", "Legacy", "L builds", "Need B", "Need M", "Lineage", "DB active", "DB hist"],
             raw_rows,
             compact=True,
         )
     prompt_utils.press_enter_to_continue()
+
+
+def _diagnostic_status_label(row: object) -> str:
+    if bool(getattr(row, "live_build_drift", False)):
+        return "refresh"
+    lineage_state = str(getattr(row, "lineage_state", "") or "").strip()
+    if lineage_state == "current_build_db_only":
+        return "restore"
+    if lineage_state in {"historical_db_only", "historical_local_only"}:
+        return "legacy"
+    need_baseline = int(getattr(row, "need_baseline", 0) or 0)
+    need_interactive = int(getattr(row, "need_interactive", 0) or 0)
+    qa_label = str(getattr(row, "qa_label", "") or "").strip().lower()
+    if qa_label.startswith("invalid") and need_baseline <= 0 and need_interactive <= 0:
+        return "review"
+    if need_baseline > 0:
+        return "baseline"
+    if need_interactive > 0:
+        return "manual"
+    return "complete"
+
+
+def _diagnostic_db_lineage_label(row: object) -> str:
+    active = int(getattr(row, "db_active_sessions", 0) or 0)
+    historical = int(getattr(row, "db_historical_sessions", 0) or 0)
+    if active > 0 and historical > 0:
+        return f"active={active} hist={historical}"
+    if active > 0:
+        return f"active={active}"
+    if historical > 0:
+        return f"hist={historical}"
+    return "—"
 
 
 def _history_progress_label(countable: object, extra: object, *, required: int, missing: object) -> str:

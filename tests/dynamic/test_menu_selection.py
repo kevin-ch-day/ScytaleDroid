@@ -79,8 +79,13 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
         dataset_apps_total=3,
         dataset_apps_complete=1,
         dataset_valid_runs_total=8,
+        current_build_ready_count=1,
+        current_build_in_progress_count=1,
+        current_build_review_count=1,
+        stale_app_count=0,
         mixed_identity_app_count=0,
         legacy_only_app_count=0,
+        historical_local_only_app_count=1,
         row_models=rows,
         expected_runs=5,
         evidence_summary={
@@ -108,6 +113,8 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert result is None
     out = capsys.readouterr().out
     assert "Quota: 8/5 valid | 1/3 complete | 0 remaining | 2 supplemental" in out
+    assert "Current build: 1/3 complete | 1 in progress | 1 review" in out
+    assert "History      : 1 local-only" in out
     assert "Archive: blocked" in out
     assert "Next : CNN — scripted interaction" in out
     assert "Warnings: ESPN QA invalid. 1 app needs baseline." in out
@@ -125,9 +132,198 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert "D diagnostics" in out
     assert "B back" in out
     assert captured["headers"] == ["#", "App", "Status", "Missing", "Quota", "Build/QA", "Template", "Action"]
-    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "5/5 +1", "current/✓", "news", "—"]
-    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/5 n2", "current/✓", "news", "scripted"]
-    assert captured["rows"][2][1:] == ["ESPN", "review", "review QA", "0/5 n5", "ready/invalid", "none", "baseline"]
+    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "5/5+1", "current/✓", "news", "—"]
+    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/5 n2", "current/✓", "news", "script"]
+    assert captured["rows"][2][1:] == ["ESPN", "review", "review QA", "0/5 n5", "ready/inv", "none", "base"]
+
+
+def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["1"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.facebook.orca",
+                display_name="Facebook Messenger",
+                baseline_countable=0,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=3,
+                need_interactive=2,
+                prep_label="hist-db",
+                qa_label="—",
+                next_label="baseline",
+                lineage_state="historical_db_only",
+                db_historical_sessions=11,
+            ),
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["2"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.guardian",
+                display_name="The Guardian",
+                baseline_countable=0,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=3,
+                need_interactive=2,
+                prep_label="ready",
+                qa_label="—",
+                next_label="baseline",
+                lineage_state="no_evidence_anywhere",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["headers"] == ["#", "App", "Status", "Missing", "Quota", "Build/QA", "Template", "Action"]
+    assert captured["rows"][0] == ["1", "Facebook Messenger", "legacy", "local+curr", "0/5 n5", "hist-db/—", "gen", "base"]
+    assert captured["rows"][1] == ["2", "The Guardian", "baseline", "base 0/3", "0/5 n5", "ready/—", "news", "base"]
+
+
+def test_display_action_label_uses_review_for_invalid_complete_row() -> None:
+    row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["1"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=1,
+        dataset_valid_runs_count=5,
+        package_name="com.cnn.mobile.android.phone",
+        display_name="CNN",
+        baseline_countable=3,
+        interactive_countable=2,
+        need_baseline=0,
+        need_interactive=0,
+        prep_label="current",
+        qa_label="invalid",
+        next_label="review QA",
+        lineage_state="current_build_observed",
+    )
+
+    assert menu_selection._display_action_label(row) == "review"
+    assert menu_selection._display_next_line_action_label(row) == "review QA"
+
+
+def test_next_recommended_row_prioritizes_review_over_manual_and_refresh() -> None:
+    manual_row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["1"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=3,
+        package_name="com.zhiliaoapp.musically",
+        display_name="TikTok",
+        baseline_countable=3,
+        interactive_countable=0,
+        need_baseline=0,
+        need_interactive=2,
+        prep_label="current",
+        qa_label="valid",
+        next_label="manual interaction",
+        lineage_state="current_build_observed",
+    )
+    refresh_row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["2"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=3,
+        package_name="com.facebook.katana",
+        display_name="Facebook",
+        baseline_countable=3,
+        interactive_countable=0,
+        need_baseline=0,
+        need_interactive=2,
+        prep_label="stale",
+        qa_label="valid (L)",
+        next_label="refresh static",
+        lineage_state="current_build_stale",
+        live_build_drift=True,
+    )
+    review_row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["3"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=1,
+        dataset_valid_runs_count=5,
+        package_name="com.cnn.mobile.android.phone",
+        display_name="CNN",
+        baseline_countable=3,
+        interactive_countable=2,
+        need_baseline=0,
+        need_interactive=0,
+        prep_label="current",
+        qa_label="invalid",
+        next_label="review QA",
+        lineage_state="current_build_observed",
+    )
+
+    picked = menu_selection._next_recommended_row([manual_row, refresh_row, review_row])
+    assert picked is review_row
+
+
+def test_next_recommended_row_prioritizes_empty_baseline_over_historical_baseline() -> None:
+    historical_row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["1"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=0,
+        package_name="com.facebook.orca",
+        display_name="Facebook Messenger",
+        baseline_countable=0,
+        interactive_countable=0,
+        need_baseline=3,
+        need_interactive=2,
+        prep_label="hist-db",
+        qa_label="—",
+        next_label="baseline",
+        lineage_state="historical_db_only",
+    )
+    empty_row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["2"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=0,
+        package_name="com.guardian",
+        display_name="The Guardian",
+        baseline_countable=0,
+        interactive_countable=0,
+        need_baseline=3,
+        need_interactive=2,
+        prep_label="ready",
+        qa_label="—",
+        next_label="baseline",
+        lineage_state="no_evidence_anywhere",
+    )
+
+    picked = menu_selection._next_recommended_row([historical_row, empty_row])
+    assert picked is empty_row
 
 
 def test_render_package_table_shows_full_list_when_only_one_row_exceeds_preview(monkeypatch, capsys) -> None:
@@ -403,9 +599,9 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
     )
 
     assert captured["headers"] == ["#", "App", "Status", "Missing", "Quota", "Build/QA", "Template", "Action"]
-    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "5/5 +1", "current/✓", "news", "—"]
+    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "5/5+1", "current/✓", "news", "—"]
     assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "3/5 n2", "mixed/+L", "acct", "manual"]
-    assert captured["rows"][2] == ["3", "ESPN", "review", "review QA", "0/5 n5", "ready/invalid", "none", "baseline"]
+    assert captured["rows"][2] == ["3", "ESPN", "review", "review QA", "0/5 n5", "ready/inv", "none", "base"]
 
 
 def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> None:
@@ -447,7 +643,47 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
     )
 
     assert captured["headers"] == ["#", "App", "Status", "Missing", "Quota", "Build/QA", "Template", "Action"]
-    assert captured["rows"][0] == ["4", "Facebook", "refresh", "static refresh", "3/5 n2", "stale/+L", "acct", "refresh"]
+    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "3/5 n2", "stale/+L", "acct", "refresh"]
+
+
+def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["5"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.example.current",
+                display_name="Current App",
+                baseline_countable=0,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=3,
+                need_interactive=2,
+                prep_label="db-only",
+                qa_label="—",
+                next_label="baseline",
+                lineage_state="current_build_db_only",
+                db_active_sessions=4,
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["rows"][0] == ["5", "Current App", "restore", "local pack", "0/5 n5", "db-only/—", "none", "restore"]
 
 
 def test_compact_warning_line_mentions_static_refresh_need() -> None:
@@ -469,3 +705,84 @@ def test_compact_warning_line_mentions_static_refresh_need() -> None:
         ]
     )
     assert warning == "Facebook needs static refresh."
+
+
+def test_compact_warning_line_mentions_historical_db_only() -> None:
+    warning = menu_selection._compact_warning_line(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=[],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="Facebook Messenger",
+                lineage_state="historical_db_only",
+                prep_label="hist-db",
+                qa_label="—",
+                next_label="baseline",
+            )
+        ]
+    )
+    assert warning == "Facebook Messenger historical DB-only."
+
+
+def test_run_package_selection_menu_shows_current_build_refresh_summary(monkeypatch, capsys) -> None:
+    row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["1", "Facebook", "3/3 complete (+1 extra)", "0/2 need 2", "2I", "refresh static", "stale", "3/5 need 2", "1", "valid (L)"],
+        op_row=["1", "Facebook", "3/3 complete (+1 extra)", "0/2 need 2", "3/5 need 2", "stale", "valid (L)", "refresh static"],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=3,
+        package_name="com.facebook.katana",
+        display_name="Facebook",
+        baseline_countable=3,
+        baseline_extra=1,
+        interactive_countable=0,
+        interactive_extra=0,
+        need_baseline=0,
+        need_interactive=2,
+        prep_label="stale",
+        qa_label="valid (L)",
+        next_label="refresh static",
+        live_build_drift=True,
+        live_expected_version_code="472143276",
+        live_observed_version_code="472224766",
+    )
+    prepared = menu_selection.PreparedPackageSelectionView(
+        packages=[("com.facebook.katana", None, None, "Facebook")],
+        dataset_pkgs={"com.facebook.katana"},
+        cfg=_Cfg(),
+        rows=[],
+        op_rows=[row.op_row],
+        build_rows=[],
+        dataset_apps_total=1,
+        dataset_apps_complete=0,
+        dataset_valid_runs_total=3,
+        current_build_ready_count=0,
+        current_build_in_progress_count=0,
+        current_build_review_count=0,
+        stale_app_count=1,
+        row_models=[row],
+        expected_runs=5,
+        evidence_summary={
+            "evidence_root_exists": True,
+            "quota_runs_counted": 3,
+            "apps_satisfied": 0,
+            "extra_eligible_runs": 1,
+        },
+    )
+    monkeypatch.setattr(menu_selection.menu_utils, "print_header", lambda *_a, **_k: None)
+    monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
+    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
+
+    result = menu_selection.run_package_selection_menu(
+        prepared,
+        summarize_evidence_quota_fn=lambda *_a, **_k: prepared.evidence_summary,
+    )
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "Current build: 0/1 complete | 1 stale" in out

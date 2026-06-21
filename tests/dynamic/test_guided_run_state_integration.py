@@ -16,6 +16,7 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
     package = "com.google.android.apps.messaging"
     select_package_calls = {"count": 0}
     monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
     monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
     monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
@@ -104,6 +105,7 @@ def test_guided_run_selected_app_prefers_display_label(monkeypatch, capsys) -> N
     package = "bbc.mobile.news.ww"
     select_package_calls = {"count": 0}
     monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
     monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
     monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
@@ -176,6 +178,7 @@ def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch)
     select_package_calls = {"count": 0}
     subtitles: list[str | None] = []
     monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
 
     monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
@@ -281,6 +284,7 @@ def test_guided_run_defaults_to_manual_when_script_template_missing(monkeypatch,
     select_package_calls = {"count": 0}
     rendered = {}
     monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
 
     monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
@@ -363,6 +367,7 @@ def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, cap
     package = "com.facebook.katana"
     select_package_calls = {"count": 0}
     monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
 
     monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
@@ -427,6 +432,233 @@ def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, cap
     out = capsys.readouterr().out
     assert "Historical context: 2 legacy valid run(s) across 1 older build(s) retained for comparison; not counted toward current quota." in out
     assert "Supplemental current-build evidence: 1 extra valid run(s) retained outside quota." in out
+
+
+def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> None:
+    package = "com.facebook.orca"
+    select_package_calls = {"count": 0}
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(
+        guided_run,
+        "_load_db_dynamic_lineage_context",
+        lambda _pkg: {"db_active_sessions": 0, "db_historical_sessions": 11, "db_total_sessions": 11},
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="Facebook Messenger")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=0,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=0,
+            reset_available=False,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            recent_runs=(),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.menu_utils, "render_menu", lambda spec: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Historical DB-only context: 11 older DB-backed session(s) exist" in out
+    assert "Queue action: baseline" in out
+    assert "Reason: 3 baseline runs needed" in out
+    assert "Recommended action: collect baseline evidence for the installed build" in out
+
+
+def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) -> None:
+    package = "com.guardian"
+    select_package_calls = {"count": 0}
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="The Guardian")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=0,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=0,
+            reset_available=False,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            recent_runs=(),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.menu_utils, "render_menu", lambda spec: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "No prior dynamic evidence exists yet for com.guardian." in out
+    assert "Queue action: baseline" in out
+    assert "Reason: 3 baseline runs needed" in out
+
+
+def test_guided_run_reports_review_queue_action_for_invalid_complete_current_build(monkeypatch, capsys) -> None:
+    package = "com.cnn.mobile.android.phone"
+    select_package_calls = {"count": 0}
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(
+        guided_run,
+        "_load_db_dynamic_lineage_context",
+        lambda _pkg: {"db_active_sessions": 6, "db_historical_sessions": 0, "db_total_sessions": 6},
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="CNN")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=6,
+                valid_runs=5,
+                baseline_valid_runs=3,
+                interactive_valid_runs=2,
+                quota_met=True,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=6,
+            reset_available=True,
+            paper_eligible_local=5,
+            quota_counted_local=5,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="interaction_scripted",
+            effective_suggested_profile="interaction_scripted",
+            suggested_slot=None,
+            recent_runs=(
+                DatasetRunRecentSummary(
+                    ended_at="2026-06-19T10:00:00Z",
+                    run_profile="interaction_scripted",
+                    interaction_level="scripted",
+                    messaging_activity=None,
+                    valid=False,
+                    invalid_reason_code="PCAP_MISSING",
+                    low_signal=None,
+                    run_id="cnnrun1",
+                    status_label="INVALID:PCAP_MISSING",
+                ),
+            ),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.menu_utils, "render_menu", lambda spec: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Queue action: review QA" in out
+    assert "Reason: latest current-build run is invalid (PCAP_MISSING)" in out
 
 
 def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypatch, capsys) -> None:
@@ -525,6 +757,8 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
 
     out = capsys.readouterr().out
     assert "Static Plan / Device Drift" in out
+    assert "Queue action: refresh static" in out
+    assert "Reason: installed build 472224766 does not match the newest static-plan build 472143276." in out
     assert "Dataset-mode dynamic runs require the installed build to match the selected static plan." in out
     assert "Refresh harvest/static for this app or choose another app." in out
     assert "472224766" in out

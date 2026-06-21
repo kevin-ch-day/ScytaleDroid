@@ -27,6 +27,7 @@ _LAST_SCOPE: ScopeSelection | None = None
 
 # Menu label for the all-inventory scope after applying the active path policy.
 FULL_INVENTORY_POLICY_FILTERED_LABEL = "All pullable packages (full inventory)"
+FULL_INVENTORY_MENU_LABEL = "All pullable packages"
 
 _DASH = "—"
 
@@ -449,7 +450,7 @@ def select_package_scope(
         blocked_full = max(inv_total - len(pullable_full), 0)
         full_pullable_files = estimated_files(pullable_full)
         profile_note = (
-            f"{profile_scope_count} active profile{'s' if profile_scope_count != 1 else ''}"
+            f"{profile_scope_count} profile{'s' if profile_scope_count != 1 else ''}"
             if profile_scope_count
             else "none available"
         )
@@ -488,7 +489,7 @@ def select_package_scope(
         )
         _add_entry(
             "4",
-            FULL_INVENTORY_POLICY_FILTERED_LABEL,
+            FULL_INVENTORY_MENU_LABEL,
             packages=inv_total,
             pullable=len(pullable_full),
             files=full_pullable_files,
@@ -510,7 +511,7 @@ def select_package_scope(
             ),
         )
 
-        headers = ["#", "Scope", "Packages", "Pullable", "Est.Files", "Notes"]
+        headers = ["#", "Scope", "Pkgs", "Ready", "APKs", "Notes"]
         table_rows = []
         for entry in entries:
             key = str(entry["key"])
