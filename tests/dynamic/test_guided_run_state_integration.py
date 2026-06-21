@@ -572,6 +572,17 @@ def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) ->
     )
 
     out = capsys.readouterr().out
+    assert "App state" in out
+    assert "Build" in out
+    assert "Evidence" in out
+    assert "QA" in out
+    assert "Need" in out
+    assert "Action" in out
+    assert "Quota" in out
+    assert "unknown" in out
+    assert "empty" in out
+    assert "base 0/3" in out
+    assert "0/5 n5" in out
     assert "No prior dynamic evidence exists yet for com.guardian." in out
     assert "Queue action: baseline" in out
     assert "Reason: 3 baseline runs needed" in out
@@ -657,6 +668,12 @@ def test_guided_run_reports_review_queue_action_for_invalid_complete_current_bui
     )
 
     out = capsys.readouterr().out
+    assert "App state" in out
+    assert "current" in out
+    assert "local+db" in out
+    assert "inv" in out
+    assert "review" in out
+    assert "5/5" in out
     assert "Queue action: review QA" in out
     assert "Reason: latest current-build run is invalid (PCAP_MISSING)" in out
 

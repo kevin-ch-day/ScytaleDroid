@@ -241,6 +241,142 @@ def _print_selected_app_queue_action(action: str, reason: str | None) -> None:
         print(status_messages.status(f"Reason: {reason}", level="info"))
 
 
+def _selected_app_build_label(
+    *,
+    active_valid_runs: int,
+    legacy_valid_runs: int,
+    db_active_sessions: int,
+    db_historical_sessions: int,
+) -> str:
+    if int(active_valid_runs) > 0 or int(db_active_sessions) > 0:
+        return "current"
+    if int(legacy_valid_runs) > 0 or int(db_historical_sessions) > 0:
+        return "legacy"
+    return "unknown"
+
+
+def _selected_app_evidence_label(lineage_state: str) -> str:
+    state = str(lineage_state or "").strip()
+    if state == "current_build_observed":
+        return "local+db"
+    if state == "current_build_db_only":
+        return "db-only"
+    if state == "historical_local_only":
+        return "local-only"
+    if state == "historical_db_only":
+        return "db-only"
+    if state == "no_evidence_anywhere":
+        return "empty"
+    return "none"
+
+
+def _selected_app_qa_badge(latest_valid: bool | None) -> str:
+    if latest_valid is True:
+        return "✓"
+    if latest_valid is False:
+        return "inv"
+    return "—"
+
+
+def _selected_app_need_label(
+    *,
+    queue_action: str,
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    baseline_required: int,
+    interactive_required: int,
+) -> str:
+    text = str(queue_action or "").strip().lower()
+    if text == "review qa":
+        return "review"
+    if text == "restore local evidence":
+        return "local pack"
+    if text == "baseline":
+        return f"base {int(baseline_valid_runs)}/{int(baseline_required)}"
+    if text in {"manual interaction", "scripted interaction"}:
+        return f"manual {int(interactive_valid_runs)}/{int(interactive_required)}"
+    return "—"
+
+
+def _selected_app_action_label(queue_action: str) -> str:
+    text = str(queue_action or "").strip().lower()
+    if text == "review qa":
+        return "review"
+    if text == "restore local evidence":
+        return "restore"
+    if text == "manual interaction":
+        return "manual"
+    if text == "scripted interaction":
+        return "script"
+    if text == "baseline":
+        return "base"
+    return str(queue_action or "").strip() or "—"
+
+
+def _selected_app_quota_label(
+    *,
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    baseline_required: int,
+    interactive_required: int,
+    extra_valid_runs: int,
+) -> str:
+    countable = int(baseline_valid_runs) + int(interactive_valid_runs)
+    required = int(baseline_required) + int(interactive_required)
+    missing = max(0, int(baseline_required) - int(baseline_valid_runs)) + max(
+        0, int(interactive_required) - int(interactive_valid_runs)
+    )
+    if missing <= 0:
+        if int(extra_valid_runs) > 0:
+            return f"{countable}/{required}+{int(extra_valid_runs)}"
+        return f"{countable}/{required}"
+    return f"{countable}/{required} n{missing}"
+
+
+def _print_selected_app_state_summary(
+    *,
+    lineage_state: str,
+    active_valid_runs: int,
+    legacy_valid_runs: int,
+    db_active_sessions: int,
+    db_historical_sessions: int,
+    latest_valid: bool | None,
+    queue_action: str,
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    baseline_required: int,
+    interactive_required: int,
+    extra_valid_runs: int,
+) -> None:
+    menu_utils.print_header("App state")
+    rows = [
+        ["Build", _selected_app_build_label(
+            active_valid_runs=active_valid_runs,
+            legacy_valid_runs=legacy_valid_runs,
+            db_active_sessions=db_active_sessions,
+            db_historical_sessions=db_historical_sessions,
+        )],
+        ["Evidence", _selected_app_evidence_label(lineage_state)],
+        ["QA", _selected_app_qa_badge(latest_valid)],
+        ["Need", _selected_app_need_label(
+            queue_action=queue_action,
+            baseline_valid_runs=baseline_valid_runs,
+            interactive_valid_runs=interactive_valid_runs,
+            baseline_required=baseline_required,
+            interactive_required=interactive_required,
+        )],
+        ["Action", _selected_app_action_label(queue_action)],
+        ["Quota", _selected_app_quota_label(
+            baseline_valid_runs=baseline_valid_runs,
+            interactive_valid_runs=interactive_valid_runs,
+            baseline_required=baseline_required,
+            interactive_required=interactive_required,
+            extra_valid_runs=extra_valid_runs,
+        )],
+    ]
+    menu_utils.print_table(["Field", "Value"], rows)
+
+
 def _is_messaging_package_or_category(package_name: str) -> bool:
     pkg_lc = str(package_name or "").strip().lower()
     if not pkg_lc:
@@ -929,13 +1065,14 @@ def _run_guided_dataset_iteration(
 
     can_reset = bool(state.reset_available)
     latest_recent = state.recent_runs[0] if state.recent_runs else None
+    latest_valid = getattr(latest_recent, "valid", None)
     queue_action, queue_reason = _selected_app_queue_action(
         baseline_valid_runs=int(counts.baseline_valid_runs),
         interactive_valid_runs=int(counts.interactive_valid_runs),
         baseline_required=int(cfg.baseline_required),
         interactive_required=int(cfg.interactive_required),
         scripted_template_ready=scripted_template_ready,
-        latest_valid=getattr(latest_recent, "valid", None),
+        latest_valid=latest_valid,
         latest_invalid_reason=getattr(latest_recent, "invalid_reason_code", None),
         db_active_sessions=db_active_sessions,
         active_valid_runs=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
@@ -1038,6 +1175,25 @@ def _run_guided_dataset_iteration(
         historical_build_count=historical_build_count,
         db_active_sessions=db_active_sessions,
         db_historical_sessions=db_historical_sessions,
+    )
+    _print_selected_app_state_summary(
+        lineage_state=_selected_app_lineage_state(
+            active_valid_runs=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
+            legacy_valid_runs=historical_valid_local,
+            db_active_sessions=db_active_sessions,
+            db_historical_sessions=db_historical_sessions,
+        ),
+        active_valid_runs=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
+        legacy_valid_runs=historical_valid_local,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+        latest_valid=latest_valid,
+        queue_action=queue_action,
+        baseline_valid_runs=int(counts.baseline_valid_runs),
+        interactive_valid_runs=int(counts.interactive_valid_runs),
+        baseline_required=int(cfg.baseline_required),
+        interactive_required=int(cfg.interactive_required),
+        extra_valid_runs=extra_valid_local,
     )
     _print_selected_app_queue_action(queue_action, queue_reason)
     if extra_valid_local > 0:
