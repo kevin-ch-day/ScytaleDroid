@@ -163,6 +163,58 @@ def test_select_package_scope_menu_dedupes_profile_package_count(monkeypatch) ->
     assert app_profile_row[4] == scope._DASH
 
 
+def test_select_package_scope_menu_uses_compact_headers(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    alpha = _row("com.example.alpha", "Alpha")
+
+    monkeypatch.setattr(scope, "_LAST_SCOPE", None)
+    monkeypatch.setattr(scope, "_render_scope_table", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scope, "_load_active_profile_scopes", lambda rows, device_serial: [])
+
+    def _capture(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+
+    monkeypatch.setattr(scope.table_utils, "render_table", _capture)
+    monkeypatch.setattr(scope.prompt_utils, "get_choice", lambda *args, **kwargs: "2")
+
+    selection = scope.select_package_scope(
+        [alpha],
+        device_serial="SERIAL123",
+        is_rooted=False,
+    )
+
+    assert selection is not None
+    assert captured["headers"] == ["#", "Scope", "Pkgs", "Ready", "APKs", "Notes"]
+
+
+def test_select_package_scope_menu_shortens_full_inventory_label(monkeypatch) -> None:
+    captured_rows: dict[str, list[list[object]]] = {}
+    alpha = _row("com.example.alpha", "Alpha")
+
+    monkeypatch.setattr(scope, "_LAST_SCOPE", None)
+    monkeypatch.setattr(scope, "_render_scope_table", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scope, "_load_active_profile_scopes", lambda rows, device_serial: [])
+    monkeypatch.setattr(
+        scope.table_utils,
+        "render_table",
+        lambda headers, rows, **kwargs: captured_rows.setdefault("rows", rows),
+    )
+    monkeypatch.setattr(scope.prompt_utils, "get_choice", lambda *args, **kwargs: "4")
+
+    selection = scope.select_package_scope(
+        [alpha],
+        device_serial="SERIAL123",
+        is_rooted=False,
+    )
+
+    assert selection is not None
+    labels = [str(row[1]) for row in captured_rows["rows"]]
+    assert "All pullable packages" in labels
+    assert "All pullable packages (full inventory)" not in labels
+    assert selection.label == "All pullable packages (full inventory)"
+
+
 def test_select_package_scope_menu_marks_default_scope_recommended(monkeypatch) -> None:
     captured_rows: dict[str, list[list[object]]] = {}
     alpha = _row("com.example.alpha", "Alpha")

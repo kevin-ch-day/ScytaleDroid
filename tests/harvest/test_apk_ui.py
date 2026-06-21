@@ -30,12 +30,12 @@ def test_report_harvest_started_retains_non_root_policy_context(capsys) -> None:
 
     out = colors.strip(capsys.readouterr().out)
     assert "Harvest start: All pullable packages (full inventory) · pulling 152 packages · ~571 APK paths" in out
-    assert "inventory snapshot=578" in out
-    assert "pullable=152" in out
-    assert "policy-blocked=426" in out
-    assert "policy=non-root paths (system/product/vendor APK paths not harvested)" in out
-    assert "harvest_mode=full_refresh" in out
-    assert "delta=off" in out
+    assert "Inventory: 578 pkgs" in out
+    assert "Ready: 152" in out
+    assert "Policy-blocked: 426" in out
+    assert "Policy: non-root paths (system/product/vendor APK paths not harvested)" in out
+    assert "Mode: full_refresh" in out
+    assert "Delta: off" in out
 
 
 def test_prompt_plan_action_simple_mode_defaults_to_execute(monkeypatch, capsys) -> None:
@@ -44,13 +44,15 @@ def test_prompt_plan_action_simple_mode_defaults_to_execute(monkeypatch, capsys)
 
     action = ui.prompt_plan_action(
         SimpleNamespace(
-            stats={"scheduled_packages": 152, "scheduled_files": 576, "blocked_packages": 426}
+            selection=SimpleNamespace(label="All pullable packages (full inventory)"),
+            stats={"scheduled_packages": 152, "scheduled_files": 576, "blocked_packages": 426},
         )
     )
 
     out = colors.strip(capsys.readouterr().out)
     assert action == "pull_snapshot"
     assert "Harvest action" in out
+    assert "Scope: All pullable packages" in out
     assert "Ready: 152 package(s) · ~576 APK path(s)" in out
     assert "Blocked before pull: 426 package(s)" in out
     assert "Enter = execute harvest · P = preview plan · 0 = cancel" in out
@@ -60,7 +62,10 @@ def test_prompt_plan_action_simple_mode_accepts_preview_and_cancel(monkeypatch) 
     monkeypatch.setattr(ui, "is_harvest_simple_mode", lambda: True)
     responses = iter(["p", "0"])
     monkeypatch.setattr(ui.prompt_utils, "prompt_text", lambda *args, **kwargs: next(responses))
-    resolution = SimpleNamespace(stats={"scheduled_packages": 1, "scheduled_files": 1, "blocked_packages": 0})
+    resolution = SimpleNamespace(
+        selection=SimpleNamespace(label="Play Store & user-installed"),
+        stats={"scheduled_packages": 1, "scheduled_files": 1, "blocked_packages": 0},
+    )
 
     assert ui.prompt_plan_action(resolution) == "dry-run"
     assert ui.prompt_plan_action(resolution) == "cancel"

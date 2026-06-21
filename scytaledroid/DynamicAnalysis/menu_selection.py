@@ -33,10 +33,18 @@ class PreparedPackageSelectionView:
     dataset_apps_total: int
     dataset_apps_complete: int
     dataset_valid_runs_total: int
+    current_build_ready_count: int = 0
+    current_build_in_progress_count: int = 0
+    current_build_review_count: int = 0
+    stale_app_count: int = 0
+    current_build_db_only_count: int = 0
     historical_valid_runs_total: int = 0
     historical_build_count_total: int = 0
     mixed_identity_app_count: int = 0
     legacy_only_app_count: int = 0
+    historical_local_only_app_count: int = 0
+    historical_db_only_app_count: int = 0
+    no_evidence_anywhere_count: int = 0
     expected_runs: int = 0
     evidence_summary: dict[str, int | bool] | None = None
     row_models: list["PreparedPackageSelectionRow"] | None = None
@@ -68,6 +76,10 @@ class PreparedPackageSelectionRow:
     live_build_drift: bool = False
     live_expected_version_code: str = ""
     live_observed_version_code: str = ""
+    lineage_state: str = ""
+    db_active_sessions: int = 0
+    db_historical_sessions: int = 0
+    db_total_sessions: int = 0
 
 
 def prepare_package_selection_view(
@@ -91,6 +103,9 @@ def prepare_package_selection_view(
         [package for package, _v, _c, _label in packages],
         device_serial=device_serial,
     )
+    db_lineage_map = _resolve_db_dynamic_lineage_context_map(
+        [package for package, _v, _c, _label in packages]
+    )
 
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
         DatasetTrackerConfig,
@@ -111,10 +126,18 @@ def prepare_package_selection_view(
     dataset_apps_total = 0
     dataset_apps_complete = 0
     dataset_valid_runs_total = 0
+    current_build_ready_count = 0
+    current_build_in_progress_count = 0
+    current_build_review_count = 0
+    stale_app_count = 0
+    current_build_db_only_count = 0
     historical_valid_runs_total = 0
     historical_build_count_total = 0
     mixed_identity_app_count = 0
     legacy_only_app_count = 0
+    historical_local_only_app_count = 0
+    historical_db_only_app_count = 0
+    no_evidence_anywhere_count = 0
     evidence_summary: dict[str, int | bool] | None = None
     for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
         prepared_row = build_package_selection_row_fn(
@@ -127,16 +150,34 @@ def prepare_package_selection_view(
             cfg=cfg,
             recent_tracker_runs=recent_tracker_runs,
             live_build_drift=live_build_drift_map.get(str(package or "").strip().lower()),
+            db_lineage_context=db_lineage_map.get(str(package or "").strip().lower()),
         )
         dataset_apps_total += prepared_row.dataset_app_count
         dataset_apps_complete += prepared_row.dataset_complete_count
         dataset_valid_runs_total += prepared_row.dataset_valid_runs_count
+        if prepared_row.live_build_drift:
+            stale_app_count += 1
+        elif prepared_row.lineage_state == "current_build_db_only":
+            current_build_db_only_count += 1
+        elif prepared_row.lineage_state == "current_build_observed":
+            if str(prepared_row.qa_label or "").startswith("invalid"):
+                current_build_review_count += 1
+            elif prepared_row.dataset_complete_count > 0:
+                current_build_ready_count += 1
+            else:
+                current_build_in_progress_count += 1
         historical_valid_runs_total += prepared_row.historical_valid_runs_count
         historical_build_count_total += prepared_row.historical_build_count
         if prepared_row.build_state == "mixed":
             mixed_identity_app_count += 1
         elif prepared_row.build_state == "legacy":
             legacy_only_app_count += 1
+        if prepared_row.lineage_state == "historical_local_only":
+            historical_local_only_app_count += 1
+        elif prepared_row.lineage_state == "historical_db_only":
+            historical_db_only_app_count += 1
+        elif prepared_row.lineage_state == "no_evidence_anywhere":
+            no_evidence_anywhere_count += 1
         rows.append(prepared_row.full_row)
         op_rows.append(prepared_row.op_row)
         row_models.append(prepared_row)
@@ -158,10 +199,18 @@ def prepare_package_selection_view(
         dataset_apps_total=dataset_apps_total,
         dataset_apps_complete=dataset_apps_complete,
         dataset_valid_runs_total=dataset_valid_runs_total,
+        current_build_ready_count=current_build_ready_count,
+        current_build_in_progress_count=current_build_in_progress_count,
+        current_build_review_count=current_build_review_count,
+        stale_app_count=stale_app_count,
+        current_build_db_only_count=current_build_db_only_count,
         historical_valid_runs_total=historical_valid_runs_total,
         historical_build_count_total=historical_build_count_total,
         mixed_identity_app_count=mixed_identity_app_count,
         legacy_only_app_count=legacy_only_app_count,
+        historical_local_only_app_count=historical_local_only_app_count,
+        historical_db_only_app_count=historical_db_only_app_count,
+        no_evidence_anywhere_count=no_evidence_anywhere_count,
         expected_runs=expected_runs,
         evidence_summary=evidence_summary,
         row_models=row_models,
@@ -179,6 +228,7 @@ def build_package_selection_row(
     cfg,
     recent_tracker_runs,
     live_build_drift=None,
+    db_lineage_context=None,
     truncate_visible_fn,
     bucket_progress_label_fn,
     quota_progress_label_fn,
@@ -222,6 +272,10 @@ def build_package_selection_row(
     live_build_drift_flag = False
     live_expected_version_code = ""
     live_observed_version_code = ""
+    lineage_state = ""
+    db_active_sessions = 0
+    db_historical_sessions = 0
+    db_total_sessions = 0
 
     if package.lower() in dataset_pkgs:
         dataset_app_count = 1
@@ -291,6 +345,10 @@ def build_package_selection_row(
         historical_valid_runs_count = legacy_valid
         historical_build_count = legacy_builds
         technical_valid_active = int(scoped.get("technical_valid_active") or 0)
+        if isinstance(db_lineage_context, dict):
+            db_active_sessions = int(db_lineage_context.get("db_active_sessions") or 0)
+            db_historical_sessions = int(db_lineage_context.get("db_historical_sessions") or 0)
+            db_total_sessions = int(db_lineage_context.get("db_total_sessions") or 0)
 
         recent = recent_tracker_runs(package, limit=1)
         if recent:
@@ -334,8 +392,18 @@ def build_package_selection_row(
             live_build_drift_flag = True
             live_expected_version_code = str(live_build_drift.get("expected_version_code") or "").strip()
             live_observed_version_code = str(live_build_drift.get("observed_version_code") or "").strip()
-            prep_label = "stale"
+        lineage_state = _row_lineage_state(
+            active_valid_runs=technical_valid_active,
+            legacy_valid_runs=legacy_valid,
+            db_active_sessions=db_active_sessions,
+            db_historical_sessions=db_historical_sessions,
+            live_build_drift=live_build_drift_flag,
+        )
+        prep_label = _prep_label_for_lineage_state(lineage_state, build_label)
+        if live_build_drift_flag:
             next_choice_label = "refresh static"
+        elif str(qa_label or "").startswith("invalid") and next_choice_label == "—":
+            next_choice_label = "review QA"
         build_row = [display, active_build, str(active_runs), str(legacy_valid), str(legacy_builds)]
 
     return PreparedPackageSelectionRow(
@@ -383,6 +451,10 @@ def build_package_selection_row(
         live_build_drift=live_build_drift_flag,
         live_expected_version_code=live_expected_version_code,
         live_observed_version_code=live_observed_version_code,
+        lineage_state=lineage_state,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+        db_total_sessions=db_total_sessions,
     )
 
 
@@ -406,10 +478,29 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             if extra_runs > 0:
                 progress_parts.append(f"{extra_runs} supplemental")
             print(f"Quota: {' | '.join(progress_parts)}")
+            build_parts = [f"{prepared.current_build_ready_count}/{prepared.dataset_apps_total} complete"]
+            if prepared.current_build_in_progress_count > 0:
+                build_parts.append(f"{prepared.current_build_in_progress_count} in progress")
+            if prepared.current_build_review_count > 0:
+                build_parts.append(f"{prepared.current_build_review_count} review")
+            if prepared.stale_app_count > 0:
+                build_parts.append(f"{prepared.stale_app_count} stale")
+            if prepared.current_build_db_only_count > 0:
+                build_parts.append(f"{prepared.current_build_db_only_count} db-only")
+            print(f"Current build: {' | '.join(build_parts)}")
+            history_parts = []
+            if prepared.historical_local_only_app_count > 0:
+                history_parts.append(f"{prepared.historical_local_only_app_count} local-only")
+            if prepared.historical_db_only_app_count > 0:
+                history_parts.append(f"{prepared.historical_db_only_app_count} db-only")
+            if prepared.no_evidence_anywhere_count > 0:
+                history_parts.append(f"{prepared.no_evidence_anywhere_count} empty")
+            if history_parts:
+                print(f"History      : {' | '.join(history_parts)}")
             print(f"Archive: {'ready' if freeze_ok else 'blocked'}")
             print()
 
-            next_row = next((row for row in row_models if row.next_label != "—"), None)
+            next_row = _next_recommended_row(row_models)
             if next_row:
                 print(f"Next : {next_row.display_name} — {_display_next_line_action_label(next_row)}")
                 print()
@@ -444,10 +535,18 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
                 dataset_apps_total=prepared.dataset_apps_total,
                 dataset_apps_complete=prepared.dataset_apps_complete,
                 dataset_valid_runs_total=prepared.dataset_valid_runs_total,
+                current_build_ready_count=prepared.current_build_ready_count,
+                current_build_in_progress_count=prepared.current_build_in_progress_count,
+                current_build_review_count=prepared.current_build_review_count,
+                stale_app_count=prepared.stale_app_count,
+                current_build_db_only_count=prepared.current_build_db_only_count,
                 historical_valid_runs_total=prepared.historical_valid_runs_total,
                 historical_build_count_total=prepared.historical_build_count_total,
                 mixed_identity_app_count=prepared.mixed_identity_app_count,
                 legacy_only_app_count=prepared.legacy_only_app_count,
+                historical_local_only_app_count=prepared.historical_local_only_app_count,
+                historical_db_only_app_count=prepared.historical_db_only_app_count,
+                no_evidence_anywhere_count=prepared.no_evidence_anywhere_count,
                 expected_runs=prepared.expected_runs,
                 evidence_summary=evidence_summary,
                 row_models=list(prepared.row_models or []),
@@ -482,6 +581,14 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
 def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
     if row.live_build_drift:
         return "installed build differs from newest static plan"
+    if row.lineage_state == "current_build_db_only":
+        return "database knows current-build sessions, but local evidence pack is missing"
+    if row.lineage_state == "historical_local_only":
+        return "only legacy local evidence exists for older builds"
+    if row.lineage_state == "historical_db_only":
+        return "only database-known historical evidence exists for older builds"
+    if row.lineage_state == "no_evidence_anywhere":
+        return "no local or database-backed dynamic evidence exists yet"
     if row.need_baseline > 0:
         return f"baseline runs needed: {row.need_baseline}"
     if row.need_interactive > 0:
@@ -496,6 +603,7 @@ def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
     issues: list[str] = []
     drift_rows = [row.display_name for row in row_models if row.live_build_drift]
     mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
+    hist_db_rows = [row.display_name for row in row_models if row.lineage_state == "historical_db_only"]
     invalid_rows = [row.display_name for row in row_models if str(row.qa_label).startswith("invalid")]
     mismatch_rows = [row.display_name for row in row_models if "id_mismatch" in str(row.qa_label)]
     baseline_needed = sum(1 for row in row_models if row.need_baseline > 0)
@@ -506,6 +614,9 @@ def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
     if mixed_rows:
         label = ", ".join(mixed_rows[:2])
         issues.append(f"{label} mixed current/legacy evidence")
+    if hist_db_rows:
+        label = ", ".join(hist_db_rows[:2])
+        issues.append(f"{label} historical DB-only")
     if invalid_rows:
         label = ", ".join(invalid_rows[:2])
         issues.append(f"{label} QA invalid")
@@ -530,6 +641,7 @@ def _attention_items(row_models: list[PreparedPackageSelectionRow]) -> list[str]
     drift_rows = [row for row in row_models if row.live_build_drift]
     invalid_rows = [row for row in row_models if str(row.qa_label).startswith("invalid")]
     mixed_rows = [row for row in row_models if row.prep_label == "mixed"]
+    historical_db_rows = [row for row in row_models if row.lineage_state == "historical_db_only"]
     mismatch_rows = [row for row in row_models if "id_mismatch" in str(row.qa_label)]
     for row in drift_rows[:3]:
         items.append(
@@ -545,6 +657,10 @@ def _attention_items(row_models: list[PreparedPackageSelectionRow]) -> list[str]
         items.append(
             f"{row.display_name}: prep mixed — {active_runs} current-build valid run(s) and "
             f"{legacy_runs} legacy valid run(s) across {legacy_builds} older build(s)"
+        )
+    for row in historical_db_rows[:3]:
+        items.append(
+            f"{row.display_name}: only database-known historical evidence exists — recollect current-build dynamic evidence"
         )
     for row in mismatch_rows[:3]:
         items.append(f"{row.display_name}: QA identity mismatch — latest valid run does not match active build identity")
@@ -571,16 +687,20 @@ def _render_compact_queue_table(
             _queue_runs_label(row, total_required=total_required),
             _queue_prep_qa_label(row),
             _queue_template_label(row.package_name),
-            _display_action_label(row),
+            _queue_action_label(row),
         ]
         for row in rows
     ]
-    table_utils.render_table(headers, table_rows, compact=False)
+    table_utils.render_table(headers, table_rows, compact=True)
 
 
 def _queue_state_label(row: PreparedPackageSelectionRow) -> str:
     if row.live_build_drift:
         return "refresh"
+    if row.lineage_state == "current_build_db_only":
+        return "restore"
+    if row.lineage_state in {"historical_local_only", "historical_db_only"}:
+        return "legacy"
     if str(row.qa_label).startswith("invalid"):
         return "review"
     if row.need_baseline > 0:
@@ -602,7 +722,13 @@ def _queue_need_label(
 ) -> str:
     state = _queue_state_label(row)
     if row.live_build_drift:
-        return "static refresh"
+        return "refresh"
+    if row.lineage_state == "current_build_db_only":
+        return "local pack"
+    if row.lineage_state == "historical_local_only":
+        return "current"
+    if row.lineage_state == "historical_db_only":
+        return "local+curr"
     if state == "review":
         return "review QA"
     if state == "baseline":
@@ -618,7 +744,7 @@ def _queue_runs_label(row: PreparedPackageSelectionRow, *, total_required: int) 
     missing = int(row.need_baseline) + int(row.need_interactive)
     if missing <= 0:
         if extra > 0:
-            return f"{countable}/{int(total_required)} +{extra}"
+            return f"{countable}/{int(total_required)}+{extra}"
         return f"{countable}/{int(total_required)}"
     return f"{countable}/{int(total_required)} n{missing}"
 
@@ -642,7 +768,7 @@ def _queue_qa_badge(value: str) -> str:
     if text == "valid (id_mismatch) (L)":
         return "+id+L"
     if text.startswith("invalid"):
-        return "invalid"
+        return "inv"
     return text
 
 
@@ -671,12 +797,23 @@ def _queue_template_label(package_name: str) -> str:
         "tiktok_basic_v2",
     }:
         return "acct"
-    return "generic"
+    return "gen"
+
+
+def _queue_action_label(row: PreparedPackageSelectionRow) -> str:
+    action = _display_action_label(row)
+    if action == "baseline":
+        return "base"
+    if action == "scripted":
+        return "script"
+    return action
 
 
 def _display_action_label(row: PreparedPackageSelectionRow) -> str:
     if row.live_build_drift:
         return "refresh"
+    if row.lineage_state == "current_build_db_only":
+        return "restore"
     action = _main_action_label(row.next_label)
     if action != "manual":
         return action
@@ -692,7 +829,42 @@ def _display_next_line_action_label(row: PreparedPackageSelectionRow) -> str:
         return "scripted interaction"
     if action == "manual":
         return "manual interaction"
+    if action == "review":
+        return "review QA"
     return action
+
+
+def _next_recommendation_priority(row: PreparedPackageSelectionRow) -> tuple[int, str]:
+    action = _display_action_label(row)
+    lineage_state = str(row.lineage_state or "")
+    if action == "review":
+        return (0, row.display_name)
+    if action == "refresh":
+        return (1, row.display_name)
+    if action == "restore":
+        return (2, row.display_name)
+    if action == "scripted":
+        return (3, row.display_name)
+    if action == "manual":
+        return (4, row.display_name)
+    if action == "baseline":
+        if lineage_state == "no_evidence_anywhere":
+            return (5, row.display_name)
+        if lineage_state == "historical_local_only":
+            return (6, row.display_name)
+        if lineage_state == "historical_db_only":
+            return (7, row.display_name)
+        return (8, row.display_name)
+    return (99, row.display_name)
+
+
+def _next_recommended_row(
+    rows: list[PreparedPackageSelectionRow],
+) -> PreparedPackageSelectionRow | None:
+    candidates = [row for row in rows if _display_action_label(row) != "—"]
+    if not candidates:
+        return None
+    return min(candidates, key=_next_recommendation_priority)
 
 
 def _group_queue_sections(
@@ -791,6 +963,8 @@ def _main_action_label(value: str) -> str:
         return "manual"
     if text == "refresh static":
         return "refresh"
+    if text == "review QA":
+        return "review"
     return text or "—"
 
 
@@ -869,6 +1043,8 @@ def _compact_prep_label(value: str) -> str:
         "current": "current",
         "mixed": "mixed",
         "legacy": "legacy",
+        "db-only": "db-only",
+        "hist-db": "hist-db",
         "ready": "ready",
         "stale": "stale",
     }
@@ -926,6 +1102,89 @@ def _resolve_live_build_drift_map(
             "observed_version_code": observed_vc,
         }
     return out
+
+
+def _resolve_db_dynamic_lineage_context_map(
+    packages: list[str],
+) -> dict[str, dict[str, int]]:
+    normalized = sorted({str(package or "").strip().lower() for package in packages if str(package or "").strip()})
+    if not normalized:
+        return {}
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+        from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
+        from scytaledroid.DynamicAnalysis.tracker_scope import resolve_active_package_identity
+    except Exception:
+        return {}
+
+    target_set = set(normalized)
+    base_rows = [
+        row
+        for row in (lineage.fetch_base_rows(core_q, package_name=None) or [])
+        if str(row.get("package_name") or "").strip().lower() in target_set
+    ]
+    dynamic_by_hash = lineage.fetch_dynamic_coverage(core_q)
+    out: dict[str, dict[str, int]] = {}
+    for row in base_rows:
+        package = str(row.get("package_name") or "").strip().lower()
+        sha = str(row.get("base_apk_sha256") or "").strip().lower()
+        if not package or not sha:
+            continue
+        dynamic_sessions = int((dynamic_by_hash.get(sha) or {}).get("dynamic_sessions") or 0)
+        if dynamic_sessions <= 0:
+            continue
+        version_code = str(row.get("version_code") or "").strip()
+        active_vc, active_sha = resolve_active_package_identity(package)
+        active_vc = str(active_vc or "").strip()
+        active_sha = str(active_sha or "").strip().lower()
+        is_active = sha == active_sha if active_sha else (version_code == active_vc if active_vc else False)
+        bucket = out.setdefault(
+            package,
+            {
+                "db_active_sessions": 0,
+                "db_historical_sessions": 0,
+                "db_total_sessions": 0,
+            },
+        )
+        bucket["db_total_sessions"] += dynamic_sessions
+        if is_active:
+            bucket["db_active_sessions"] += dynamic_sessions
+        else:
+            bucket["db_historical_sessions"] += dynamic_sessions
+    return out
+
+
+def _row_lineage_state(
+    *,
+    active_valid_runs: int,
+    legacy_valid_runs: int,
+    db_active_sessions: int,
+    db_historical_sessions: int,
+    live_build_drift: bool,
+) -> str:
+    if live_build_drift:
+        return "current_build_stale"
+    if int(active_valid_runs) > 0:
+        return "current_build_observed"
+    if int(db_active_sessions) > 0:
+        return "current_build_db_only"
+    if int(legacy_valid_runs) > 0:
+        return "historical_local_only"
+    if int(db_historical_sessions) > 0:
+        return "historical_db_only"
+    return "no_evidence_anywhere"
+
+
+def _prep_label_for_lineage_state(lineage_state: str, default_build_label: str) -> str:
+    mapping = {
+        "current_build_stale": "stale",
+        "current_build_observed": default_build_label or "current",
+        "current_build_db_only": "db-only",
+        "historical_local_only": "legacy",
+        "historical_db_only": "hist-db",
+        "no_evidence_anywhere": "ready",
+    }
+    return mapping.get(lineage_state, default_build_label or "ready")
 
 
 def build_scoped_dataset_counts(

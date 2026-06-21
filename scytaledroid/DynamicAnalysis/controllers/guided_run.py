@@ -70,6 +70,177 @@ _META_FAMILY_PACKAGES = {
 }
 
 
+def _load_db_dynamic_lineage_context(package_name: str) -> dict[str, int]:
+    pkg_lc = str(package_name or "").strip().lower()
+    if not pkg_lc:
+        return {}
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+        from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
+        from scytaledroid.DynamicAnalysis.tracker_scope import resolve_active_package_identity
+    except Exception:
+        return {}
+
+    base_rows = [
+        row
+        for row in (lineage.fetch_base_rows(core_q, package_name=pkg_lc) or [])
+        if str(row.get("package_name") or "").strip().lower() == pkg_lc
+    ]
+    dynamic_by_hash = lineage.fetch_dynamic_coverage(core_q)
+    active_vc, active_sha = resolve_active_package_identity(pkg_lc)
+    active_vc = str(active_vc or "").strip()
+    active_sha = str(active_sha or "").strip().lower()
+
+    out = {
+        "db_active_sessions": 0,
+        "db_historical_sessions": 0,
+        "db_total_sessions": 0,
+    }
+    for row in base_rows:
+        sha = str(row.get("base_apk_sha256") or "").strip().lower()
+        if not sha:
+            continue
+        dynamic_sessions = int((dynamic_by_hash.get(sha) or {}).get("dynamic_sessions") or 0)
+        if dynamic_sessions <= 0:
+            continue
+        version_code = str(row.get("version_code") or "").strip()
+        is_active = sha == active_sha if active_sha else (version_code == active_vc if active_vc else False)
+        out["db_total_sessions"] += dynamic_sessions
+        if is_active:
+            out["db_active_sessions"] += dynamic_sessions
+        else:
+            out["db_historical_sessions"] += dynamic_sessions
+    return out
+
+
+def _selected_app_lineage_state(
+    *,
+    active_valid_runs: int,
+    legacy_valid_runs: int,
+    db_active_sessions: int,
+    db_historical_sessions: int,
+) -> str:
+    if int(active_valid_runs) > 0:
+        return "current_build_observed"
+    if int(db_active_sessions) > 0:
+        return "current_build_db_only"
+    if int(legacy_valid_runs) > 0:
+        return "historical_local_only"
+    if int(db_historical_sessions) > 0:
+        return "historical_db_only"
+    return "no_evidence_anywhere"
+
+
+def _print_selected_app_evidence_context(
+    *,
+    package_name: str,
+    active_valid_runs: int,
+    legacy_valid_runs: int,
+    historical_build_count: int,
+    db_active_sessions: int,
+    db_historical_sessions: int,
+) -> None:
+    state = _selected_app_lineage_state(
+        active_valid_runs=active_valid_runs,
+        legacy_valid_runs=legacy_valid_runs,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+    )
+    if int(legacy_valid_runs) > 0:
+        build_text = (
+            f" across {historical_build_count} older build(s)"
+            if historical_build_count > 0
+            else ""
+        )
+        print(
+            status_messages.status(
+                f"Historical context: {legacy_valid_runs} legacy valid run(s){build_text} retained for comparison; not counted toward current quota.",
+                level="info",
+            )
+        )
+    if state == "current_build_db_only":
+        print(
+            status_messages.status(
+                f"Current-build DB-only context: {db_active_sessions} DB-backed session(s) match the active build, but the local evidence pack is missing in this workspace.",
+                level="warn",
+            )
+        )
+        print(
+            status_messages.status(
+                "Recommended action: restore the local evidence pack if available, or recollect the current build.",
+                level="info",
+            )
+        )
+        return
+    if state == "historical_local_only":
+        print(
+            status_messages.status(
+                "Current-build evidence is still missing for this app. Baseline collection should target the installed build.",
+                level="info",
+            )
+        )
+        return
+    if state == "historical_db_only":
+        print(
+            status_messages.status(
+                f"Historical DB-only context: {db_historical_sessions} older DB-backed session(s) exist, but no local evidence pack is present in this workspace.",
+                level="warn",
+            )
+        )
+        print(
+            status_messages.status(
+                "Recommended action: collect baseline evidence for the installed build; treat older sessions as historical context only.",
+                level="info",
+            )
+        )
+        return
+    if state == "no_evidence_anywhere":
+        print(
+            status_messages.status(
+                f"No prior dynamic evidence exists yet for {package_name}. This run will establish the first current-build baseline.",
+                level="info",
+            )
+        )
+
+
+def _selected_app_queue_action(
+    *,
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    baseline_required: int,
+    interactive_required: int,
+    scripted_template_ready: bool,
+    latest_valid: bool | None,
+    latest_invalid_reason: str | None,
+    db_active_sessions: int,
+    active_valid_runs: int,
+) -> tuple[str, str | None]:
+    baseline_missing = max(0, int(baseline_required) - int(baseline_valid_runs))
+    interactive_missing = max(0, int(interactive_required) - int(interactive_valid_runs))
+    if baseline_missing <= 0 and interactive_missing <= 0 and latest_valid is False:
+        detail = str(latest_invalid_reason or "").strip().upper() or "UNKNOWN"
+        return ("review QA", f"latest current-build run is invalid ({detail})")
+    if int(active_valid_runs) <= 0 and int(db_active_sessions) > 0:
+        return ("restore local evidence", "DB knows current-build sessions but the local evidence pack is missing")
+    if baseline_missing > 0:
+        suffix = "" if baseline_missing == 1 else "s"
+        return ("baseline", f"{baseline_missing} baseline run{suffix} needed")
+    if interactive_missing > 0:
+        action = "scripted interaction" if scripted_template_ready else "manual interaction"
+        suffix = "" if interactive_missing == 1 else "s"
+        return (action, f"{interactive_missing} interactive run{suffix} needed")
+    return ("—", None)
+
+
+def _print_selected_app_queue_action(action: str, reason: str | None) -> None:
+    text = str(action or "").strip()
+    if not text or text == "—":
+        return
+    print(status_messages.status(f"Queue action: {text}", level="info"))
+    if str(reason or "").strip():
+        print(status_messages.status(f"Reason: {reason}", level="info"))
+
+
 def _is_messaging_package_or_category(package_name: str) -> bool:
     pkg_lc = str(package_name or "").strip().lower()
     if not pkg_lc:
@@ -701,6 +872,15 @@ def _run_guided_dataset_iteration(
                     level="warn",
                 )
             )
+        observed_vc = str(plan_drift.get("observed_version_code") or "").strip() or "unknown"
+        expected_vc = str(plan_drift.get("expected_version_code") or "").strip() or "unknown"
+        print(status_messages.status("Queue action: refresh static", level="info"))
+        print(
+            status_messages.status(
+                f"Reason: installed build {observed_vc} does not match the newest static-plan build {expected_vc}.",
+                level="info",
+            )
+        )
         print(
             status_messages.status(
                 "Dataset-mode dynamic runs require the installed build to match the selected static plan. "
@@ -728,6 +908,9 @@ def _run_guided_dataset_iteration(
     extra_valid_local = int(counts.extra_valid_runs)
     historical_valid_local = int(state.historical_valid_runs)
     historical_build_count = int(state.historical_build_count)
+    db_lineage_context = _load_db_dynamic_lineage_context(package_name)
+    db_active_sessions = int(db_lineage_context.get("db_active_sessions") or 0)
+    db_historical_sessions = int(db_lineage_context.get("db_historical_sessions") or 0)
     interactive_label = _interactive_phase_label(cfg)
     if int(counts.baseline_valid_runs) < int(cfg.baseline_required):
         suggested_profile = _canonical_baseline_profile_for_package(package_name)
@@ -745,6 +928,18 @@ def _run_guided_dataset_iteration(
         return "suggested" if key == suggested_default_key else None
 
     can_reset = bool(state.reset_available)
+    latest_recent = state.recent_runs[0] if state.recent_runs else None
+    queue_action, queue_reason = _selected_app_queue_action(
+        baseline_valid_runs=int(counts.baseline_valid_runs),
+        interactive_valid_runs=int(counts.interactive_valid_runs),
+        baseline_required=int(cfg.baseline_required),
+        interactive_required=int(cfg.interactive_required),
+        scripted_template_ready=scripted_template_ready,
+        latest_valid=getattr(latest_recent, "valid", None),
+        latest_invalid_reason=getattr(latest_recent, "invalid_reason_code", None),
+        db_active_sessions=db_active_sessions,
+        active_valid_runs=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
+    )
     protocol_options = [
         menu_utils.MenuOption(
             "1",
@@ -836,18 +1031,15 @@ def _run_guided_dataset_iteration(
                 level="info",
             )
         )
-    if historical_valid_local > 0:
-        build_text = (
-            f" across {historical_build_count} older build(s)"
-            if historical_build_count > 0
-            else ""
-        )
-        print(
-            status_messages.status(
-                f"Historical context: {historical_valid_local} legacy valid run(s){build_text} retained for comparison; not counted toward current quota.",
-                level="info",
-            )
-        )
+    _print_selected_app_evidence_context(
+        package_name=package_name,
+        active_valid_runs=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
+        legacy_valid_runs=historical_valid_local,
+        historical_build_count=historical_build_count,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+    )
+    _print_selected_app_queue_action(queue_action, queue_reason)
     if extra_valid_local > 0:
         print(
             status_messages.status(

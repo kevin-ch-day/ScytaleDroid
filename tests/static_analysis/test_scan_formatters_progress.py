@@ -257,7 +257,7 @@ def test_checkpoint_card_multiline_shape_default_table() -> None:
     assert "Current package : Next App · com.example.next" in card
     assert "Packages 10 / 144" in card
     assert "APK artifacts 120 / 531" in card
-    assert "APK reports saved 118 / 531" in card
+    assert "Reports 118 / 531" in card
     assert "Elapsed 18m 0s · ETA ~40m" in card
     assert "Warnings 3" in card
     assert "Policy failures 1" in card
@@ -295,11 +295,12 @@ def test_checkpoint_card_concise_pipeline_block_collapses_to_dense_lines() -> No
     )
 
     assert "Warnings 475 · Policy failures 0 · Finding failures 94 · Execution errors 0" in card
-    assert "Skipped stages 1424 · Parse/resource est. 35" in card
+    assert "Skipped stages 1424 · Parse est. 35" in card
     assert "Current package : Android Auto · com.google.android.projection.gearhead" in card
-    assert "Packages 80 / 152 · APK artifacts 286 / 576 · APK reports saved 286 / 576" in card
+    assert "Packages 80 / 152 · APK artifacts 286 / 576 · Reports 286 / 576" in card
     assert "Elapsed 15 mins 37 secs · ETA ~15 mins 50 secs" in card
-    assert "(skipped = profile/applicability skips; normal when detectors do not apply)" in card
+    assert "(execution OK — no analyzer/pipeline errors)" in card
+    assert "(skipped = profile/applicability skips; normal)" in card
     assert "Metric" not in card
 
 
