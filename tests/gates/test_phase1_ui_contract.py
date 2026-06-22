@@ -34,6 +34,7 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
     assert rendered, "main menu should render a menu spec"
     labels = [item.label for item in rendered[0].items]
     assert labels == [
+        "Select device",
         "Device Inventory & Harvest",
         "Static Analysis Pipeline",
         "Dynamic Analysis",
@@ -45,6 +46,43 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
         "APK library",
         "About ScytaleDroid",
     ]
+
+
+def test_handle_select_device_starts_selector_on_new_line(monkeypatch, capsys) -> None:
+    selector_calls = {"count": 0}
+
+    def _fake_select_device(**_kwargs):
+        selector_calls["count"] += 1
+        print("SELECTOR HEADER")
+        return None
+
+    import scytaledroid.DynamicAnalysis.controllers.device_select as device_select_module
+
+    monkeypatch.setattr(device_select_module, "select_device", _fake_select_device)
+
+    app_main.handle_select_device()
+
+    out = capsys.readouterr().out
+    assert selector_calls["count"] == 1
+    assert out.startswith("\nSELECTOR HEADER\n")
+
+
+def test_handle_database_starts_menu_on_new_line(monkeypatch, capsys) -> None:
+    menu_calls = {"count": 0}
+
+    def _fake_database_menu():
+        menu_calls["count"] += 1
+        print("DATABASE HEADER")
+
+    import scytaledroid.Database.db_utils.database_menu as database_menu_module
+
+    monkeypatch.setattr(database_menu_module, "database_menu", _fake_database_menu)
+
+    app_main.handle_database()
+
+    out = capsys.readouterr().out
+    assert menu_calls["count"] == 1
+    assert out.startswith("\nDATABASE HEADER\n")
 
 
 def test_environment_metrics_hidden_in_normal_prod_mode(monkeypatch) -> None:

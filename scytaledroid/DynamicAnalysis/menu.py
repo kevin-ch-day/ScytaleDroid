@@ -796,7 +796,7 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "2":
-            selected = _choose_active_research_cohort()
+            selected = _resolve_active_cohort_for_run()
             if isinstance(selected, dict):
                 _warn_if_code_changed()
                 _run_guided_dataset_run(ui_defaults)
@@ -819,6 +819,11 @@ def dynamic_analysis_menu() -> None:
             continue
 
         if choice == "6":
+            _choose_active_research_cohort()
+            _pause_if_verbose()
+            continue
+
+        if choice == "7":
             _dynamic_maintenance_menu(pause_if_verbose=_pause_if_verbose)
             _pause_if_verbose()
             continue
@@ -1383,6 +1388,21 @@ def _run_guided_dataset_run(ui_defaults: _DynamicUiDefaults) -> None:
         observer_prompts_enabled=bool(ui_defaults.observer_prompts_enabled),
         pcapdroid_api_key=ui_defaults.pcapdroid_api_key,
     )
+
+
+def _resolve_active_cohort_for_run() -> dict[str, object] | None:
+    active_key = str(active_research_cohort_key() or "").strip().lower()
+    rows = chooseable_active_research_cohorts()
+    if not rows:
+        print(status_messages.status("No active app cohorts are defined in the DB.", level="warn"))
+        return None
+    if active_key:
+        for row in rows:
+            cohort_key = str(row.get("cohort_key") or "").strip().lower()
+            if cohort_key == active_key:
+                return dict(row)
+    selected = _choose_active_research_cohort()
+    return dict(selected) if isinstance(selected, dict) else None
 
 
 def _run_focused_app_run(ui_defaults: _DynamicUiDefaults) -> None:
