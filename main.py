@@ -28,6 +28,12 @@ def _resolve_timezones() -> WorldClockState:
     return load_state()
 
 
+def _start_screen_transition() -> None:
+    """Insert a single blank line before rendering the next major screen."""
+
+    print()
+
+
 def _describe_snapshot(snapshot: ClockSnapshot) -> tuple[str, str]:
     timestamp = format_display_time(snapshot.local_time)
     tz_label = describe_timezone(snapshot.timezone, snapshot.local_time)
@@ -108,22 +114,24 @@ def main_menu() -> None:
     ensure_db_ready()
     from scytaledroid.Database.db_utils import schema_gate
     menu_actions: list[tuple[str, str, Callable[[], None]]] = [
-        ("1", "Device Inventory & Harvest", handle_device),
-        ("2", "Static Analysis Pipeline", handle_static),
-        ("3", "Dynamic Analysis", handle_dynamic),
-        ("4", "API server", handle_api),
-        ("5", "Reporting & Exports", handle_reporting),
-        ("6", "Database tools", handle_database),
-        ("7", "Governance & Readiness", handle_data_workspace),
-        ("8", "Evidence & Workspace", handle_workspace),
-        ("9", "APK library", handle_browse_apks),
-        ("10", "About ScytaleDroid", handle_about),
+        ("1", "Select device", handle_select_device),
+        ("2", "Device Inventory & Harvest", handle_device),
+        ("3", "Static Analysis Pipeline", handle_static),
+        ("4", "Dynamic Analysis", handle_dynamic),
+        ("5", "API server", handle_api),
+        ("6", "Reporting & Exports", handle_reporting),
+        ("7", "Database tools", handle_database),
+        ("8", "Governance & Readiness", handle_data_workspace),
+        ("9", "Evidence & Workspace", handle_workspace),
+        ("10", "APK library", handle_browse_apks),
+        ("11", "About ScytaleDroid", handle_about),
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
     valid_choices = list(handlers)
-    # Keep a default for enter-to-select but do not show "(default)" in UI.
-    default_choice = "1"
+    # Keep enter-to-select on the first workflow stage rather than re-opening
+    # device selection when operators are already working with one device.
+    default_choice = "2"
     ui_once: dict[str, bool] = {}
     while True:
         print()
@@ -152,6 +160,14 @@ def main_menu() -> None:
         menu_utils.print_hint(
             "Choose a workflow stage."
         )
+        try:
+            from scytaledroid.DeviceAnalysis import device_manager
+
+            active_device = device_manager.describe_active_device()
+        except Exception:
+            active_device = "None"
+        if active_device and active_device != "None":
+            menu_utils.print_hint(f"Selected device: {active_device}")
         spec = MenuSpec(
             items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],
             default=None,
@@ -384,6 +400,28 @@ def _print_tier1_status_banner() -> dict[str, object]:
 
 # --- Handlers for each menu option ---
 
+def handle_select_device() -> None:
+    from scytaledroid.DynamicAnalysis.controllers.device_select import (
+        get_device_selection_details,
+        select_device,
+    )
+
+    _start_screen_transition()
+    selected = select_device(
+        header="Select Capture Device",
+        prefer_active=False,
+        allow_auto_single=False,
+    )
+    if not selected:
+        return
+    serial, _label = selected
+    details = get_device_selection_details(serial)
+    print(status_messages.status("Capture device selected", level="success"))
+    print(f"  {details['name']}")
+    print(f"  Serial : {details['serial']}")
+    print(f"  Android: {details['android']}")
+    print(f"  Type   : {details['type']}")
+
 def handle_device() -> None:
     """Launch the Android Devices hub."""
     from scytaledroid.DeviceAnalysis.device_hub_menu import devices_hub
@@ -424,6 +462,7 @@ def handle_api() -> None:
 def handle_database() -> None:
     from scytaledroid.Database.db_utils.database_menu import database_menu
 
+    _start_screen_transition()
     database_menu()
 
 

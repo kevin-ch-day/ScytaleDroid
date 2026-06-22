@@ -112,14 +112,14 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
 
     assert result is None
     out = capsys.readouterr().out
-    assert "Publication : 1/3 complete | 1 review" in out
+    assert "Publication : 1/3 quota-satisfied | 1 review" in out
     assert "Quota       : 8/5 valid | 0 remaining | 2 supplemental" in out
     assert "Current     : 1/3 complete | 1 in progress | 1 review" in out
     assert "History     : 1 local-only" in out
     assert "Archive     : blocked" in out
-    assert "Blocked by  : 1 review | 2 capture gaps" in out
+    assert "Blocked by  : 1 review | 1 base | 1 manual" in out
     assert "Next        : CNN — scripted interaction" in out
-    assert "Warnings: ESPN QA invalid. 1 app needs baseline." in out
+    assert "Warnings: ESPN review | 1 baseline gap | 1 manual gap. Press D." in out
     assert "Attention needed" not in out
     assert "Ready for manual interaction" not in out
     assert "Needs baseline capture" not in out
@@ -134,9 +134,9 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert "D diagnostics" in out
     assert "B back" in out
     assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "5/5+1", "unknown", "none", "✓", "news", "—"]
-    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/5 n2", "unknown", "none", "✓", "news", "script"]
-    assert captured["rows"][2][1:] == ["ESPN", "review", "review", "0/5 n5", "unknown", "none", "inv", "none", "base"]
+    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "5/5 +1", "unknown", "none", "✓", "news", "—"]
+    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/5 need 2", "unknown", "none", "✓", "news", "script"]
+    assert captured["rows"][2][1:] == ["ESPN", "review", "review", "0/5 need 5", "unknown", "none", "inv", "none", "base"]
 
 
 def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeypatch) -> None:
@@ -197,8 +197,8 @@ def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeyp
     )
 
     assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["1", "Facebook Messenger", "legacy", "local+curr", "0/5 n5", "legacy", "db-only", "—", "gen", "base"]
-    assert captured["rows"][1] == ["2", "The Guardian", "baseline", "base 0/3", "0/5 n5", "unknown", "empty", "—", "news", "base"]
+    assert captured["rows"][0] == ["1", "Facebook Messenger", "baseline", "local+curr", "0/5 need 5", "legacy", "db-only", "—", "gen", "base"]
+    assert captured["rows"][1] == ["2", "The Guardian", "baseline", "base 0/3", "0/5 need 5", "unknown", "empty", "—", "news", "base"]
 
 
 def test_display_action_label_uses_review_for_invalid_complete_row() -> None:
@@ -601,9 +601,9 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
     )
 
     assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "5/5+1", "unknown", "none", "✓", "news", "—"]
-    assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "3/5 n2", "unknown", "none", "+L", "acct", "manual"]
-    assert captured["rows"][2] == ["3", "ESPN", "review", "review", "0/5 n5", "unknown", "none", "inv", "none", "base"]
+    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "5/5 +1", "unknown", "none", "✓", "news", "—"]
+    assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "3/5 need 2", "unknown", "none", "+L", "acct", "manual"]
+    assert captured["rows"][2] == ["3", "ESPN", "review", "review", "0/5 need 5", "unknown", "none", "inv", "none", "base"]
 
 
 def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> None:
@@ -645,7 +645,7 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
     )
 
     assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "3/5 n2", "drift", "local+db", "+L", "acct", "refresh"]
+    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "3/5 need 2", "drift", "local+db", "+L", "acct", "refresh"]
 
 
 def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch) -> None:
@@ -685,7 +685,7 @@ def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch)
         interactive_required=2,
     )
 
-    assert captured["rows"][0] == ["5", "Current App", "restore", "local pack", "0/5 n5", "current", "db-only", "—", "none", "restore"]
+    assert captured["rows"][0] == ["5", "Current App", "restore", "local pack", "0/5 need 5", "current", "db-only", "—", "none", "restore"]
 
 
 def test_compact_warning_line_mentions_static_refresh_need() -> None:
@@ -706,7 +706,7 @@ def test_compact_warning_line_mentions_static_refresh_need() -> None:
             )
         ]
     )
-    assert warning == "Facebook needs static refresh."
+    assert warning == "Facebook refresh. Press D."
 
 
 def test_compact_warning_line_mentions_historical_db_only() -> None:
@@ -727,7 +727,7 @@ def test_compact_warning_line_mentions_historical_db_only() -> None:
             )
         ]
     )
-    assert warning == "Facebook Messenger historical DB-only."
+    assert warning == "1 historical DB-only. Press D."
 
 
 def test_run_package_selection_menu_shows_current_build_refresh_summary(monkeypatch, capsys) -> None:
@@ -788,4 +788,4 @@ def test_run_package_selection_menu_shows_current_build_refresh_summary(monkeypa
     assert result is None
     out = capsys.readouterr().out
     assert "Current     : 0/1 complete | 1 drift" in out
-    assert "Blocked by  : 1 capture gap | 1 refresh" in out
+    assert "Blocked by  : 1 manual | 1 refresh" in out

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
 from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_static_handoff_plan_summary
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.Utils.DisplayUtils import status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
@@ -43,7 +45,7 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
     return DynamicMenuSections(
         primary_actions=[
             MenuOption("1", "Focused app run"),
-            MenuOption("2", "Cohort run"),
+            MenuOption("2", "App queue / next action"),
         ],
         validation=[
             MenuOption("3", "State summary"),
@@ -51,7 +53,8 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
         ],
         maintenance=[
             MenuOption("5", "Verify capture environment"),
-            MenuOption("6", "Maintenance tools"),
+            MenuOption("6", "Change cohort / filter"),
+            MenuOption("7", "Maintenance tools"),
         ],
         archive_export=[],
     )
@@ -99,7 +102,15 @@ def render_dynamic_menu_overview() -> None:
     supplemental_valid = max(0, int(getattr(summary, "valid_runs", 0) or 0) - quota_valid)
     freeze_text = "ready" if summary.can_freeze else "blocked"
     reason_text = _quota_reason_text(summary)
+    cohort_label = active_research_cohort_label()
+    try:
+        selected_device = device_manager.describe_active_device()
+    except Exception:
+        selected_device = "None"
+    device_text = selected_device if selected_device and selected_device != "None" else "none selected"
     state_items = [
+        summary_cards.summary_item("Cohort", cohort_label, value_style="accent"),
+        summary_cards.summary_item("Selected device", device_text, value_style="muted"),
         summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
         summary_cards.summary_item("Quota-valid runs", f"{quota_valid} / {expected_valid}", value_style="muted"),
         *(

@@ -77,10 +77,12 @@ def test_render_cohort_status_help_mentions_supplemental_and_historical(monkeypa
     out = capsys.readouterr().out
     assert "locked" in out
     assert "mixed" in out
-    assert "valid+L" in out
+    assert "+L" in out
     assert "+ extra" in out
     assert "db-only" in out
-    assert "hist-db" in out
+    assert "Build=legacy + Evidence=db-only" in out
+    assert "Build=current + Evidence=db-only" in out
+    assert "drift" in out
     out_lc = out.lower()
     assert "evidence-authoritative quota" in out_lc
     assert "tracker-scoped latest-run state" in out_lc

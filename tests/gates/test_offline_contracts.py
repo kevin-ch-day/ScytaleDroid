@@ -81,7 +81,6 @@ def test_static_menu_allows_dry_run_when_schema_gate_fails(monkeypatch):
     )
     monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
     monkeypatch.setattr(menu_module, "_search_app_scope", lambda groups: ScopeSelection(scope="app", label="Example", groups=(dummy_group,)))
-    monkeypatch.setattr(menu_module, "describe_last_selection", lambda _groups: {"available": False, "label": "", "source": "none"})
     monkeypatch.setattr(menu_module, "collect_view_options", lambda command: (False, False, False, False))
     monkeypatch.setattr(menu_module, "ask_run_controls", lambda: "run")
     monkeypatch.setattr(menu_module.status_messages, "print_status", lambda *_a, **_k: None)

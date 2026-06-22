@@ -11,7 +11,7 @@ def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypat
     assert sections.primary_actions[0].key == "1"
     assert sections.primary_actions[0].label == "Focused app run"
     assert sections.primary_actions[1].key == "2"
-    assert sections.primary_actions[1].label == "Cohort run"
+    assert sections.primary_actions[1].label == "App queue / next action"
     assert sections.validation[0].key == "3"
     assert sections.validation[0].label == "State summary"
     assert sections.validation[1].key == "4"
@@ -19,10 +19,14 @@ def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypat
     assert sections.maintenance[0].key == "5"
     assert sections.maintenance[0].label == "Verify capture environment"
     assert sections.maintenance[1].key == "6"
-    assert sections.maintenance[1].label == "Maintenance tools"
+    assert sections.maintenance[1].label == "Change cohort / filter"
+    assert sections.maintenance[2].key == "7"
+    assert sections.maintenance[2].label == "Maintenance tools"
 
 
 def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(menu_views, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(menu_views.device_manager, "describe_active_device", lambda: "moto_g_5G___2024 (ZY22JK89DR) - DEVICE")
     monkeypatch.setattr(
         menu_views,
         "run_freeze_readiness_audit",
@@ -48,16 +52,21 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
     menu_views.render_dynamic_menu_overview()
 
     out = capsys.readouterr().out
+    assert "Cohort" in out
+    assert "Research Dataset Beta" in out
+    assert "Selected device" in out
+    assert "moto_g_5G___2024 (ZY22JK89DR) - DEVICE" in out
     assert "Quota-valid runs" in out
     assert "1 / 60" in out
     assert "quota not satisfied — 59 quota-valid runs remaining" in out
     assert "Supplemental valid" not in out
     assert "ready (12/12 plans)" in out
-    assert "Research cohort" not in out
     assert "Next" not in out
 
 
 def test_render_dynamic_menu_overview_surfaces_supplemental_valid_runs(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(menu_views, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(menu_views.device_manager, "describe_active_device", lambda: "None")
     monkeypatch.setattr(
         menu_views,
         "run_freeze_readiness_audit",
@@ -84,6 +93,7 @@ def test_render_dynamic_menu_overview_surfaces_supplemental_valid_runs(monkeypat
 
     out = capsys.readouterr().out
     assert "Evidence" in out
+    assert "none selected" in out
     assert "19 packs (18 valid)" in out
     assert "Quota-valid runs" in out
     assert "15 / 80" in out
