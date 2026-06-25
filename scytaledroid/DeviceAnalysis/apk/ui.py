@@ -230,7 +230,10 @@ def prompt_plan_action(resolution: PlanResolution) -> str:
         print(f"Ready: {scheduled_packages} package(s) · ~{scheduled_files} APK path(s)")
         if blocked_total > 0:
             print(f"Blocked before pull: {blocked_total} package(s)")
-        print("Enter = execute harvest · P = preview plan · 0 = cancel")
+        print()
+        print("Enter = execute harvest")
+        print("P = preview plan")
+        print("0 = cancel")
         while True:
             choice = prompt_utils.prompt_text("Action [Enter/P/0]", required=False).strip().lower()
             if choice in {"", "1", "run", "execute", "go"}:
@@ -530,7 +533,7 @@ def report_harvest_started(
     sel = str(selection_label).strip() or "(unknown scope)"
     print(
         status_messages.status(
-            f"Harvest start: {sel} · pulling {int(scheduled)} packages · ~{int(artifacts)} APK paths",
+            f"Harvest start: {sel}",
             level="info",
         )
     )
@@ -539,23 +542,26 @@ def report_harvest_started(
         detail_bits.append(
             f"Inventory: {int(candidate_count)} pkgs (pre-scope / pre-delta context)"
         )
-    elif selected_count != scheduled or blocked_policy or blocked_scope:
-        detail_bits.append(f"Inventory: {int(selected_count)} pkgs")
-        if policy_eligible != scheduled:
-            detail_bits.append(f"Ready: {int(policy_eligible)}")
-        else:
-            detail_bits.append(f"Ready: {int(scheduled)}")
+    detail_bits.append(f"Pulling: {int(scheduled)} package(s) · ~{int(artifacts)} APK path(s)")
+    if blocked_policy or blocked_scope:
+        blocked_parts: list[str] = []
         if blocked_policy:
-            detail_bits.append(f"Policy-blocked: {int(blocked_policy)}")
+            blocked_parts.append(f"policy-blocked {int(blocked_policy)}")
         if blocked_scope:
-            detail_bits.append(f"Scope-blocked: {int(blocked_scope)}")
+            blocked_parts.append(f"scope-blocked {int(blocked_scope)}")
+        detail_bits.append("Blocked: " + " · ".join(blocked_parts))
+    if blocked_policy or blocked_scope or candidate_count != selected_count:
         detail_bits.append(f"Policy: {policy_text}")
+    flag_bits: list[str] = []
     if harvest_mode:
-        detail_bits.append(f"Mode: {harvest_mode}")
+        flag_bits.append(f"Mode: {harvest_mode}")
     if delta_filter_applied is not None:
-        detail_bits.append(f"Delta: {'on' if delta_filter_applied else 'off'}")
+        flag_bits.append(f"Delta: {'on' if delta_filter_applied else 'off'}")
+    if flag_bits:
+        detail_bits.append(" · ".join(flag_bits))
     if detail_bits:
-        print(status_messages.status(" · ".join(detail_bits), level="info"))
+        for bit in detail_bits:
+            print(status_messages.status(bit, level="info"))
 
 
 def pause_after_preview() -> None:

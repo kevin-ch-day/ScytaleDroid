@@ -14,7 +14,8 @@ pytestmark = [pytest.mark.contract, pytest.mark.ui_contract, pytest.mark.gate]
 
 
 def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
-    rendered = []
+    sections: list[tuple[str, list[str]]] = []
+    exit_calls = {"count": 0}
 
     monkeypatch.setattr(app_main, "ensure_db_ready", lambda: None)
     monkeypatch.setattr(
@@ -24,28 +25,32 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
     )
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
     monkeypatch.setattr(app_main.menu_utils, "print_header", lambda *_a, **_k: None)
-    monkeypatch.setattr(app_main.menu_utils, "render_menu", lambda spec: rendered.append(spec))
+    current_section = {"title": None}
+    monkeypatch.setattr(
+        app_main.menu_utils,
+        "print_section",
+        lambda title: current_section.__setitem__("title", title),
+    )
+    def _capture_menu(items, **kwargs):
+        if kwargs.get("show_exit"):
+            exit_calls["count"] += 1
+            return
+        sections.append((str(current_section["title"]), [item.label for item in items]))
+    monkeypatch.setattr(app_main.menu_utils, "print_menu", _capture_menu)
     monkeypatch.setattr(app_main.prompt_utils, "get_choice", lambda *_a, **_k: "0")
     monkeypatch.setattr(app_main.status_messages, "print_status", lambda *_a, **_k: None)
     monkeypatch.setattr(app_main.status_messages, "print_strip", lambda *_a, **_k: None)
 
     app_main.main_menu()
 
-    assert rendered, "main menu should render a menu spec"
-    labels = [item.label for item in rendered[0].items]
-    assert labels == [
-        "Select device",
-        "Device Inventory & Harvest",
-        "Static Analysis Pipeline",
-        "Dynamic Analysis",
-        "API server",
-        "Reporting & Exports",
-        "Database tools",
-        "Governance & Readiness",
-        "Evidence & Workspace",
-        "APK library",
-        "About ScytaleDroid",
+    assert sections == [
+        ("Setup", ["Select device"]),
+        ("Analysis", ["Device Inventory & Harvest", "Static Analysis Pipeline", "Dynamic Analysis"]),
+        ("Support", ["API server", "Reporting & Exports", "APK library"]),
+        ("Diagnostics", ["Database tools", "Governance & Readiness", "Evidence & Workspace"]),
+        ("About", ["About ScytaleDroid"]),
     ]
+    assert exit_calls["count"] == 1
 
 
 def test_handle_select_device_starts_selector_on_new_line(monkeypatch, capsys) -> None:
@@ -83,6 +88,20 @@ def test_handle_database_starts_menu_on_new_line(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert menu_calls["count"] == 1
     assert out.startswith("\nDATABASE HEADER\n")
+
+
+def test_emit_main_menu_db_disabled_hint_points_to_database_tools(monkeypatch) -> None:
+    messages: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        app_main.status_messages,
+        "print_status",
+        lambda message, level="info", **_kwargs: messages.append((str(message), str(level))),
+    )
+
+    app_main._emit_main_menu_db_connection_line(False, "Database disabled.", "DB is optional.")
+
+    assert messages[0] == ("DB: off — set DSN in .env (menu 7)", "warn")
 
 
 def test_environment_metrics_hidden_in_normal_prod_mode(monkeypatch) -> None:

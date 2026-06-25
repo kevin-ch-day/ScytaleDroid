@@ -12,6 +12,51 @@ from scytaledroid.DynamicAnalysis.utils.run_cleanup import PackageRunCounts
 pytestmark = [pytest.mark.contract, pytest.mark.state_contract]
 
 
+def _make_protocol_options_app(
+    *,
+    package_name: str = "bbc.mobile.news.ww",
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    baseline_required: int = 3,
+    interactive_required: int = 2,
+    scripted_template_ready: bool = True,
+) -> guided_run._SelectedAppContext:
+    return guided_run._SelectedAppContext(
+        package_name=package_name,
+        display_label=package_name,
+        meta_family_note=False,
+        state=SimpleNamespace(suggested_slot=1, reset_available=False),
+        cfg=SimpleNamespace(
+            baseline_required=baseline_required,
+            interactive_required=interactive_required,
+        ),
+        counts=PackageRunCounts(
+            total_runs=baseline_valid_runs + interactive_valid_runs,
+            valid_runs=baseline_valid_runs + interactive_valid_runs,
+            baseline_valid_runs=baseline_valid_runs,
+            interactive_valid_runs=interactive_valid_runs,
+            quota_met=(
+                baseline_valid_runs >= baseline_required
+                and interactive_valid_runs >= interactive_required
+            ),
+            extra_valid_runs=0,
+        ),
+        latest_recent=None,
+        latest_valid=None,
+        queue_action="baseline",
+        queue_reason=None,
+        db_active_sessions=0,
+        db_historical_sessions=0,
+        historical_valid_local=0,
+        historical_build_count=0,
+        extra_valid_local=0,
+        suggested_default_key="1",
+        suggested_is_interactive=False,
+        scripted_template_ready=scripted_template_ready,
+        can_reset=False,
+    )
+
+
 def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, capsys) -> None:
     package = "com.google.android.apps.messaging"
     select_package_calls = {"count": 0}
@@ -105,10 +150,279 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
     out = capsys.readouterr().out
 
     assert "Selected app: com.google.android.apps.messaging" in out
+    assert "App Queue / Next Action" not in out
     assert "Run readiness:" not in out
     assert "Press Enter to continue, V for details, or B to go back" not in out
     assert "Dynamic Workbench" in out
     assert device_calls == {"select": 0, "preflight": 0}
+
+
+def test_selected_app_protocol_options_hold_interaction_until_baseline_complete() -> None:
+    app = _make_protocol_options_app(
+        baseline_valid_runs=0,
+        interactive_valid_runs=0,
+        scripted_template_ready=True,
+    )
+
+    options = {option.key: option for option in guided_run._build_selected_app_protocol_options(app)}
+
+    assert str(options["1"].description) == "suggested · counts toward quota"
+    assert str(options["2"].description) == "held until baseline complete"
+    assert str(options["3"].description) == "held until baseline complete"
+
+
+def test_selected_app_protocol_options_mark_completed_quota_as_supplemental() -> None:
+    app = _make_protocol_options_app(
+        baseline_valid_runs=3,
+        interactive_valid_runs=2,
+        scripted_template_ready=True,
+    )
+
+    options = {option.key: option for option in guided_run._build_selected_app_protocol_options(app)}
+
+    assert str(options["1"].description) == "supplemental · outside quota"
+    assert str(options["2"].description) == "supplemental · outside quota"
+    assert str(options["3"].description) == "supplemental · outside quota"
+
+
+def test_guided_run_messaging_connected_baseline_wording_is_explicit(monkeypatch, capsys) -> None:
+    package = "com.whatsapp"
+    select_package_calls = {"count": 0}
+    choice_iter = iter(["1", "1"])
+    prompts: list[str] = []
+
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="WhatsApp")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=0,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=0,
+            reset_available=False,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="baseline_connected",
+            effective_suggested_profile="baseline_connected",
+            suggested_slot=1,
+            recent_runs=(),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.menu_utils, "render_menu", lambda spec: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *a, **k: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *a, **k: next(choice_iter))
+
+    def _prompt_yes_no(message, default=False):
+        prompts.append(str(message))
+        if str(message) == "Ready now?":
+            return False
+        if "Switch to manual interaction now?" in str(message):
+            return False
+        return default
+
+    monkeypatch.setattr(guided_run.prompt_utils, "prompt_yes_no", _prompt_yes_no)
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Messaging Baseline Check" in out
+    assert "This baseline requires an existing conversation thread to be open and visible." in out
+    assert "Do not send messages or start calls." in out
+    assert "Ready now?" in prompts
+    assert "Connected-thread baseline is not ready." in out
+
+
+def test_guided_run_workbench_surfaces_messaging_connected_baseline_note(monkeypatch, capsys) -> None:
+    package = "com.whatsapp"
+    select_package_calls = {"count": 0}
+
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="WhatsApp")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=0,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=0,
+            reset_available=False,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="baseline_connected",
+            effective_suggested_profile="baseline_connected",
+            suggested_slot=1,
+            recent_runs=(),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.menu_utils, "render_menu", lambda spec: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert (
+        "Messaging baseline uses connected idle: open an existing conversation thread and keep it visible; no send/call."
+        in out
+    )
+
+
+def test_guided_run_capture_setup_does_not_repeat_recent_tracker_runs(monkeypatch, capsys) -> None:
+    package = "bbc.mobile.news.ww"
+    select_package_calls = {"count": 0}
+    choices = iter(["1", "1"])
+
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="BBC News")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=1,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=1,
+            reset_available=True,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(("EXCLUDED_LOW_SIGNAL", 1),),
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            recent_runs=(
+                DatasetRunRecentSummary(
+                    ended_at="2026-06-24T10:00:00Z",
+                    run_profile="baseline_idle",
+                    interaction_level="minimal",
+                    messaging_activity=None,
+                    valid=False,
+                    invalid_reason_code="PCAP_MISSING",
+                    low_signal=None,
+                    run_id="bbc-run-1",
+                    status_label="INVALID:PCAP_MISSING",
+                ),
+            ),
+            baseline_idle_pcap_missing_streak=1,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.menu_utils, "render_menu", lambda spec: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
+    monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
+    monkeypatch.setattr(guided_run, "ensure_plan_or_error", lambda *args, **kwargs: None)
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Capture Setup" in out
+    assert "Recent Tracker Runs" not in out
 
 
 def test_guided_run_selected_app_prefers_display_label(monkeypatch, capsys) -> None:
@@ -180,6 +494,141 @@ def test_guided_run_selected_app_prefers_display_label(monkeypatch, capsys) -> N
     out = capsys.readouterr().out
     assert "Selected app: BBC News" in out
     assert "Package: bbc.mobile.news.ww" in out
+
+
+def test_guided_run_selected_app_falls_back_to_db_display_label(monkeypatch, capsys) -> None:
+    package = "com.guardian"
+    select_package_calls = {"count": 0}
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name=None)],
+    )
+    monkeypatch.setattr(guided_run, "load_display_name_map", lambda _groups: {package: "The Guardian"})
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=0,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=0,
+            reset_available=False,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            recent_runs=(),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Selected app: The Guardian" in out
+    assert "Package: com.guardian" in out
+
+
+def test_guided_run_selected_app_normalizes_x_display_label(monkeypatch, capsys) -> None:
+    package = "com.twitter.android"
+    select_package_calls = {"count": 0}
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _pkg: {})
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="X")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=0,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=0,
+            reset_available=False,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            recent_runs=(),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Selected app: X (Twitter)" in out
+    assert "Package: com.twitter.android" in out
 
 
 def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch) -> None:
@@ -360,6 +809,107 @@ def test_guided_run_seeds_queue_from_active_selected_device(monkeypatch) -> None
     )
 
     assert subtitles[0] == "Device: moto_g_5G___2024 (ZY22JK89DR) - DEVICE"
+
+
+def test_choose_capture_device_reuses_selected_device_without_reopening_selector(monkeypatch, capsys) -> None:
+    selector_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        guided_run,
+        "get_device_selection_details",
+        lambda serial: {
+            "name": "moto g 5G - 2024",
+            "serial": serial,
+            "android": "15",
+            "type": "physical",
+            "label": "moto g 5G - 2024 (ZY22JK89DR)",
+        },
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "select_device",
+        lambda **_kwargs: selector_calls.__setitem__("count", selector_calls["count"] + 1) or ("other", "other"),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+
+    selected = guided_run._choose_capture_device(
+        {"serial": "ZY22JK89DR", "label": "moto_g_5G___2024 (ZY22JK89DR) - DEVICE"}
+    )
+
+    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 (ZY22JK89DR)")
+    assert selector_calls["count"] == 0
+    out = capsys.readouterr().out
+    assert "Capture device" in out
+    assert "Use selected device" in out
+    assert "Change device" in out
+
+
+def test_choose_capture_device_can_open_change_device_selector(monkeypatch) -> None:
+    selector_kwargs = {}
+
+    monkeypatch.setattr(
+        guided_run,
+        "get_device_selection_details",
+        lambda serial: {
+            "name": "moto g 5G - 2024",
+            "serial": serial,
+            "android": "15",
+            "type": "physical",
+            "label": "moto g 5G - 2024 (ZY22JK89DR)",
+        },
+    )
+
+    def _select_device(**kwargs):
+        selector_kwargs.update(kwargs)
+        return ("BBB", "Phone B (BBB)")
+
+    monkeypatch.setattr(guided_run, "select_device", _select_device)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "2")
+
+    selected = guided_run._choose_capture_device(
+        {"serial": "ZY22JK89DR", "label": "moto_g_5G___2024 (ZY22JK89DR) - DEVICE"}
+    )
+
+    assert selected == ("BBB", "Phone B (BBB)")
+    assert selector_kwargs == {
+        "header": "Change Capture Device",
+        "prefer_active": False,
+        "allow_auto_single": False,
+    }
+
+
+def test_choose_capture_device_warns_when_saved_device_is_not_detected(monkeypatch, capsys) -> None:
+    selector_calls = {"count": 0}
+
+    monkeypatch.setattr(
+        guided_run,
+        "get_device_selection_details",
+        lambda serial: {
+            "name": serial,
+            "serial": serial,
+            "android": "—",
+            "type": "device",
+            "label": serial,
+            "status": "not detected",
+            "detected": "",
+        },
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "select_device",
+        lambda **_kwargs: selector_calls.__setitem__("count", selector_calls["count"] + 1) or ("other", "other"),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+
+    selected = guided_run._choose_capture_device(
+        {"serial": "ZY22JK89DR", "label": "moto_g_5G___2024 (ZY22JK89DR) - DEVICE"}
+    )
+
+    assert selected == ("ZY22JK89DR", "ZY22JK89DR")
+    assert selector_calls["count"] == 0
+    out = capsys.readouterr().out
+    assert "Capture device" in out
+    assert "Selected device is not currently detected via adb." in out
 
 
 def test_guided_run_review_path_does_not_require_device(monkeypatch, capsys) -> None:
@@ -643,7 +1193,7 @@ def test_guided_run_defaults_to_manual_when_script_template_missing(monkeypatch,
     assert rendered["default"] == "3"
     assert rendered["items"]["2"].disabled is True
     assert rendered["items"]["3"].badge == "suggested"
-    assert "Standard cohort interaction path for paper #3" in str(rendered["items"]["3"].description)
+    assert "suggested · counts toward quota" == str(rendered["items"]["3"].description)
 
 
 def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, capsys) -> None:
@@ -785,10 +1335,95 @@ def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> N
     )
 
     out = capsys.readouterr().out
-    assert "Historical DB-only context: 11 older DB-backed session(s) exist" in out
+    assert "Why:" in out
+    assert "Historical DB-only evidence exists, but no local evidence pack is present in this workspace." in out
     assert "Queue action: baseline" in out
     assert "Reason: 3 baseline runs needed" in out
-    assert "Recommended action: collect baseline evidence for the installed build" in out
+    assert "Collect baseline evidence for the installed build." in out
+
+
+def test_guided_run_current_build_db_only_offers_restore_or_recollect(monkeypatch, capsys) -> None:
+    package = "com.linkedin.android"
+    select_package_calls = {"count": 0}
+    prompts: list[str] = []
+    choices = iter(["R", "0"])
+
+    monkeypatch.setattr(guided_run, "_detect_static_plan_build_drift", lambda **_k: None)
+    monkeypatch.setattr(
+        guided_run,
+        "_load_db_dynamic_lineage_context",
+        lambda _pkg: {"db_active_sessions": 4, "db_historical_sessions": 0, "db_total_sessions": 4},
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(guided_run, "_print_paper_mode_constants", lambda: None)
+    monkeypatch.setattr(guided_run, "select_device", lambda: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(guided_run, "_device_preflight_checks", lambda _serial: True)
+    monkeypatch.setattr(
+        guided_run,
+        "group_artifacts",
+        lambda: [SimpleNamespace(package_name=package, display_name="LinkedIn")],
+    )
+    monkeypatch.setattr(guided_run, "active_research_cohort_packages", lambda: (package,))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: DatasetRunState(
+            package_name=package,
+            tracker_status="ok",
+            evidence_status="ok",
+            state_status="ok",
+            counts=PackageRunCounts(
+                total_runs=0,
+                valid_runs=0,
+                baseline_valid_runs=0,
+                interactive_valid_runs=0,
+                quota_met=False,
+                extra_valid_runs=0,
+            ),
+            baseline_required=3,
+            interactive_required=2,
+            total_required=5,
+            local_evidence_dir_count=0,
+            reset_available=False,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            exclusion_reason_top=(),
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            recent_runs=(),
+            baseline_idle_pcap_missing_streak=0,
+            baseline_idle_low_signal_streak=0,
+            baseline_connected_insufficient_duration_streak=0,
+        ),
+    )
+    monkeypatch.setattr(guided_run.menu_utils, "render_menu", lambda spec: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
+
+    def _prompt_yes_no(message, default=False):
+        prompts.append(str(message))
+        return False
+
+    monkeypatch.setattr(guided_run.prompt_utils, "prompt_yes_no", _prompt_yes_no)
+
+    def _select_package(_groups, title, subtitle=None):
+        select_package_calls["count"] += 1
+        if select_package_calls["count"] == 1:
+            return package
+        return None
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=_select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert "Queue action: restore local evidence" in out
+    assert "Reason: DB knows current-build sessions but the local evidence pack is missing" in out
+    assert "Restore / Recollect" in out
+    assert "Restore the missing evidence pack if you have it, or recollect a current-build baseline now." in out
+    assert any("Start baseline recollection for the installed build now?" in prompt for prompt in prompts)
 
 
 def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) -> None:
@@ -1059,12 +1694,16 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     )
 
     out = capsys.readouterr().out
-    assert "Static Plan / Device Drift" in out
-    assert "Queue action: refresh static" in out
-    assert "Reason: installed build 472224766 does not match the newest static-plan build 472143276." in out
-    assert "Dataset-mode dynamic runs require the installed build to match the selected static plan." in out
+    assert "Static Plan / Device Drift" not in out
+    assert "Status" in out
+    assert "refresh" in out
+    assert out.count("Why:") == 1
+    assert "Pause dynamic collection for this app until harvest/static refresh is complete." in out
+    assert "Recommended next step:" in out
+    assert "Blocked: installed build 472224766 does not match static-plan build 472143276." in out
     assert "Refresh harvest/static for this app or choose another app." in out
     assert "472224766" in out
     assert "472143276" in out
     assert "Dynamic Workbench" in out
+    assert "Current-build evidence is still missing for this app." not in out
     assert render_menu_calls["count"] == 1

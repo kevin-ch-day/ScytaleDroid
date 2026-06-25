@@ -9,7 +9,7 @@ import os
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,7 +18,14 @@ from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DynamicAnalysis.controllers.device_select import select_device
+from scytaledroid.DynamicAnalysis.controllers.device_select import (
+    get_device_selection_details,
+    select_device,
+)
+from scytaledroid.DynamicAnalysis.controllers import guided_run_capture as _guided_run_capture
+from scytaledroid.DynamicAnalysis.controllers import guided_run_messaging as _guided_run_messaging
+from scytaledroid.DynamicAnalysis.controllers import guided_run_selected_app_state as _guided_run_selected_app_state
+from scytaledroid.DynamicAnalysis.controllers import guided_run_workbench as _guided_run_workbench
 from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     device_preflight_checks as _device_preflight_checks_impl,
     extract_version_code_details_from_dump as _extract_version_code_details_from_dump_impl,
@@ -56,7 +63,7 @@ from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
     find_dynamic_run_dirs,
     reset_package_dataset_tracker,
 )
-from scytaledroid.StaticAnalysis.core.repository import group_artifacts
+from scytaledroid.StaticAnalysis.core.repository import group_artifacts, load_display_name_map
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 _BATTERY_WARN_PCT = 30
@@ -71,6 +78,21 @@ _META_FAMILY_PACKAGES = {
     "com.instagram.android",
     "com.whatsapp",
 }
+
+_QUEUE_ACTION_NONE = "none"
+_QUEUE_ACTION_REVIEW_QA = "review_qa"
+_QUEUE_ACTION_RESTORE_LOCAL = "restore_local_evidence"
+_QUEUE_ACTION_BASELINE = "baseline"
+_QUEUE_ACTION_SCRIPTED = "scripted_interaction"
+_QUEUE_ACTION_MANUAL = "manual_interaction"
+
+
+def _normalize_dynamic_app_display_label(display_label: str | None, package_name: str) -> str:
+    text = str(display_label or "").strip() or str(package_name or "").strip()
+    pkg_lc = str(package_name or "").strip().lower()
+    if pkg_lc == "com.twitter.android" and text.strip().lower() == "x":
+        return "X (Twitter)"
+    return text
 
 
 @dataclass(frozen=True)
@@ -100,6 +122,45 @@ class _SelectedAppContext:
 class _SelectedAppAction:
     app: _SelectedAppContext
     selected_protocol: str
+
+
+@dataclass(frozen=True)
+class _SelectedAppStateSnapshot:
+    build: str
+    evidence: str
+    qa: str
+    need: str
+    action: str
+    quota: str
+
+
+def _queue_action_key(action: str | None) -> str:
+    text = str(action or "").strip().lower()
+    if not text or text == "—":
+        return _QUEUE_ACTION_NONE
+    if text == "review qa":
+        return _QUEUE_ACTION_REVIEW_QA
+    if text == "restore local evidence":
+        return _QUEUE_ACTION_RESTORE_LOCAL
+    if text == "baseline":
+        return _QUEUE_ACTION_BASELINE
+    if text == "scripted interaction":
+        return _QUEUE_ACTION_SCRIPTED
+    if text == "manual interaction":
+        return _QUEUE_ACTION_MANUAL
+    return text.replace(" ", "_")
+
+
+def _with_selected_app_display(app: _SelectedAppContext, *, package_name: str, display_label: str) -> _SelectedAppContext:
+    return replace(
+        app,
+        display_label=display_label,
+        meta_family_note=bool(str(package_name or "").strip().lower() in _META_FAMILY_PACKAGES),
+    )
+
+
+def _selected_app_active_valid_runs(app: _SelectedAppContext) -> int:
+    return int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
 
 
 def _initial_device_context() -> dict[str, str | None]:
@@ -188,6 +249,7 @@ def _print_selected_app_evidence_context(
     historical_build_count: int,
     db_active_sessions: int,
     db_historical_sessions: int,
+    include_why: bool = True,
 ) -> None:
     state = _selected_app_lineage_state(
         active_valid_runs=active_valid_runs,
@@ -207,49 +269,31 @@ def _print_selected_app_evidence_context(
                 level="info",
             )
         )
+    if not include_why:
+        return
     if state == "current_build_db_only":
-        print(
-            status_messages.status(
-                f"Current-build DB-only context: {db_active_sessions} DB-backed session(s) match the active build, but the local evidence pack is missing in this workspace.",
-                level="warn",
-            )
-        )
-        print(
-            status_messages.status(
-                "Recommended action: restore the local evidence pack if available, or recollect the current build.",
-                level="info",
-            )
-        )
+        print()
+        print("Why:")
+        print("Current-build DB-backed evidence exists, but the local evidence pack is missing in this workspace.")
+        print("Restore the local evidence pack if available, or recollect the current build.")
         return
     if state == "historical_local_only":
-        print(
-            status_messages.status(
-                "Current-build evidence is still missing for this app. Baseline collection should target the installed build.",
-                level="info",
-            )
-        )
+        print()
+        print("Why:")
+        print("Current-build evidence is still missing for this app.")
+        print("Baseline collection should target the installed build.")
         return
     if state == "historical_db_only":
-        print(
-            status_messages.status(
-                f"Historical DB-only context: {db_historical_sessions} older DB-backed session(s) exist, but no local evidence pack is present in this workspace.",
-                level="warn",
-            )
-        )
-        print(
-            status_messages.status(
-                "Recommended action: collect baseline evidence for the installed build; treat older sessions as historical context only.",
-                level="info",
-            )
-        )
+        print()
+        print("Why:")
+        print("Historical DB-only evidence exists, but no local evidence pack is present in this workspace.")
+        print("Collect baseline evidence for the installed build.")
         return
     if state == "no_evidence_anywhere":
-        print(
-            status_messages.status(
-                f"No prior dynamic evidence exists yet for {package_name}. This run will establish the first current-build baseline.",
-                level="info",
-            )
-        )
+        print()
+        print("Why:")
+        print(f"No prior dynamic evidence exists yet for {package_name}.")
+        print("This run will establish the first current-build baseline.")
 
 
 def _selected_app_queue_action(
@@ -264,30 +308,25 @@ def _selected_app_queue_action(
     db_active_sessions: int,
     active_valid_runs: int,
 ) -> tuple[str, str | None]:
-    baseline_missing = max(0, int(baseline_required) - int(baseline_valid_runs))
-    interactive_missing = max(0, int(interactive_required) - int(interactive_valid_runs))
-    if baseline_missing <= 0 and interactive_missing <= 0 and latest_valid is False:
-        detail = str(latest_invalid_reason or "").strip().upper() or "UNKNOWN"
-        return ("review QA", f"latest current-build run is invalid ({detail})")
-    if int(active_valid_runs) <= 0 and int(db_active_sessions) > 0:
-        return ("restore local evidence", "DB knows current-build sessions but the local evidence pack is missing")
-    if baseline_missing > 0:
-        suffix = "" if baseline_missing == 1 else "s"
-        return ("baseline", f"{baseline_missing} baseline run{suffix} needed")
-    if interactive_missing > 0:
-        action = "scripted interaction" if scripted_template_ready else "manual interaction"
-        suffix = "" if interactive_missing == 1 else "s"
-        return (action, f"{interactive_missing} interactive run{suffix} needed")
-    return ("—", None)
+    return _guided_run_selected_app_state.selected_app_queue_action(
+        baseline_valid_runs=baseline_valid_runs,
+        interactive_valid_runs=interactive_valid_runs,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+        scripted_template_ready=scripted_template_ready,
+        latest_valid=latest_valid,
+        latest_invalid_reason=latest_invalid_reason,
+        db_active_sessions=db_active_sessions,
+        active_valid_runs=active_valid_runs,
+    )
 
 
 def _print_selected_app_queue_action(action: str, reason: str | None) -> None:
-    text = str(action or "").strip()
-    if not text or text == "—":
-        return
-    print(status_messages.status(f"Queue action: {text}", level="info"))
-    if str(reason or "").strip():
-        print(status_messages.status(f"Reason: {reason}", level="info"))
+    _guided_run_selected_app_state.print_selected_app_queue_action(
+        action,
+        reason,
+        status_messages=status_messages,
+    )
 
 
 def _render_selected_app_review(
@@ -296,85 +335,23 @@ def _render_selected_app_review(
     latest_recent: Any,
     print_tier1_qa_result: Callable[[str], None] | None = None,
 ) -> None:
-    print()
-    menu_utils.print_header("Stored QA Review", display_label)
-    if latest_recent is None:
-        print(
-            status_messages.status(
-                "No stored current-build run is available yet for QA review.",
-                level="warn",
-            )
-        )
-        return
-    run_id = str(getattr(latest_recent, "run_id", "") or "").strip()
-    status_label = str(getattr(latest_recent, "status_label", "") or "UNKNOWN").strip()
-    invalid_reason = str(getattr(latest_recent, "invalid_reason_code", "") or "—").strip()
-    rows = [
-        ["Run ID", run_id or "—"],
-        ["Status", status_label or "UNKNOWN"],
-        ["Profile", _run_profile_label(getattr(latest_recent, "run_profile", None))],
-        ["Ended", str(getattr(latest_recent, "ended_at", None) or "—")],
-        ["Invalid reason", invalid_reason or "—"],
-    ]
-    menu_utils.print_table(["Field", "Value"], rows)
-    if getattr(latest_recent, "valid", None) is True:
-        print(status_messages.status("Latest current-build run is QA-valid.", level="success"))
-    elif getattr(latest_recent, "valid", None) is False:
-        print(
-            status_messages.status(
-                "Latest current-build run is QA-invalid and excluded from quota/publication use.",
-                level="warn",
-            )
-        )
-    else:
-        print(status_messages.status("Latest current-build run has unknown QA status.", level="warn"))
-    if print_tier1_qa_result and run_id:
-        try:
-            print_tier1_qa_result(run_id)
-        except Exception as exc:
-            print(status_messages.status(f"QA detail rendering failed: {exc}", level="warn"))
+    _guided_run_workbench.render_selected_app_review(
+        display_label=display_label,
+        latest_recent=latest_recent,
+        print_tier1_qa_result=print_tier1_qa_result,
+        menu_utils=menu_utils,
+        status_messages=status_messages,
+        run_profile_label_fn=_run_profile_label,
+    )
 
 
 def _render_selected_app_recent_runs(state: Any) -> None:
-    print()
-    menu_utils.print_header("Recent Tracker Runs")
-    recent_runs = tuple(getattr(state, "recent_runs", ()) or ())
-    if not recent_runs:
-        print(status_messages.status("No recent tracker-scoped runs are stored for this app.", level="warn"))
-        return
-    rows: list[list[str]] = []
-    for index, row in enumerate(recent_runs, start=1):
-        rows.append(
-            [
-                str(index),
-                str(getattr(row, "ended_at", None) or "—"),
-                _run_profile_label(getattr(row, "run_profile", None)),
-                str(getattr(row, "status_label", None) or "UNKNOWN"),
-                str(getattr(row, "run_id", None) or "—"),
-            ]
-        )
-    menu_utils.print_table(["#", "Ended", "Profile", "Status", "Run ID"], rows)
-    if int(getattr(state, "baseline_idle_pcap_missing_streak", 0) or 0) > 0:
-        print(
-            status_messages.status(
-                f"Recent baseline PCAP-missing streak: {int(getattr(state, 'baseline_idle_pcap_missing_streak', 0) or 0)}",
-                level="warn",
-            )
-        )
-    if int(getattr(state, "baseline_idle_low_signal_streak", 0) or 0) > 0:
-        print(
-            status_messages.status(
-                f"Recent low-signal baseline streak: {int(getattr(state, 'baseline_idle_low_signal_streak', 0) or 0)}",
-                level="warn",
-            )
-        )
-    if int(getattr(state, "baseline_connected_insufficient_duration_streak", 0) or 0) > 0:
-        print(
-            status_messages.status(
-                "Recent messaging baseline streak: insufficient duration on connected-idle baselines.",
-                level="warn",
-            )
-        )
+    _guided_run_workbench.render_selected_app_recent_runs(
+        state,
+        menu_utils=menu_utils,
+        status_messages=status_messages,
+        run_profile_label_fn=_run_profile_label,
+    )
 
 
 def _render_selected_app_diagnostics(
@@ -386,29 +363,15 @@ def _render_selected_app_diagnostics(
     db_active_sessions: int,
     db_historical_sessions: int,
 ) -> None:
-    print()
-    menu_utils.print_header("Diagnostics", display_label)
-    rows = [
-        ["Package", package_name],
-        ["Queue action", str(queue_action or "—")],
-        ["Tracker state", str(getattr(state, "tracker_status", "unknown") or "unknown")],
-        ["Evidence state", str(getattr(state, "evidence_status", "unknown") or "unknown")],
-        ["Overall state", str(getattr(state, "state_status", "unknown") or "unknown")],
-        ["Local evidence packs", str(int(getattr(state, "local_evidence_dir_count", 0) or 0))],
-        ["Quota-counted local runs", str(int(getattr(state, "quota_counted_local", 0) or 0))],
-        ["Paper-eligible local runs", str(int(getattr(state, "paper_eligible_local", 0) or 0))],
-        ["DB current-build sessions", str(int(db_active_sessions))],
-        ["DB historical sessions", str(int(db_historical_sessions))],
-    ]
-    menu_utils.print_table(["Field", "Value"], rows)
-    top = tuple(getattr(state, "exclusion_reason_top", ()) or ())
-    if top:
-        print()
-        menu_utils.print_section("Top Exclusions")
-        menu_utils.print_table(
-            ["Reason", "Count"],
-            [[str(reason), str(int(count))] for reason, count in top],
-        )
+    _guided_run_workbench.render_selected_app_diagnostics(
+        package_name=package_name,
+        display_label=display_label,
+        state=state,
+        queue_action=queue_action,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+        menu_utils=menu_utils,
+    )
 
 
 def _selected_app_build_label(
@@ -418,34 +381,20 @@ def _selected_app_build_label(
     db_active_sessions: int,
     db_historical_sessions: int,
 ) -> str:
-    if int(active_valid_runs) > 0 or int(db_active_sessions) > 0:
-        return "current"
-    if int(legacy_valid_runs) > 0 or int(db_historical_sessions) > 0:
-        return "legacy"
-    return "unknown"
+    return _guided_run_selected_app_state.selected_app_build_label(
+        active_valid_runs=active_valid_runs,
+        legacy_valid_runs=legacy_valid_runs,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+    )
 
 
 def _selected_app_evidence_label(lineage_state: str) -> str:
-    state = str(lineage_state or "").strip()
-    if state == "current_build_observed":
-        return "local+db"
-    if state == "current_build_db_only":
-        return "db-only"
-    if state == "historical_local_only":
-        return "local-only"
-    if state == "historical_db_only":
-        return "db-only"
-    if state == "no_evidence_anywhere":
-        return "empty"
-    return "none"
+    return _guided_run_selected_app_state.selected_app_evidence_label(lineage_state)
 
 
 def _selected_app_qa_badge(latest_valid: bool | None) -> str:
-    if latest_valid is True:
-        return "✓"
-    if latest_valid is False:
-        return "inv"
-    return "—"
+    return _guided_run_selected_app_state.selected_app_qa_badge(latest_valid)
 
 
 def _selected_app_need_label(
@@ -456,31 +405,31 @@ def _selected_app_need_label(
     baseline_required: int,
     interactive_required: int,
 ) -> str:
-    text = str(queue_action or "").strip().lower()
-    if text == "review qa":
-        return "review"
-    if text == "restore local evidence":
-        return "local pack"
-    if text == "baseline":
-        return f"base {int(baseline_valid_runs)}/{int(baseline_required)}"
-    if text in {"manual interaction", "scripted interaction"}:
-        return f"manual {int(interactive_valid_runs)}/{int(interactive_required)}"
-    return "—"
+    return _guided_run_selected_app_state.selected_app_need_label(
+        queue_action=queue_action,
+        baseline_valid_runs=baseline_valid_runs,
+        interactive_valid_runs=interactive_valid_runs,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+        queue_action_key_fn=_queue_action_key,
+        queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
+        queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+        queue_action_baseline=_QUEUE_ACTION_BASELINE,
+        queue_action_manual=_QUEUE_ACTION_MANUAL,
+        queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
+    )
 
 
 def _selected_app_action_label(queue_action: str) -> str:
-    text = str(queue_action or "").strip().lower()
-    if text == "review qa":
-        return "review"
-    if text == "restore local evidence":
-        return "restore"
-    if text == "manual interaction":
-        return "manual"
-    if text == "scripted interaction":
-        return "script"
-    if text == "baseline":
-        return "base"
-    return str(queue_action or "").strip() or "—"
+    return _guided_run_selected_app_state.selected_app_action_label(
+        queue_action,
+        queue_action_key_fn=_queue_action_key,
+        queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
+        queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+        queue_action_baseline=_QUEUE_ACTION_BASELINE,
+        queue_action_manual=_QUEUE_ACTION_MANUAL,
+        queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
+    )
 
 
 def _selected_app_quota_label(
@@ -491,16 +440,51 @@ def _selected_app_quota_label(
     interactive_required: int,
     extra_valid_runs: int,
 ) -> str:
-    countable = int(baseline_valid_runs) + int(interactive_valid_runs)
-    required = int(baseline_required) + int(interactive_required)
-    missing = max(0, int(baseline_required) - int(baseline_valid_runs)) + max(
-        0, int(interactive_required) - int(interactive_valid_runs)
+    return _guided_run_selected_app_state.selected_app_quota_label(
+        baseline_valid_runs=baseline_valid_runs,
+        interactive_valid_runs=interactive_valid_runs,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+        extra_valid_runs=extra_valid_runs,
     )
-    if missing <= 0:
-        if int(extra_valid_runs) > 0:
-            return f"{countable}/{required}+{int(extra_valid_runs)}"
-        return f"{countable}/{required}"
-    return f"{countable}/{required} n{missing}"
+
+
+def _selected_app_state_snapshot(
+    *,
+    lineage_state: str,
+    active_valid_runs: int,
+    legacy_valid_runs: int,
+    db_active_sessions: int,
+    db_historical_sessions: int,
+    latest_valid: bool | None,
+    queue_action: str,
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    baseline_required: int,
+    interactive_required: int,
+    extra_valid_runs: int,
+) -> _SelectedAppStateSnapshot:
+    snapshot = _guided_run_selected_app_state.selected_app_state_snapshot(
+        lineage_state=lineage_state,
+        active_valid_runs=active_valid_runs,
+        legacy_valid_runs=legacy_valid_runs,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+        latest_valid=latest_valid,
+        queue_action=queue_action,
+        baseline_valid_runs=baseline_valid_runs,
+        interactive_valid_runs=interactive_valid_runs,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+        extra_valid_runs=extra_valid_runs,
+        queue_action_key_fn=_queue_action_key,
+        queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
+        queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+        queue_action_baseline=_QUEUE_ACTION_BASELINE,
+        queue_action_manual=_QUEUE_ACTION_MANUAL,
+        queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
+    )
+    return _SelectedAppStateSnapshot(**snapshot.__dict__)
 
 
 def _print_selected_app_state_summary(
@@ -518,33 +502,27 @@ def _print_selected_app_state_summary(
     interactive_required: int,
     extra_valid_runs: int,
 ) -> None:
-    menu_utils.print_header("App state")
-    rows = [
-        ["Build", _selected_app_build_label(
-            active_valid_runs=active_valid_runs,
-            legacy_valid_runs=legacy_valid_runs,
-            db_active_sessions=db_active_sessions,
-            db_historical_sessions=db_historical_sessions,
-        )],
-        ["Evidence", _selected_app_evidence_label(lineage_state)],
-        ["QA", _selected_app_qa_badge(latest_valid)],
-        ["Need", _selected_app_need_label(
-            queue_action=queue_action,
-            baseline_valid_runs=baseline_valid_runs,
-            interactive_valid_runs=interactive_valid_runs,
-            baseline_required=baseline_required,
-            interactive_required=interactive_required,
-        )],
-        ["Action", _selected_app_action_label(queue_action)],
-        ["Quota", _selected_app_quota_label(
-            baseline_valid_runs=baseline_valid_runs,
-            interactive_valid_runs=interactive_valid_runs,
-            baseline_required=baseline_required,
-            interactive_required=interactive_required,
-            extra_valid_runs=extra_valid_runs,
-        )],
-    ]
-    menu_utils.print_table(["Field", "Value"], rows)
+    _guided_run_selected_app_state.print_selected_app_state_summary(
+        lineage_state=lineage_state,
+        active_valid_runs=active_valid_runs,
+        legacy_valid_runs=legacy_valid_runs,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+        latest_valid=latest_valid,
+        queue_action=queue_action,
+        baseline_valid_runs=baseline_valid_runs,
+        interactive_valid_runs=interactive_valid_runs,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+        extra_valid_runs=extra_valid_runs,
+        queue_action_key_fn=_queue_action_key,
+        queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
+        queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+        queue_action_baseline=_QUEUE_ACTION_BASELINE,
+        queue_action_manual=_QUEUE_ACTION_MANUAL,
+        queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
+        menu_utils=menu_utils,
+    )
 
 
 def _select_guided_dataset_package(
@@ -572,18 +550,80 @@ def _select_guided_dataset_package(
         )
     if not package_name:
         return None
+    display_label = _resolve_package_display_label(groups, package_name)
+    return str(package_name), str(display_label)
+
+
+def _resolve_package_display_label(groups: list[Any], package_name: str) -> str:
     pkg_lc = str(package_name or "").strip().lower()
-    display_label = package_name
+    if not pkg_lc:
+        return str(package_name or "").strip() or package_name
     try:
         display_map = {
-            str(g.package_name or "").strip().lower(): (g.display_name or g.package_name)
+            str(g.package_name or "").strip().lower(): str(g.display_name or "").strip()
             for g in groups
             if getattr(g, "package_name", None)
         }
-        display_label = display_map.get(pkg_lc) or package_name
+        display_label = display_map.get(pkg_lc) or ""
+        if display_label:
+            return _normalize_dynamic_app_display_label(display_label, package_name)
     except Exception:
-        display_label = package_name
-    return str(package_name), str(display_label)
+        pass
+    try:
+        db_map = load_display_name_map(groups)
+    except Exception:
+        db_map = {}
+    display_label = str(db_map.get(pkg_lc) or "").strip()
+    if display_label:
+        return _normalize_dynamic_app_display_label(display_label, package_name)
+    return _normalize_dynamic_app_display_label(str(package_name or "").strip() or package_name, package_name)
+
+
+def _plan_drift_rows(plan_drift: dict[str, Any], *, detailed_installed_build: bool) -> list[list[str]]:
+    return _guided_run_capture.plan_drift_rows(
+        plan_drift,
+        detailed_installed_build=detailed_installed_build,
+    )
+
+
+def _print_plan_drift_warning(plan_drift: dict[str, Any]) -> None:
+    _guided_run_capture.print_plan_drift_warning(
+        plan_drift,
+        status_messages=status_messages,
+    )
+
+
+def _print_plan_drift_blocked_message(plan_drift: dict[str, Any]) -> None:
+    _guided_run_capture.print_plan_drift_blocked_message(
+        plan_drift,
+        status_messages=status_messages,
+    )
+
+
+def _render_static_plan_build_drift_block(*, display_label: str, plan_drift: dict[str, Any]) -> None:
+    _guided_run_capture.render_static_plan_build_drift_block(
+        display_label=display_label,
+        plan_drift=plan_drift,
+        menu_utils=menu_utils,
+        status_messages=status_messages,
+    )
+
+
+def _render_selected_app_drift_workbench(
+    *,
+    app: _SelectedAppContext,
+    plan_drift: dict[str, Any],
+) -> None:
+    _guided_run_capture.render_selected_app_drift_workbench(
+        app=app,
+        plan_drift=plan_drift,
+        menu_utils=menu_utils,
+        status_messages=status_messages,
+        selected_app_active_valid_runs_fn=_selected_app_active_valid_runs,
+        print_selected_app_evidence_context_fn=_print_selected_app_evidence_context,
+        selected_app_lineage_state_fn=_selected_app_lineage_state,
+        selected_app_state_snapshot_fn=_selected_app_state_snapshot,
+    )
 
 
 def _load_selected_app_context(
@@ -652,20 +692,18 @@ def _load_selected_app_context(
 
 
 def _is_messaging_package_or_category(package_name: str) -> bool:
-    pkg_lc = str(package_name or "").strip().lower()
-    if not pkg_lc:
-        return False
-    category = str(category_for_package(pkg_lc) or "").strip().lower()
-    if category == "messaging":
-        return True
-    # Backstop for legacy mappings while category maps are evolving.
-    return pkg_lc in {p.lower() for p in MESSAGING_PACKAGES}
+    return _guided_run_messaging.is_messaging_package_or_category(
+        package_name,
+        category_lookup=category_for_package,
+        messaging_packages=MESSAGING_PACKAGES,
+    )
 
 
 def _canonical_baseline_profile_for_package(package_name: str) -> str:
-    if _is_messaging_package_or_category(package_name):
-        return "baseline_connected"
-    return "baseline_idle"
+    return _guided_run_messaging.canonical_baseline_profile_for_package(
+        package_name,
+        is_messaging_package_or_category_fn=_is_messaging_package_or_category,
+    )
 
 
 def _is_messaging_connected_baseline(
@@ -674,10 +712,11 @@ def _is_messaging_connected_baseline(
     run_profile: str,
     messaging_activity: str | None,
 ) -> bool:
-    return (
-        _is_messaging_package_or_category(package_name)
-        and str(run_profile or "").strip().lower() == "baseline_connected"
-        and str(messaging_activity or "").strip().lower() in {"", "connected_idle"}
+    return _guided_run_messaging.is_messaging_connected_baseline(
+        package_name=package_name,
+        run_profile=run_profile,
+        messaging_activity=messaging_activity,
+        is_messaging_package_or_category_fn=_is_messaging_package_or_category,
     )
 
 
@@ -686,17 +725,11 @@ def _messaging_baseline_connected_insufficient_duration_streak(
     *,
     package_name: str,
 ) -> int:
-    if not _is_messaging_package_or_category(package_name):
-        return 0
-    streak = 0
-    for r in recent_runs:
-        prof = str(getattr(r, "run_profile", "") or "").strip().lower()
-        reason = str(getattr(r, "invalid_reason_code", "") or "").strip().upper()
-        if prof == "baseline_connected" and getattr(r, "valid", None) is False and reason == "INSUFFICIENT_DURATION":
-            streak += 1
-            continue
-        break
-    return streak
+    return _guided_run_messaging.messaging_baseline_connected_insufficient_duration_streak(
+        recent_runs,
+        package_name=package_name,
+        is_messaging_package_or_category_fn=_is_messaging_package_or_category,
+    )
 
 
 def _intent_counts_toward_quota(
@@ -730,16 +763,27 @@ def _apply_messaging_baseline_countability_policy(
     counts_toward_completion: bool,
 ) -> tuple[bool, str | None]:
     """Messaging baseline policy: baseline is baseline_connected by default."""
-    if not counts_toward_completion:
-        return counts_toward_completion, None
-    if not _is_messaging_package_or_category(package_name):
-        return counts_toward_completion, None
-    if not str(run_profile or "").strip().lower().startswith("baseline"):
-        return counts_toward_completion, None
-    activity = str(messaging_activity or "").strip().lower()
-    if activity in {"", "none"}:
-        return False, "MESSAGING_BASELINE_NONE_EXPLORATORY"
-    return counts_toward_completion, None
+    return _guided_run_messaging.apply_messaging_baseline_countability_policy(
+        package_name=package_name,
+        run_profile=run_profile,
+        messaging_activity=messaging_activity,
+        counts_toward_completion=counts_toward_completion,
+        is_messaging_package_or_category_fn=_is_messaging_package_or_category,
+    )
+
+
+def _confirm_messaging_connected_baseline_ready() -> bool:
+    return _guided_run_messaging.confirm_messaging_connected_baseline_ready(
+        menu_utils=menu_utils,
+        prompt_utils=prompt_utils,
+    )
+
+
+def _handle_messaging_connected_baseline_not_ready() -> str | None:
+    return _guided_run_messaging.handle_messaging_connected_baseline_not_ready(
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+    )
 
 
 def _print_paper_mode_constants() -> None:
@@ -791,119 +835,46 @@ def _print_paper_mode_constants() -> None:
 
 
 def _build_selected_app_protocol_options(app: _SelectedAppContext) -> list[menu_utils.MenuOption]:
-    counts = app.counts
-    cfg = app.cfg
-    baseline_complete = int(counts.baseline_valid_runs) >= int(cfg.baseline_required)
-    suggested_default_key = app.suggested_default_key
-    suggested_is_interactive = app.suggested_is_interactive
-    scripted_template_ready = app.scripted_template_ready
-    can_reset = app.can_reset
+    return _guided_run_workbench.build_selected_app_protocol_options(
+        app,
+        menu_utils=menu_utils,
+        queue_action_key_fn=_queue_action_key,
+        is_messaging_package_or_category_fn=_is_messaging_package_or_category,
+        queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
+        queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+    )
 
-    def _badge_for(key: str) -> str | None:
-        if not app.state.suggested_slot:
-            return None
-        return "suggested" if key == suggested_default_key else None
 
-    return [
-        menu_utils.MenuOption(
-            "A",
-            "Review QA",
-            description="review current stored evidence and latest QA state; no device required",
-            badge=("suggested" if str(app.queue_action or "").strip().lower() == "review qa" else None),
-        ),
-        menu_utils.MenuOption(
-            "H",
-            "View run history",
-            description="recent tracker-scoped run history for this app; no device required",
-            badge=None,
-        ),
-        menu_utils.MenuOption(
-            "G",
-            "View diagnostics",
-            description="stored lineage, tracker, and quota state for this app; no device required",
-            badge=None,
-        ),
-        menu_utils.MenuOption(
-            "1",
-            "Baseline",
-            description=(
-                (
-                    "Purpose: baseline-only training. run_profile="
-                    if int(counts.baseline_valid_runs) < int(cfg.baseline_required)
-                    else "Purpose: supplemental baseline evidence. run_profile="
-                )
-                + _canonical_baseline_profile_for_package(app.package_name)
-                + " | "
-                + (
-                    "Counts toward quota: YES (baseline requirement not yet met)"
-                    if int(counts.baseline_valid_runs) < int(cfg.baseline_required)
-                    else "Counts toward quota: NO (baseline requirement already met). Saved as supplemental baseline evidence."
-                )
-            ),
-            badge=_badge_for("1"),
-        ),
-        menu_utils.MenuOption(
-            "2",
-            "Scripted Interaction",
-            description=(
-                (
-                    "Purpose: guided timed prompts (not automation). Phase timestamps are saved for later PCAP correlation. "
-                    "run_profile=interaction_scripted | "
-                    + (
-                        "Counts toward quota: YES (if VALID)"
-                        if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)
-                        else (
-                            "Counts toward quota: NO (baseline requirement not complete)"
-                            if not baseline_complete
-                            else "Counts toward quota: NO (interactive quota met; saved as supplemental evidence)"
-                        )
-                    )
-                )
-                if scripted_template_ready
-                else "Unavailable for this app: no scripted interaction template is defined. Use Manual Interaction for dynamic stimulus."
-            ),
-            badge=_badge_for("2"),
-            disabled=(not scripted_template_ready),
-        ),
-        menu_utils.MenuOption(
-            "3",
-            "Manual Interaction",
-            description=(
-                (
-                    "Purpose: operator-driven dynamic stimulus. Standard cohort interaction path for paper #3. "
-                    if str(getattr(cfg, "interactive_profile", "") or "").strip().lower() == "interaction_manual"
-                    else (
-                        "Purpose: operator-driven dynamic stimulus. Recommended when no scripted template exists. "
-                        if not scripted_template_ready
-                        else "Purpose: operator-driven dynamic stimulus. "
-                    )
-                )
-                + "run_profile=interaction_manual | "
-                + (
-                    "Counts toward quota: YES (if VALID)"
-                    if baseline_complete and int(counts.interactive_valid_runs) < int(cfg.interactive_required)
-                    else (
-                        "Counts toward quota: NO (baseline requirement not complete)"
-                        if not baseline_complete
-                        else "Counts toward quota: NO (interactive quota met; saved as supplemental evidence)"
-                    )
-                )
-            ),
-            badge=_badge_for("3"),
-        ),
-        menu_utils.MenuOption("4", "Test app (Dry Run/No Saving)", description="no capture; checks plan + tools", badge=None),
-        menu_utils.MenuOption(
-            "D",
-            "Reset app (dangerous)",
-            description=(
-                "delete local evidence packs + reset tracker for this app"
-                if can_reset
-                else "disabled: no local evidence packs in this workspace"
-            ),
-            badge=None,
-            disabled=(not can_reset),
-        ),
-    ]
+def _print_selected_app_workbench_summary(app: _SelectedAppContext) -> None:
+    _guided_run_workbench.print_selected_app_workbench_summary(
+        app,
+        status_messages=status_messages,
+        selected_app_active_valid_runs_fn=_selected_app_active_valid_runs,
+        selected_app_lineage_state_fn=_selected_app_lineage_state,
+        print_selected_app_evidence_context_fn=_print_selected_app_evidence_context,
+        print_selected_app_state_summary_fn=_print_selected_app_state_summary,
+        print_selected_app_queue_action_fn=_print_selected_app_queue_action,
+        is_messaging_package_or_category_fn=_is_messaging_package_or_category,
+    )
+
+
+def _handle_selected_app_aux_action(
+    *,
+    selected_protocol: str,
+    app: _SelectedAppContext,
+    print_tier1_qa_result: Callable[[str], None] | None,
+) -> str | None:
+    return _guided_run_workbench.handle_selected_app_aux_action(
+        selected_protocol=selected_protocol,
+        app=app,
+        print_tier1_qa_result=print_tier1_qa_result,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        menu_utils=menu_utils,
+        render_selected_app_review_fn=_render_selected_app_review,
+        render_selected_app_recent_runs_fn=_render_selected_app_recent_runs,
+        render_selected_app_diagnostics_fn=_render_selected_app_diagnostics,
+    )
 
 
 def _render_selected_app_workbench(
@@ -911,97 +882,17 @@ def _render_selected_app_workbench(
     app: _SelectedAppContext,
     print_tier1_qa_result: Callable[[str], None] | None,
 ) -> str:
-    protocol_options = _build_selected_app_protocol_options(app)
-    default_choice = (
-        "A"
-        if str(app.queue_action or "").strip().lower() == "review qa"
-        else (app.suggested_default_key if app.suggested_is_interactive else "1")
+    return _guided_run_workbench.render_selected_app_workbench(
+        app=app,
+        print_tier1_qa_result=print_tier1_qa_result,
+        menu_utils=menu_utils,
+        prompt_utils=prompt_utils,
+        queue_action_key_fn=_queue_action_key,
+        queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
+        build_selected_app_protocol_options_fn=_build_selected_app_protocol_options,
+        print_selected_app_workbench_summary_fn=_print_selected_app_workbench_summary,
+        handle_selected_app_aux_action_fn=_handle_selected_app_aux_action,
     )
-    menu_utils.print_header("Dynamic Workbench", app.display_label)
-    if app.meta_family_note:
-        print(
-            status_messages.status(
-                "Meta-family app: Facebook, Messenger, Instagram, and WhatsApp are tracked as separate apps.",
-                level="info",
-            )
-        )
-    _print_selected_app_evidence_context(
-        package_name=app.package_name,
-        active_valid_runs=int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs),
-        legacy_valid_runs=app.historical_valid_local,
-        historical_build_count=app.historical_build_count,
-        db_active_sessions=app.db_active_sessions,
-        db_historical_sessions=app.db_historical_sessions,
-    )
-    _print_selected_app_state_summary(
-        lineage_state=_selected_app_lineage_state(
-            active_valid_runs=int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs),
-            legacy_valid_runs=app.historical_valid_local,
-            db_active_sessions=app.db_active_sessions,
-            db_historical_sessions=app.db_historical_sessions,
-        ),
-        active_valid_runs=int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs),
-        legacy_valid_runs=app.historical_valid_local,
-        db_active_sessions=app.db_active_sessions,
-        db_historical_sessions=app.db_historical_sessions,
-        latest_valid=app.latest_valid,
-        queue_action=app.queue_action,
-        baseline_valid_runs=int(app.counts.baseline_valid_runs),
-        interactive_valid_runs=int(app.counts.interactive_valid_runs),
-        baseline_required=int(app.cfg.baseline_required),
-        interactive_required=int(app.cfg.interactive_required),
-        extra_valid_runs=app.extra_valid_local,
-    )
-    _print_selected_app_queue_action(app.queue_action, app.queue_reason)
-    if app.extra_valid_local > 0:
-        print(
-            status_messages.status(
-                f"Supplemental current-build evidence: {app.extra_valid_local} extra valid run(s) retained outside quota.",
-                level="info",
-            )
-        )
-    while True:
-        menu_utils.render_menu(
-            menu_utils.MenuSpec(
-                items=protocol_options,
-                default=default_choice,
-                exit_label="Back",
-                show_exit=True,
-                show_descriptions=True,
-                compact=True,
-            )
-        )
-        selected_protocol = prompt_utils.get_choice(
-            menu_utils.selectable_keys(protocol_options, include_exit=True),
-            default=default_choice,
-            casefold=True,
-            invalid_message="Choose 0-4, A, H, G, or D.",
-            disabled=[option.key for option in protocol_options if option.disabled],
-        ).upper()
-        if selected_protocol == "A":
-            _render_selected_app_review(
-                display_label=app.display_label,
-                latest_recent=app.latest_recent,
-                print_tier1_qa_result=print_tier1_qa_result,
-            )
-            prompt_utils.press_enter_to_continue()
-            continue
-        if selected_protocol == "H":
-            _render_selected_app_recent_runs(app.state)
-            prompt_utils.press_enter_to_continue()
-            continue
-        if selected_protocol == "G":
-            _render_selected_app_diagnostics(
-                package_name=app.package_name,
-                display_label=app.display_label,
-                state=app.state,
-                queue_action=app.queue_action,
-                db_active_sessions=app.db_active_sessions,
-                db_historical_sessions=app.db_historical_sessions,
-            )
-            prompt_utils.press_enter_to_continue()
-            continue
-        return selected_protocol
 
 
 def _select_guided_dataset_action(
@@ -1037,65 +928,23 @@ def _select_guided_dataset_action(
         else None
     )
     if plan_drift is not None:
+        selected_app = _with_selected_app_display(
+            _load_selected_app_context(package_name=package_name),
+            package_name=package_name,
+            display_label=display_label,
+        )
         print()
-        menu_utils.print_header("Static Plan / Device Drift")
-        rows = [
-            ["App", display_label],
-            [
-                "Installed build",
-                f"{plan_drift.get('observed_version_code') or 'unknown'} "
-                f"({plan_drift.get('observed_command') or 'unknown'})",
-            ],
-            [
-                "Static plan build",
-                f"{plan_drift.get('expected_version_name') or 'unknown'} "
-                f"({plan_drift.get('expected_version_code') or 'unknown'})",
-            ],
-            ["Static run", plan_drift.get("static_run_id") or "unknown"],
-        ]
-        menu_utils.print_table(["Field", "Value"], rows)
-        if plan_drift.get("observed_pattern") or plan_drift.get("observed_line"):
-            print(
-                status_messages.status(
-                    "Observed build identity came from the live package dump and does not match the newest static plan.",
-                    level="warn",
-                )
-            )
-        observed_vc = str(plan_drift.get("observed_version_code") or "").strip() or "unknown"
-        expected_vc = str(plan_drift.get("expected_version_code") or "").strip() or "unknown"
-        print(status_messages.status("Queue action: refresh static", level="info"))
-        print(
-            status_messages.status(
-                f"Reason: installed build {observed_vc} does not match the newest static-plan build {expected_vc}.",
-                level="info",
-            )
-        )
-        print(
-            status_messages.status(
-                "Dataset-mode dynamic runs require the installed build to match the selected static plan. "
-                "Refresh harvest/static for this app or choose another app.",
-                level="error",
-            )
-        )
+        _render_selected_app_drift_workbench(app=selected_app, plan_drift=plan_drift)
         prompt_utils.press_enter_to_continue()
         return _SelectedAppAction(
-            app=_SelectedAppContext(
-                **{
-                    **_load_selected_app_context(package_name=package_name).__dict__,
-                    "display_label": display_label,
-                    "meta_family_note": bool(str(package_name or "").strip().lower() in _META_FAMILY_PACKAGES),
-                }
-            ),
+            app=selected_app,
             selected_protocol="0",
         )
 
-    app = _load_selected_app_context(package_name=package_name)
-    app = _SelectedAppContext(
-        **{
-            **app.__dict__,
-            "display_label": display_label,
-            "meta_family_note": bool(str(package_name or "").strip().lower() in _META_FAMILY_PACKAGES),
-        }
+    app = _with_selected_app_display(
+        _load_selected_app_context(package_name=package_name),
+        package_name=package_name,
+        display_label=display_label,
     )
     selected_protocol = _render_selected_app_workbench(
         app=app,
@@ -1419,60 +1268,43 @@ def _prepare_selected_app_capture(
     device_ctx: dict[str, str | None],
     print_device_badge: Callable[[str, str], None],
 ) -> tuple[str, str] | None:
-    print()
-    menu_utils.print_header("Capture Setup", app.display_label)
-    _print_paper_mode_constants()
-    selected = select_device()
-    if not selected:
-        return None
-    device_serial, device_label = selected
-    device_ctx["serial"] = device_serial
-    device_ctx["label"] = device_label
-    print_device_badge(device_serial, device_label)
-    if not _device_preflight_checks(device_serial):
-        prompt_utils.press_enter_to_continue()
-        return None
-    plan_drift = _detect_static_plan_build_drift(
-        device_serial=device_serial,
-        package_name=app.package_name,
+    return _guided_run_capture.prepare_selected_app_capture(
+        app=app,
+        device_ctx=device_ctx,
+        print_device_badge=print_device_badge,
+        menu_utils=menu_utils,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+        print_paper_mode_constants_fn=_print_paper_mode_constants,
+        choose_capture_device_fn=_choose_capture_device,
+        device_preflight_checks_fn=_device_preflight_checks,
+        detect_static_plan_build_drift_fn=_detect_static_plan_build_drift,
+        render_selected_app_drift_workbench_fn=_render_selected_app_drift_workbench,
     )
-    if plan_drift is not None:
-        print()
-        menu_utils.print_header("Static Plan / Device Drift")
-        rows = [
-            ["App", app.display_label],
-            [
-                "Installed build",
-                f"{plan_drift.get('observed_version_code') or 'unknown'} "
-                f"({plan_drift.get('observed_command') or 'unknown'})",
-            ],
-            [
-                "Static plan build",
-                f"{plan_drift.get('expected_version_name') or 'unknown'} "
-                f"({plan_drift.get('expected_version_code') or 'unknown'})",
-            ],
-            ["Static run", plan_drift.get('static_run_id') or 'unknown'],
-        ]
-        menu_utils.print_table(["Field", "Value"], rows)
-        print(status_messages.status("Queue action: refresh static", level="info"))
-        print(
-            status_messages.status(
-                f"Reason: installed build {str(plan_drift.get('observed_version_code') or '').strip() or 'unknown'} "
-                f"does not match the newest static-plan build {str(plan_drift.get('expected_version_code') or '').strip() or 'unknown'}.",
-                level="info",
-            )
-        )
-        print(
-            status_messages.status(
-                "Dataset-mode dynamic runs require the installed build to match the selected static plan. "
-                "Refresh harvest/static for this app or choose another app.",
-                level="error",
-            )
-        )
-        prompt_utils.press_enter_to_continue()
-        return None
-    _render_selected_app_recent_runs(app.state)
-    return device_serial, device_label
+
+
+def _print_capture_device_choice(
+    *,
+    details: dict[str, str],
+    detected: bool,
+) -> None:
+    _guided_run_capture.print_capture_device_choice(
+        details=details,
+        detected=detected,
+        menu_utils=menu_utils,
+        status_messages=status_messages,
+    )
+
+
+def _choose_capture_device(device_ctx: dict[str, str | None]) -> tuple[str, str] | None:
+    return _guided_run_capture.choose_capture_device(
+        device_ctx,
+        get_device_selection_details_fn=get_device_selection_details,
+        select_device_fn=select_device,
+        menu_utils=menu_utils,
+        prompt_utils=prompt_utils,
+        status_messages=status_messages,
+    )
 
 
 def _auto_run_static_for_package(package_name: str) -> bool:
@@ -1528,9 +1360,7 @@ def run_guided_dataset_run(
     observer_prompts_enabled: bool = False,
     pcapdroid_api_key: str | None = None,
 ) -> None:
-    print()
     cohort_label = active_research_cohort_label()
-    menu_utils.print_header("App Queue / Next Action", cohort_label)
     device_ctx: dict[str, str | None] = _initial_device_context()
 
     while True:
@@ -1742,8 +1572,6 @@ def _run_guided_dataset_iteration(
             # activity is "connected_idle" by definition. Do not offer a menu that can
             # accidentally select known-low-signal "home idle" baselines.
             messaging_activity = "connected_idle"
-            print()
-            print(status_messages.status("Messaging Activity tag: Idle (baseline_connected).", level="info"))
         else:
             print()
             menu_utils.print_header("Messaging Activity (Tag)")
@@ -1796,7 +1624,7 @@ def _run_guided_dataset_iteration(
         print(
             status_messages.status(
                 "Messaging baseline with 'none/home idle' is exploratory. "
-                "Use 'Connected idle' (open thread, no send/call) for countable messaging baseline.",
+                "Use 'connected idle' (open thread visible, no send/call) for countable messaging baseline.",
                 level="warn",
             )
         )
@@ -1809,27 +1637,17 @@ def _run_guided_dataset_iteration(
                 interactive_valid_runs=int(counts.interactive_valid_runs),
                 cfg=cfg,
             )
-            print(status_messages.status("Using messaging baseline_connected behavior.", level="info"))
+            print(status_messages.status("Using messaging connected-idle baseline behavior.", level="info"))
 
     if _is_messaging_connected_baseline(
         package_name=package_name,
         run_profile=run_profile,
         messaging_activity=messaging_activity,
     ):
-        can_open_thread = prompt_utils.prompt_yes_no(
-            "Can you open an existing conversation thread now? (required for baseline_connected)",
-            default=True,
-        )
+        can_open_thread = _confirm_messaging_connected_baseline_ready()
         if not can_open_thread:
-            print(
-                status_messages.status(
-                    "Without an existing thread, messaging baseline is likely low-signal and may be excluded.",
-                    level="warn",
-                )
-            )
-            fallback_interaction = "interaction_manual"
-            fallback_label = "manual interaction"
-            if prompt_utils.prompt_yes_no(f"Switch to {fallback_label} now?", default=True):
+            fallback_interaction = _handle_messaging_connected_baseline_not_ready()
+            if fallback_interaction:
                 run_profile = fallback_interaction
                 interaction_level = "manual"
                 messaging_activity = "none"

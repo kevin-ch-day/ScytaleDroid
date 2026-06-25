@@ -121,6 +121,8 @@ def get_device_selection_details(serial: str) -> dict[str, str]:
             "android": "—",
             "type": "device",
             "label": serial,
+            "status": "not detected",
+            "detected": "",
         }
     return {
         "name": _device_name(device),
@@ -128,6 +130,8 @@ def get_device_selection_details(serial: str) -> dict[str, str]:
         "android": _device_android_version(device),
         "type": _device_kind(device),
         "label": _device_compact_label(device),
+        "status": _device_status(device, active_serial=None),
+        "detected": "1",
     }
 
 
@@ -148,9 +152,11 @@ def select_device(
         prompt_utils.press_enter_to_continue()
         return None
 
-    active_serial = str(device_service.get_active_serial() or "").strip() if prefer_active else ""
+    # Keep display of the active selection separate from auto-reuse behavior.
+    # Explicit selectors should still show which device is currently selected.
+    active_serial = str(device_service.get_active_serial() or "").strip()
     active_device = _lookup_device_by_serial(summaries, active_serial)
-    if active_serial:
+    if prefer_active and active_serial:
         if active_device is not None:
             device_label = _device_compact_label(active_device)
             print(status_messages.status(f"Using current device: {device_label}", level="info"))

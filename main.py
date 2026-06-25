@@ -10,7 +10,6 @@ from collections.abc import Callable
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
 from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, summary_cards
-from scytaledroid.Utils.DisplayUtils.menu_utils import MenuSpec
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.System.world_clock.display import (
@@ -108,6 +107,36 @@ def print_banner(*, show_clocks: bool = False) -> None:
     )
     logging_engine.emit_environment_snapshot()
 
+
+def _build_main_menu_sections(
+    menu_actions: list[tuple[str, str, Callable[[], None]]],
+) -> list[tuple[str, list[menu_utils.MenuOption]]]:
+    by_key = {key: menu_utils.MenuOption(key, label) for key, label, _ in menu_actions}
+    return [
+        ("Setup", [by_key["1"]]),
+        ("Analysis", [by_key["2"], by_key["3"], by_key["4"]]),
+        ("Support", [by_key["5"], by_key["6"], by_key["10"]]),
+        ("Diagnostics", [by_key["7"], by_key["8"], by_key["9"]]),
+        ("About", [by_key["11"]]),
+    ]
+
+
+def _render_main_menu_sections(
+    sections: list[tuple[str, list[menu_utils.MenuOption]]],
+) -> None:
+    for title, items in sections:
+        if not items:
+            continue
+        menu_utils.print_section(title)
+        menu_utils.print_menu(
+            items,
+            show_exit=False,
+            show_descriptions=False,
+            compact=True,
+        )
+        print()
+    menu_utils.print_menu([], show_exit=True, exit_label="Exit", show_descriptions=False, compact=True)
+
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
@@ -128,6 +157,7 @@ def main_menu() -> None:
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
+    menu_sections = _build_main_menu_sections(menu_actions)
     valid_choices = list(handlers)
     # Keep enter-to-select on the first workflow stage rather than re-opening
     # device selection when operators are already working with one device.
@@ -168,15 +198,7 @@ def main_menu() -> None:
             active_device = "None"
         if active_device and active_device != "None":
             menu_utils.print_hint(f"Selected device: {active_device}")
-        spec = MenuSpec(
-            items=[menu_utils.MenuOption(key, label) for key, label, _ in menu_actions],
-            default=None,
-            exit_label="Exit",
-            show_exit=True,
-            show_descriptions=False,
-            compact=True,
-        )
-        menu_utils.render_menu(spec)
+        _render_main_menu_sections(menu_sections)
 
         extra_valid: list[str] = []
         if status_snapshot.get("allow_copy_freeze_hash"):
@@ -291,7 +313,7 @@ def _emit_main_menu_db_connection_line(ok: bool, message: str, detail: str) -> N
     headline = message.strip()
     if headline == "Database disabled.":
         status_messages.print_status(
-            "DB: off — set DSN in .env (menu 6)",
+            "DB: off — set DSN in .env (menu 7)",
             level="warn",
         )
         return

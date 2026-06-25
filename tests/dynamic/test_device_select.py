@@ -188,3 +188,39 @@ def test_select_device_can_force_prompt_for_single_detected_device(monkeypatch, 
     assert "Use this device for inventory, harvest, dynamic capture, logcat, and shell actions." in out
     assert "Current device" in out
     assert "Detected devices" in out
+
+
+def test_select_device_forced_prompt_still_shows_current_device(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        device_select.device_service,
+        "scan_devices",
+        lambda: (
+            [{"serial": "ZY22JK89DR", "model": "moto"}],
+            [],
+            [
+                {
+                    "serial": "ZY22JK89DR",
+                    "model": "moto g 5G - 2024",
+                    "android_version": "15",
+                    "device_type": "Physical",
+                    "state": "device",
+                }
+            ],
+            {"ZY22JK89DR": {"serial": "ZY22JK89DR"}},
+        ),
+    )
+    monkeypatch.setattr(device_select.device_service, "get_active_serial", lambda: "ZY22JK89DR")
+    monkeypatch.setattr(device_select.device_service, "set_active_serial", lambda _serial: True)
+    monkeypatch.setattr(device_select.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+
+    selected = device_select.select_device(
+        header="Select Capture Device",
+        prefer_active=False,
+        allow_auto_single=False,
+    )
+
+    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 (ZY22JK89DR)")
+    out = capsys.readouterr().out
+    assert "Current device" in out
+    assert "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical" in out
+    assert "current" in out

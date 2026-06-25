@@ -83,6 +83,10 @@ def test_render_cohort_status_help_mentions_supplemental_and_historical(monkeypa
     assert "Build=legacy + Evidence=db-only" in out
     assert "Build=current + Evidence=db-only" in out
     assert "drift" in out
+    assert "refresh steps" in out
+    assert "identity mismatch" in out
+    assert "baseline gap" in out
+    assert "manual gap" in out
     out_lc = out.lower()
     assert "evidence-authoritative quota" in out_lc
     assert "tracker-scoped latest-run state" in out_lc
@@ -280,6 +284,7 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
             ),
             SimpleNamespace(
                 display_name="Facebook",
+                package_name="com.facebook.katana",
                 baseline_countable=3,
                 baseline_extra=0,
                 interactive_countable=0,
@@ -293,11 +298,21 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
                 db_historical_sessions=20,
                 qa_label="valid (L)",
                 live_build_drift=True,
+                live_expected_version_code="472143276",
+                live_expected_version_name="565.0.0.49.74",
+                live_observed_version_code="472224766",
+                live_static_run_id="4290",
             ),
         ],
     )
 
     out = capsys.readouterr().out
+    assert "Build refresh required" in out
+    assert "Refresh harvest/static before continuing dataset-mode dynamic capture." in out
+    assert "Package     : com.facebook.katana" in out
+    assert "Installed   : 472224766" in out
+    assert "Static plan : 565.0.0.49.74 (472143276)" in out
+    assert "Static run  : 4290" in out
     assert "Operator summary" in out
     summary_headers, summary_rows = captured_tables[1]
     assert summary_headers == ["App", "Status", "Reason", "DB lineage", "Latest QA"]

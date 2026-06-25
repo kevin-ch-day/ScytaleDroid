@@ -586,9 +586,9 @@ def _evidence_alignment_text(
     if harvest_snapshot_id is None:
         return "snapshot ?"
     if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
-        return f"aligned @ {harvest_snapshot_id}"
+        return f"aligned to {harvest_snapshot_id}"
     if inventory_snapshot_id is not None:
-        return f"mismatch hv {harvest_snapshot_id} vs inv {inventory_snapshot_id}"
+        return f"harvest {harvest_snapshot_id} vs inventory {inventory_snapshot_id}"
     return f"harvest @ {harvest_snapshot_id}"
 
 
