@@ -75,7 +75,9 @@ class PreparedPackageSelectionRow:
     technical_valid_active: int = 0
     live_build_drift: bool = False
     live_expected_version_code: str = ""
+    live_expected_version_name: str = ""
     live_observed_version_code: str = ""
+    live_static_run_id: str = ""
     lineage_state: str = ""
     db_active_sessions: int = 0
     db_historical_sessions: int = 0
@@ -271,7 +273,9 @@ def build_package_selection_row(
     technical_valid_active = 0
     live_build_drift_flag = False
     live_expected_version_code = ""
+    live_expected_version_name = ""
     live_observed_version_code = ""
+    live_static_run_id = ""
     lineage_state = ""
     db_active_sessions = 0
     db_historical_sessions = 0
@@ -391,7 +395,9 @@ def build_package_selection_row(
         if isinstance(live_build_drift, dict):
             live_build_drift_flag = True
             live_expected_version_code = str(live_build_drift.get("expected_version_code") or "").strip()
+            live_expected_version_name = str(live_build_drift.get("expected_version_name") or "").strip()
             live_observed_version_code = str(live_build_drift.get("observed_version_code") or "").strip()
+            live_static_run_id = str(live_build_drift.get("static_run_id") or "").strip()
         lineage_state = _row_lineage_state(
             active_valid_runs=technical_valid_active,
             legacy_valid_runs=legacy_valid,
@@ -400,6 +406,8 @@ def build_package_selection_row(
             live_build_drift=live_build_drift_flag,
         )
         prep_label = _prep_label_for_lineage_state(lineage_state, build_label)
+        if live_build_drift_flag:
+            prep_label = "stale"
         if live_build_drift_flag:
             next_choice_label = "refresh static"
         elif str(qa_label or "").startswith("invalid") and next_choice_label == "—":
@@ -450,7 +458,9 @@ def build_package_selection_row(
         technical_valid_active=technical_valid_active,
         live_build_drift=live_build_drift_flag,
         live_expected_version_code=live_expected_version_code,
+        live_expected_version_name=live_expected_version_name,
         live_observed_version_code=live_observed_version_code,
+        live_static_run_id=live_static_run_id,
         lineage_state=lineage_state,
         db_active_sessions=db_active_sessions,
         db_historical_sessions=db_historical_sessions,
@@ -583,35 +593,66 @@ def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
 
 
 def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
-    issues: list[str] = []
-    drift_rows = [row.display_name for row in row_models if row.live_build_drift]
-    mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
-    hist_db_count = sum(1 for row in row_models if row.lineage_state == "historical_db_only")
-    invalid_rows = [row.display_name for row in row_models if str(row.qa_label).startswith("invalid")]
-    mismatch_rows = [row.display_name for row in row_models if "id_mismatch" in str(row.qa_label)]
-    baseline_needed = sum(1 for row in row_models if row.need_baseline > 0)
-    manual_needed = sum(
-        1 for row in row_models if row.need_baseline <= 0 and row.need_interactive > 0
-    )
+    def _format_issue(
+        names: list[str],
+        *,
+        singular_suffix: str,
+        plural_label: str,
+    ) -> str:
+        if not names:
+            return ""
+        if len(names) == 1:
+            return f"{names[0]} {singular_suffix}"
+        if len(names) == 2:
+            return f"{', '.join(names)} {singular_suffix}"
+        return f"{len(names)} {plural_label}"
 
-    if invalid_rows:
-        label = ", ".join(invalid_rows[:2])
-        issues.append(f"{label} review")
-    if drift_rows:
-        label = ", ".join(drift_rows[:2])
-        issues.append(f"{label} refresh")
-    if hist_db_count > 0:
-        issues.append(f"{hist_db_count} historical DB-only")
+    issues: list[str] = []
+    mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
+    mismatch_rows = [row.display_name for row in row_models if "id_mismatch" in str(row.qa_label)]
+    historical_rows = [
+        row.display_name
+        for row in row_models
+        if row.lineage_state in {"historical_local_only", "historical_db_only"}
+    ]
+    db_only_current_rows = [
+        row.display_name
+        for row in row_models
+        if row.lineage_state == "current_build_db_only"
+    ]
+
     if mixed_rows:
-        label = ", ".join(mixed_rows[:2])
-        issues.append(f"{label} mixed current/legacy")
-    elif mismatch_rows:
-        label = ", ".join(mismatch_rows[:2])
-        issues.append(f"{label} identity mismatch")
-    if baseline_needed > 0:
-        issues.append(f"{baseline_needed} baseline gap{'s' if baseline_needed != 1 else ''}")
-    if manual_needed > 0:
-        issues.append(f"{manual_needed} manual gap{'s' if manual_needed != 1 else ''}")
+        issues.append(
+            _format_issue(
+                mixed_rows,
+                singular_suffix="mixed current/legacy evidence",
+                plural_label="mixed current/legacy evidence states",
+            )
+        )
+    if mismatch_rows:
+        issues.append(
+            _format_issue(
+                mismatch_rows,
+                singular_suffix="identity mismatch",
+                plural_label="identity mismatches",
+            )
+        )
+    if historical_rows:
+        issues.append(
+            _format_issue(
+                historical_rows,
+                singular_suffix="history-only app",
+                plural_label="history-only apps",
+            )
+        )
+    if db_only_current_rows:
+        issues.append(
+            _format_issue(
+                db_only_current_rows,
+                singular_suffix="DB-only current-build app",
+                plural_label="DB-only current-build apps",
+            )
+        )
     if not issues:
         return ""
     top = issues[:4]
@@ -659,24 +700,44 @@ def _render_compact_queue_table(
     baseline_required: int,
     interactive_required: int,
 ) -> None:
-    headers = ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
     total_required = int(baseline_required) + int(interactive_required)
     app_width = _queue_app_width()
-    table_rows = [
-        [
-            row.full_row[0],
-            text_blocks.truncate_visible(row.display_name, app_width),
-            _queue_state_label(row),
-            _queue_need_label(row, baseline_required=baseline_required, interactive_required=interactive_required),
-            _queue_runs_label(row, total_required=total_required),
-            _queue_build_label(row),
-            _queue_evidence_label(row),
-            _queue_qa_badge(row.qa_label),
-            _queue_template_label(row.package_name),
-            _queue_action_label(row),
+    if _queue_compact_layout_mode() == "narrow":
+        headers = ["#", "App", "Status", "Need", "Quota", "State", "Tmpl", "Action"]
+        table_rows = [
+            [
+                row.full_row[0],
+                text_blocks.truncate_visible(row.display_name, app_width),
+                _queue_status_narrow_label(row),
+                _queue_need_narrow_label(
+                    row,
+                    baseline_required=baseline_required,
+                    interactive_required=interactive_required,
+                ),
+                _queue_runs_narrow_label(row, total_required=total_required),
+                _queue_state_summary_label(row),
+                _queue_template_label(row.package_name),
+                _queue_action_narrow_label(row),
+            ]
+            for row in rows
         ]
-        for row in rows
-    ]
+    else:
+        headers = ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
+        table_rows = [
+            [
+                row.full_row[0],
+                text_blocks.truncate_visible(row.display_name, app_width),
+                _queue_state_label(row),
+                _queue_need_label(row, baseline_required=baseline_required, interactive_required=interactive_required),
+                _queue_runs_label(row, total_required=total_required),
+                _queue_build_label(row),
+                _queue_evidence_label(row),
+                _queue_qa_badge(row.qa_label),
+                _queue_template_label(row.package_name),
+                _queue_action_label(row),
+            ]
+            for row in rows
+        ]
     table_utils.render_table(headers, table_rows, compact=False, padding=2)
 
 
@@ -687,6 +748,11 @@ def _queue_app_width() -> int:
     if width < 110:
         return 18
     return 22
+
+
+def _queue_compact_layout_mode() -> str:
+    width = terminal.get_terminal_width(force_refresh=True)
+    return "narrow" if width < 110 else "wide"
 
 
 def _render_queue_summary_block(
@@ -741,19 +807,19 @@ def _archive_blocker_summary(row_models: list[PreparedPackageSelectionRow]) -> s
     if not row_models:
         return ""
     review_count = sum(1 for row in row_models if _queue_state_label(row) == "review")
+    refresh_count = sum(1 for row in row_models if row.live_build_drift)
     baseline_count = sum(1 for row in row_models if row.need_baseline > 0)
     manual_count = sum(1 for row in row_models if row.need_baseline <= 0 and row.need_interactive > 0)
-    refresh_count = sum(1 for row in row_models if row.live_build_drift)
     parts: list[str] = []
     if review_count > 0:
         parts.append(f"{review_count} review")
-    if baseline_count > 0:
-        parts.append(f"{baseline_count} base")
-    if manual_count > 0:
-        parts.append(f"{manual_count} manual")
     if refresh_count > 0:
         parts.append(f"{refresh_count} refresh")
-    return " | ".join(parts[:3])
+    if baseline_count > 0:
+        parts.append(f"{baseline_count} baseline gap{'s' if baseline_count != 1 else ''}")
+    if manual_count > 0:
+        parts.append(f"{manual_count} manual")
+    return " | ".join(parts)
 
 
 def _queue_state_label(row: PreparedPackageSelectionRow) -> str:
@@ -827,16 +893,14 @@ def _queue_build_label(row: PreparedPackageSelectionRow) -> str:
 
 
 def _queue_evidence_label(row: PreparedPackageSelectionRow) -> str:
-    if row.live_build_drift:
-        return "local+db"
     lineage_state = str(row.lineage_state or "").strip()
-    if lineage_state == "current_build_observed":
+    if int(getattr(row, "technical_valid_active", 0) or 0) > 0 or lineage_state == "current_build_observed":
         return "local+db"
-    if lineage_state == "current_build_db_only":
+    if int(getattr(row, "db_active_sessions", 0) or 0) > 0 or lineage_state == "current_build_db_only":
         return "db-only"
-    if lineage_state == "historical_local_only":
+    if int(getattr(row, "historical_valid_runs_count", 0) or 0) > 0 or lineage_state == "historical_local_only":
         return "local-only"
-    if lineage_state == "historical_db_only":
+    if int(getattr(row, "db_historical_sessions", 0) or 0) > 0 or lineage_state == "historical_db_only":
         return "db-only"
     if lineage_state == "no_evidence_anywhere":
         return "empty"
@@ -895,6 +959,87 @@ def _queue_action_label(row: PreparedPackageSelectionRow) -> str:
     if action == "scripted":
         return "script"
     return action
+
+
+def _queue_state_summary_label(row: PreparedPackageSelectionRow) -> str:
+    build = _queue_build_label(row)
+    evidence = _queue_evidence_label(row)
+    qa = _queue_qa_badge(row.qa_label)
+    evidence_short = {
+        "local+db": "ldb",
+        "local-only": "local",
+        "db-only": "db",
+        "empty": "empty",
+        "none": "—",
+    }.get(evidence, evidence)
+    build_short = {
+        "current": "cur",
+        "legacy": "leg",
+        "unknown": "unk",
+        "drift": "drift",
+    }.get(build, build)
+    parts = [build]
+    parts = [build_short]
+    if evidence_short and evidence_short != "—":
+        parts.append(evidence_short)
+    if qa and qa != "—":
+        parts.append(qa)
+    return "/".join(parts)
+
+
+def _queue_status_narrow_label(row: PreparedPackageSelectionRow) -> str:
+    return {
+        "complete": "done",
+        "review": "review",
+        "baseline": "base",
+        "manual": "manual",
+        "refresh": "refresh",
+        "restore": "restore",
+        "legacy": "legacy",
+        "blocked": "block",
+    }.get(_queue_state_label(row), _queue_state_label(row))
+
+
+def _queue_need_narrow_label(
+    row: PreparedPackageSelectionRow,
+    *,
+    baseline_required: int,
+    interactive_required: int,
+) -> str:
+    need = _queue_need_label(
+        row,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+    )
+    if need.startswith("base "):
+        return "b " + need.split(" ", 1)[1]
+    if need.startswith("manual "):
+        return "m " + need.split(" ", 1)[1]
+    return {
+        "local pack": "local",
+        "local+curr": "loc+cur",
+        "current": "current",
+        "refresh": "refresh",
+        "review": "review",
+    }.get(need, need)
+
+
+def _queue_runs_narrow_label(row: PreparedPackageSelectionRow, *, total_required: int) -> str:
+    text = _queue_runs_label(row, total_required=total_required)
+    if " need " not in text:
+        return text
+    prefix, missing = text.split(" need ", 1)
+    return f"{prefix} n{missing}"
+
+
+def _queue_action_narrow_label(row: PreparedPackageSelectionRow) -> str:
+    return {
+        "manual": "man",
+        "script": "scr",
+        "review": "rev",
+        "refresh": "ref",
+        "restore": "rest",
+    }.get(_queue_action_label(row), _queue_action_label(row))
 
 
 def _display_action_label(row: PreparedPackageSelectionRow) -> str:
@@ -1187,7 +1332,9 @@ def _resolve_live_build_drift_map(
             continue
         out[pkg.lower()] = {
             "expected_version_code": expected_vc,
+            "expected_version_name": str(newest.get("version_name") or "").strip(),
             "observed_version_code": observed_vc,
+            "static_run_id": str(newest.get("static_run_id") or "").strip(),
         }
     return out
 
@@ -1250,8 +1397,6 @@ def _row_lineage_state(
     db_historical_sessions: int,
     live_build_drift: bool,
 ) -> str:
-    if live_build_drift:
-        return "current_build_stale"
     if int(active_valid_runs) > 0:
         return "current_build_observed"
     if int(db_active_sessions) > 0:
@@ -1265,7 +1410,6 @@ def _row_lineage_state(
 
 def _prep_label_for_lineage_state(lineage_state: str, default_build_label: str) -> str:
     mapping = {
-        "current_build_stale": "stale",
         "current_build_observed": default_build_label or "current",
         "current_build_db_only": "db-only",
         "historical_local_only": "legacy",

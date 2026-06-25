@@ -67,7 +67,7 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     assert "pullable" in out and "policy-blocked" in out and "scope-blocked" in out
     assert "117 runs" in out
     assert "Harvest 117" not in out
-    assert "aligned @ 26" in out
+    assert "aligned to 26" in out
     assert "Next: static analysis (menu 2)" in out
     assert "Device Capability" not in out
     assert "Pipeline State" not in out
@@ -221,7 +221,7 @@ def test_dashboard_next_step_explains_inventory_harvest_misalignment(monkeypatch
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "mismatch hv 30 vs inv 31" in out
+    assert "harvest 30 vs inventory 31" in out
     assert "Next: run harvest (2) to match latest inventory." in out
 
 
@@ -275,5 +275,5 @@ def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monk
     out = colors.strip(capsys.readouterr().out)
     assert "full device" in out
     assert "baseline-full" not in out
-    assert "aligned @ 60" in out
+    assert "aligned to 60" in out
     assert "1 run" in out

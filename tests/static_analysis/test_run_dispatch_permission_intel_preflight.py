@@ -295,6 +295,34 @@ def test_preflight_run_context_includes_package_and_apk_counts(
     assert "APK files in this run: 2" in out
 
 
+def test_preflight_catalog_labels_line_is_compact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _preflight_no_primary_db: None,
+) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.permission_intel.is_permission_intel_configured",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.catalog.app_display_label_preflight.summarize_apps_display_labels_for_groups",
+        lambda _groups: (135, 152),
+    )
+    group = SimpleNamespace(artifacts=("base.apk",), package_name="com.example.app")
+    selection = ScopeSelection("all", "All harvested apps", (group,))
+
+    run_dispatch._emit_static_run_preflight_summary(
+        _base_params(scope="all", scope_label="All harvested apps"),
+        frozen_ctx=_ctx(),
+        base_dir=Path("."),
+        selection=selection,
+    )
+    out = capsys.readouterr().out
+    assert "Display labels: 135/152 labeled · 17 need review" in out
+    assert "Catalog hygiene: Database Tools → option 8" in out
+    assert "PYTHONPATH=. python scripts/db/report_app_label_hygiene.py" not in out
+
+
 class _FakeDatabaseEngine:
     def fetch_one(self, _q: str) -> tuple[int]:
         return (1,)

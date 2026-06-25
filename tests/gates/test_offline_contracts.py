@@ -36,7 +36,7 @@ def _dummy_group():
 
 
 def test_main_menu_renders_when_base_schema_unavailable(monkeypatch):
-    rendered = []
+    sections: list[str] = []
 
     monkeypatch.setattr(app_main, "ensure_db_ready", lambda: None)
     monkeypatch.setattr(
@@ -46,14 +46,15 @@ def test_main_menu_renders_when_base_schema_unavailable(monkeypatch):
     )
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
     monkeypatch.setattr(app_main.menu_utils, "print_header", lambda *_a, **_k: None)
-    monkeypatch.setattr(app_main.menu_utils, "render_menu", lambda spec: rendered.append(spec))
+    monkeypatch.setattr(app_main.menu_utils, "print_section", lambda title: sections.append(str(title)))
+    monkeypatch.setattr(app_main.menu_utils, "print_menu", lambda *_a, **_k: None)
     monkeypatch.setattr(app_main.prompt_utils, "get_choice", lambda *_a, **_k: "0")
     monkeypatch.setattr(app_main.status_messages, "print_status", lambda *_a, **_k: None)
     monkeypatch.setattr(app_main.status_messages, "print_strip", lambda *_a, **_k: None)
 
     app_main.main_menu()
 
-    assert rendered, "main menu should still render even when the base schema gate fails"
+    assert sections, "main menu should still render even when the base schema gate fails"
 
 
 def test_static_menu_allows_dry_run_when_schema_gate_fails(monkeypatch):

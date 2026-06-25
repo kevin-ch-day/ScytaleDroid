@@ -133,8 +133,8 @@ def _emit_intel_and_run_grade_lines(params: RunParameters) -> None:
 
     if intel_label == "ok":
         _preflight_plain(
-            "Run grade: PAPER-GRADE READY — Permission Intel + governance snapshots OK; "
-            "Intel does not gate detectors or persistence."
+            "Run grade: PAPER-GRADE READY (Permission Intel/governance ready; "
+            "does not gate detectors or persistence)"
         )
         return
 
@@ -273,15 +273,22 @@ def _emit_catalog_display_labels(selection: Any | None) -> None:
         return
     try:
         from scytaledroid.Database.db_utils.catalog.app_display_label_preflight import (
-            format_apps_display_name_hygiene_line,
+            summarize_apps_display_labels_for_groups,
         )
 
-        line = format_apps_display_name_hygiene_line(groups)
+        progress = summarize_apps_display_labels_for_groups(groups)
     except Exception as exc:
         _preflight_warn_row(f"Display labels: WARN — {exc}")
         return
-    if line:
-        _preflight_plain(line)
+    if progress is None:
+        _preflight_plain("Display labels: skipped")
+        return
+    labeled, total = progress
+    need = max(0, total - labeled)
+    line = f"Display labels: {labeled}/{total} labeled · {need} need review"
+    if need > 0:
+        line += " — Catalog hygiene: Database Tools → option 8"
+    _preflight_plain(line)
 
 
 __all__ = [

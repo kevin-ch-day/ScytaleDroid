@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from scytaledroid.DynamicAnalysis.plans import loader
 
 
@@ -178,3 +180,32 @@ def test_build_plan_validation_event_includes_summary_counts(monkeypatch):
     assert event["summary"]["mismatch_count"] == len(outcome.mismatches)
     assert event["summary"]["db_row_found"] is True
     assert event["summary"]["has_static_link"] is False
+
+
+def test_plan_validation_missing_static_handoff_hash_column_degrades_cleanly(monkeypatch):
+    fallback_row = dict(_db_row())
+    fallback_row.pop("static_handoff_hash")
+
+    def _fake_run_sql(query, params=None, *, fetch="none", **kwargs):
+        if "sar.static_handoff_hash" in query:
+            raise loader.DatabaseError("no such column: sar.static_handoff_hash")
+        if "static_analysis_runs" in query:
+            return fallback_row
+        return None
+
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql)
+
+    outcome = loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")
+
+    assert outcome.status == "FAIL"
+    assert any("static_analysis_runs missing fields: static_handoff_hash" in reason for reason in outcome.reasons)
+
+
+def test_plan_validation_re_raises_unrelated_db_errors(monkeypatch):
+    def _fake_run_sql(query, params=None, *, fetch="none", **kwargs):
+        raise loader.DatabaseError("no such table: static_analysis_runs")
+
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql)
+
+    with pytest.raises(loader.DatabaseError, match="no such table: static_analysis_runs"):
+        loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")

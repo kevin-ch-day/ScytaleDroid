@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from scytaledroid.DynamicAnalysis import menu_selection
 from scytaledroid.DynamicAnalysis import tracker_scope
 
@@ -7,6 +9,11 @@ from scytaledroid.DynamicAnalysis import tracker_scope
 class _Cfg:
     baseline_required = 3
     interactive_required = 2
+
+
+@pytest.fixture(autouse=True)
+def _wide_queue_layout(monkeypatch) -> None:
+    monkeypatch.setattr(menu_selection.terminal, "get_terminal_width", lambda *args, **kwargs: 140)
 
 
 def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monkeypatch, capsys) -> None:
@@ -117,9 +124,9 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert "Current     : 1/3 complete | 1 in progress | 1 review" in out
     assert "History     : 1 local-only" in out
     assert "Archive     : blocked" in out
-    assert "Blocked by  : 1 review | 1 base | 1 manual" in out
+    assert "Blocked by  : 1 review | 1 baseline gap | 1 manual" in out
     assert "Next        : CNN — scripted interaction" in out
-    assert "Warnings: ESPN review | 1 baseline gap | 1 manual gap. Press D." in out
+    assert "Warnings:" not in out
     assert "Attention needed" not in out
     assert "Ready for manual interaction" not in out
     assert "Needs baseline capture" not in out
@@ -638,6 +645,7 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
                 live_build_drift=True,
                 live_expected_version_code="472143276",
                 live_observed_version_code="472224766",
+                historical_valid_runs_count=1,
             ),
         ],
         baseline_required=3,
@@ -645,7 +653,7 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
     )
 
     assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "3/5 need 2", "drift", "local+db", "+L", "acct", "refresh"]
+    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "3/5 need 2", "drift", "local-only", "+L", "acct", "refresh"]
 
 
 def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch) -> None:
@@ -688,6 +696,68 @@ def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch)
     assert captured["rows"][0] == ["5", "Current App", "restore", "local pack", "0/5 need 5", "current", "db-only", "—", "none", "restore"]
 
 
+def test_compact_queue_table_uses_narrow_layout_when_terminal_is_tight(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(menu_selection.terminal, "get_terminal_width", lambda *args, **kwargs: 96)
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["2"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.cnn.mobile.android.phone",
+                display_name="CNN",
+                baseline_countable=3,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=2,
+                prep_label="current",
+                qa_label="invalid",
+                next_label="review QA",
+                lineage_state="current_build_observed",
+            ),
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["3"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.facebook.katana",
+                display_name="Facebook",
+                baseline_countable=3,
+                baseline_extra=1,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=2,
+                prep_label="mixed",
+                qa_label="valid (L)",
+                next_label="manual interaction",
+                lineage_state="current_build_observed",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "State", "Tmpl", "Action"]
+    assert captured["rows"][0] == ["2", "CNN", "review", "review", "3/5 n2", "cur/ldb/inv", "news", "rev"]
+    assert captured["rows"][1] == ["3", "Facebook", "manual", "m 0/2", "3/5 n2", "cur/ldb/+L", "acct", "man"]
+
+
 def test_compact_warning_line_mentions_static_refresh_need() -> None:
     warning = menu_selection._compact_warning_line(
         [
@@ -706,7 +776,56 @@ def test_compact_warning_line_mentions_static_refresh_need() -> None:
             )
         ]
     )
-    assert warning == "Facebook refresh. Press D."
+    assert warning == ""
+
+
+def test_compact_warning_line_shows_hidden_refresh_count() -> None:
+    def _row(name: str) -> menu_selection.PreparedPackageSelectionRow:
+        return menu_selection.PreparedPackageSelectionRow(
+            full_row=[],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=0,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=0,
+            display_name=name,
+            live_build_drift=True,
+        )
+
+    warning = menu_selection._compact_warning_line(
+        [
+            _row("LinkedIn"),
+            _row("Reddit"),
+            _row("Signal"),
+            _row("Snapchat"),
+        ]
+    )
+    assert warning == ""
+
+
+def test_compact_warning_line_uses_count_summaries_for_large_groups() -> None:
+    def _row(name: str, **kwargs) -> menu_selection.PreparedPackageSelectionRow:
+        return menu_selection.PreparedPackageSelectionRow(
+            full_row=[],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=0,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=0,
+            display_name=name,
+            **kwargs,
+        )
+
+    warning = menu_selection._compact_warning_line(
+        [
+            _row("Facebook", qa_label="valid (id_mismatch)"),
+            _row("X (Twitter)", qa_label="valid (id_mismatch)"),
+            _row("Signal", lineage_state="historical_db_only"),
+            _row("Snapchat", lineage_state="historical_db_only"),
+            _row("Telegram", lineage_state="historical_local_only"),
+        ]
+    )
+    assert warning == "Facebook, X (Twitter) identity mismatch | 3 history-only apps. Press D."
 
 
 def test_compact_warning_line_mentions_historical_db_only() -> None:
@@ -727,7 +846,7 @@ def test_compact_warning_line_mentions_historical_db_only() -> None:
             )
         ]
     )
-    assert warning == "1 historical DB-only. Press D."
+    assert warning == "Facebook Messenger history-only app. Press D."
 
 
 def test_run_package_selection_menu_shows_current_build_refresh_summary(monkeypatch, capsys) -> None:
@@ -788,4 +907,44 @@ def test_run_package_selection_menu_shows_current_build_refresh_summary(monkeypa
     assert result is None
     out = capsys.readouterr().out
     assert "Current     : 0/1 complete | 1 drift" in out
-    assert "Blocked by  : 1 manual | 1 refresh" in out
+    assert "Blocked by  : 1 refresh | 1 manual" in out
+
+
+def test_archive_blocker_summary_keeps_refresh_visible_with_overlapping_counts() -> None:
+    rows = [
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=[],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=0,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=0,
+            display_name="CNN",
+            qa_label="invalid",
+        ),
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=[],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=0,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=0,
+            display_name="LinkedIn",
+            live_build_drift=True,
+            need_baseline=3,
+        ),
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=[],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=0,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=0,
+            display_name="TikTok",
+            need_interactive=2,
+        ),
+    ]
+
+    blocker_text = menu_selection._archive_blocker_summary(rows)
+
+    assert blocker_text == "1 review | 1 refresh | 1 baseline gap | 1 manual"

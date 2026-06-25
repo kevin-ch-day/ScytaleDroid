@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core import DatabaseError, db_queries as core_q
 from scytaledroid.DeviceAnalysis.identity import normalize_hex_digest
 
 SUPPORTED_SIGNATURE_VERSIONS = {"v1"}
@@ -448,8 +448,7 @@ def _missing_db_fields(row: dict[str, object]) -> list[str]:
 def _fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
     if static_run_id is None:
         return {}
-    row = core_q.run_sql(
-        """
+    query = """
         SELECT sar.id AS static_run_id,
                sar.run_signature,
                sar.run_signature_version,
@@ -463,13 +462,43 @@ def _fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
         LEFT JOIN app_versions av ON av.id = sar.app_version_id
         LEFT JOIN apps a ON a.id = av.app_id
         WHERE sar.id=%s
-        """,
-        (static_run_id,),
-        fetch="one_dict",
-    )
+        """
+    try:
+        row = core_q.run_sql(
+            query,
+            (static_run_id,),
+            fetch="one_dict",
+        )
+    except DatabaseError as exc:
+        if not _is_missing_static_handoff_hash_error(exc):
+            raise
+        row = core_q.run_sql(
+            """
+            SELECT sar.id AS static_run_id,
+                   sar.run_signature,
+                   sar.run_signature_version,
+                   sar.apk_set_id,
+                   sar.artifact_set_hash,
+                   sar.base_apk_sha256,
+                   sar.pipeline_version,
+                   a.package_name
+            FROM static_analysis_runs sar
+            LEFT JOIN app_versions av ON av.id = sar.app_version_id
+            LEFT JOIN apps a ON a.id = av.app_id
+            WHERE sar.id=%s
+            """,
+            (static_run_id,),
+            fetch="one_dict",
+        )
     if not isinstance(row, dict):
         return {}
+    row.setdefault("static_handoff_hash", None)
     return row
+
+
+def _is_missing_static_handoff_hash_error(exc: Exception) -> bool:
+    message = str(exc).strip().lower()
+    return "static_handoff_hash" in message and "no such column" in message
 
 
 def _cross_check_session_link(

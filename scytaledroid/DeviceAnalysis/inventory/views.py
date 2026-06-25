@@ -54,7 +54,7 @@ def print_inventory_run_summary_from_result(result) -> None:
         status_messages.status(
             (
                 f"{inventory_cli_labels.SECTION_HEADLINE} complete · snapshot {sid_label} · "
-                f"{total_pkgs} packages on this snapshot"
+                f"{total_pkgs} packages"
             ),
             level="success",
         )

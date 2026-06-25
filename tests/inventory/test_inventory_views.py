@@ -60,7 +60,7 @@ def test_print_inventory_run_summary_from_result(capsys):
     assert "data/state/device/inventory.json" not in out
     assert "Retention: 5 kept (DB 5, FS 2)" in out
     assert "Refresh inventory complete" in out and "snapshot 11" in out
-    assert "2 packages on this snapshot" in out
+    assert "2 packages" in out
 
 
 def test_inventory_summary_field_order_is_stable(capsys):

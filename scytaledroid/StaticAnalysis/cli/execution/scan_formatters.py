@@ -70,6 +70,9 @@ def _append_pipeline_events_table(
         for label, val in rows:
             lines.append(f"  {label:<{label_w}}  {val:>{mw}}")
     else:
+        if warn == 0 and pol == 0 and fnd == 0 and err == 0 and skip == 0 and parse_est == 0:
+            lines.append("  No detector-stage events yet · execution OK")
+            return
         lines.append(
             f"  Warnings {warn} · Policy failures {pol} · Finding failures {fnd} · Execution errors {err}"
         )
@@ -647,11 +650,9 @@ def _format_compact_progress_text(
     lines.append(f"Package: {pkg_disp}")
     if total_apps > 0:
         ordinal = min(max(apps_completed, 0) + 1, total_apps)
-        lines.append(f"Package progress: {ordinal} / {total_apps} selected")
+        package_progress_line = f"Package progress: {ordinal} / {total_apps} selected"
     else:
-        lines.append("Package progress: -")
-    lines.append(f"APK artifact progress: {artifacts_done} / {total_artifacts} completed")
-    lines.append(f"Elapsed: {elapsed_text}")
+        package_progress_line = "Package progress: -"
     eta_raw = str(eta_text or "").strip()
     no_eta = eta_raw in {"", "--"}
     if concise:
@@ -671,14 +672,28 @@ def _format_compact_progress_text(
         eta_line = f"ETA: ~{eta_raw}"
         if eta_preliminary and total_artifacts > 0:
             eta_line += " (preliminary; split-heavy apps may skew)"
-    lines.append(eta_line)
-
     arch = archive_reports_written
     if total_artifacts > 0:
         ac = 0 if arch is None else int(arch)
-        lines.append(f"APK reports saved: {ac} / {total_artifacts}")
+        reports_line = f"{ac} / {total_artifacts}"
+        artifacts_line = f"APK artifact progress: {artifacts_done} / {total_artifacts} completed"
     else:
-        lines.append("APK reports saved: —")
+        reports_line = "—"
+        artifacts_line = "APK artifact progress: —"
+
+    if concise:
+        progress_bits = [package_progress_line.removeprefix("Package progress: ").strip()]
+        if total_artifacts > 0:
+            progress_bits.append(f"APKs {artifacts_done} / {total_artifacts}")
+            progress_bits.append(f"reports {reports_line}")
+        lines.append(f"Run progress: {' · '.join(progress_bits)}")
+        lines.append(f"Timing: elapsed {elapsed_text} · {eta_line.removeprefix('ETA: ').strip()}")
+    else:
+        lines.append(package_progress_line)
+        lines.append(artifacts_line)
+        lines.append(f"Elapsed: {elapsed_text}")
+        lines.append(eta_line)
+        lines.append(f"APK reports saved: {reports_line}")
 
     if (
         last_report_seconds_ago is not None

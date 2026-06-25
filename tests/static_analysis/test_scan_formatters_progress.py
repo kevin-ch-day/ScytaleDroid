@@ -93,8 +93,10 @@ def test_compact_progress_concise_defaults_short_lines() -> None:
         include_run_context=False,
     )
     assert "Run context" not in text
-    assert "ETA: pending (needs a few completed APKs)" in text
-    assert "Execution errors" in text
+    assert "Run progress: 1 / 12 selected · APKs 0 / 98 · reports 0 / 98" in text
+    assert "Timing: elapsed starting · pending (needs a few completed APKs)" in text
+    assert "No detector-stage events yet · execution OK" in text
+    assert "APK reports saved:" not in text
     assert "Live table = detector-stage roll-ups" in text
     assert "Use --verbose for full OK + skipped-stage columns" in text
 
@@ -116,6 +118,8 @@ def test_compact_progress_omits_run_context_when_disabled() -> None:
     assert "Run context" not in text
     assert "Session:" not in text
     assert "Current package" in text
+    assert "Run progress:" in text
+    assert "Timing:" in text
     assert "Detector-stage events so far" in text
 
 
@@ -136,7 +140,7 @@ def test_compact_progress_shows_persist_lag_when_stale() -> None:
         include_run_context=False,
         stale_persist_seconds=180,
     )
-    assert "APK reports saved: 40 / 98" in text
+    assert "Run progress: 6 / 12 selected · APKs 40 / 98 · reports 40 / 98" in text
     assert "Last report persist: com.stale.pkg" in text
 
 

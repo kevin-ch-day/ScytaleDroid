@@ -849,7 +849,12 @@ def render_cohort_status_help() -> None:
     print("Action   = recommended operator move: base, manual, script, review, refresh, or restore.")
     print("locked   = manual phase unavailable until baseline minimum is met.")
     print("mixed    = current-build and legacy-build evidence both exist.")
-    print("drift    = installed device build drifted from the newest static plan; rerun harvest/static for this app.")
+    print("refresh  = installed app version code differs from the newest static-plan candidate.")
+    print("drift    = build posture for a refresh-blocked app; harvest/static refresh is required before dynamic continuation.")
+    print("identity mismatch = latest valid run does not match the active build identity; review historical vs current evidence carefully.")
+    print("baseline gap = baseline minimum is not met yet for quota/publication use.")
+    print("manual gap   = baseline is complete, but interactive quota is still missing.")
+    print("refresh steps: harvest current APK(s), rerun static for that build, regenerate the newest plan, then return to the queue.")
     print("Build=current + Evidence=db-only = current-build sessions exist in the DB, but the local evidence pack is missing.")
     print("Build=legacy + Evidence=db-only = only historical DB-backed evidence exists; recollect current-build evidence.")
     print("+L       = latest QA valid, legacy evidence also exists.")
@@ -870,6 +875,26 @@ def render_cohort_status_debug(rows: list[list[str]], row_models: list[object]) 
         compact=False,
     )
     if row_models:
+        drift_rows = [row for row in row_models if bool(getattr(row, "live_build_drift", False))]
+        if drift_rows:
+            print()
+            print("Build refresh required")
+            print("----------------------")
+            print(f"{len(drift_rows)} apps have installed builds that differ from the newest static plan.")
+            print("Refresh harvest/static before continuing dataset-mode dynamic capture.")
+            for row in drift_rows:
+                expected_vc = str(getattr(row, "live_expected_version_code", "") or "").strip() or "unknown"
+                expected_vn = str(getattr(row, "live_expected_version_name", "") or "").strip()
+                static_plan = f"{expected_vn} ({expected_vc})" if expected_vn else expected_vc
+                observed_vc = str(getattr(row, "live_observed_version_code", "") or "").strip() or "unknown"
+                static_run_id = str(getattr(row, "live_static_run_id", "") or "").strip() or "unknown"
+                print()
+                print(str(getattr(row, "display_name", "—") or "—"))
+                print(f"  Package     : {str(getattr(row, 'package_name', '—') or '—')}")
+                print(f"  Installed   : {observed_vc}")
+                print(f"  Static plan : {static_plan}")
+                print(f"  Static run  : {static_run_id}")
+                print("  Action      : refresh harvest/static, then return to dynamic queue")
         print()
         print("Operator summary")
         summary_rows = [
