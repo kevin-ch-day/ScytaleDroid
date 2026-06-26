@@ -37,6 +37,9 @@ CREATE_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE = """
       latest_dynamic_started_at_utc   DATETIME     DEFAULT NULL,
       latest_dynamic_status           VARCHAR(48)  DEFAULT NULL,
       latest_dynamic_grade            VARCHAR(16)  DEFAULT NULL,
+      dynamic_technical_validity_state VARCHAR(48) DEFAULT NULL,
+      dynamic_quota_state             VARCHAR(48)  DEFAULT NULL,
+      dynamic_cohort_eligibility_state VARCHAR(48) DEFAULT NULL,
       dynamic_run_profile             VARCHAR(32)  DEFAULT NULL,
       dynamic_interaction_level       VARCHAR(32)  DEFAULT NULL,
       dynamic_feature_state           VARCHAR(64)  DEFAULT NULL,
@@ -58,6 +61,13 @@ CREATE_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE = """
       KEY idx_wsdsac_feature_recency (dynamic_feature_recency_state),
       KEY idx_wsdsac_materialized (materialized_at_utc)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+ALTER_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE_NORMALIZED_RUNTIME = """
+    ALTER TABLE web_static_dynamic_app_summary_cache
+      ADD COLUMN IF NOT EXISTS dynamic_technical_validity_state VARCHAR(48) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS dynamic_quota_state VARCHAR(48) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS dynamic_cohort_eligibility_state VARCHAR(48) DEFAULT NULL;
 """
 
 
@@ -251,4 +261,5 @@ _DDL_STATEMENTS: list[str] = [
       ADD COLUMN IF NOT EXISTS paper_eligible TINYINT(1) DEFAULT NULL;
     """,
     CREATE_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE,
+    ALTER_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE_NORMALIZED_RUNTIME,
 ]

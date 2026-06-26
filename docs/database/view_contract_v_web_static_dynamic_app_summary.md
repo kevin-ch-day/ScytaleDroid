@@ -95,9 +95,9 @@ Reason for transitional v1:
 
 Use:
 
-- `dynamic_sessions`
+- `v_dynamic_run_context_v1`
 - `dynamic_network_features`
-- latest valid row logic equivalent to `v_web_runtime_run_index`
+- latest feature-row linkage equivalent to `v_web_runtime_run_index`
 
 These provide:
 
@@ -105,9 +105,16 @@ These provide:
 - run profile
 - interaction level
 - runtime grade
+- normalized technical validity / quota / cohort eligibility state
 - feature availability
 - low-signal flags
 - selected throughput/packet metrics
+
+Compatibility note:
+
+- boolean-style fields such as `dynamic_valid_dataset_run` and
+  `dynamic_invalid_reason_code` may remain present for transitional consumers
+  that have not yet migrated to normalized runtime-state fields
 
 ### Derived regime layer
 
@@ -159,15 +166,21 @@ This provides:
 - `latest_dynamic_started_at_utc`
 - `latest_dynamic_status`
 - `latest_dynamic_grade`
+- `dynamic_technical_validity_state`
+- `dynamic_quota_state`
+- `dynamic_cohort_eligibility_state`
 - `dynamic_run_profile`
 - `dynamic_interaction_level`
-- `dynamic_valid_dataset_run`
-- `dynamic_invalid_reason_code`
 - `dynamic_feature_state`
 - `dynamic_low_signal`
 - `dynamic_packet_count`
 - `dynamic_bytes_per_sec`
 - `dynamic_packets_per_sec`
+
+Compatibility / transitional dynamic fields:
+
+- `dynamic_valid_dataset_run`
+- `dynamic_invalid_reason_code`
 
 ### Cross-analysis / regime summary
 

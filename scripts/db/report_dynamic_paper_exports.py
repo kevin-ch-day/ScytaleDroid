@@ -409,13 +409,25 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
     _write_csv(output_root / "unresolved_domains.csv", unresolved_domain_rows)
     _write_csv(output_root / "invalid_or_skipped_packs.csv", invalid_or_skipped_rows)
 
+    apps_seen = len(per_app_rows)
+    apps_with_valid_runs = sum(1 for row in per_app_rows if int(row["valid_run_count"]) > 0)
+    apps_invalid_or_skipped_only = sum(
+        1 for row in per_app_rows if int(row["valid_run_count"]) == 0 and int(row["skipped_or_invalid_run_count"]) > 0
+    )
+    runs_seen = len(per_run_rows)
+    valid_run_count = sum(1 for row in per_run_rows if int(row["valid_pack"]) == 1)
+
     summary = {
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "repo_root": str(_REPO_ROOT),
         "dynamic_evidence_root": str(root.resolve()),
-        "runs_exported": len(per_run_rows),
-        "apps_exported": len(per_app_rows),
-        "valid_run_count": sum(1 for row in per_run_rows if int(row["valid_pack"]) == 1),
+        "runs_seen": runs_seen,
+        "runs_exported": runs_seen,
+        "apps_seen": apps_seen,
+        "apps_exported": apps_seen,
+        "apps_with_valid_runs": apps_with_valid_runs,
+        "apps_invalid_or_skipped_only": apps_invalid_or_skipped_only,
+        "valid_run_count": valid_run_count,
         "invalid_or_skipped_pack_count": len(invalid_or_skipped_rows),
         "unresolved_service_rows": sum(1 for row in unresolved_domain_rows if row["reason"] == "service_unresolved"),
         "unresolved_signal_rows": sum(1 for row in unresolved_domain_rows if row["reason"] == "signal_unmapped"),
@@ -444,6 +456,10 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "pcap_report_top_dns_top_sni_authoritative_for_runtime_signal_rollups",
             "paper-facing app/service/signal summaries exclude invalid_or_skipped packs",
         ],
+        "compatibility_aliases": {
+            "apps_exported": "apps_seen",
+            "runs_exported": "runs_seen",
+        },
         "no_db_writes": True,
         "experimental_audit": True,
     }

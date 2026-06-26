@@ -6,11 +6,42 @@ from datetime import UTC, datetime
 
 from scytaledroid.Database.db_core import database_session, run_sql
 from scytaledroid.Database.db_queries.analysis.schema import (
+    ALTER_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE_NORMALIZED_RUNTIME,
     CREATE_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE,
 )
 
 STATIC_DYNAMIC_SUMMARY_VIEW = "v_web_static_dynamic_app_summary"
 STATIC_DYNAMIC_SUMMARY_CACHE = "web_static_dynamic_app_summary_cache"
+STATIC_DYNAMIC_SUMMARY_REQUIRED_RUNTIME_COLUMNS = (
+    "dynamic_technical_validity_state",
+    "dynamic_quota_state",
+    "dynamic_cohort_eligibility_state",
+)
+
+
+def static_dynamic_summary_relation_has_required_runtime_columns(
+    relation: str,
+    *,
+    runner=run_sql,
+) -> bool:
+    """Return True when the named summary relation exposes normalized runtime-state columns."""
+
+    try:
+        placeholders = ", ".join(["%s"] * len(STATIC_DYNAMIC_SUMMARY_REQUIRED_RUNTIME_COLUMNS))
+        row = runner(
+            f"""
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = %s
+              AND column_name IN ({placeholders})
+            """,
+            (relation, *STATIC_DYNAMIC_SUMMARY_REQUIRED_RUNTIME_COLUMNS),
+            fetch="one",
+        )
+    except Exception:
+        return False
+    return int(row[0] or 0) == len(STATIC_DYNAMIC_SUMMARY_REQUIRED_RUNTIME_COLUMNS) if row else False
 
 
 def static_dynamic_summary_cache_status(*, runner=run_sql) -> tuple[int | None, str | None]:
@@ -65,6 +96,15 @@ def static_dynamic_summary_cache_is_stale(*, runner=run_sql) -> bool:
     return cache_max < view_max
 
 
+def static_dynamic_summary_cache_has_required_runtime_columns(*, runner=run_sql) -> bool:
+    """Return True when the cache table exposes normalized runtime-state columns."""
+
+    return static_dynamic_summary_relation_has_required_runtime_columns(
+        STATIC_DYNAMIC_SUMMARY_CACHE,
+        runner=runner,
+    )
+
+
 def refresh_static_dynamic_summary_cache(*, reuse_connection: bool = True) -> tuple[int, datetime]:
     """Rebuild the materialized latest-package static/dynamic summary cache."""
 
@@ -74,6 +114,10 @@ def refresh_static_dynamic_summary_cache(*, reuse_connection: bool = True) -> tu
         db.execute(
             CREATE_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE,
             query_name="summary_surfaces.cache.ensure_table",
+        )
+        db.execute(
+            ALTER_WEB_STATIC_DYNAMIC_APP_SUMMARY_CACHE_NORMALIZED_RUNTIME,
+            query_name="summary_surfaces.cache.ensure_runtime_columns",
         )
         with db.transaction():
             db.execute(
@@ -108,6 +152,9 @@ def refresh_static_dynamic_summary_cache(*, reuse_connection: bool = True) -> tu
                   latest_dynamic_started_at_utc,
                   latest_dynamic_status,
                   latest_dynamic_grade,
+                  dynamic_technical_validity_state,
+                  dynamic_quota_state,
+                  dynamic_cohort_eligibility_state,
                   dynamic_run_profile,
                   dynamic_interaction_level,
                   dynamic_feature_state,
@@ -150,6 +197,9 @@ def refresh_static_dynamic_summary_cache(*, reuse_connection: bool = True) -> tu
                   latest_dynamic_started_at_utc,
                   latest_dynamic_status,
                   latest_dynamic_grade,
+                  dynamic_technical_validity_state,
+                  dynamic_quota_state,
+                  dynamic_cohort_eligibility_state,
                   dynamic_run_profile,
                   dynamic_interaction_level,
                   dynamic_feature_state,
@@ -177,7 +227,12 @@ def preferred_static_dynamic_summary_relation(*, runner=run_sql) -> str:
     """Return the best available read surface for latest package summary rows."""
 
     count, _materialized_at = static_dynamic_summary_cache_status(runner=runner)
-    if count and count > 0 and not static_dynamic_summary_cache_is_stale(runner=runner):
+    if (
+        count
+        and count > 0
+        and not static_dynamic_summary_cache_is_stale(runner=runner)
+        and static_dynamic_summary_cache_has_required_runtime_columns(runner=runner)
+    ):
         return STATIC_DYNAMIC_SUMMARY_CACHE
     return STATIC_DYNAMIC_SUMMARY_VIEW
 
@@ -185,8 +240,11 @@ def preferred_static_dynamic_summary_relation(*, runner=run_sql) -> str:
 __all__ = [
     "STATIC_DYNAMIC_SUMMARY_VIEW",
     "STATIC_DYNAMIC_SUMMARY_CACHE",
+    "STATIC_DYNAMIC_SUMMARY_REQUIRED_RUNTIME_COLUMNS",
     "preferred_static_dynamic_summary_relation",
     "refresh_static_dynamic_summary_cache",
+    "static_dynamic_summary_relation_has_required_runtime_columns",
     "static_dynamic_summary_cache_is_stale",
+    "static_dynamic_summary_cache_has_required_runtime_columns",
     "static_dynamic_summary_cache_status",
 ]

@@ -55,6 +55,7 @@ def web_consumer_extension_ddls(
         CREATE_VW_PERMISSION_AUDIT_LATEST,
         CREATE_V_WEB_PERMISSION_INTEL_CURRENT,
     )
+    from scytaledroid.Database.db_queries.views_dynamic import CREATE_V_DYNAMIC_RUN_CONTEXT_V1
     from scytaledroid.Database.db_queries.views_static import (
         CREATE_V_STATIC_HANDOFF_V1,
         CREATE_V_STATIC_MASVS_FINDINGS_V1,
@@ -109,6 +110,7 @@ def web_consumer_extension_ddls(
         ("v_web_app_report_summary", CREATE_V_WEB_APP_REPORT_SUMMARY),
         ("v_web_app_directory", CREATE_V_WEB_APP_DIRECTORY),
         ("v_web_static_dynamic_app_summary", CREATE_V_WEB_STATIC_DYNAMIC_APP_SUMMARY),
+        ("v_dynamic_run_context_v1", CREATE_V_DYNAMIC_RUN_CONTEXT_V1),
         ("v_web_runtime_run_index", CREATE_V_WEB_RUNTIME_RUN_INDEX),
         ("v_web_runtime_run_detail", CREATE_V_WEB_RUNTIME_RUN_DETAIL),
     ]
@@ -174,6 +176,7 @@ EXPECTED_VIEW_OBJECTS: tuple[str, ...] = (
     "v_static_run_category_summary",
     "v_runtime_dynamic_cohort_status_v1",
     "v_paper_dynamic_cohort_v1",
+    "v_dynamic_run_context_v1",
     "v_run_overview",
     "v_run_identity",
     "v_static_handoff_v1",

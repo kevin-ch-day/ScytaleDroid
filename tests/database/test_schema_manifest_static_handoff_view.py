@@ -113,6 +113,17 @@ def test_runtime_views_and_run_identity_prefer_phase_a_typed_read_columns():
     assert "v_web_runtime_run_detail" in statements
 
 
+def test_manifest_orders_dynamic_run_context_before_web_runtime_views() -> None:
+    statements = schema_manifest.ordered_schema_statements()
+    idx_ctx = next(
+        i for i, stmt in enumerate(statements) if "CREATE OR REPLACE VIEW v_dynamic_run_context_v1" in stmt
+    )
+    idx_web = next(
+        i for i, stmt in enumerate(statements) if "CREATE OR REPLACE VIEW v_web_runtime_run_index" in stmt
+    )
+    assert idx_ctx < idx_web
+
+
 def test_schema_manifest_includes_artifact_registry_typed_linkage_columns_and_indexes():
     statements = schema_manifest.ordered_schema_statements()
     combined = "\n".join(statements).lower()

@@ -18,20 +18,20 @@ def severity_band_from_badge(badge: Badge) -> str:
     return "INFO"
 
 
+def _finding_weight_score(finding: Finding) -> int | None:
+    from scytaledroid.StaticAnalysis.detectors.correlation.scoring import finding_weight
+
+    return safe_int(finding_weight(finding))
+
+
 def score_from_finding(finding: Finding) -> int:
     metrics = finding.metrics
     if isinstance(metrics, Mapping):
-        value = metrics.get("score")
-        try:
-            return safe_int(value, default=0)
-        except (TypeError, ValueError):
-            pass
-    try:
-        from scytaledroid.StaticAnalysis.detectors.correlation.scoring import finding_weight
-
-        return safe_int(finding_weight(finding), default=0)
-    except Exception:
-        return 0
+        score = safe_int(metrics.get("score"))
+        if score is not None:
+            return score
+    fallback = _finding_weight_score(finding)
+    return fallback if fallback is not None else 0
 
 
 def correlation_rows_from_result(
@@ -85,6 +85,7 @@ def extract_target_sdk(apk: APK) -> int | None:
 
 
 __all__ = [
+    "_finding_weight_score",
     "severity_band_from_badge",
     "score_from_finding",
     "correlation_rows_from_result",

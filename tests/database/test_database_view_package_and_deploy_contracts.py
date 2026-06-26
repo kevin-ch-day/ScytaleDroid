@@ -62,6 +62,38 @@ def test_web_static_dynamic_summary_prefers_completed_canonical_static_rows() ->
     assert "latest_run_missing_features_older_features_exist" in sql
 
 
+def test_web_runtime_run_index_prefers_dynamic_run_context_semantics() -> None:
+    sql = views.CREATE_V_WEB_RUNTIME_RUN_INDEX
+    assert "FROM v_dynamic_run_context_v1 ctx" in sql
+    assert "ctx.technical_validity_state" in sql
+    assert "ctx.quota_state" in sql
+    assert "ctx.cohort_eligibility_state" in sql
+    assert "ctx.cohort_status" in sql
+    assert "ctx.cohort_reason_code" in sql
+    assert "ctx.countable" in sql
+    assert "ctx.valid_dataset_run" in sql
+    assert "FROM dynamic_sessions ds" not in sql
+
+
+def test_web_runtime_run_detail_enriches_dynamic_sessions_with_context_states() -> None:
+    sql = views.CREATE_V_WEB_RUNTIME_RUN_DETAIL
+    assert "FROM dynamic_sessions ds" in sql
+    assert "LEFT JOIN v_dynamic_run_context_v1 ctx" in sql
+    assert "ctx.technical_validity_state" in sql
+    assert "ctx.quota_state" in sql
+    assert "ctx.cohort_eligibility_state" in sql
+    assert "ctx.cohort_status" in sql
+    assert "ctx.cohort_reason_code" in sql
+    assert "COALESCE(NULLIF(ctx.app_label, ''), NULLIF(a.display_name, ''), ds.package_name) AS app_label" in sql
+
+
+def test_web_app_report_summary_centralizes_details_bridge() -> None:
+    sql = views.CREATE_V_WEB_APP_REPORT_SUMMARY
+    assert "COALESCE(sfs.details, strs.findings_details) AS details_json" in sql
+    assert "LEFT JOIN static_findings_summary sfs" in sql
+    assert "LEFT JOIN v_web_app_string_summary strs" in sql
+
+
 # --- views façade __all__ ---
 
 

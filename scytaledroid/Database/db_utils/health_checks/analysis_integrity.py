@@ -16,9 +16,17 @@ from scytaledroid.Database.summary_surfaces import (
 
 @dataclass(frozen=True)
 class AnalysisIntegritySummary:
+    """Cross-layer integrity snapshot.
+
+    `quota_valid_runs_missing_features` is the authoritative dynamic feature-gap metric.
+    `countable_runs_missing_features` is retained as a compatibility alias for older
+    menu/tests that still use pre-normalization terminology.
+    """
+
     dynamic_runs: int | None
     dynamic_feature_rows: int | None
     dynamic_runs_missing_features: int | None
+    quota_valid_runs_missing_features: int | None
     countable_runs_missing_features: int | None
     packages_latest_run_has_features: int | None
     packages_latest_run_missing_features_older_features_exist: int | None
@@ -60,6 +68,7 @@ REQUIRED_ANALYSIS_TABLE_OBJECTS: tuple[str, ...] = ("analysis_dynamic_cohort_sta
 REQUIRED_ANALYSIS_VIEW_OBJECTS: tuple[str, ...] = (
     "v_runtime_dynamic_cohort_status_v1",
     "v_paper_dynamic_cohort_v1",
+    "v_dynamic_run_context_v1",
     "v_web_app_directory",
     "v_web_static_dynamic_app_summary",
     "v_web_runtime_run_index",
@@ -193,6 +202,15 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
     summary_source = preferred_static_dynamic_summary_relation(runner=run_sql)
     cache_rows, cache_materialized_at = static_dynamic_summary_cache_status(runner=run_sql)
 
+    quota_valid_runs_missing_features = scalar(
+        """
+        SELECT COUNT(*)
+        FROM v_dynamic_run_context_v1 ctx
+        WHERE ctx.quota_state = 'QUOTA_VALID'
+          AND ctx.feature_schema_version IS NULL
+        """
+    )
+
     return AnalysisIntegritySummary(
         dynamic_runs=scalar("SELECT COUNT(*) FROM dynamic_sessions"),
         dynamic_feature_rows=scalar("SELECT COUNT(*) FROM dynamic_network_features"),
@@ -205,16 +223,9 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
             WHERE nf.dynamic_run_id IS NULL
             """
         ),
-        countable_runs_missing_features=scalar(
-            """
-            SELECT COUNT(*)
-            FROM dynamic_sessions ds
-            LEFT JOIN dynamic_network_features nf
-              ON nf.dynamic_run_id = ds.dynamic_run_id
-            WHERE COALESCE(ds.countable, 0) = 1
-              AND nf.dynamic_run_id IS NULL
-            """
-        ),
+        quota_valid_runs_missing_features=quota_valid_runs_missing_features,
+        # Compatibility alias for older countable terminology.
+        countable_runs_missing_features=quota_valid_runs_missing_features,
         packages_latest_run_has_features=scalar(
             """
             SELECT COUNT(*)

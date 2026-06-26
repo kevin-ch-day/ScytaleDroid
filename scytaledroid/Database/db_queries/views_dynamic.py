@@ -107,13 +107,32 @@ SELECT
   ds.operator_messaging_activity,
   ds.scenario_id,
   ds.tier,
+  ds.grade,
   ds.status AS workflow_status,
   ds.countable,
   ds.valid_dataset_run,
   ds.invalid_reason_code,
+  CASE
+    WHEN ds.valid_dataset_run = 1 THEN 'TECH_VALID'
+    WHEN ds.valid_dataset_run = 0 THEN 'TECH_INVALID'
+    ELSE 'TECH_LEGACY_UNKNOWN'
+  END AS technical_validity_state,
+  CASE
+    WHEN ds.valid_dataset_run = 1 AND ds.countable = 1 THEN 'QUOTA_VALID'
+    WHEN ds.valid_dataset_run = 1 AND ds.countable = 0 THEN 'SUPPLEMENTAL_VALID'
+    WHEN ds.valid_dataset_run = 1 AND ds.countable IS NULL THEN 'VALID_COUNTING_UNKNOWN'
+    WHEN ds.valid_dataset_run = 0 THEN 'QUOTA_INELIGIBLE'
+    ELSE 'QUOTA_LEGACY_UNKNOWN'
+  END AS quota_state,
   adcs.paper_eligible AS cohort_paper_eligible,
   adcs.status AS cohort_status,
   adcs.reason_code AS cohort_reason_code,
+  CASE
+    WHEN adcs.dynamic_run_id IS NULL THEN 'COHORT_NOT_EVALUATED'
+    WHEN adcs.paper_eligible = 1 THEN 'COHORT_ELIGIBLE'
+    WHEN adcs.paper_eligible = 0 THEN 'COHORT_INELIGIBLE'
+    ELSE 'COHORT_UNRESOLVED'
+  END AS cohort_eligibility_state,
   ds.duration_seconds,
   ds.started_at_utc,
   ds.ended_at_utc,
@@ -172,15 +191,30 @@ LEFT JOIN static_analysis_runs sar
 LEFT JOIN (
   SELECT
     obs.dynamic_run_id,
-    COUNT(*) AS domain_observation_rows,
+    COUNT(DISTINCT obs.observation_id) AS domain_observation_rows,
     COUNT(DISTINCT obs.observed_domain) AS distinct_observed_domains,
     COUNT(DISTINCT obs.root_domain) AS distinct_root_domains,
-    SUM(CASE WHEN LOWER(TRIM(COALESCE(obs.owner_class, ''))) = 'first_party' THEN 1 ELSE 0 END) AS first_party_domain_rows,
-    SUM(CASE WHEN LOWER(TRIM(COALESCE(obs.owner_class, ''))) = 'third_party' THEN 1 ELSE 0 END) AS third_party_domain_rows,
-    SUM(CASE
-          WHEN LOWER(TRIM(COALESCE(obs.owner_class, ''))) IN ('first_party', 'third_party') THEN 0
-          ELSE 1
-        END) AS unknown_domain_rows,
+    COUNT(
+      DISTINCT CASE
+        WHEN LOWER(TRIM(COALESCE(obs.owner_class, ''))) = 'first_party'
+        THEN obs.observation_id
+        ELSE NULL
+      END
+    ) AS first_party_domain_rows,
+    COUNT(
+      DISTINCT CASE
+        WHEN LOWER(TRIM(COALESCE(obs.owner_class, ''))) = 'third_party'
+        THEN obs.observation_id
+        ELSE NULL
+      END
+    ) AS third_party_domain_rows,
+    COUNT(
+      DISTINCT CASE
+        WHEN LOWER(TRIM(COALESCE(obs.owner_class, ''))) IN ('first_party', 'third_party')
+        THEN NULL
+        ELSE obs.observation_id
+      END
+    ) AS unknown_domain_rows,
     COUNT(DISTINCT svc.service_id) AS matched_service_count,
     COUNT(DISTINCT sig.signal_id) AS matched_signal_count,
     GROUP_CONCAT(DISTINCT obs.owner_class ORDER BY obs.owner_class SEPARATOR ',') AS owner_classes_csv,
