@@ -771,7 +771,6 @@ def dynamic_analysis_menu() -> None:
         _warn_if_code_changed()
         render_dynamic_menu_overview()
         print()
-        print()
         menu_utils.print_section("Run")
         menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=False, compact=True)
         print()

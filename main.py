@@ -121,21 +121,36 @@ def _build_main_menu_sections(
     ]
 
 
-def _render_main_menu_sections(
-    sections: list[tuple[str, list[menu_utils.MenuOption]]],
-) -> None:
-    for title, items in sections:
-        if not items:
-            continue
-        menu_utils.print_section(title)
-        menu_utils.print_menu(
-            items,
-            show_exit=False,
-            show_descriptions=False,
-            compact=True,
-        )
-        print()
-    menu_utils.print_menu([], show_exit=True, exit_label="Exit", show_descriptions=False, compact=True)
+def _build_main_menu_options(
+    menu_actions: list[tuple[str, str, Callable[[], None]]],
+) -> list[menu_utils.MenuOption]:
+    options: list[menu_utils.MenuOption] = []
+    for _title, items in _build_main_menu_sections(menu_actions):
+        options.extend(items)
+    return options
+
+
+def _describe_main_menu_database(ok: bool, message: str, detail: str) -> str:
+    """Return a compact database summary for the main-menu dashboard."""
+
+    if ok:
+        from scytaledroid.Database.db_core import db_config
+
+        cfg = db_config.DB_CONFIG
+        host = cfg.get("host", "?")
+        port = cfg.get("port", "?")
+        database = (cfg.get("database") or "").strip() or "?"
+        return f"{database} @ {host}:{port}"
+
+    headline = message.strip()
+    if headline == "Database disabled.":
+        return "off — set DSN in .env (menu 7)"
+    if headline:
+        return f"error — {headline}"
+    trimmed = (detail or "").strip()
+    if trimmed:
+        return f"error — {trimmed}"
+    return "error"
 
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
@@ -157,7 +172,7 @@ def main_menu() -> None:
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
-    menu_sections = _build_main_menu_sections(menu_actions)
+    menu_options = _build_main_menu_options(menu_actions)
     valid_choices = list(handlers)
     # Keep enter-to-select on the first workflow stage rather than re-opening
     # device selection when operators are already working with one device.
@@ -187,18 +202,24 @@ def main_menu() -> None:
         _emit_main_menu_db_connection_line(ok, message, detail or "")
         print()
         menu_utils.print_header("Main Menu")
-        menu_utils.print_hint(
-            "Choose a workflow stage."
-        )
         try:
             from scytaledroid.DeviceAnalysis import device_manager
 
             active_device = device_manager.describe_active_device()
         except Exception:
             active_device = "None"
-        if active_device and active_device != "None":
-            menu_utils.print_hint(f"Selected device: {active_device}")
-        _render_main_menu_sections(menu_sections)
+        selected_device = active_device if active_device and active_device != "None" else "none"
+        print(f"Selected device: {selected_device}")
+        print(f"Database: {_describe_main_menu_database(ok, message, detail or '')}")
+        print("-----")
+        print()
+        menu_utils.print_menu(
+            menu_options,
+            show_exit=True,
+            exit_label="Exit",
+            show_descriptions=False,
+            compact=True,
+        )
 
         extra_valid: list[str] = []
         if status_snapshot.get("allow_copy_freeze_hash"):

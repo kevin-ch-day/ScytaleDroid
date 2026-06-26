@@ -9,9 +9,14 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
+from scytaledroid.DynamicAnalysis import app_queue_state as _app_queue_state
 from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     extract_version_code_details_from_dump,
     read_observed_version_code_details,
+)
+from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
+    selected_app_queue_action as _selected_app_queue_action_shared,
 )
 from scytaledroid.DynamicAnalysis.plan_selection import load_plan_candidates
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
@@ -354,9 +359,14 @@ def build_package_selection_row(
             db_historical_sessions = int(db_lineage_context.get("db_historical_sessions") or 0)
             db_total_sessions = int(db_lineage_context.get("db_total_sessions") or 0)
 
+        latest_valid: bool | None = None
+        latest_invalid_reason: str | None = None
         recent = recent_tracker_runs(package, limit=1)
         if recent:
             r = recent[0]
+            latest_valid = r.valid
+            if r.valid is False:
+                latest_invalid_reason = str(getattr(r, "invalid_reason_code", "") or "").strip() or None
             if r.valid is True:
                 last_label = "valid"
             elif r.valid is False:
@@ -388,10 +398,19 @@ def build_package_selection_row(
             last_label = f"{last_label} (L)"
         qa_label = last_label
 
-        next_label = next_action_from_need_fn(need_base, need_inter)
-        if need_label == "0":
-            next_label = "—"
-        next_choice_label = next_label
+        queue_action, _queue_reason = _selected_app_queue_action_shared(
+            baseline_valid_runs=base_countable,
+            interactive_valid_runs=inter_countable,
+            baseline_required=int(cfg.baseline_required),
+            interactive_required=int(cfg.interactive_required),
+            scripted_template_ready=bool(resolved_template_for_package(package)),
+            latest_valid=latest_valid,
+            latest_invalid_reason=latest_invalid_reason,
+            db_active_sessions=db_active_sessions,
+            active_valid_runs=technical_valid_active,
+        )
+        next_label = queue_action
+        next_choice_label = queue_action
         if isinstance(live_build_drift, dict):
             live_build_drift_flag = True
             live_expected_version_code = str(live_build_drift.get("expected_version_code") or "").strip()
@@ -408,10 +427,7 @@ def build_package_selection_row(
         prep_label = _prep_label_for_lineage_state(lineage_state, build_label)
         if live_build_drift_flag:
             prep_label = "stale"
-        if live_build_drift_flag:
             next_choice_label = "refresh static"
-        elif str(qa_label or "").startswith("invalid") and next_choice_label == "—":
-            next_choice_label = "review QA"
         build_row = [display, active_build, str(active_runs), str(legacy_valid), str(legacy_builds)]
 
     return PreparedPackageSelectionRow(
@@ -572,126 +588,15 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
 
 
 def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
-    if row.live_build_drift:
-        return "installed build differs from newest static plan"
-    if row.lineage_state == "current_build_db_only":
-        return "database knows current-build sessions, but local evidence pack is missing"
-    if row.lineage_state == "historical_local_only":
-        return "only legacy local evidence exists for older builds"
-    if row.lineage_state == "historical_db_only":
-        return "only database-known historical evidence exists for older builds"
-    if row.lineage_state == "no_evidence_anywhere":
-        return "no local or database-backed dynamic evidence exists yet"
-    if row.need_baseline > 0:
-        return f"baseline runs needed: {row.need_baseline}"
-    if row.need_interactive > 0:
-        return f"baseline complete, interactive runs needed: {row.need_interactive}"
-    if row.baseline_extra > 0 or row.interactive_extra > 0:
-        extra_total = int(row.baseline_extra) + int(row.interactive_extra)
-        return f"quota complete, {extra_total} extra run(s) retained"
-    return "quota state up to date"
+    return _app_queue_state.recommended_reason(row)
 
 
 def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
-    def _format_issue(
-        names: list[str],
-        *,
-        singular_suffix: str,
-        plural_label: str,
-    ) -> str:
-        if not names:
-            return ""
-        if len(names) == 1:
-            return f"{names[0]} {singular_suffix}"
-        if len(names) == 2:
-            return f"{', '.join(names)} {singular_suffix}"
-        return f"{len(names)} {plural_label}"
-
-    issues: list[str] = []
-    mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
-    mismatch_rows = [row.display_name for row in row_models if "id_mismatch" in str(row.qa_label)]
-    historical_rows = [
-        row.display_name
-        for row in row_models
-        if row.lineage_state in {"historical_local_only", "historical_db_only"}
-    ]
-    db_only_current_rows = [
-        row.display_name
-        for row in row_models
-        if row.lineage_state == "current_build_db_only"
-    ]
-
-    if mixed_rows:
-        issues.append(
-            _format_issue(
-                mixed_rows,
-                singular_suffix="mixed current/legacy evidence",
-                plural_label="mixed current/legacy evidence states",
-            )
-        )
-    if mismatch_rows:
-        issues.append(
-            _format_issue(
-                mismatch_rows,
-                singular_suffix="identity mismatch",
-                plural_label="identity mismatches",
-            )
-        )
-    if historical_rows:
-        issues.append(
-            _format_issue(
-                historical_rows,
-                singular_suffix="history-only app",
-                plural_label="history-only apps",
-            )
-        )
-    if db_only_current_rows:
-        issues.append(
-            _format_issue(
-                db_only_current_rows,
-                singular_suffix="DB-only current-build app",
-                plural_label="DB-only current-build apps",
-            )
-        )
-    if not issues:
-        return ""
-    top = issues[:4]
-    return " | ".join(top) + ". Press D."
+    return _app_queue_state.compact_warning_line(row_models)
 
 
 def _attention_items(row_models: list[PreparedPackageSelectionRow]) -> list[str]:
-    items: list[str] = []
-    baseline_needed = sum(1 for row in row_models if row.need_baseline > 0)
-    drift_rows = [row for row in row_models if row.live_build_drift]
-    invalid_rows = [row for row in row_models if str(row.qa_label).startswith("invalid")]
-    mixed_rows = [row for row in row_models if row.prep_label == "mixed"]
-    historical_db_rows = [row for row in row_models if row.lineage_state == "historical_db_only"]
-    mismatch_rows = [row for row in row_models if "id_mismatch" in str(row.qa_label)]
-    for row in drift_rows[:3]:
-        items.append(
-            f"{row.display_name}: installed build {row.live_observed_version_code or 'unknown'} "
-            f"drifted from static plan {row.live_expected_version_code or 'unknown'} — rerun harvest/static"
-        )
-    for row in invalid_rows[:3]:
-        items.append(f"{row.display_name}: QA invalid — review latest run before trusting quota credit")
-    for row in mixed_rows[:3]:
-        active_runs = int(getattr(row, "technical_valid_active", 0) or 0)
-        legacy_runs = int(getattr(row, "historical_valid_runs_count", 0) or 0)
-        legacy_builds = int(getattr(row, "historical_build_count", 0) or 0)
-        items.append(
-            f"{row.display_name}: prep mixed — {active_runs} current-build valid run(s) and "
-            f"{legacy_runs} legacy valid run(s) across {legacy_builds} older build(s)"
-        )
-    for row in historical_db_rows[:3]:
-        items.append(
-            f"{row.display_name}: only database-known historical evidence exists — recollect current-build dynamic evidence"
-        )
-    for row in mismatch_rows[:3]:
-        items.append(f"{row.display_name}: QA identity mismatch — latest valid run does not match active build identity")
-    if baseline_needed > 0:
-        verb = "needs" if baseline_needed == 1 else "need"
-        items.append(f"{baseline_needed} app{'s' if baseline_needed != 1 else ''} still {verb} baseline capture")
-    return items
+    return _app_queue_state.attention_items(row_models)
 
 
 def _render_compact_queue_table(
@@ -700,59 +605,22 @@ def _render_compact_queue_table(
     baseline_required: int,
     interactive_required: int,
 ) -> None:
-    total_required = int(baseline_required) + int(interactive_required)
-    app_width = _queue_app_width()
-    if _queue_compact_layout_mode() == "narrow":
-        headers = ["#", "App", "Status", "Need", "Quota", "State", "Tmpl", "Action"]
-        table_rows = [
-            [
-                row.full_row[0],
-                text_blocks.truncate_visible(row.display_name, app_width),
-                _queue_status_narrow_label(row),
-                _queue_need_narrow_label(
-                    row,
-                    baseline_required=baseline_required,
-                    interactive_required=interactive_required,
-                ),
-                _queue_runs_narrow_label(row, total_required=total_required),
-                _queue_state_summary_label(row),
-                _queue_template_label(row.package_name),
-                _queue_action_narrow_label(row),
-            ]
-            for row in rows
-        ]
-    else:
-        headers = ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-        table_rows = [
-            [
-                row.full_row[0],
-                text_blocks.truncate_visible(row.display_name, app_width),
-                _queue_state_label(row),
-                _queue_need_label(row, baseline_required=baseline_required, interactive_required=interactive_required),
-                _queue_runs_label(row, total_required=total_required),
-                _queue_build_label(row),
-                _queue_evidence_label(row),
-                _queue_qa_badge(row.qa_label),
-                _queue_template_label(row.package_name),
-                _queue_action_label(row),
-            ]
-            for row in rows
-        ]
-    table_utils.render_table(headers, table_rows, compact=False, padding=2)
+    _app_queue_rendering.render_compact_queue_table(
+        rows,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+        terminal_mod=terminal,
+        table_utils_mod=table_utils,
+        text_blocks_mod=text_blocks,
+    )
 
 
 def _queue_app_width() -> int:
-    width = terminal.get_terminal_width(force_refresh=True)
-    if width < 100:
-        return 18
-    if width < 110:
-        return 18
-    return 22
+    return _app_queue_rendering.queue_app_width(terminal_mod=terminal)
 
 
 def _queue_compact_layout_mode() -> str:
-    width = terminal.get_terminal_width(force_refresh=True)
-    return "narrow" if width < 110 else "wide"
+    return _app_queue_rendering.queue_compact_layout_mode(terminal_mod=terminal)
 
 
 def _render_queue_summary_block(
@@ -765,83 +633,23 @@ def _render_queue_summary_block(
     freeze_ok: bool,
     next_row: PreparedPackageSelectionRow | None,
 ) -> None:
-    publication_parts = [f"{apps_ok}/{prepared.dataset_apps_total} quota-satisfied"]
-    if prepared.current_build_review_count > 0:
-        publication_parts.append(f"{prepared.current_build_review_count} review")
-    print(f"Publication : {' | '.join(publication_parts)}")
-
-    quota_parts = [f"{quota}/{prepared.expected_runs} valid", f"{remaining} remaining"]
-    if extra_runs > 0:
-        quota_parts.append(f"{extra_runs} supplemental")
-    print(f"Quota       : {' | '.join(quota_parts)}")
-
-    current_parts = [f"{prepared.current_build_ready_count}/{prepared.dataset_apps_total} complete"]
-    if prepared.current_build_in_progress_count > 0:
-        current_parts.append(f"{prepared.current_build_in_progress_count} in progress")
-    if prepared.current_build_review_count > 0:
-        current_parts.append(f"{prepared.current_build_review_count} review")
-    if prepared.stale_app_count > 0:
-        current_parts.append(f"{prepared.stale_app_count} drift")
-    if prepared.current_build_db_only_count > 0:
-        current_parts.append(f"{prepared.current_build_db_only_count} db-only")
-    print(f"Current     : {' | '.join(current_parts)}")
-
-    history_parts = []
-    if prepared.historical_local_only_app_count > 0:
-        history_parts.append(f"{prepared.historical_local_only_app_count} local-only")
-    if prepared.historical_db_only_app_count > 0:
-        history_parts.append(f"{prepared.historical_db_only_app_count} db-only")
-    if prepared.no_evidence_anywhere_count > 0:
-        history_parts.append(f"{prepared.no_evidence_anywhere_count} empty")
-    print(f"History     : {' | '.join(history_parts) if history_parts else '—'}")
-    print(f"Archive     : {'ready' if freeze_ok else 'blocked'}")
-    if not freeze_ok:
-        blocker_text = _archive_blocker_summary(list(prepared.row_models or []))
-        if blocker_text:
-            print(f"Blocked by  : {blocker_text}")
-    if next_row:
-        print(f"Next        : {next_row.display_name} — {_display_next_line_action_label(next_row)}")
+    _app_queue_rendering.render_queue_summary_block(
+        prepared=prepared,
+        quota=quota,
+        apps_ok=apps_ok,
+        remaining=remaining,
+        extra_runs=extra_runs,
+        freeze_ok=freeze_ok,
+        next_row=next_row,
+    )
 
 
 def _archive_blocker_summary(row_models: list[PreparedPackageSelectionRow]) -> str:
-    if not row_models:
-        return ""
-    review_count = sum(1 for row in row_models if _queue_state_label(row) == "review")
-    refresh_count = sum(1 for row in row_models if row.live_build_drift)
-    baseline_count = sum(1 for row in row_models if row.need_baseline > 0)
-    manual_count = sum(1 for row in row_models if row.need_baseline <= 0 and row.need_interactive > 0)
-    parts: list[str] = []
-    if review_count > 0:
-        parts.append(f"{review_count} review")
-    if refresh_count > 0:
-        parts.append(f"{refresh_count} refresh")
-    if baseline_count > 0:
-        parts.append(f"{baseline_count} baseline gap{'s' if baseline_count != 1 else ''}")
-    if manual_count > 0:
-        parts.append(f"{manual_count} manual")
-    return " | ".join(parts)
+    return _app_queue_state.archive_blocker_summary(row_models)
 
 
 def _queue_state_label(row: PreparedPackageSelectionRow) -> str:
-    if row.live_build_drift:
-        return "refresh"
-    if row.lineage_state == "current_build_db_only":
-        return "restore"
-    if row.lineage_state in {"historical_local_only", "historical_db_only"}:
-        if row.need_baseline > 0:
-            return "baseline"
-        return "legacy"
-    if str(row.qa_label).startswith("invalid"):
-        return "review"
-    if row.need_baseline > 0:
-        return "baseline"
-    if row.need_interactive > 0:
-        return "manual"
-    if row.next_label == "—":
-        return "complete"
-    if row.prep_label == "mixed":
-        return "review"
-    return "blocked"
+    return _app_queue_state.queue_state_label(row)
 
 
 def _queue_need_label(
@@ -850,154 +658,43 @@ def _queue_need_label(
     baseline_required: int,
     interactive_required: int,
 ) -> str:
-    state = _queue_state_label(row)
-    if row.live_build_drift:
-        return "refresh"
-    if row.lineage_state == "current_build_db_only":
-        return "local pack"
-    if row.lineage_state == "historical_local_only":
-        return "current"
-    if row.lineage_state == "historical_db_only":
-        return "local+curr"
-    if state == "review":
-        return "review"
-    if state == "baseline":
-        return f"base {row.baseline_countable}/{int(baseline_required)}"
-    if state == "manual":
-        return f"manual {row.interactive_countable}/{int(interactive_required)}"
-    return "—"
+    return _app_queue_state.queue_need_label(
+        row,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+    )
 
 
 def _queue_runs_label(row: PreparedPackageSelectionRow, *, total_required: int) -> str:
-    countable = int(row.baseline_countable) + int(row.interactive_countable)
-    extra = int(row.baseline_extra) + int(row.interactive_extra)
-    missing = int(row.need_baseline) + int(row.need_interactive)
-    if missing <= 0:
-        if extra > 0:
-            return f"{countable}/{int(total_required)} +{extra}"
-        return f"{countable}/{int(total_required)}"
-    return f"{countable}/{int(total_required)} need {missing}"
+    return _app_queue_state.queue_runs_label(row, total_required=total_required)
 
 
 def _queue_build_label(row: PreparedPackageSelectionRow) -> str:
-    if row.live_build_drift:
-        return "drift"
-    lineage_state = str(row.lineage_state or "").strip()
-    if lineage_state in {"current_build_observed", "current_build_db_only"}:
-        return "current"
-    if lineage_state in {"historical_local_only", "historical_db_only"}:
-        return "legacy"
-    if lineage_state == "no_evidence_anywhere":
-        return "unknown"
-    return "unknown"
+    return _app_queue_state.queue_build_label(row)
 
 
 def _queue_evidence_label(row: PreparedPackageSelectionRow) -> str:
-    lineage_state = str(row.lineage_state or "").strip()
-    if int(getattr(row, "technical_valid_active", 0) or 0) > 0 or lineage_state == "current_build_observed":
-        return "local+db"
-    if int(getattr(row, "db_active_sessions", 0) or 0) > 0 or lineage_state == "current_build_db_only":
-        return "db-only"
-    if int(getattr(row, "historical_valid_runs_count", 0) or 0) > 0 or lineage_state == "historical_local_only":
-        return "local-only"
-    if int(getattr(row, "db_historical_sessions", 0) or 0) > 0 or lineage_state == "historical_db_only":
-        return "db-only"
-    if lineage_state == "no_evidence_anywhere":
-        return "empty"
-    return "none"
+    return _app_queue_state.queue_evidence_label(row)
 
 
 def _queue_qa_badge(value: str) -> str:
-    text = str(value or "").strip()
-    if text in {"", "—"}:
-        return "—"
-    if text == "valid":
-        return "✓"
-    if text == "valid (L)":
-        return "+L"
-    if text == "valid (id_mismatch)":
-        return "+id"
-    if text == "valid (id_mismatch) (L)":
-        return "+id+L"
-    if text.startswith("invalid"):
-        return "inv"
-    return text
+    return _app_queue_state.queue_qa_badge(value)
 
 
 def _queue_template_label(package_name: str) -> str:
-    template_id = str(resolved_template_for_package(package_name) or "").strip()
-    if not template_id:
-        return "none"
-    if template_id == "news_reader_basic_v1":
-        return "news"
-    if template_id in {
-        "social_feed_basic_v2",
-        "facebook_basic_v2",
-        "snapchat_basic_v1",
-        "x_twitter_full_session_v1",
-        "social_messaging_basic_v1",
-        "messaging_idle_v1",
-        "messaging_text_v1",
-        "messaging_voice_v1",
-        "messaging_video_v1",
-        "messaging_call_basic_v1",
-        "whatsapp_idle_v1",
-        "whatsapp_text_v1",
-        "whatsapp_voice_v1",
-        "whatsapp_video_v1",
-        "tiktok_basic_v1",
-        "tiktok_basic_v2",
-    }:
-        return "acct"
-    return "gen"
+    return _app_queue_state.queue_template_label(package_name)
 
 
 def _queue_action_label(row: PreparedPackageSelectionRow) -> str:
-    action = _display_action_label(row)
-    if action == "baseline":
-        return "base"
-    if action == "scripted":
-        return "script"
-    return action
+    return _app_queue_state.queue_action_label(row)
 
 
 def _queue_state_summary_label(row: PreparedPackageSelectionRow) -> str:
-    build = _queue_build_label(row)
-    evidence = _queue_evidence_label(row)
-    qa = _queue_qa_badge(row.qa_label)
-    evidence_short = {
-        "local+db": "ldb",
-        "local-only": "local",
-        "db-only": "db",
-        "empty": "empty",
-        "none": "—",
-    }.get(evidence, evidence)
-    build_short = {
-        "current": "cur",
-        "legacy": "leg",
-        "unknown": "unk",
-        "drift": "drift",
-    }.get(build, build)
-    parts = [build]
-    parts = [build_short]
-    if evidence_short and evidence_short != "—":
-        parts.append(evidence_short)
-    if qa and qa != "—":
-        parts.append(qa)
-    return "/".join(parts)
+    return _app_queue_state.queue_state_summary_label(row)
 
 
 def _queue_status_narrow_label(row: PreparedPackageSelectionRow) -> str:
-    return {
-        "complete": "done",
-        "review": "review",
-        "baseline": "base",
-        "manual": "manual",
-        "refresh": "refresh",
-        "restore": "restore",
-        "legacy": "legacy",
-        "blocked": "block",
-    }.get(_queue_state_label(row), _queue_state_label(row))
+    return _app_queue_state.queue_status_narrow_label(row)
 
 
 def _queue_need_narrow_label(
@@ -1006,127 +703,43 @@ def _queue_need_narrow_label(
     baseline_required: int,
     interactive_required: int,
 ) -> str:
-    need = _queue_need_label(
+    return _app_queue_state.queue_need_narrow_label(
         row,
         baseline_required=baseline_required,
         interactive_required=interactive_required,
     )
-    if need.startswith("base "):
-        return "b " + need.split(" ", 1)[1]
-    if need.startswith("manual "):
-        return "m " + need.split(" ", 1)[1]
-    return {
-        "local pack": "local",
-        "local+curr": "loc+cur",
-        "current": "current",
-        "refresh": "refresh",
-        "review": "review",
-    }.get(need, need)
 
 
 def _queue_runs_narrow_label(row: PreparedPackageSelectionRow, *, total_required: int) -> str:
-    text = _queue_runs_label(row, total_required=total_required)
-    if " need " not in text:
-        return text
-    prefix, missing = text.split(" need ", 1)
-    return f"{prefix} n{missing}"
+    return _app_queue_state.queue_runs_narrow_label(row, total_required=total_required)
 
 
 def _queue_action_narrow_label(row: PreparedPackageSelectionRow) -> str:
-    return {
-        "manual": "man",
-        "script": "scr",
-        "review": "rev",
-        "refresh": "ref",
-        "restore": "rest",
-    }.get(_queue_action_label(row), _queue_action_label(row))
+    return _app_queue_state.queue_action_narrow_label(row)
 
 
 def _display_action_label(row: PreparedPackageSelectionRow) -> str:
-    if row.live_build_drift:
-        return "refresh"
-    if row.lineage_state == "current_build_db_only":
-        return "restore"
-    action = _main_action_label(row.next_label)
-    if action != "manual":
-        return action
-    template = _queue_template_label(row.package_name)
-    if row.need_interactive > 0 and row.need_baseline <= 0 and template in {"news", "gen"}:
-        return "scripted"
-    return action
+    return _app_queue_state.display_action_label(row)
 
 
 def _display_next_line_action_label(row: PreparedPackageSelectionRow) -> str:
-    action = _display_action_label(row)
-    if action == "scripted":
-        return "scripted interaction"
-    if action == "manual":
-        return "manual interaction"
-    if action == "review":
-        return "review QA"
-    return action
+    return _app_queue_state.display_next_line_action_label(row)
 
 
 def _next_recommendation_priority(row: PreparedPackageSelectionRow) -> tuple[int, str]:
-    action = _display_action_label(row)
-    lineage_state = str(row.lineage_state or "")
-    if action == "review":
-        return (0, row.display_name)
-    if action == "refresh":
-        return (1, row.display_name)
-    if action == "restore":
-        return (2, row.display_name)
-    if action == "scripted":
-        return (3, row.display_name)
-    if action == "manual":
-        return (4, row.display_name)
-    if action == "baseline":
-        if lineage_state == "no_evidence_anywhere":
-            return (5, row.display_name)
-        if lineage_state == "historical_local_only":
-            return (6, row.display_name)
-        if lineage_state == "historical_db_only":
-            return (7, row.display_name)
-        return (8, row.display_name)
-    return (99, row.display_name)
+    return _app_queue_state.next_recommendation_priority(row)
 
 
 def _next_recommended_row(
     rows: list[PreparedPackageSelectionRow],
 ) -> PreparedPackageSelectionRow | None:
-    candidates = [row for row in rows if _display_action_label(row) != "—"]
-    if not candidates:
-        return None
-    return min(candidates, key=_next_recommendation_priority)
+    return _app_queue_state.next_recommended_row(rows)
 
 
 def _group_queue_sections(
     row_models: list[PreparedPackageSelectionRow],
 ) -> list[tuple[str, list[PreparedPackageSelectionRow]]]:
-    needs_refresh: list[PreparedPackageSelectionRow] = []
-    ready_manual: list[PreparedPackageSelectionRow] = []
-    needs_baseline: list[PreparedPackageSelectionRow] = []
-    complete_or_extra: list[PreparedPackageSelectionRow] = []
-    other_blocked: list[PreparedPackageSelectionRow] = []
-    for row in row_models:
-        if row.live_build_drift:
-            needs_refresh.append(row)
-        elif row.need_baseline > 0:
-            needs_baseline.append(row)
-        elif row.need_interactive > 0 and row.next_label == "manual interaction":
-            ready_manual.append(row)
-        elif row.next_label == "—":
-            complete_or_extra.append(row)
-        else:
-            other_blocked.append(row)
-    sections: list[tuple[str, list[PreparedPackageSelectionRow]]] = []
-    sections.append(("Needs static refresh", needs_refresh))
-    sections.append(("Ready for manual interaction", ready_manual))
-    sections.append(("Needs baseline capture", needs_baseline))
-    sections.append(("Complete / over-quota", complete_or_extra))
-    if other_blocked:
-        sections.append(("Other / blocked", other_blocked))
-    return sections
+    return _app_queue_state.group_queue_sections(row_models)
 
 
 def _render_queue_section_table(
@@ -1136,28 +749,13 @@ def _render_queue_section_table(
     interactive_required: int,
     show_all: bool = False,
 ) -> None:
-    headers = ["#", "App", "Baseline", "Manual", "Quota", "Prep", "QA", "Action"]
-    total_required = int(baseline_required) + int(interactive_required)
-    table_rows = [
-        [
-            row.full_row[0],
-            row.display_name,
-            _main_progress_label(row.baseline_countable, row.baseline_extra, required=baseline_required),
-            _manual_progress_label(row, interactive_required=interactive_required),
-            _main_progress_label(
-                row.baseline_countable + row.interactive_countable,
-                row.baseline_extra + row.interactive_extra,
-                required=total_required,
-                missing=row.need_baseline + row.need_interactive,
-            ),
-            row.prep_label or "—",
-            _compact_qa_label(row.qa_label),
-            _main_action_label(row.next_label),
-        ]
-        for row in rows
-    ]
-    max_rows = None if show_all else 15
-    table_utils.render_table(headers, table_rows, compact=False, max_rows=max_rows, padding=3)
+    _app_queue_rendering.render_queue_section_table(
+        rows,
+        baseline_required=baseline_required,
+        interactive_required=interactive_required,
+        table_utils_mod=table_utils,
+        show_all=show_all,
+    )
 
 
 def _main_progress_label(
@@ -1167,38 +765,20 @@ def _main_progress_label(
     required: int,
     missing: int | None = None,
 ) -> str:
-    count_i = max(0, int(countable))
-    extra_i = max(0, int(extra))
-    required_i = max(0, int(required))
-    missing_i = max(0, int(missing if missing is not None else max(required_i - count_i, 0)))
-    if missing_i == 0:
-        if extra_i > 0:
-            suffix = " extra" if extra_i == 1 else " extras"
-            return f"{count_i}/{required_i} +{extra_i}{suffix}"
-        return f"{count_i}/{required_i} complete"
-    return f"{count_i}/{required_i} need {missing_i}"
-
-
-def _manual_progress_label(row: PreparedPackageSelectionRow, *, interactive_required: int) -> str:
-    if row.need_baseline > 0:
-        return "locked"
-    return _main_progress_label(
-        row.interactive_countable,
-        row.interactive_extra,
-        required=interactive_required,
-        missing=row.need_interactive,
+    return _app_queue_state.main_progress_label(
+        countable,
+        extra,
+        required=required,
+        missing=missing,
     )
 
 
+def _manual_progress_label(row: PreparedPackageSelectionRow, *, interactive_required: int) -> str:
+    return _app_queue_state.manual_progress_label(row, interactive_required=interactive_required)
+
+
 def _main_action_label(value: str) -> str:
-    text = str(value or "").strip()
-    if text == "manual interaction":
-        return "manual"
-    if text == "refresh static":
-        return "refresh"
-    if text == "review QA":
-        return "review"
-    return text or "—"
+    return _app_queue_state.main_action_label(value)
 
 
 def render_package_table(
@@ -1208,91 +788,33 @@ def render_package_table(
     max_preview: int = 15,
     show_all: bool = False,
 ) -> bool:
-    headers = list(headers) if headers else ["#", "App"]
-    selection_headers = ["#", "App", "Baseline", "Manual", "Quota", "Static prep", "Last QA", "Next action"]
-    # Avoid a pointless "show full list" branch when only a single row would be hidden.
-    effective_preview = max_preview + 1 if len(rows) == (max_preview + 1) else max_preview
-    truncated = len(rows) > effective_preview and not show_all
-    rendered_rows = rows if show_all or len(rows) <= effective_preview else rows[:effective_preview]
-    if headers == selection_headers:
-        compact_headers = ["#", "App", "Base", "Manual", "Quota", "Prep", "QA", "Next"]
-        table_utils.render_table(compact_headers, _compact_selection_rows(rendered_rows), compact=False)
-    else:
-        table_utils.render_table(headers, rendered_rows, compact=False)
-    if truncated:
-        print(f"Showing first {effective_preview} of {len(rows)} apps.")
-    return truncated
+    return _app_queue_rendering.render_package_table(
+        rows,
+        table_utils_mod=table_utils,
+        headers=headers,
+        max_preview=max_preview,
+        show_all=show_all,
+    )
 
 
 def _compact_selection_rows(rows: list[list[str]]) -> list[list[str]]:
-    return [
-        [
-            row[0],
-            row[1],
-            _compact_progress_label(row[2]),
-            _compact_progress_label(row[3]),
-            _compact_progress_label(row[4]),
-            _compact_prep_label(row[5]),
-            _compact_qa_label(row[6]),
-            _compact_next_action(row[7]),
-        ]
-        for row in rows
-    ]
+    return _app_queue_rendering.compact_selection_rows(rows)
 
 
 def _compact_progress_label(value: str) -> str:
-    text = str(value or "").strip()
-    if not text or text == "—":
-        return text or "—"
-    if text == "locked":
-        return "locked"
-    complete_match = re.fullmatch(r"(\d+)/(\d+)\s+complete(?:\s+\(\+(\d+)\s+extra\))?", text)
-    if complete_match:
-        count = int(complete_match.group(1))
-        required = int(complete_match.group(2))
-        extra = int(complete_match.group(3) or 0)
-        if extra > 0:
-            return f"{count + extra}/{required}"
-        return f"{count}/{required}"
-    need_match = re.fullmatch(r"(\d+)/(\d+)\s+need\s+(\d+)(?:\s+\(\+(\d+)\s+extra\))?", text)
-    if need_match:
-        count = int(need_match.group(1))
-        required = int(need_match.group(2))
-        missing = int(need_match.group(3))
-        return f"{count}/{required} n{missing}"
-    return text
+    return _app_queue_state.compact_progress_label(value)
 
 
 def _compact_next_action(value: str) -> str:
-    text = str(value or "").strip().lower()
-    if text == "manual interaction":
-        return "manual"
-    return str(value or "").strip() or "—"
+    return _app_queue_state.compact_next_action(value)
 
 
 def _compact_prep_label(value: str) -> str:
-    text = str(value or "").strip().lower()
-    mapping = {
-        "current": "current",
-        "mixed": "mixed",
-        "legacy": "legacy",
-        "db-only": "db-only",
-        "hist-db": "hist-db",
-        "ready": "ready",
-        "stale": "stale",
-    }
-    return mapping.get(text, str(value or "").strip() or "—")
+    return _app_queue_state.compact_prep_label(value)
 
 
 def _compact_qa_label(value: str) -> str:
-    text = str(value or "").strip()
-    if text == "valid (L)":
-        return "valid+L"
-    if text == "valid (id_mismatch) (L)":
-        return "valid+id+L"
-    if text == "valid (id_mismatch)":
-        return "valid+id"
-    return text or "—"
+    return _app_queue_state.compact_qa_label(value)
 
 
 def _resolve_live_build_drift_map(

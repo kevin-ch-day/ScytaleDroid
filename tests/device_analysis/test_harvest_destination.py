@@ -58,7 +58,7 @@ def test_run_artifacts_root_fallback_nested_and_legacy_and_runs(tmp_path: Path, 
     monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
 
     from scytaledroid.DeviceAnalysis.harvest.models import HarvestResult
-    from scytaledroid.DeviceAnalysis.harvest.summary import _run_artifacts_root
+    from scytaledroid.DeviceAnalysis.harvest.report_model import _run_artifacts_root
 
     nested = HarvestResult(serial="X", run_timestamp="20300416_120000_000001")
     legacy_day = HarvestResult(serial="X", run_timestamp="20300416")

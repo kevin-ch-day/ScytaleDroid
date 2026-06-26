@@ -223,6 +223,7 @@ def refresh_existing_persistence_audit_payload(
     payload: dict[str, Any],
     *,
     session_label: str | None = None,
+    prefer_reconcile: bool = True,
 ) -> dict[str, Any]:
     """Refresh an existing persistence audit summary from DB + filesystem truth.
 
@@ -249,10 +250,17 @@ def refresh_existing_persistence_audit_payload(
         report_paths=_existing_payload_report_paths(payload),
     )
 
-    try:
-        _apply_reconcile_summary(refreshed_summary, stamp)
-    except Exception as exc:
-        refreshed_summary["reconciliation_error"] = str(exc)
+    if prefer_reconcile:
+        try:
+            _apply_reconcile_summary(refreshed_summary, stamp)
+        except Exception as exc:
+            refreshed_summary["reconciliation_error"] = str(exc)
+    else:
+        _apply_direct_summary_fallback(refreshed_summary, stamp)
+        # Direct refresh updates top-level canonical/bridge/report counters only.
+        # Do not preserve older reconcile-package gap lists because they may be stale
+        # relative to the refreshed counts and would mislead operator-facing reports.
+        refreshed_summary["reconciliation"] = {}
 
     if not _has_run_statuses(refreshed_summary):
         _apply_direct_summary_fallback(refreshed_summary, stamp)
@@ -263,7 +271,9 @@ def refresh_existing_persistence_audit_payload(
     updated = dict(payload)
     updated["summary"] = refreshed_summary
     updated["summary_refreshed_at_utc"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    updated["summary_refresh_source"] = "db_and_filesystem_rebuild"
+    updated["summary_refresh_source"] = (
+        "db_and_filesystem_rebuild" if prefer_reconcile else "db_direct_and_filesystem_rebuild"
+    )
     return updated
 
 
@@ -271,15 +281,44 @@ def refresh_persistence_audit_artifact(
     path: str | Path,
     *,
     write: bool = True,
+    prefer_reconcile: bool = True,
 ) -> dict[str, Any]:
     """Refresh a persisted audit artifact in-place, preserving row-level detail."""
 
     artifact_path = Path(path)
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
-    refreshed = refresh_existing_persistence_audit_payload(payload)
+    refreshed = refresh_existing_persistence_audit_payload(
+        payload,
+        prefer_reconcile=prefer_reconcile,
+    )
     if write:
         artifact_path.write_text(json.dumps(refreshed, indent=2, sort_keys=True), encoding="utf-8")
     return refreshed
+
+
+def refresh_persistence_audit_artifact_for_session(
+    session_stamp: str | None,
+    *,
+    output_dir: str | None = None,
+    write: bool = True,
+    prefer_reconcile: bool = True,
+) -> dict[str, Any] | None:
+    """Refresh the persisted audit summary for a session when the artifact exists."""
+
+    stamp = str(session_stamp or "").strip()
+    if not stamp:
+        return None
+
+    base = Path(output_dir or app_config.OUTPUT_DIR) / "audit" / "persistence"
+    for suffix in ("persistence_audit", "missing_run_ids"):
+        candidate = base / f"{stamp}_{suffix}.json"
+        if candidate.is_file():
+            return refresh_persistence_audit_artifact(
+                candidate,
+                write=write,
+                prefer_reconcile=prefer_reconcile,
+            )
+    return None
 
 
 def _emit_missing_run_ids_artifact(
@@ -309,4 +348,5 @@ __all__ = [
     "_emit_missing_run_ids_artifact",
     "refresh_existing_persistence_audit_payload",
     "refresh_persistence_audit_artifact",
+    "refresh_persistence_audit_artifact_for_session",
 ]

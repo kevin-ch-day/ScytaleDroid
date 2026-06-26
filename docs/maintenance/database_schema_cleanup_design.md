@@ -234,7 +234,7 @@ Hypotheses to validate on the failing row (read-only):
 
 - Re-run hygiene script: session absent or `cleanup_status=pruned`.  
 - `recreate_web_consumer_views.py` + `smoke_web_db.sh` (Web tree).  
-- `pytest tests/database tests/db tests/db_utils -q` slice.
+- `pytest tests/database tests/db -q` slice.
 
 ### 6.5 Child dependency order (session-scoped prune)
 

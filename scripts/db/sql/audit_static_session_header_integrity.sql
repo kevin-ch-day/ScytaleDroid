@@ -13,6 +13,8 @@
 -- Operational interpretation:
 --   * IN_PROGRESS shells can legitimately have started rows, zero links, and
 --     zero rollups until package finalization catches up.
+--   * Sessions with both STARTED and COMPLETED rows can still legitimately
+--     have zero links while per-package persistence is still catching up.
 --   * INTERRUPTED / all-FAILED sessions can legitimately have zero links and
 --     zero rollups if nothing completed.
 --   * Missing links are only a defect when completed run rows exist.
@@ -38,6 +40,11 @@ SELECT
       AND COALESCE(l.actual_link_rows, 0) = 0
       AND COALESCE(s.total_run_count, 0) < COALESCE(r.actual_run_rows, 0)
       THEN 'in_progress_shell_unrefreshed'
+    WHEN COALESCE(r.started_rows, 0) > 0
+      AND COALESCE(r.completed_rows, 0) > 0
+      AND COALESCE(r.completed_rows, 0) < COALESCE(r.actual_run_rows, 0)
+      AND COALESCE(l.actual_link_rows, 0) = 0
+      THEN 'in_progress_partial_pending_links'
     WHEN COALESCE(s.total_run_count, 0) <> COALESCE(r.actual_run_rows, 0)
       THEN 'run_count_mismatch'
     WHEN COALESCE(r.completed_rows, 0) > 0

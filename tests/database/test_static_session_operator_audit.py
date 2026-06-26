@@ -40,6 +40,20 @@ def test_classify_session_header_diagnostic_marks_completed_header_stale() -> No
     assert status == "completed_header_stale"
 
 
+def test_classify_session_header_diagnostic_marks_partial_in_progress_pending_links() -> None:
+    status = classify_session_header_diagnostic(
+        header_total_run_count=12,
+        header_session_link_rows=0,
+        header_rollup_rows=0,
+        actual_run_rows=12,
+        actual_completed_rows=3,
+        actual_started_rows=9,
+        actual_link_rows=0,
+        actual_rollup_rows=0,
+    )
+    assert status == "in_progress_partial_pending_links"
+
+
 def test_classify_session_header_diagnostic_keeps_interrupted_failed_session_healthy() -> None:
     status = classify_session_header_diagnostic(
         header_total_run_count=33,

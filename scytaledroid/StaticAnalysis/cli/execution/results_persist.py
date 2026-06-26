@@ -102,6 +102,24 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
             category="static_analysis",
         )
 
+    # The persistence audit artifact is emitted before cohort-rollup finalization runs.
+    # Refresh the summary once more so operator-facing JSON reflects the committed rollup row.
+    try:
+        from scytaledroid.StaticAnalysis.cli.flows.run_persistence_audit import (
+            refresh_persistence_audit_artifact_for_session,
+        )
+
+        refresh_persistence_audit_artifact_for_session(
+            session_stamp,
+            write=True,
+            prefer_reconcile=False,
+        )
+    except Exception as exc:
+        log.warning(
+            f"Failed to refresh persistence audit summary after cohort rollup for session={session_stamp}: {exc}",
+            category="static_analysis",
+        )
+
     level = "info"
     print(
         status_messages.status(

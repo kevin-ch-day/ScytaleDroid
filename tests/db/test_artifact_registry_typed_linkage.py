@@ -56,6 +56,7 @@ def test_record_artifacts_populates_typed_columns(monkeypatch, tmp_path: Path) -
     reg.record_artifacts(
         run_id="501",
         run_type="static",
+        session_stamp="20260625-all-full",
         artifacts=[
             {
                 "path": str(artifact_path),
@@ -75,6 +76,8 @@ def test_record_artifacts_populates_typed_columns(monkeypatch, tmp_path: Path) -
     assert "dynamic_run_id" in query
     assert "dynamic_run_uuid" in query
     assert "linkage_migration_status" in query
+    assert "session_stamp" in query
+    assert row_by_column["session_stamp"] == "20260625-all-full"
     assert row_by_column["static_run_id"] == 501
     assert row_by_column["dynamic_run_id"] is None
     assert row_by_column["dynamic_run_uuid"] is None
@@ -98,6 +101,7 @@ def test_backfill_typed_linkage_uses_updates_only() -> None:
 
 def test_integrity_view_prefers_typed_joins_with_legacy_fallback() -> None:
     sql = views_admin.CREATE_V_ARTIFACT_REGISTRY_INTEGRITY.lower()
+    assert "ar.session_stamp" in sql
     assert "ar.static_run_id is not null" in sql
     assert "ar.static_run_id is null" in sql
     assert "ar.dynamic_run_id is not null" in sql

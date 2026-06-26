@@ -97,7 +97,7 @@ Use **`bridge_posture.py`** and **[legacy_static_reader_dependency_map.md](legac
 | --- | --- |
 | Python legacy SQL grep | Same tight patterns as [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) “Re-verify command” |
 | Web grep | Same as Web deep dive |
-| Tests | `pytest tests/database tests/db_utils tests/persistence tests/static_analysis -q` (expand as touched) |
+| Tests | `pytest tests/database tests/db tests/persistence tests/static_analysis -q` (expand as touched) |
 | Web smoke | `SCYTALEDROID_WEB_ROOT=… ./scripts/db/smoke_web_db.sh` when views/consumers change |
 | Operator | Spot-check DB menus + one session reconcile report |
 

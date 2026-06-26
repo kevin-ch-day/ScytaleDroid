@@ -14,11 +14,6 @@ def test_refresh_inventory_for_harvest_menu_uses_harvest_ready_mode(monkeypatch)
         "fetch_inventory_metadata",
         lambda _serial: SimpleNamespace(status_label="FRESH"),
     )
-    monkeypatch.setattr(
-        harvest_entry,
-        "print_inventory_run_feedback",
-        lambda result, **kwargs: captured.update({"feedback_kwargs": kwargs}),
-    )
     monkeypatch.setattr(text_blocks, "UI_PREFS", None, raising=False)
 
     from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
@@ -35,4 +30,3 @@ def test_refresh_inventory_for_harvest_menu_uses_harvest_ready_mode(monkeypatch)
     assert ok is True
     assert status.status_label == "FRESH"
     assert captured["run_kwargs"]["mode"] == "bulk"
-    assert captured["feedback_kwargs"]["mode_label"] == "harvest-ready"

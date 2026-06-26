@@ -208,7 +208,7 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | `scripts/__init__.py` | workflow_helper | RO | none | yes | compileall gate | n/a | keep |
 | `clean_project.sh` | workflow_helper | MIX | none | n/a | touches `scripts/db` tree per script | dev hygiene | keep |
 | `install_wireshark_cli.sh` | supported_operator | W | none | n/a | `menu_reports.py` suggests sudo path | Dynamic capture deps | keep |
-| `stress_static_postcheck.py` | ci_or_gate | RO | none | yes | `tests/static/test_static_batch_summary.py` docstring | static batch QA | keep |
+| `stress_static_postcheck.py` | ci_or_gate | RO | none | yes | `tests/static_analysis/test_batch_log_semantics.py` docstring | static batch QA | keep |
 | `static_analysis_audit_logs.sh` | workflow_helper | RO | none | n/a | static_analysis_audit_runbook.md | ops | keep |
 
 ---

@@ -50,7 +50,7 @@ is a navigation aid for maintenance work, not a contract for refactoring.
 | Main entrypoints | `db_core/db_engine.py`; `db_core/schema_introspection.py` (single helper for **`information_schema.tables`** presence on the operational DB via `run_sql` — distinct from **`db_core/permission_intel.py`** probes); `db_queries/schema_manifest.py`; `db_queries/views.py`; `db_utils/database_menu.py`; `tools/bootstrap.py`; `tools/db_status.py`; `db_core/permission_intel.py`; `scripts/db/recreate_web_consumer_views.py`; `docs/maintenance/database_governance_runbook.md`. |
 | Common tasks that should start here | Schema/view changes, read-model additions, DB cleanup/pruning, schema gates, permission-intel split, bridge freeze/deprecation, diagnostics around persistence surfaces. |
 | Common tasks that should not start here | Static detector semantics, dynamic orchestration logic, PHP rendering, publication formatting. |
-| Related tests / smoke checks | `tests/database/*`, `tests/db_utils/*`, `tests/db/*`, `tests/gates/test_static_gate.py`; DB tools menu in `./run.sh`; `python -m py_compile` for DB modules. |
+| Related tests / smoke checks | `tests/database/*`, `tests/db/*`, `tests/gates/test_static_gate.py`; DB tools menu in `./run.sh`; `python -m py_compile` for DB modules. |
 | High-risk / large files | `db_queries/views.py` (largest DB contract file), `db_utils/menus/health_checks.py`, `db_utils/menu_actions.py`, `db_utils/reset_static.py`, `db_utils/static_reconcile.py`, `db_core/db_engine.py`. These are central contract and maintenance surfaces. |
 
 ### `scytaledroid/Reporting` and `scytaledroid/Publication`

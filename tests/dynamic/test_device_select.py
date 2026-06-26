@@ -38,11 +38,11 @@ def test_select_device_auto_uses_single_detected_device(monkeypatch, capsys) -> 
 
     selected = device_select.select_device()
 
-    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 (ZY22JK89DR)")
+    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical")
     assert prompt_calls["count"] == 0
     assert set_calls["serial"] == "ZY22JK89DR"
     out = capsys.readouterr().out
-    assert "Using detected device: moto g 5G - 2024 (ZY22JK89DR)" in out
+    assert "Using detected device: moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical" in out
 
 
 def test_select_device_prompts_when_multiple_devices_detected(monkeypatch, capsys) -> None:
@@ -90,7 +90,7 @@ def test_select_device_prompts_when_multiple_devices_detected(monkeypatch, capsy
 
     selected = device_select.select_device()
 
-    assert selected == ("BBB", "Phone B (BBB)")
+    assert selected == ("BBB", "Phone B · BBB · Android 15 · emulator")
     assert set_calls["serial"] == "BBB"
     out = capsys.readouterr().out
     assert "Current device" in out
@@ -141,10 +141,10 @@ def test_select_device_reuses_active_device_without_prompt(monkeypatch, capsys) 
 
     selected = device_select.select_device()
 
-    assert selected == ("AAA", "Phone A (AAA)")
+    assert selected == ("AAA", "Phone A · AAA · Android 14 · physical")
     assert prompt_calls["count"] == 0
     out = capsys.readouterr().out
-    assert "Using current device: Phone A (AAA)" in out
+    assert "Using current device: Phone A · AAA · Android 14 · physical" in out
 
 
 def test_select_device_can_force_prompt_for_single_detected_device(monkeypatch, capsys) -> None:
@@ -181,7 +181,7 @@ def test_select_device_can_force_prompt_for_single_detected_device(monkeypatch, 
         allow_auto_single=False,
     )
 
-    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 (ZY22JK89DR)")
+    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical")
     assert set_calls["serial"] == "ZY22JK89DR"
     out = capsys.readouterr().out
     assert "Select Capture Device" in out
@@ -219,7 +219,7 @@ def test_select_device_forced_prompt_still_shows_current_device(monkeypatch, cap
         allow_auto_single=False,
     )
 
-    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 (ZY22JK89DR)")
+    assert selected == ("ZY22JK89DR", "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical")
     out = capsys.readouterr().out
     assert "Current device" in out
     assert "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical" in out

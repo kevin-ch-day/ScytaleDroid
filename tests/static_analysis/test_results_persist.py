@@ -5,6 +5,7 @@ from scytaledroid.StaticAnalysis.cli.execution import results_persist
 
 def test_persist_cohort_rollup_refreshes_static_session_header(monkeypatch) -> None:
     calls: list[tuple[str | None, str | None, str]] = []
+    audit_refresh_calls: list[tuple[str | None, bool, bool]] = []
 
     def _run_sql(sql, params=(), fetch=None, dictionary=False, **_kwargs):  # type: ignore[no-untyped-def]
         normalized = " ".join(str(sql).split())
@@ -21,8 +22,14 @@ def test_persist_cohort_rollup_refreshes_static_session_header(monkeypatch) -> N
         "scytaledroid.StaticAnalysis.cli.persistence.static_session_summary.maybe_refresh_static_analysis_session_summary",
         lambda stamp, scope, *, reason: calls.append((stamp, scope, reason)),
     )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.flows.run_persistence_audit.refresh_persistence_audit_artifact_for_session",
+        lambda session_stamp, *, write, prefer_reconcile: audit_refresh_calls.append(
+            (session_stamp, write, prefer_reconcile)
+        ),
+    )
 
     results_persist._persist_cohort_rollup("sess-1", "All harvested apps")
 
     assert calls == [("sess-1", "All harvested apps", "post_cohort_rollup")]
-
+    assert audit_refresh_calls == [("sess-1", True, False)]

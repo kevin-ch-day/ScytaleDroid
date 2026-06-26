@@ -94,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             old_days=int(args.old_days),
             run_type_filter=args.run_type,
             path_sample_limit=int(args.path_sample),
+            repo_root=_REPO_ROOT,
         )
     except Exception as exc:
         sys.stderr.write(f"Report failed: {exc}\n")

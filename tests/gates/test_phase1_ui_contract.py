@@ -14,8 +14,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.ui_contract, pytest.mark.gate]
 
 
 def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
-    sections: list[tuple[str, list[str]]] = []
-    exit_calls = {"count": 0}
+    rendered_menus: list[tuple[list[str], dict[str, object]]] = []
 
     monkeypatch.setattr(app_main, "ensure_db_ready", lambda: None)
     monkeypatch.setattr(
@@ -25,17 +24,8 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
     )
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
     monkeypatch.setattr(app_main.menu_utils, "print_header", lambda *_a, **_k: None)
-    current_section = {"title": None}
-    monkeypatch.setattr(
-        app_main.menu_utils,
-        "print_section",
-        lambda title: current_section.__setitem__("title", title),
-    )
     def _capture_menu(items, **kwargs):
-        if kwargs.get("show_exit"):
-            exit_calls["count"] += 1
-            return
-        sections.append((str(current_section["title"]), [item.label for item in items]))
+        rendered_menus.append(([item.label for item in items], kwargs))
     monkeypatch.setattr(app_main.menu_utils, "print_menu", _capture_menu)
     monkeypatch.setattr(app_main.prompt_utils, "get_choice", lambda *_a, **_k: "0")
     monkeypatch.setattr(app_main.status_messages, "print_status", lambda *_a, **_k: None)
@@ -43,14 +33,63 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
 
     app_main.main_menu()
 
-    assert sections == [
-        ("Setup", ["Select device"]),
-        ("Analysis", ["Device Inventory & Harvest", "Static Analysis Pipeline", "Dynamic Analysis"]),
-        ("Support", ["API server", "Reporting & Exports", "APK library"]),
-        ("Diagnostics", ["Database tools", "Governance & Readiness", "Evidence & Workspace"]),
-        ("About", ["About ScytaleDroid"]),
+    assert rendered_menus == [
+        (
+            [
+                "Select device",
+                "Device Inventory & Harvest",
+                "Static Analysis Pipeline",
+                "Dynamic Analysis",
+                "API server",
+                "Reporting & Exports",
+                "APK library",
+                "Database tools",
+                "Governance & Readiness",
+                "Evidence & Workspace",
+                "About ScytaleDroid",
+            ],
+            {
+                "show_exit": True,
+                "exit_label": "Exit",
+                "show_descriptions": False,
+                "compact": True,
+            },
+        )
     ]
-    assert exit_calls["count"] == 1
+
+
+def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(app_main, "ensure_db_ready", lambda: None)
+    monkeypatch.setattr(
+        schema_gate,
+        "check_base_schema",
+        lambda: (True, "ready", ""),
+    )
+    monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
+    monkeypatch.setattr(app_main, "_emit_main_menu_db_connection_line", lambda *_a, **_k: None)
+
+    from scytaledroid.DeviceAnalysis import device_manager
+
+    monkeypatch.setattr(
+        device_manager,
+        "describe_active_device",
+        lambda: "moto g 5G 2024 · ZY22JK89DR",
+    )
+    monkeypatch.setattr(
+        app_main,
+        "_describe_main_menu_database",
+        lambda *_a, **_k: "scytaledroid_core_prod @ localhost:3306",
+    )
+    monkeypatch.setattr(app_main.prompt_utils, "get_choice", lambda *_a, **_k: "0")
+    monkeypatch.setattr(app_main.status_messages, "print_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_main.status_messages, "print_strip", lambda *_a, **_k: None)
+
+    app_main.main_menu()
+
+    out = capsys.readouterr().out
+    assert "Selected device: moto g 5G 2024 · ZY22JK89DR" in out
+    assert "Database: scytaledroid_core_prod @ localhost:3306" in out
+    assert "-----" in out
 
 
 def test_handle_select_device_starts_selector_on_new_line(monkeypatch, capsys) -> None:

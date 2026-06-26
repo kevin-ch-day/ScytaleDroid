@@ -178,6 +178,76 @@ DYNAMIC_SERVICE_SIGNAL_MIGRATIONS: tuple[MigrationSpec, ...] = (
     ),
 )
 
+ARTIFACT_REGISTRY_SESSION_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260625_artifact_registry_session_stamp_v1",
+        migration_name="Artifact registry session-stamp additive support",
+        schema_version_before="0.3.11-dynamic-service-signals",
+        schema_version_after="0.3.12-artifact-registry-session-stamp",
+        statements=(
+            "ALTER TABLE artifact_registry ADD COLUMN IF NOT EXISTS session_stamp VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_artifact_session_stamp ON artifact_registry (session_stamp)",
+            "CREATE INDEX IF NOT EXISTS ix_artifact_run_type_session_created ON artifact_registry (run_type, session_stamp, created_at_utc)",
+        ),
+        description="Adds optional session_stamp to artifact_registry so static session-scoped audit and cleanup can avoid extra recovery joins.",
+        apply_mode="manual_script",
+        stage="artifact_registry",
+    ),
+)
+
+STATIC_SESSION_RUN_LINKS_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260626_static_session_run_links_schema_v1",
+        migration_name="Static session-run-links schema hardening",
+        schema_version_before="0.3.12-artifact-registry-session-stamp",
+        schema_version_after="0.3.13-static-session-run-links-schema",
+        statements=(
+            "ALTER TABLE static_session_run_links DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+            "ALTER TABLE static_session_run_links "
+            "MODIFY COLUMN run_origin VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'created', "
+            "MODIFY COLUMN origin_session_stamp VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL, "
+            "MODIFY COLUMN pipeline_version VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL, "
+            "MODIFY COLUMN base_apk_sha256 CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL, "
+            "MODIFY COLUMN artifact_set_hash CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL, "
+            "MODIFY COLUMN run_signature CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL, "
+            "MODIFY COLUMN run_signature_version VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL, "
+            "MODIFY COLUMN identity_error_reason VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_static_session_run_origin ON static_session_run_links (origin_session_stamp)",
+            "ALTER TABLE static_session_run_links "
+            "ADD CONSTRAINT fk_static_session_run_static FOREIGN KEY (static_run_id) "
+            "REFERENCES static_analysis_runs (id) ON DELETE CASCADE",
+        ),
+        description=(
+            "Normalizes static_session_run_links metadata columns to utf8mb4_unicode_ci, "
+            "restores the origin_session_stamp index, and adds the static_run_id foreign key."
+        ),
+        apply_mode="manual_script",
+        stage="static_schema",
+    ),
+)
+
+STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260626_static_finding_evidence_payload_schema_v1",
+        migration_name="Static finding evidence payload schema hardening",
+        schema_version_before="0.3.13-static-session-run-links-schema",
+        schema_version_after="0.3.14-static-finding-evidence-payload-schema",
+        statements=(
+            "ALTER TABLE static_finding_evidence_payloads DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+            "ALTER TABLE static_finding_evidence_payloads "
+            "MODIFY COLUMN evidence_json LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL, "
+            "MODIFY COLUMN evidence_chars INT UNSIGNED NOT NULL, "
+            "MODIFY COLUMN first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        ),
+        description=(
+            "Normalizes the canonical static finding evidence payload store to utf8mb4_unicode_ci and "
+            "aligns evidence_chars/first_seen_at with the canonical DDL."
+        ),
+        apply_mode="manual_script",
+        stage="static_schema",
+    ),
+)
+
 
 def registered_migrations() -> tuple[MigrationSpec, ...]:
     return (
@@ -187,6 +257,9 @@ def registered_migrations() -> tuple[MigrationSpec, ...]:
         + DYNAMIC_DOMAIN_CONTEXT_MIGRATIONS
         + DYNAMIC_SERVICE_CONTEXT_MIGRATIONS
         + DYNAMIC_SERVICE_SIGNAL_MIGRATIONS
+        + ARTIFACT_REGISTRY_SESSION_MIGRATIONS
+        + STATIC_SESSION_RUN_LINKS_MIGRATIONS
+        + STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS
     )
 
 
@@ -587,6 +660,8 @@ __all__ = [
     "RESEARCH_COHORT_MIGRATIONS",
     "DYNAMIC_DOMAIN_CONTEXT_MIGRATIONS",
     "DYNAMIC_SERVICE_SIGNAL_MIGRATIONS",
+    "STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS",
+    "STATIC_SESSION_RUN_LINKS_MIGRATIONS",
     "attach_receipt_path_to_latest_migration",
     "append_schema_version",
     "build_schema_migration_report",

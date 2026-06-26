@@ -179,9 +179,11 @@ def export_dep_json(static_run_id: int) -> str | None:
 
     dep_path = evidence_dir / "dep.json"
     dep_path.write_text(json.dumps(dep_payload, indent=2, sort_keys=True, default=str))
+    _replace_existing_dep_snapshot_registry_rows(static_run_id, dep_path)
     record_artifacts(
         run_id=str(static_run_id),
         run_type="static",
+        session_stamp=str(dep_payload.get("session_stamp") or "").strip() or None,
         artifacts=[_artifact_entry(dep_path, artifact_type="dep_snapshot")],
         origin="host",
         pull_status="n/a",
@@ -206,13 +208,34 @@ def _update_static_manifest(
     artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
     if not isinstance(artifacts, list):
         artifacts = []
-    artifacts.append(_artifact_entry(dep_path, artifact_type="dep_snapshot"))
+    artifacts = _upsert_artifact_entry(
+        artifacts,
+        _artifact_entry(dep_path, artifact_type="dep_snapshot"),
+    )
     if isinstance(manifest, dict):
         manifest["artifacts"] = artifacts
         manifest["package_name"] = manifest.get("package_name") or package_name
         manifest["tool_semver"] = manifest.get("tool_semver") or app_config.APP_VERSION
         manifest["tool_git_commit"] = manifest.get("tool_git_commit") or get_git_commit()
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str))
+
+
+def _replace_existing_dep_snapshot_registry_rows(static_run_id: int, dep_path: Path) -> int:
+    resolved_path = str(dep_path.resolve())
+    return int(
+        core_q.run_sql_rowcount(
+            """
+            DELETE FROM artifact_registry
+            WHERE run_type = 'static'
+              AND artifact_type = 'dep_snapshot'
+              AND host_path = %s
+              AND (static_run_id = %s OR (static_run_id IS NULL AND run_id = %s))
+            """,
+            (resolved_path, int(static_run_id), str(static_run_id)),
+            query_name="artifact_registry.replace_static_dep_snapshot",
+        )
+        or 0
+    )
 
 
 def _artifact_entry(path: Path, *, artifact_type: str) -> Mapping[str, Any]:
@@ -226,6 +249,25 @@ def _artifact_entry(path: Path, *, artifact_type: str) -> Mapping[str, Any]:
         "origin": "host",
         "pull_status": "n/a",
     }
+
+
+def _upsert_artifact_entry(
+    artifacts: Sequence[Mapping[str, Any]],
+    artifact_entry: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    target_type = str(artifact_entry.get("type") or artifact_entry.get("artifact_type") or "").strip()
+    target_path = str(artifact_entry.get("path") or artifact_entry.get("relative_path") or "").strip()
+    kept: list[Mapping[str, Any]] = []
+    for entry in artifacts:
+        if not isinstance(entry, Mapping):
+            continue
+        entry_type = str(entry.get("type") or entry.get("artifact_type") or "").strip()
+        entry_path = str(entry.get("path") or entry.get("relative_path") or "").strip()
+        if entry_type == target_type and entry_path == target_path:
+            continue
+        kept.append(entry)
+    kept.append(artifact_entry)
+    return kept
 
 
 def _build_watchlist(static_run_id: int) -> Mapping[str, bool]:
