@@ -35,6 +35,7 @@ class DatasetRunRecentSummary:
     messaging_activity: str | None
     valid: bool | None
     invalid_reason_code: str | None
+    pcap_failure_detail: str | None
     low_signal: bool | None
     run_id: str
     status_label: str
@@ -224,6 +225,9 @@ def _recent_run_summaries(
             invalid_reason_code=(
                 str(row.get("invalid_reason_code")) if row.get("invalid_reason_code") else None
             ),
+            pcap_failure_detail=(
+                str(row.get("pcap_failure_detail")) if row.get("pcap_failure_detail") else None
+            ),
             low_signal=(True if row.get("low_signal") is True else (False if row.get("low_signal") is False else None)),
             run_id=str(row.get("run_id") or ""),
             status_label="",
@@ -237,6 +241,7 @@ def _recent_run_summaries(
             messaging_activity=row.messaging_activity,
             valid=row.valid,
             invalid_reason_code=row.invalid_reason_code,
+            pcap_failure_detail=row.pcap_failure_detail,
             low_signal=row.low_signal,
             run_id=row.run_id,
             status_label=_status_label(row),

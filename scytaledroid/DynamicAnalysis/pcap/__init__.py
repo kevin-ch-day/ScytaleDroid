@@ -11,6 +11,14 @@ from typing import Any
 __all__ = [
     "export_pcap_features_csv",
     "export_dynamic_run_summary_csv",
+    "extract_verify_issue_codes",
+    "verify_issue_codes_csv",
+    "canonical_pcap_failure_code",
+    "canonical_pcap_failure_code_from_raw_detail",
+    "dataset_pcap_failure_detail",
+    "deep_audit_pcap_failure_detail",
+    "export_pcap_failure_detail",
+    "raw_pcap_failure_detail_from_canonical",
     "OverlapConfig",
     "write_static_dynamic_overlap",
     "DatasetTrackerConfig",
@@ -27,6 +35,37 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:  # pragma: no cover - import-time shim
+    if name in {
+        "extract_verify_issue_codes",
+        "verify_issue_codes_csv",
+        "canonical_pcap_failure_code",
+        "canonical_pcap_failure_code_from_raw_detail",
+        "dataset_pcap_failure_detail",
+        "deep_audit_pcap_failure_detail",
+        "export_pcap_failure_detail",
+        "raw_pcap_failure_detail_from_canonical",
+    }:
+        from .diagnostics import (
+            canonical_pcap_failure_code,
+            canonical_pcap_failure_code_from_raw_detail,
+            dataset_pcap_failure_detail,
+            deep_audit_pcap_failure_detail,
+            export_pcap_failure_detail,
+            raw_pcap_failure_detail_from_canonical,
+            extract_verify_issue_codes,
+            verify_issue_codes_csv,
+        )
+
+        return {
+            "extract_verify_issue_codes": extract_verify_issue_codes,
+            "verify_issue_codes_csv": verify_issue_codes_csv,
+            "canonical_pcap_failure_code": canonical_pcap_failure_code,
+            "canonical_pcap_failure_code_from_raw_detail": canonical_pcap_failure_code_from_raw_detail,
+            "dataset_pcap_failure_detail": dataset_pcap_failure_detail,
+            "deep_audit_pcap_failure_detail": deep_audit_pcap_failure_detail,
+            "export_pcap_failure_detail": export_pcap_failure_detail,
+            "raw_pcap_failure_detail_from_canonical": raw_pcap_failure_detail_from_canonical,
+        }[name]
     if name in {"export_dynamic_run_summary_csv", "export_pcap_features_csv"}:
         from .aggregate import export_dynamic_run_summary_csv, export_pcap_features_csv
 
@@ -62,4 +101,3 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - import-time shim
 
         return {"PcapReportConfig": PcapReportConfig, "write_pcap_report": write_pcap_report}[name]
     raise AttributeError(name)
-

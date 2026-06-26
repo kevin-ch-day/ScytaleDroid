@@ -39,6 +39,7 @@ def _write_sidecar(
 
 
 def _write_manifest(path: Path, *, package_name: str, version_code: str, session_label: str = "run1") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema": "harvest_package_manifest_v1",
         "package": {
@@ -47,8 +48,55 @@ def _write_manifest(path: Path, *, package_name: str, version_code: str, session
             "session_label": session_label,
             "device_serial": "SER1",
         },
+        "execution": {
+            "observed_artifacts": [],
+        },
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _write_manifest_with_observed(
+    path: Path,
+    *,
+    package_name: str,
+    version_code: str,
+    observed_artifacts: list[dict[str, object]],
+    session_label: str = "run1",
+    device_serial: str = "SER1",
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": "harvest_package_manifest_v1",
+        "package": {
+            "package_name": package_name,
+            "version_code": version_code,
+            "session_label": session_label,
+            "device_serial": device_serial,
+        },
+        "execution": {
+            "observed_artifacts": observed_artifacts,
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _observed_entry(*, local_rel: str, canonical_rel: str, sha: str, file_name: str = "base.apk") -> dict[str, object]:
+    return {
+        "split_label": "base",
+        "file_name": file_name,
+        "is_base": True,
+        "local_artifact_path": local_rel,
+        "canonical_store_path": canonical_rel,
+        "sha256": sha,
+        "file_size": 1,
+        "pull_outcome": "written",
+    }
+
+
+def _write_symlink(session_path: Path, target_path: Path) -> None:
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    rel_target = os.path.relpath(target_path, start=session_path.parent)
+    session_path.symlink_to(rel_target)
 
 
 def _db_row(*, package_name: str, sha: str, data_root: str, local_rel_path: str, version_code: str = "1") -> dict:
@@ -452,3 +500,311 @@ def test_storage_pressure_exposes_status_counts_and_inode_accounting(monkeypatch
     inode = audit["inode_accounting"]
     assert inode["inodes_seen_in_both_session_and_canonical"] == 1
     assert inode["canonical_only_inodes"] == 1
+
+
+def test_thin_session_gate_passes_for_all_symlink_session_with_policy_blocked_manifest(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "SER1-20260626-170424-973587"
+    rel = f"SER1/runs/{session_label}/com.example.good/Good_v1/com_example_good_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"good"
+    sha = sha256(payload).hexdigest()
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    canonical_path = tmp_path / canonical_rel
+    _write_apk(canonical_path, payload)
+    _write_symlink(session_apk, canonical_path)
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.good",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+        session_label=session_label,
+    )
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.good",
+        version_code="1",
+        observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+        session_label=session_label,
+    )
+    _write_manifest_with_observed(
+        root / "device_apks" / "SER1" / "runs" / session_label / "com.example.blocked" / "Blocked_v2" / "harvest_package_manifest.json",
+        package_name="com.example.blocked",
+        version_code="2",
+        observed_artifacts=[],
+        session_label=session_label,
+    )
+
+    report = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)
+    summary = report["summary"]
+
+    assert summary["gate_pass"] is True
+    assert summary["apk_paths_total"] == 1
+    assert summary["regular_apk_files"] == 0
+    assert summary["symlink_apk_files"] == 1
+    assert summary["package_manifests"] == 2
+    assert summary["package_manifests_with_observed_artifacts"] == 1
+    assert summary["package_manifests_policy_or_empty"] == 1
+    assert summary["observed_artifacts"] == 1
+    assert summary["local_artifact_path_points_to_session_path"] == 1
+
+
+def test_thin_session_gate_fails_when_regular_apk_present(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.regular/Regular_v1/com_example_regular_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"regular"
+    sha = _write_apk(session_apk, payload)
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    _write_apk(tmp_path / canonical_rel, payload)
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.regular",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+    )
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.regular",
+        version_code="1",
+        observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+    )
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)["summary"]
+    assert summary["gate_pass"] is False
+    assert "regular_apk_files_present" in summary["gate_fail_reasons"]
+
+
+def test_thin_session_gate_fails_when_sidecar_missing(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.nosidecar/NoSidecar_v1/com_example_nosidecar_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"nosidecar"
+    sha = sha256(payload).hexdigest()
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    canonical_path = tmp_path / canonical_rel
+    _write_apk(canonical_path, payload)
+    _write_symlink(session_apk, canonical_path)
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.nosidecar",
+        version_code="1",
+        observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+    )
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)["summary"]
+    assert summary["gate_pass"] is False
+    assert summary["missing_sidecars"] == 1
+    assert "missing_sidecars" in summary["gate_fail_reasons"]
+
+
+def test_thin_session_gate_fails_when_manifest_missing_for_apk_path(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.nomanifest/NoManifest_v1/com_example_nomanifest_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"nomanifest"
+    sha = sha256(payload).hexdigest()
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    canonical_path = tmp_path / canonical_rel
+    _write_apk(canonical_path, payload)
+    _write_symlink(session_apk, canonical_path)
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.nomanifest",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+    )
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)["summary"]
+    assert summary["gate_pass"] is False
+    assert summary["missing_manifests_for_apk_paths"] == 1
+    assert "missing_manifests_for_apk_paths" in summary["gate_fail_reasons"]
+
+
+def test_thin_session_gate_fails_when_canonical_blob_missing(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.missingblob/MissingBlob_v1/com_example_missingblob_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"missingblob"
+    sha = sha256(payload).hexdigest()
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    canonical_path = tmp_path / canonical_rel
+    _write_symlink(session_apk, canonical_path)
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.missingblob",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+    )
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.missingblob",
+        version_code="1",
+        observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+    )
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)["summary"]
+    assert summary["gate_pass"] is False
+    assert summary["canonical_blobs_missing"] == 1
+    assert "canonical_blobs_missing" in summary["gate_fail_reasons"]
+
+
+def test_thin_session_gate_fails_when_symlink_target_outside_canonical_store(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.outside/Outside_v1/com_example_outside_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"outside"
+    sha = sha256(payload).hexdigest()
+    outside_target = tmp_path / "other-store" / "outside.apk"
+    _write_apk(outside_target, payload)
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    _write_symlink(session_apk, outside_target)
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.outside",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+    )
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.outside",
+        version_code="1",
+        observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+    )
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)["summary"]
+    assert summary["gate_pass"] is False
+    assert summary["symlink_targets_outside_canonical_store"] == 1
+    assert "symlink_targets_outside_canonical_store" in summary["gate_fail_reasons"]
+
+
+def test_thin_session_gate_fails_when_local_artifact_path_points_elsewhere(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.localpath/LocalPath_v1/com_example_localpath_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"localpath"
+    sha = sha256(payload).hexdigest()
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    canonical_path = tmp_path / canonical_rel
+    _write_apk(canonical_path, payload)
+    _write_symlink(session_apk, canonical_path)
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.localpath",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+    )
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.localpath",
+        version_code="1",
+        observed_artifacts=[
+            _observed_entry(
+                local_rel=f"SER1/runs/{session_label}/somewhere/else/base.apk",
+                canonical_rel=canonical_rel,
+                sha=sha,
+            )
+        ],
+    )
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)["summary"]
+    assert summary["gate_pass"] is False
+    assert summary["local_artifact_path_points_to_session_path"] == 0
+    assert "observed_local_artifact_paths_not_pointing_to_session" in summary["gate_fail_reasons"]
+
+
+def test_thin_session_gate_allows_split_package_with_multiple_artifacts(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    session_label = "run1"
+    package_dir = root / "device_apks" / "SER1" / "runs" / session_label / "com.example.split" / "Split_v1"
+    entries: list[dict[str, object]] = []
+    for name, payload in [
+        ("com_example_split_1__base.apk", b"split-base"),
+        ("com_example_split_1__split_config.xhdpi.apk", b"split-xhdpi"),
+    ]:
+        rel = f"SER1/runs/{session_label}/com.example.split/Split_v1/{name}"
+        session_apk = package_dir / name
+        sha = sha256(payload).hexdigest()
+        canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+        canonical_path = tmp_path / canonical_rel
+        _write_apk(canonical_path, payload)
+        _write_symlink(session_apk, canonical_path)
+        _write_sidecar(
+            session_apk.with_suffix(".apk.meta.json"),
+            package_name="com.example.split",
+            version_code="1",
+            sha=sha,
+            canonical_rel=canonical_rel,
+            local_rel=rel,
+            session_label=session_label,
+        )
+        entries.append(_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha, file_name=name))
+    _write_manifest_with_observed(
+        package_dir / "harvest_package_manifest.json",
+        package_name="com.example.split",
+        version_code="1",
+        observed_artifacts=entries,
+        session_label=session_label,
+    )
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, session_label=session_label)["summary"]
+    assert summary["gate_pass"] is True
+    assert summary["package_manifests"] == 1
+    assert summary["observed_artifacts"] == 2
+    assert summary["apk_paths_total"] == 2
+
+
+def test_thin_session_gate_latest_session_selects_newest_directory_deterministically(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    old_label = "SER1-20260626-170424-000001"
+    new_label = "SER1-20260626-170424-000002"
+    for label, payload, offset in [
+        (old_label, b"old", 10),
+        (new_label, b"new", 20),
+    ]:
+        rel = f"SER1/runs/{label}/com.example.app/App_v1/com_example_app_1__base.apk"
+        session_apk = root / "device_apks" / rel
+        sha = sha256(payload).hexdigest()
+        canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+        canonical_path = tmp_path / canonical_rel
+        _write_apk(canonical_path, payload)
+        _write_symlink(session_apk, canonical_path)
+        _write_sidecar(
+            session_apk.with_suffix(".apk.meta.json"),
+            package_name="com.example.app",
+            version_code="1",
+            sha=sha,
+            canonical_rel=canonical_rel,
+            local_rel=rel,
+            session_label=label,
+        )
+        _write_manifest_with_observed(
+            session_apk.parent / "harvest_package_manifest.json",
+            package_name="com.example.app",
+            version_code="1",
+            observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+            session_label=label,
+        )
+        session_dir = root / "device_apks" / "SER1" / "runs" / label
+        os.utime(session_dir, (offset, offset))
+
+    summary = storage_pressure.build_thin_session_gate_report(data_root=root, latest_session=True)["summary"]
+    assert summary["session_label"] == new_label

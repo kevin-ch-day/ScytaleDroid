@@ -25,6 +25,7 @@ def make_recent_summary(
     run_id: str,
     status_label: str,
     invalid_reason_code: str | None = None,
+    pcap_failure_detail: str | None = None,
     messaging_activity: str | None = None,
     low_signal: str | None = None,
 ) -> DatasetRunRecentSummary:
@@ -35,6 +36,7 @@ def make_recent_summary(
         messaging_activity=messaging_activity,
         valid=valid,
         invalid_reason_code=invalid_reason_code,
+        pcap_failure_detail=pcap_failure_detail,
         low_signal=low_signal,
         run_id=run_id,
         status_label=status_label,

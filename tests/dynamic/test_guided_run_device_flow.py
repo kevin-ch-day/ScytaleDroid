@@ -181,6 +181,7 @@ def test_guided_run_seeds_queue_from_active_selected_device(monkeypatch) -> None
 
 def test_choose_capture_device_reuses_selected_device_without_reopening_selector(monkeypatch, capsys) -> None:
     selector_calls = {"count": 0}
+    prompt_calls = {"count": 0}
 
     monkeypatch.setattr(
         guided_run,
@@ -191,6 +192,7 @@ def test_choose_capture_device_reuses_selected_device_without_reopening_selector
             "android": "15",
             "type": "physical",
             "label": "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical",
+            "detected": "1",
         },
     )
     monkeypatch.setattr(
@@ -198,7 +200,11 @@ def test_choose_capture_device_reuses_selected_device_without_reopening_selector
         "select_device",
         lambda **_kwargs: selector_calls.__setitem__("count", selector_calls["count"] + 1) or ("other", "other"),
     )
-    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+    monkeypatch.setattr(
+        guided_run.prompt_utils,
+        "get_choice",
+        lambda *args, **kwargs: prompt_calls.__setitem__("count", prompt_calls["count"] + 1) or "1",
+    )
 
     selected = guided_run._choose_capture_device(
         {"serial": "ZY22JK89DR", "label": "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical"}
@@ -206,24 +212,28 @@ def test_choose_capture_device_reuses_selected_device_without_reopening_selector
 
     assert selected == ("ZY22JK89DR", "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical")
     assert selector_calls["count"] == 0
+    assert prompt_calls["count"] == 0
     out = capsys.readouterr().out
     assert "Capture device" in out
-    assert "Use selected device" in out
-    assert "Change device" in out
+    assert "Use selected device" not in out
+    assert "Keep selected device" not in out
+    assert "Change device" not in out
 
 
-def test_choose_capture_device_can_open_change_device_selector(monkeypatch) -> None:
+def test_choose_capture_device_can_open_change_device_selector_when_saved_device_is_not_detected(monkeypatch) -> None:
     selector_kwargs = {}
 
     monkeypatch.setattr(
         guided_run,
         "get_device_selection_details",
         lambda serial: {
-            "name": "moto g 5G - 2024",
+            "name": serial,
             "serial": serial,
             "android": "15",
             "type": "physical",
             "label": "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical",
+            "status": "not detected",
+            "detected": "",
         },
     )
 

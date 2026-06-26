@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from scytaledroid.DynamicAnalysis.controllers import guided_run
+from scytaledroid.DynamicAnalysis.controllers import selected_app_review
 
 from tests.dynamic._guided_run_state_support import (
     make_dataset_state,
@@ -61,6 +62,7 @@ def test_guided_run_review_path_does_not_require_device(monkeypatch, capsys) -> 
                     interaction_level="scripted",
                     valid=False,
                     invalid_reason_code="PCAP_MISSING",
+                    pcap_failure_detail="PCAP_DEVICE_FILE_MISSING",
                     run_id="cnn-run-1",
                     status_label="INVALID:PCAP_MISSING",
                 ),
@@ -81,8 +83,42 @@ def test_guided_run_review_path_does_not_require_device(monkeypatch, capsys) -> 
     assert select_package_calls["count"] == 2
     assert "Stored QA Review" in out
     assert "cnn-run-1" in out
+    assert "PCAP detail" in out
+    assert "PCAP_DEVICE_FILE_MISSING" in out
+    assert "This review is display-only; the stored run remains excluded from quota/publication use." in out
+    assert "Recollect a current-build run after verifying PCAP capture/export is working." in out
     assert qa_calls["run_id"] == "cnn-run-1"
     assert device_calls == {"select": 0, "preflight": 0}
+
+
+@pytest.mark.parametrize(
+    ("valid", "invalid_reason", "expected"),
+    [
+        (
+            True,
+            "",
+            "Return to the app screen if you want supplemental baseline, scripted, or manual evidence.",
+        ),
+        (
+            False,
+            "PCAP_TOO_SMALL",
+            "Recollect a longer or higher-signal current-build run before relying on it.",
+        ),
+        (
+            None,
+            "",
+            "Use run history and diagnostics to decide whether recollection is needed.",
+        ),
+    ],
+)
+def test_selected_app_review_next_step_lines_cover_valid_invalid_and_unknown(
+    valid: bool | None,
+    invalid_reason: str,
+    expected: str,
+) -> None:
+    lines = selected_app_review._next_step_lines(valid=valid, invalid_reason=invalid_reason)
+    assert lines[0] == "Next step:"
+    assert expected in lines
 
 
 @pytest.mark.parametrize(
@@ -227,7 +263,7 @@ def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> N
     assert "Why:" in out
     assert "Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace." in out
     assert "1) Baseline run [default]" in out
-    assert "Reason: 3 baseline runs needed" in out
+    assert "Reason:" not in out
     assert "Collect baseline evidence for the installed build." in out
 
 
@@ -292,4 +328,4 @@ def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) ->
     assert "Unknown build · no current-build evidence · QA unknown · quota 0/5" in out
     assert "No dynamic evidence exists yet for com.guardian." in out
     assert "1) Baseline run [default]" in out
-    assert "Reason: 3 baseline runs needed" in out
+    assert "Reason:" not in out

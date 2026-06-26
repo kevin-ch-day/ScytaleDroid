@@ -311,6 +311,7 @@ def _selected_app_queue_action(
     scripted_template_ready: bool,
     latest_valid: bool | None,
     latest_invalid_reason: str | None,
+    latest_pcap_failure_detail: str | None,
     db_active_sessions: int,
     active_valid_runs: int,
 ) -> tuple[str, str | None]:
@@ -322,6 +323,7 @@ def _selected_app_queue_action(
         scripted_template_ready=scripted_template_ready,
         latest_valid=latest_valid,
         latest_invalid_reason=latest_invalid_reason,
+        latest_pcap_failure_detail=latest_pcap_failure_detail,
         db_active_sessions=db_active_sessions,
         active_valid_runs=active_valid_runs,
     )
@@ -629,6 +631,7 @@ def _load_selected_app_context(
         scripted_template_ready=scripted_template_ready,
         latest_valid=latest_valid,
         latest_invalid_reason=getattr(latest_recent, "invalid_reason_code", None),
+        latest_pcap_failure_detail=getattr(latest_recent, "pcap_failure_detail", None),
         db_active_sessions=db_active_sessions,
         active_valid_runs=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
     )
@@ -680,6 +683,7 @@ def _selected_app_latest_recent_summary(*, package_name: str, state: Any) -> Any
             messaging_activity=getattr(row, "messaging_activity", None),
             valid=valid,
             invalid_reason_code=invalid_reason,
+            pcap_failure_detail=str(getattr(row, "pcap_failure_detail", "") or "").strip() or None,
             low_signal=getattr(row, "low_signal", None),
             run_id=str(getattr(row, "run_id", "") or ""),
             status_label=status_label,

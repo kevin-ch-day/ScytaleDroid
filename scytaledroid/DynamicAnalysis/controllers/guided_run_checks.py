@@ -23,41 +23,9 @@ def _read_json(path: Path) -> dict | None:
 
 
 def _infer_pcap_failure_detail(run_dir: Path, *, pcap_size_int: int) -> str | None:
-    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
-    local_pcaps = [path for path in capture_dir.glob("*.pcap*") if path.is_file()]
-    if local_pcaps:
-        try:
-            if max(path.stat().st_size for path in local_pcaps) <= 0:
-                return "PCAP_LOCAL_FILE_EMPTY"
-        except Exception:
-            return "PCAP_LOCAL_FILE_EMPTY"
-    meta = _read_json(capture_dir / "pcapdroid_capture_meta.json") or {}
-    diagnostics = meta.get("failure_diagnostics") if isinstance(meta.get("failure_diagnostics"), dict) else {}
-    expected_exists = diagnostics.get("expected_device_path_exists")
-    expected_size = diagnostics.get("expected_device_path_size_bytes")
-    fallback_exists = diagnostics.get("latest_fallback_exists")
-    fallback_size = diagnostics.get("latest_fallback_size_bytes")
-    if expected_exists is True:
-        try:
-            if int(expected_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
-    if fallback_exists is True:
-        try:
-            if int(fallback_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
-    if pcap_size_int > 0:
-        return "PCAP_PARSE_FAILED"
-    if expected_exists is False and not diagnostics.get("latest_fallback_path"):
-        return "PCAP_DEVICE_FILE_MISSING"
-    return "PCAP_LOCAL_FILE_MISSING"
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
+
+    return dataset_pcap_failure_detail(run_dir, pcap_size_int=pcap_size_int)
 
 
 def _derive_pcap_failure_summary(run_dir: Path, *, pcap_size_int: int) -> tuple[str | None, str | None]:

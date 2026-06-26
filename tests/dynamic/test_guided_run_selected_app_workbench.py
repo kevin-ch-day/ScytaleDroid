@@ -86,9 +86,9 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
     assert "App Queue / Next Action" not in out
     assert "Run readiness:" not in out
     assert "Press Enter to continue, V for details, or B to go back" not in out
-    assert "Recommended" in out
+    assert "Run Option" in out
     assert "1) Baseline run [default]" in out
-    assert "Reason: 3 baseline runs needed" in out
+    assert "Reason:" not in out
     assert device_calls == {"select": 0, "preflight": 0}
 
 
@@ -154,9 +154,9 @@ def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkey
     out = capsys.readouterr().out
     assert "CNN" in out
     assert "Current build · current-build evidence (local+db) · QA valid · quota 5/5" in out
+    assert "Run Option" in out
     assert "3) Manual run [default]" in out
-    assert "Reason: quota is already satisfied; this run would be supplemental." in out
-    assert "Other run options" in out
+    assert "Reason:" not in out
     assert "1) Baseline run" in out
     assert "2) Scripted run" in out
     assert "4) Test app" in out
@@ -164,7 +164,6 @@ def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkey
     assert "A) Review QA" in out
     assert "H) Run history" in out
     assert "G) Diagnostics" in out
-    assert "Danger" in out
     assert "X) Reset app" in out
     assert "X) Reset app [default]" not in out
     assert "D) Reset app" not in out
@@ -246,7 +245,7 @@ def test_guided_run_defaults_to_manual_when_script_template_missing(monkeypatch,
     assert "BBC News" in out
     assert "3) Manual run [default]" in out
     assert "2) Scripted run (held)" in out
-    assert "Reason: 2 interactive runs needed" in out
+    assert "Reason:" not in out
 
 
 def test_guided_run_reports_review_queue_action_for_invalid_complete_current_build(monkeypatch, capsys) -> None:
@@ -283,6 +282,7 @@ def test_guided_run_reports_review_queue_action_for_invalid_complete_current_bui
                     interaction_level="scripted",
                     valid=False,
                     invalid_reason_code="PCAP_MISSING",
+                    pcap_failure_detail="PCAP_DEVICE_FILE_MISSING",
                     run_id="cnnrun1",
                     status_label="INVALID:PCAP_MISSING",
                 ),
@@ -301,6 +301,6 @@ def test_guided_run_reports_review_queue_action_for_invalid_complete_current_bui
     assert select_package_calls["count"] == 2
     assert "Current build · current-build evidence (local+db) · QA needs review · quota 5/5" in out
     assert "A) Review QA [default]" in out
-    assert "Reason: QA needs review; latest current-build QA invalid (PCAP_MISSING)." in out
+    assert "Reason: QA needs review; latest current-build QA invalid (PCAP_DEVICE_FILE_MISSING)." in out
     assert "3) Manual run" in out
     assert "3) Manual run [default]" not in out

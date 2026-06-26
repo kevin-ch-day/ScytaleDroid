@@ -230,9 +230,12 @@ def choose_capture_device(
         menu_utils=menu_utils,
         status_messages=status_messages,
     )
+    if detected:
+        return current_serial, str(details.get("label") or current_serial)
+
     menu_utils.print_menu(
         [
-            menu_utils.MenuOption("1", "Use selected device"),
+            menu_utils.MenuOption("1", "Keep selected device"),
             menu_utils.MenuOption("2", "Change device"),
         ],
         show_exit=False,

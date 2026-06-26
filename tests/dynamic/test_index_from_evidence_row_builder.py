@@ -162,3 +162,116 @@ def test_build_dynamic_session_row_accepts_legacy_static_run_id_under_run_identi
     assert row is not None
     assert row["static_run_id"] == 321
     assert row["run_signature"] == "legacy-sig"
+
+
+def test_build_dynamic_session_row_prefers_tracker_countability_truth(monkeypatch, tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run126"
+    (run_dir / "inputs").mkdir(parents=True)
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run126",
+                "status": "success",
+                "target": {"package_name": "com.example.current"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": False,
+                    "valid_dataset_run": True,
+                    "invalid_reason_code": "EXTRA_RUN",
+                },
+                "operator": {"sampling_rate_s": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "inputs" / "static_dynamic_plan.json").write_text(
+        json.dumps({"package_name": "com.example.current"}),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "summary.json").write_text(
+        json.dumps({"dynamic_run_id": "run126", "telemetry": {"stats": {}, "quality": {}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        index_from_evidence,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "com.example.current": {
+                    "runs": [
+                        {
+                            "run_id": "run126",
+                            "valid_dataset_run": True,
+                            "counts_toward_quota": True,
+                            "invalid_reason_code": None,
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    row = index_from_evidence.build_dynamic_session_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["countable"] == 1
+    assert row["valid_dataset_run"] == 1
+    assert row["invalid_reason_code"] is None
+
+
+def test_build_dynamic_network_features_row_prefers_tracker_countability_truth(monkeypatch, tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run127"
+    (run_dir / "inputs").mkdir(parents=True)
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run127",
+                "status": "success",
+                "target": {"package_name": "com.example.current"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": False,
+                    "valid_dataset_run": True,
+                    "invalid_reason_code": "EXTRA_RUN",
+                },
+                "operator": {"sampling_rate_s": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps({"metrics": {}, "proxies": {}, "quality": {"protocol": {}}}),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(json.dumps({}), encoding="utf-8")
+    monkeypatch.setattr(
+        index_from_evidence,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "com.example.current": {
+                    "runs": [
+                        {
+                            "run_id": "run127",
+                            "valid_dataset_run": True,
+                            "counts_toward_quota": True,
+                            "invalid_reason_code": None,
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    row = index_from_evidence.build_dynamic_network_features_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["countable"] == 1
+    assert row["valid_dataset_run"] == 1
+    assert row["invalid_reason_code"] is None

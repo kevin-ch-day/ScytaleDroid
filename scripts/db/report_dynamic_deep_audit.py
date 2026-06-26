@@ -445,6 +445,12 @@ def _pcap_artifact_info(
     summary_payload: Mapping[str, Any] | None,
     verify_row: Mapping[str, Any],
 ) -> dict[str, Any]:
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import (
+        canonical_pcap_failure_code,
+        deep_audit_pcap_failure_detail,
+        extract_verify_issue_codes,
+    )
+
     artifact_rel = ""
     artifact_exists = False
     local_path: Path | None = None
@@ -468,25 +474,16 @@ def _pcap_artifact_info(
     )
     if pcap_size_bytes <= 0 and local_path is not None and local_path.exists():
         pcap_size_bytes = _safe_int(local_path.stat().st_size)
-    issue_codes = {
-        str(issue.get("code") or "")
-        for issue in (verify_row.get("issues") or [])
-        if isinstance(issue, Mapping)
-    }
-    if not artifact_rel:
-        detail = "PCAP_MISSING"
-    elif not artifact_exists:
-        detail = "PCAP_LOCAL_FILE_MISSING"
-    elif pcap_size_bytes <= 0:
-        detail = "PCAP_LOCAL_FILE_EMPTY"
-    elif str((report or {}).get("report_status") or "") == "ok":
-        detail = ""
-    elif "pcap_file_missing" in issue_codes:
-        detail = "PCAP_LOCAL_FILE_MISSING"
-    elif "pcap_artifact_missing" in issue_codes:
-        detail = "PCAP_MISSING"
-    else:
-        detail = "PCAP_PARSE_FAILED"
+    issue_codes = set(extract_verify_issue_codes(verify_row))
+    canonical = canonical_pcap_failure_code(
+        artifact_rel=artifact_rel,
+        artifact_exists=artifact_exists,
+        pcap_size_bytes=pcap_size_bytes,
+        report_status=str((report or {}).get("report_status") or ""),
+        invalid_reason_code=str(verify_row.get("invalid_reason_code") or ""),
+        verify_row=verify_row,
+    )
+    detail = deep_audit_pcap_failure_detail(canonical)
     pcap_present = bool(artifact_exists and pcap_size_bytes > 0)
     return {
         "pcap_present": pcap_present,
