@@ -19,6 +19,10 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_plan_read_path,
     write_dataset_plan_payload,
 )
+from scytaledroid.DynamicAnalysis.tracker_scope import (
+    default_resolve_tracker_run_identity,
+    scope_tracker_runs_to_active_identity,
+)
 
 MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
@@ -223,7 +227,7 @@ def update_dataset_tracker(
     app_entry["target_runs"] = int(cfg.baseline_required) + int(cfg.interactive_required)
 
     # Deterministically mark quota-counted runs vs extras.
-    _apply_quota_marking(app_entry, cfg)
+    _apply_quota_marking(app_entry, cfg, package_name=package)
 
     def _counted(r: dict[str, Any]) -> bool:
         return r.get("valid_dataset_run") is True and bool(r.get("counts_toward_quota"))
@@ -380,7 +384,47 @@ def _normalize_tracker_payload(
 
         # Ensure quota markings are present for UI labels (extra_run, counts_toward_quota),
         # and then compute counts from those deterministic markings.
-        _apply_quota_marking(entry, cfg)
+        before_run_markers = [
+            (
+                bool(r.get("counts_toward_quota")),
+                int(r.get("extra_run") or 0),
+                bool(r.get("countable")),
+            )
+            for r in runs
+            if isinstance(r, dict)
+        ]
+        before_entry_fields = (
+            bool(entry.get("quota_met")),
+            entry.get("quota_met_at"),
+            entry.get("quota_met_run_id"),
+            int(entry.get("extra_valid_runs") or 0),
+            int(entry.get("baseline_valid_runs") or 0),
+            int(entry.get("interactive_valid_runs") or 0),
+            int(entry.get("valid_runs") or 0),
+        )
+
+        _apply_quota_marking(entry, cfg, package_name=str(_pkg or ""))
+
+        after_run_markers = [
+            (
+                bool(r.get("counts_toward_quota")),
+                int(r.get("extra_run") or 0),
+                bool(r.get("countable")),
+            )
+            for r in runs
+            if isinstance(r, dict)
+        ]
+        after_entry_fields = (
+            bool(entry.get("quota_met")),
+            entry.get("quota_met_at"),
+            entry.get("quota_met_run_id"),
+            int(entry.get("extra_valid_runs") or 0),
+            int(entry.get("baseline_valid_runs") or 0),
+            int(entry.get("interactive_valid_runs") or 0),
+            int(entry.get("valid_runs") or 0),
+        )
+        if (before_run_markers != after_run_markers or before_entry_fields != after_entry_fields) and isinstance(dirty, list) and dirty:
+            dirty[0] = True
 
         def _counted(r: dict[str, Any]) -> bool:
             return r.get("valid_dataset_run") is True and bool(r.get("counts_toward_quota"))
@@ -576,7 +620,14 @@ def _parse_dt(value: object) -> datetime | None:
         return None
 
 
-def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -> None:
+def _apply_quota_marking(
+    app_entry: dict[str, Any],
+    cfg: DatasetTrackerConfig,
+    *,
+    package_name: str | None = None,
+    resolve_tracker_run_identity_fn=default_resolve_tracker_run_identity,
+    scope_tracker_runs_to_active_identity_fn=scope_tracker_runs_to_active_identity,
+) -> None:
     """Mark which runs count toward the first N valid runs (quota) and which are extras.
 
     This is intentionally deterministic from recorded run history, not from the order in
@@ -594,7 +645,31 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         if isinstance(r, dict):
             r["counts_toward_quota"] = False
             r["extra_run"] = 0
-    indexed: list[tuple[int, dict[str, Any]]] = [(i, r) for i, r in enumerate(runs) if isinstance(r, dict)]
+    package_text = str(package_name or "").strip()
+    scoped_active_runs: set[str] | None = None
+    if package_text:
+        try:
+            scoped = scope_tracker_runs_to_active_identity_fn(
+                package_text,
+                [r for r in runs if isinstance(r, dict)],
+                resolve_tracker_run_identity_fn=resolve_tracker_run_identity_fn,
+            )
+            scoped_active_runs = {
+                str(r.get("run_id") or "").strip()
+                for r in (scoped.get("active_runs") or [])
+                if isinstance(r, dict) and str(r.get("run_id") or "").strip()
+            }
+        except Exception:
+            scoped_active_runs = None
+
+    indexed: list[tuple[int, dict[str, Any]]] = []
+    for i, r in enumerate(runs):
+        if not isinstance(r, dict):
+            continue
+        run_id = str(r.get("run_id") or "").strip()
+        if scoped_active_runs is not None and run_id and run_id not in scoped_active_runs:
+            continue
+        indexed.append((i, r))
     indexed.sort(
         key=lambda item: (
             _parse_dt(item[1].get("ended_at"))
@@ -675,7 +750,7 @@ def _apply_quota_marking(app_entry: dict[str, Any], cfg: DatasetTrackerConfig) -
         for r in runs
         if isinstance(r, dict)
         and r.get("valid_dataset_run") is True
-        and not r.get("counts_toward_quota")
+        and bool(r.get("extra_run"))
     )
 
 
@@ -1127,41 +1202,9 @@ def _timeline_status(run_dir: Path) -> dict[str, Any]:
 
 
 def _pcap_failure_detail(run_dir: Path) -> str | None:
-    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
-    local_pcaps = sorted(capture_dir.glob("*.pcap*"))
-    if local_pcaps:
-        local_size = max(int(p.stat().st_size) for p in local_pcaps)
-        if local_size <= 0:
-            return "PCAP_LOCAL_FILE_EMPTY"
-    meta = _read_json(capture_dir / "pcapdroid_capture_meta.json")
-    if not isinstance(meta, dict):
-        return None
-    diagnostics = meta.get("failure_diagnostics") if isinstance(meta.get("failure_diagnostics"), dict) else {}
-    expected_exists = diagnostics.get("expected_device_path_exists")
-    expected_size = diagnostics.get("expected_device_path_size_bytes")
-    fallback_exists = diagnostics.get("latest_fallback_exists")
-    fallback_size = diagnostics.get("latest_fallback_size_bytes")
-    if expected_exists is True:
-        try:
-            if int(expected_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
-    if fallback_exists is True:
-        try:
-            if int(fallback_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
-    if local_pcaps:
-        return "PCAP_PARSE_FAILED"
-    if expected_exists is False and not diagnostics.get("latest_fallback_path"):
-        return "PCAP_DEVICE_FILE_MISSING"
-    return "PCAP_LOCAL_FILE_MISSING"
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
+
+    return dataset_pcap_failure_detail(run_dir, pcap_size_int=0)
 
 
 def _pcap_failure_summary(

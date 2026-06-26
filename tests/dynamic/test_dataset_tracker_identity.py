@@ -77,3 +77,85 @@ def test_interaction_before_baseline_quota_is_supplemental() -> None:
     assert by_id["b3"]["counts_toward_quota"] is True
     assert by_id["i2"]["counts_toward_quota"] is True
     assert app_entry["quota_met"] is False
+
+
+def test_quota_marking_scopes_current_build_separately_from_legacy_runs() -> None:
+    cfg = DatasetTrackerConfig()
+    app_entry = {
+        "runs": [
+            {
+                "run_id": "legacy-b1",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "version_code": "311990001",
+                "base_apk_sha256": "legacysha",
+                "started_at": "2026-06-15T01:00:00+00:00",
+            },
+            {
+                "run_id": "legacy-b2",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "version_code": "311990001",
+                "base_apk_sha256": "legacysha",
+                "started_at": "2026-06-15T02:00:00+00:00",
+            },
+            {
+                "run_id": "legacy-b3",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "version_code": "311990001",
+                "base_apk_sha256": "legacysha",
+                "started_at": "2026-06-15T03:00:00+00:00",
+            },
+            {
+                "run_id": "current-b1",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "version_code": "312021000",
+                "base_apk_sha256": "currentsha",
+                "started_at": "2026-06-26T01:00:00+00:00",
+            },
+            {
+                "run_id": "current-b2",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "version_code": "312021000",
+                "base_apk_sha256": "currentsha",
+                "started_at": "2026-06-26T02:00:00+00:00",
+            },
+        ]
+    }
+
+    _apply_quota_marking(
+        app_entry,
+        cfg,
+        package_name="com.twitter.android",
+        resolve_tracker_run_identity_fn=lambda _pkg, row: (
+            str(row.get("version_code") or "") or None,
+            str(row.get("base_apk_sha256") or "") or None,
+        ),
+        scope_tracker_runs_to_active_identity_fn=lambda _pkg, runs, resolve_tracker_run_identity_fn: {
+            "active_identity": ("312021000", "currentsha"),
+            "active_runs": [r for r in runs if r.get("base_apk_sha256") == "currentsha"],
+            "valid_runs": list(runs),
+            "legacy_runs": [r for r in runs if r.get("base_apk_sha256") == "legacysha"],
+            "legacy_valid": 3,
+            "legacy_builds": 1,
+        },
+    )
+
+    by_id = {row["run_id"]: row for row in app_entry["runs"]}
+
+    assert by_id["legacy-b1"]["counts_toward_quota"] is False
+    assert by_id["legacy-b1"]["extra_run"] == 0
+    assert by_id["legacy-b2"]["counts_toward_quota"] is False
+    assert by_id["legacy-b3"]["counts_toward_quota"] is False
+    assert by_id["current-b1"]["counts_toward_quota"] is True
+    assert by_id["current-b2"]["counts_toward_quota"] is True
+    assert app_entry["quota_met"] is False
+    assert app_entry["extra_valid_runs"] == 0

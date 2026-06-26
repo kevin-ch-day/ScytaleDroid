@@ -25,13 +25,18 @@ def selected_app_queue_action(
     scripted_template_ready: bool,
     latest_valid: bool | None,
     latest_invalid_reason: str | None,
+    latest_pcap_failure_detail: str | None,
     db_active_sessions: int,
     active_valid_runs: int,
 ) -> tuple[str, str | None]:
     baseline_missing = max(0, int(baseline_required) - int(baseline_valid_runs))
     interactive_missing = max(0, int(interactive_required) - int(interactive_valid_runs))
     if baseline_missing <= 0 and interactive_missing <= 0 and latest_valid is False:
-        detail = str(latest_invalid_reason or "").strip().upper() or "UNKNOWN"
+        detail = (
+            str(latest_pcap_failure_detail or "").strip().upper()
+            or str(latest_invalid_reason or "").strip().upper()
+            or "UNKNOWN"
+        )
         return ("review QA", f"latest current-build QA invalid ({detail})")
     if int(active_valid_runs) <= 0 and int(db_active_sessions) > 0:
         return ("restore local evidence", "current-build evidence exists in the DB, but the local evidence pack is missing")

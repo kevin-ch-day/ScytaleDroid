@@ -292,6 +292,186 @@ def build_storage_pressure_audit(
     }
 
 
+def generate_thin_session_gate_report(
+    *,
+    data_root: Path | None = None,
+    out_dir: Path | None = None,
+    stamp: str | None = None,
+    session_label: str | None = None,
+    latest_session: bool = False,
+) -> tuple[dict[str, Any], Path, Path]:
+    report = build_thin_session_gate_report(
+        data_root=data_root,
+        session_label=session_label,
+        latest_session=latest_session,
+    )
+    json_path, csv_path = write_thin_session_gate_report(
+        report,
+        out_dir=out_dir,
+        stamp=stamp,
+    )
+    return report, json_path, csv_path
+
+
+def build_thin_session_gate_report(
+    *,
+    data_root: Path | None = None,
+    session_label: str | None = None,
+    latest_session: bool = False,
+) -> dict[str, Any]:
+    resolved_data_root = (data_root or artifact_store.data_root()).resolve()
+    device_root = (resolved_data_root / "device_apks").resolve()
+    canonical_root = (resolved_data_root / "store" / "apk" / "sha256").resolve()
+    repo_root = resolved_data_root.parent.resolve()
+
+    session_dir = _resolve_selected_session_dir(
+        device_root=device_root,
+        session_label=session_label,
+        latest_session=latest_session,
+    )
+    artifact_rows = [
+        _build_session_gate_artifact_row(
+            apk_path=apk_path,
+            device_root=device_root,
+            canonical_root=canonical_root,
+        )
+        for apk_path in _iter_session_apk_paths(session_dir)
+    ]
+    actual_apk_abs_paths = {str(row.get("absolute_path") or "") for row in artifact_rows}
+
+    package_manifests = 0
+    package_manifests_with_observed_artifacts = 0
+    package_manifests_policy_or_empty = 0
+    observed_artifacts = 0
+    observed_with_canonical_store_path = 0
+    observed_with_local_artifact_path = 0
+    canonical_blobs_present = 0
+    canonical_blobs_missing = 0
+    local_artifact_path_points_to_session_path = 0
+    manifest_rows: list[dict[str, Any]] = []
+
+    for manifest_path in sorted(session_dir.rglob("harvest_package_manifest.json")):
+        if not manifest_path.is_file():
+            continue
+        package_manifests += 1
+        manifest_payload = _load_json(manifest_path)
+        observed = _manifest_observed_artifacts(manifest_payload)
+        observed_count = len(observed)
+        if observed_count > 0:
+            package_manifests_with_observed_artifacts += 1
+        else:
+            package_manifests_policy_or_empty += 1
+        manifest_rows.append(
+            {
+                "manifest_path": _safe_relative(manifest_path, session_dir),
+                "observed_artifacts": observed_count,
+                "has_observed_artifacts": observed_count > 0,
+            }
+        )
+        for entry in observed:
+            observed_artifacts += 1
+            local_rel = _text_or_none(entry.get("local_artifact_path"))
+            canonical_text = _text_or_none(entry.get("canonical_store_path"))
+
+            if local_rel:
+                observed_with_local_artifact_path += 1
+                local_abs = _resolve_local_artifact_path(device_root=device_root, local_artifact_path=local_rel)
+                if (
+                    local_abs is not None
+                    and _path_within_root(local_abs, session_dir)
+                    and local_abs.as_posix() in actual_apk_abs_paths
+                ):
+                    local_artifact_path_points_to_session_path += 1
+
+            if canonical_text:
+                observed_with_canonical_store_path += 1
+                canonical_abs = _resolve_declared_path(repo_root=repo_root, rel_or_abs=canonical_text)
+                if canonical_abs is not None and canonical_abs.exists():
+                    canonical_blobs_present += 1
+                else:
+                    canonical_blobs_missing += 1
+            else:
+                canonical_blobs_missing += 1
+
+    apk_paths_total = len(artifact_rows)
+    regular_apk_files = sum(1 for row in artifact_rows if not bool(row.get("is_symlink")))
+    symlink_apk_files = sum(1 for row in artifact_rows if bool(row.get("is_symlink")))
+    sidecars = sum(1 for row in artifact_rows if bool(row.get("sidecar_present")))
+    missing_sidecars = apk_paths_total - sidecars
+    missing_manifests_for_apk_paths = sum(1 for row in artifact_rows if not bool(row.get("manifest_present")))
+    symlink_targets_inside_canonical_store = sum(
+        1 for row in artifact_rows if bool(row.get("symlink_target_inside_canonical_store"))
+    )
+    symlink_targets_outside_canonical_store = sum(
+        1
+        for row in artifact_rows
+        if bool(row.get("is_symlink")) and not bool(row.get("symlink_target_inside_canonical_store"))
+    )
+
+    gate_fail_reasons: list[str] = []
+    if apk_paths_total <= 0:
+        gate_fail_reasons.append("no_apk_paths_found")
+    if regular_apk_files != 0:
+        gate_fail_reasons.append("regular_apk_files_present")
+    if symlink_apk_files != apk_paths_total:
+        gate_fail_reasons.append("symlink_apk_files_do_not_cover_all_apk_paths")
+    if missing_sidecars != 0:
+        gate_fail_reasons.append("missing_sidecars")
+    if missing_manifests_for_apk_paths != 0:
+        gate_fail_reasons.append("missing_manifests_for_apk_paths")
+    if observed_with_canonical_store_path != observed_artifacts:
+        gate_fail_reasons.append("observed_artifacts_missing_canonical_store_path")
+    if observed_with_local_artifact_path != observed_artifacts:
+        gate_fail_reasons.append("observed_artifacts_missing_local_artifact_path")
+    if canonical_blobs_missing != 0:
+        gate_fail_reasons.append("canonical_blobs_missing")
+    if symlink_targets_outside_canonical_store != 0:
+        gate_fail_reasons.append("symlink_targets_outside_canonical_store")
+    if local_artifact_path_points_to_session_path != observed_artifacts:
+        gate_fail_reasons.append("observed_local_artifact_paths_not_pointing_to_session")
+
+    summary = {
+        "session_label": session_dir.name,
+        "device_serial": _session_device_serial(session_dir),
+        "run_dir": session_dir.as_posix(),
+        "package_manifests": package_manifests,
+        "package_manifests_with_observed_artifacts": package_manifests_with_observed_artifacts,
+        "package_manifests_policy_or_empty": package_manifests_policy_or_empty,
+        "observed_artifacts": observed_artifacts,
+        "apk_paths_total": apk_paths_total,
+        "regular_apk_files": regular_apk_files,
+        "symlink_apk_files": symlink_apk_files,
+        "sidecars": sidecars,
+        "missing_sidecars": missing_sidecars,
+        "missing_manifests_for_apk_paths": missing_manifests_for_apk_paths,
+        "observed_with_canonical_store_path": observed_with_canonical_store_path,
+        "observed_with_local_artifact_path": observed_with_local_artifact_path,
+        "canonical_blobs_present": canonical_blobs_present,
+        "canonical_blobs_missing": canonical_blobs_missing,
+        "symlink_targets_inside_canonical_store": symlink_targets_inside_canonical_store,
+        "symlink_targets_outside_canonical_store": symlink_targets_outside_canonical_store,
+        "local_artifact_path_points_to_session_path": local_artifact_path_points_to_session_path,
+        "gate_pass": not gate_fail_reasons,
+        "gate_fail_reasons": gate_fail_reasons,
+    }
+    return {
+        "schema_version": "thin_session_gate_v1",
+        "mode": "read_only",
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "data_root": resolved_data_root.as_posix(),
+        "repo_root": repo_root.as_posix(),
+        "device_apks_root": device_root.as_posix(),
+        "canonical_store_root": canonical_root.as_posix(),
+        "selection": {
+            "requested_session_label": _text_or_none(session_label),
+            "latest_session": bool(latest_session),
+        },
+        "summary": summary,
+        "artifact_rows": artifact_rows,
+        "manifest_rows": manifest_rows,
+    }
+
+
 def build_blocked_sidecar_report(
     *,
     core_q: Any,
@@ -358,6 +538,27 @@ def write_blocked_sidecar_report(
     csv_path = resolved_out_dir / f"storage_pressure_blocked_sidecars_{resolved_stamp}.csv"
     atomic_write_text(json_path, json.dumps(json_ready(report), indent=2, sort_keys=True) + "\n")
     _write_blocked_sidecar_csv(csv_path, report)
+    return json_path, csv_path
+
+
+def write_thin_session_gate_report(
+    report: Mapping[str, Any],
+    *,
+    out_dir: Path | None = None,
+    stamp: str | None = None,
+) -> tuple[Path, Path]:
+    resolved_out_dir = (out_dir or default_output_root()).resolve()
+    resolved_out_dir.mkdir(parents=True, exist_ok=True)
+    resolved_stamp = stamp or audit_stamp()
+    summary = report.get("summary") if isinstance(report, Mapping) else {}
+    session_label = _safe_filename_fragment(
+        _text_or_none(summary.get("session_label") if isinstance(summary, Mapping) else None) or "unknown"
+    )
+
+    json_path = resolved_out_dir / f"thin_session_gate_{session_label}_{resolved_stamp}.json"
+    csv_path = resolved_out_dir / f"thin_session_gate_artifacts_{session_label}_{resolved_stamp}.csv"
+    atomic_write_text(json_path, json.dumps(json_ready(report), indent=2, sort_keys=True) + "\n")
+    _write_thin_session_gate_csv(csv_path, report)
     return json_path, csv_path
 
 
@@ -737,6 +938,90 @@ def _classify_session_apk(
     )
 
 
+def _resolve_selected_session_dir(
+    *,
+    device_root: Path,
+    session_label: str | None,
+    latest_session: bool,
+) -> Path:
+    session_dirs = _iter_session_run_dirs(device_root)
+    if not session_dirs:
+        raise ValueError(f"No harvest session directories found under {device_root}")
+    if latest_session:
+        return max(session_dirs, key=_session_dir_sort_key)
+    requested = _text_or_none(session_label)
+    if requested:
+        matches = [path for path in session_dirs if path.name == requested]
+        if not matches:
+            raise ValueError(f"Harvest session {requested!r} was not found under {device_root}")
+        if len(matches) > 1:
+            joined = ", ".join(path.as_posix() for path in matches)
+            raise ValueError(f"Harvest session {requested!r} is ambiguous: {joined}")
+        return matches[0]
+    return max(session_dirs, key=_session_dir_sort_key)
+
+
+def _iter_session_run_dirs(device_root: Path) -> list[Path]:
+    if not device_root.exists():
+        return []
+    return sorted(
+        (path for path in device_root.glob("*/runs/*") if path.is_dir()),
+        key=lambda item: item.as_posix(),
+    )
+
+
+def _session_dir_sort_key(path: Path) -> tuple[int, str]:
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    return (mtime, path.as_posix())
+
+
+def _session_device_serial(session_dir: Path) -> str | None:
+    try:
+        return _text_or_none(session_dir.parent.parent.name)
+    except Exception:
+        return None
+
+
+def _iter_session_apk_paths(session_dir: Path) -> list[Path]:
+    rows: list[Path] = []
+    if not session_dir.exists():
+        return rows
+    for apk_path in sorted(session_dir.rglob("*.apk")):
+        if not apk_path.is_file() and not apk_path.is_symlink():
+            continue
+        rows.append(apk_path)
+    return rows
+
+
+def _build_session_gate_artifact_row(
+    *,
+    apk_path: Path,
+    device_root: Path,
+    canonical_root: Path,
+) -> dict[str, Any]:
+    sidecar_path = apk_path.with_suffix(".apk.meta.json")
+    sidecar = _load_json(sidecar_path)
+    manifest_path = apk_path.parent / "harvest_package_manifest.json"
+    is_symlink = apk_path.is_symlink()
+    symlink_target = _read_symlink_target(apk_path) if is_symlink else None
+    return {
+        "local_rel_path": _safe_relative(apk_path, device_root),
+        "absolute_path": _lexical_absolute_path(apk_path).as_posix(),
+        "manifest_present": manifest_path.exists(),
+        "sidecar_present": sidecar is not None,
+        "is_symlink": is_symlink,
+        "symlink_target": symlink_target.as_posix() if symlink_target else None,
+        "symlink_target_inside_canonical_store": bool(
+            symlink_target and _path_within_root(symlink_target, canonical_root)
+        ),
+        "sidecar_canonical_store_path": _text_or_none(sidecar.get("canonical_store_path")) if sidecar else None,
+        "sidecar_local_path": _text_or_none(sidecar.get("local_path")) if sidecar else None,
+    }
+
+
 def _build_db_lineage_rows(
     *,
     db_artifact_rows: Iterable[Mapping[str, Any]],
@@ -965,6 +1250,31 @@ def _write_blocked_sidecar_csv(path: Path, report: Mapping[str, Any]) -> None:
     atomic_write_text(path, buffer.getvalue())
 
 
+def _write_thin_session_gate_csv(path: Path, report: Mapping[str, Any]) -> None:
+    rows = report.get("artifact_rows", [])
+    if not isinstance(rows, list):
+        rows = []
+    fieldnames = [
+        "local_rel_path",
+        "absolute_path",
+        "manifest_present",
+        "sidecar_present",
+        "is_symlink",
+        "symlink_target",
+        "symlink_target_inside_canonical_store",
+        "sidecar_canonical_store_path",
+        "sidecar_local_path",
+    ]
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        writer.writerow({name: row.get(name) for name in fieldnames})
+    atomic_write_text(path, buffer.getvalue())
+
+
 def _build_db_sha_index(db_artifact_rows: Iterable[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     index: dict[str, list[dict[str, Any]]] = {}
     for row in db_artifact_rows:
@@ -1125,6 +1435,18 @@ def _manifest_package_value(manifest: Mapping[str, Any] | None, key: str) -> str
     return _text_or_none(package_block.get(key))
 
 
+def _manifest_observed_artifacts(manifest: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    if not isinstance(manifest, Mapping):
+        return []
+    execution = manifest.get("execution")
+    if not isinstance(execution, Mapping):
+        return []
+    observed = execution.get("observed_artifacts")
+    if not isinstance(observed, list):
+        return []
+    return [entry for entry in observed if isinstance(entry, Mapping)]
+
+
 def _session_label_from_rel(local_rel_path: str | None) -> str | None:
     if not local_rel_path:
         return None
@@ -1236,6 +1558,26 @@ def _resolve_canonical_path(
     return None
 
 
+def _resolve_declared_path(*, repo_root: Path, rel_or_abs: str) -> Path | None:
+    text = _text_or_none(rel_or_abs)
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    if candidate.is_absolute():
+        return _lexical_absolute_path(candidate)
+    return _lexical_absolute_path(repo_root / candidate)
+
+
+def _resolve_local_artifact_path(*, device_root: Path, local_artifact_path: str) -> Path | None:
+    text = _text_or_none(local_artifact_path)
+    if not text:
+        return None
+    candidate = Path(local_artifact_path).expanduser()
+    if candidate.is_absolute():
+        return _lexical_absolute_path(candidate)
+    return _lexical_absolute_path(device_root / candidate)
+
+
 def _resolve_db_recorded_path(*, data_root: str | None, local_rel_path: str | None) -> Path | None:
     if not local_rel_path:
         return None
@@ -1245,6 +1587,31 @@ def _resolve_db_recorded_path(*, data_root: str | None, local_rel_path: str | No
     if data_root:
         return Path(data_root).expanduser() / candidate
     return None
+
+
+def _lexical_absolute_path(path: Path) -> Path:
+    return Path(os.path.normpath(os.path.abspath(path.expanduser().as_posix())))
+
+
+def _path_within_root(path: Path, root: Path) -> bool:
+    try:
+        _lexical_absolute_path(path).relative_to(_lexical_absolute_path(root))
+        return True
+    except Exception:
+        return False
+
+
+def _read_symlink_target(path: Path) -> Path | None:
+    if not path.is_symlink():
+        return None
+    try:
+        raw_target = os.readlink(path)
+    except OSError:
+        return None
+    target = Path(raw_target)
+    if not target.is_absolute():
+        target = path.parent / target
+    return _lexical_absolute_path(target)
 
 
 def _safe_relative(path: Path, root: Path) -> str:
@@ -1260,6 +1627,12 @@ def _safe_relative(path: Path, root: Path) -> str:
 def _text_or_none(value: object) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _safe_filename_fragment(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in str(value or "").strip())
+    cleaned = cleaned.strip("-.")
+    return cleaned or "unknown"
 
 
 def _norm_sha(value: object) -> str | None:
@@ -1308,9 +1681,12 @@ __all__ = [
     "audit_stamp",
     "build_blocked_sidecar_report",
     "build_storage_pressure_audit",
+    "build_thin_session_gate_report",
     "default_output_root",
     "generate_storage_pressure_audit",
+    "generate_thin_session_gate_report",
     "json_ready",
     "write_blocked_sidecar_report",
+    "write_thin_session_gate_report",
     "write_storage_pressure_audit",
 ]

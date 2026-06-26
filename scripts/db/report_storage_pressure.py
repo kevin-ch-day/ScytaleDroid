@@ -54,12 +54,68 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also build and write a focused report for blocked_missing_sidecar session APKs.",
     )
+    parser.add_argument(
+        "--session-label",
+        help="Resolve and audit one harvest session under data/device_apks/<serial>/runs/<session_label>.",
+    )
+    parser.add_argument(
+        "--latest-session",
+        action="store_true",
+        help="Select the newest harvest session directory deterministically for thin-session gate checks.",
+    )
+    parser.add_argument(
+        "--thin-session-gate",
+        action="store_true",
+        help="Run the read-only session-scoped thin-session rollout gate instead of the global DB-backed pressure audit.",
+    )
     args = parser.parse_args(argv)
+
+    try:
+        from scytaledroid.DeviceAnalysis.services import storage_pressure
+    except ImportError as exc:
+        sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
+        return 2
+
+    if args.thin_session_gate:
+        if args.session_label and args.latest_session:
+            sys.stderr.write("--session-label and --latest-session are mutually exclusive.\n")
+            return 2
+        try:
+            report, json_path, csv_path = storage_pressure.generate_thin_session_gate_report(
+                data_root=args.data_root,
+                out_dir=args.out_dir,
+                stamp=args.stamp,
+                session_label=args.session_label,
+                latest_session=bool(args.latest_session),
+            )
+        except ValueError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+
+        if args.stdout_json:
+            payload = {
+                "schema_version": report.get("schema_version"),
+                "mode": report.get("mode"),
+                "generated_at_utc": report.get("generated_at_utc"),
+                "data_root": report.get("data_root"),
+                "repo_root": report.get("repo_root"),
+                "device_apks_root": report.get("device_apks_root"),
+                "canonical_store_root": report.get("canonical_store_root"),
+                "selection": report.get("selection"),
+                "summary": report.get("summary"),
+            }
+            print(json.dumps(storage_pressure.json_ready(payload), indent=2, sort_keys=True))
+            return 0
+        if args.summary_json:
+            print(json.dumps(storage_pressure.json_ready(report.get("summary", {})), indent=2, sort_keys=True))
+            return 0
+
+        _print_thin_session_gate_text(report, json_path=json_path, csv_path=csv_path)
+        return 0
 
     try:
         from scytaledroid.Database.db_core import db_config
         from scytaledroid.Database.db_core import db_queries as core_q
-        from scytaledroid.DeviceAnalysis.services import storage_pressure
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 2
@@ -108,6 +164,48 @@ def main(argv: list[str] | None = None) -> int:
         blocked_csv_path=blocked_csv_path,
     )
     return 0
+
+
+def _print_thin_session_gate_text(
+    report: dict[str, object],
+    *,
+    json_path: Path,
+    csv_path: Path,
+) -> None:
+    summary = dict(report.get("summary") or {})
+    print("=== Thin-Session Rollout Gate ===")
+    print(f"Run dir: {summary.get('run_dir')}")
+    print("")
+    lines = [
+        ("Session label", summary.get("session_label")),
+        ("Device serial", summary.get("device_serial")),
+        ("Package manifests", summary.get("package_manifests")),
+        ("Manifests with observed artifacts", summary.get("package_manifests_with_observed_artifacts")),
+        ("Policy/empty manifests", summary.get("package_manifests_policy_or_empty")),
+        ("Observed artifacts", summary.get("observed_artifacts")),
+        ("APK paths total", summary.get("apk_paths_total")),
+        ("Regular APK files", summary.get("regular_apk_files")),
+        ("Symlink APK files", summary.get("symlink_apk_files")),
+        ("Sidecars", summary.get("sidecars")),
+        ("Missing sidecars", summary.get("missing_sidecars")),
+        ("Missing manifests for APK paths", summary.get("missing_manifests_for_apk_paths")),
+        ("Observed with canonical_store_path", summary.get("observed_with_canonical_store_path")),
+        ("Observed with local_artifact_path", summary.get("observed_with_local_artifact_path")),
+        ("Canonical blobs present", summary.get("canonical_blobs_present")),
+        ("Canonical blobs missing", summary.get("canonical_blobs_missing")),
+        ("Symlink targets inside canonical", summary.get("symlink_targets_inside_canonical_store")),
+        ("Symlink targets outside canonical", summary.get("symlink_targets_outside_canonical_store")),
+        ("Observed local paths in session", summary.get("local_artifact_path_points_to_session_path")),
+        ("Gate pass", summary.get("gate_pass")),
+    ]
+    width = max(len(str(label)) for label, _value in lines)
+    for label, value in lines:
+        print(f"{label:<{width}} : {value}")
+    reasons = summary.get("gate_fail_reasons") or []
+    print("Gate fail reasons".ljust(width) + f" : {', '.join(str(item) for item in reasons) if reasons else '—'}")
+    print("")
+    print(f"JSON report: {json_path}")
+    print(f"CSV report : {csv_path}")
 
 
 def _print_text(

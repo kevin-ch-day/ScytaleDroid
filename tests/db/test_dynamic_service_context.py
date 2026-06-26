@@ -324,6 +324,24 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert x_media["service_key"] == "x_media_cdn"
     assert x_media["service_category"] == "content_delivery"
 
+    x_probe = service_context.resolve_service_for_domain(
+        "probe.twitter.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_probe["service_key"] == "x_platform"
+    assert x_probe["role_class"] == "realtime_engagement"
+
+    x_video_s = service_context.resolve_service_for_domain(
+        "video-s.twimg.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_video_s["service_key"] == "x_media_cdn"
+    assert x_video_s["role_class"] == "content_delivery"
+
     x_ads = service_context.resolve_service_for_domain(
         "ads-api.x.com",
         package_name="com.twitter.android",

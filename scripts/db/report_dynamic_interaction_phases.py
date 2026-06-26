@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         build_interaction_timeline_from_run_dir,
         phase_packet_transport_summary,
     )
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
 
     root = _dynamic_root()
     phase_rows: list[dict[str, Any]] = []
@@ -66,6 +68,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
     scripted_runs_with_timeline_but_no_pcap = 0
     scripted_runs_invalid_pcap = 0
     scripted_runs_valid_pcap = 0
+    invalid_pcap_detail_counts: Counter[str] = Counter()
 
     for manifest_path in sorted(root.glob("*/run_manifest.json")):
         run_dir = manifest_path.parent
@@ -91,10 +94,16 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         else:
             pcap_available = bool(pcap_available_raw)
         invalid_reason = str(dataset.get("invalid_reason_code") or "").strip().upper()
+        pcap_size_bytes = int(dataset.get("pcap_size_bytes") or 0)
+        pcap_failure_detail = str(dataset.get("pcap_failure_detail") or "").strip()
+        if not pcap_failure_detail and (not pcap_available or invalid_reason.startswith("PCAP_")):
+            pcap_failure_detail = str(dataset_pcap_failure_detail(run_dir, pcap_size_int=pcap_size_bytes) or "").strip()
         if pcap_available:
             scripted_runs_valid_pcap += 1
         elif invalid_reason.startswith("PCAP_"):
             scripted_runs_invalid_pcap += 1
+            if pcap_failure_detail:
+                invalid_pcap_detail_counts[pcap_failure_detail] += 1
         timeline = _read_json(run_dir / "analysis" / "interaction_timeline.json")
         if not isinstance(timeline, dict):
             timeline = build_interaction_timeline_from_run_dir(run_dir, manifest=manifest)
@@ -133,6 +142,9 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
                     "operator_note": step.get("operator_note"),
                     "notes": step.get("notes"),
                     "timeline_complete": timeline.get("timeline_complete"),
+                    "pcap_available": pcap_available,
+                    "invalid_reason_code": invalid_reason,
+                    "pcap_failure_detail": pcap_failure_detail,
                 }
             )
 
@@ -205,6 +217,9 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "operator_note",
             "notes",
             "timeline_complete",
+            "pcap_available",
+            "invalid_reason_code",
+            "pcap_failure_detail",
         ],
     )
     _write_csv(
@@ -248,6 +263,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         "scripted_runs_with_timeline_but_no_pcap": scripted_runs_with_timeline_but_no_pcap,
         "scripted_runs_invalid_pcap": scripted_runs_invalid_pcap,
         "scripted_runs_valid_pcap": scripted_runs_valid_pcap,
+        "scripted_runs_invalid_pcap_by_detail": dict(sorted(invalid_pcap_detail_counts.items())),
         "output_files": {
             "interaction_phase_summary_csv": str(phase_path.resolve()),
             "phase_packet_transport_summary_csv": str(transport_path.resolve()),

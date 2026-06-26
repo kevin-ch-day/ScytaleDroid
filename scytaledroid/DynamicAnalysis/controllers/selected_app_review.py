@@ -5,6 +5,39 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
+def _next_step_lines(*, valid: bool | None, invalid_reason: str) -> list[str]:
+    reason = str(invalid_reason or "").strip().upper()
+    if valid is True:
+        return [
+            "Next step:",
+            "This review is display-only; no acceptance action is required here.",
+            "Return to the app screen if you want supplemental baseline, scripted, or manual evidence.",
+        ]
+    if valid is False:
+        if reason == "PCAP_MISSING":
+            return [
+                "Next step:",
+                "This review is display-only; the stored run remains excluded from quota/publication use.",
+                "Recollect a current-build run after verifying PCAP capture/export is working.",
+            ]
+        if reason == "PCAP_TOO_SMALL":
+            return [
+                "Next step:",
+                "This review is display-only; the stored run remains excluded from quota/publication use.",
+                "Recollect a longer or higher-signal current-build run before relying on it.",
+            ]
+        return [
+            "Next step:",
+            "This review is display-only; the stored run remains excluded from quota/publication use.",
+            "Collect a replacement current-build run before relying on this app for publication/archive readiness.",
+        ]
+    return [
+        "Next step:",
+        "This review is display-only; no stored QA verdict is available to accept or reject here.",
+        "Use run history and diagnostics to decide whether recollection is needed.",
+    ]
+
+
 def render_selected_app_review(
     *,
     display_label: str,
@@ -32,6 +65,7 @@ def render_selected_app_review(
     else:
         qa_status = "QA unknown"
     invalid_reason = str(getattr(latest_recent, "invalid_reason_code", "") or "—").strip()
+    pcap_failure_detail = str(getattr(latest_recent, "pcap_failure_detail", "") or "").strip()
     rows = [
         ["Run ID", run_id or "—"],
         ["QA status", qa_status],
@@ -39,6 +73,8 @@ def render_selected_app_review(
         ["Ended", str(getattr(latest_recent, "ended_at", None) or "—")],
         ["Invalid reason", invalid_reason or "—"],
     ]
+    if getattr(latest_recent, "valid", None) is False and pcap_failure_detail:
+        rows.append(["PCAP detail", pcap_failure_detail])
     menu_utils.print_table(["Field", "Value"], rows)
     if getattr(latest_recent, "valid", None) is True:
         print(status_messages.status("Latest current-build run is QA valid.", level="success"))
@@ -56,6 +92,9 @@ def render_selected_app_review(
             print_tier1_qa_result(run_id)
         except Exception as exc:
             print(status_messages.status(f"QA detail rendering failed: {exc}", level="warn"))
+    print()
+    for line in _next_step_lines(valid=getattr(latest_recent, "valid", None), invalid_reason=invalid_reason):
+        print(line)
 
 
 def render_selected_app_recent_runs(
@@ -148,6 +187,7 @@ def render_selected_app_diagnostics(
 
 
 __all__ = [
+    "_next_step_lines",
     "render_selected_app_diagnostics",
     "render_selected_app_recent_runs",
     "render_selected_app_review",

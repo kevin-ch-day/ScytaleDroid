@@ -239,6 +239,82 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert b_graph["owner_class"] == "first_party"
     assert b_graph["role_class"] == "social_graph_api"
 
+    x_probe = classify_domain("probe.twitter.com", package_name="com.twitter.android", references=refs)
+    assert x_probe["owner_class"] == "first_party"
+    assert x_probe["role_class"] == "realtime_engagement"
+
+    x_video_s = classify_domain("video-s.twimg.com", package_name="com.twitter.android", references=refs)
+    assert x_video_s["owner_class"] == "first_party"
+    assert x_video_s["role_class"] == "content_delivery"
+
+    firebase_logging = classify_domain(
+        "firebaselogging.googleapis.com",
+        package_name="com.twitter.android",
+        references=refs,
+    )
+    assert firebase_logging["owner_class"] == "third_party"
+    assert firebase_logging["role_class"] == "google_api_platform"
+
+    firebase_remote_config = classify_domain(
+        "firebaseremoteconfig.googleapis.com",
+        package_name="com.twitter.android",
+        references=refs,
+    )
+    assert firebase_remote_config["owner_class"] == "third_party"
+    assert firebase_remote_config["role_class"] == "google_api_platform"
+
+    google_time = classify_domain("time.google.com", package_name="com.twitter.android", references=refs)
+    assert google_time["owner_class"] == "third_party"
+    assert google_time["role_class"] == "google_infrastructure"
+
+    cnn_ngtv = classify_domain("freeview.ngtv.io", package_name="com.cnn.mobile.android.phone", references=refs)
+    assert cnn_ngtv["owner_class"] == "first_party"
+    assert cnn_ngtv["role_class"] == "streaming_delivery"
+
+    cnn_discomax = classify_domain(
+        "default.any-any.prd.api.discomax.com",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_discomax["owner_class"] == "first_party"
+    assert cnn_discomax["role_class"] == "streaming_platform_api"
+
+    cnn_warnermedia = classify_domain(
+        "top.warnermediacdn.com",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_warnermedia["owner_class"] == "first_party"
+    assert cnn_warnermedia["role_class"] == "content_delivery"
+
+    freewheel = classify_domain("bea4.v.fwmrm.net", package_name="com.cnn.mobile.android.phone", references=refs)
+    assert freewheel["owner_class"] == "third_party"
+    assert freewheel["role_class"] == "adtech_video_monetization"
+
+    mux = classify_domain(
+        "out053a3bejgh7t0phqa0csou.litix.io",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert mux["owner_class"] == "third_party"
+    assert mux["role_class"] == "video_analytics_measurement"
+
+    brightline = classify_domain(
+        "cdn-media.brightline.tv",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert brightline["owner_class"] == "third_party"
+    assert brightline["role_class"] == "interactive_ctv_advertising"
+
+    dianomi_worker = classify_domain(
+        "gpp-decoder.dianomi.workers.dev",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert dianomi_worker["owner_class"] == "third_party"
+    assert dianomi_worker["role_class"] == "adtech_monetization"
+
 
 def test_index_dynamic_evidence_pack_to_db_includes_domain_context(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-1"

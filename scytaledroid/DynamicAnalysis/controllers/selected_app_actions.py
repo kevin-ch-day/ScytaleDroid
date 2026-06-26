@@ -213,26 +213,38 @@ def _render_recommended_screen(
 
     print(_summary_phrase(app))
     print()
-    menu_utils.print_section("Recommended")
-    print(
-        _action_line(
-            default_choice,
-            _label(default_choice),
-            is_default=True,
-            disabled=bool(getattr(option_map.get(default_choice), "disabled", False)),
-        )
-    )
-    print(f"Reason: {reason}")
-
-    run_keys = [key for key in ["1", "2", "3", "4"] if key in option_map and key != default_choice]
-    if run_keys:
-        print()
-        menu_utils.print_section("Other run options")
+    run_keys = [key for key in ["1", "2", "3", "4"] if key in option_map]
+    if default_choice in run_keys:
+        menu_utils.print_section("Run Option")
         for key in run_keys:
             option = option_map[key]
-            print(_action_line(key, _label(key), disabled=bool(option.disabled)))
+            print(
+                _action_line(
+                    key,
+                    _label(key),
+                    is_default=(key == default_choice),
+                    disabled=bool(option.disabled),
+                )
+            )
+    else:
+        menu_utils.print_section("Recommended")
+        print(
+            _action_line(
+                default_choice,
+                _label(default_choice),
+                is_default=True,
+                disabled=bool(getattr(option_map.get(default_choice), "disabled", False)),
+            )
+        )
+        print(f"Reason: {reason}")
+        if run_keys:
+            print()
+            menu_utils.print_section("Run Option")
+            for key in run_keys:
+                option = option_map[key]
+                print(_action_line(key, _label(key), disabled=bool(option.disabled)))
 
-    inspect_keys = [key for key in ["A", "H", "G", "R"] if key in option_map and key != default_choice]
+    inspect_keys = [key for key in ["A", "H", "G", "R", "X"] if key in option_map and key != default_choice]
     if inspect_keys:
         print()
         menu_utils.print_section("Review / inspect")
@@ -241,10 +253,6 @@ def _render_recommended_screen(
             print(_action_line(key, _label(key), disabled=bool(option.disabled)))
 
     print()
-    menu_utils.print_section("Danger")
-    if "X" in option_map:
-        option = option_map["X"]
-        print(_action_line("X", _label("X"), disabled=bool(option.disabled)))
     print("0) Back")
 
 

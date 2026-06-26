@@ -38,6 +38,7 @@ class RecentRun:
     messaging_activity: str | None
     valid: bool | None
     invalid_reason_code: str | None
+    pcap_failure_detail: str | None
     low_signal: bool | None
 
 
@@ -113,6 +114,9 @@ def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]
                 valid=valid_norm,
                 invalid_reason_code=(
                     str(r.get("invalid_reason_code")) if r.get("invalid_reason_code") else None
+                ),
+                pcap_failure_detail=(
+                    str(r.get("pcap_failure_detail")) if r.get("pcap_failure_detail") else None
                 ),
                 low_signal=(
                     True
