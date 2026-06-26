@@ -30,6 +30,10 @@ def classify_dataset_readiness(row: dict[str, Any]) -> str:
     harvested = str(row.get("harvested") or "N").upper()
     static_ready = str(row.get("static_ready") or "N").upper()
     dyn_runs = _as_int(row.get("dyn_runs"))
+    valid_runs = _as_int(row.get("valid_runs"))
+    quota_valid_runs = _as_int(row.get("quota_valid_runs"))
+    invalid_runs = _as_int(row.get("invalid_runs"))
+    legacy_unknown_runs = _as_int(row.get("legacy_unknown_runs"))
     analysis_runs = _as_int(row.get("analysis_runs"))
 
     if installed != "Y":
@@ -40,8 +44,16 @@ def classify_dataset_readiness(row: dict[str, Any]) -> str:
         return "NEEDS_STATIC"
     if analysis_runs > 0:
         return "DATASET_READY_ANALYSIS"
+    if quota_valid_runs > 0 or valid_runs > 0:
+        return "CAPTURED_VALID_NOT_IN_ANALYSIS"
+    if invalid_runs > 0 and legacy_unknown_runs > 0:
+        return "INVALID_AND_LEGACY_ONLY"
+    if invalid_runs > 0:
+        return "INVALID_EVIDENCE_ONLY"
+    if legacy_unknown_runs > 0:
+        return "LEGACY_EVIDENCE_ONLY"
     if dyn_runs > 0:
-        return "CAPTURED_NOT_IN_ANALYSIS"
+        return "CAPTURED_UNQUALIFIED_ONLY"
     return "NEEDS_DYNAMIC"
 
 
@@ -91,9 +103,18 @@ def fetch_dataset_readiness_dashboard(
         dyn_counts AS (
           SELECT package_name,
                  COUNT(*) AS total_runs,
-                 SUM(CASE WHEN grade = 'PAPER_GRADE' THEN 1 ELSE 0 END) AS canonical_runs,
-                 MAX(CASE WHEN pcap_valid = 1 THEN 1 ELSE 0 END) AS pcap_valid
-          FROM dynamic_sessions
+                 SUM(CASE WHEN technical_validity_state = 'TECH_VALID' THEN 1 ELSE 0 END) AS valid_runs,
+                 SUM(CASE WHEN quota_state = 'QUOTA_VALID' THEN 1 ELSE 0 END) AS quota_valid_runs,
+                 SUM(CASE WHEN quota_state = 'SUPPLEMENTAL_VALID' THEN 1 ELSE 0 END) AS supplemental_valid_runs,
+                 SUM(CASE WHEN technical_validity_state = 'TECH_INVALID' THEN 1 ELSE 0 END) AS invalid_runs,
+                 SUM(CASE WHEN technical_validity_state = 'TECH_LEGACY_UNKNOWN' THEN 1 ELSE 0 END) AS legacy_unknown_runs,
+                 MAX(
+                   CASE
+                     WHEN technical_validity_state = 'TECH_VALID' AND pcap_valid = 1 THEN 1
+                     ELSE 0
+                   END
+                 ) AS valid_run_has_pcap
+          FROM v_dynamic_run_context_v1
           GROUP BY package_name
         ),
         latest_analysis_cohort AS (
@@ -133,10 +154,14 @@ def fetch_dataset_readiness_dashboard(
           r.harvested_at,
           CASE WHEN s.static_run_id IS NULL THEN 'N' ELSE 'Y' END AS static_ready,
           COALESCE(d.total_runs, 0) AS dyn_runs,
-          COALESCE(d.canonical_runs, 0) AS canonical_runs,
+          COALESCE(d.valid_runs, 0) AS valid_runs,
+          COALESCE(d.quota_valid_runs, 0) AS quota_valid_runs,
+          COALESCE(d.supplemental_valid_runs, 0) AS supplemental_valid_runs,
+          COALESCE(d.invalid_runs, 0) AS invalid_runs,
+          COALESCE(d.legacy_unknown_runs, 0) AS legacy_unknown_runs,
           CASE
-            WHEN d.pcap_valid IS NULL THEN 'N/A'
-            WHEN d.pcap_valid = 1 THEN 'Y'
+            WHEN COALESCE(d.valid_runs, 0) = 0 THEN 'N/A'
+            WHEN d.valid_run_has_pcap = 1 THEN 'Y'
             ELSE 'N'
           END AS pcap_valid,
           COALESCE(al.analysis_runs, 0) AS analysis_runs,
@@ -189,9 +214,18 @@ def fetch_dataset_readiness_dashboard(
         dyn_counts AS (
           SELECT package_name,
                  COUNT(*) AS total_runs,
-                 SUM(CASE WHEN grade = 'PAPER_GRADE' THEN 1 ELSE 0 END) AS canonical_runs,
-                 MAX(CASE WHEN pcap_valid = 1 THEN 1 ELSE 0 END) AS pcap_valid
-          FROM dynamic_sessions
+                 SUM(CASE WHEN technical_validity_state = 'TECH_VALID' THEN 1 ELSE 0 END) AS valid_runs,
+                 SUM(CASE WHEN quota_state = 'QUOTA_VALID' THEN 1 ELSE 0 END) AS quota_valid_runs,
+                 SUM(CASE WHEN quota_state = 'SUPPLEMENTAL_VALID' THEN 1 ELSE 0 END) AS supplemental_valid_runs,
+                 SUM(CASE WHEN technical_validity_state = 'TECH_INVALID' THEN 1 ELSE 0 END) AS invalid_runs,
+                 SUM(CASE WHEN technical_validity_state = 'TECH_LEGACY_UNKNOWN' THEN 1 ELSE 0 END) AS legacy_unknown_runs,
+                 MAX(
+                   CASE
+                     WHEN technical_validity_state = 'TECH_VALID' AND pcap_valid = 1 THEN 1
+                     ELSE 0
+                   END
+                 ) AS valid_run_has_pcap
+          FROM v_dynamic_run_context_v1
           GROUP BY package_name
         ),
         latest_analysis_cohort AS (
@@ -231,10 +265,14 @@ def fetch_dataset_readiness_dashboard(
           r.harvested_at,
           CASE WHEN s.static_run_id IS NULL THEN 'N' ELSE 'Y' END AS static_ready,
           COALESCE(d.total_runs, 0) AS dyn_runs,
-          COALESCE(d.canonical_runs, 0) AS canonical_runs,
+          COALESCE(d.valid_runs, 0) AS valid_runs,
+          COALESCE(d.quota_valid_runs, 0) AS quota_valid_runs,
+          COALESCE(d.supplemental_valid_runs, 0) AS supplemental_valid_runs,
+          COALESCE(d.invalid_runs, 0) AS invalid_runs,
+          COALESCE(d.legacy_unknown_runs, 0) AS legacy_unknown_runs,
           CASE
-            WHEN d.pcap_valid IS NULL THEN 'N/A'
-            WHEN d.pcap_valid = 1 THEN 'Y'
+            WHEN COALESCE(d.valid_runs, 0) = 0 THEN 'N/A'
+            WHEN d.valid_run_has_pcap = 1 THEN 'Y'
             ELSE 'N'
           END AS pcap_valid,
           COALESCE(al.analysis_runs, 0) AS analysis_runs,
@@ -274,7 +312,13 @@ def fetch_dataset_readiness_dashboard(
     for row in rows:
         normalized = dict(row)
         normalized["dyn_runs"] = _as_int(row.get("dyn_runs"))
-        normalized["canonical_runs"] = _as_int(row.get("canonical_runs"))
+        normalized["valid_runs"] = _as_int(row.get("valid_runs"))
+        normalized["quota_valid_runs"] = _as_int(row.get("quota_valid_runs"))
+        # Compatibility alias for older reporting callers; quota_valid_runs is authoritative.
+        normalized["canonical_runs"] = normalized["quota_valid_runs"]
+        normalized["supplemental_valid_runs"] = _as_int(row.get("supplemental_valid_runs"))
+        normalized["invalid_runs"] = _as_int(row.get("invalid_runs"))
+        normalized["legacy_unknown_runs"] = _as_int(row.get("legacy_unknown_runs"))
         normalized["analysis_runs"] = _as_int(row.get("analysis_runs"))
         normalized["analysis_baseline_runs"] = _as_int(row.get("analysis_baseline_runs"))
         normalized["analysis_interactive_runs"] = _as_int(row.get("analysis_interactive_runs"))

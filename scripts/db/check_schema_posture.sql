@@ -31,6 +31,7 @@ FROM (
   UNION ALL SELECT 'v_static_run_category_summary'
   UNION ALL SELECT 'v_runtime_dynamic_cohort_status_v1'
   UNION ALL SELECT 'v_paper_dynamic_cohort_v1'
+  UNION ALL SELECT 'v_dynamic_run_context_v1'
   UNION ALL SELECT 'v_run_overview'
   UNION ALL SELECT 'v_run_identity'
   UNION ALL SELECT 'v_static_handoff_v1'

@@ -17,6 +17,10 @@ def test_dynamic_run_context_view_normalizes_effective_runtime_fields() -> None:
     sql = _manifest_sql()
     expected_static_expr = resolved_dynamic_session_static_run_id("ds")
 
+    assert "ds.grade" in sql
+    assert "technical_validity_state" in sql
+    assert "quota_state" in sql
+    assert "cohort_eligibility_state" in sql
     assert "effective_run_profile" in sql
     assert "COALESCE(ds.operator_run_profile, nf.run_profile, ds.profile_key, 'unknown') AS effective_run_profile" in sql
     assert (
@@ -37,6 +41,8 @@ def test_dynamic_run_context_view_exposes_domain_service_signal_rollups() -> Non
     assert "LEFT JOIN dynamic_service_catalog svc" in sql
     assert "LEFT JOIN dynamic_service_signal_map ssm" in sql
     assert "LEFT JOIN dynamic_signal_catalog sig" in sql
+    assert "COUNT(DISTINCT obs.observation_id) AS domain_observation_rows" in sql
+    assert "COUNT(DISTINCT obs.observation_id" in sql
     assert "COUNT(DISTINCT svc.service_id) AS matched_service_count" in sql
     assert "COUNT(DISTINCT sig.signal_id) AS matched_signal_count" in sql
     assert "service_keys_csv" in sql

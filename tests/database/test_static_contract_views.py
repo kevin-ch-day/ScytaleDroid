@@ -101,6 +101,12 @@ def test_web_static_dynamic_summary_reads_explicit_latest_static_surfaces() -> N
     assert "vw_static_finding_surfaces_latest" in sql
     assert "from permission_audit_apps" not in sql
     assert "from static_findings_summary" not in sql
+    assert "from v_dynamic_run_context_v1" in sql
+    assert "from dynamic_sessions ds1" not in sql
+    assert "from dynamic_sessions dsf1" not in sql
+    assert "dynamic_technical_validity_state" in sql
+    assert "dynamic_quota_state" in sql
+    assert "dynamic_cohort_eligibility_state" in sql
 
 
 def test_web_app_findings_joins_evidence_payload_store() -> None:

@@ -286,8 +286,8 @@ def run_health_summary() -> None:
         f"{analysis.dynamic_runs_missing_features if analysis.dynamic_runs_missing_features is not None else '—'}"
     )
     print(
-        "countable_missing_feat : "
-        f"{analysis.countable_runs_missing_features if analysis.countable_runs_missing_features is not None else '—'}"
+        "quota_valid_missing  : "
+        f"{analysis.quota_valid_runs_missing_features if analysis.quota_valid_runs_missing_features is not None else '—'}"
     )
     print(
         "feature_recency_pkgs   : "
@@ -1114,4 +1114,3 @@ __all__ = [
     "prompt_recompute_network_signal_quality",
     "prompt_reset_static_data",
 ]
-

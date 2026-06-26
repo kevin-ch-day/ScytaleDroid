@@ -35,6 +35,7 @@ def test_recreate_web_consumer_views_layer_web_dry_run() -> None:
         timeout=60,
     )
     assert proc.returncode == 0
+    assert "v_dynamic_run_context_v1" in proc.stdout
     assert "v_web_app_directory" in proc.stdout
     assert "DDL order (web," in proc.stdout
 
@@ -46,6 +47,7 @@ def test_check_schema_posture_sql_exists() -> None:
     assert "information_schema.TABLES" in body
     assert "REGEXP '^v_.*'" in body
     assert "analysis_dynamic_cohort_status" in body
+    assert "v_dynamic_run_context_v1" in body
     assert "non_utf8mb4_non_hash_text_column" in body
     assert "COLUMN_NAME LIKE '%sha256'" in body
 
@@ -55,3 +57,16 @@ def test_smoke_shell_script_readable() -> None:
     assert shell.exists()
     text = shell.read_text(encoding="utf-8")
     assert "sd_web_db_smoke.php" in text
+
+
+def test_web_smoke_script_exercises_app_detail_static_and_dynamic_reads() -> None:
+    smoke = Path("/var/www/html/ScytaleDroid-Web/scripts/sd_web_db_smoke.php")
+    assert smoke.exists()
+    text = smoke.read_text(encoding="utf-8")
+    assert "app_overview" in text
+    assert "app_sessions" in text
+    assert "app_findings_summary" in text
+    assert "app_dynamic_summary" in text
+    assert "app_dynamic_runs" in text
+    assert "dynamic_run_detail" in text
+    assert "static_dynamic_summary_probe" in text

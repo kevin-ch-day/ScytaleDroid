@@ -29,3 +29,25 @@ def compact_regime(value: object) -> str:
     for source, target in replacements.items():
         text = text.replace(source, target)
     return text.replace(" + ", "+")
+
+
+def compact_runtime_state(technical_state: object, quota_state: object) -> str:
+    tech = {
+        "TECH_VALID": "valid",
+        "TECH_INVALID": "invalid",
+        "TECH_LEGACY_UNKNOWN": "legacy",
+        "": "—",
+    }.get(str(technical_state or "").strip().upper(), str(technical_state or "—") or "—")
+    quota = {
+        "QUOTA_VALID": "quota",
+        "SUPPLEMENTAL_VALID": "supp",
+        "QUOTA_INELIGIBLE": "inelig",
+        "VALID_COUNTING_UNKNOWN": "count-?",
+        "QUOTA_LEGACY_UNKNOWN": "legacy",
+        "": "—",
+    }.get(str(quota_state or "").strip().upper(), str(quota_state or "—") or "—")
+    if tech == "—" and quota == "—":
+        return "—"
+    if quota == "—":
+        return tech
+    return f"{tech}/{quota}"

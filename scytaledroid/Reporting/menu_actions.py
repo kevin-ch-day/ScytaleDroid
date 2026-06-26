@@ -22,7 +22,7 @@ from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
 )
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
-from .menu_actions_cross_analysis_helpers import compact_gap, compact_regime
+from .menu_actions_cross_analysis_helpers import compact_gap, compact_regime, compact_runtime_state
 
 
 def _choose_reporting_research_cohort() -> dict[str, object]:
@@ -121,7 +121,7 @@ def handle_dataset_readiness_dashboard() -> None:
         "Repo Ver",
         "Static",
         "Dyn Runs",
-        "PaperGrade",
+        "Quota valid",
         "Analysis",
         "PCAP",
         "Status",
@@ -138,7 +138,7 @@ def handle_dataset_readiness_dashboard() -> None:
                 str(row.get("repo_version") or "—"),
                 str(row.get("static_ready") or "N"),
                 str(row.get("dyn_runs") or 0),
-                str(row.get("canonical_runs") or 0),
+                str(row.get("quota_valid_runs") or 0),
                 str(row.get("analysis_runs") or 0),
                 str(row.get("pcap_valid") or "N/A"),
                 str(row.get("status") or "UNKNOWN"),
@@ -185,7 +185,7 @@ def handle_cross_analysis_summary() -> None:
     headers = [
         "App",
         "Perm",
-        "Dyn",
+        "Runtime",
         "Gap",
         "Regime",
     ]
@@ -195,7 +195,10 @@ def handle_cross_analysis_summary() -> None:
             [
                 str(row.get("app_label") or "—"),
                 str(row.get("permission_audit_grade") or "—"),
-                str(row.get("dynamic_feature_state") or "—"),
+                compact_runtime_state(
+                    row.get("dynamic_technical_validity_state"),
+                    row.get("dynamic_quota_state"),
+                ),
                 compact_gap(row.get("dynamic_feature_recency_state")),
                 compact_regime(row.get("regime_final_label")),
             ]
@@ -217,7 +220,12 @@ def handle_cross_analysis_summary() -> None:
         )
         print(
             "  "
-            f"feature={str(row.get('dynamic_feature_state') or '—')} "
+            f"runtime={compact_runtime_state(row.get('dynamic_technical_validity_state'), row.get('dynamic_quota_state'))} "
+            f"cohort={str(row.get('dynamic_cohort_eligibility_state') or '—')} "
+            f"feature={str(row.get('dynamic_feature_state') or '—')}"
+        )
+        print(
+            "  "
             f"gap={str(row.get('dynamic_feature_recency_state') or '—')} "
             f"summary={str(row.get('summary_state') or '—')}"
         )
@@ -810,11 +818,14 @@ def fetch_tier1_status() -> dict[str, object]:
         "pcap_total_runs": 0,
         # DB tracking state (some workflows are evidence-pack-first).
         "db_dynamic_sessions_total": 0,
-        "db_dynamic_sessions_dataset": 0,
+        "db_dynamic_sessions_dataset_tier": 0,
+        "db_dynamic_sessions_dataset": 0,  # compatibility alias
         # Evidence-pack-derived counts (DB-free; aligns with research baseline contract).
         "evidence_packs_total": 0,
-        "evidence_dataset_packs": 0,
-        "evidence_dataset_valid": 0,
+        "evidence_quota_eligible_packs": 0,
+        "evidence_quota_valid_packs": 0,
+        "evidence_dataset_packs": 0,  # compatibility alias
+        "evidence_dataset_valid": 0,  # compatibility alias
         # Export-derived health signals (post-export).
         "feature_health_status": None,
         "feature_health_at": None,
@@ -849,8 +860,10 @@ def fetch_tier1_status() -> dict[str, object]:
             dictionary=True,
         )
         if row:
-            status["db_dynamic_sessions_dataset"] = int(row.get("cnt") or 0)
+            status["db_dynamic_sessions_dataset_tier"] = int(row.get("cnt") or 0)
+            status["db_dynamic_sessions_dataset"] = status["db_dynamic_sessions_dataset_tier"]
     except Exception:
+        status["db_dynamic_sessions_dataset_tier"] = 0
         status["db_dynamic_sessions_dataset"] = 0
 
     try:
@@ -902,7 +915,7 @@ def fetch_tier1_status() -> dict[str, object]:
         from pathlib import Path
 
         root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-        total = dataset_total = dataset_valid = 0
+        total = quota_eligible_total = quota_valid_total = 0
         if root.exists():
             for mf in root.glob("*/run_manifest.json"):
                 total += 1
@@ -918,14 +931,18 @@ def fetch_tier1_status() -> dict[str, object]:
                     continue
                 if ds.get("countable") is False:
                     continue
-                dataset_total += 1
+                quota_eligible_total += 1
                 if ds.get("valid_dataset_run") is True:
-                    dataset_valid += 1
+                    quota_valid_total += 1
         status["evidence_packs_total"] = total
-        status["evidence_dataset_packs"] = dataset_total
-        status["evidence_dataset_valid"] = dataset_valid
+        status["evidence_quota_eligible_packs"] = quota_eligible_total
+        status["evidence_quota_valid_packs"] = quota_valid_total
+        status["evidence_dataset_packs"] = quota_eligible_total
+        status["evidence_dataset_valid"] = quota_valid_total
     except Exception:
         status["evidence_packs_total"] = 0
+        status["evidence_quota_eligible_packs"] = 0
+        status["evidence_quota_valid_packs"] = 0
         status["evidence_dataset_packs"] = 0
         status["evidence_dataset_valid"] = 0
 

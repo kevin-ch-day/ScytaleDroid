@@ -49,7 +49,7 @@ def test_fetch_analysis_integrity_summary_includes_dynamic_retention_counts(monk
             return 37
         if "WHERE nf.dynamic_run_id IS NULL" in sql and "COALESCE(ds.countable, 0) = 1" not in sql:
             return 103
-        if "COALESCE(ds.countable, 0) = 1" in sql:
+        if "FROM v_dynamic_run_context_v1 ctx" in sql and "ctx.quota_state = 'QUOTA_VALID'" in sql:
             return 95
         if "FROM web_static_dynamic_app_summary_cache" in sql and "dynamic_feature_recency_state = 'latest_run_has_features'" in sql:
             return 1
@@ -107,6 +107,7 @@ def test_fetch_analysis_integrity_summary_includes_dynamic_retention_counts(monk
     assert summary.dynamic_runs == 140
     assert summary.dynamic_feature_rows == 37
     assert summary.dynamic_runs_missing_features == 103
+    assert summary.quota_valid_runs_missing_features == 95
     assert summary.countable_runs_missing_features == 95
     assert summary.packages_latest_run_has_features == 1
     assert summary.packages_latest_run_missing_features_older_features_exist == 12

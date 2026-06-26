@@ -103,53 +103,51 @@ LEFT JOIN (
 CREATE_V_WEB_RUNTIME_RUN_INDEX = """
 CREATE OR REPLACE VIEW v_web_runtime_run_index AS
 SELECT
-  ds.dynamic_run_id,
-  ds.package_name,
-  COALESCE(NULLIF(a.display_name, ''), ds.package_name) AS app_label,
-  ds.status,
-  ds.tier,
-  COALESCE(ds.operator_run_profile, nf.run_profile, ds.profile_key, 'unknown') AS run_profile,
-  COALESCE(ds.operator_interaction_level, nf.interaction_level, 'unknown') AS interaction_level,
-  ds.started_at_utc,
-  ds.ended_at_utc,
-  ds.duration_seconds,
-  ds.grade,
-  ds.countable,
-  ds.valid_dataset_run,
-  ds.invalid_reason_code,
-  ds.pcap_valid,
-  ds.pcap_bytes,
-  ds.network_signal_quality,
-  nf.feature_schema_version,
-  nf.packet_count,
-  nf.bytes_per_sec,
-  nf.packets_per_sec,
-  nf.low_signal,
+  ctx.dynamic_run_id,
+  ctx.package_name,
+  ctx.app_label,
+  ctx.workflow_status AS status,
+  ctx.tier,
+  ctx.effective_run_profile AS run_profile,
+  ctx.effective_interaction_level AS interaction_level,
+  ctx.started_at_utc,
+  ctx.ended_at_utc,
+  ctx.duration_seconds,
+  ctx.grade,
+  ctx.countable,
+  ctx.valid_dataset_run,
+  ctx.invalid_reason_code,
+  ctx.technical_validity_state,
+  ctx.quota_state,
+  ctx.cohort_eligibility_state,
+  ctx.cohort_status,
+  ctx.cohort_reason_code,
+  ctx.pcap_valid,
+  ctx.pcap_bytes,
+  ctx.network_signal_quality,
+  ctx.feature_schema_version,
+  ctx.packet_count,
+  ctx.bytes_per_sec,
+  ctx.packets_per_sec,
+  ctx.low_signal,
   COALESCE(issues.issue_count, 0) AS issue_count,
   latest_regime.static_grade,
   latest_regime.dynamic_grade_if,
   latest_regime.dynamic_score_if,
   latest_regime.final_regime_if,
-  CASE WHEN nf.dynamic_run_id IS NULL THEN 'missing_features' ELSE 'features_available' END AS feature_state,
   CASE
-    WHEN {resolved_dynamic_static_run_id} IS NULL THEN 'missing_static_run_id'
-    WHEN sar.id IS NULL THEN 'dangling_static_run_id'
-    ELSE 'static_linked'
-  END AS static_link_state
-FROM dynamic_sessions ds
-LEFT JOIN apps a
-  ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
-     CONVERT(ds.package_name USING utf8mb4) COLLATE utf8mb4_general_ci
-LEFT JOIN dynamic_network_features nf
-  ON nf.dynamic_run_id = ds.dynamic_run_id
-LEFT JOIN static_analysis_runs sar
-  ON sar.id = {resolved_dynamic_static_run_id}
+    WHEN COALESCE(NULLIF(TRIM(COALESCE(ctx.feature_schema_version, '')), ''), '') = ''
+      THEN 'missing_features'
+    ELSE 'features_available'
+  END AS feature_state,
+  ctx.static_link_state
+FROM v_dynamic_run_context_v1 ctx
 LEFT JOIN (
   SELECT dynamic_run_id, COUNT(*) AS issue_count
   FROM dynamic_session_issues
   GROUP BY dynamic_run_id
 ) issues
-  ON issues.dynamic_run_id = ds.dynamic_run_id
+  ON issues.dynamic_run_id = ctx.dynamic_run_id
 LEFT JOIN (
   SELECT rr.*
   FROM analysis_risk_regime_summary rr
@@ -163,16 +161,14 @@ LEFT JOIN (
    AND latest.max_created = rr.created_at_utc
 ) latest_regime
   ON CONVERT(latest_regime.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
-     CONVERT(ds.package_name USING utf8mb4) COLLATE utf8mb4_general_ci;
-""".format(
-    resolved_dynamic_static_run_id=resolved_dynamic_session_static_run_id("ds"),
-)
+     CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_general_ci;
+"""
 
 CREATE_V_WEB_RUNTIME_RUN_DETAIL = """
 CREATE OR REPLACE VIEW v_web_runtime_run_detail AS
 SELECT
   ds.*,
-  COALESCE(NULLIF(a.display_name, ''), ds.package_name) AS app_label,
+  COALESCE(NULLIF(ctx.app_label, ''), NULLIF(a.display_name, ''), ds.package_name) AS app_label,
   nf.feature_schema_version,
   nf.host_tools_json,
   nf.capture_duration_s,
@@ -203,6 +199,11 @@ SELECT
   nf.new_domain_rate_per_min,
   nf.new_sni_rate_per_min,
   nf.new_dns_rate_per_min,
+  ctx.technical_validity_state,
+  ctx.quota_state,
+  ctx.cohort_eligibility_state,
+  ctx.cohort_status,
+  ctx.cohort_reason_code,
   CASE WHEN nf.dynamic_run_id IS NULL THEN 'missing_features' ELSE 'features_available' END AS feature_state,
   CASE
     WHEN {resolved_dynamic_static_run_id} IS NULL THEN 'missing_static_run_id'
@@ -210,6 +211,8 @@ SELECT
     ELSE 'static_linked'
   END AS static_link_state
 FROM dynamic_sessions ds
+LEFT JOIN v_dynamic_run_context_v1 ctx
+  ON ctx.dynamic_run_id = ds.dynamic_run_id
 LEFT JOIN apps a
   ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_general_ci =
      CONVERT(ds.package_name USING utf8mb4) COLLATE utf8mb4_general_ci
@@ -978,6 +981,7 @@ SELECT
   COALESCE(strs.flags, 0) AS flags,
   COALESCE(strs.certs, 0) AS certs,
   COALESCE(strs.high_entropy, sessions.high_entropy, 0) AS high_entropy,
+  COALESCE(sfs.details, strs.findings_details) AS details_json,
   COALESCE(comps.providers, 0) AS providers,
   COALESCE(comps.exported_providers, 0) AS exported_providers,
   COALESCE(comps.weak_provider_guards, 0) AS weak_provider_guards,
@@ -990,6 +994,8 @@ LEFT JOIN v_web_app_permission_summary perm
 LEFT JOIN v_web_app_string_summary strs
   ON CONVERT(strs.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
  AND CONVERT(strs.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+LEFT JOIN static_findings_summary sfs
+  ON sfs.static_run_id = sessions.static_run_id
 LEFT JOIN v_web_app_component_summary comps
   ON CONVERT(comps.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
  AND CONVERT(comps.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(sessions.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci;
@@ -1032,13 +1038,16 @@ SELECT
   latest_dynamic.started_at_utc AS latest_dynamic_started_at_utc,
   latest_dynamic.status AS latest_dynamic_status,
   latest_dynamic.grade AS latest_dynamic_grade,
-  COALESCE(latest_dynamic.operator_run_profile, latest_nf.run_profile, latest_dynamic.profile_key, 'unknown') AS dynamic_run_profile,
-  COALESCE(latest_dynamic.operator_interaction_level, latest_nf.interaction_level, 'unknown') AS dynamic_interaction_level,
+  latest_dynamic.technical_validity_state AS dynamic_technical_validity_state,
+  latest_dynamic.quota_state AS dynamic_quota_state,
+  latest_dynamic.cohort_eligibility_state AS dynamic_cohort_eligibility_state,
+  COALESCE(latest_dynamic.run_profile, latest_nf.run_profile, 'unknown') AS dynamic_run_profile,
+  COALESCE(latest_dynamic.interaction_level, latest_nf.interaction_level, 'unknown') AS dynamic_interaction_level,
   latest_feature_dynamic.dynamic_run_id AS latest_feature_dynamic_run_id,
   latest_feature_dynamic.started_at_utc AS latest_feature_dynamic_started_at_utc,
   latest_feature_dynamic.grade AS latest_feature_dynamic_grade,
-  COALESCE(latest_feature_dynamic.operator_run_profile, latest_feature_nf.run_profile, latest_feature_dynamic.profile_key, 'unknown') AS latest_feature_run_profile,
-  COALESCE(latest_feature_dynamic.operator_interaction_level, latest_feature_nf.interaction_level, 'unknown') AS latest_feature_interaction_level,
+  COALESCE(latest_feature_dynamic.run_profile, latest_feature_nf.run_profile, 'unknown') AS latest_feature_run_profile,
+  COALESCE(latest_feature_dynamic.interaction_level, latest_feature_nf.interaction_level, 'unknown') AS latest_feature_interaction_level,
   latest_dynamic.valid_dataset_run AS dynamic_valid_dataset_run,
   latest_dynamic.invalid_reason_code AS dynamic_invalid_reason_code,
   CASE
@@ -1085,7 +1094,7 @@ FROM (
   UNION
   SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM v_static_risk_surfaces_v1
   UNION
-  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM dynamic_sessions
+  SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM v_dynamic_run_context_v1
   UNION
   SELECT CONVERT(package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name FROM analysis_risk_regime_summary
 ) pkg
@@ -1135,51 +1144,71 @@ LEFT JOIN (
 ) latest_static_run
   ON CONVERT(latest_static_run.package_name_lc USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN (
-  SELECT ds1.*
-  FROM dynamic_sessions ds1
+  SELECT
+    ctx1.package_name,
+    ctx1.dynamic_run_id,
+    ctx1.started_at_utc,
+    ctx1.created_at,
+    ctx1.workflow_status AS status,
+    ctx1.grade,
+    ctx1.technical_validity_state,
+    ctx1.quota_state,
+    ctx1.cohort_eligibility_state,
+    ctx1.effective_run_profile AS run_profile,
+    ctx1.effective_interaction_level AS interaction_level,
+    ctx1.valid_dataset_run,
+    ctx1.invalid_reason_code
+  FROM v_dynamic_run_context_v1 ctx1
   JOIN (
     SELECT package_name, MAX(COALESCE(started_at_utc, created_at)) AS max_started
-    FROM dynamic_sessions
+    FROM v_dynamic_run_context_v1
     GROUP BY package_name
   ) latest
-    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ds1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
-   AND latest.max_started = COALESCE(ds1.started_at_utc, ds1.created_at)
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ctx1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   AND latest.max_started = COALESCE(ctx1.started_at_utc, ctx1.created_at)
   JOIN (
     SELECT package_name, COALESCE(started_at_utc, created_at) AS started_marker, MAX(dynamic_run_id) AS max_run_id
-    FROM dynamic_sessions
+    FROM v_dynamic_run_context_v1
     GROUP BY package_name, COALESCE(started_at_utc, created_at)
   ) tie
-    ON CONVERT(tie.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ds1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
-   AND tie.started_marker = COALESCE(ds1.started_at_utc, ds1.created_at)
-   AND tie.max_run_id = ds1.dynamic_run_id
+    ON CONVERT(tie.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ctx1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   AND tie.started_marker = COALESCE(ctx1.started_at_utc, ctx1.created_at)
+   AND tie.max_run_id = ctx1.dynamic_run_id
 ) latest_dynamic
   ON CONVERT(latest_dynamic.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN dynamic_network_features latest_nf
   ON latest_nf.dynamic_run_id = latest_dynamic.dynamic_run_id
 LEFT JOIN (
-  SELECT dsf1.*
-  FROM dynamic_sessions dsf1
+  SELECT
+    ctxf1.package_name,
+    ctxf1.dynamic_run_id,
+    ctxf1.started_at_utc,
+    ctxf1.created_at,
+    ctxf1.grade,
+    ctxf1.effective_run_profile AS run_profile,
+    ctxf1.effective_interaction_level AS interaction_level
+  FROM v_dynamic_run_context_v1 ctxf1
   JOIN dynamic_network_features nff1
-    ON nff1.dynamic_run_id = dsf1.dynamic_run_id
+    ON nff1.dynamic_run_id = ctxf1.dynamic_run_id
   JOIN (
-    SELECT dsf.package_name, MAX(COALESCE(dsf.started_at_utc, dsf.created_at)) AS max_started
-    FROM dynamic_sessions dsf
+    SELECT ctxf.package_name, MAX(COALESCE(ctxf.started_at_utc, ctxf.created_at)) AS max_started
+    FROM v_dynamic_run_context_v1 ctxf
     JOIN dynamic_network_features nff
-      ON nff.dynamic_run_id = dsf.dynamic_run_id
-    GROUP BY dsf.package_name
+      ON nff.dynamic_run_id = ctxf.dynamic_run_id
+    GROUP BY ctxf.package_name
   ) latest
-    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(dsf1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
-   AND latest.max_started = COALESCE(dsf1.started_at_utc, dsf1.created_at)
+    ON CONVERT(latest.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ctxf1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   AND latest.max_started = COALESCE(ctxf1.started_at_utc, ctxf1.created_at)
   JOIN (
-    SELECT dsf.package_name, COALESCE(dsf.started_at_utc, dsf.created_at) AS started_marker, MAX(dsf.dynamic_run_id) AS max_run_id
-    FROM dynamic_sessions dsf
+    SELECT ctxf.package_name, COALESCE(ctxf.started_at_utc, ctxf.created_at) AS started_marker, MAX(ctxf.dynamic_run_id) AS max_run_id
+    FROM v_dynamic_run_context_v1 ctxf
     JOIN dynamic_network_features nff
-      ON nff.dynamic_run_id = dsf.dynamic_run_id
-    GROUP BY dsf.package_name, COALESCE(dsf.started_at_utc, dsf.created_at)
+      ON nff.dynamic_run_id = ctxf.dynamic_run_id
+    GROUP BY ctxf.package_name, COALESCE(ctxf.started_at_utc, ctxf.created_at)
   ) tie
-    ON CONVERT(tie.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(dsf1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
-   AND tie.started_marker = COALESCE(dsf1.started_at_utc, dsf1.created_at)
-   AND tie.max_run_id = dsf1.dynamic_run_id
+    ON CONVERT(tie.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ctxf1.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+   AND tie.started_marker = COALESCE(ctxf1.started_at_utc, ctxf1.created_at)
+   AND tie.max_run_id = ctxf1.dynamic_run_id
 ) latest_feature_dynamic
   ON CONVERT(latest_feature_dynamic.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(pkg.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN dynamic_network_features latest_feature_nf

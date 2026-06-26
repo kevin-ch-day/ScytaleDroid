@@ -160,12 +160,18 @@ def test_generate_report_excludes_broken_pack_from_valid_summaries(tmp_path: Pat
     out_dir = tmp_path / "audit"
     summary = report.generate_report(output_dir=out_dir)
 
+    assert summary["runs_seen"] == 2
     assert summary["runs_exported"] == 2
+    assert summary["apps_seen"] == 2
     assert summary["apps_exported"] == 2
+    assert summary["apps_with_valid_runs"] == 1
+    assert summary["apps_invalid_or_skipped_only"] == 1
     assert summary["valid_run_count"] == 1
     assert summary["invalid_or_skipped_pack_count"] == 1
     assert summary["unresolved_service_rows"] == 0
     assert summary["unresolved_signal_rows"] == 0
+    assert summary["compatibility_aliases"]["apps_exported"] == "apps_seen"
+    assert summary["compatibility_aliases"]["runs_exported"] == "runs_seen"
 
     with (out_dir / "per_run_summary.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
