@@ -66,7 +66,9 @@ Defined in `scytaledroid/Database/db_queries/views_admin.py`:
 | other | `unknown_run_type` | Unexpected `run_type` value |
 
 **Static convention:** writers use `run_id=str(static_analysis_runs.id)` (numeric string).
-There is **no** `session_stamp` column on `artifact_registry`; session is indirect via SAR.
+`artifact_registry.session_stamp` now exists as an **optional** additive column for
+new/backfilled **static** rows. Dynamic rows may still leave it `NULL`, so session
+recovery is still indirect on the dynamic side.
 
 **Dynamic convention:** `run_id` is the dynamic run identifier string (`dynamic_run_id`),
 written from `DynamicAnalysis/storage/persistence.py` (`record_artifacts`).
@@ -138,6 +140,12 @@ Use these **labels** in runbooks and future tooling; they are not DB enums yet.
 | `dynamic_dangling_review` | `dangling_dynamic_run` — correlate with evidence dirs and `dynamic_sessions` history before delete. |
 | `static_nonnumeric_run_id_review` | Non-numeric static `run_id` — **legacy / mis-keyed**; investigate before bulk delete. |
 | `static_numeric_missing_sar_candidate` | Mid-age (between recent and old thresholds) static numeric `run_id` with no SAR and **blank** `host_path` — export then registry delete candidate. |
+| `static_truly_detached_candidate` | Static missing-SAR row, host file missing, no legacy/canonical overlap — use `prune_artifact_registry_static_detached.py` (receipt-first). |
+| `static_file_present_detached_review` | Static missing-SAR row with host file still present and no canonical overlap — review evidence value before delete. |
+| `static_legacy_overlap_missing_file` | Static host file is missing, but legacy `runs` overlap still exists — retire legacy session debt first. |
+| `static_legacy_overlap_file_present_review` | Static row still overlaps legacy `runs` and the host file still exists — blocked pending legacy session + file review. |
+| `static_canonical_residue_review` | Static dangling row still overlaps canonical static tables — investigate residue before any cleanup. |
+| `static_malformed_run_id_review` | Static dangling row has malformed / non-numeric run identity — manual review before delete. |
 | `unknown_link_review` | Unexpected `link_state` / `run_type` combination — inspect manually. |
 
 Non-numeric static `run_id` rows are **always** `dangling_static_run` under the current view;
@@ -228,9 +236,9 @@ array (pre-change exports); treat those as legacy when scripting parsers.
 
 ## 6. RFC (future schema / ops; not implemented)
 
-- **Nullable `session_stamp` or `source_session_stamp`** on `artifact_registry` for new rows
-  would make session-scoped triage and retention policies cheaper without replacing `run_id`
-  join semantics for static/dynamic.
+- Continue populating `artifact_registry.session_stamp` for new static rows and keep
+  dynamic-side session identity as a future design question rather than overloading
+  it prematurely.
 - **Operator menu wiring** for prune (optional): keep script as primary surface until UX review.
 - **Indexes** — once delete batches are defined, add covering indexes aligned with
   `v_artifact_registry_integrity` filters (`run_type`, `link_state`, `created_at_utc`) only

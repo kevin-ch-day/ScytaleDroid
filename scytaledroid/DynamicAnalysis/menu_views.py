@@ -53,7 +53,7 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
         ],
         maintenance=[
             MenuOption("5", "Verify capture environment"),
-            MenuOption("6", "Change cohort / filter"),
+            MenuOption("6", "Change cohort"),
             MenuOption("7", "Maintenance tools"),
         ],
         archive_export=[],
@@ -108,22 +108,31 @@ def render_dynamic_menu_overview() -> None:
     except Exception:
         selected_device = "None"
     device_text = selected_device if selected_device and selected_device != "None" else "none selected"
+    subtitle = f"{cohort_label} · {device_text}"
+    quota_text = f"{quota_valid} / {expected_valid} valid"
+    if expected_valid > 0 and not summary.can_freeze:
+        remaining = max(0, expected_valid - quota_valid)
+        quota_text += f" ({remaining} remaining)"
+    next_step = _next_step_text(
+        summary=summary,
+        handoff_ready=handoff_ready,
+        handoff_total=handoff_total,
+        selected_device_text=device_text,
+    )
     state_items = [
-        summary_cards.summary_item("Cohort", cohort_label, value_style="accent"),
-        summary_cards.summary_item("Selected device", device_text, value_style="muted"),
         summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
-        summary_cards.summary_item("Quota-valid runs", f"{quota_valid} / {expected_valid}", value_style="muted"),
+        summary_cards.summary_item("Quota", quota_text, value_style="muted"),
         *(
-            [summary_cards.summary_item("Supplemental valid", f"{supplemental_valid} outside quota", value_style="muted")]
+            [summary_cards.summary_item("Supplemental", f"{supplemental_valid} outside quota", value_style="muted")]
             if supplemental_valid > 0
             else []
         ),
         summary_cards.summary_item(
-            "Freeze/export",
+            "Archive",
             freeze_text,
             value_style="success" if summary.can_freeze else "warning",
         ),
-        summary_cards.summary_item("Reason", reason_text, value_style="muted"),
+        summary_cards.summary_item("Why blocked", reason_text, value_style="muted"),
         summary_cards.summary_item(
             "Static prep",
             handoff_status,
@@ -137,6 +146,28 @@ def render_dynamic_menu_overview() -> None:
         summary_cards.format_summary_card(
             "Status",
             state_items,
-            footer=footer,
+            subtitle=subtitle,
+            footer=footer or next_step,
         )
     )
+
+
+def _next_step_text(
+    *,
+    summary,
+    handoff_ready: int,
+    handoff_total: int,
+    selected_device_text: str,
+) -> str:
+    if str(selected_device_text or "").strip().lower() == "none selected":
+        return "Next: select a capture device, then open App queue / next action."
+    if int(getattr(summary, "total_runs", 0) or 0) == 0:
+        return "Next: use Focused app run or App queue / next action to create evidence."
+    if handoff_total > 0 and handoff_ready < handoff_total:
+        return "Next: static prep is incomplete; review State summary before collecting more runs."
+    reason_code = str(getattr(summary, "first_failing_reason", "") or "").strip().upper()
+    if reason_code == "QUOTA_NOT_SATISFIED":
+        return "Next: open App queue / next action to continue collection."
+    if not bool(getattr(summary, "can_freeze", False)):
+        return "Next: review Archive readiness for the current blocker."
+    return "Next: archive readiness checks are satisfied."

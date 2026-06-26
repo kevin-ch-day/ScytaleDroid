@@ -43,7 +43,7 @@
 ```bash
 python -m py_compile <changed python files>
 pytest tests/persistence -q
-pytest tests/db_utils -q
+pytest tests/database -q
 pytest tests/scripts -q
 pytest tests/static_analysis/test_diagnostic_output_helpers.py -q
 pytest tests/database/test_legacy_static_mirror_diagnostics.py -q

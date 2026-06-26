@@ -153,7 +153,7 @@ Legend for **Suggested handling** (Phase 2 planning — **not** a commitment to 
 | `scytaledroid/Database/db_utils/reset_static.py`, `Workspace/reset_full.py` | table lists, `DELETE FROM runs` | write_admin | keep | Do not narrow before reader exit |
 | `scytaledroid/Database/tools/db_schema_snapshot.py` | `_LEGACY_MIRROR_TABLES`, snapshot `required_tables` | diagnostic | relabel | Presence vs “truth” |
 | `tests/integration/test_persist_run_summary.py` | assertions on `runs` | test | replace later | Out of scope for this doc’s edits |
-| `tests/ui/test_global_menu_rollout.py`, `tests/static_analysis/test_missing_run_ids_artifact.py` | SQL substring assertions | test | replace later | |
+| `tests/ui/test_database_menu_rollout.py`, `tests/static_analysis/test_missing_run_ids_artifact.py` | SQL substring assertions | test | replace later | |
 
 ---
 

@@ -939,6 +939,7 @@ class PermissionAuditAccumulator:
                                 record_artifacts(
                                     run_id=str(static_run_id_local),
                                     run_type="static",
+                                    session_stamp=str(session_stamp or "").strip() or None,
                                     artifacts=[
                                         {
                                             "path": str(snap_path),

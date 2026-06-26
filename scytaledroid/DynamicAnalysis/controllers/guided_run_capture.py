@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
+    selected_app_evidence_text,
+    selected_app_qa_text,
+)
+
 
 def plan_drift_rows(plan_drift: dict[str, Any], *, detailed_installed_build: bool) -> list[list[str]]:
     installed_build = str(plan_drift.get("observed_version_code") or "unknown")
@@ -62,78 +67,118 @@ def render_selected_app_drift_workbench(
     app: Any,
     plan_drift: dict[str, Any],
     menu_utils: Any,
+    prompt_utils: Any,
     status_messages: Any,
     selected_app_active_valid_runs_fn: Callable[[Any], int],
     print_selected_app_evidence_context_fn: Callable[..., None],
     selected_app_lineage_state_fn: Callable[..., str],
     selected_app_state_snapshot_fn: Callable[..., Any],
+    render_selected_app_recent_runs_fn: Callable[[Any], None],
+    render_selected_app_diagnostics_fn: Callable[..., None],
 ) -> None:
-    active_valid_runs = selected_app_active_valid_runs_fn(app)
-    menu_utils.print_header("Dynamic Workbench", app.display_label)
-    print_selected_app_evidence_context_fn(
-        package_name=app.package_name,
-        active_valid_runs=active_valid_runs,
-        legacy_valid_runs=app.historical_valid_local,
-        historical_build_count=app.historical_build_count,
-        db_active_sessions=app.db_active_sessions,
-        db_historical_sessions=app.db_historical_sessions,
-        include_why=False,
-    )
-    lineage_state = selected_app_lineage_state_fn(
-        active_valid_runs=active_valid_runs,
-        legacy_valid_runs=app.historical_valid_local,
-        db_active_sessions=app.db_active_sessions,
-        db_historical_sessions=app.db_historical_sessions,
-    )
-    snapshot = selected_app_state_snapshot_fn(
-        lineage_state=lineage_state,
-        active_valid_runs=active_valid_runs,
-        legacy_valid_runs=app.historical_valid_local,
-        db_active_sessions=app.db_active_sessions,
-        db_historical_sessions=app.db_historical_sessions,
-        latest_valid=app.latest_valid,
-        queue_action="baseline",
-        baseline_valid_runs=int(app.counts.baseline_valid_runs),
-        interactive_valid_runs=int(app.counts.interactive_valid_runs),
-        baseline_required=int(app.cfg.baseline_required),
-        interactive_required=int(app.cfg.interactive_required),
-        extra_valid_runs=app.extra_valid_local,
-    )
-    evidence_short = {
-        "local+db": "ldb",
-        "local-only": "local",
-        "db-only": "db",
-        "empty": "empty",
-        "none": "—",
-    }.get(snapshot.evidence, snapshot.evidence)
-    state_parts = ["drift"]
-    if evidence_short and evidence_short != "—":
-        state_parts.append(evidence_short)
-    qa_badge = snapshot.qa
-    if qa_badge and qa_badge != "—":
-        state_parts.append(qa_badge)
-    menu_utils.print_header("App state")
-    rows = [
-        ["Status", "refresh"],
-        ["Need", "refresh"],
-        ["Quota", snapshot.quota],
-        ["State", "/".join(state_parts)],
-        ["Action", "refresh"],
-    ]
-    menu_utils.print_table(["Field", "Value"], rows)
+    while True:
+        active_valid_runs = selected_app_active_valid_runs_fn(app)
+        menu_utils.print_header(app.display_label)
+        lineage_state = selected_app_lineage_state_fn(
+            active_valid_runs=active_valid_runs,
+            legacy_valid_runs=app.historical_valid_local,
+            db_active_sessions=app.db_active_sessions,
+            db_historical_sessions=app.db_historical_sessions,
+        )
+        snapshot = selected_app_state_snapshot_fn(
+            lineage_state=lineage_state,
+            active_valid_runs=active_valid_runs,
+            legacy_valid_runs=app.historical_valid_local,
+            db_active_sessions=app.db_active_sessions,
+            db_historical_sessions=app.db_historical_sessions,
+            latest_valid=app.latest_valid,
+            queue_action="refresh",
+            baseline_valid_runs=int(app.counts.baseline_valid_runs),
+            interactive_valid_runs=int(app.counts.interactive_valid_runs),
+            baseline_required=int(app.cfg.baseline_required),
+            interactive_required=int(app.cfg.interactive_required),
+            extra_valid_runs=app.extra_valid_local,
+        )
+        evidence_text = selected_app_evidence_text(snapshot.build, snapshot.evidence)
+        qa_text = selected_app_qa_text(snapshot.qa)
+        print(f"Build drift detected · {evidence_text} · {qa_text} · quota {snapshot.quota}")
+        print()
+        menu_utils.print_section("Recommended")
+        print("R) Refresh checklist [default]")
+        print("Reason: installed build does not match the newest static plan.")
+        print()
+        print_plan_drift_warning(plan_drift, status_messages=status_messages)
+        print_plan_drift_blocked_message(plan_drift, status_messages=status_messages)
+        print()
+        menu_utils.print_section("Review / inspect")
+        print("H) Run history")
+        print("G) Diagnostics")
+        print()
+        print("0) Back")
+        choice = prompt_utils.get_choice(
+            ["R", "H", "G", "0", "B"],
+            default="R",
+            casefold=True,
+            invalid_message="Choose one of the listed actions.",
+        ).upper()
+        if choice in {"0", "B"}:
+            return
+        if choice == "R":
+            _render_refresh_checklist(
+                app=app,
+                plan_drift=plan_drift,
+                menu_utils=menu_utils,
+            )
+            prompt_utils.press_enter_to_continue()
+            continue
+        if choice == "H":
+            render_selected_app_recent_runs_fn(app.state)
+            prompt_utils.press_enter_to_continue()
+            continue
+        if choice == "G":
+            render_selected_app_diagnostics_fn(
+                package_name=app.package_name,
+                display_label=app.display_label,
+                state=app.state,
+                queue_action="refresh",
+                db_active_sessions=app.db_active_sessions,
+                db_historical_sessions=app.db_historical_sessions,
+            )
+            prompt_utils.press_enter_to_continue()
+            continue
+
+
+def _render_refresh_checklist(
+    *,
+    app: Any,
+    plan_drift: dict[str, Any],
+    menu_utils: Any,
+) -> None:
+    menu_utils.print_header("Refresh checklist", app.display_label)
+    print("This app is blocked because the installed build does not match the newest static plan.")
     print()
-    print("Why:")
-    print("The installed app build does not match the newest static plan.")
-    print("Pause dynamic collection for this app until harvest/static refresh is complete.")
-    print()
+    print("Current state")
     rows = plan_drift_rows(plan_drift, detailed_installed_build=False)
     menu_utils.print_table(["Field", "Value"], rows)
     print()
-    print("Recommended next step:")
-    print("Refresh harvest/static for this app, then return to the dynamic queue.")
+    print("To clear refresh:")
+    print("  1. Back out to Main Menu.")
+    print("  2. Open Device Inventory & Harvest.")
+    print("  3. Refresh inventory if the snapshot is stale.")
+    print("  4. Execute harvest and choose a scope that includes this app.")
+    print("  5. Pull the current APK/build.")
+    print("  6. Open Static Analysis Pipeline.")
+    print("  7. Choose Analyze one app.")
+    print("  8. Analyze this app/package.")
+    print("  9. Return to Dynamic Analysis → App queue / next action.")
+    print(" 10. Confirm this app no longer shows Build=drift / Action=refresh.")
+    if bool(getattr(app, "has_identity_mismatch", False)):
+        print()
+        print("Caution:")
+        print("  Identity mismatch context exists. Check diagnostics before reusing older evidence.")
     print()
-    print_plan_drift_warning(plan_drift, status_messages=status_messages)
-    print_plan_drift_blocked_message(plan_drift, status_messages=status_messages)
+    print("After refresh clears:")
+    print("  Return to the app queue and follow the updated recommended action for this app.")
 
 
 def print_capture_device_choice(
@@ -246,7 +291,6 @@ def prepare_selected_app_capture(
     if plan_drift is not None:
         print()
         render_selected_app_drift_workbench_fn(app=app, plan_drift=plan_drift)
-        prompt_utils.press_enter_to_continue()
         return None
     return device_serial, device_label
 

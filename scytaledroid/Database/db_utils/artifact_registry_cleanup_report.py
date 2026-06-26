@@ -7,7 +7,7 @@ values are clamped before interpolation (no user SQL fragments).
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -21,8 +21,41 @@ CATEGORY_ACTIONS: dict[str, str] = {
     "dynamic_dangling_review": "Correlate with dynamic evidence dirs / session history before delete.",
     "static_nonnumeric_run_id_review": "Legacy or mis-keyed static run_id; investigate before bulk delete.",
     "static_numeric_missing_sar_candidate": "Mid-age SAR gap + blank host_path; export then registry delete candidate.",
+    "static_truly_detached_candidate": "Static registry-only delete candidate; use prune_artifact_registry_static_detached.py (receipt + --apply).",
+    "static_file_present_detached_review": "Static host file still exists without canonical linkage; review evidence value before registry delete.",
+    "static_legacy_overlap_missing_file": "Static host file is missing but legacy runs overlap remains; retire legacy session debt first.",
+    "static_legacy_overlap_file_present_review": "Static legacy-overlap row still has a present host file; blocked pending legacy session + file review.",
+    "static_canonical_residue_review": "Static row still overlaps canonical tables; investigate residue before any registry delete.",
+    "static_malformed_run_id_review": "Static row has malformed/non-numeric run identity; inspect manually before cleanup.",
+    "static_unknown_review": "Static dangling row did not match a known reason bucket; inspect manually.",
     "unknown_link_review": "Unexpected link_state/run_type mix; inspect manually.",
 }
+
+_STATIC_PRIMARY_REASON_TO_CLEANUP_CATEGORY: dict[str, str] = {
+    "truly_detached": "static_truly_detached_candidate",
+    "file_present_db_detached": "static_file_present_detached_review",
+    "legacy_mirror_only_file_missing": "static_legacy_overlap_missing_file",
+    "legacy_mirror_only_with_file": "static_legacy_overlap_file_present_review",
+    "canonical_db_residue": "static_canonical_residue_review",
+    "malformed_static_run_id": "static_malformed_run_id_review",
+    "unknown_needs_review": "static_unknown_review",
+}
+
+
+def _collect_static_dangling_summary(run_sql: Callable[..., Any], *, repo_root: Path) -> Mapping[str, Any]:
+    from .artifact_registry_static_dangling import collect_artifact_registry_static_dangling_report
+
+    return collect_artifact_registry_static_dangling_report(run_sql, repo_root=repo_root)
+
+
+def _collect_static_session_retirement_summary(
+    run_sql: Callable[..., Any],
+    *,
+    repo_root: Path,
+) -> Mapping[str, Any]:
+    from .artifact_registry_static_session_retirement import collect_static_session_retirement_report
+
+    return collect_static_session_retirement_report(run_sql, repo_root=repo_root)
 
 
 def _clamp_interval_days(value: int, *, lo: int = 1, hi: int = 3650) -> int:
@@ -31,6 +64,108 @@ def _clamp_interval_days(value: int, *, lo: int = 1, hi: int = 3650) -> int:
     except (TypeError, ValueError):
         v = lo
     return max(lo, min(v, hi))
+
+
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _static_cleanup_category_from_reason(reason: Any) -> str:
+    key = _norm_text(reason)
+    return _STATIC_PRIMARY_REASON_TO_CLEANUP_CATEGORY.get(key, "static_unknown_review")
+
+
+def _rebuild_totals_by_category(summary_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counter: Counter[str] = Counter()
+    for row in summary_rows:
+        if not isinstance(row, Mapping):
+            continue
+        category = str(row.get("cleanup_category") or "")
+        counter[category] += int(row.get("row_count") or 0)
+    return [
+        {
+            "cleanup_category": category,
+            "row_count": int(row_count),
+            "candidate_action": CATEGORY_ACTIONS.get(category, "—"),
+        }
+        for category, row_count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _build_static_dangling_summary_dimensions(static_report: Mapping[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    grouped: dict[tuple[str, str, str, str, str, str, str], dict[str, Any]] = {}
+    category_counts: Counter[str] = Counter()
+    rows = static_report.get("static_dangling_rows") or []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        cleanup_category = _static_cleanup_category_from_reason(row.get("primary_reason"))
+        artifact_type = str(row.get("artifact_type") or "")
+        age_bucket = str(row.get("age_bucket") or "")
+        host_path_presence = "blank_host" if not _norm_text(row.get("host_path")) else "host_path_set"
+        static_run_id_shape = "numeric_run_id" if row.get("resolved_static_run_id") is not None else "non_numeric_run_id"
+        key = (
+            cleanup_category,
+            str(row.get("run_type") or ""),
+            str(row.get("link_state") or ""),
+            artifact_type,
+            age_bucket,
+            host_path_presence,
+            static_run_id_shape,
+        )
+        current = grouped.setdefault(
+            key,
+            {
+                "cleanup_category": cleanup_category,
+                "run_type": str(row.get("run_type") or ""),
+                "link_state": str(row.get("link_state") or ""),
+                "artifact_type": artifact_type,
+                "age_bucket": age_bucket,
+                "host_path_presence": host_path_presence,
+                "static_run_id_shape": static_run_id_shape,
+                "row_count": 0,
+                "created_min": None,
+                "created_max": None,
+            },
+        )
+        current["row_count"] = int(current.get("row_count") or 0) + 1
+        created = _norm_text(row.get("created_at_utc")) or None
+        if created:
+            if not current["created_min"] or created < str(current["created_min"]):
+                current["created_min"] = created
+            if not current["created_max"] or created > str(current["created_max"]):
+                current["created_max"] = created
+        category_counts[cleanup_category] += 1
+    summary_rows = list(grouped.values())
+    summary_rows.sort(
+        key=lambda row: (
+            -int(row.get("row_count") or 0),
+            str(row.get("cleanup_category") or ""),
+            str(row.get("artifact_type") or ""),
+        )
+    )
+    return summary_rows, dict(sorted(category_counts.items()))
+
+
+def _build_static_dangling_top_run_ids(static_report: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    runs = static_report.get("static_dangling_runs") or []
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in runs:
+        if not isinstance(row, Mapping):
+            continue
+        cleanup_category = _static_cleanup_category_from_reason(
+            row.get("dominant_primary_reason") or row.get("primary_reason")
+        )
+        grouped[cleanup_category].append(
+            {
+                "run_id": str(row.get("resolved_static_run_id") or ""),
+                "count": int(row.get("row_count") or 0),
+            }
+        )
+    for category, items in grouped.items():
+        out[category] = sorted(items, key=lambda item: (-int(item.get("count") or 0), str(item.get("run_id") or "")))[:12]
+    return dict(out)
 
 
 def classified_from_clause(*, recent_days: int, old_days: int) -> tuple[str, str]:
@@ -106,6 +241,7 @@ def collect_cleanup_candidate_report(
     old_days: int = 90,
     run_type_filter: str | None = None,
     path_sample_limit: int = 0,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     """Run read-only aggregates; optional ``Path.is_file()`` probes (no deletes)."""
 
@@ -120,6 +256,57 @@ def collect_cleanup_candidate_report(
     if run_type_filter and str(run_type_filter).strip().lower() in {"static", "dynamic"}:
         rt_filter = " WHERE c.run_type = %s "
         params_base.append(str(run_type_filter).strip().lower())
+
+    static_report: Mapping[str, Any] | None = None
+    static_diagnostics_summary: dict[str, Any] | None = None
+
+    if not run_type_filter or str(run_type_filter).strip().lower() == "static":
+        try:
+            resolved_repo_root = (repo_root or Path.cwd()).resolve()
+            static_report = _collect_static_dangling_summary(
+                run_sql,
+                repo_root=resolved_repo_root,
+            )
+            retirement_report = _collect_static_session_retirement_summary(
+                run_sql,
+                repo_root=resolved_repo_root,
+            )
+            static_summary = (
+                static_report.get("summary")
+                if isinstance(static_report.get("summary"), Mapping)
+                else {}
+            )
+            retirement_summary = (
+                retirement_report.get("summary")
+                if isinstance(retirement_report.get("summary"), Mapping)
+                else {}
+            )
+            static_cleanup_dimensions, static_cleanup_category_counts = _build_static_dangling_summary_dimensions(static_report)
+            static_diagnostics_summary = {
+                "dangling_static_registry_rows": int(static_summary.get("dangling_static_registry_rows") or 0),
+                "linked_static_registry_rows": int(static_summary.get("linked_static_registry_rows") or 0),
+                "distinct_static_run_count": int(static_summary.get("distinct_static_run_count") or 0),
+                "distinct_recovered_package_count": int(static_summary.get("distinct_recovered_package_count") or 0),
+                "runs_with_recovered_manifest_context": int(static_summary.get("runs_with_recovered_manifest_context") or 0),
+                "complete_core_bundle_run_count": int(static_summary.get("complete_core_bundle_run_count") or 0),
+                "partial_core_bundle_run_count": int(static_summary.get("partial_core_bundle_run_count") or 0),
+                "runs_with_duplicate_artifact_types": int(static_summary.get("runs_with_duplicate_artifact_types") or 0),
+                "primary_reason_counts": dict(static_summary.get("primary_reason_counts") or {}),
+                "reason_flag_counts": dict(static_summary.get("reason_flag_counts") or {}),
+                "cleanup_category_counts": static_cleanup_category_counts,
+                "blocked_session_count": int(retirement_summary.get("blocked_session_count") or 0),
+                "blocked_registry_rows": int(retirement_summary.get("blocked_registry_rows") or 0),
+                "blocked_sessions": list(retirement_summary.get("blocked_sessions") or []),
+                "candidate_session_count": int(retirement_summary.get("candidate_session_count") or 0),
+                "candidate_registry_rows": int(retirement_summary.get("candidate_registry_rows") or 0),
+                "recommended_candidate_order": list(retirement_summary.get("recommended_candidate_order") or []),
+            }
+        except Exception as exc:
+            static_report = None
+            static_diagnostics_summary = {"error": f"{type(exc).__name__}: {exc}"}
+            static_cleanup_dimensions = []
+    else:
+        static_cleanup_dimensions = []
 
     summary_sql = f"""
         SELECT
@@ -153,6 +340,18 @@ def collect_cleanup_candidate_report(
         dictionary=True,
         query_name="artifact_registry_cleanup.summary",
     ) or []
+    summary_rows = [dict(row) for row in rows if isinstance(row, dict)]
+
+    if static_cleanup_dimensions:
+        summary_rows = [
+            row
+            for row in summary_rows
+            if not (
+                str(row.get("run_type") or "") == "static"
+                and str(row.get("link_state") or "") == "dangling_static_run"
+            )
+        ]
+        summary_rows.extend(static_cleanup_dimensions)
 
     tops_sql = f"""
         SELECT c.cleanup_category, c.run_id, COUNT(*) AS cnt
@@ -179,29 +378,12 @@ def collect_cleanup_candidate_report(
                 {"run_id": str(row.get("run_id") or ""), "count": int(row.get("cnt") or 0)}
             )
 
-    totals_sql = f"""
-        SELECT c.cleanup_category, COUNT(*) AS row_count
-        FROM {from_clause}
-        {rt_filter}
-        GROUP BY c.cleanup_category
-        ORDER BY row_count DESC
-    """
-    totals_raw = run_sql(
-        totals_sql,
-        tuple(params_base),
-        fetch="all",
-        dictionary=True,
-        query_name="artifact_registry_cleanup.totals",
-    ) or []
-    totals_by_category = [
-        {
-            "cleanup_category": str(r.get("cleanup_category") or ""),
-            "row_count": int(r.get("row_count") or 0),
-            "candidate_action": CATEGORY_ACTIONS.get(str(r.get("cleanup_category") or ""), "—"),
-        }
-        for r in totals_raw
-        if isinstance(r, dict)
-    ]
+    if static_cleanup_dimensions and static_report:
+        for category, items in _build_static_dangling_top_run_ids(static_report).items():
+            top_by_category[category] = items
+    totals_by_category = _rebuild_totals_by_category(summary_rows)
+    allowed_categories = {str(row.get("cleanup_category") or "") for row in totals_by_category}
+    top_by_category = {category: items for category, items in top_by_category.items() if category in allowed_categories}
 
     path_probe: dict[str, Any] | None = None
     lim = max(0, min(int(path_sample_limit), 5000))
@@ -270,9 +452,10 @@ def collect_cleanup_candidate_report(
         "old_days_threshold": od,
         "run_type_filter": run_type_filter,
         "totals_by_category": totals_by_category,
-        "summary_dimensions": [dict(r) for r in rows if isinstance(r, dict)],
+        "summary_dimensions": summary_rows,
         "top_run_ids_by_category": {k: v for k, v in top_by_category.items()},
         "path_probe": path_probe,
+        "static_diagnostics_summary": static_diagnostics_summary,
     }
 
 
@@ -332,19 +515,70 @@ def format_text_report(data: Mapping[str, Any]) -> str:
         lines.append(f"  probe_errors={probe.get('host_path_probe_errors')}")
         for ex in probe.get("examples") or []:
             lines.append(f"    {ex}")
+    static_diag = data.get("static_diagnostics_summary")
+    if isinstance(static_diag, Mapping):
+        lines.append("")
+        lines.append("## Static dangling focus")
+        if static_diag.get("error"):
+            lines.append(f"  static diagnostics unavailable: {static_diag.get('error')}")
+        else:
+            reason_counts = static_diag.get("primary_reason_counts")
+            if isinstance(reason_counts, Mapping) and reason_counts:
+                lines.append(
+                    "  primary reasons: "
+                    + ", ".join(f"{key}={reason_counts[key]}" for key in sorted(reason_counts))
+                )
+            cleanup_counts = static_diag.get("cleanup_category_counts")
+            if isinstance(cleanup_counts, Mapping) and cleanup_counts:
+                lines.append(
+                    "  cleanup categories: "
+                    + ", ".join(f"{key}={cleanup_counts[key]}" for key in sorted(cleanup_counts))
+                )
+            lines.append(
+                "  detached runs: "
+                f"{static_diag.get('distinct_static_run_count', 0)} "
+                f"(recovered packages={static_diag.get('distinct_recovered_package_count', 0)})"
+            )
+            lines.append(
+                "  recovered manifest context: "
+                f"{static_diag.get('runs_with_recovered_manifest_context', 0)} run(s)"
+            )
+            lines.append(
+                "  core bundle status: "
+                f"complete={static_diag.get('complete_core_bundle_run_count', 0)} "
+                f"partial={static_diag.get('partial_core_bundle_run_count', 0)} "
+                f"duplicates={static_diag.get('runs_with_duplicate_artifact_types', 0)}"
+            )
+            lines.append(
+                "  blocked legacy sessions: "
+                f"{static_diag.get('blocked_session_count', 0)} "
+                f"(registry_rows={static_diag.get('blocked_registry_rows', 0)})"
+            )
+            blocked_sessions = static_diag.get("blocked_sessions")
+            if isinstance(blocked_sessions, list) and blocked_sessions:
+                lines.append("  blocked session stamps: " + ", ".join(str(item) for item in blocked_sessions[:8]))
+            lines.append(
+                "  candidate legacy sessions: "
+                f"{static_diag.get('candidate_session_count', 0)} "
+                f"(registry_rows={static_diag.get('candidate_registry_rows', 0)})"
+            )
+            candidate_order = static_diag.get("recommended_candidate_order")
+            if isinstance(candidate_order, list) and candidate_order:
+                lines.append("  recommended candidate order: " + ", ".join(str(item) for item in candidate_order[:8]))
     lines.append("")
     lines.append("Notes:")
     lines.append(
         "  This report is SELECT-only. For **scoped** old-dangling deletes (receipt + --apply), use "
-        "scripts/db/prune_artifact_registry_dangling.py; see docs/maintenance/artifact_registry_cleanup_track.md."
+        "scripts/db/prune_artifact_registry_dangling.py. For static-only truly detached rows, use "
+        "scripts/db/prune_artifact_registry_static_detached.py; see docs/maintenance/artifact_registry_cleanup_track.md."
     )
     lines.append(
         "  Workspace maintenance → prune artifact_registry remains a blunt instrument: it deletes **all** "
         "non-linked rows after prompts — avoid for catalog-wide debt."
     )
     lines.append(
-        "  Longer-term RFC: optional session_stamp on artifact_registry; indexes tuned for cleanup "
-        "queries once measured in production."
+        "  artifact_registry.session_stamp is now the preferred static session marker for new/backfilled rows; "
+        "dynamic rows may still be null because dynamic_sessions does not expose a cohort-style session_stamp."
     )
     return "\n".join(lines) + "\n"
 

@@ -326,9 +326,10 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
         print(f"  Static handoff    : {canonical.get('handoff_paths', 0)} path(s) recorded")
 
     print()
-    _print_heading("Legacy mirror (removed)", underline="-")
+    _print_heading("Compatibility / derived surfaces", underline="-")
     print("  Static analysis no longer INSERTs into legacy runs/metrics/buckets/legacy findings/contributors.")
-    print("  Reconcile-driven audit JSON lists per-table mirror package counts when DB reconciliation ran.")
+    print("  risk_scores remains an active permission-posture session surface on the core DB.")
+    print("  Reconcile-driven audit JSON lists per-table compatibility counts when DB reconciliation ran.")
 
     if reports:
         archive_n = _safe_int(reports.get("archive_json_paths"))
@@ -357,12 +358,12 @@ def render_persistence_audit_summary_section(session_stamp: str | None) -> None:
     if reconciliation:
         gap_items = [
             ("missing_legacy_runs_count", "compat runs"),
-            ("missing_legacy_risk_count", "compat risk"),
+            ("missing_legacy_risk_count", "permission posture risk"),
             ("missing_secondary_compat_mirror_count", "secondary compat mirrors"),
             ("missing_findings_summary_count", "findings summary"),
             ("missing_string_summary_count", "string summary"),
             ("bridge_only_runs_count", "compat-only runs"),
-            ("bridge_only_risk_count", "compat-only risk"),
+            ("bridge_only_risk_count", "compat-only permission posture risk"),
         ]
         active_gaps = [
             f"{label}={reconciliation.get(key, 0)}"

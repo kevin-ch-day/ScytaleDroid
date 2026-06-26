@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DeviceAnalysis.device_menu.formatters import format_device_context_line
 
 from .adb import devices as adb_devices
 
@@ -119,7 +120,15 @@ def describe_active_device() -> str:
     active = get_active_device()
     if not active:
         return "None"
-    return adb_devices.get_device_label(active)
+    return format_device_context_line(active)
+
+
+def describe_device(device: dict[str, str | None] | None) -> str:
+    """Return a consistent human-readable label for a device row."""
+
+    if not isinstance(device, dict) or not device:
+        return "None"
+    return format_device_context_line(device)
 
 
 def get_last_serial() -> str | None:

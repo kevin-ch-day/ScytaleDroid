@@ -231,27 +231,16 @@ def prompt_plan_action(resolution: PlanResolution) -> str:
         if blocked_total > 0:
             print(f"Blocked before pull: {blocked_total} package(s)")
         print()
-        print("Enter = execute harvest")
-        print("P = preview plan")
-        print("0 = cancel")
-        while True:
-            choice = prompt_utils.prompt_text("Action [Enter/P/0]", required=False).strip().lower()
-            if choice in {"", "1", "run", "execute", "go"}:
-                return "pull_snapshot"
-            if choice in {"p", "2", "preview"}:
-                return "dry-run"
-            if choice in {"0", "c", "cancel"}:
-                return "cancel"
-            print(status_messages.status("Invalid choice. Press Enter, P, or 0.", level="warn"))
+        if prompt_utils.prompt_yes_no("Start harvest now?", default=True):
+            return "pull_snapshot"
+        return "cancel"
 
-    print("1) Execute harvest")
-    print("2) Preview plan")
-    print("0) Cancel")
-    choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Select: ")
-    if choice == "1":
+    print("Harvest action")
+    print("──────────────")
+    print("Y) Start harvest")
+    print("N) Cancel")
+    if prompt_utils.prompt_yes_no("Start harvest now?", default=True):
         return "pull_snapshot"
-    if choice == "2":
-        return "dry-run"
     return "cancel"
 
 

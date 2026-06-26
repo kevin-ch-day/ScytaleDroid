@@ -498,7 +498,9 @@ def _fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
 
 def _is_missing_static_handoff_hash_error(exc: Exception) -> bool:
     message = str(exc).strip().lower()
-    return "static_handoff_hash" in message and "no such column" in message
+    if "static_handoff_hash" not in message:
+        return False
+    return "no such column" in message or "unknown column" in message
 
 
 def _cross_check_session_link(

@@ -5,6 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 
+def _clean_device_text(value: str | None) -> str:
+    return " ".join(str(value or "").replace("_", " ").split()).strip()
+
+
 def prettify_model(value: str | None) -> str:
     if not value:
         return "Unknown"
@@ -122,6 +126,76 @@ def format_device_line(
     return label
 
 
+def format_device_display_name(device: dict[str, str | None]) -> str:
+    """Return a human-readable device name for menu/UI display."""
+
+    name = (
+        device.get("model")
+        or device.get("display_name")
+        or device.get("device")
+        or device.get("serial")
+        or "Unknown device"
+    )
+    cleaned = _clean_device_text(name)
+    if not cleaned:
+        return "Unknown device"
+    if cleaned == str(device.get("serial") or "").strip():
+        return cleaned
+    return prettify_model(cleaned)
+
+
+def format_device_android_short(device: dict[str, str | None]) -> str | None:
+    """Return a concise Android version string such as ``15`` when known."""
+
+    version = str(device.get("android_version") or "").strip()
+    if version:
+        return version
+    release = str(device.get("android_release") or "").strip()
+    if not release:
+        return None
+    if release.lower().startswith("android "):
+        return release.split(" ", 1)[1].split(" ", 1)[0].strip() or None
+    return release.split(" ", 1)[0].strip() or None
+
+
+def format_device_type_short(device: dict[str, str | None]) -> str | None:
+    """Return a normalized lowercase device kind when known."""
+
+    kind = str(device.get("device_type") or "").strip().lower()
+    if kind in {"physical", "emulator"}:
+        return kind
+    return None
+
+
+def format_device_context_line(
+    device: dict[str, str | None],
+    *,
+    include_android: bool = True,
+    include_type: bool = True,
+) -> str:
+    """Return a consistent selected-device line for cross-menu display."""
+
+    parts = [
+        format_device_display_name(device),
+        str(device.get("serial") or "unknown").strip() or "unknown",
+    ]
+    if include_android:
+        android = format_device_android_short(device)
+        if android:
+            parts.append(f"Android {android}")
+    if include_type:
+        kind = format_device_type_short(device)
+        if kind:
+            parts.append(kind)
+    return " · ".join(parts)
+
+
+def format_device_context_compact(device: dict[str, str | None]) -> str:
+    """Return a compact device label with name and serial only."""
+
+    return format_device_context_line(device, include_android=False, include_type=False)
+
+
 __all__ = [
     "format_timestamp_utc",
     "prettify_model",
@@ -132,6 +206,11 @@ __all__ = [
     "format_build_tags",
     "format_emulator_flag",
     "format_device_line",
+    "format_device_display_name",
+    "format_device_android_short",
+    "format_device_type_short",
+    "format_device_context_line",
+    "format_device_context_compact",
 ]
 
 

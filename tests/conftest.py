@@ -10,6 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from tests._collection_policy import derived_markers_for_path  # noqa: E402
 from scytaledroid.Database.db_core import db_config  # noqa: E402
 
 
@@ -111,3 +112,27 @@ def isolate_integration_db(request: pytest.FixtureRequest) -> Iterator[None]:
         yield
     finally:
         db_config.override_database(original_db)
+
+
+def _apply_derived_markers(item: pytest.Item) -> None:
+    explicit_markers = {marker.name for marker in item.iter_markers()}
+    try:
+        rel_path = item.path.resolve().relative_to(ROOT)
+    except Exception:
+        rel_path = item.path
+    for marker_name in derived_markers_for_path(rel_path):
+        if marker_name in explicit_markers:
+            continue
+        item.add_marker(getattr(pytest.mark, marker_name))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_itemcollected(item: pytest.Item) -> None:
+    _apply_derived_markers(item)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    del config
+    for item in items:
+        _apply_derived_markers(item)

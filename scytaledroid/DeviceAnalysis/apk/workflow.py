@@ -608,10 +608,6 @@ def resolve_harvest_plan(
         refresh_requested = False
         while True:
             action = ui.prompt_plan_action(preview_resolution)
-            if action == "dry-run":
-                harvest.preview_plan(plan)
-                ui.pause_after_preview()
-                continue
             if action == "rescope":
                 break
             if action == "cancel":

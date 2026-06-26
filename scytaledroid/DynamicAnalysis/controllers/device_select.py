@@ -2,42 +2,26 @@
 
 from __future__ import annotations
 
+from scytaledroid.DeviceAnalysis.device_menu.formatters import (
+    format_device_android_short,
+    format_device_context_line,
+    format_device_display_name,
+    format_device_type_short,
+)
 from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 
-def _clean_text(value: str | None) -> str:
-    return " ".join(str(value or "").replace("_", " ").split()).strip()
-
-
 def _device_name(device: dict[str, str | None]) -> str:
-    name = (
-        device.get("model")
-        or device.get("display_name")
-        or device.get("device")
-        or device.get("serial")
-        or "Unknown device"
-    )
-    return _clean_text(name) or "Unknown device"
+    return format_device_display_name(device)
 
 
 def _device_android_version(device: dict[str, str | None]) -> str:
-    version = str(device.get("android_version") or "").strip()
-    if version:
-        return version
-    release = str(device.get("android_release") or "").strip()
-    if release.lower().startswith("android "):
-        return release.split(" ", 1)[1].split(" ", 1)[0].strip() or "—"
-    return "—"
+    return format_device_android_short(device) or "—"
 
 
 def _device_kind(device: dict[str, str | None]) -> str:
-    kind = str(device.get("device_type") or "").strip().lower()
-    if kind == "emulator":
-        return "emulator"
-    if kind == "physical":
-        return "physical"
-    return "device"
+    return format_device_type_short(device) or "device"
 
 
 def _device_status(device: dict[str, str | None], *, active_serial: str | None) -> str:
@@ -52,19 +36,8 @@ def _device_status(device: dict[str, str | None], *, active_serial: str | None) 
     return "unknown"
 
 
-def _device_compact_label(device: dict[str, str | None]) -> str:
-    return f"{_device_name(device)} ({str(device.get('serial') or 'unknown').strip()})"
-
-
 def _device_current_line(device: dict[str, str | None]) -> str:
-    return " · ".join(
-        [
-            _device_name(device),
-            str(device.get("serial") or "unknown").strip(),
-            f"Android {_device_android_version(device)}",
-            _device_kind(device),
-        ]
-    )
+    return format_device_context_line(device)
 
 
 def _device_rows(
@@ -129,7 +102,7 @@ def get_device_selection_details(serial: str) -> dict[str, str]:
         "serial": str(device.get("serial") or serial).strip(),
         "android": _device_android_version(device),
         "type": _device_kind(device),
-        "label": _device_compact_label(device),
+        "label": _device_current_line(device),
         "status": _device_status(device, active_serial=None),
         "detected": "1",
     }
@@ -158,7 +131,7 @@ def select_device(
     active_device = _lookup_device_by_serial(summaries, active_serial)
     if prefer_active and active_serial:
         if active_device is not None:
-            device_label = _device_compact_label(active_device)
+            device_label = _device_current_line(active_device)
             print(status_messages.status(f"Using current device: {device_label}", level="info"))
             return active_serial, device_label
 
@@ -169,7 +142,7 @@ def select_device(
             print(status_messages.status("Detected device missing serial.", level="error"))
             prompt_utils.press_enter_to_continue()
             return None
-        device_label = _device_compact_label(selected_device)
+        device_label = _device_current_line(selected_device)
         device_service.set_active_serial(device_serial)
         print(status_messages.status(f"Using detected device: {device_label}", level="info"))
         return device_serial, device_label
@@ -199,7 +172,7 @@ def select_device(
         prompt_utils.press_enter_to_continue()
         return None
 
-    device_label = _device_compact_label(selected_device)
+    device_label = _device_current_line(selected_device)
     device_service.set_active_serial(device_serial)
     return device_serial, device_label
 

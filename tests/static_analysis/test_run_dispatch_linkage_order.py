@@ -5,8 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
+from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
+from tests.static_analysis._run_dispatch_support import (
+    make_outcome,
+    make_params,
+    make_selection,
+    patch_execute_run_spec_defaults,
+    patch_launch_scan_flow_defaults,
+    patch_static_run_lock,
+)
 
 
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
@@ -14,21 +22,14 @@ pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 
 @pytest.fixture(autouse=True)
 def _disable_static_run_lock(monkeypatch):
-    monkeypatch.setattr(run_dispatch, "_acquire_static_run_lock", lambda *_a, **_k: Path("/tmp/static.lock"))
-    monkeypatch.setattr(run_dispatch, "_release_static_run_lock", lambda *_a, **_k: None)
+    patch_static_run_lock(monkeypatch, Path("/tmp"))
     monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
 
 
 def test_launch_scan_flow_builds_run_map_after_render_persistence(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    result = AppRunResult(package_name="com.example.app", category="Test", static_run_id=None)
-    outcome = RunOutcome(
-        results=[result],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
+    outcome = make_outcome(
+        results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=None)]
     )
 
     calls: dict[str, object] = {
@@ -36,11 +37,7 @@ def test_launch_scan_flow_builds_run_map_after_render_persistence(monkeypatch) -
         "run_map_built": False,
     }
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
 
     def _render_and_persist(_outcome, *_a, **_k):
         # Simulate persist_run_summary assigning static_run_id during render.
@@ -69,26 +66,13 @@ def test_launch_scan_flow_builds_run_map_after_render_persistence(monkeypatch) -
     monkeypatch.setattr(run_dispatch, "_build_session_run_map", _build_run_map)
     monkeypatch.setattr(run_dispatch, "validate_run_map", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_persist_session_run_links", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "execute_permission_scan", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-
     def _capture_missing(*, missing_id_packages, **_kwargs):
         calls["missing_packages_seen"] = list(missing_id_packages)
 
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", _capture_missing)
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-1",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-1")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -193,26 +177,10 @@ def test_resolve_unique_session_stamp_first_run_when_db_and_local_absent(monkeyp
 
 
 def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    result = AppRunResult(package_name="com.example.app", category="Test", static_run_id=None)
-    outcome = RunOutcome(
-        results=[result],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
+    outcome = make_outcome(
+        results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=None)]
     )
-
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_build_session_run_map", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "execute_permission_scan", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
 
     captured_ids: list[int] = []
 
@@ -232,17 +200,8 @@ def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypat
 
     monkeypatch.setattr(core_q, "run_sql", _fake_run_sql)
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-1",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-1")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -250,23 +209,8 @@ def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypat
 
 
 def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
-    )
-
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    outcome = make_outcome(scope="app", label="Example")
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
 
     calls = {"run_map": 0, "perm_refresh": 0, "blocked_reason": None}
 
@@ -284,17 +228,8 @@ def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(m
     monkeypatch.setattr(run_dispatch, "execute_permission_scan", _execute_permission_scan)
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", _emit_missing)
 
-    params = RunParameters(
-        profile="full",
-        scope="app",
-        scope_label="Example",
-        session_stamp="sess-empty",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=True,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+    params = make_params(scope="app", scope_label="Example", session_stamp="sess-empty", permission_snapshot_refresh=True)
+    selection = make_selection(scope="app", label="Example")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -304,27 +239,17 @@ def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(m
 
 
 def test_launch_scan_flow_aborted_skips_linkage_and_permission_refresh(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
+    outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=777)],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
+        scope="app",
+        label="Example",
         aborted=True,
         abort_reason="SIGINT",
         abort_signal="SIGINT",
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     calls = {"run_map": 0, "perm_refresh": 0, "blocked_reason": None, "footer": 0, "rollup": 0}
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: calls.__setitem__("footer", calls["footer"] + 1))
     monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: calls.__setitem__("rollup", calls["rollup"] + 1))
 
@@ -336,17 +261,8 @@ def test_launch_scan_flow_aborted_skips_linkage_and_permission_refresh(monkeypat
 
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", _emit_missing)
 
-    params = RunParameters(
-        profile="full",
-        scope="app",
-        scope_label="Example",
-        session_stamp="sess-aborted",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=True,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+    params = make_params(scope="app", scope_label="Example", session_stamp="sess-aborted", permission_snapshot_refresh=True)
+    selection = make_selection(scope="app", label="Example")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -362,22 +278,13 @@ def test_launch_scan_flow_records_render_failure_and_skips_follow_on_postprocess
         def exception(self, *_args, **_kwargs):
             return None
 
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
+    outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=501)],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
+        scope="app",
+        label="Example",
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(run_dispatch.logging_engine, "get_error_logger", lambda: _SilentLogger())
 
     calls = {"run_map": 0, "perm_refresh": 0, "blocked_reason": None}
@@ -400,17 +307,8 @@ def test_launch_scan_flow_records_render_failure_and_skips_follow_on_postprocess
     monkeypatch.setattr(run_dispatch, "execute_permission_scan", _execute_permission_scan)
     monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", _emit_missing)
 
-    params = RunParameters(
-        profile="full",
-        scope="app",
-        scope_label="Example",
-        session_stamp="sess-render-fail",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=True,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+    params = make_params(scope="app", scope_label="Example", session_stamp="sess-render-fail", permission_snapshot_refresh=True)
+    selection = make_selection(scope="app", label="Example")
 
     result = run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -422,65 +320,36 @@ def test_launch_scan_flow_records_render_failure_and_skips_follow_on_postprocess
 
 
 def test_launch_scan_flow_run_map_failure_raises_in_strict_mode(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
+    outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=501)],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
+        scope="app",
+        label="Example",
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(run_dispatch, "_build_session_run_map", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
-    monkeypatch.setattr(run_dispatch, "execute_permission_scan", lambda *_a, **_k: None)
 
-    params = RunParameters(
-        profile="full",
+    params = make_params(
         scope="app",
         scope_label="Example",
         session_stamp="sess-strict",
-        dry_run=False,
-        persistence_ready=True,
         permission_snapshot_refresh=True,
         strict_persistence=True,
-        paper_grade_requested=False,
     )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
-
-    import pytest
+    selection = make_selection(scope="app", label="Example")
 
     with pytest.raises(RuntimeError, match="Failed to build run map"):
         run_dispatch.launch_scan_flow(selection, params, Path("."))
 
 
 def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
+    outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=777)],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
+        scope="app",
+        label="Example",
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(
         run_dispatch,
         "_build_session_run_map",
@@ -500,17 +369,8 @@ def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(mo
 
     monkeypatch.setattr(run_dispatch, "execute_permission_scan", _capture_permission_scan)
 
-    params = RunParameters(
-        profile="full",
-        scope="app",
-        scope_label="Example",
-        session_stamp="sess-perm",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=True,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+    params = make_params(scope="app", scope_label="Example", session_stamp="sess-perm", permission_snapshot_refresh=True)
+    selection = make_selection(scope="app", label="Example")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
     assert seen.get("fail_on_persist_error") is True
@@ -519,22 +379,13 @@ def test_launch_scan_flow_passes_fail_on_persist_error_for_permission_refresh(mo
 
 
 def test_launch_scan_flow_defers_persistence_footer_until_after_permission_refresh(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
+    outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=None)],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
+        scope="app",
+        label="Example",
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
 
     calls: list[tuple[str, object]] = []
 
@@ -583,17 +434,8 @@ def test_launch_scan_flow_defers_persistence_footer_until_after_permission_refre
         lambda session_stamp, scope_label: calls.append(("rollup", (session_stamp, scope_label))),
     )
 
-    params = RunParameters(
-        profile="full",
-        scope="app",
-        scope_label="Example",
-        session_stamp="sess-ordered",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=True,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+    params = make_params(scope="app", scope_label="Example", session_stamp="sess-ordered", permission_snapshot_refresh=True)
+    selection = make_selection(scope="app", label="Example")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -607,21 +449,13 @@ def test_launch_scan_flow_defers_persistence_footer_until_after_permission_refre
 
 
 def test_launch_scan_flow_return_to_main_menu_still_runs_required_postprocessing(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
+    outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=777)],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
+        scope="app",
+        label="Example",
     )
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(
         run_dispatch.persistence_runtime,
         "refresh_session_views",
@@ -647,17 +481,8 @@ def test_launch_scan_flow_return_to_main_menu_still_runs_required_postprocessing
         lambda *_a, **_k: calls.__setitem__("footer", calls["footer"] + 1),
     )
 
-    params = RunParameters(
-        profile="full",
-        scope="app",
-        scope_label="Example",
-        session_stamp="sess-return",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=True,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+    params = make_params(scope="app", scope_label="Example", session_stamp="sess-return", permission_snapshot_refresh=True)
+    selection = make_selection(scope="app", label="Example")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -665,17 +490,15 @@ def test_launch_scan_flow_return_to_main_menu_still_runs_required_postprocessing
 
 
 def test_execute_run_spec_detailed_refreshes_summary_cache_after_success(monkeypatch, tmp_path) -> None:
-    params = RunParameters(
+    params = make_params(
         profile="lightweight",
         scope="app",
         scope_label="com.example.app",
         session_stamp="dispatch-cache-ok",
         session_label="dispatch-cache-ok",
-        dry_run=False,
-        paper_grade_requested=False,
     )
     spec = run_dispatch.StaticRunSpec(
-        selection=ScopeSelection(scope="app", label="com.example.app", groups=tuple()),
+        selection=make_selection(scope="app", label="com.example.app"),
         params=params,
         base_dir=tmp_path,
         run_mode="batch",
@@ -683,17 +506,7 @@ def test_execute_run_spec_detailed_refreshes_summary_cache_after_success(monkeyp
         noninteractive=True,
     )
 
-    monkeypatch.setattr(run_dispatch.output_prefs, "snapshot", lambda: {})
-    monkeypatch.setattr(run_dispatch.output_prefs, "get_run_context", lambda: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_quiet", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_batch", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_run_mode", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_noninteractive", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_show_splits", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_run_context", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "restore", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_resolve_effective_run_params", lambda *_a, **_k: (params, None))
-    monkeypatch.setattr(run_dispatch, "_launch_scan_flow_resolved", lambda *_a, **_k: object())
+    patch_execute_run_spec_defaults(monkeypatch, params=params, launch_result=object())
 
     calls: list[bool] = []
     monkeypatch.setattr(
@@ -709,17 +522,15 @@ def test_execute_run_spec_detailed_refreshes_summary_cache_after_success(monkeyp
 
 
 def test_execute_run_spec_detailed_ignores_summary_cache_refresh_failure(monkeypatch, tmp_path) -> None:
-    params = RunParameters(
+    params = make_params(
         profile="lightweight",
         scope="app",
         scope_label="com.example.app",
         session_stamp="dispatch-cache-warn",
         session_label="dispatch-cache-warn",
-        dry_run=False,
-        paper_grade_requested=False,
     )
     spec = run_dispatch.StaticRunSpec(
-        selection=ScopeSelection(scope="app", label="com.example.app", groups=tuple()),
+        selection=make_selection(scope="app", label="com.example.app"),
         params=params,
         base_dir=tmp_path,
         run_mode="batch",
@@ -727,17 +538,7 @@ def test_execute_run_spec_detailed_ignores_summary_cache_refresh_failure(monkeyp
         noninteractive=True,
     )
 
-    monkeypatch.setattr(run_dispatch.output_prefs, "snapshot", lambda: {})
-    monkeypatch.setattr(run_dispatch.output_prefs, "get_run_context", lambda: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_quiet", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_batch", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_run_mode", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_noninteractive", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_show_splits", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "set_run_context", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch.output_prefs, "restore", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_resolve_effective_run_params", lambda *_a, **_k: (params, None))
-    monkeypatch.setattr(run_dispatch, "_launch_scan_flow_resolved", lambda *_a, **_k: object())
+    patch_execute_run_spec_defaults(monkeypatch, params=params, launch_result=object())
 
     warnings: list[str] = []
     monkeypatch.setattr(

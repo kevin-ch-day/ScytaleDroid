@@ -83,34 +83,37 @@ def apply_messaging_baseline_countability_policy(
     return counts_toward_completion, None
 
 
-def confirm_messaging_connected_baseline_ready(*, menu_utils: Any, prompt_utils: Any) -> bool:
+def prompt_messaging_baseline_setup(*, menu_utils: Any, prompt_utils: Any) -> str:
     print()
-    menu_utils.print_header("Messaging Baseline Check")
-    print("This baseline requires an existing conversation thread to be open and visible.")
-    print("Do not send messages or start calls.")
-    return prompt_utils.prompt_yes_no("Ready now?", default=True)
-
-
-def handle_messaging_connected_baseline_not_ready(*, prompt_utils: Any, status_messages: Any) -> str | None:
-    print(
-        status_messages.status(
-            "Connected-thread baseline is not ready. Without a visible conversation thread, this run is likely low-signal and may be excluded.",
-            level="warn",
-        )
+    menu_utils.print_header("Messaging Baseline Setup")
+    print("This app uses the messaging baseline policy.")
+    print()
+    print("Countable baseline evidence requires:")
+    print("  - app is open")
+    print("  - an existing conversation thread is visible")
+    print("  - no message sending")
+    print("  - no call initiation")
+    print("  - no account-changing action")
+    print()
+    print("Choose:")
+    print("1) Run connected-idle baseline")
+    print("   counts toward baseline quota if checks pass")
+    print("2) Switch to manual interaction")
+    print("   use if the app is not ready for connected-idle baseline")
+    print("0) Cancel")
+    return prompt_utils.get_choice(
+        ["1", "2", "0"],
+        default="1",
+        prompt="› Choose [1]: ",
+        invalid_message="Choose 1, 2, or 0.",
     )
-    fallback_interaction = "interaction_manual"
-    fallback_label = "manual interaction"
-    if prompt_utils.prompt_yes_no(f"Switch to {fallback_label} now?", default=True):
-        return fallback_interaction
-    return None
 
 
 __all__ = [
     "apply_messaging_baseline_countability_policy",
     "canonical_baseline_profile_for_package",
-    "confirm_messaging_connected_baseline_ready",
-    "handle_messaging_connected_baseline_not_ready",
     "is_messaging_connected_baseline",
     "is_messaging_package_or_category",
     "messaging_baseline_connected_insufficient_duration_streak",
+    "prompt_messaging_baseline_setup",
 ]

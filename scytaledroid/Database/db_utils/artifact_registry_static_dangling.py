@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,6 +66,17 @@ REASON_FIELDS: tuple[str, ...] = (
     "malformed_static_run_id",
     "unknown_needs_review",
 )
+
+CORE_BUNDLE_ARTIFACT_TYPES: tuple[str, ...] = (
+    "dep_snapshot",
+    "static_run_manifest",
+    "manifest_evidence",
+    "static_baseline_json",
+    "static_dynamic_plan_json",
+    "static_report",
+)
+
+_TIMESTAMP_HINT_RE = re.compile(r"-(\d{8}T\d{6}Z)\.json$", re.IGNORECASE)
 
 
 def _norm_text(value: Any) -> str:
@@ -128,6 +140,14 @@ def _path_exists(host_path: str | None) -> bool | None:
         return False
 
 
+def _read_json(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _infer_host_path_family(host_path: str | None) -> str | None:
     hp = _norm_text_or_none(host_path)
     if not hp:
@@ -158,6 +178,34 @@ def _workspace_prefix(host_path: str | None) -> str | None:
     if marker in hp:
         return hp.split(marker, 1)[0]
     return str(Path(hp).parent)
+
+
+def _timestamp_hint_from_path(host_path: str | None) -> str | None:
+    hp = _norm_text_or_none(host_path)
+    if not hp:
+        return None
+    match = _TIMESTAMP_HINT_RE.search(hp.replace("\\", "/"))
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _recover_run_manifest_context(repo_root: Path, run_id: str) -> dict[str, Any]:
+    manifest_path = repo_root / "evidence" / "static_runs" / run_id / "run_manifest.json"
+    manifest_exists = manifest_path.is_file()
+    payload = _read_json(manifest_path) if manifest_exists else None
+    return {
+        "recovered_run_manifest_path": str(manifest_path) if manifest_exists else None,
+        "recovered_run_manifest_exists": manifest_exists,
+        "recovered_package_name": _norm_text_or_none((payload or {}).get("package_name")),
+        "recovered_display_name": _norm_text_or_none((payload or {}).get("display_name")),
+        "recovered_version_name": _norm_text_or_none((payload or {}).get("version_name")),
+        "recovered_version_code": _norm_text_or_none((payload or {}).get("version_code")),
+        "recovered_profile_key": _norm_text_or_none((payload or {}).get("profile_key")),
+        "recovered_scenario_id": _norm_text_or_none((payload or {}).get("scenario_id")),
+        "recovered_run_grade": _norm_text_or_none((payload or {}).get("run_grade")),
+        "recovered_base_apk_sha256": _norm_text_or_none((payload or {}).get("base_apk_sha256") or (payload or {}).get("apk_sha256")),
+    }
 
 
 def _schema_inventory(run_sql: RunSql) -> tuple[list[dict[str, Any]], set[str]]:
@@ -246,7 +294,7 @@ def _dangling_row_sql(discovered_tables: set[str]) -> str:
         "v.created_at_utc",
         "v.status_reason",
         "JSON_UNQUOTE(JSON_EXTRACT(v.meta_json, '$.package_name')) AS meta_package_name",
-        "JSON_UNQUOTE(JSON_EXTRACT(v.meta_json, '$.session_stamp')) AS meta_session_stamp",
+        "COALESCE(v.session_stamp, JSON_UNQUOTE(JSON_EXTRACT(v.meta_json, '$.session_stamp'))) AS meta_session_stamp",
         "JSON_UNQUOTE(JSON_EXTRACT(v.meta_json, '$.session_label')) AS meta_session_label",
         _exists("has_static_session_run_link", "static_session_run_links", "t.static_run_id = v.resolved_static_run_id"),
         _exists("has_static_analysis_findings", "static_analysis_findings", "t.run_id = v.resolved_static_run_id"),
@@ -335,11 +383,12 @@ def _classify_row(row: Mapping[str, Any], *, repo_root: Path) -> dict[str, Any]:
     }
 
 
-def _build_run_rows(row_records: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _build_run_rows(row_records: Sequence[Mapping[str, Any]], *, repo_root: Path) -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
     reason_counter_by_run: dict[str, Counter[str]] = defaultdict(Counter)
     artifact_counter_by_run: dict[str, Counter[str]] = defaultdict(Counter)
     path_family_counter_by_run: dict[str, Counter[str]] = defaultdict(Counter)
+    timestamp_hints_by_run: dict[str, set[str]] = defaultdict(set)
     for row in row_records:
         run_id = str(row.get("resolved_static_run_id") or row.get("run_id") or "(blank)")
         group = grouped.setdefault(
@@ -380,18 +429,42 @@ def _build_run_rows(row_records: Sequence[Mapping[str, Any]]) -> list[dict[str, 
         artifact_counter_by_run[run_id][_norm_text_or_none(row.get("artifact_type")) or ""] += 1
         path_family_counter_by_run[run_id][_norm_text_or_none(row.get("host_path_family")) or ""] += 1
         reason_counter_by_run[run_id][_norm_text_or_none(row.get("primary_reason")) or "unknown"] += 1
+        hint = _timestamp_hint_from_path(_norm_text_or_none(row.get("host_path")))
+        if hint:
+            timestamp_hints_by_run[run_id].add(hint)
     out: list[dict[str, Any]] = []
     for run_id, group in grouped.items():
         artifact_types = artifact_counter_by_run[run_id]
         path_families = path_family_counter_by_run[run_id]
         reasons = reason_counter_by_run[run_id]
         dominant_reason = max(reasons.items(), key=lambda item: (item[1], item[0]))[0] if reasons else None
+        manifest_context = _recover_run_manifest_context(repo_root, run_id) if run_id.isdigit() else {
+            "recovered_run_manifest_path": None,
+            "recovered_run_manifest_exists": False,
+            "recovered_package_name": None,
+            "recovered_display_name": None,
+            "recovered_version_name": None,
+            "recovered_version_code": None,
+            "recovered_profile_key": None,
+            "recovered_scenario_id": None,
+            "recovered_run_grade": None,
+            "recovered_base_apk_sha256": None,
+        }
+        duplicate_types = sorted(kind for kind, count in artifact_types.items() if kind and int(count) > 1)
+        missing_core_types = sorted(kind for kind in CORE_BUNDLE_ARTIFACT_TYPES if artifact_types.get(kind, 0) <= 0)
         group["artifact_type_count"] = len(artifact_types)
         group["artifact_types_csv"] = ",".join(sorted(artifact_types))
         group["path_family_count"] = len(path_families)
         group["path_families_csv"] = ",".join(sorted(path_families))
         group["dominant_primary_reason"] = dominant_reason
         group["primary_reason_distribution"] = json.dumps(dict(sorted(reasons.items())), sort_keys=True)
+        group["path_timestamp_hints_csv"] = ",".join(sorted(timestamp_hints_by_run.get(run_id) or ()))
+        group["duplicate_artifact_rows"] = sum(max(0, int(count) - 1) for count in artifact_types.values())
+        group["duplicate_artifact_types_csv"] = ",".join(duplicate_types)
+        group["core_bundle_artifact_type_count"] = sum(1 for kind in CORE_BUNDLE_ARTIFACT_TYPES if artifact_types.get(kind, 0) > 0)
+        group["missing_core_artifact_types_csv"] = ",".join(missing_core_types)
+        group["core_bundle_complete"] = not missing_core_types
+        group.update(manifest_context)
         out.append(group)
     out.sort(key=lambda row: (str(row.get("created_at_min_utc") or ""), str(row.get("resolved_static_run_id") or "")))
     return out
@@ -481,7 +554,7 @@ def collect_artifact_registry_static_dangling_report(
         query_name="artifact_registry_static_dangling.dangling_rows",
     )
     row_records = [_classify_row(row, repo_root=repo_root) for row in dangling_rows_raw]
-    run_rows = _build_run_rows(row_records)
+    run_rows = _build_run_rows(row_records, repo_root=repo_root)
     reason_counts = _build_reason_counts(
         row_records,
         linked_static_registry_rows=totals["linked_static_registry_rows"],
@@ -497,10 +570,20 @@ def collect_artifact_registry_static_dangling_report(
     path_family_counts = Counter(_norm_text_or_none(row.get("host_path_family")) or "unknown" for row in row_records)
     artifact_type_counts = Counter(_norm_text_or_none(row.get("artifact_type")) or "unknown" for row in row_records)
     linkage_resolution_counts = Counter(_norm_text_or_none(row.get("linkage_resolution_path")) or "unknown" for row in row_records)
+    recovered_packages = {
+        _norm_text_or_none(row.get("recovered_package_name"))
+        for row in run_rows
+        if _norm_text_or_none(row.get("recovered_package_name"))
+    }
 
     summary = {
         **totals,
         "distinct_static_run_count": len({str(row.get("resolved_static_run_id")) for row in row_records if row.get("resolved_static_run_id") is not None}),
+        "distinct_recovered_package_count": len(recovered_packages),
+        "runs_with_recovered_manifest_context": sum(1 for row in run_rows if _norm_bool(row.get("recovered_run_manifest_exists"))),
+        "complete_core_bundle_run_count": sum(1 for row in run_rows if _norm_bool(row.get("core_bundle_complete"))),
+        "partial_core_bundle_run_count": sum(1 for row in run_rows if not _norm_bool(row.get("core_bundle_complete"))),
+        "runs_with_duplicate_artifact_types": sum(1 for row in run_rows if _norm_text_or_none(row.get("duplicate_artifact_types_csv"))),
         "schema_tables_discovered": [row["table_name"] for row in schema_rows],
         "primary_reason_counts": dict(sorted(primary_reason_counts.items())),
         "reason_flag_counts": dict(sorted(reason_flag_counts.items())),

@@ -4,9 +4,11 @@ Session identifiers (read carefully):
 
 - **Canonical SAR** rows on ``static_analysis_runs`` are filtered by ``session_label`` in this module
   (see ``_canonical_direct_counts``, ``_static_run_status_counts``, ``reconcile_static_session``).
-- **Legacy mirror** ``runs`` / compat package probes use ``runs.session_stamp`` (and
-  ``risk_scores.session_stamp``) with the same string in typical CLI flows where the stamp and label
-  match; when they diverge, only the canonical path is guaranteed correct here.
+- **Compatibility / session surfaces** use ``session_stamp`` with the same string in typical CLI flows:
+  legacy ``runs`` and the still-active permission-posture ``risk_scores`` table, plus
+  ``static_findings_summary``, ``static_string_summary``, ``static_session_run_links``, and
+  ``static_session_rollups``. When label and stamp diverge, only the canonical SAR path is guaranteed
+  correct here.
 """
 
 from __future__ import annotations
@@ -153,7 +155,12 @@ def _apply_reconcile_summary(summary: AuditSummary, session_label: str) -> None:
 
 
 def _canonical_direct_counts(session_label: str) -> AuditSummary:
-    """Return direct-table canonical audit counts scoped by ``static_analysis_runs.session_label``."""
+    """Return direct-table canonical audit counts.
+
+    ``static_analysis_runs`` is keyed here by ``session_label``; session-scoped summary tables
+    such as ``static_findings_summary`` / ``static_string_summary`` are keyed by ``session_stamp``
+    and reuse the same token in current CLI flows.
+    """
     return {
         "run_statuses": _static_run_status_counts(session_label),
         "baseline_runs": _scalar_count(
@@ -204,7 +211,7 @@ def _canonical_direct_counts(session_label: str) -> AuditSummary:
             """
             SELECT package_name
             FROM static_findings_summary
-            WHERE session_label=%s
+            WHERE session_stamp=%s
             """,
             (session_label,),
         ),
@@ -212,7 +219,7 @@ def _canonical_direct_counts(session_label: str) -> AuditSummary:
             """
             SELECT package_name
             FROM static_string_summary
-            WHERE session_label=%s
+            WHERE session_stamp=%s
             """,
             (session_label,),
         ),
@@ -264,7 +271,8 @@ def _secondary_compat_package_rows(runs_session_stamp: str) -> tuple[list[Row], 
 def _bridge_direct_counts(*, session_label: str, runs_session_stamp: str) -> AuditSummary:
     """Return direct-table bridge/compat audit counts.
 
-    ``session_label`` keys ``static_session_*`` link/rollup rows. ``runs_session_stamp`` keys legacy
+    ``session_label`` keys canonical ``static_analysis_runs`` selection elsewhere. ``runs_session_stamp`` keys
+    ``static_session_*`` link/rollup rows and legacy
     ``runs`` / compat mirror probes (often the same string as ``session_label`` in CLI flows).
     """
     findings_rows, metrics_rows, buckets_rows, contributors_rows = _secondary_compat_package_rows(
@@ -301,17 +309,17 @@ def _bridge_direct_counts(*, session_label: str, runs_session_stamp: str) -> Aud
             """
             SELECT COUNT(*)
             FROM static_session_run_links
-            WHERE session_label=%s
+            WHERE session_stamp=%s
             """,
-            (session_label,),
+            (runs_session_stamp,),
         ),
         "session_rollups": _scalar_count(
             """
             SELECT COUNT(*)
             FROM static_session_rollups
-            WHERE session_label=%s
+            WHERE session_stamp=%s
             """,
-            (session_label,),
+            (runs_session_stamp,),
         ),
     }
 
@@ -320,7 +328,8 @@ def _apply_direct_summary_fallback(summary: AuditSummary, session_label: str) ->
     """Populate audit summary directly from tables when reconciliation is unavailable.
 
     ``session_label`` is the canonical static session selector (``static_analysis_runs.session_label``).
-    Legacy bridge counts reuse the same string as ``runs.session_stamp`` / ``risk_scores.session_stamp``;
+    Bridge/session-link counts reuse the same string as ``session_stamp`` on legacy mirrors and
+    ``static_session_*`` tables;
     if your deployment separates label from stamp, pass reconciled data instead of relying on this fallback.
     """
     try:

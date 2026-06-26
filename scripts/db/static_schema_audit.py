@@ -56,6 +56,13 @@ AUDIT_PROFILES: dict[str, dict[str, str]] = {
         "readers_hint": "reporting, menus, Web views",
         "notes": "",
     },
+    "static_finding_evidence_payloads": {
+        "classification": "canonical_keep",
+        "owner_domain": "StaticAnalysis",
+        "writers_hint": "StaticAnalysis/cli/persistence/run_summary.py; finding_evidence_payload.py",
+        "readers_hint": "views_web.py; check_evidence_storage_posture.py; check_evidence_latest_write_posture.py; report_evidence_storage_posture.py",
+        "notes": "Canonical SHA-256 keyed dedupe store for finding evidence JSON bodies referenced by static_analysis_findings.evidence_hash.",
+    },
     "static_permission_matrix": {
         "classification": "canonical_keep",
         "owner_domain": "StaticAnalysis",
@@ -102,7 +109,7 @@ AUDIT_PROFILES: dict[str, dict[str, str]] = {
         "classification": "derived_keep",
         "owner_domain": "StaticAnalysis",
         "writers_hint": "StaticAnalysis/cli/persistence/run_summary.py (correlation stage INSERT)",
-        "readers_hint": "session_diagnostics.py; UI/menu SQL (tests/ui/test_global_menu_rollout.py patterns)",
+        "readers_hint": "session_diagnostics.py; UI/menu SQL (tests/ui/test_database_menu_rollout.py patterns)",
         "notes": "Canonical correlation payload table; superseded legacy base name correlations. Not in static_schema_gate.",
     },
     "static_fileproviders": {

@@ -8,6 +8,7 @@ SELECT
   ar.artifact_id,
   ar.run_id,
   ar.run_type,
+  ar.session_stamp,
   ar.static_run_id,
   ar.dynamic_run_id,
   ar.linkage_migration_status,

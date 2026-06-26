@@ -30,7 +30,7 @@ def test_schema_migration_registry_has_no_duplicate_ids() -> None:
     assert duplicate_registry_ids() == {}
     assert len(registered_migrations()) >= 3
     assert registry_version_chain_issues() == []
-    assert latest_registered_schema_version() == "0.3.11-dynamic-service-signals"
+    assert latest_registered_schema_version() == "0.3.14-static-finding-evidence-payload-schema"
 
 
 def test_runtime_schema_version_ddl_matches_live_hotfix_contract() -> None:

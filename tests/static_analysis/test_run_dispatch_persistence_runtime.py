@@ -5,38 +5,28 @@ from pathlib import Path
 
 import pytest
 
-from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
+from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult
 from scytaledroid.StaticAnalysis.cli.core.run_specs import StaticRunSpec
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
 from scytaledroid.StaticAnalysis.cli.flows import session_finalizer
+from tests.static_analysis._run_dispatch_support import (
+    make_outcome,
+    make_params,
+    make_post_summary,
+    make_selection,
+    patch_launch_scan_flow_defaults,
+    patch_static_run_lock,
+)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_static_run_lock(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(run_dispatch.app_config, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(run_dispatch, "_acquire_static_run_lock", lambda *_a, **_k: tmp_path / "static_analysis.lock")
-    monkeypatch.setattr(run_dispatch, "_release_static_run_lock", lambda *_a, **_k: None)
+    patch_static_run_lock(monkeypatch, tmp_path)
 
 
 def test_launch_scan_flow_dry_run_skips_runtime_persistence(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="app", label="Example", groups=tuple()),
-        base_dir=Path("."),
-    )
-
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
+    outcome = make_outcome(scope="app", label="Example")
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome, persistence_enabled=False)
 
     def _unexpected_bootstrap(**_kwargs):
         raise AssertionError("dry-run must not bootstrap runtime persistence")
@@ -46,57 +36,18 @@ def test_launch_scan_flow_dry_run_skips_runtime_persistence(monkeypatch) -> None
 
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", _unexpected_bootstrap)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", _unexpected_refresh)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: False)
-
-    params = RunParameters(
-        profile="full",
-        scope="app",
-        scope_label="Example",
-        session_stamp="sess-dry",
-        dry_run=True,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="app", label="Example", groups=tuple())
+    params = make_params(scope="app", scope_label="Example", session_stamp="sess-dry", dry_run=True)
+    selection = make_selection(scope="app", label="Example")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
 
 def test_launch_scan_flow_announces_postprocessing_boundary(monkeypatch, capsys) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
-    )
+    outcome = make_outcome()
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
-
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-postprocessing",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-postprocessing")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -105,35 +56,16 @@ def test_launch_scan_flow_announces_postprocessing_boundary(monkeypatch, capsys)
 
 
 def test_launch_scan_flow_updates_heartbeat_phases(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
-    )
+    outcome = make_outcome()
 
     phases: list[tuple[str, str | None, bool]] = []
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
-        lambda **_k: type("PostSummary", (), {"permission_refresh_error": None})(),
+        lambda **_k: make_post_summary(),
     )
-    monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_hb_set_run", lambda session_stamp, phase="scan": phases.append(("run", session_stamp, phase == "scan")))
     monkeypatch.setattr(
         run_dispatch,
@@ -141,17 +73,8 @@ def test_launch_scan_flow_updates_heartbeat_phases(monkeypatch) -> None:
         lambda phase, keep_app=True: phases.append((phase, None, keep_app)),
     )
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-heartbeat",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-heartbeat")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -164,14 +87,7 @@ def test_launch_scan_flow_updates_heartbeat_phases(monkeypatch) -> None:
 
 
 def test_launch_scan_flow_emits_phase_logs(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
-    )
+    outcome = make_outcome()
 
     records: list[dict[str, object]] = []
 
@@ -179,37 +95,16 @@ def test_launch_scan_flow_emits_phase_logs(monkeypatch) -> None:
         def info(self, _message, *, extra=None):
             records.append(dict(extra or {}))
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
-        lambda **_k: type("PostSummary", (), {"permission_refresh_error": None})(),
+        lambda **_k: make_post_summary(),
     )
-    monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "get_run_logger", lambda *_a, **_k: _Logger())
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-phase-log",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-phase-log")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -234,17 +129,8 @@ def test_launch_scan_flow_blocks_when_another_static_run_is_active(monkeypatch, 
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("Another static analysis run is already active.")),
     )
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-lock",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-lock")
+    selection = make_selection(scope="all", label="All apps")
 
     outcome = run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -254,13 +140,7 @@ def test_launch_scan_flow_blocks_when_another_static_run_is_active(monkeypatch, 
 
 
 def test_launch_scan_flow_sigint_marks_aborting_and_logs_abort_event(monkeypatch, capsys) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
+    outcome = make_outcome(
         aborted=True,
         abort_reason="SIGINT",
         abort_signal="SIGINT",
@@ -286,36 +166,15 @@ def test_launch_scan_flow_sigint_marks_aborting_and_logs_abort_event(monkeypatch
         handler(run_dispatch.signal.SIGINT, None)
         return outcome
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(run_dispatch, "execute_scan", _execute_scan)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "get_run_logger", lambda *_a, **_k: _Logger())
     monkeypatch.setattr(run_dispatch.signal, "getsignal", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch.signal, "signal", _signal)
     monkeypatch.setattr(run_dispatch, "_hb_set_phase", lambda phase, keep_app=True: phases.append(phase))
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-sigint",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-sigint")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -331,14 +190,7 @@ def test_launch_scan_flow_sigint_marks_aborting_and_logs_abort_event(monkeypatch
 
 
 def test_launch_scan_flow_run_end_uses_postprocessing_failure_status(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
-    )
+    outcome = make_outcome()
 
     records: list[dict[str, object]] = []
     phases: list[str] = []
@@ -350,42 +202,18 @@ def test_launch_scan_flow_run_end_uses_postprocessing_failure_status(monkeypatch
         def warning(self, _message, *, extra=None):
             records.append(dict(extra or {}))
 
-    class _PostSummary:
-        permission_refresh_error = None
-
     def _render_results(*_args, **_kwargs):
         outcome.persistence_failed = True
         outcome.failures.append("PERSISTENCE_ERROR")
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", _render_results)
-    monkeypatch.setattr(run_dispatch, "run_post_summary_postprocessing", lambda **_k: _PostSummary())
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_postprocessing_step", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_dispatch, "run_post_summary_postprocessing", lambda **_k: make_post_summary())
     monkeypatch.setattr(run_dispatch, "get_run_logger", lambda *_a, **_k: _Logger())
     monkeypatch.setattr(run_dispatch, "_hb_set_phase", lambda phase, keep_app=True: phases.append(phase))
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-run-end-failed",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-run-end-failed")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -397,14 +225,7 @@ def test_launch_scan_flow_run_end_uses_postprocessing_failure_status(monkeypatch
 
 
 def test_launch_scan_flow_emits_persist_end_for_deferred_footer(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
-    )
+    outcome = make_outcome()
 
     records: list[dict[str, object]] = []
 
@@ -415,39 +236,18 @@ def test_launch_scan_flow_emits_persist_end_for_deferred_footer(monkeypatch) -> 
         def warning(self, _message, *, extra=None):
             records.append(dict(extra or {}))
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
-        lambda **_k: type("PostSummary", (), {"permission_refresh_error": None, "linkage_blocked_reason": None, "run_map_built": False})(),
+        lambda **_k: make_post_summary(run_map_built=False),
     )
-    monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_session_finalization_issues", lambda **_k: [])
     monkeypatch.setattr(run_dispatch.logging_engine, "get_static_logger", lambda: _Logger())
     monkeypatch.setattr(run_dispatch, "get_run_logger", lambda *_a, **_k: _Logger())
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-persist-end",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-persist-end")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -459,13 +259,8 @@ def test_launch_scan_flow_emits_persist_end_for_deferred_footer(monkeypatch) -> 
 
 
 def test_launch_scan_flow_marks_run_failed_when_session_finalization_is_incomplete(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
+    outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=7)],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
     )
 
     records: list[dict[str, object]] = []
@@ -477,39 +272,18 @@ def test_launch_scan_flow_marks_run_failed_when_session_finalization_is_incomple
         def warning(self, _message, *, extra=None):
             records.append(dict(extra or {}))
 
-    monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
-    monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
-    monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
-    monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_missing_run_ids_artifact", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "finalize_open_runs", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_db_preflight_lock_warning", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_emit_static_run_preflight_summary", lambda *_a, **_k: None)
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
     monkeypatch.setattr(
         run_dispatch,
         "run_post_summary_postprocessing",
-        lambda **_k: type("PostSummary", (), {"permission_refresh_error": None, "linkage_blocked_reason": None, "run_map_built": True})(),
+        lambda **_k: make_post_summary(run_map_built=True),
     )
-    monkeypatch.setattr(run_dispatch, "_render_persistence_footer", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_dispatch, "_persist_cohort_rollup", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_session_finalization_issues", lambda **_k: ["run_map_missing", "session_links_missing"])
     monkeypatch.setattr(run_dispatch.logging_engine, "get_static_logger", lambda: _Logger())
     monkeypatch.setattr(run_dispatch, "get_run_logger", lambda *_a, **_k: _Logger())
 
-    params = RunParameters(
-        profile="full",
-        scope="all",
-        scope_label="All apps",
-        session_stamp="sess-finalization-failed",
-        dry_run=False,
-        persistence_ready=True,
-        permission_snapshot_refresh=False,
-        paper_grade_requested=False,
-    )
-    selection = ScopeSelection(scope="all", label="All apps", groups=tuple())
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-finalization-failed")
+    selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
@@ -581,14 +355,7 @@ def test_session_finalization_outputs_flags_incomplete_link_coverage(monkeypatch
 
 
 def test_execute_run_spec_detailed_uses_session_cache_finalizer(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    outcome = RunOutcome(
-        results=[],
-        started_at=now,
-        finished_at=now,
-        scope=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        base_dir=Path("."),
-    )
+    outcome = make_outcome()
 
     cache_calls: list[str] = []
 
@@ -604,16 +371,11 @@ def test_execute_run_spec_detailed_uses_session_cache_finalizer(monkeypatch) -> 
     )
 
     spec = StaticRunSpec(
-        selection=ScopeSelection(scope="all", label="All apps", groups=tuple()),
-        params=RunParameters(
-            profile="full",
+        selection=make_selection(scope="all", label="All apps"),
+        params=make_params(
             scope="all",
             scope_label="All apps",
             session_stamp="sess-cache",
-            dry_run=False,
-            persistence_ready=True,
-            permission_snapshot_refresh=False,
-            paper_grade_requested=False,
         ),
         base_dir=Path("."),
         run_mode="interactive",

@@ -84,6 +84,7 @@ def test_render_cohort_status_help_mentions_supplemental_and_historical(monkeypa
     assert "Build=current + Evidence=db-only" in out
     assert "drift" in out
     assert "refresh steps" in out
+    assert "installed app build differs from the newest static plan" in out
     assert "identity mismatch" in out
     assert "baseline gap" in out
     assert "manual gap" in out

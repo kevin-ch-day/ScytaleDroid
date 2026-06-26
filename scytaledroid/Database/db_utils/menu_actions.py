@@ -1447,7 +1447,7 @@ def reconcile_static_session_artifacts() -> None:
     print_warning_preview("Failed packages", summary.failed_packages)
     print_warning_preview("Missing session links", summary.missing_session_links)
     print_warning_preview("Missing compat runs", summary.missing_legacy_runs)
-    print_warning_preview("Missing compat risk", summary.missing_risk_scores)
+    print_warning_preview("Missing permission posture risk", summary.missing_risk_scores)
     secondary_compat_gap_count = summary.missing_secondary_compat_mirror_count
     if secondary_compat_gap_count:
         print(

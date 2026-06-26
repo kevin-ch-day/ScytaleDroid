@@ -12,11 +12,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
-from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DynamicAnalysis.controllers.device_select import (
     get_device_selection_details,
@@ -24,8 +24,9 @@ from scytaledroid.DynamicAnalysis.controllers.device_select import (
 )
 from scytaledroid.DynamicAnalysis.controllers import guided_run_capture as _guided_run_capture
 from scytaledroid.DynamicAnalysis.controllers import guided_run_messaging as _guided_run_messaging
-from scytaledroid.DynamicAnalysis.controllers import guided_run_selected_app_state as _guided_run_selected_app_state
-from scytaledroid.DynamicAnalysis.controllers import guided_run_workbench as _guided_run_workbench
+from scytaledroid.DynamicAnalysis.controllers import selected_app_actions as _selected_app_actions
+from scytaledroid.DynamicAnalysis.controllers import selected_app_review as _selected_app_review
+from scytaledroid.DynamicAnalysis.controllers import selected_app_state as _selected_app_state
 from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     device_preflight_checks as _device_preflight_checks_impl,
     extract_version_code_details_from_dump as _extract_version_code_details_from_dump_impl,
@@ -61,6 +62,7 @@ from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
     delete_dynamic_evidence_packs,
     find_dynamic_run_dirs,
+    recent_tracker_runs,
     reset_package_dataset_tracker,
 )
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts, load_display_name_map
@@ -82,6 +84,7 @@ _META_FAMILY_PACKAGES = {
 _QUEUE_ACTION_NONE = "none"
 _QUEUE_ACTION_REVIEW_QA = "review_qa"
 _QUEUE_ACTION_RESTORE_LOCAL = "restore_local_evidence"
+_QUEUE_ACTION_REFRESH = "refresh"
 _QUEUE_ACTION_BASELINE = "baseline"
 _QUEUE_ACTION_SCRIPTED = "scripted_interaction"
 _QUEUE_ACTION_MANUAL = "manual_interaction"
@@ -100,6 +103,7 @@ class _SelectedAppContext:
     package_name: str
     display_label: str
     meta_family_note: bool
+    has_identity_mismatch: bool
     state: Any
     cfg: Any
     counts: Any
@@ -142,6 +146,8 @@ def _queue_action_key(action: str | None) -> str:
         return _QUEUE_ACTION_REVIEW_QA
     if text == "restore local evidence":
         return _QUEUE_ACTION_RESTORE_LOCAL
+    if text == "refresh":
+        return _QUEUE_ACTION_REFRESH
     if text == "baseline":
         return _QUEUE_ACTION_BASELINE
     if text == "scripted interaction":
@@ -174,7 +180,7 @@ def _initial_device_context() -> dict[str, str | None]:
     if not serial:
         return {"serial": None, "label": None}
     try:
-        label = adb_devices.get_device_label(active)
+        label = device_manager.describe_device(active)
     except Exception:
         label = serial
     return {"serial": serial, "label": label}
@@ -265,7 +271,7 @@ def _print_selected_app_evidence_context(
         )
         print(
             status_messages.status(
-                f"Historical context: {legacy_valid_runs} legacy valid run(s){build_text} retained for comparison; not counted toward current quota.",
+                f"Historical evidence: {legacy_valid_runs} legacy valid run(s){build_text} retained for comparison; not counted toward current quota.",
                 level="info",
             )
         )
@@ -274,25 +280,25 @@ def _print_selected_app_evidence_context(
     if state == "current_build_db_only":
         print()
         print("Why:")
-        print("Current-build DB-backed evidence exists, but the local evidence pack is missing in this workspace.")
+        print("Current-build evidence exists in the DB, but the local evidence pack is missing in this workspace.")
         print("Restore the local evidence pack if available, or recollect the current build.")
         return
     if state == "historical_local_only":
         print()
         print("Why:")
-        print("Current-build evidence is still missing for this app.")
+        print("Historical evidence exists locally, but current-build evidence is still missing for this app.")
         print("Baseline collection should target the installed build.")
         return
     if state == "historical_db_only":
         print()
         print("Why:")
-        print("Historical DB-only evidence exists, but no local evidence pack is present in this workspace.")
+        print("Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace.")
         print("Collect baseline evidence for the installed build.")
         return
     if state == "no_evidence_anywhere":
         print()
         print("Why:")
-        print(f"No prior dynamic evidence exists yet for {package_name}.")
+        print(f"No dynamic evidence exists yet for {package_name}.")
         print("This run will establish the first current-build baseline.")
 
 
@@ -308,7 +314,7 @@ def _selected_app_queue_action(
     db_active_sessions: int,
     active_valid_runs: int,
 ) -> tuple[str, str | None]:
-    return _guided_run_selected_app_state.selected_app_queue_action(
+    return _selected_app_state.selected_app_queue_action(
         baseline_valid_runs=baseline_valid_runs,
         interactive_valid_runs=interactive_valid_runs,
         baseline_required=baseline_required,
@@ -320,22 +326,13 @@ def _selected_app_queue_action(
         active_valid_runs=active_valid_runs,
     )
 
-
-def _print_selected_app_queue_action(action: str, reason: str | None) -> None:
-    _guided_run_selected_app_state.print_selected_app_queue_action(
-        action,
-        reason,
-        status_messages=status_messages,
-    )
-
-
 def _render_selected_app_review(
     *,
     display_label: str,
     latest_recent: Any,
     print_tier1_qa_result: Callable[[str], None] | None = None,
 ) -> None:
-    _guided_run_workbench.render_selected_app_review(
+    _selected_app_review.render_selected_app_review(
         display_label=display_label,
         latest_recent=latest_recent,
         print_tier1_qa_result=print_tier1_qa_result,
@@ -346,7 +343,7 @@ def _render_selected_app_review(
 
 
 def _render_selected_app_recent_runs(state: Any) -> None:
-    _guided_run_workbench.render_selected_app_recent_runs(
+    _selected_app_review.render_selected_app_recent_runs(
         state,
         menu_utils=menu_utils,
         status_messages=status_messages,
@@ -363,7 +360,7 @@ def _render_selected_app_diagnostics(
     db_active_sessions: int,
     db_historical_sessions: int,
 ) -> None:
-    _guided_run_workbench.render_selected_app_diagnostics(
+    _selected_app_review.render_selected_app_diagnostics(
         package_name=package_name,
         display_label=display_label,
         state=state,
@@ -381,7 +378,7 @@ def _selected_app_build_label(
     db_active_sessions: int,
     db_historical_sessions: int,
 ) -> str:
-    return _guided_run_selected_app_state.selected_app_build_label(
+    return _selected_app_state.selected_app_build_label(
         active_valid_runs=active_valid_runs,
         legacy_valid_runs=legacy_valid_runs,
         db_active_sessions=db_active_sessions,
@@ -390,11 +387,11 @@ def _selected_app_build_label(
 
 
 def _selected_app_evidence_label(lineage_state: str) -> str:
-    return _guided_run_selected_app_state.selected_app_evidence_label(lineage_state)
+    return _selected_app_state.selected_app_evidence_label(lineage_state)
 
 
 def _selected_app_qa_badge(latest_valid: bool | None) -> str:
-    return _guided_run_selected_app_state.selected_app_qa_badge(latest_valid)
+    return _selected_app_state.selected_app_qa_badge(latest_valid)
 
 
 def _selected_app_need_label(
@@ -405,7 +402,7 @@ def _selected_app_need_label(
     baseline_required: int,
     interactive_required: int,
 ) -> str:
-    return _guided_run_selected_app_state.selected_app_need_label(
+    return _selected_app_state.selected_app_need_label(
         queue_action=queue_action,
         baseline_valid_runs=baseline_valid_runs,
         interactive_valid_runs=interactive_valid_runs,
@@ -414,6 +411,7 @@ def _selected_app_need_label(
         queue_action_key_fn=_queue_action_key,
         queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
         queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+        queue_action_refresh=_QUEUE_ACTION_REFRESH,
         queue_action_baseline=_QUEUE_ACTION_BASELINE,
         queue_action_manual=_QUEUE_ACTION_MANUAL,
         queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
@@ -421,11 +419,12 @@ def _selected_app_need_label(
 
 
 def _selected_app_action_label(queue_action: str) -> str:
-    return _guided_run_selected_app_state.selected_app_action_label(
+    return _selected_app_state.selected_app_action_label(
         queue_action,
         queue_action_key_fn=_queue_action_key,
         queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
         queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+        queue_action_refresh=_QUEUE_ACTION_REFRESH,
         queue_action_baseline=_QUEUE_ACTION_BASELINE,
         queue_action_manual=_QUEUE_ACTION_MANUAL,
         queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
@@ -440,7 +439,7 @@ def _selected_app_quota_label(
     interactive_required: int,
     extra_valid_runs: int,
 ) -> str:
-    return _guided_run_selected_app_state.selected_app_quota_label(
+    return _selected_app_state.selected_app_quota_label(
         baseline_valid_runs=baseline_valid_runs,
         interactive_valid_runs=interactive_valid_runs,
         baseline_required=baseline_required,
@@ -464,7 +463,7 @@ def _selected_app_state_snapshot(
     interactive_required: int,
     extra_valid_runs: int,
 ) -> _SelectedAppStateSnapshot:
-    snapshot = _guided_run_selected_app_state.selected_app_state_snapshot(
+    snapshot = _selected_app_state.selected_app_state_snapshot(
         lineage_state=lineage_state,
         active_valid_runs=active_valid_runs,
         legacy_valid_runs=legacy_valid_runs,
@@ -480,50 +479,12 @@ def _selected_app_state_snapshot(
         queue_action_key_fn=_queue_action_key,
         queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
         queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
+        queue_action_refresh=_QUEUE_ACTION_REFRESH,
         queue_action_baseline=_QUEUE_ACTION_BASELINE,
         queue_action_manual=_QUEUE_ACTION_MANUAL,
         queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
     )
     return _SelectedAppStateSnapshot(**snapshot.__dict__)
-
-
-def _print_selected_app_state_summary(
-    *,
-    lineage_state: str,
-    active_valid_runs: int,
-    legacy_valid_runs: int,
-    db_active_sessions: int,
-    db_historical_sessions: int,
-    latest_valid: bool | None,
-    queue_action: str,
-    baseline_valid_runs: int,
-    interactive_valid_runs: int,
-    baseline_required: int,
-    interactive_required: int,
-    extra_valid_runs: int,
-) -> None:
-    _guided_run_selected_app_state.print_selected_app_state_summary(
-        lineage_state=lineage_state,
-        active_valid_runs=active_valid_runs,
-        legacy_valid_runs=legacy_valid_runs,
-        db_active_sessions=db_active_sessions,
-        db_historical_sessions=db_historical_sessions,
-        latest_valid=latest_valid,
-        queue_action=queue_action,
-        baseline_valid_runs=baseline_valid_runs,
-        interactive_valid_runs=interactive_valid_runs,
-        baseline_required=baseline_required,
-        interactive_required=interactive_required,
-        extra_valid_runs=extra_valid_runs,
-        queue_action_key_fn=_queue_action_key,
-        queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
-        queue_action_restore_local=_QUEUE_ACTION_RESTORE_LOCAL,
-        queue_action_baseline=_QUEUE_ACTION_BASELINE,
-        queue_action_manual=_QUEUE_ACTION_MANUAL,
-        queue_action_scripted=_QUEUE_ACTION_SCRIPTED,
-        menu_utils=menu_utils,
-    )
-
 
 def _select_guided_dataset_package(
     *,
@@ -618,11 +579,14 @@ def _render_selected_app_drift_workbench(
         app=app,
         plan_drift=plan_drift,
         menu_utils=menu_utils,
+        prompt_utils=prompt_utils,
         status_messages=status_messages,
         selected_app_active_valid_runs_fn=_selected_app_active_valid_runs,
         print_selected_app_evidence_context_fn=_print_selected_app_evidence_context,
         selected_app_lineage_state_fn=_selected_app_lineage_state,
         selected_app_state_snapshot_fn=_selected_app_state_snapshot,
+        render_selected_app_recent_runs_fn=_render_selected_app_recent_runs,
+        render_selected_app_diagnostics_fn=_render_selected_app_diagnostics,
     )
 
 
@@ -655,7 +619,7 @@ def _load_selected_app_context(
 
     suggested_is_interactive = _is_interactive_profile(suggested_profile)
     suggested_default_key = _suggested_menu_key(suggested_profile)
-    latest_recent = state.recent_runs[0] if state.recent_runs else None
+    latest_recent = _selected_app_latest_recent_summary(package_name=package_name, state=state)
     latest_valid = getattr(latest_recent, "valid", None)
     queue_action, queue_reason = _selected_app_queue_action(
         baseline_valid_runs=int(counts.baseline_valid_runs),
@@ -672,6 +636,11 @@ def _load_selected_app_context(
         package_name=package_name,
         display_label=package_name,
         meta_family_note=bool(str(package_name or "").strip().lower() in _META_FAMILY_PACKAGES),
+        has_identity_mismatch=_selected_app_has_identity_mismatch(
+            package_name=package_name,
+            latest_recent=latest_recent,
+            cfg=cfg,
+        ),
         state=state,
         cfg=cfg,
         counts=counts,
@@ -689,6 +658,89 @@ def _load_selected_app_context(
         scripted_template_ready=scripted_template_ready,
         can_reset=bool(state.reset_available),
     )
+
+
+def _selected_app_latest_recent_summary(*, package_name: str, state: Any) -> Any:
+    fallback = state.recent_runs[0] if getattr(state, "recent_runs", ()) else None
+    recent = recent_tracker_runs(package_name, limit=1)
+    if recent:
+        row = recent[0]
+        valid = getattr(row, "valid", None)
+        invalid_reason = str(getattr(row, "invalid_reason_code", "") or "").strip() or None
+        if valid is True:
+            status_label = "VALID"
+        elif valid is False:
+            status_label = f"INVALID:{invalid_reason or 'UNKNOWN'}"
+        else:
+            status_label = "UNKNOWN"
+        tracker_summary = SimpleNamespace(
+            ended_at=getattr(row, "ended_at", None),
+            run_profile=getattr(row, "run_profile", None),
+            interaction_level=getattr(row, "interaction_level", None),
+            messaging_activity=getattr(row, "messaging_activity", None),
+            valid=valid,
+            invalid_reason_code=invalid_reason,
+            low_signal=getattr(row, "low_signal", None),
+            run_id=str(getattr(row, "run_id", "") or ""),
+            status_label=status_label,
+        )
+        if fallback is None:
+            return tracker_summary
+        tracker_run_id = str(getattr(tracker_summary, "run_id", "") or "").strip()
+        fallback_run_id = str(getattr(fallback, "run_id", "") or "").strip()
+        tracker_ended = str(getattr(tracker_summary, "ended_at", "") or "").strip()
+        fallback_ended = str(getattr(fallback, "ended_at", "") or "").strip()
+        if tracker_run_id and fallback_run_id and tracker_run_id == fallback_run_id:
+            return tracker_summary
+        if tracker_ended and fallback_ended and tracker_ended > fallback_ended:
+            return tracker_summary
+    return fallback
+
+
+def _selected_app_has_identity_mismatch(
+    *,
+    package_name: str,
+    latest_recent: Any,
+    cfg: Any,
+) -> bool:
+    if getattr(latest_recent, "valid", None) is not True:
+        return False
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+
+        tracker = load_dataset_tracker()
+        apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+        entry = apps.get(str(package_name or "").strip().lower()) if isinstance(apps, dict) else None
+        runs = entry.get("runs") if isinstance(entry, dict) else None
+        if not isinstance(runs, list):
+            return False
+        recent_row = next(
+            (
+                row
+                for row in runs
+                if isinstance(row, dict)
+                and str(row.get("run_id") or "").strip() == str(getattr(latest_recent, "run_id", "") or "").strip()
+            ),
+            None,
+        )
+        if not isinstance(recent_row, dict):
+            return False
+        scoped = _build_scoped_dataset_counts_shared(
+            package_name,
+            runs,
+            cfg=cfg,
+            resolve_tracker_run_identity_fn=_resolve_tracker_run_identity_shared,
+        )
+        active_ident = (
+            str(scoped.get("active_version_code") or "").strip() or None,
+            str(scoped.get("active_base_sha") or "").strip().lower() or None,
+        )
+        if not (active_ident[0] or active_ident[1]):
+            return False
+        recent_ident = _resolve_tracker_run_identity_shared(package_name, recent_row)
+        return recent_ident != active_ident
+    except Exception:
+        return False
 
 
 def _is_messaging_package_or_category(package_name: str) -> bool:
@@ -772,17 +824,10 @@ def _apply_messaging_baseline_countability_policy(
     )
 
 
-def _confirm_messaging_connected_baseline_ready() -> bool:
-    return _guided_run_messaging.confirm_messaging_connected_baseline_ready(
+def _prompt_messaging_baseline_setup() -> str:
+    return _guided_run_messaging.prompt_messaging_baseline_setup(
         menu_utils=menu_utils,
         prompt_utils=prompt_utils,
-    )
-
-
-def _handle_messaging_connected_baseline_not_ready() -> str | None:
-    return _guided_run_messaging.handle_messaging_connected_baseline_not_ready(
-        prompt_utils=prompt_utils,
-        status_messages=status_messages,
     )
 
 
@@ -835,7 +880,7 @@ def _print_paper_mode_constants() -> None:
 
 
 def _build_selected_app_protocol_options(app: _SelectedAppContext) -> list[menu_utils.MenuOption]:
-    return _guided_run_workbench.build_selected_app_protocol_options(
+    return _selected_app_actions.build_selected_app_protocol_options(
         app,
         menu_utils=menu_utils,
         queue_action_key_fn=_queue_action_key,
@@ -846,14 +891,11 @@ def _build_selected_app_protocol_options(app: _SelectedAppContext) -> list[menu_
 
 
 def _print_selected_app_workbench_summary(app: _SelectedAppContext) -> None:
-    _guided_run_workbench.print_selected_app_workbench_summary(
+    _selected_app_actions.print_selected_app_workbench_summary(
         app,
         status_messages=status_messages,
         selected_app_active_valid_runs_fn=_selected_app_active_valid_runs,
-        selected_app_lineage_state_fn=_selected_app_lineage_state,
         print_selected_app_evidence_context_fn=_print_selected_app_evidence_context,
-        print_selected_app_state_summary_fn=_print_selected_app_state_summary,
-        print_selected_app_queue_action_fn=_print_selected_app_queue_action,
         is_messaging_package_or_category_fn=_is_messaging_package_or_category,
     )
 
@@ -864,7 +906,7 @@ def _handle_selected_app_aux_action(
     app: _SelectedAppContext,
     print_tier1_qa_result: Callable[[str], None] | None,
 ) -> str | None:
-    return _guided_run_workbench.handle_selected_app_aux_action(
+    return _selected_app_actions.handle_selected_app_aux_action(
         selected_protocol=selected_protocol,
         app=app,
         print_tier1_qa_result=print_tier1_qa_result,
@@ -882,7 +924,7 @@ def _render_selected_app_workbench(
     app: _SelectedAppContext,
     print_tier1_qa_result: Callable[[str], None] | None,
 ) -> str:
-    return _guided_run_workbench.render_selected_app_workbench(
+    return _selected_app_actions.render_selected_app_workbench(
         app=app,
         print_tier1_qa_result=print_tier1_qa_result,
         menu_utils=menu_utils,
@@ -935,7 +977,6 @@ def _select_guided_dataset_action(
         )
         print()
         _render_selected_app_drift_workbench(app=selected_app, plan_drift=plan_drift)
-        prompt_utils.press_enter_to_continue()
         return _SelectedAppAction(
             app=selected_app,
             selected_protocol="0",
@@ -1434,7 +1475,7 @@ def _run_guided_dataset_iteration(
     counts = app.counts
     if selected_protocol == "0":
         return True
-    if selected_protocol == "D":
+    if selected_protocol == "X":
         local = find_dynamic_run_dirs(package_name)
         print(
             status_messages.status(
@@ -1620,15 +1661,13 @@ def _run_guided_dataset_iteration(
         messaging_activity=messaging_activity,
         counts_toward_completion=counts_toward_completion,
     )
-    if policy_reason == "MESSAGING_BASELINE_NONE_EXPLORATORY":
-        print(
-            status_messages.status(
-                "Messaging baseline with 'none/home idle' is exploratory. "
-                "Use 'connected idle' (open thread visible, no send/call) for countable messaging baseline.",
-                level="warn",
-            )
-        )
-        if prompt_utils.prompt_yes_no("Switch to connected-idle baseline now?", default=True):
+    if policy_reason == "MESSAGING_BASELINE_NONE_EXPLORATORY" or _is_messaging_connected_baseline(
+        package_name=package_name,
+        run_profile=run_profile,
+        messaging_activity=messaging_activity,
+    ):
+        baseline_setup = _prompt_messaging_baseline_setup()
+        if baseline_setup == "1":
             messaging_activity = "connected_idle"
             run_profile = "baseline_connected"
             counts_toward_completion = _intent_counts_toward_quota(
@@ -1638,34 +1677,25 @@ def _run_guided_dataset_iteration(
                 cfg=cfg,
             )
             print(status_messages.status("Using messaging connected-idle baseline behavior.", level="info"))
-
-    if _is_messaging_connected_baseline(
-        package_name=package_name,
-        run_profile=run_profile,
-        messaging_activity=messaging_activity,
-    ):
-        can_open_thread = _confirm_messaging_connected_baseline_ready()
-        if not can_open_thread:
-            fallback_interaction = _handle_messaging_connected_baseline_not_ready()
-            if fallback_interaction:
-                run_profile = fallback_interaction
-                interaction_level = "manual"
-                messaging_activity = "none"
-                counts_toward_completion = _intent_counts_toward_quota(
-                    run_profile=run_profile,
-                    baseline_valid_runs=int(counts.baseline_valid_runs),
-                    interactive_valid_runs=int(counts.interactive_valid_runs),
-                    cfg=cfg,
+        elif baseline_setup == "2":
+            run_profile = "interaction_manual"
+            interaction_level = "manual"
+            messaging_activity = "none"
+            counts_toward_completion = _intent_counts_toward_quota(
+                run_profile=run_profile,
+                baseline_valid_runs=int(counts.baseline_valid_runs),
+                interactive_valid_runs=int(counts.interactive_valid_runs),
+                cfg=cfg,
+            )
+            print(status_messages.status("Switched to manual interaction.", level="info"))
+        else:
+            print(
+                status_messages.status(
+                    "Run canceled. Start again when the app is ready for a connected-idle baseline or choose manual interaction.",
+                    level="info",
                 )
-                print(status_messages.status(f"Switched to {fallback_label}.", level="info"))
-            else:
-                print(
-                    status_messages.status(
-                        "Run canceled to avoid low-signal baseline. Start again when a thread is available.",
-                        level="info",
-                    )
-                )
-                return True
+            )
+            return True
 
     # Template policy determines scripted countability (messaging activity is only a tag).
     if _is_messaging_package_or_category(package_name) and str(run_profile or "").strip().lower() == "interaction_scripted":

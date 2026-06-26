@@ -436,6 +436,7 @@ _DDL_STATEMENTS: list[str] = [
       artifact_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       run_id        VARCHAR(64)     NOT NULL,
       run_type      VARCHAR(16)     NOT NULL,
+      session_stamp VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
       static_run_id BIGINT UNSIGNED DEFAULT NULL,
       dynamic_run_id VARCHAR(64)    DEFAULT NULL,
       linkage_migration_status VARCHAR(32) NOT NULL DEFAULT 'legacy_unclassified',
@@ -462,6 +463,7 @@ _DDL_STATEMENTS: list[str] = [
     ALTER TABLE artifact_registry
       ADD COLUMN IF NOT EXISTS static_run_id BIGINT UNSIGNED DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS dynamic_run_id VARCHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS session_stamp VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
       ADD COLUMN IF NOT EXISTS linkage_migration_status VARCHAR(32) NOT NULL DEFAULT 'legacy_unclassified';
     """,
     """
@@ -475,6 +477,14 @@ _DDL_STATEMENTS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS ix_artifact_dynamic_run_id
       ON artifact_registry (dynamic_run_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_artifact_session_stamp
+      ON artifact_registry (session_stamp);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_artifact_run_type_session_created
+      ON artifact_registry (run_type, session_stamp, created_at_utc);
     """,
     """
     -- Durable failure records for static persistence. Written outside the main
@@ -677,7 +687,7 @@ _DDL_STATEMENTS: list[str] = [
         FOREIGN KEY (static_run_id)
         REFERENCES static_analysis_runs (id)
         ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     """,
     """
     ALTER TABLE static_session_run_links
@@ -786,11 +796,11 @@ _DDL_STATEMENTS: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS static_finding_evidence_payloads (
       evidence_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-      evidence_json LONGTEXT NOT NULL,
+      evidence_json LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
       evidence_chars INT UNSIGNED NOT NULL,
       first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (evidence_hash)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     """,
     """
     ALTER TABLE static_analysis_findings

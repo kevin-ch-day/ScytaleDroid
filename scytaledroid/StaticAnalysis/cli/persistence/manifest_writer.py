@@ -37,6 +37,7 @@ def write_static_run_manifest(
             """
             SELECT
               sar.id,
+              sar.session_stamp,
               sar.run_started_utc,
               sar.ended_at_utc,
               sar.profile_key,
@@ -65,6 +66,7 @@ def write_static_run_manifest(
         return False
     (
         run_id,
+        session_stamp,
         run_started_utc,
         ended_at_utc,
         profile_key,
@@ -165,6 +167,7 @@ def write_static_run_manifest(
     record_artifacts(
         run_id=str(static_run_id),
         run_type="static",
+        session_stamp=str(session_stamp or "").strip() or None,
         artifacts=[
             {
                 "path": str(manifest_path),

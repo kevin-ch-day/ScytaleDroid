@@ -10,6 +10,7 @@ from scytaledroid.StaticAnalysis.cli.flows.run_persistence_audit import (
     _empty_audit_summary,
     refresh_existing_persistence_audit_payload,
     refresh_persistence_audit_artifact,
+    refresh_persistence_audit_artifact_for_session,
 )
 from scytaledroid.StaticAnalysis.cli.flows.run_persistence_queries import _apply_reconcile_summary
 
@@ -168,6 +169,90 @@ def test_refresh_existing_persistence_audit_payload_rebuilds_summary(tmp_path, m
     assert refreshed["summary"]["bridge"]["session_rollups"] == 1
 
 
+def test_refresh_existing_persistence_audit_payload_direct_mode_updates_rollups_and_clears_stale_reconciliation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-direct"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("a.json", "b.json"):
+        (archive_dir / name).write_text("{}", encoding="utf-8")
+
+    def _fake_run_sql(query, params=(), fetch="none", **_kwargs):
+        sql = " ".join(str(query).split())
+        if "SELECT status, COUNT(*) FROM static_analysis_runs" in sql:
+            return [("COMPLETED", 2)]
+        if "COUNT(*) FROM static_analysis_runs WHERE session_label=%s AND is_canonical=1" in sql:
+            return [(2,)]
+        if "COUNT(*) FROM static_analysis_runs WHERE session_label=%s AND static_handoff_json_path IS NOT NULL" in sql:
+            return [(2,)]
+        if "COUNT(*) FROM static_analysis_findings" in sql:
+            return [(10,)]
+        if "COUNT(*) FROM static_permission_matrix" in sql:
+            return [(1,)]
+        if "COUNT(*) FROM static_permission_risk_vnext" in sql:
+            return [(1,)]
+        if "SELECT package_name FROM static_findings_summary" in sql:
+            return [("pkg.alpha",), ("pkg.beta",)]
+        if "SELECT package_name FROM static_string_summary" in sql:
+            return [("pkg.alpha",), ("pkg.beta",)]
+        if "SELECT package FROM runs" in sql and "session_stamp=%s" in sql:
+            return []
+        if "SELECT package_name FROM risk_scores" in sql:
+            return []
+        if "SELECT DISTINCT lr.package FROM findings" in sql:
+            return []
+        if "SELECT DISTINCT lr.package FROM metrics" in sql:
+            return []
+        if "SELECT DISTINCT lr.package FROM buckets" in sql:
+            return []
+        if "SELECT DISTINCT lr.package FROM contributors" in sql:
+            return []
+        if "COUNT(*) FROM static_session_run_links" in sql:
+            return [(2,)]
+        if "COUNT(*) FROM static_session_rollups" in sql:
+            return [(1,)]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_core.db_queries.run_sql",
+        _fake_run_sql,
+    )
+
+    payload = {
+        "session_stamp": "sess-direct",
+        "outcome": {
+            "canonical_failed": False,
+            "persistence_failed": False,
+            "compat_export_failed": False,
+            "compat_export_stage": None,
+        },
+        "rows": [
+            {"package_name": "pkg.alpha", "artifact_reports": 1},
+            {"package_name": "pkg.beta", "artifact_reports": 1},
+        ],
+        "summary": {
+            "reports": {
+                "json_report_paths": 2,
+                "latest_json_paths": 2,
+            },
+            "reconciliation": {
+                "missing_findings_summary_count": 99,
+                "bridge_only_runs_count": 7,
+            },
+        },
+    }
+
+    refreshed = refresh_existing_persistence_audit_payload(payload, prefer_reconcile=False)
+
+    assert refreshed["summary"]["bridge"]["session_rollups"] == 1
+    assert refreshed["summary"]["canonical"]["baseline_runs"] == 2
+    assert refreshed["summary"]["reports"]["archive_json_paths"] == 2
+    assert refreshed["summary_refresh_source"] == "db_direct_and_filesystem_rebuild"
+    assert refreshed["summary"]["reconciliation"] == {}
+
+
 def test_refresh_persistence_audit_artifact_writes_updated_summary(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-write"
@@ -224,6 +309,51 @@ def test_refresh_persistence_audit_artifact_writes_updated_summary(tmp_path, mon
     assert refreshed["summary"]["reports"]["archive_json_paths"] == 1
     assert written["summary"]["reports"]["archive_json_paths"] == 1
     assert written["summary_refresh_source"] == "db_and_filesystem_rebuild"
+
+
+def test_refresh_persistence_audit_artifact_for_session_resolves_existing_artifact(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    audit_dir = tmp_path / "output" / "audit" / "persistence"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    artifact = audit_dir / "sess-path_persistence_audit.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "session_stamp": "sess-path",
+                "outcome": {"canonical_failed": False, "persistence_failed": False},
+                "rows": [],
+                "summary": {"reports": {"json_report_paths": 0, "latest_json_paths": 0}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_refresh(path, *, write=True, prefer_reconcile=True):
+        captured["path"] = str(path)
+        captured["write"] = write
+        captured["prefer_reconcile"] = prefer_reconcile
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.flows.run_persistence_audit.refresh_persistence_audit_artifact",
+        _fake_refresh,
+    )
+
+    refreshed = refresh_persistence_audit_artifact_for_session(
+        "sess-path",
+        write=True,
+        prefer_reconcile=False,
+    )
+
+    assert refreshed == {"ok": True}
+    assert Path(str(captured["path"])).resolve() == artifact.resolve()
+    assert captured["write"] is True
+    assert captured["prefer_reconcile"] is False
 
 
 def test_refresh_existing_persistence_audit_payload_survives_reconcile_failure(tmp_path, monkeypatch) -> None:

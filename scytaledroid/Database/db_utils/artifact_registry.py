@@ -63,6 +63,7 @@ def record_artifacts(
     run_id: str,
     run_type: str,
     artifacts: Iterable[Mapping[str, Any]],
+    session_stamp: str | None = None,
     origin: str = "host",
     base_path: Path | None = None,
     pull_status: str | None = None,
@@ -81,6 +82,7 @@ def record_artifacts(
         linkage_migration_status=linkage_migration_status,
     )
     dynamic_run_uuid = normalize_dynamic_run_uuid(typed_dynamic_run_id)
+    resolved_session_stamp = str(session_stamp or "").strip() or None
     for entry in artifacts:
         normalized = _normalize_artifact(entry, base_path)
         if not normalized:
@@ -94,6 +96,7 @@ def record_artifacts(
             (
                 run_id,
                 run_type,
+                resolved_session_stamp,
                 typed_static_run_id,
                 typed_dynamic_run_id,
                 dynamic_run_uuid,
@@ -117,6 +120,7 @@ def record_artifacts(
         INSERT INTO artifact_registry (
           run_id,
           run_type,
+          session_stamp,
           static_run_id,
           dynamic_run_id,
           dynamic_run_uuid,
@@ -132,7 +136,7 @@ def record_artifacts(
           pulled_at_utc,
           status_reason,
           meta_json
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     core_q.run_sql_many(sql, rows, query_name="artifact_registry.insert")
 
