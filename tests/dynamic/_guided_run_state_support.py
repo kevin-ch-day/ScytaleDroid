@@ -148,6 +148,7 @@ def make_protocol_options_app(
         latest_valid=None,
         queue_action="baseline",
         queue_reason=None,
+        live_build_drift=False,
         db_active_sessions=0,
         db_historical_sessions=0,
         historical_valid_local=0,

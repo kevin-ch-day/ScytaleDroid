@@ -13,6 +13,7 @@ import re
 import sqlite3
 import time
 import uuid
+import hashlib
 from collections.abc import Iterable, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -87,6 +88,14 @@ def _redact(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return type(value)(_redact(v) for v in value)
     return value
+
+
+def _sql_log_fields(sql: str) -> dict[str, str]:
+    compact = " ".join(str(sql or "").split())
+    return {
+        "sql_preview": compact[:240],
+        "sql_sha1": hashlib.sha1(compact.encode("utf-8")).hexdigest(),
+    }
 
 
 def _normalise_single(sql: str, params: Any | None) -> _NormalisedStatement:
@@ -356,6 +365,7 @@ def _execute(
         "event": "db.exec",
         "query": query_name or "sql",
         "trace_id": trace_id,
+        **_sql_log_fields(sql),
     }
     if context:
         base_extra.update(context)

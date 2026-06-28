@@ -18,6 +18,7 @@ class SelectedAppStateSnapshot:
 
 def selected_app_queue_action(
     *,
+    live_build_drift: bool = False,
     baseline_valid_runs: int,
     interactive_valid_runs: int,
     baseline_required: int,
@@ -29,6 +30,8 @@ def selected_app_queue_action(
     db_active_sessions: int,
     active_valid_runs: int,
 ) -> tuple[str, str | None]:
+    if bool(live_build_drift):
+        return ("refresh", "installed build does not match the newest static plan")
     baseline_missing = max(0, int(baseline_required) - int(baseline_valid_runs))
     interactive_missing = max(0, int(interactive_required) - int(interactive_valid_runs))
     if baseline_missing <= 0 and interactive_missing <= 0 and latest_valid is False:

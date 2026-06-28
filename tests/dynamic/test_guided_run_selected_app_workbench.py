@@ -103,7 +103,7 @@ def test_selected_app_protocol_options_hold_interaction_until_baseline_complete(
 
     assert str(options["1"].description) == "suggested · counts toward quota"
     assert str(options["2"].description) == "held until baseline complete"
-    assert str(options["3"].description) == "held until baseline complete"
+    assert str(options["3"].description) == "no saving"
 
 
 def test_selected_app_protocol_options_mark_completed_quota_as_supplemental() -> None:
@@ -117,7 +117,7 @@ def test_selected_app_protocol_options_mark_completed_quota_as_supplemental() ->
 
     assert str(options["1"].description) == "supplemental · outside quota"
     assert str(options["2"].description) == "supplemental · outside quota"
-    assert str(options["3"].description) == "supplemental · outside quota"
+    assert str(options["3"].description) == "no saving"
 
 
 def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkeypatch, capsys) -> None:
@@ -141,7 +141,7 @@ def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkey
     )
 
     def _fake_choice(_choices, *, default=None, **_kwargs):
-        assert default == "3"
+        assert default == "2"
         return "0"
 
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", _fake_choice)
@@ -155,11 +155,10 @@ def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkey
     assert "CNN" in out
     assert "Current build · current-build evidence (local+db) · QA valid · quota 5/5" in out
     assert "Run Option" in out
-    assert "3) Manual run [default]" in out
+    assert "2) Interactive run [default]" in out
     assert "Reason:" not in out
     assert "1) Baseline run" in out
-    assert "2) Scripted run" in out
-    assert "4) Test app" in out
+    assert "3) Test app" in out
     assert "Review / inspect" in out
     assert "A) Review QA" in out
     assert "H) Run history" in out
@@ -228,8 +227,7 @@ def test_guided_run_defaults_to_manual_when_script_template_missing(monkeypatch,
     )
 
     def _fake_choice(_choices, *, default=None, disabled=None, **_kwargs):
-        assert default == "3"
-        assert "2" in (disabled or [])
+        assert default == "2"
         return "0"
 
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", _fake_choice)
@@ -243,8 +241,8 @@ def test_guided_run_defaults_to_manual_when_script_template_missing(monkeypatch,
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert "BBC News" in out
-    assert "3) Manual run [default]" in out
-    assert "2) Scripted run (held)" in out
+    assert "2) Interactive run [default]" in out
+    assert "3) Test app" in out
     assert "Reason:" not in out
 
 
@@ -302,5 +300,52 @@ def test_guided_run_reports_review_queue_action_for_invalid_complete_current_bui
     assert "Current build · current-build evidence (local+db) · QA needs review · quota 5/5" in out
     assert "A) Review QA [default]" in out
     assert "Reason: QA needs review; latest current-build QA invalid (PCAP_DEVICE_FILE_MISSING)." in out
-    assert "3) Manual run" in out
-    assert "3) Manual run [default]" not in out
+    assert "2) Interactive run" in out
+    assert "2) Interactive run [default]" not in out
+
+
+def test_selected_app_latest_recent_summary_prefers_scoped_state_over_unscoped_recent_tracker(monkeypatch) -> None:
+    package = "com.cnn.mobile.android.phone"
+    state = make_dataset_state(
+        package,
+        total_runs=6,
+        valid_runs=5,
+        baseline_valid_runs=3,
+        interactive_valid_runs=2,
+        quota_met=True,
+        recent_runs=(
+            make_recent_summary(
+                ended_at="2026-06-19T10:00:00Z",
+                run_profile="interaction_scripted",
+                interaction_level="scripted",
+                valid=False,
+                invalid_reason_code="PCAP_MISSING",
+                pcap_failure_detail="PCAP_DEVICE_FILE_MISSING",
+                run_id="cnnrun1",
+                status_label="INVALID:PCAP_MISSING",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "recent_tracker_runs",
+        lambda _package_name, limit=1: [
+            guided_run.SimpleNamespace(
+                ended_at="2026-06-19T10:05:00Z",
+                run_profile="baseline_idle",
+                interaction_level="minimal",
+                messaging_activity=None,
+                valid=True,
+                invalid_reason_code=None,
+                pcap_failure_detail=None,
+                low_signal=False,
+                run_id="other-valid-run",
+            )
+        ],
+    )
+
+    summary = guided_run._selected_app_latest_recent_summary(package_name=package, state=state)
+
+    assert getattr(summary, "run_id", None) == "cnnrun1"
+    assert getattr(summary, "valid", None) is False
+    assert getattr(summary, "invalid_reason_code", None) == "PCAP_MISSING"

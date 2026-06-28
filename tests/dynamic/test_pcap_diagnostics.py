@@ -87,6 +87,27 @@ def test_dataset_pcap_failure_detail_handles_device_empty_file(tmp_path: Path) -
     assert dataset_pcap_failure_detail(run_dir, pcap_size_int=0) == "PCAP_DEVICE_FILE_EMPTY"
 
 
+def test_dataset_pcap_failure_detail_handles_delayed_device_empty_file(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-delayed-empty-device"
+    meta_path = run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json"
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "failure_diagnostics": {
+                    "expected_device_path_exists": False,
+                    "expected_device_path_size_bytes": None,
+                    "latest_fallback_path": None,
+                    "delayed_expected_device_path_exists": True,
+                    "delayed_expected_device_path_size_bytes": 0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert dataset_pcap_failure_detail(run_dir, pcap_size_int=0) == "PCAP_DEVICE_FILE_EMPTY"
+
+
 def test_dataset_pcap_failure_detail_handles_local_parse_failure(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-parse-failed"
     pcap_path = run_dir / "artifacts" / "pcapdroid_capture" / "run.pcap"

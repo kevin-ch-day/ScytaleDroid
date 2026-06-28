@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import textwrap
 from pathlib import Path
 
-from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
     resolve_dataset_plan_read_path,
+)
+from scytaledroid.DynamicAnalysis.menus.environment_reports import (
+    capture_environment_summary as _capture_environment_summary_impl,
+    render_host_pcap_tools as _render_host_pcap_tools_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.dataset_status_report import (
+    count_tracker_runs as _count_tracker_runs_impl,
+    render_dataset_status as _render_dataset_status_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.state_summary_views import (
+    render_compact_state_summary as _render_compact_state_summary_impl,
 )
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
@@ -27,13 +36,7 @@ def _bool_text(value: object) -> str:
 
 
 def _count_tracker_runs(apps: object) -> int:
-    if not isinstance(apps, dict):
-        return 0
-    return sum(
-        len(entry.get("runs", []))
-        for entry in apps.values()
-        if isinstance(entry, dict) and isinstance(entry.get("runs"), list)
-    )
+    return _count_tracker_runs_impl(apps)
 
 
 def _tracker_path() -> Path:
@@ -45,58 +48,7 @@ def _freeze_path() -> Path:
 
 
 def _capture_environment_summary() -> dict[str, object]:
-    required_tools = ("adb", "tshark", "capinfos")
-    optional_tools = ("tcpdump", "dumpcap", "editcap", "mergecap", "frida", "mitmproxy", "mitmdump")
-    tools: dict[str, dict[str, object]] = {}
-    for name in (*required_tools, *optional_tools):
-        path = shutil.which(name)
-        tools[name] = {"path": path, "present": bool(path)}
-
-    adb_devices: list[str] = []
-    adb_path = tools.get("adb", {}).get("path")
-    if adb_path:
-        try:
-            completed = subprocess.run(
-                [str(adb_path), "devices"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
-            for line in (completed.stdout or "").splitlines()[1:]:
-                parts = line.strip().split()
-                if len(parts) >= 2 and parts[1] == "device":
-                    adb_devices.append(parts[0])
-        except Exception:
-            adb_devices = []
-
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    nearest_existing = evidence_root
-    while not nearest_existing.exists() and nearest_existing != nearest_existing.parent:
-        nearest_existing = nearest_existing.parent
-    evidence_root_ready = (
-        (evidence_root.exists() and os.access(evidence_root, os.R_OK | os.W_OK))
-        or (not evidence_root.exists() and nearest_existing.exists() and os.access(nearest_existing, os.W_OK))
-    )
-    blocking = []
-    for name in required_tools:
-        if not tools.get(name, {}).get("present"):
-            blocking.append(f"missing {name}")
-    if not adb_devices:
-        blocking.append("no adb device visible")
-    if not evidence_root_ready:
-        blocking.append("dynamic evidence root is not writable")
-
-    return {
-        "required_tools": required_tools,
-        "optional_tools": optional_tools,
-        "tools": tools,
-        "adb_devices": adb_devices,
-        "evidence_root": str(evidence_root),
-        "evidence_root_exists": bool(evidence_root.exists()),
-        "evidence_root_ready": bool(evidence_root_ready),
-        "blocking_issues": blocking,
-    }
+    return _capture_environment_summary_impl()
 
 
 def run_freeze_readiness_audit_report() -> None:
@@ -205,118 +157,15 @@ def run_freeze_readiness_audit_report() -> None:
 
 
 def render_dataset_status() -> None:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
-
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
-
-    print()
-    menu_utils.print_header("Cohort Status Overview")
-    menu_utils.print_hint(
-        "Review cohort progress from local evidence packs and tracker state without starting collection."
+    _render_dataset_status_impl(
+        active_research_cohort_label_fn=active_research_cohort_label,
+        run_freeze_readiness_audit_fn=run_freeze_readiness_audit,
+        build_state_summary_fn=build_state_summary,
+        group_artifacts_fn=group_artifacts,
+        load_display_name_map_fn=load_display_name_map,
+        tracker_path_fn=_tracker_path,
+        freeze_path_fn=_freeze_path,
     )
-    cohort_label = active_research_cohort_label()
-    print(status_messages.status(f"Active research cohort: {cohort_label}", level="info"))
-    summary = run_freeze_readiness_audit()
-    state_payload = build_state_summary()
-    handoff = (
-        state_payload.get("static_handoff_plan_summary")
-        if isinstance(state_payload.get("static_handoff_plan_summary"), dict)
-        else {}
-    )
-    try:
-        display_names = load_display_name_map(group_artifacts())
-    except Exception:
-        display_names = {}
-    payload = load_dataset_tracker()
-    apps = payload.get("apps", {})
-    tracker_exists = _tracker_path().exists()
-    tracker_rows = _count_tracker_runs(apps)
-    if not tracker_rows:
-        rows = [
-            ("Research cohort", cohort_label),
-            ("Cohort runs", "none recorded"),
-            ("Evidence packs", str(int(summary.total_runs))),
-            ("Tracker", "present" if tracker_exists else "missing"),
-            ("Freeze file", "present" if _freeze_path().exists() else "missing"),
-            (
-                "Static handoff",
-                f"ready {int(handoff.get('dataset_packages_with_plan') or 0)}/"
-                f"{int(handoff.get('dataset_packages_total') or 0)}",
-            ),
-            ("Next", f"run cohort ({cohort_label})"),
-        ]
-        table_utils.render_table(["Signal", "Status"], rows, compact=False)
-        if int(summary.total_runs) == 0:
-            print(
-                status_messages.status(
-                    "No dynamic evidence packs are present. This is expected after cleanup or before the first run.",
-                    level="info",
-                )
-            )
-        return
-
-    cfg = DatasetTrackerConfig()
-    target = int(cfg.baseline_required) + int(cfg.interactive_required)
-    rows = []
-    for package, entry in sorted(apps.items()):
-        runs = int(entry.get("run_count") or 0)
-        valid = int(entry.get("valid_runs") or 0)
-        app_target = int(entry.get("target_runs") or 0) or target
-        base = int(entry.get("baseline_valid_runs") or 0)
-        inter = int(entry.get("interactive_valid_runs") or 0)
-        latest_run = ""
-        run_entries = entry.get("runs") if isinstance(entry.get("runs"), list) else []
-        if run_entries:
-            latest = run_entries[-1] if isinstance(run_entries[-1], dict) else {}
-            latest_run = str(latest.get("run_id") or latest.get("dynamic_run_id") or "")
-        freeze_eligible = "yes" if entry.get("app_complete") else "no"
-        if entry.get("app_complete"):
-            blocking = ""
-        else:
-            missing_base = max(0, int(cfg.baseline_required) - base)
-            missing_inter = max(0, int(cfg.interactive_required) - inter)
-            parts = []
-            if missing_base:
-                parts.append(f"need baseline {missing_base}")
-            if missing_inter:
-                parts.append(f"need interactive {missing_inter}")
-            blocking = ", ".join(parts) or "not quota complete"
-        rows.append(
-            {
-                "Package": package,
-                "Display": display_names.get(package, ""),
-                "Target": app_target,
-                "Runs": runs,
-                "Valid packs": valid,
-                "Latest run": latest_run[:12],
-                "Freeze eligible": freeze_eligible,
-                "Blocking reason": blocking,
-            }
-        )
-    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
-    if ui_level in {"details", "debug"}:
-        table_utils.print_table(
-            rows,
-            headers=[
-                "Package",
-                "Display",
-                "Target",
-                "Runs",
-                "Valid packs",
-                "Latest run",
-                "Freeze eligible",
-                "Blocking reason",
-            ],
-        )
-        return
-    for row in rows:
-        display = str(row.get("Display") or "").strip()
-        label = f"{display} ({row['Package']})" if display else str(row["Package"])
-        print(
-            f"{label} | quota={row['Valid packs']}/{row['Target']} "
-            f"runs={row['Runs']} latest={row['Latest run'] or '-'} "
-            f"freeze_eligible={row['Freeze eligible']} reason={row['Blocking reason'] or '-'}"
-        )
 
 
 def build_freeze_state_payload() -> dict[str, object]:
@@ -341,108 +190,14 @@ def run_state_summary_report(
     ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
     verbose = ui_level in {"details", "debug"}
     if not verbose:
-        env = _capture_environment_summary()
-        cohort_label = active_research_cohort_label()
-        total_runs = int(getattr(summary, "total_runs", 0) or 0)
-        valid_runs = int(getattr(summary, "valid_runs", 0) or 0)
-        missing_run_manifest_dirs = int(getattr(summary, "missing_run_manifest_dirs", 0) or 0)
-        evidence_root_exists = bool(getattr(summary, "evidence_root_exists", False))
-        evidence_root = str(getattr(summary, "evidence_root", "") or "")
-        tracker_runs_hint = int(getattr(summary, "tracker_runs_hint", 0) or 0)
-        reasons = tuple(getattr(summary, "reasons", ()) or ())
-        handoff = (
-            state_payload.get("static_handoff_plan_summary")
-            if isinstance(state_payload.get("static_handoff_plan_summary"), dict)
-            else {}
+        _render_compact_state_summary_impl(
+            summary=summary,
+            state_payload=state_payload,
+            capture_environment_summary_fn=_capture_environment_summary,
+            active_research_cohort_label_fn=active_research_cohort_label,
+            tracker_path_fn=_tracker_path,
+            bool_text_fn=_bool_text,
         )
-        tracker = state_payload.get("tracker_vs_evidence_per_app")
-        tracker_rows = len(tracker) if isinstance(tracker, list) else 0
-        mismatches = 0
-        if isinstance(tracker, list):
-            for row in tracker:
-                if not isinstance(row, dict):
-                    continue
-                if int(row.get("tracker_countable") or 0) != int(row.get("evidence_eligible_countable") or 0):
-                    mismatches += 1
-        sections = [
-            (
-                "Research cohort",
-                [
-                    ("active cohort", cohort_label),
-                ],
-            ),
-            (
-                "Environment",
-                [
-                    ("capture tools", "ready" if not env.get("blocking_issues") else "blocking issues"),
-                    ("blocking issues", str(len(env.get("blocking_issues") or []))),
-                ],
-            ),
-            (
-                "Static handoff",
-                [
-                    (
-                        "dataset apps ready",
-                        f"{int(handoff.get('dataset_packages_with_plan') or 0)}/"
-                        f"{int(handoff.get('dataset_packages_total') or 0)}",
-                    ),
-                    ("plan files", str(int(handoff.get("dynamic_plan_files") or 0))),
-                    ("source", str(handoff.get("plan_dir") or "")),
-                ],
-            ),
-            (
-                "Repeatability",
-                [
-                    (
-                        "runs ready",
-                        f"{int(((state_payload.get('repeatability_summary') or {}) if isinstance(state_payload.get('repeatability_summary'), dict) else {}).get('runs_repeatability_ready') or 0)}/"
-                        f"{int(((state_payload.get('repeatability_summary') or {}) if isinstance(state_payload.get('repeatability_summary'), dict) else {}).get('runs_total') or 0)}",
-                    ),
-                    ("freeze role", str((((state_payload.get("repeatability_summary") or {}) if isinstance(state_payload.get("repeatability_summary"), dict) else {}).get("freeze_role") or "none"))),
-                    (
-                        "publication manifests",
-                        _bool_text((((state_payload.get("repeatability_summary") or {}) if isinstance(state_payload.get("repeatability_summary"), dict) else {}).get("publication_manifests_present"))),
-                    ),
-                ],
-            ),
-                (
-                    "Evidence",
-                    [
-                        ("evidence packs", f"{total_runs} total / {valid_runs} valid / {max(total_runs - valid_runs, 0)} invalid"),
-                        ("incomplete dirs", str(missing_run_manifest_dirs)),
-                        ("evidence root exists", _bool_text(evidence_root_exists)),
-                        ("evidence root", evidence_root),
-                    ],
-                ),
-                (
-                    "Tracker",
-                    [
-                        ("tracker exists", _bool_text(_tracker_path().exists())),
-                        ("tracker rows", str(tracker_runs_hint)),
-                        ("tracker/evidence mismatches", str(mismatches)),
-                        ("dataset rows evaluated", str(tracker_rows)),
-                    ],
-                ),
-            (
-                "Freeze",
-                [
-                    ("can_freeze", _bool_text(summary.can_freeze)),
-                    ("first blocker", str(summary.first_failing_reason or "none")),
-                    ("audit report", str(summary.report_path)),
-                ],
-            ),
-        ]
-        for title, rows_for_section in sections:
-            print()
-            menu_utils.print_header(title)
-            table_utils.render_table(["Signal", "Value"], rows_for_section, compact=False)
-        if "NO_EVIDENCE_PACKS_FOUND" in reasons:
-            print(
-                status_messages.status(
-                    "No dynamic evidence packs are present. This is expected after cleanup or before the first run.",
-                    level="info",
-                )
-            )
         return
     rows = [
         ("CAN_FREEZE", "YES" if summary.can_freeze else "NO"),
@@ -596,55 +351,7 @@ def run_state_summary_report(
 
 
 def render_host_pcap_tools() -> None:
-    """Render host/device toolchain status required for dynamic capture."""
-
-    print()
-    menu_utils.print_header("Capture Environment")
-    env = _capture_environment_summary()
-    tools = env.get("tools") if isinstance(env.get("tools"), dict) else {}
-    required = tuple(env.get("required_tools") or ())
-    optional = tuple(env.get("optional_tools") or ())
-    devices = env.get("adb_devices") if isinstance(env.get("adb_devices"), list) else []
-    blocking = env.get("blocking_issues") if isinstance(env.get("blocking_issues"), list) else []
-    ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
-    verbose = ui_level in {"details", "debug"}
-
-    required_rows = []
-    for name in required:
-        meta = tools.get(name) if isinstance(tools.get(name), dict) else {}
-        present = bool(meta.get("present"))
-        value = "present" if present else "missing"
-        if verbose and meta.get("path"):
-            value = str(meta.get("path"))
-        required_rows.append((name, value))
-    required_rows.append(("device visible", ", ".join(str(d) for d in devices) if devices else "missing"))
-    required_rows.append(("dynamic evidence root writable", "yes" if env.get("evidence_root_ready") else "no"))
-    menu_utils.print_header("Required")
-    table_utils.render_table(["Check", "Status"], required_rows, compact=False)
-
-    optional_present = []
-    optional_missing = []
-    for name in optional:
-        meta = tools.get(name) if isinstance(tools.get(name), dict) else {}
-        if meta.get("present"):
-            optional_present.append((name, str(meta.get("path") or "present")))
-        else:
-            optional_missing.append(name)
-    if optional_present:
-        print()
-        menu_utils.print_header("Optional Present")
-        table_utils.render_table(["Tool", "Path"], optional_present, compact=False)
-    print()
-    menu_utils.print_header("Optional Missing")
-    print(", ".join(optional_missing) if optional_missing else "none")
-
-    print()
-    menu_utils.print_header("Blocking Issues")
-    if blocking:
-        for issue in blocking:
-            print(status_messages.status(str(issue), level="warn"))
-    else:
-        print(status_messages.status("required ready", level="success"))
+    _render_host_pcap_tools_impl()
 
 
 __all__ = [
@@ -841,12 +548,11 @@ def render_cohort_status_help() -> None:
     menu_utils.print_header("Help", "Queue legend")
     print("Status   = workflow state only: complete, review, manual, baseline, restore, refresh, legacy, or blocked.")
     print("Need     = current blocker or gap: review, base 0/3, manual 0/2, current, local+curr, refresh, or local pack.")
-    print("Quota    = quota-valid runs against total quota; +N or + extra means supplemental valid runs outside quota.")
+    print("Baseline Runs    = baseline-side valid runs shown as a raw count against the total run target; + extra rolls into the displayed count.")
+    print("Interactive Runs = scripted/manual runs combined for planning; detailed run type remains in history/diagnostics.")
     print("Build    = build posture for this app in the queue: current, legacy, drift, or unknown.")
-    print("Evidence = queue lineage token: local+db, db-only, local-only, empty, or none.")
     print("QA       = latest QA badge: ✓, inv, +id, +L, +id+L, or —.")
-    print("Tmpl     = scripted template availability: news, acct, gen, or none.")
-    print("Action   = recommended operator move: base, manual, script, review, refresh, or restore.")
+    print("Action   = recommended operator move: baseline, interactive, review, refresh, or restore.")
     print("locked   = manual phase unavailable until baseline minimum is met.")
     print("mixed    = current-build and legacy-build evidence both exist.")
     print("refresh  = installed app build differs from the newest static plan. Refresh harvest/static before continuing dataset-mode dynamic capture for this app.")
@@ -855,12 +561,12 @@ def render_cohort_status_help() -> None:
     print("baseline gap = baseline minimum is not met yet for quota/publication use.")
     print("manual gap   = baseline is complete, but interactive quota is still missing.")
     print("refresh steps: harvest current APK(s), rerun static for that build, regenerate the newest plan, then return to the queue.")
-    print("local+db  = current-build evidence (local+db).")
-    print("local-only = historical evidence (local-only).")
-    print("Build=current + Evidence=db-only = current-build sessions exist in the DB, but the local evidence pack is missing.")
-    print("Build=legacy + Evidence=db-only = only historical DB-backed evidence exists; recollect current-build evidence.")
+    print("Detailed local/db/history evidence lineage moved to diagnostics and run history.")
+    print("db-only  = evidence exists in stored history/DB context but no local pack is present in this workspace.")
+    print("Build=legacy + Evidence=db-only = historical-only context; recollect on the installed build.")
+    print("Build=current + Evidence=db-only = current-build run context is stored, but the local evidence pack is not present here.")
     print("+L       = latest QA valid, legacy evidence also exists.")
-    print("Status is workflow state only; Build, Evidence, and QA are separate displayed dimensions.")
+    print("Status is workflow state only; Build and QA are separate displayed dimensions.")
     print("Need explains why the app is not done; Action is the recommended next operation.")
     print("Evidence-authoritative quota = archive/freeze truth.")
     print("Tracker-scoped latest-run state = queue-operating view of the active build.")

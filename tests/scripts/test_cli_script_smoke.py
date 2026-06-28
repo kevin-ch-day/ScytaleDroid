@@ -112,3 +112,21 @@ def test_verify_evidence_manifest_help_exits_zero() -> None:
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "--session" in (proc.stdout or "").lower() or "--session" in (proc.stderr or "").lower()
+
+
+def test_report_pcap_observer_audit_help_exits_zero() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo)
+    proc = subprocess.run(
+        [sys.executable, str(repo / "scripts" / "db" / "report_pcap_observer_audit.py"), "--help"],
+        cwd=str(repo),
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    out = ((proc.stdout or "") + (proc.stderr or "")).lower()
+    assert "pcap observer audit" in out

@@ -144,25 +144,53 @@ def dataset_pcap_failure_detail(run_dir: Path, *, pcap_size_int: int = 0) -> str
     expected_size = diagnostics.get("expected_device_path_size_bytes")
     fallback_exists = diagnostics.get("latest_fallback_exists")
     fallback_size = diagnostics.get("latest_fallback_size_bytes")
+    delayed_expected_exists = diagnostics.get("delayed_expected_device_path_exists")
+    delayed_expected_size = diagnostics.get("delayed_expected_device_path_size_bytes")
+    delayed_fallback_exists = diagnostics.get("delayed_latest_fallback_exists")
+    delayed_fallback_size = diagnostics.get("delayed_latest_fallback_size_bytes")
+
+    def _classify_device_surface(exists: object, size: object) -> str | None:
+        if exists is not True:
+            return None
+        try:
+            if int(size or 0) <= 0:
+                return "PCAP_DEVICE_FILE_EMPTY"
+        except Exception:
+            return "PCAP_DEVICE_FILE_EMPTY"
+        if not local_pcaps:
+            return "PCAP_PULL_FAILED"
+        return None
+
+    direct_device_result = _classify_device_surface(expected_exists, expected_size)
+    if direct_device_result:
+        return direct_device_result
+    fallback_device_result = _classify_device_surface(fallback_exists, fallback_size)
+    if fallback_device_result:
+        return fallback_device_result
+    delayed_device_result = _classify_device_surface(delayed_expected_exists, delayed_expected_size)
+    if delayed_device_result:
+        return delayed_device_result
+    delayed_fallback_result = _classify_device_surface(delayed_fallback_exists, delayed_fallback_size)
+    if delayed_fallback_result:
+        return delayed_fallback_result
+
     if expected_exists is True:
-        try:
-            if int(expected_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
+        return "PCAP_PULL_FAILED" if not local_pcaps else None
     if fallback_exists is True:
-        try:
-            if int(fallback_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
+        return "PCAP_PULL_FAILED" if not local_pcaps else None
+    if delayed_expected_exists is True:
+        return "PCAP_PULL_FAILED" if not local_pcaps else None
+    if delayed_fallback_exists is True:
+        return "PCAP_PULL_FAILED" if not local_pcaps else None
     if int(pcap_size_int or 0) > 0:
         return "PCAP_PARSE_FAILED"
-    if expected_exists is False and not diagnostics.get("latest_fallback_path"):
+    delayed_fallback_path = diagnostics.get("delayed_latest_fallback_path")
+    if (
+        expected_exists is False
+        and not diagnostics.get("latest_fallback_path")
+        and delayed_expected_exists is not True
+        and not delayed_fallback_path
+    ):
         return "PCAP_DEVICE_FILE_MISSING"
     return "PCAP_LOCAL_FILE_MISSING"
 

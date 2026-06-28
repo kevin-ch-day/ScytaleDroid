@@ -37,6 +37,10 @@ def test_draft_bullets_mentions_missing_rdi_when_unavailable() -> None:
         "runs_with_domain_observations_db": 19,
         "runs_missing_domain_observations_db": 7,
         "runs_missing_domain_observations_invalid_pcap": 2,
+        "runs_missing_domain_observations_invalid_pcap_by_raw_detail": {
+            "PCAP_DEVICE_FILE_MISSING": 1,
+            "PCAP_LOCAL_FILE_MISSING": 1,
+        },
         "runs_missing_domain_observations_index_lag": 5,
         "proposed_domain_backfill_command": "PYTHONPATH=. python scripts/db/backfill_dynamic_domain_context.py --apply --json",
     }
@@ -49,6 +53,69 @@ def test_draft_bullets_mentions_missing_rdi_when_unavailable() -> None:
     assert "backfill_dynamic_domain_context.py" in bullets
     assert "invalid PCAP evidence: 2" in bullets
     assert "possible DB index lag: 5" in bullets
+    assert "PCAP_DEVICE_FILE_MISSING=1" in bullets
+    assert "current evidence-backed runs still appear consistent with domain-index lag" in bullets
+
+
+def test_draft_bullets_call_out_zero_index_lag_when_remaining_rows_are_invalid_pcap() -> None:
+    summary = {
+        "dynamic_runs_scanned": 28,
+        "dynamic_sessions_in_db": 170,
+        "valid_dataset_runs_scanned": 25,
+        "countable_runs_scanned": 21,
+        "apps_seen": 6,
+        "runs_with_pcap": 26,
+        "runs_with_pcap_report": 28,
+        "runs_with_pcap_features": 28,
+        "runs_with_domain_observations_db": 26,
+        "runs_missing_domain_observations_db": 2,
+        "runs_missing_domain_observations_invalid_pcap": 2,
+        "runs_missing_domain_observations_invalid_pcap_by_raw_detail": {
+            "PCAP_DEVICE_FILE_MISSING": 1,
+            "PCAP_LOCAL_FILE_MISSING": 1,
+        },
+        "runs_missing_domain_observations_index_lag": 0,
+        "proposed_domain_backfill_command": "PYTHONPATH=. python scripts/db/backfill_dynamic_domain_context.py --apply --json",
+    }
+    bullets = subject._draft_bullets(
+        summary,
+        [{"mode": "idle", "valid_dataset_run": 1, "domain_observations_in_db": 1}],
+        {"current_rdi_available": False},
+    )
+    assert "No current evidence-backed runs are still classified as DB domain-index lag candidates." in bullets
+    assert "Remaining missing `dynamic_domain_observations` rows are invalid-PCAP exclusions, not indexing debt." in bullets
+    assert "aligned for current valid evidence" in bullets
+
+
+def test_draft_paragraphs_highlight_zero_index_lag_and_invalid_pcap_exclusions() -> None:
+    summary = {
+        "dynamic_runs_scanned": 28,
+        "dynamic_sessions_in_db": 170,
+        "valid_dataset_runs_scanned": 25,
+        "countable_runs_scanned": 21,
+        "apps_seen": 6,
+        "runs_with_pcap_report": 28,
+        "runs_with_pcap_features": 28,
+        "runs_with_domain_observations_db": 26,
+        "runs_missing_domain_observations_db": 2,
+        "runs_missing_domain_observations_invalid_pcap": 2,
+        "runs_missing_domain_observations_invalid_pcap_by_raw_detail": {
+            "PCAP_DEVICE_FILE_MISSING": 1,
+            "PCAP_LOCAL_FILE_MISSING": 1,
+        },
+        "runs_missing_domain_observations_index_lag": 0,
+    }
+    paragraphs = subject._draft_paragraphs(
+        summary,
+        [
+            {"mode": "idle", "valid_dataset_run": 1, "domain_observations_in_db": 1},
+            {"mode": "idle", "valid_dataset_run": 1, "domain_observations_in_db": 1},
+        ],
+        {"current_rdi_available": False},
+    )
+    assert "no remaining runs are currently classified as evidence-backed index-lag candidates" in paragraphs
+    assert "invalid-PCAP exclusions rather than indexing debt" in paragraphs
+    assert "prior paper anchor remains the only directly reportable X/Twitter RDI reference tonight" in paragraphs
 
 
 def test_classify_missing_domain_observation_case_marks_invalid_pcap_artifact() -> None:

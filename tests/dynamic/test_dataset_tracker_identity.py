@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     BASELINE_REQUIRED,
     INTERACTION_REQUIRED,
@@ -7,7 +10,9 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
     _apply_quota_marking,
     _known_identity_value,
+    evaluate_dataset_validity,
 )
+from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 
 
 def test_known_identity_value_skips_unknown_placeholders() -> None:
@@ -159,3 +164,60 @@ def test_quota_marking_scopes_current_build_separately_from_legacy_runs() -> Non
     assert by_id["current-b2"]["counts_toward_quota"] is True
     assert app_entry["quota_met"] is False
     assert app_entry["extra_valid_runs"] == 0
+
+
+def test_evaluate_dataset_validity_uses_summary_netstats_when_entry_omits_total(tmp_path: Path) -> None:
+    run_dir = tmp_path / "dynamic" / "run-1"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis" / "summary.json").write_text(
+        json.dumps(
+            {
+                "telemetry": {
+                    "stats": {
+                        "netstats_bytes_in_total": 1_500_000,
+                        "netstats_bytes_out_total": 250_000,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "capinfos": {
+                    "parsed": {
+                        "capture_duration_s": 240.0,
+                        "packet_count": 4096,
+                        "data_size_bytes": 512_000,
+                    }
+                },
+                "protocol_hierarchy": [{"protocol": "ip", "bytes": 4096, "frames": 16}],
+                "no_traffic_observed": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(json.dumps({"metrics": {}, "proxies": {}}), encoding="utf-8")
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-1",
+        created_at="2026-06-28T00:00:00Z",
+        operator={
+            "run_profile": "baseline_idle",
+            "run_sequence": 1,
+            "interaction_level": "minimal",
+        },
+    )
+
+    validity = evaluate_dataset_validity(
+        run_dir,
+        manifest,
+        {"pcap_size_bytes": 512_000},
+        DatasetTrackerConfig(),
+    )
+
+    assert validity["valid_dataset_run"] is True
+    assert validity["netstats_observed_bytes"] == 1_750_000

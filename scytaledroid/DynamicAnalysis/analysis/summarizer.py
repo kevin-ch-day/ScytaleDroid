@@ -217,15 +217,62 @@ class DynamicRunSummarizer:
             destinations = payload.get("destinations", [])
             if isinstance(destinations, list):
                 return [str(item) for item in destinations]
-        return []
+        report_path = self.writer.run_dir / "analysis/pcap_report.json"
+        if not report_path.exists():
+            return []
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        return self._destinations_from_pcap_report(report)
 
     def _detect_cleartext(self, destinations: list[str]) -> str:
         if not destinations:
             return "unknown"
+        has_port_hint = False
         for entry in destinations:
+            if ":" in entry or entry.rsplit(".", 1)[-1].isdigit():
+                has_port_hint = True
             if entry.endswith(".80") or entry.endswith(":80"):
                 return "true"
-        return "false"
+        return "false" if has_port_hint else "unknown"
+
+    def _destinations_from_pcap_report(self, report: dict[str, Any]) -> list[str]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+
+        def _append(value: object) -> None:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                return
+            seen.add(text)
+            ordered.append(text)
+
+        for key in ("top_dns", "top_sni"):
+            items = report.get(key)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                _append(item.get("value"))
+
+        service_context = report.get("service_context")
+        if isinstance(service_context, dict):
+            for service in service_context.get("services") or []:
+                if not isinstance(service, dict):
+                    continue
+                for domain in service.get("domains") or []:
+                    if not isinstance(domain, dict):
+                        continue
+                    _append(domain.get("domain"))
+            for unresolved in service_context.get("unresolved_domains") or []:
+                if isinstance(unresolved, dict):
+                    _append(unresolved.get("domain"))
+                else:
+                    _append(unresolved)
+
+        return ordered
 
     def _evidence_sizes(self, manifest: RunManifest) -> dict[str, int]:
         sizes: dict[str, int] = {}

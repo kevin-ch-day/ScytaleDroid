@@ -84,6 +84,42 @@ def _print_current_device(selected_device: dict[str, str | None] | None, *, acti
     print("  none selected")
 
 
+def _prompt_no_devices() -> bool:
+    menu_utils.print_section("Detected devices")
+    print("  none detected via adb")
+    print()
+    print("1) Retry scan")
+    print("0) Cancel")
+    choice = prompt_utils.get_choice(
+        ["1", "0"],
+        default="1",
+        prompt="› Action [1/0]: ",
+        invalid_message="Choose 1 to retry or 0 to cancel.",
+    )
+    return choice == "1"
+
+
+def _prompt_single_device(
+    device: dict[str, str | None],
+    *,
+    active_serial: str | None,
+) -> str:
+    menu_utils.print_section("Detected device")
+    menu_utils.print_table(
+        ["#", "Device", "Serial", "Type", "Android", "Status"],
+        _device_rows([device], active_serial=active_serial),
+    )
+    print()
+    print("1) Use this device")
+    print("0) Cancel")
+    return prompt_utils.get_choice(
+        ["1", "0"],
+        default="1",
+        prompt="› Action [1/0]: ",
+        invalid_message="Choose 1 to use this device or 0 to cancel.",
+    )
+
+
 def get_device_selection_details(serial: str) -> dict[str, str]:
     _devices, _warnings, summaries, _serial_map = device_service.scan_devices()
     device = _lookup_device_by_serial(summaries, serial)
@@ -117,64 +153,81 @@ def select_device(
     menu_utils.print_header(header)
     print("Use this device for inventory, harvest, dynamic capture, logcat, and shell actions.")
     print()
-    devices, warnings, summaries, _serial_map = device_service.scan_devices()
-    for warning in warnings:
-        print(status_messages.status(warning, level="warn"))
-    if not devices:
-        print(status_messages.status("No devices detected via adb.", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return None
+    while True:
+        devices, warnings, summaries, _serial_map = device_service.scan_devices()
+        for warning in warnings:
+            print(status_messages.status(warning, level="warn"))
 
-    # Keep display of the active selection separate from auto-reuse behavior.
-    # Explicit selectors should still show which device is currently selected.
-    active_serial = str(device_service.get_active_serial() or "").strip()
-    active_device = _lookup_device_by_serial(summaries, active_serial)
-    if prefer_active and active_serial:
-        if active_device is not None:
-            device_label = _device_current_line(active_device)
-            print(status_messages.status(f"Using current device: {device_label}", level="info"))
-            return active_serial, device_label
+        # Keep display of the active selection separate from auto-reuse behavior.
+        # Explicit selectors should still show which device is currently selected.
+        active_serial = str(device_service.get_active_serial() or "").strip()
+        active_device = _lookup_device_by_serial(summaries, active_serial)
+        if prefer_active and active_serial:
+            if active_device is not None:
+                device_label = _device_current_line(active_device)
+                print(status_messages.status(f"Using current device: {device_label}", level="info"))
+                return active_serial, device_label
 
-    if allow_auto_single and len(summaries) == 1:
-        selected_device = summaries[0]
+        if not devices:
+            _print_current_device(active_device, active_serial=active_serial)
+            print()
+            retry = _prompt_no_devices()
+            if retry:
+                print()
+                continue
+            return None
+
+        if allow_auto_single and len(summaries) == 1:
+            selected_device = summaries[0]
+            device_serial = selected_device.get("serial")
+            if not device_serial:
+                print(status_messages.status("Detected device missing serial.", level="error"))
+                return None
+            device_label = _device_current_line(selected_device)
+            device_service.set_active_serial(device_serial)
+            print(status_messages.status(f"Using detected device: {device_label}", level="info"))
+            return device_serial, device_label
+
+        _print_current_device(active_device, active_serial=active_serial)
+        print()
+        if len(summaries) == 1:
+            selected_device = summaries[0]
+            choice = _prompt_single_device(selected_device, active_serial=active_serial)
+            if choice == "0":
+                return None
+            device_serial = selected_device.get("serial")
+            if not device_serial:
+                print(status_messages.status("Detected device missing serial.", level="error"))
+                return None
+            device_label = _device_current_line(selected_device)
+            device_service.set_active_serial(device_serial)
+            return device_serial, device_label
+
+        menu_utils.print_section("Detected devices")
+        menu_utils.print_table(
+            ["#", "Device", "Serial", "Type", "Android", "Status"],
+            _device_rows(summaries, active_serial=active_serial),
+        )
+        print()
+        print("0  Cancel")
+        device_choice = prompt_utils.get_choice(
+            [str(index + 1) for index in range(len(summaries))] + ["0"],
+            default="1",
+            prompt="› Choose device # [1]: ",
+            invalid_message="Choose a listed device number or 0 to cancel.",
+        )
+        if device_choice == "0":
+            return None
+        device_index = int(device_choice) - 1
+        selected_device = summaries[device_index]
         device_serial = selected_device.get("serial")
         if not device_serial:
-            print(status_messages.status("Detected device missing serial.", level="error"))
-            prompt_utils.press_enter_to_continue()
+            print(status_messages.status("Selected device missing serial.", level="error"))
             return None
+
         device_label = _device_current_line(selected_device)
         device_service.set_active_serial(device_serial)
-        print(status_messages.status(f"Using detected device: {device_label}", level="info"))
         return device_serial, device_label
-
-    _print_current_device(active_device, active_serial=active_serial)
-    print()
-    menu_utils.print_section("Detected devices")
-    menu_utils.print_table(
-        ["#", "Device", "Serial", "Type", "Android", "Status"],
-        _device_rows(summaries, active_serial=active_serial),
-    )
-    print()
-    print("0  Cancel")
-    device_choice = prompt_utils.get_choice(
-        [str(index + 1) for index in range(len(summaries))] + ["0"],
-        default="1",
-        prompt="› Choose device # [1]: ",
-        invalid_message="Choose a listed device number or 0 to cancel.",
-    )
-    if device_choice == "0":
-        return None
-    device_index = int(device_choice) - 1
-    selected_device = summaries[device_index]
-    device_serial = selected_device.get("serial")
-    if not device_serial:
-        print(status_messages.status("Selected device missing serial.", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return None
-
-    device_label = _device_current_line(selected_device)
-    device_service.set_active_serial(device_serial)
-    return device_serial, device_label
 
 
 __all__ = ["get_device_selection_details", "select_device"]

@@ -22,6 +22,10 @@ from scytaledroid.Utils.System.world_clock.display import (
 from scytaledroid.Utils.System.world_clock.state import WorldClockState, load_state
 from scytaledroid.Utils.version_utils import get_git_commit
 
+_MAIN_MENU_UI_STATE: dict[str, bool] = {
+    "suppress_db_status_once": False,
+}
+
 
 def _resolve_timezones() -> WorldClockState:
     return load_state()
@@ -31,6 +35,17 @@ def _start_screen_transition() -> None:
     """Insert a single blank line before rendering the next major screen."""
 
     print()
+
+
+def _suppress_main_menu_db_status_once() -> None:
+    _MAIN_MENU_UI_STATE["suppress_db_status_once"] = True
+
+
+def _consume_main_menu_db_status_suppressed() -> bool:
+    suppressed = bool(_MAIN_MENU_UI_STATE.get("suppress_db_status_once"))
+    if suppressed:
+        _MAIN_MENU_UI_STATE["suppress_db_status_once"] = False
+    return suppressed
 
 
 def _describe_snapshot(snapshot: ClockSnapshot) -> tuple[str, str]:
@@ -115,8 +130,9 @@ def _build_main_menu_sections(
     return [
         ("Setup", [by_key["1"]]),
         ("Analysis", [by_key["2"], by_key["3"], by_key["4"]]),
-        ("Support", [by_key["5"], by_key["6"], by_key["10"]]),
+        ("Support", [by_key["5"], by_key["6"]]),
         ("Diagnostics", [by_key["7"], by_key["8"], by_key["9"]]),
+        ("Library", [by_key["10"]]),
         ("About", [by_key["11"]]),
     ]
 
@@ -199,7 +215,8 @@ def main_menu() -> None:
                     category="application",
                     extra={"schema_gate_message": message, "schema_gate_detail": detail},
                 )
-        _emit_main_menu_db_connection_line(ok, message, detail or "")
+        if not _consume_main_menu_db_status_suppressed():
+            _emit_main_menu_db_connection_line(ok, message, detail or "")
         print()
         menu_utils.print_header("Main Menu")
         try:
@@ -464,6 +481,7 @@ def handle_select_device() -> None:
     print(f"  Serial : {details['serial']}")
     print(f"  Android: {details['android']}")
     print(f"  Type   : {details['type']}")
+    _suppress_main_menu_db_status_once()
 
 def handle_device() -> None:
     """Launch the Android Devices hub."""
@@ -479,7 +497,7 @@ def handle_static() -> None:
 
 
 def handle_dynamic() -> None:
-    from scytaledroid.DynamicAnalysis.menu import dynamic_analysis_menu
+    from scytaledroid.DynamicAnalysis.menus.dynamic_menu import dynamic_analysis_menu
 
     dynamic_analysis_menu()
 
@@ -771,6 +789,22 @@ def main(argv: list[str] | None = None) -> int:
         print()
         status_messages.print_status(MAIN_INTERRUPT_NOTICE, level="warn")
         log.info("Application interrupted by user.", category="application")
+    except Exception as exc:
+        extra = logging_engine.ensure_trace({"argv": list(argv)})
+        app_logger = logging_engine.get_app_logger()
+        app_logger.exception(
+            f"Unhandled application exception: {exc.__class__.__name__}: {exc}",
+            extra=extra,
+        )
+        err_logger = logging_engine.get_error_logger()
+        if err_logger is not app_logger:
+            err_extra = dict(extra)
+            err_extra.setdefault("source_category", "application")
+            err_logger.exception(
+                f"[APPLICATION] Unhandled application exception: {exc.__class__.__name__}: {exc}",
+                extra=err_extra,
+            )
+        raise
     return 0
 
 

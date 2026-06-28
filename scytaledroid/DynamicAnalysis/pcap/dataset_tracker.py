@@ -791,8 +791,14 @@ def evaluate_dataset_validity(
     """
     flags: dict[str, int] = {"short_run": 0, "no_traffic_observed": 0}
     timeline_state = _timeline_status(run_dir)
+    netstats_summary = _netstats_summary(run_dir)
     try:
-        netstats_total_bytes = int(entry.get("netstats_total_bytes") or 0)
+        netstats_total_bytes = int(
+            entry.get("netstats_total_bytes")
+            if entry.get("netstats_total_bytes") is not None
+            else netstats_summary.get("netstats_total_bytes")
+            or 0
+        )
     except Exception:
         netstats_total_bytes = 0
 

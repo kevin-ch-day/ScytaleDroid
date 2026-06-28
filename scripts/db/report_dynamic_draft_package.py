@@ -378,6 +378,7 @@ def _raw_pcap_failure_detail(run_dir: Path, manifest: dict[str, Any], row: dict[
 
 
 def _draft_bullets(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi_row: dict[str, Any]) -> str:
+    invalid_pcap_by_raw = dict(summary.get("runs_missing_domain_observations_invalid_pcap_by_raw_detail") or {})
     lines = [
         "# Dynamic Draft Results",
         "",
@@ -396,9 +397,33 @@ def _draft_bullets(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi_ro
         f"- Missing-row cases classified as invalid PCAP evidence: {summary['runs_missing_domain_observations_invalid_pcap']}.",
         f"- Missing-row cases still consistent with possible DB index lag: {summary['runs_missing_domain_observations_index_lag']}.",
         "",
-        "## X/Twitter Coverage",
+        "## Domain Index Status",
         "",
     ]
+    if invalid_pcap_by_raw:
+        detail_bits = [f"{key}={value}" for key, value in sorted(invalid_pcap_by_raw.items())]
+        lines.append(f"- Invalid-PCAP missing-row breakdown: {', '.join(detail_bits)}.")
+    if int(summary.get("runs_missing_domain_observations_index_lag") or 0) == 0:
+        lines.extend(
+            [
+                "- No current evidence-backed runs are still classified as DB domain-index lag candidates.",
+                "- Remaining missing `dynamic_domain_observations` rows are invalid-PCAP exclusions, not indexing debt.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- Some current evidence-backed runs still appear consistent with domain-index lag and may benefit from backfill/reindex review.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+        "## X/Twitter Coverage",
+        "",
+        ]
+    )
     if x_rows:
         idle = sum(1 for row in x_rows if row.get("mode") == "idle")
         interactive = sum(1 for row in x_rows if row.get("mode") == "interactive")
@@ -433,16 +458,99 @@ def _draft_bullets(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi_ro
             "",
             "## Limitations / Future Work",
             "",
-            "- DB-derived domain/service/signal indexing is behind the filesystem evidence corpus.",
-            "- Some missing `dynamic_domain_observations` rows are invalid-PCAP artifact cases, not normal DB index lag.",
-            "- Remaining index-lag interpretation should be restricted to runs classified as `index_lag_candidate`.",
+            (
+                "- DB-derived domain/service/signal indexing still has current evidence-backed lag candidates."
+                if int(summary.get("runs_missing_domain_observations_index_lag") or 0) > 0
+                else "- DB-derived domain/service/signal indexing is aligned for current valid evidence; remaining gaps are invalid-PCAP exclusions."
+            ),
+            "- Missing `dynamic_domain_observations` rows should be interpreted through raw PCAP failure detail before treating them as DB lag.",
             "- Current enriched static-to-dynamic bridge evidence still relies partly on embedded plans and read-only overlay analysis.",
             "- Current corpus does not expose ready-to-use RDI artifacts for the newly collected X/Twitter runs.",
-            f"- Established backfill command for the domain index: `{summary['proposed_domain_backfill_command']}`.",
+            (
+                f"- Established backfill command for the domain index: `{summary['proposed_domain_backfill_command']}`."
+                if int(summary.get("runs_missing_domain_observations_index_lag") or 0) > 0
+                else f"- Established backfill command remains available if new index-lag candidates appear: `{summary['proposed_domain_backfill_command']}`."
+            ),
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def _draft_paragraphs(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi_row: dict[str, Any]) -> str:
+    invalid_pcap_by_raw = dict(summary.get("runs_missing_domain_observations_invalid_pcap_by_raw_detail") or {})
+    valid_runs = int(summary.get("valid_dataset_runs_scanned") or 0)
+    total_runs = int(summary.get("dynamic_runs_scanned") or 0)
+    countable_runs = int(summary.get("countable_runs_scanned") or 0)
+    apps_seen = int(summary.get("apps_seen") or 0)
+    domain_indexed = int(summary.get("runs_with_domain_observations_db") or 0)
+    missing_domain_rows = int(summary.get("runs_missing_domain_observations_db") or 0)
+    invalid_pcap_missing = int(summary.get("runs_missing_domain_observations_invalid_pcap") or 0)
+    index_lag_missing = int(summary.get("runs_missing_domain_observations_index_lag") or 0)
+
+    x_total = len(x_rows)
+    x_valid = sum(1 for row in x_rows if int(row.get("valid_dataset_run") or 0) == 1)
+    x_indexed = sum(1 for row in x_rows if int(row.get("domain_observations_in_db") or 0) == 1)
+    x_idle = sum(1 for row in x_rows if row.get("mode") == "idle")
+    x_interactive = sum(1 for row in x_rows if row.get("mode") == "interactive")
+
+    paragraphs = [
+        (
+            f"The current dynamic corpus contains {total_runs} evidence packs across {apps_seen} apps, "
+            f"with {valid_runs} runs presently classified as valid dataset evidence and {countable_runs} runs "
+            f"counted toward the cohort protocol. PCAP-derived reports are present for "
+            f"{int(summary.get('runs_with_pcap_report') or 0)} runs and feature exports are present for "
+            f"{int(summary.get('runs_with_pcap_features') or 0)} runs."
+        ),
+    ]
+
+    if index_lag_missing == 0:
+        detail_bits = ", ".join(f"{key}={value}" for key, value in sorted(invalid_pcap_by_raw.items()))
+        paragraphs.append(
+            (
+                f"DB-backed domain indexing is aligned for current valid evidence: {domain_indexed} runs are already "
+                f"materialized in `dynamic_domain_observations`, and no remaining runs are currently classified as "
+                f"evidence-backed index-lag candidates. The {missing_domain_rows} remaining missing-domain cases are "
+                f"all invalid-PCAP exclusions rather than indexing debt"
+                + (f" ({detail_bits})" if detail_bits else "")
+                + "."
+            )
+        )
+    else:
+        paragraphs.append(
+            (
+                f"DB-backed domain indexing covers {domain_indexed} runs, but {index_lag_missing} runs still appear "
+                f"consistent with evidence-backed index lag. The remaining missing-domain cases should therefore be "
+                f"split between invalid-PCAP exclusions ({invalid_pcap_missing}) and true indexing follow-up "
+                f"candidates ({index_lag_missing})."
+            )
+        )
+
+    if x_total > 0:
+        x_sentence = (
+            f"X/Twitter currently contributes {x_total} runs to the corpus, all {x_idle} of which are idle-mode "
+            f"captures and {x_interactive} of which are interactive captures. {x_valid} of those runs are presently "
+            f"valid and {x_indexed} are already indexed into DB-backed domain context."
+        )
+        if rdi_row.get("current_rdi_available"):
+            x_sentence += (
+                f" Current corpus RDI is available for X/Twitter with idle={rdi_row['current_mu_idle_rdi']}, "
+                f"interactive={rdi_row['current_mu_interactive_rdi']}, and delta={rdi_row['current_delta_rdi']}."
+            )
+        else:
+            x_sentence += (
+                " Current corpus RDI is not yet available from the present export surfaces, so the prior paper anchor "
+                "remains the only directly reportable X/Twitter RDI reference tonight."
+            )
+        paragraphs.append(x_sentence)
+
+    paragraphs.append(
+        "The main remaining limitations are capture-quality rather than service/signal taxonomy coverage: unresolved "
+        "domain-context rows are no longer the blocker, but invalid PCAP artifacts still constrain a small number of "
+        "runs and prevent those packs from contributing to publication-grade domain-observation tables."
+    )
+
+    return "\n\n".join(paragraphs)
 
 
 def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
@@ -659,6 +767,16 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         if reason.startswith("invalid_") and not reason.startswith("invalid_pcap_")
     )
     index_lag_missing = int(missing_reason_counts.get("index_lag_candidate", 0))
+    invalid_pcap_by_raw_detail = dict(
+        sorted(
+            Counter(
+                _norm_text(row.get("pcap_failure_detail_raw"))
+                for row in missing_domain_rows
+                if str(row.get("reason") or "").startswith("invalid_pcap_")
+                and _norm_text(row.get("pcap_failure_detail_raw"))
+            ).items()
+        )
+    )
 
     summary = {
         "generated_at": datetime.now(tz=UTC).isoformat(),
@@ -676,6 +794,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         "runs_with_domain_observations_db": sum(1 for row in ledger_rows if row["domain_observations_in_db"] == 1),
         "runs_missing_domain_observations_db": len(missing_domain_rows),
         "runs_missing_domain_observations_invalid_pcap": invalid_pcap_missing,
+        "runs_missing_domain_observations_invalid_pcap_by_raw_detail": invalid_pcap_by_raw_detail,
         "runs_missing_domain_observations_invalid_other": invalid_other_missing,
         "runs_missing_domain_observations_index_lag": index_lag_missing,
         "x_twitter_runs": len(x_rows_sorted),
@@ -692,6 +811,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "missing_domain_observation_runs_csv": str((output_root / "missing_domain_observation_runs.csv").resolve()),
             "service_signal_coverage_csv": str((output_root / "service_signal_coverage.csv").resolve()),
             "draft_results_bullets_md": str((output_root / "draft_results_bullets.md").resolve()),
+            "draft_results_paragraphs_md": str((output_root / "draft_results_paragraphs.md").resolve()),
         },
         "no_db_writes": True,
     }
@@ -704,6 +824,10 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
     _write_csv(output_root / "service_signal_coverage.csv", service_signal_rows)
     (output_root / "draft_results_bullets.md").write_text(
         _draft_bullets(summary, x_rows_sorted, rdi_summary) + "\n",
+        encoding="utf-8",
+    )
+    (output_root / "draft_results_paragraphs.md").write_text(
+        _draft_paragraphs(summary, x_rows_sorted, rdi_summary) + "\n",
         encoding="utf-8",
     )
     (output_root / "dynamic_run_summary.json").write_text(
