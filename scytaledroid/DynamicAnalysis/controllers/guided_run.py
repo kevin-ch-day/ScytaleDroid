@@ -58,6 +58,10 @@ from scytaledroid.DynamicAnalysis.templates.category_map import (
     category_for_package,
     resolved_template_for_package,
 )
+from scytaledroid.DynamicAnalysis.tracker_scope import (
+    build_scoped_dataset_counts as _build_scoped_dataset_counts_shared,
+    default_resolve_tracker_run_identity as _resolve_tracker_run_identity_shared,
+)
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
     delete_dynamic_evidence_packs,
@@ -111,6 +115,7 @@ class _SelectedAppContext:
     latest_valid: bool | None
     queue_action: str
     queue_reason: str | None
+    live_build_drift: bool
     db_active_sessions: int
     db_historical_sessions: int
     historical_valid_local: int
@@ -304,6 +309,7 @@ def _print_selected_app_evidence_context(
 
 def _selected_app_queue_action(
     *,
+    live_build_drift: bool = False,
     baseline_valid_runs: int,
     interactive_valid_runs: int,
     baseline_required: int,
@@ -316,6 +322,7 @@ def _selected_app_queue_action(
     active_valid_runs: int,
 ) -> tuple[str, str | None]:
     return _selected_app_state.selected_app_queue_action(
+        live_build_drift=live_build_drift,
         baseline_valid_runs=baseline_valid_runs,
         interactive_valid_runs=interactive_valid_runs,
         baseline_required=baseline_required,
@@ -361,6 +368,9 @@ def _render_selected_app_diagnostics(
     queue_action: str,
     db_active_sessions: int,
     db_historical_sessions: int,
+    latest_recent: Any = None,
+    has_identity_mismatch: bool = False,
+    live_build_drift: bool | None = None,
 ) -> None:
     _selected_app_review.render_selected_app_diagnostics(
         package_name=package_name,
@@ -369,6 +379,9 @@ def _render_selected_app_diagnostics(
         queue_action=queue_action,
         db_active_sessions=db_active_sessions,
         db_historical_sessions=db_historical_sessions,
+        latest_recent=latest_recent,
+        has_identity_mismatch=has_identity_mismatch,
+        live_build_drift=live_build_drift,
         menu_utils=menu_utils,
     )
 
@@ -595,6 +608,7 @@ def _render_selected_app_drift_workbench(
 def _load_selected_app_context(
     *,
     package_name: str,
+    live_build_drift: bool = False,
 ) -> _SelectedAppContext:
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
@@ -624,6 +638,7 @@ def _load_selected_app_context(
     latest_recent = _selected_app_latest_recent_summary(package_name=package_name, state=state)
     latest_valid = getattr(latest_recent, "valid", None)
     queue_action, queue_reason = _selected_app_queue_action(
+        live_build_drift=live_build_drift,
         baseline_valid_runs=int(counts.baseline_valid_runs),
         interactive_valid_runs=int(counts.interactive_valid_runs),
         baseline_required=int(cfg.baseline_required),
@@ -651,6 +666,7 @@ def _load_selected_app_context(
         latest_valid=latest_valid,
         queue_action=queue_action,
         queue_reason=queue_reason,
+        live_build_drift=bool(live_build_drift),
         db_active_sessions=db_active_sessions,
         db_historical_sessions=db_historical_sessions,
         historical_valid_local=historical_valid_local,
@@ -688,15 +704,28 @@ def _selected_app_latest_recent_summary(*, package_name: str, state: Any) -> Any
             run_id=str(getattr(row, "run_id", "") or ""),
             status_label=status_label,
         )
-        if fallback is None:
-            return tracker_summary
         tracker_run_id = str(getattr(tracker_summary, "run_id", "") or "").strip()
-        fallback_run_id = str(getattr(fallback, "run_id", "") or "").strip()
-        tracker_ended = str(getattr(tracker_summary, "ended_at", "") or "").strip()
-        fallback_ended = str(getattr(fallback, "ended_at", "") or "").strip()
-        if tracker_run_id and fallback_run_id and tracker_run_id == fallback_run_id:
-            return tracker_summary
-        if tracker_ended and fallback_ended and tracker_ended > fallback_ended:
+        if fallback is not None:
+            fallback_run_id = str(getattr(fallback, "run_id", "") or "").strip()
+            if tracker_run_id and fallback_run_id and tracker_run_id == fallback_run_id:
+                return SimpleNamespace(
+                    ended_at=getattr(fallback, "ended_at", None),
+                    run_profile=getattr(fallback, "run_profile", None),
+                    interaction_level=getattr(fallback, "interaction_level", None),
+                    messaging_activity=getattr(fallback, "messaging_activity", None),
+                    valid=getattr(fallback, "valid", None),
+                    invalid_reason_code=getattr(fallback, "invalid_reason_code", None),
+                    pcap_failure_detail=(
+                        getattr(fallback, "pcap_failure_detail", None)
+                        or getattr(tracker_summary, "pcap_failure_detail", None)
+                    ),
+                    low_signal=getattr(fallback, "low_signal", None),
+                    run_id=fallback_run_id,
+                    status_label=getattr(fallback, "status_label", getattr(tracker_summary, "status_label", "UNKNOWN")),
+                )
+        if fallback is not None:
+            return fallback
+        if fallback is None:
             return tracker_summary
     return fallback
 
@@ -975,7 +1004,7 @@ def _select_guided_dataset_action(
     )
     if plan_drift is not None:
         selected_app = _with_selected_app_display(
-            _load_selected_app_context(package_name=package_name),
+            _load_selected_app_context(package_name=package_name, live_build_drift=True),
             package_name=package_name,
             display_label=display_label,
         )

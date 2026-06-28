@@ -218,3 +218,131 @@ def test_post_run_integrity_derives_pcap_failure_summary_for_historical_run(caps
     assert "Network traffic was observed by Android netstats" in out
     assert "Scripted interaction timeline is still available for protocol validation" in out
     assert "PCAP failure detail: PCAP_DEVICE_FILE_MISSING" in out
+    assert "Observer note: named device file was not visible on device at stop time." in out
+
+
+def test_post_run_integrity_prefers_delayed_empty_device_classification(capsys, tmp_path: Path) -> None:
+    run_dir = tmp_path / "evidence" / "dynamic" / "run-5"
+    _write(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": False,
+                "invalid_reason_code": "PCAP_MISSING",
+                "pcap_size_bytes": 0,
+            }
+        },
+    )
+    _write(
+        run_dir / "analysis" / "summary.json",
+        {
+            "telemetry": {
+                "stats": {
+                    "netstats_bytes_in_total": 1024,
+                    "netstats_bytes_out_total": 2048,
+                }
+            }
+        },
+    )
+    _write(
+        run_dir / "analysis" / "pcap_report.json",
+        {
+            "report_status": "skip",
+            "pcap_size_bytes": 0,
+            "capinfos": {"parsed": {}},
+        },
+    )
+    _write(
+        run_dir / "analysis" / "pcap_features.json",
+        {
+            "metrics": {},
+            "proxies": {},
+            "quality": {
+                "report_status": "skip",
+                "pcap_enrichment": {
+                    "status": "skipped",
+                    "reason": "pcap_path_missing",
+                },
+            },
+        },
+    )
+    _write(
+        run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json",
+        {
+            "pcap_size_bytes": 0,
+            "pcap_valid": False,
+            "failure_diagnostics": {
+                "expected_device_path_exists": False,
+                "expected_device_path_size_bytes": None,
+                "latest_fallback_path": None,
+                "delayed_expected_device_path_exists": True,
+                "delayed_expected_device_path_size_bytes": 0,
+            },
+        },
+    )
+
+    _post_run_integrity_check(
+        SimpleNamespace(dynamic_run_id="run-5", evidence_path=str(run_dir))
+    )
+    out = capsys.readouterr().out
+    assert "PCAP failure detail: PCAP_DEVICE_FILE_EMPTY" in out
+    assert "Observer note: named device file appeared after stop but remained empty." in out
+
+
+def test_post_run_integrity_surfaces_status_unavailable_observer_note(capsys, tmp_path: Path) -> None:
+    run_dir = tmp_path / "evidence" / "dynamic" / "run-6"
+    _write(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": False,
+                "invalid_reason_code": "PCAP_MISSING",
+                "pcap_size_bytes": 0,
+            }
+        },
+    )
+    _write(
+        run_dir / "analysis" / "pcap_report.json",
+        {
+            "report_status": "skip",
+            "pcap_size_bytes": 0,
+            "capinfos": {"parsed": {}},
+        },
+    )
+    _write(
+        run_dir / "analysis" / "pcap_features.json",
+        {
+            "metrics": {},
+            "proxies": {},
+            "quality": {
+                "report_status": "skip",
+                "pcap_enrichment": {
+                    "status": "skipped",
+                    "reason": "pcap_path_missing",
+                },
+            },
+        },
+    )
+    _write(
+        run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json",
+        {
+            "pcap_size_bytes": 0,
+            "pcap_valid": False,
+            "status_check": {
+                "ok": None,
+                "error": None,
+                "source": "unavailable",
+            },
+            "failure_diagnostics": {
+                "expected_device_path_exists": False,
+                "expected_device_path_size_bytes": None,
+                "latest_fallback_path": None,
+            },
+        },
+    )
+
+    _post_run_integrity_check(
+        SimpleNamespace(dynamic_run_id="run-6", evidence_path=str(run_dir))
+    )
+    out = capsys.readouterr().out
+    assert "PCAPdroid status probe unavailable; capture was judged from artifacts." in out

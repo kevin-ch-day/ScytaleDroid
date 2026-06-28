@@ -79,9 +79,10 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert "Static Plan / Device Drift" not in out
-    assert "Build drift detected" in out
-    assert "current-build evidence (local+db)" in out
-    assert "quota 3/5 n2" in out
+    assert "Installed build drift detected" in out
+    assert "tracked-build evidence (local+db)" in out
+    assert "tracked quota 3/5 n2" in out
+    assert "Installed build 472224766 · tracked static-plan build 472143276" in out
     assert "R) Refresh checklist [default]" in out
     assert "Reason: installed build does not match the newest static plan." in out
     assert "Blocked: installed build 472224766 does not match static-plan build 472143276." in out
@@ -91,6 +92,33 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     assert "Review / inspect" in out
     assert "H) Run history" in out
     assert "G) Diagnostics" in out
+
+
+def test_load_selected_app_context_uses_refresh_action_when_live_build_drift_is_true(monkeypatch) -> None:
+    package = "com.cnn.mobile.android.phone"
+
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            total_runs=6,
+            valid_runs=5,
+            baseline_valid_runs=3,
+            interactive_valid_runs=2,
+            quota_met=True,
+        ),
+    )
+    monkeypatch.setattr(guided_run, "_scripted_template_available", lambda _package_name: True)
+    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _package_name: {"db_active_sessions": 1, "db_historical_sessions": 0})
+    monkeypatch.setattr(guided_run, "_selected_app_latest_recent_summary", lambda **_kwargs: None)
+    monkeypatch.setattr(guided_run, "_selected_app_has_identity_mismatch", lambda **_kwargs: False)
+
+    app = guided_run._load_selected_app_context(package_name=package, live_build_drift=True)
+
+    assert app.queue_action == "refresh"
+    assert app.queue_reason == "installed build does not match the newest static plan"
+    assert app.live_build_drift is True
 
 
 def test_selected_app_state_snapshot_supports_refresh_action() -> None:
@@ -150,7 +178,8 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
 
     out = capsys.readouterr().out
     assert captured["queue_action"] == "refresh"
-    assert "Build drift detected · historical evidence (local-only) · QA unknown · quota 0/5 n5" in out
+    assert "Installed build drift detected · historical evidence (local-only) · QA unknown · tracked quota 0/5 n5" in out
+    assert "Installed build 312021000 · tracked static-plan build 312011000" in out
     assert "R) Refresh checklist [default]" in out
 
 
@@ -187,11 +216,13 @@ def test_drift_workbench_refresh_checklist_includes_menu_path(monkeypatch, capsy
     assert "Installed build" in out
     assert "Static plan" in out
     assert "Static run" in out
+    assert "tracked static-plan build, not the newly installed build" in out
     assert "Device Inventory & Harvest" in out
     assert "Static Analysis Pipeline" in out
     assert "Analyze one app" in out
     assert "Dynamic Analysis" in out
     assert "App queue / next action" in out
+    assert "new current build target" in out
 
 
 def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(monkeypatch, capsys) -> None:

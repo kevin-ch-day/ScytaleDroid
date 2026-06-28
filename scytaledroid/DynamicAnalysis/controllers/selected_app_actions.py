@@ -40,8 +40,6 @@ def build_selected_app_protocol_options(
         return "supplemental · outside quota"
 
     def _interactive_option_description(*, template_available: bool = True) -> str:
-        if not template_available:
-            return "unavailable"
         if not baseline_complete:
             return "held until baseline complete"
         if int(counts.interactive_valid_runs) < int(cfg.interactive_required):
@@ -65,22 +63,16 @@ def build_selected_app_protocol_options(
         ),
         menu_utils.MenuOption(
             "2",
-            "Scripted",
-            description=_interactive_option_description(template_available=scripted_template_ready),
-            badge=_badge_for("2"),
-            disabled=(not scripted_template_ready),
+            "Interactive",
+            description=_interactive_option_description(),
+            badge=("suggested" if suggested_default_key in {"2", "3"} else None),
         ),
         menu_utils.MenuOption(
             "3",
-            "Manual",
-            description=(
-                "suggested · counts toward quota"
-                if _interactive_option_description() == "counts toward quota"
-                else _interactive_option_description()
-            ),
-            badge=_badge_for("3"),
+            "Test app",
+            description="no saving",
+            badge=None,
         ),
-        menu_utils.MenuOption("4", "Test app", description="no saving", badge=None),
         menu_utils.MenuOption(
             "X",
             "Reset app",
@@ -154,19 +146,15 @@ def _recommended_action(
         return "R", "current-build evidence exists in the DB, but the local evidence pack is missing from this workspace."
     if action_key == "baseline":
         return "1", str(app.queue_reason or "baseline quota is not yet met.")
-    if action_key == "scripted_interaction" and "2" in option_keys and not option_keys["2"].disabled:
+    if action_key in {"scripted_interaction", "manual_interaction"} and "2" in option_keys:
         return "2", str(app.queue_reason or "interactive quota is still missing.")
-    if action_key == "manual_interaction":
-        return "3", str(app.queue_reason or "interactive quota is still missing.")
     if getattr(app.counts, "quota_met", False) and app.latest_valid is True:
-        return "3", "quota is already satisfied; this run would be supplemental."
+        return "2", "quota is already satisfied; this run would be supplemental."
     if int(app.counts.baseline_valid_runs) < int(app.cfg.baseline_required):
         return "1", f"baseline quota is not yet met ({int(app.counts.baseline_valid_runs)}/{int(app.cfg.baseline_required)})."
     if int(app.counts.interactive_valid_runs) < int(app.cfg.interactive_required):
-        if "2" in option_keys and not option_keys["2"].disabled:
-            return "2", f"interactive quota is still missing ({int(app.counts.interactive_valid_runs)}/{int(app.cfg.interactive_required)})."
-        return "3", f"interactive quota is still missing ({int(app.counts.interactive_valid_runs)}/{int(app.cfg.interactive_required)})."
-    return "3", "manual collection is available as supplemental work."
+        return "2", f"interactive quota is still missing ({int(app.counts.interactive_valid_runs)}/{int(app.cfg.interactive_required)})."
+    return "2", "interactive collection is available as supplemental work."
 
 
 def _action_line(key: str, label: str, *, is_default: bool = False, disabled: bool = False) -> str:
@@ -194,10 +182,8 @@ def _render_recommended_screen(
         if key == "1":
             return "Baseline run"
         if key == "2":
-            return "Scripted run"
+            return "Interactive run"
         if key == "3":
-            return "Manual run"
-        if key == "4":
             return "Test app"
         if key == "A":
             return "Review QA"
@@ -213,7 +199,7 @@ def _render_recommended_screen(
 
     print(_summary_phrase(app))
     print()
-    run_keys = [key for key in ["1", "2", "3", "4"] if key in option_map]
+    run_keys = [key for key in ["1", "2", "3"] if key in option_map]
     if default_choice in run_keys:
         menu_utils.print_section("Run Option")
         for key in run_keys:
@@ -334,6 +320,9 @@ def handle_selected_app_aux_action(
             queue_action=app.queue_action,
             db_active_sessions=app.db_active_sessions,
             db_historical_sessions=app.db_historical_sessions,
+            latest_recent=app.latest_recent,
+            has_identity_mismatch=app.has_identity_mismatch,
+            live_build_drift=getattr(app, "live_build_drift", None),
         )
         prompt_utils.press_enter_to_continue()
         return None
@@ -352,6 +341,19 @@ def handle_selected_app_aux_action(
         if prompt_utils.prompt_yes_no("Start baseline recollection for the installed build now?", default=True):
             return "1"
         return None
+    if selected_protocol == "2":
+        if (
+            app.scripted_template_ready
+            and int(app.counts.baseline_valid_runs) >= int(app.cfg.baseline_required)
+            and (
+                str(app.suggested_default_key or "") == "2"
+                or "scripted" in str(app.queue_action or "").lower()
+            )
+        ):
+            return "2"
+        return "3"
+    if selected_protocol == "3":
+        return "4"
     return selected_protocol
 
 

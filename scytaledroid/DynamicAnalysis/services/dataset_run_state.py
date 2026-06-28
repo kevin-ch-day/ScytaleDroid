@@ -65,6 +65,8 @@ class DatasetRunState:
     baseline_connected_insufficient_duration_streak: int
     historical_valid_runs: int = 0
     historical_build_count: int = 0
+    active_version_code: str = ""
+    active_base_sha: str = ""
 
 
 def _is_messaging_package_or_category(package_name: str) -> bool:
@@ -425,6 +427,8 @@ def load_dataset_run_state(
         baseline_connected_insufficient_duration_streak=baseline_connected_insufficient_duration_streak,
         historical_valid_runs=int(scoped_counts.get("legacy_valid") or scoped_runs.get("legacy_valid") or 0),
         historical_build_count=int(scoped_counts.get("legacy_builds") or scoped_runs.get("legacy_builds") or 0),
+        active_version_code=str(scoped_counts.get("active_version_code") or ""),
+        active_base_sha=str(scoped_counts.get("active_base_sha") or ""),
     )
 
 

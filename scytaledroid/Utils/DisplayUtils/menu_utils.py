@@ -213,7 +213,7 @@ def print_main_banner(
 
     header = colors.apply(app_name, palette.header, bold=True)
     version_line = colors.apply(
-        f"{'Version' if ascii_ui else 'Version'}: {app_version} ({app_release})",
+        f"{'Version' if ascii_ui else 'Version'}: {app_version}",
         palette.accent,
     )
 

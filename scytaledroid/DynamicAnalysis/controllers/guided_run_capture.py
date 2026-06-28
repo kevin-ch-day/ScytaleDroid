@@ -10,6 +10,23 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
 )
 
 
+def _drift_evidence_text(build: str, evidence: str) -> str:
+    evidence_key = str(evidence or "").strip()
+    if evidence_key == "local+db":
+        return "tracked-build evidence (local+db)"
+    if evidence_key == "db-only":
+        return "tracked-build evidence (db-only)"
+    if evidence_key in {"empty", "none"}:
+        return "no tracked-build evidence"
+    return selected_app_evidence_text(build, evidence)
+
+
+def _drift_build_summary(plan_drift: dict[str, Any]) -> str:
+    observed_vc = str(plan_drift.get("observed_version_code") or "").strip() or "unknown"
+    expected_vc = str(plan_drift.get("expected_version_code") or "").strip() or "unknown"
+    return f"Installed build {observed_vc} · tracked static-plan build {expected_vc}"
+
+
 def plan_drift_rows(plan_drift: dict[str, Any], *, detailed_installed_build: bool) -> list[list[str]]:
     installed_build = str(plan_drift.get("observed_version_code") or "unknown")
     if detailed_installed_build:
@@ -99,9 +116,10 @@ def render_selected_app_drift_workbench(
             interactive_required=int(app.cfg.interactive_required),
             extra_valid_runs=app.extra_valid_local,
         )
-        evidence_text = selected_app_evidence_text(snapshot.build, snapshot.evidence)
+        evidence_text = _drift_evidence_text(snapshot.build, snapshot.evidence)
         qa_text = selected_app_qa_text(snapshot.qa)
-        print(f"Build drift detected · {evidence_text} · {qa_text} · quota {snapshot.quota}")
+        print(f"Installed build drift detected · {evidence_text} · {qa_text} · tracked quota {snapshot.quota}")
+        print(_drift_build_summary(plan_drift))
         print()
         menu_utils.print_section("Recommended")
         print("R) Refresh checklist [default]")
@@ -143,6 +161,9 @@ def render_selected_app_drift_workbench(
                 queue_action="refresh",
                 db_active_sessions=app.db_active_sessions,
                 db_historical_sessions=app.db_historical_sessions,
+                latest_recent=app.latest_recent,
+                has_identity_mismatch=bool(getattr(app, "has_identity_mismatch", False)),
+                live_build_drift=True,
             )
             prompt_utils.press_enter_to_continue()
             continue
@@ -156,6 +177,7 @@ def _render_refresh_checklist(
 ) -> None:
     menu_utils.print_header("Refresh checklist", app.display_label)
     print("This app is blocked because the installed build does not match the newest static plan.")
+    print("Current baseline/interactive counts below belong to the tracked static-plan build, not the newly installed build.")
     print()
     print("Current state")
     rows = plan_drift_rows(plan_drift, detailed_installed_build=False)
@@ -179,6 +201,7 @@ def _render_refresh_checklist(
     print()
     print("After refresh clears:")
     print("  Return to the app queue and follow the updated recommended action for this app.")
+    print("  The refreshed app version should be treated as the new current build target for dataset-mode runs.")
 
 
 def print_capture_device_choice(

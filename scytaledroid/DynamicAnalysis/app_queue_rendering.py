@@ -12,8 +12,8 @@ def queue_app_width(*, terminal_mod: Any) -> int:
     if width < 100:
         return 18
     if width < 110:
-        return 18
-    return 22
+        return 20
+    return 24
 
 
 def queue_compact_layout_mode(*, terminal_mod: Any) -> str:
@@ -30,10 +30,9 @@ def render_compact_queue_table(
     table_utils_mod: Any,
     text_blocks_mod: Any,
 ) -> None:
-    total_required = int(baseline_required) + int(interactive_required)
     app_width = queue_app_width(terminal_mod=terminal_mod)
     if queue_compact_layout_mode(terminal_mod=terminal_mod) == "narrow":
-        headers = ["#", "App", "Status", "Need", "Quota", "State", "Tmpl", "Action"]
+        headers = ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
         table_rows = [
             [
                 row.full_row[0],
@@ -44,15 +43,22 @@ def render_compact_queue_table(
                     baseline_required=baseline_required,
                     interactive_required=interactive_required,
                 ),
-                app_queue_state.queue_runs_narrow_label(row, total_required=total_required),
-                app_queue_state.queue_state_summary_label(row),
-                app_queue_state.queue_template_label(row.package_name),
+                app_queue_state.queue_baseline_runs_label(
+                    row,
+                    baseline_required=baseline_required,
+                ),
+                app_queue_state.queue_interactive_runs_label(
+                    row,
+                    interactive_required=interactive_required,
+                ),
+                app_queue_state.queue_build_label(row),
+                app_queue_state.queue_qa_badge(row.qa_label),
                 app_queue_state.queue_action_narrow_label(row),
             ]
             for row in rows
         ]
     else:
-        headers = ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
+        headers = ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
         table_rows = [
             [
                 row.full_row[0],
@@ -63,11 +69,16 @@ def render_compact_queue_table(
                     baseline_required=baseline_required,
                     interactive_required=interactive_required,
                 ),
-                app_queue_state.queue_runs_label(row, total_required=total_required),
+                app_queue_state.queue_baseline_runs_label(
+                    row,
+                    baseline_required=baseline_required,
+                ),
+                app_queue_state.queue_interactive_runs_label(
+                    row,
+                    interactive_required=interactive_required,
+                ),
                 app_queue_state.queue_build_label(row),
-                app_queue_state.queue_evidence_label(row),
                 app_queue_state.queue_qa_badge(row.qa_label),
-                app_queue_state.queue_template_label(row.package_name),
                 app_queue_state.queue_action_label(row),
             ]
             for row in rows
@@ -85,10 +96,8 @@ def render_queue_summary_block(
     freeze_ok: bool,
     next_row: Any | None,
 ) -> None:
-    publication_parts = [f"{apps_ok}/{prepared.dataset_apps_total} quota-satisfied"]
-    if prepared.current_build_review_count > 0:
-        publication_parts.append(f"{prepared.current_build_review_count} review")
-    print(f"Publication : {' | '.join(publication_parts)}")
+    evidence_parts = [f"{apps_ok}/{prepared.dataset_apps_total} quota-satisfied"]
+    print(f"Corpus      : {' | '.join(evidence_parts)}")
 
     quota_parts = [f"{quota}/{prepared.expected_runs} valid", f"{remaining} remaining"]
     if extra_runs > 0:

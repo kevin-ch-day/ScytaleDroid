@@ -23,6 +23,7 @@ CAPTURE_MODE = "app_only"
 FINALIZE_MIN_WAIT_S = 5.0
 FINALIZE_MAX_WAIT_S = 12.0
 FINALIZE_STABLE_POLLS = 2
+FAILURE_RECHECK_DELAY_S = 2.0
 
 
 def _effective_min_pcap_bytes(run_ctx: RunContext) -> int:
@@ -85,6 +86,7 @@ class PcapdroidCaptureObserver(Observer):
 
         adb_shell.run_shell(run_ctx.device_serial, start_args)
         status_ok, status_error = _pcapdroid_status_ok(run_ctx.device_serial, api_key)
+        status_source = "direct_probe"
         newest_hint = _peek_latest_pcapdroid(run_ctx.device_serial, min_epoch=capture_start)
         start_probe = _poll_latest_pcapdroid(
             run_ctx.device_serial,
@@ -93,6 +95,11 @@ class PcapdroidCaptureObserver(Observer):
         )
         if status_ok is None and start_probe.get("latest_path"):
             status_ok = True
+            status_error = None
+            status_source = "fallback_probe"
+        elif status_ok is None:
+            status_source = "unavailable"
+            status_error = None
         if status_ok is False:
             raise RuntimeError(status_error or "PCAPdroid capture did not start")
         meta_path.write_text(
@@ -108,6 +115,7 @@ class PcapdroidCaptureObserver(Observer):
                     "status_check": {
                         "ok": status_ok,
                         "error": status_error,
+                        "source": status_source,
                     },
                     "start_hint": newest_hint,
                     "start_probe": start_probe,
@@ -290,6 +298,7 @@ class PcapdroidCaptureObserver(Observer):
                         run_ctx.device_serial,
                         device_path,
                         min_epoch=capture_start_epoch,
+                        recheck_delay_s=FAILURE_RECHECK_DELAY_S,
                     )
                     meta_path.write_text(
                         json.dumps(meta_payload, indent=2, sort_keys=True),
@@ -463,6 +472,7 @@ def _capture_failure_diagnostics(
     device_path: str,
     *,
     min_epoch: float | None = None,
+    recheck_delay_s: float = 0.0,
 ) -> dict[str, object]:
     diagnostics: dict[str, object] = {
         "expected_device_path": device_path,
@@ -474,6 +484,15 @@ def _capture_failure_diagnostics(
     if fallback_path:
         diagnostics["latest_fallback_exists"] = _device_file_exists(device_serial, fallback_path)
         diagnostics["latest_fallback_size_bytes"] = _device_file_size(device_serial, fallback_path)
+    if recheck_delay_s > 0:
+        time.sleep(recheck_delay_s)
+        diagnostics["delayed_expected_device_path_exists"] = _device_file_exists(device_serial, device_path)
+        diagnostics["delayed_expected_device_path_size_bytes"] = _device_file_size(device_serial, device_path)
+        delayed_fallback_path = _latest_pcapdroid_capture(device_serial, min_epoch=min_epoch)
+        diagnostics["delayed_latest_fallback_path"] = delayed_fallback_path
+        if delayed_fallback_path:
+            diagnostics["delayed_latest_fallback_exists"] = _device_file_exists(device_serial, delayed_fallback_path)
+            diagnostics["delayed_latest_fallback_size_bytes"] = _device_file_size(device_serial, delayed_fallback_path)
     return diagnostics
 
 

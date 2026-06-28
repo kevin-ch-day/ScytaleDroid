@@ -53,11 +53,11 @@ def compact_warning_line(row_models: list[Any]) -> str:
 
     issues: list[str] = []
     mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
-    mismatch_rows = [row.display_name for row in row_models if "id_mismatch" in str(row.qa_label)]
-    historical_rows = [
+    mismatch_rows = [
         row.display_name
         for row in row_models
-        if row.lineage_state in {"historical_local_only", "historical_db_only"}
+        if "id_mismatch" in str(row.qa_label)
+        and row.lineage_state in {"current_build_observed", "current_build_db_only"}
     ]
     db_only_current_rows = [
         row.display_name
@@ -81,14 +81,6 @@ def compact_warning_line(row_models: list[Any]) -> str:
                 plural_label="identity mismatches",
             )
         )
-    if historical_rows:
-        issues.append(
-            _format_issue(
-                historical_rows,
-                singular_suffix="history-only app",
-                plural_label="history-only apps",
-            )
-        )
     if db_only_current_rows:
         issues.append(
             _format_issue(
@@ -101,6 +93,54 @@ def compact_warning_line(row_models: list[Any]) -> str:
         return ""
     top = issues[:4]
     return " | ".join(top) + ". Press D."
+
+
+def compact_note_line(row_models: list[Any]) -> str:
+    def _format_issue(
+        names: list[str],
+        *,
+        singular_suffix: str,
+        plural_label: str,
+    ) -> str:
+        if not names:
+            return ""
+        if len(names) == 1:
+            return f"{names[0]} {singular_suffix}"
+        if len(names) == 2:
+            return f"{', '.join(names)} {singular_suffix}"
+        return f"{len(names)} {plural_label}"
+
+    issues: list[str] = []
+    legacy_mismatch_rows = [
+        row.display_name
+        for row in row_models
+        if "id_mismatch" in str(row.qa_label)
+        and row.lineage_state in {"historical_local_only", "historical_db_only"}
+    ]
+    historical_rows = [
+        row.display_name
+        for row in row_models
+        if row.lineage_state in {"historical_local_only", "historical_db_only"}
+    ]
+    if legacy_mismatch_rows:
+        issues.append(
+            _format_issue(
+                legacy_mismatch_rows,
+                singular_suffix="legacy identity note",
+                plural_label="legacy identity notes",
+            )
+        )
+    if historical_rows:
+        issues.append(
+            _format_issue(
+                historical_rows,
+                singular_suffix="history-only app",
+                plural_label="history-only apps",
+            )
+        )
+    if not issues:
+        return ""
+    return " | ".join(issues[:4]) + ". Press D."
 
 
 def attention_items(row_models: list[Any]) -> list[str]:
@@ -214,6 +254,16 @@ def queue_runs_label(row: Any, *, total_required: int) -> str:
     return f"{countable}/{int(total_required)} need {missing}"
 
 
+def queue_baseline_runs_label(row: Any, *, baseline_required: int) -> str:
+    count = int(row.baseline_countable) + int(row.baseline_extra)
+    return f"{count}/{int(baseline_required)}"
+
+
+def queue_interactive_runs_label(row: Any, *, interactive_required: int) -> str:
+    count = int(row.interactive_countable) + int(row.interactive_extra)
+    return f"{count}/{int(interactive_required)}"
+
+
 def queue_build_label(row: Any) -> str:
     return selected_app_build_label(
         active_valid_runs=int(getattr(row, "technical_valid_active", 0) or 0),
@@ -270,9 +320,9 @@ def queue_template_label(package_name: str) -> str:
 def queue_action_label(row: Any) -> str:
     action = display_action_label(row)
     if action == "baseline":
-        return "base"
-    if action == "scripted":
-        return "script"
+        return "baseline"
+    if action == "interactive":
+        return "interactive"
     return action
 
 
@@ -294,7 +344,7 @@ def queue_status_narrow_label(row: Any) -> str:
     return {
         "complete": "done",
         "review": "review",
-        "baseline": "base",
+        "baseline": "baseline",
         "manual": "manual",
         "refresh": "refresh",
         "restore": "restore",
@@ -337,8 +387,7 @@ def queue_runs_narrow_label(row: Any, *, total_required: int) -> str:
 
 def queue_action_narrow_label(row: Any) -> str:
     return {
-        "manual": "man",
-        "script": "scr",
+        "interactive": "interactive",
         "review": "rev",
         "refresh": "ref",
         "restore": "rest",
@@ -353,18 +402,13 @@ def display_action_label(row: Any) -> str:
     action = main_action_label(row.next_label)
     if action != "manual":
         return action
-    template = queue_template_label(row.package_name)
-    if row.need_interactive > 0 and row.need_baseline <= 0 and template in {"news", "gen"}:
-        return "scripted"
-    return action
+    return "interactive"
 
 
 def display_next_line_action_label(row: Any) -> str:
     action = display_action_label(row)
-    if action == "scripted":
-        return "scripted interaction"
-    if action == "manual":
-        return "manual interaction"
+    if action == "interactive":
+        return "interactive"
     if action == "review":
         return "review QA"
     return action
@@ -379,18 +423,16 @@ def next_recommendation_priority(row: Any) -> tuple[int, str]:
         return (1, row.display_name)
     if action == "restore":
         return (2, row.display_name)
-    if action == "scripted":
+    if action == "interactive":
         return (3, row.display_name)
-    if action == "manual":
-        return (4, row.display_name)
     if action == "baseline":
         if lineage_state == "no_evidence_anywhere":
-            return (5, row.display_name)
+            return (4, row.display_name)
         if lineage_state == "historical_local_only":
-            return (6, row.display_name)
+            return (5, row.display_name)
         if lineage_state == "historical_db_only":
-            return (7, row.display_name)
-        return (8, row.display_name)
+            return (6, row.display_name)
+        return (7, row.display_name)
     return (99, row.display_name)
 
 
@@ -460,8 +502,8 @@ def manual_progress_label(row: Any, *, interactive_required: int) -> str:
 
 def main_action_label(value: str) -> str:
     text = str(value or "").strip()
-    if text == "manual interaction":
-        return "manual"
+    if text in {"manual interaction", "scripted interaction", "manual", "scripted"}:
+        return "interactive"
     if text == "refresh static":
         return "refresh"
     if text == "review QA":
@@ -494,8 +536,8 @@ def compact_progress_label(value: str) -> str:
 
 def compact_next_action(value: str) -> str:
     text = str(value or "").strip().lower()
-    if text == "manual interaction":
-        return "manual"
+    if text in {"manual interaction", "scripted interaction", "manual", "scripted"}:
+        return "interactive"
     return str(value or "").strip() or "—"
 
 

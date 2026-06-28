@@ -371,13 +371,13 @@ def cmd_per_app(args: argparse.Namespace) -> int:
     """
     Per-package quota view from evidence (authoritative lane).
 
-    Mirrors scytaledroid.DynamicAnalysis.menu._summarize_evidence_quota bucket logic:
+    Mirrors scytaledroid.DynamicAnalysis.menus.dynamic_menu._summarize_evidence_quota bucket logic:
     - Uses derive_paper_eligibility()
     - Buckets run_profile to baseline vs interactive
     - Counts first N per bucket as quota_counted; remaining as extras
     """
     from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
-    from scytaledroid.DynamicAnalysis.menu import _run_profile_bucket
+    from scytaledroid.DynamicAnalysis.menus.dynamic_menu import _run_profile_bucket
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
     cfg = DatasetTrackerConfig()
