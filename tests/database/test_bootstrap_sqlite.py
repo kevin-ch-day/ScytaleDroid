@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
+from scytaledroid.Database.db_queries.harvest.install_sets import CREATE_HARVEST_APK_OBSERVATIONS
 from scytaledroid.Database.tools import bootstrap
 
 
@@ -49,3 +54,29 @@ def test_execute_statements_skips_mysql_only_sqlite_statements(monkeypatch) -> N
     assert len(executed) == 1
     assert "CREATE TABLE IF NOT EXISTS demo" in executed[0]
     assert "ON UPDATE CURRENT_TIMESTAMP" not in executed[0]
+
+
+def test_normalize_sqlite_preserves_unique_constraint_columns() -> None:
+    normalized = bootstrap._normalize_sqlite(CREATE_HARVEST_APK_OBSERVATIONS)  # noqa: SLF001
+
+    assert "UNIQUE (" in normalized
+    assert "harvest_session_id" in normalized
+    assert "package_name" in normalized
+    assert "split_name" in normalized
+    assert "sha256" in normalized
+    assert "UNIQUE KEY" not in normalized
+
+
+def test_normalized_harvest_observations_sql_executes_in_sqlite() -> None:
+    normalized = bootstrap._normalize_sqlite(CREATE_HARVEST_APK_OBSERVATIONS)  # noqa: SLF001
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute(normalized)
+
+
+def test_bootstrap_database_rejects_sqlite_outside_tests(monkeypatch) -> None:
+    monkeypatch.setitem(bootstrap.DB_CONFIG, "engine", "sqlite")
+    monkeypatch.setattr(bootstrap.db_config, "is_test_env", lambda: False)
+
+    with pytest.raises(RuntimeError, match="SQLite bootstrap is test-only"):
+        bootstrap.bootstrap_database()

@@ -173,7 +173,12 @@ def test_select_device_can_force_prompt_for_single_detected_device(monkeypatch, 
         "set_active_serial",
         lambda serial: set_calls.__setitem__("serial", serial) or True,
     )
-    monkeypatch.setattr(device_select.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+    prompt_capture = {"prompt": None}
+    monkeypatch.setattr(
+        device_select.prompt_utils,
+        "get_choice",
+        lambda *args, **kwargs: prompt_capture.__setitem__("prompt", kwargs.get("prompt")) or "1",
+    )
 
     selected = device_select.select_device(
         header="Select Capture Device",
@@ -187,7 +192,9 @@ def test_select_device_can_force_prompt_for_single_detected_device(monkeypatch, 
     assert "Select Capture Device" in out
     assert "Use this device for inventory, harvest, dynamic capture, logcat, and shell actions." in out
     assert "Current device" in out
-    assert "Detected devices" in out
+    assert "Detected device" in out
+    assert "Use this device" in out
+    assert prompt_capture["prompt"] == "› Action [1/0]: "
 
 
 def test_select_device_forced_prompt_still_shows_current_device(monkeypatch, capsys) -> None:
@@ -211,7 +218,12 @@ def test_select_device_forced_prompt_still_shows_current_device(monkeypatch, cap
     )
     monkeypatch.setattr(device_select.device_service, "get_active_serial", lambda: "ZY22JK89DR")
     monkeypatch.setattr(device_select.device_service, "set_active_serial", lambda _serial: True)
-    monkeypatch.setattr(device_select.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+    prompt_capture = {"prompt": None}
+    monkeypatch.setattr(
+        device_select.prompt_utils,
+        "get_choice",
+        lambda *args, **kwargs: prompt_capture.__setitem__("prompt", kwargs.get("prompt")) or "1",
+    )
 
     selected = device_select.select_device(
         header="Select Capture Device",
@@ -224,3 +236,42 @@ def test_select_device_forced_prompt_still_shows_current_device(monkeypatch, cap
     assert "Current device" in out
     assert "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical" in out
     assert "current" in out
+    assert "Detected device" in out
+    assert prompt_capture["prompt"] == "› Action [1/0]: "
+
+
+def test_select_device_no_devices_can_cancel_without_press_enter(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        device_select.device_service,
+        "scan_devices",
+        lambda: ([], [], [], {}),
+    )
+    monkeypatch.setattr(device_select.device_service, "get_active_serial", lambda: None)
+    press_enter_calls = {"count": 0}
+    monkeypatch.setattr(
+        device_select.prompt_utils,
+        "press_enter_to_continue",
+        lambda: press_enter_calls.__setitem__("count", press_enter_calls["count"] + 1),
+    )
+    prompt_capture = {"prompt": None}
+    monkeypatch.setattr(
+        device_select.prompt_utils,
+        "get_choice",
+        lambda *args, **kwargs: prompt_capture.__setitem__("prompt", kwargs.get("prompt")) or "0",
+    )
+
+    selected = device_select.select_device(
+        header="Select Capture Device",
+        prefer_active=False,
+        allow_auto_single=False,
+    )
+
+    assert selected is None
+    assert press_enter_calls["count"] == 0
+    out = capsys.readouterr().out
+    assert "Current device" in out
+    assert "none selected" in out
+    assert "Detected devices" in out
+    assert "none detected via adb" in out
+    assert "Retry scan" in out
+    assert prompt_capture["prompt"] == "› Action [1/0]: "

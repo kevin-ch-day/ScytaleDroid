@@ -35,6 +35,7 @@ class DatasetRunRecentSummary:
     messaging_activity: str | None
     valid: bool | None
     invalid_reason_code: str | None
+    pcap_failure_detail: str | None
     low_signal: bool | None
     run_id: str
     status_label: str
@@ -64,6 +65,8 @@ class DatasetRunState:
     baseline_connected_insufficient_duration_streak: int
     historical_valid_runs: int = 0
     historical_build_count: int = 0
+    active_version_code: str = ""
+    active_base_sha: str = ""
 
 
 def _is_messaging_package_or_category(package_name: str) -> bool:
@@ -224,6 +227,9 @@ def _recent_run_summaries(
             invalid_reason_code=(
                 str(row.get("invalid_reason_code")) if row.get("invalid_reason_code") else None
             ),
+            pcap_failure_detail=(
+                str(row.get("pcap_failure_detail")) if row.get("pcap_failure_detail") else None
+            ),
             low_signal=(True if row.get("low_signal") is True else (False if row.get("low_signal") is False else None)),
             run_id=str(row.get("run_id") or ""),
             status_label="",
@@ -237,6 +243,7 @@ def _recent_run_summaries(
             messaging_activity=row.messaging_activity,
             valid=row.valid,
             invalid_reason_code=row.invalid_reason_code,
+            pcap_failure_detail=row.pcap_failure_detail,
             low_signal=row.low_signal,
             run_id=row.run_id,
             status_label=_status_label(row),
@@ -420,6 +427,8 @@ def load_dataset_run_state(
         baseline_connected_insufficient_duration_streak=baseline_connected_insufficient_duration_streak,
         historical_valid_runs=int(scoped_counts.get("legacy_valid") or scoped_runs.get("legacy_valid") or 0),
         historical_build_count=int(scoped_counts.get("legacy_builds") or scoped_runs.get("legacy_builds") or 0),
+        active_version_code=str(scoped_counts.get("active_version_code") or ""),
+        active_base_sha=str(scoped_counts.get("active_base_sha") or ""),
     )
 
 

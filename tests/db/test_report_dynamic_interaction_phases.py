@@ -207,12 +207,16 @@ def test_generate_report_exports_phase_and_transport_rows(tmp_path: Path, monkey
     assert summary["scripted_runs_invalid_pcap"] == 0
     assert summary["scripted_runs_with_timeline_but_no_pcap"] == 0
     assert summary["transport_rows_skipped_missing_pcap"] == 0
+    assert summary["scripted_runs_invalid_pcap_by_detail"] == {}
 
     with (out_dir / "interaction_phase_summary.csv").open(encoding="utf-8") as handle:
         phase_rows = list(csv.DictReader(handle))
     assert len(phase_rows) == 2
     assert phase_rows[0]["package"] == "bbc.mobile.news.ww"
     assert phase_rows[0]["phase_label"] == "Open Home"
+    assert phase_rows[0]["pcap_available"] == "True"
+    assert phase_rows[0]["invalid_reason_code"] == ""
+    assert phase_rows[0]["pcap_failure_detail"] == ""
     assert phase_rows[1]["step_outcome"] == "limited"
     assert phase_rows[1]["limitation_reason"] == "paywall"
     assert phase_rows[1]["notes_present"] == "True"
@@ -283,10 +287,14 @@ def test_generate_report_keeps_timeline_rows_when_pcap_missing(tmp_path: Path, m
     assert summary["scripted_runs_invalid_pcap"] == 1
     assert summary["scripted_runs_valid_pcap"] == 0
     assert summary["transport_rows_skipped_missing_pcap"] == 2
+    assert summary["scripted_runs_invalid_pcap_by_detail"] == {"PCAP_DEVICE_FILE_EMPTY": 1}
 
     with (out_dir / "interaction_phase_summary.csv").open(encoding="utf-8") as handle:
         phase_rows = list(csv.DictReader(handle))
     assert len(phase_rows) == 2
+    assert phase_rows[0]["pcap_available"] == "False"
+    assert phase_rows[0]["invalid_reason_code"] == "PCAP_MISSING"
+    assert phase_rows[0]["pcap_failure_detail"] == "PCAP_DEVICE_FILE_EMPTY"
 
     with (out_dir / "phase_packet_transport_summary.csv").open(encoding="utf-8") as handle:
         transport_rows = list(csv.DictReader(handle))
@@ -308,6 +316,7 @@ def test_main_prints_pcap_counters(capsys, monkeypatch, tmp_path: Path) -> None:
             "scripted_runs_invalid_pcap": 1,
             "scripted_runs_with_timeline_but_no_pcap": 1,
             "transport_rows_skipped_missing_pcap": 6,
+            "scripted_runs_invalid_pcap_by_detail": {"PCAP_DEVICE_FILE_EMPTY": 1},
             "output_files": {"summary_json": str(summary_path)},
         },
     )

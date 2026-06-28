@@ -268,7 +268,7 @@ def _load_provider_features(packages: set[str]) -> dict[str, dict[str, int]]:
     if not packages:
         return {}
     placeholders = ", ".join(["%s"] * len(packages))
-    rows = core_q.run_sql(
+    acl_rows = core_q.run_sql(
         f"""
         SELECT package_name, authority, metadata
         FROM static_provider_acl
@@ -278,9 +278,28 @@ def _load_provider_features(packages: set[str]) -> dict[str, dict[str, int]]:
         fetch="all",
         dictionary=True,
     ) or []
+    fileprovider_rows = core_q.run_sql(
+        f"""
+        SELECT package_name, authority, grant_uri_permissions
+        FROM static_fileproviders
+        WHERE package_name IN ({placeholders})
+        """,
+        tuple(sorted(packages)),
+        fetch="all",
+        dictionary=True,
+    ) or []
     authority_counts: dict[str, set[str]] = defaultdict(set)
     grant_uri_counts: Counter[str] = Counter()
-    for row in rows:
+    for row in fileprovider_rows:
+        if not isinstance(row, dict):
+            continue
+        package = _norm_text(row.get("package_name")).lower()
+        authority = _norm_text(row.get("authority"))
+        if authority:
+            authority_counts[package].add(authority)
+        if _norm_bool(row.get("grant_uri_permissions")):
+            grant_uri_counts[package] += 1
+    for row in acl_rows:
         if not isinstance(row, dict):
             continue
         package = _norm_text(row.get("package_name")).lower()

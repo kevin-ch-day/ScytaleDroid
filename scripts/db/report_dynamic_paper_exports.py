@@ -90,8 +90,63 @@ def _summarize_missing_artifacts(run_dir: Path, manifest: dict[str, Any], issues
     return pcap_present, sorted({item for item in missing if item})
 
 
+def _issue_codes(verify_row: dict[str, Any]) -> list[str]:
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import extract_verify_issue_codes
+
+    return list(extract_verify_issue_codes(verify_row))
+
+
+def _issue_codes_csv(verify_row: dict[str, Any]) -> str:
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import verify_issue_codes_csv
+
+    return verify_issue_codes_csv(verify_row)
+
+
+def _pcap_failure_detail(verify_row: dict[str, Any], report_status: str, raw_detail: str = "") -> str:
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import (
+        canonical_pcap_failure_code,
+        canonical_pcap_failure_code_from_raw_detail,
+        export_pcap_failure_detail,
+    )
+
+    canonical = canonical_pcap_failure_code_from_raw_detail(raw_detail)
+    if not canonical:
+        canonical = canonical_pcap_failure_code(
+            report_status=report_status,
+            invalid_reason_code=str(verify_row.get("invalid_reason_code") or ""),
+            verify_row=verify_row,
+        )
+    return export_pcap_failure_detail(canonical)
+
+
+def _pcap_failure_detail_raw(run_dir: Path, manifest: dict[str, Any], verify_row: dict[str, Any], report: dict[str, Any]) -> str:
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import (
+        canonical_pcap_failure_code,
+        dataset_pcap_failure_detail,
+        raw_pcap_failure_detail_from_canonical,
+    )
+
+    dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
+    raw_detail = str(dataset.get("pcap_failure_detail") or "").strip()
+    invalid_reason = str(
+        verify_row.get("invalid_reason_code") or dataset.get("invalid_reason_code") or ""
+    ).strip().upper()
+    report_status = str(report.get("report_status") or "missing").strip().lower()
+    pcap_size_bytes = int(dataset.get("pcap_size_bytes") or report.get("pcap_size_bytes") or 0)
+    canonical = canonical_pcap_failure_code(
+        report_status=report_status,
+        invalid_reason_code=invalid_reason,
+        verify_row=verify_row,
+    )
+    if not raw_detail and (invalid_reason.startswith("PCAP_") or report_status in {"skip", "partial"}):
+        raw_detail = str(dataset_pcap_failure_detail(run_dir, pcap_size_int=pcap_size_bytes) or "").strip()
+    if not raw_detail:
+        raw_detail = raw_pcap_failure_detail_from_canonical(canonical)
+    return raw_detail
+
+
 def _evidence_status(*, verify_row: dict[str, Any], report_status: str, missing_artifacts: list[str]) -> str:
-    issue_codes = {str(issue.get("code") or "") for issue in (verify_row.get("issues") or []) if isinstance(issue, dict)}
+    issue_codes = set(_issue_codes(verify_row))
     valid_dataset_run = verify_row.get("valid_dataset_run")
     if "pcap_artifact_missing" in issue_codes or "pcap_file_missing" in issue_codes:
         return "legacy_broken_skipped"
@@ -107,9 +162,9 @@ def _evidence_status(*, verify_row: dict[str, Any], report_status: str, missing_
 
 
 def _recommended_action(status: str, verify_row: dict[str, Any]) -> str:
-    issue_codes = {str(issue.get("code") or "") for issue in (verify_row.get("issues") or []) if isinstance(issue, dict)}
+    issue_codes = set(_issue_codes(verify_row))
     if status == "legacy_broken_skipped":
-        return "recollect this legacy run or exclude it from the paper corpus"
+        return "verify PCAP capture/export for this run, then recollect or exclude it from the paper corpus"
     if status == "skipped":
         return "restore missing evidence inputs and rerun PCAP analysis"
     if status == "invalid":
@@ -228,6 +283,8 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         per_run_rows.append(per_run_row)
 
         if evidence_status != "valid":
+            pcap_failure_detail_raw = _pcap_failure_detail_raw(run_dir, manifest, verify_row, report)
+            pcap_failure_detail = _pcap_failure_detail(verify_row, report_status, pcap_failure_detail_raw)
             invalid_or_skipped_rows.append(
                 {
                     "package": package,
@@ -235,7 +292,11 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
                     "run_id": run_id,
                     "evidence_path": str(run_dir.resolve()),
                     "status": evidence_status,
+                    "pcap_failure_detail": pcap_failure_detail,
+                    "pcap_failure_detail_raw": pcap_failure_detail_raw,
                     "reason": "; ".join(sorted({str(issue.get("code") or "") for issue in (verify_row.get("issues") or []) if isinstance(issue, dict)})),
+                    "invalid_reason_code": str(verify_row.get("invalid_reason_code") or "").strip(),
+                    "verifier_issue_codes": _issue_codes_csv(verify_row),
                     "missing_artifacts": "; ".join(missing_artifacts),
                     "recommended_action": _recommended_action(evidence_status, verify_row),
                 }
@@ -429,6 +490,17 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         "apps_invalid_or_skipped_only": apps_invalid_or_skipped_only,
         "valid_run_count": valid_run_count,
         "invalid_or_skipped_pack_count": len(invalid_or_skipped_rows),
+        "invalid_pcap_pack_count": sum(1 for row in invalid_or_skipped_rows if str(row.get("pcap_failure_detail") or "").startswith("invalid_pcap_")),
+        "invalid_pcap_pack_count_by_raw_detail": dict(
+            sorted(
+                Counter(
+                    str(row.get("pcap_failure_detail_raw") or "")
+                    for row in invalid_or_skipped_rows
+                    if str(row.get("pcap_failure_detail_raw") or "").strip()
+                ).items()
+            )
+        ),
+        "legacy_broken_skipped_pack_count": sum(1 for row in invalid_or_skipped_rows if row.get("status") == "legacy_broken_skipped"),
         "unresolved_service_rows": sum(1 for row in unresolved_domain_rows if row["reason"] == "service_unresolved"),
         "unresolved_signal_rows": sum(1 for row in unresolved_domain_rows if row["reason"] == "signal_unmapped"),
         "matrix_columns": matrix_columns,

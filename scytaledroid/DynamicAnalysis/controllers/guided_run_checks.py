@@ -23,41 +23,9 @@ def _read_json(path: Path) -> dict | None:
 
 
 def _infer_pcap_failure_detail(run_dir: Path, *, pcap_size_int: int) -> str | None:
-    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
-    local_pcaps = [path for path in capture_dir.glob("*.pcap*") if path.is_file()]
-    if local_pcaps:
-        try:
-            if max(path.stat().st_size for path in local_pcaps) <= 0:
-                return "PCAP_LOCAL_FILE_EMPTY"
-        except Exception:
-            return "PCAP_LOCAL_FILE_EMPTY"
-    meta = _read_json(capture_dir / "pcapdroid_capture_meta.json") or {}
-    diagnostics = meta.get("failure_diagnostics") if isinstance(meta.get("failure_diagnostics"), dict) else {}
-    expected_exists = diagnostics.get("expected_device_path_exists")
-    expected_size = diagnostics.get("expected_device_path_size_bytes")
-    fallback_exists = diagnostics.get("latest_fallback_exists")
-    fallback_size = diagnostics.get("latest_fallback_size_bytes")
-    if expected_exists is True:
-        try:
-            if int(expected_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
-    if fallback_exists is True:
-        try:
-            if int(fallback_size or 0) <= 0:
-                return "PCAP_DEVICE_FILE_EMPTY"
-        except Exception:
-            return "PCAP_DEVICE_FILE_EMPTY"
-        if not local_pcaps:
-            return "PCAP_PULL_FAILED"
-    if pcap_size_int > 0:
-        return "PCAP_PARSE_FAILED"
-    if expected_exists is False and not diagnostics.get("latest_fallback_path"):
-        return "PCAP_DEVICE_FILE_MISSING"
-    return "PCAP_LOCAL_FILE_MISSING"
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
+
+    return dataset_pcap_failure_detail(run_dir, pcap_size_int=pcap_size_int)
 
 
 def _derive_pcap_failure_summary(run_dir: Path, *, pcap_size_int: int) -> tuple[str | None, str | None]:
@@ -82,6 +50,39 @@ def _derive_pcap_failure_summary(run_dir: Path, *, pcap_size_int: int) -> tuple[
         else:
             base += " Scripted interaction timeline is still available for protocol validation."
     return detail, base
+
+
+def _pcap_observer_notes(run_dir: Path) -> list[str]:
+    meta = _read_json(run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json") or {}
+    if not isinstance(meta, dict):
+        return []
+    notes: list[str] = []
+    status = meta.get("status_check") if isinstance(meta.get("status_check"), dict) else {}
+    status_error = str(status.get("error") or "").strip()
+    status_source = str(status.get("source") or "").strip()
+    if status_error:
+        notes.append(f"PCAPdroid status: {status_error}")
+    elif status_source == "unavailable":
+        notes.append("PCAPdroid status probe unavailable; capture was judged from artifacts.")
+
+    diagnostics = meta.get("failure_diagnostics") if isinstance(meta.get("failure_diagnostics"), dict) else {}
+    expected_exists = diagnostics.get("expected_device_path_exists")
+    delayed_expected_exists = diagnostics.get("delayed_expected_device_path_exists")
+    delayed_expected_size = diagnostics.get("delayed_expected_device_path_size_bytes")
+    fallback_path = str(diagnostics.get("latest_fallback_path") or "").strip()
+    delayed_fallback_path = str(diagnostics.get("delayed_latest_fallback_path") or "").strip()
+    if expected_exists is False and delayed_expected_exists is True:
+        try:
+            delayed_size = int(delayed_expected_size or 0)
+        except Exception:
+            delayed_size = 0
+        if delayed_size <= 0:
+            notes.append("Observer note: named device file appeared after stop but remained empty.")
+        else:
+            notes.append("Observer note: named device file appeared after stop; local pull should be reviewed.")
+    elif expected_exists is False and not fallback_path and not delayed_fallback_path:
+        notes.append("Observer note: named device file was not visible on device at stop time.")
+    return notes[:3]
 
 
 def read_observed_version_code_details(
@@ -607,5 +608,7 @@ def post_run_integrity_check(
             print(status_messages.status("Recommended action: verify PCAPdroid capture/export and recollect.", level="warn"))
             if pcap_failure_detail:
                 print(status_messages.status(f"PCAP failure detail: {pcap_failure_detail}", level="warn"))
+            for note in _pcap_observer_notes(run_dir):
+                print(status_messages.status(note, level="warn"))
     else:
         print(status_messages.status("Dataset validity: VALID", level="success"))

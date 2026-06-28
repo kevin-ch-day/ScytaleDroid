@@ -168,6 +168,8 @@ def test_generate_report_excludes_broken_pack_from_valid_summaries(tmp_path: Pat
     assert summary["apps_invalid_or_skipped_only"] == 1
     assert summary["valid_run_count"] == 1
     assert summary["invalid_or_skipped_pack_count"] == 1
+    assert summary["invalid_pcap_pack_count"] == 1
+    assert summary["legacy_broken_skipped_pack_count"] == 1
     assert summary["unresolved_service_rows"] == 0
     assert summary["unresolved_signal_rows"] == 0
     assert summary["compatibility_aliases"]["apps_exported"] == "apps_seen"
@@ -182,7 +184,12 @@ def test_generate_report_excludes_broken_pack_from_valid_summaries(tmp_path: Pat
         invalid_rows = list(csv.DictReader(handle))
     assert len(invalid_rows) == 1
     assert invalid_rows[0]["package"] == "com.twitter.android"
+    assert invalid_rows[0]["pcap_failure_detail"] == "invalid_pcap_artifact_missing"
+    assert invalid_rows[0]["pcap_failure_detail_raw"] == "PCAP_ARTIFACT_MISSING"
+    assert invalid_rows[0]["invalid_reason_code"] == "legacy_broken_pack"
+    assert "pcap_artifact_missing" in invalid_rows[0]["verifier_issue_codes"]
     assert "recollect" in invalid_rows[0]["recommended_action"]
+    assert summary["invalid_pcap_pack_count_by_raw_detail"] == {"PCAP_ARTIFACT_MISSING": 1}
 
     with (out_dir / "per_app_summary.csv").open(encoding="utf-8") as handle:
         app_rows = list(csv.DictReader(handle))
@@ -200,6 +207,19 @@ def test_generate_report_excludes_broken_pack_from_valid_summaries(tmp_path: Pat
     assert matrix_rows[0]["package"] == "bbc.mobile.news.ww"
     assert matrix_rows[0]["service__publisher"] == "4"
     assert matrix_rows[0]["signal__advertising"] == "3"
+
+
+def test_pcap_failure_detail_prefers_verifier_issue_codes() -> None:
+    verify_row = {
+        "invalid_reason_code": "PCAP_MISSING",
+        "issues": [
+            {"code": "pcap_artifact_missing"},
+            {"code": "protocol_empty_no_reason"},
+        ],
+    }
+    assert report._pcap_failure_detail(verify_row, "skip") == "invalid_pcap_artifact_missing"
+    assert report._pcap_failure_detail(verify_row, "skip", "PCAP_LOCAL_FILE_MISSING") == "invalid_pcap_file_missing"
+    assert report._issue_codes_csv(verify_row) == "pcap_artifact_missing;protocol_empty_no_reason"
 
 
 def test_generate_report_recomputes_service_context_from_top_indicators(tmp_path: Path, monkeypatch) -> None:

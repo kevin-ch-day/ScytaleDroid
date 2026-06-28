@@ -19,6 +19,7 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.storage.domain_context_index import index_dynamic_domain_context_for_run
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
@@ -59,6 +60,23 @@ def _to_mysql_dt(value: object) -> str | None:
         dt = dt.replace(tzinfo=UTC)
     dt = dt.astimezone(UTC)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _tracker_truth_for_run(dynamic_run_id: str, package_name: str) -> dict[str, Any] | None:
+    tracker = load_dataset_tracker()
+    apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+    if not isinstance(apps, dict):
+        return None
+    for pkg, entry in apps.items():
+        if str(pkg) != package_name or not isinstance(entry, dict):
+            continue
+        runs = entry.get("runs")
+        if not isinstance(runs, list):
+            continue
+        for run in runs:
+            if isinstance(run, dict) and str(run.get("run_id") or "") == dynamic_run_id:
+                return run
+    return None
 
 
 def _ensure_dynamic_network_features_columns() -> None:
@@ -144,6 +162,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
 
     ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
     op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
+    tracker_truth = _tracker_truth_for_run(rid, pkg)
 
     scenario = mf.get("scenario") if isinstance(mf.get("scenario"), dict) else {}
     scenario_id = None
@@ -203,6 +222,22 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         except Exception:
             return None
 
+    countable_source = (
+        tracker_truth.get("counts_toward_quota")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("counts_toward_quota") is not None
+        else ds.get("countable")
+    )
+    valid_dataset_source = (
+        tracker_truth.get("valid_dataset_run")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("valid_dataset_run") is not None
+        else ds.get("valid_dataset_run")
+    )
+    invalid_reason_source = (
+        tracker_truth.get("invalid_reason_code")
+        if isinstance(tracker_truth, dict) and "invalid_reason_code" in tracker_truth
+        else ds.get("invalid_reason_code")
+    )
+
     return {
         "dynamic_run_id": rid,
         "package_name": pkg,
@@ -213,9 +248,9 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "operator_messaging_activity": str((op or {}).get("messaging_activity") or "").strip() or None,
         "scenario_id": scenario_id,
         "tier": str(ds.get("tier") or "") or None,
-        "countable": 1 if ds.get("countable") is True else (0 if ds.get("countable") is False else None),
-        "valid_dataset_run": 1 if ds.get("valid_dataset_run") is True else (0 if ds.get("valid_dataset_run") is False else None),
-        "invalid_reason_code": str(ds.get("invalid_reason_code") or "") or None,
+        "countable": 1 if countable_source is True else (0 if countable_source is False else None),
+        "valid_dataset_run": 1 if valid_dataset_source is True else (0 if valid_dataset_source is False else None),
+        "invalid_reason_code": str(invalid_reason_source or "") or None,
         "duration_seconds": int(ds.get("duration_seconds") or 0) or None,
         "sampling_rate_s": sampling_rate_s_int,
         "started_at_utc": _to_mysql_dt(mf.get("started_at")),
@@ -301,6 +336,7 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     ds = mf.get("dataset") if isinstance(mf.get("dataset"), dict) else {}
     op = mf.get("operator") if isinstance(mf.get("operator"), dict) else {}
     env = mf.get("environment") if isinstance(mf.get("environment"), dict) else {}
+    tracker_truth = _tracker_truth_for_run(rid, pkg)
 
     pf = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
     metrics = pf.get("metrics") if isinstance(pf.get("metrics"), dict) else {}
@@ -455,15 +491,31 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     elif isinstance(qual.get("feature_schema_version"), str) and qual.get("feature_schema_version").strip():
         schema_ver = qual.get("feature_schema_version").strip()
 
+    countable_source = (
+        tracker_truth.get("counts_toward_quota")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("counts_toward_quota") is not None
+        else ds.get("countable")
+    )
+    valid_dataset_source = (
+        tracker_truth.get("valid_dataset_run")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("valid_dataset_run") is not None
+        else ds.get("valid_dataset_run")
+    )
+    invalid_reason_source = (
+        tracker_truth.get("invalid_reason_code")
+        if isinstance(tracker_truth, dict) and "invalid_reason_code" in tracker_truth
+        else ds.get("invalid_reason_code")
+    )
+
     return {
         "dynamic_run_id": rid,
         "package_name": pkg,
         "run_profile": run_profile,
         "interaction_level": interaction_level,
         "tier": str(ds.get("tier") or "") or None,
-        "valid_dataset_run": 1 if ds.get("valid_dataset_run") is True else (0 if ds.get("valid_dataset_run") is False else None),
-        "invalid_reason_code": str(ds.get("invalid_reason_code") or "") or None,
-        "countable": 1 if ds.get("countable") is True else (0 if ds.get("countable") is False else None),
+        "valid_dataset_run": 1 if valid_dataset_source is True else (0 if valid_dataset_source is False else None),
+        "invalid_reason_code": str(invalid_reason_source or "") or None,
+        "countable": 1 if countable_source is True else (0 if countable_source is False else None),
         "low_signal": 1 if ds.get("low_signal") is True else (0 if ds.get("low_signal") is False else None),
         "low_signal_reasons_json": (
             json.dumps(ds.get("low_signal_reasons"), sort_keys=True)

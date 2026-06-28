@@ -8,18 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
 from scytaledroid.DynamicAnalysis import app_queue_state as _app_queue_state
-from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
-    extract_version_code_details_from_dump,
-    read_observed_version_code_details,
+from scytaledroid.DynamicAnalysis.menus.queue_data_sources import (
+    resolve_db_dynamic_lineage_context_map as _resolve_db_dynamic_lineage_context_map_impl,
+    resolve_live_build_drift_map as _resolve_live_build_drift_map_impl,
 )
-from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
-    selected_app_queue_action as _selected_app_queue_action_shared,
+from scytaledroid.DynamicAnalysis.menus.queue_row_builder import (
+    build_package_selection_row as _build_package_selection_row_impl,
+    prep_label_for_lineage_state as _prep_label_for_lineage_state_impl,
+    row_lineage_state as _row_lineage_state_impl,
 )
-from scytaledroid.DynamicAnalysis.plan_selection import load_plan_candidates
-from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     build_scoped_dataset_counts as _build_scoped_dataset_counts_shared,
     resolve_tracker_run_identity as _resolve_tracker_run_identity_shared,
@@ -244,243 +243,24 @@ def build_package_selection_row(
     build_scoped_dataset_counts_fn,
     resolve_tracker_run_identity_fn,
 ) -> PreparedPackageSelectionRow:
-    display = ((app_label or package).strip() or package)
-    if str(package).strip().lower() == "com.twitter.android" and display.strip().lower() == "x":
-        display = "X (Twitter)"
-    if display in collisions:
-        display = f"{display} ({package})"
-    display = truncate_visible_fn(display, 30)
-
-    base_label = "—"
-    inter_label = "—"
-    need_label = "—"
-    next_label = "—"
-    build_label = "—"
-    total_label = "—"
-    legacy_label = "—"
-    last_label = "—"
-    build_row: list[str] | None = None
-    dataset_app_count = 0
-    dataset_complete_count = 0
-    dataset_valid_runs_count = 0
-    historical_valid_runs_count = 0
-    historical_build_count = 0
-    build_state = "—"
-    baseline_countable = 0
-    baseline_extra = 0
-    interactive_countable = 0
-    interactive_extra = 0
-    need_baseline = 0
-    need_interactive = 0
-    prep_label = "—"
-    qa_label = "—"
-    next_choice_label = "—"
-    technical_valid_active = 0
-    live_build_drift_flag = False
-    live_expected_version_code = ""
-    live_expected_version_name = ""
-    live_observed_version_code = ""
-    live_static_run_id = ""
-    lineage_state = ""
-    db_active_sessions = 0
-    db_historical_sessions = 0
-    db_total_sessions = 0
-
-    if package.lower() in dataset_pkgs:
-        dataset_app_count = 1
-        entry = tracker_apps.get(package) if isinstance(tracker_apps, dict) else None
-        runs = entry.get("runs") if isinstance(entry, dict) else []
-        scoped = build_scoped_dataset_counts_fn(package, runs if isinstance(runs, list) else [], cfg=cfg)
-        base_countable = int(scoped["baseline_countable"])
-        base_extra = int(scoped["baseline_extra"])
-        inter_countable = int(scoped["interactive_countable"])
-        inter_extra = int(scoped["interactive_extra"])
-        baseline_countable = base_countable
-        baseline_extra = base_extra
-        interactive_countable = inter_countable
-        interactive_extra = inter_extra
-        legacy_valid = int(scoped["legacy_valid"])
-        legacy_builds = int(scoped["legacy_builds"])
-        active_version = str(scoped.get("active_version_code") or "—")
-        active_sha = str(scoped.get("active_base_sha") or "")
-        active_build = active_version
-        if active_sha:
-            active_build = f"{active_version} / {active_sha[:10]}"
-        elif active_version == "—":
-            active_build = "unknown (tracker-only)"
-        active_runs = base_countable + base_extra + inter_countable + inter_extra
-
-        base_label = bucket_progress_label_fn(
-            base_countable,
-            int(cfg.baseline_required),
-            extra_count=base_extra,
-        )
-        baseline_complete = base_countable >= int(cfg.baseline_required)
-        inter_label = (
-            bucket_progress_label_fn(
-                inter_countable,
-                int(cfg.interactive_required),
-                extra_count=inter_extra,
-            )
-            if baseline_complete
-            else "locked"
-        )
-        need_base = max(0, int(cfg.baseline_required) - base_countable)
-        need_inter = max(0, int(cfg.interactive_required) - inter_countable)
-        need_baseline = need_base
-        need_interactive = need_inter
-        if need_base == 0 and need_inter == 0:
-            dataset_complete_count = 1
-        dataset_valid_runs_count = base_countable + inter_countable
-        if need_base or need_inter:
-            need_parts = []
-            if need_base:
-                need_parts.append(f"{need_base}B")
-            if need_inter:
-                need_parts.append(f"{need_inter}I")
-            need_label = " ".join(need_parts)
-        else:
-            need_label = "0"
-        total_required = int(cfg.baseline_required) + int(cfg.interactive_required)
-        total_label = quota_progress_label_fn(
-            base_countable + inter_countable,
-            total_required,
-            extra_count=base_extra + inter_extra,
-        )
-        legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
-        build_label = static_build_label_fn(active_runs, legacy_valid)
-        build_state = build_label
-        prep_label = build_label
-        historical_valid_runs_count = legacy_valid
-        historical_build_count = legacy_builds
-        technical_valid_active = int(scoped.get("technical_valid_active") or 0)
-        if isinstance(db_lineage_context, dict):
-            db_active_sessions = int(db_lineage_context.get("db_active_sessions") or 0)
-            db_historical_sessions = int(db_lineage_context.get("db_historical_sessions") or 0)
-            db_total_sessions = int(db_lineage_context.get("db_total_sessions") or 0)
-
-        latest_valid: bool | None = None
-        latest_invalid_reason: str | None = None
-        recent = recent_tracker_runs(package, limit=1)
-        if recent:
-            r = recent[0]
-            latest_valid = r.valid
-            if r.valid is False:
-                latest_invalid_reason = str(getattr(r, "invalid_reason_code", "") or "").strip() or None
-            if r.valid is True:
-                last_label = "valid"
-            elif r.valid is False:
-                last_label = "invalid"
-            else:
-                last_label = "unknown"
-            if (
-                last_label == "valid"
-                and isinstance(runs, list)
-                and (scoped.get("active_version_code") or scoped.get("active_base_sha"))
-            ):
-                recent_row = next(
-                    (
-                        item
-                        for item in runs
-                        if isinstance(item, dict) and str(item.get("run_id") or "") == str(r.run_id or "")
-                    ),
-                    None,
-                )
-                if isinstance(recent_row, dict):
-                    recent_ident = resolve_tracker_run_identity_fn(package, recent_row)
-                    active_ident = (
-                        str(scoped.get("active_version_code") or "") or None,
-                        str(scoped.get("active_base_sha") or "") or None,
-                    )
-                    if recent_ident != active_ident:
-                        last_label = "valid (id_mismatch)"
-        if legacy_valid > 0 and last_label != "—" and not last_label.endswith(" (L)"):
-            last_label = f"{last_label} (L)"
-        qa_label = last_label
-
-        queue_action, _queue_reason = _selected_app_queue_action_shared(
-            baseline_valid_runs=base_countable,
-            interactive_valid_runs=inter_countable,
-            baseline_required=int(cfg.baseline_required),
-            interactive_required=int(cfg.interactive_required),
-            scripted_template_ready=bool(resolved_template_for_package(package)),
-            latest_valid=latest_valid,
-            latest_invalid_reason=latest_invalid_reason,
-            db_active_sessions=db_active_sessions,
-            active_valid_runs=technical_valid_active,
-        )
-        next_label = queue_action
-        next_choice_label = queue_action
-        if isinstance(live_build_drift, dict):
-            live_build_drift_flag = True
-            live_expected_version_code = str(live_build_drift.get("expected_version_code") or "").strip()
-            live_expected_version_name = str(live_build_drift.get("expected_version_name") or "").strip()
-            live_observed_version_code = str(live_build_drift.get("observed_version_code") or "").strip()
-            live_static_run_id = str(live_build_drift.get("static_run_id") or "").strip()
-        lineage_state = _row_lineage_state(
-            active_valid_runs=technical_valid_active,
-            legacy_valid_runs=legacy_valid,
-            db_active_sessions=db_active_sessions,
-            db_historical_sessions=db_historical_sessions,
-            live_build_drift=live_build_drift_flag,
-        )
-        prep_label = _prep_label_for_lineage_state(lineage_state, build_label)
-        if live_build_drift_flag:
-            prep_label = "stale"
-            next_choice_label = "refresh static"
-        build_row = [display, active_build, str(active_runs), str(legacy_valid), str(legacy_builds)]
-
-    return PreparedPackageSelectionRow(
-        full_row=[
-            str(idx),
-            display,
-            base_label,
-            inter_label,
-            need_label,
-            next_label,
-            build_label,
-            total_label,
-            legacy_label,
-            last_label,
-        ],
-        op_row=[
-            str(idx),
-            display,
-            base_label,
-            inter_label,
-            total_label,
-            build_label,
-            last_label,
-            next_label,
-        ],
-        build_row=build_row,
-        dataset_app_count=dataset_app_count,
-        dataset_complete_count=dataset_complete_count,
-        dataset_valid_runs_count=dataset_valid_runs_count,
-        historical_valid_runs_count=historical_valid_runs_count,
-        historical_build_count=historical_build_count,
-        build_state=build_state,
-        package_name=package,
-        display_name=display,
-        baseline_countable=baseline_countable,
-        baseline_extra=baseline_extra,
-        interactive_countable=interactive_countable,
-        interactive_extra=interactive_extra,
-        need_baseline=need_baseline,
-        need_interactive=need_interactive,
-        prep_label=prep_label,
-        qa_label=qa_label,
-        next_label=next_choice_label,
-        technical_valid_active=technical_valid_active,
-        live_build_drift=live_build_drift_flag,
-        live_expected_version_code=live_expected_version_code,
-        live_expected_version_name=live_expected_version_name,
-        live_observed_version_code=live_observed_version_code,
-        live_static_run_id=live_static_run_id,
-        lineage_state=lineage_state,
-        db_active_sessions=db_active_sessions,
-        db_historical_sessions=db_historical_sessions,
-        db_total_sessions=db_total_sessions,
+    return _build_package_selection_row_impl(
+        prepared_row_cls=PreparedPackageSelectionRow,
+        idx=idx,
+        package=package,
+        app_label=app_label,
+        collisions=collisions,
+        dataset_pkgs=dataset_pkgs,
+        tracker_apps=tracker_apps,
+        cfg=cfg,
+        recent_tracker_runs=recent_tracker_runs,
+        live_build_drift=live_build_drift,
+        db_lineage_context=db_lineage_context,
+        truncate_visible_fn=truncate_visible_fn,
+        bucket_progress_label_fn=bucket_progress_label_fn,
+        quota_progress_label_fn=quota_progress_label_fn,
+        static_build_label_fn=static_build_label_fn,
+        build_scoped_dataset_counts_fn=build_scoped_dataset_counts_fn,
+        resolve_tracker_run_identity_fn=resolve_tracker_run_identity_fn,
     )
 
 
@@ -523,6 +303,10 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             if warnings_line:
                 print()
                 print(f"Warnings: {warnings_line}")
+            notes_line = _compact_note_line(row_models)
+            if notes_line:
+                print()
+                print(f"Notes   : {notes_line}")
             print()
         print()
         print("Select an app by number or name.")
@@ -538,7 +322,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             return package_name
         choice_lc = choice.lower()
         if choice_lc in {"s", "summary"}:
-            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_details
+            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_details
 
             render_cohort_status_details(
                 dataset_apps_total=prepared.dataset_apps_total,
@@ -564,17 +348,17 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             )
             continue
         if choice_lc in {"y", "history"}:
-            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_build_history
+            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_build_history
 
             render_cohort_build_history(list(prepared.row_models or []), prepared.build_rows)
             continue
         if choice_lc in {"h", "help"}:
-            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_help
+            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_help
 
             render_cohort_status_help()
             continue
         if choice_lc in {"d", "debug", "diagnostics"}:
-            from scytaledroid.DynamicAnalysis.menu_reports import render_cohort_status_debug
+            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_debug
 
             render_cohort_status_debug(prepared.rows, list(prepared.row_models or []))
             continue
@@ -593,6 +377,10 @@ def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
 
 def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
     return _app_queue_state.compact_warning_line(row_models)
+
+
+def _compact_note_line(row_models: list[PreparedPackageSelectionRow]) -> str:
+    return _app_queue_state.compact_note_line(row_models)
 
 
 def _attention_items(row_models: list[PreparedPackageSelectionRow]) -> list[str]:
@@ -822,93 +610,13 @@ def _resolve_live_build_drift_map(
     *,
     device_serial: str | None,
 ) -> dict[str, dict[str, str]]:
-    if not str(device_serial or "").strip():
-        return {}
-    out: dict[str, dict[str, str]] = {}
-    for package_name in packages:
-        pkg = str(package_name or "").strip()
-        if not pkg:
-            continue
-        try:
-            candidates, _note = load_plan_candidates(pkg)
-        except Exception:
-            continue
-        if not candidates:
-            continue
-        newest = sorted(candidates, key=lambda row: row.get("generated_at") or "", reverse=True)[0]
-        identity = newest.get("identity") if isinstance(newest.get("identity"), dict) else {}
-        expected_vc = str(identity.get("version_code") or newest.get("version_code") or "").strip()
-        if not expected_vc:
-            continue
-        try:
-            observed = read_observed_version_code_details(
-                str(device_serial).strip(),
-                pkg,
-                run_shell_fn=lambda serial, command: adb_shell.run_shell(serial, list(command)),
-                extract_details_fn=extract_version_code_details_from_dump,
-            )
-        except Exception:
-            continue
-        observed_vc = str(observed.get("version_code") or "").strip()
-        if not observed_vc or observed_vc == expected_vc:
-            continue
-        out[pkg.lower()] = {
-            "expected_version_code": expected_vc,
-            "expected_version_name": str(newest.get("version_name") or "").strip(),
-            "observed_version_code": observed_vc,
-            "static_run_id": str(newest.get("static_run_id") or "").strip(),
-        }
-    return out
+    return _resolve_live_build_drift_map_impl(packages, device_serial=device_serial)
 
 
 def _resolve_db_dynamic_lineage_context_map(
     packages: list[str],
 ) -> dict[str, dict[str, int]]:
-    normalized = sorted({str(package or "").strip().lower() for package in packages if str(package or "").strip()})
-    if not normalized:
-        return {}
-    try:
-        from scytaledroid.Database.db_core import db_queries as core_q
-        from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
-        from scytaledroid.DynamicAnalysis.tracker_scope import resolve_active_package_identity
-    except Exception:
-        return {}
-
-    target_set = set(normalized)
-    base_rows = [
-        row
-        for row in (lineage.fetch_base_rows(core_q, package_name=None) or [])
-        if str(row.get("package_name") or "").strip().lower() in target_set
-    ]
-    dynamic_by_hash = lineage.fetch_dynamic_coverage(core_q)
-    out: dict[str, dict[str, int]] = {}
-    for row in base_rows:
-        package = str(row.get("package_name") or "").strip().lower()
-        sha = str(row.get("base_apk_sha256") or "").strip().lower()
-        if not package or not sha:
-            continue
-        dynamic_sessions = int((dynamic_by_hash.get(sha) or {}).get("dynamic_sessions") or 0)
-        if dynamic_sessions <= 0:
-            continue
-        version_code = str(row.get("version_code") or "").strip()
-        active_vc, active_sha = resolve_active_package_identity(package)
-        active_vc = str(active_vc or "").strip()
-        active_sha = str(active_sha or "").strip().lower()
-        is_active = sha == active_sha if active_sha else (version_code == active_vc if active_vc else False)
-        bucket = out.setdefault(
-            package,
-            {
-                "db_active_sessions": 0,
-                "db_historical_sessions": 0,
-                "db_total_sessions": 0,
-            },
-        )
-        bucket["db_total_sessions"] += dynamic_sessions
-        if is_active:
-            bucket["db_active_sessions"] += dynamic_sessions
-        else:
-            bucket["db_historical_sessions"] += dynamic_sessions
-    return out
+    return _resolve_db_dynamic_lineage_context_map_impl(packages)
 
 
 def _row_lineage_state(
@@ -919,26 +627,17 @@ def _row_lineage_state(
     db_historical_sessions: int,
     live_build_drift: bool,
 ) -> str:
-    if int(active_valid_runs) > 0:
-        return "current_build_observed"
-    if int(db_active_sessions) > 0:
-        return "current_build_db_only"
-    if int(legacy_valid_runs) > 0:
-        return "historical_local_only"
-    if int(db_historical_sessions) > 0:
-        return "historical_db_only"
-    return "no_evidence_anywhere"
+    return _row_lineage_state_impl(
+        active_valid_runs=active_valid_runs,
+        legacy_valid_runs=legacy_valid_runs,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+        live_build_drift=live_build_drift,
+    )
 
 
 def _prep_label_for_lineage_state(lineage_state: str, default_build_label: str) -> str:
-    mapping = {
-        "current_build_observed": default_build_label or "current",
-        "current_build_db_only": "db-only",
-        "historical_local_only": "legacy",
-        "historical_db_only": "hist-db",
-        "no_evidence_anywhere": "ready",
-    }
-    return mapping.get(lineage_state, default_build_label or "ready")
+    return _prep_label_for_lineage_state_impl(lineage_state, default_build_label)
 
 
 def build_scoped_dataset_counts(

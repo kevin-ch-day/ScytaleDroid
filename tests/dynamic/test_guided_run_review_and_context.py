@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from scytaledroid.DynamicAnalysis.controllers import guided_run
+from scytaledroid.DynamicAnalysis.controllers import selected_app_review
 
 from tests.dynamic._guided_run_state_support import (
     make_dataset_state,
@@ -61,11 +64,28 @@ def test_guided_run_review_path_does_not_require_device(monkeypatch, capsys) -> 
                     interaction_level="scripted",
                     valid=False,
                     invalid_reason_code="PCAP_MISSING",
+                    pcap_failure_detail="PCAP_DEVICE_FILE_MISSING",
                     run_id="cnn-run-1",
                     status_label="INVALID:PCAP_MISSING",
                 ),
             ),
         ),
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "recent_tracker_runs",
+        lambda _package_name, limit=1: [
+            make_recent_summary(
+                ended_at="2026-06-20T10:00:00Z",
+                run_profile="interaction_scripted",
+                interaction_level="scripted",
+                valid=False,
+                invalid_reason_code="PCAP_MISSING",
+                pcap_failure_detail="PCAP_DEVICE_FILE_MISSING",
+                run_id="cnn-run-1",
+                status_label="INVALID:PCAP_MISSING",
+            )
+        ],
     )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
@@ -81,8 +101,42 @@ def test_guided_run_review_path_does_not_require_device(monkeypatch, capsys) -> 
     assert select_package_calls["count"] == 2
     assert "Stored QA Review" in out
     assert "cnn-run-1" in out
+    assert "PCAP detail" in out
+    assert "PCAP_DEVICE_FILE_MISSING" in out
+    assert "This review is display-only; the stored run remains excluded from quota/publication use." in out
+    assert "Recollect a current-build run after verifying PCAP capture/export is working." in out
     assert qa_calls["run_id"] == "cnn-run-1"
     assert device_calls == {"select": 0, "preflight": 0}
+
+
+@pytest.mark.parametrize(
+    ("valid", "invalid_reason", "expected"),
+    [
+        (
+            True,
+            "",
+            "Return to the app screen if you want supplemental baseline, scripted, or manual evidence.",
+        ),
+        (
+            False,
+            "PCAP_TOO_SMALL",
+            "Recollect a longer or higher-signal current-build run before relying on it.",
+        ),
+        (
+            None,
+            "",
+            "Use run history and diagnostics to decide whether recollection is needed.",
+        ),
+    ],
+)
+def test_selected_app_review_next_step_lines_cover_valid_invalid_and_unknown(
+    valid: bool | None,
+    invalid_reason: str,
+    expected: str,
+) -> None:
+    lines = selected_app_review._next_step_lines(valid=valid, invalid_reason=invalid_reason)
+    assert lines[0] == "Next step:"
+    assert expected in lines
 
 
 @pytest.mark.parametrize(
@@ -155,6 +209,11 @@ def test_guided_run_history_and_diagnostics_do_not_require_device(
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert expected_header in out
+    if expected_header == "Diagnostics":
+        assert "Study status" in out
+        assert "Live device status" in out
+        assert "Capture status" in out
+        assert "Publication status" in out
     assert device_calls == {"select": 0, "preflight": 0}
 
 
@@ -227,7 +286,7 @@ def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> N
     assert "Why:" in out
     assert "Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace." in out
     assert "1) Baseline run [default]" in out
-    assert "Reason: 3 baseline runs needed" in out
+    assert "Reason:" not in out
     assert "Collect baseline evidence for the installed build." in out
 
 
@@ -292,4 +351,141 @@ def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) ->
     assert "Unknown build · no current-build evidence · QA unknown · quota 0/5" in out
     assert "No dynamic evidence exists yet for com.guardian." in out
     assert "1) Baseline run [default]" in out
-    assert "Reason: 3 baseline runs needed" in out
+    assert "Reason:" not in out
+
+
+def test_selected_app_latest_recent_summary_does_not_replace_scoped_current_run_with_newer_unscoped_run(
+    monkeypatch,
+) -> None:
+    fallback = make_recent_summary(
+        ended_at="2026-06-26T20:18:37.984723+00:00",
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        valid=True,
+        run_id="current-build-run",
+        status_label="VALID",
+    )
+    newer_unscoped = make_recent_summary(
+        ended_at="2026-06-27T01:00:00.000000+00:00",
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        valid=True,
+        run_id="legacy-run",
+        status_label="VALID",
+    )
+    monkeypatch.setattr(guided_run, "recent_tracker_runs", lambda _pkg, limit=1: [newer_unscoped])
+
+    selected = guided_run._selected_app_latest_recent_summary(
+        package_name="com.twitter.android",
+        state=SimpleNamespace(recent_runs=(fallback,)),
+    )
+
+    assert selected is fallback
+
+
+def test_selected_app_has_identity_mismatch_uses_tracker_scope_helpers(monkeypatch) -> None:
+    latest_recent = make_recent_summary(
+        ended_at="2026-06-26T20:18:37.984723+00:00",
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        valid=True,
+        run_id="twitter-run-1",
+        status_label="VALID",
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.dataset_tracker.load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "com.twitter.android": {
+                    "runs": [
+                        {
+                            "run_id": "twitter-run-1",
+                            "ended_at": "2026-06-26T20:18:37.984723+00:00",
+                            "run_profile": "baseline_idle",
+                            "valid_dataset_run": True,
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "_build_scoped_dataset_counts_shared",
+        lambda *_args, **_kwargs: {
+            "active_version_code": "312011000",
+            "active_base_sha": "aaaabbbb",
+        },
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "_resolve_tracker_run_identity_shared",
+        lambda _package, _run: ("312021000", "ccccdddd"),
+    )
+
+    mismatch = guided_run._selected_app_has_identity_mismatch(
+        package_name="com.twitter.android",
+        latest_recent=latest_recent,
+        cfg=object(),
+    )
+
+    assert mismatch is True
+
+
+def test_selected_app_latest_recent_summary_prefers_scoped_state_over_newer_tracker_row(
+    monkeypatch,
+) -> None:
+    fallback = make_recent_summary(
+        ended_at="2026-06-26T20:18:37.984723+00:00",
+        run_profile="interaction_manual",
+        interaction_level="manual",
+        valid=True,
+        run_id="current-valid-run",
+        status_label="VALID",
+    )
+    newer_invalid = make_recent_summary(
+        ended_at="2026-06-27T01:00:00.000000+00:00",
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        valid=False,
+        invalid_reason_code="PCAP_MISSING",
+        pcap_failure_detail="PCAP_DEVICE_FILE_MISSING",
+        run_id="current-invalid-run",
+        status_label="INVALID:PCAP_MISSING",
+    )
+    monkeypatch.setattr(guided_run, "recent_tracker_runs", lambda _pkg, limit=1: [newer_invalid])
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.dataset_tracker.load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "com.cnn.mobile.android.phone": {
+                    "runs": [
+                        {
+                            "run_id": "current-invalid-run",
+                            "ended_at": "2026-06-27T01:00:00.000000+00:00",
+                            "run_profile": "interaction_scripted",
+                            "valid_dataset_run": False,
+                            "invalid_reason_code": "PCAP_MISSING",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.tracker_scope.resolve_active_package_identity",
+        lambda _pkg: ("312021000", "aaaabbbb"),
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "_resolve_tracker_run_identity_shared",
+        lambda _package, _run: ("312021000", "aaaabbbb"),
+    )
+
+    selected = guided_run._selected_app_latest_recent_summary(
+        package_name="com.cnn.mobile.android.phone",
+        state=SimpleNamespace(recent_runs=(fallback,)),
+    )
+
+    assert selected.run_id == "current-valid-run"
+    assert selected.valid is True

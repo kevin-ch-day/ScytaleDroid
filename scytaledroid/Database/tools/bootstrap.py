@@ -15,6 +15,7 @@ import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
+from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_core.db_queries import run_sql
 from scytaledroid.Database.db_queries import schema_manifest
@@ -53,10 +54,23 @@ def _normalize_sqlite(sql: str) -> str:
 
     # Strip MySQL KEY/CONSTRAINT lines that SQLite won't parse cleanly
     cleaned_lines: list[str] = []
+    skip_index_block = False
     for line in sql.splitlines():
         stripped = line.strip()
         upper = stripped.upper()
-        if upper.startswith("KEY ") or upper.startswith("UNIQUE KEY") or upper.startswith("CONSTRAINT "):
+        if skip_index_block:
+            if ")" in stripped:
+                skip_index_block = False
+            continue
+        if upper.startswith("UNIQUE KEY"):
+            line = re.sub(r"^(\s*)UNIQUE\s+KEY\s+\S+\s*", r"\1UNIQUE ", line, flags=re.IGNORECASE)
+            stripped = line.strip()
+            upper = stripped.upper()
+        elif upper.startswith("KEY "):
+            if "(" in stripped and ")" not in stripped:
+                skip_index_block = True
+            continue
+        elif upper.startswith("CONSTRAINT "):
             continue
         if upper.startswith("FOREIGN KEY"):
             continue
@@ -248,6 +262,11 @@ def bootstrap_database() -> None:
         )
 
     if dialect == "sqlite":
+        if not db_config.is_test_env():
+            raise RuntimeError(
+                "SQLite bootstrap is test-only. Configure SCYTALEDROID_DB_URL for MariaDB/MySQL "
+                "or disable DB-backed workflows."
+            )
         log.warning(
             "SQLite bootstrap uses relaxed constraints; MySQL/MariaDB is canonical.",
             category="database",
