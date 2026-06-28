@@ -38,6 +38,7 @@ class RecentRun:
     messaging_activity: str | None
     valid: bool | None
     invalid_reason_code: str | None
+    pcap_failure_detail: str | None
     low_signal: bool | None
 
 
@@ -99,6 +100,11 @@ def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]
             valid_norm = False
         else:
             valid_norm = None
+        pcap_failure_detail = (
+            str(r.get("pcap_failure_detail")) if r.get("pcap_failure_detail") else None
+        )
+        if valid_norm is False and not pcap_failure_detail:
+            pcap_failure_detail = _derive_local_pcap_failure_detail(str(r.get("run_id") or ""))
         out.append(
             RecentRun(
                 run_id=str(r.get("run_id") or ""),
@@ -114,6 +120,7 @@ def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]
                 invalid_reason_code=(
                     str(r.get("invalid_reason_code")) if r.get("invalid_reason_code") else None
                 ),
+                pcap_failure_detail=pcap_failure_detail,
                 low_signal=(
                     True
                     if r.get("low_signal") is True
@@ -122,6 +129,21 @@ def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]
             )
         )
     return out
+
+
+def _derive_local_pcap_failure_detail(run_id: str) -> str | None:
+    run_id_text = str(run_id or "").strip()
+    if not run_id_text:
+        return None
+    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id_text
+    if not run_dir.exists():
+        return None
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
+
+        return dataset_pcap_failure_detail(run_dir, pcap_size_int=0)
+    except Exception:
+        return None
 
 
 def find_dynamic_run_dirs(package_name: str) -> list[Path]:

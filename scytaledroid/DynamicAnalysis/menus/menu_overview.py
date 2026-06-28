@@ -54,7 +54,9 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
         maintenance=[
             MenuOption("5", "Verify capture environment"),
             MenuOption("6", "Change cohort"),
-            MenuOption("7", "Maintenance tools"),
+            MenuOption("7", "Reindex tracker"),
+            MenuOption("8", "Prune incomplete evidence"),
+            MenuOption("9", "Legacy structural tools"),
         ],
         archive_export=[],
     )

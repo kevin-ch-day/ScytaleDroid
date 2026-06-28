@@ -35,19 +35,19 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
 
     assert rendered_menus == [
         (
-            [
-                "Select device",
-                "Device Inventory & Harvest",
-                "Static Analysis Pipeline",
-                "Dynamic Analysis",
-                "API server",
-                "Reporting & Exports",
-                "APK library",
-                "Database tools",
-                "Governance & Readiness",
-                "Evidence & Workspace",
-                "About ScytaleDroid",
-            ],
+                [
+                    "Select device",
+                    "Device Inventory & Harvest",
+                    "Static Analysis Pipeline",
+                    "Dynamic Analysis",
+                    "API server",
+                    "Reporting & Exports",
+                    "Database tools",
+                    "Governance & Readiness",
+                    "Evidence & Workspace",
+                    "APK library",
+                    "About ScytaleDroid",
+                ],
             {
                 "show_exit": True,
                 "exit_label": "Exit",
@@ -127,6 +127,15 @@ def test_handle_database_starts_menu_on_new_line(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert menu_calls["count"] == 1
     assert out.startswith("\nDATABASE HEADER\n")
+
+
+def test_main_menu_db_status_suppression_consumes_once() -> None:
+    app_main._MAIN_MENU_UI_STATE["suppress_db_status_once"] = False
+
+    app_main._suppress_main_menu_db_status_once()
+
+    assert app_main._consume_main_menu_db_status_suppressed() is True
+    assert app_main._consume_main_menu_db_status_suppressed() is False
 
 
 def test_emit_main_menu_db_disabled_hint_points_to_database_tools(monkeypatch) -> None:

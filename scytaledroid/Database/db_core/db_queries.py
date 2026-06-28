@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from .db_engine import DatabaseEngine
@@ -13,6 +15,8 @@ ParamsType = Sequence[Any] | Mapping[str, Any] | None
 ParamRow = tuple[Any, ...]
 
 _PLACEHOLDER_SCAN_RE = re.compile("%")
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT = _THIS_FILE.parents[3]
 
 
 def _prepare_params(
@@ -109,6 +113,34 @@ def _resolve_engine() -> DatabaseEngine:
     return database_session()  # type: ignore[return-value]
 
 
+def _caller_hint() -> str | None:
+    frame = inspect.currentframe()
+    try:
+        outer = frame.f_back if frame is not None else None
+        while outer is not None:
+            filename = Path(outer.f_code.co_filename).resolve()
+            if filename != _THIS_FILE:
+                try:
+                    rel = filename.relative_to(_REPO_ROOT)
+                    path_text = rel.as_posix()
+                except Exception:
+                    path_text = filename.as_posix()
+                return f"{path_text}:{outer.f_code.co_name}:{outer.f_lineno}"
+            outer = outer.f_back
+    finally:
+        del frame
+    return None
+
+
+def _merge_context(context: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    caller = _caller_hint()
+    if not caller:
+        return context
+    merged = dict(context or {})
+    merged.setdefault("caller", caller)
+    return merged
+
+
 def run_sql(
     query: str,
     params: ParamsType = None,
@@ -147,6 +179,7 @@ def run_sql(
 
     # Obtain engine (existing or session-scoped)
     eng_or_ctx = _resolve_engine()
+    effective_context = _merge_context(context)
     # If we received a context manager from database_session(), enter/exit it here.
     if hasattr(eng_or_ctx, "__enter__") and hasattr(eng_or_ctx, "__exit__"):
         with eng_or_ctx as db:  # type: ignore[assignment]
@@ -157,7 +190,7 @@ def run_sql(
                 base,
                 return_lastrowid,
                 query_name=query_name,
-                context=context,
+                context=effective_context,
             )
     else:
         db = eng_or_ctx  # type: ignore[assignment]
@@ -168,7 +201,7 @@ def run_sql(
             base,
             return_lastrowid,
             query_name=query_name,
-            context=context,
+            context=effective_context,
         )
 
 
@@ -234,12 +267,13 @@ def run_sql_many(
         raise ValueError("SQL query mixes named and positional placeholders; use a single style.")
 
     eng_or_ctx = _resolve_engine()
+    effective_context = _merge_context(context)
     if hasattr(eng_or_ctx, "__enter__") and hasattr(eng_or_ctx, "__exit__"):
         with eng_or_ctx as db:  # type: ignore[assignment]
-            db.execute_many(query, rows, query_name=query_name, context=context)
+            db.execute_many(query, rows, query_name=query_name, context=effective_context)
     else:
         db = eng_or_ctx  # type: ignore[assignment]
-        db.execute_many(query, rows, query_name=query_name, context=context)
+        db.execute_many(query, rows, query_name=query_name, context=effective_context)
 
 
 def run_sql_write(
@@ -273,6 +307,7 @@ def run_sql_rowcount(
     _validate_placeholder_style(query, normalised_params)
     exec_params = _prepare_params(normalised_params)
     eng_or_ctx = _resolve_engine()
+    effective_context = _merge_context(context)
     if hasattr(eng_or_ctx, "__enter__") and hasattr(eng_or_ctx, "__exit__"):
         with eng_or_ctx as db:  # type: ignore[assignment]
             return int(
@@ -280,7 +315,7 @@ def run_sql_rowcount(
                     query,
                     exec_params,
                     query_name=query_name or "run_sql.rowcount",
-                    context=context,
+                    context=effective_context,
                 )
             )
     db = eng_or_ctx  # type: ignore[assignment]
@@ -289,7 +324,7 @@ def run_sql_rowcount(
             query,
             exec_params,
             query_name=query_name or "run_sql.rowcount",
-            context=context,
+            context=effective_context,
         )
     )
 

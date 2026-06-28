@@ -119,14 +119,15 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
 
     assert result is None
     out = capsys.readouterr().out
-    assert "Publication : 1/3 quota-satisfied | 1 review" in out
+    assert "Corpus      : 1/3 quota-satisfied" in out
     assert "Quota       : 8/5 valid | 0 remaining | 2 supplemental" in out
     assert "Current     : 1/3 complete | 1 in progress | 1 review" in out
     assert "History     : 1 local-only" in out
     assert "Archive     : blocked" in out
     assert "Blocked by  : 1 review | 1 baseline gap | 1 manual" in out
-    assert "Next        : CNN — scripted interaction" in out
+    assert "Next        : CNN — interactive" in out
     assert "Warnings:" not in out
+    assert "Notes   :" not in out
     assert "Attention needed" not in out
     assert "Ready for manual interaction" not in out
     assert "Needs baseline capture" not in out
@@ -140,10 +141,10 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert "H help" in out
     assert "D diagnostics" in out
     assert "B back" in out
-    assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "5/5 +1", "unknown", "none", "✓", "news", "—"]
-    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/5 need 2", "unknown", "none", "✓", "news", "script"]
-    assert captured["rows"][2][1:] == ["ESPN", "review", "review", "0/5 need 5", "unknown", "none", "inv", "none", "base"]
+    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "4/3", "2/2", "unknown", "✓", "—"]
+    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/3", "0/2", "unknown", "✓", "interactive"]
+    assert captured["rows"][2][1:] == ["ESPN", "review", "review", "0/3", "0/2", "unknown", "inv", "baseline"]
 
 
 def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeypatch) -> None:
@@ -203,9 +204,9 @@ def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeyp
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["1", "Facebook Messenger", "baseline", "local+curr", "0/5 need 5", "legacy", "db-only", "—", "gen", "base"]
-    assert captured["rows"][1] == ["2", "The Guardian", "baseline", "base 0/3", "0/5 need 5", "unknown", "empty", "—", "news", "base"]
+    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+    assert captured["rows"][0] == ["1", "Facebook Messenger", "baseline", "local+curr", "0/3", "0/2", "legacy", "—", "baseline"]
+    assert captured["rows"][1] == ["2", "The Guardian", "baseline", "base 0/3", "0/3", "0/2", "unknown", "—", "baseline"]
 
 
 def test_display_action_label_uses_review_for_invalid_complete_row() -> None:
@@ -439,7 +440,7 @@ def test_render_package_table_uses_manual_column_and_extra_counts(monkeypatch, c
         "3/5 n2",
         "ready",
         "valid",
-        "manual",
+        "interactive",
     ]]
 
 
@@ -607,10 +608,10 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "5/5 +1", "unknown", "none", "✓", "news", "—"]
-    assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "3/5 need 2", "unknown", "none", "+L", "acct", "manual"]
-    assert captured["rows"][2] == ["3", "ESPN", "review", "review", "0/5 need 5", "unknown", "none", "inv", "none", "base"]
+    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "4/3", "2/2", "unknown", "✓", "—"]
+    assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "4/3", "0/2", "unknown", "+L", "interactive"]
+    assert captured["rows"][2] == ["3", "ESPN", "review", "review", "0/3", "0/2", "unknown", "inv", "baseline"]
 
 
 def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> None:
@@ -652,8 +653,55 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "Build", "Evidence", "QA", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "3/5 need 2", "drift", "local-only", "+L", "acct", "refresh"]
+    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "4/3", "0/2", "drift", "+L", "refresh"]
+
+
+def test_compact_queue_table_shows_x_baseline_against_baseline_target(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["15"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.twitter.android",
+                display_name="X (Twitter)",
+                baseline_countable=3,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=2,
+                prep_label="stale",
+                qa_label="valid (L)",
+                next_label="refresh static",
+                lineage_state="current_build_observed",
+                live_build_drift=True,
+                live_expected_version_code="312021000",
+                live_observed_version_code="312031000",
+                historical_valid_runs_count=17,
+                technical_valid_active=3,
+                db_active_sessions=3,
+                db_historical_sessions=17,
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+    assert captured["rows"][0] == ["15", "X (Twitter)", "refresh", "refresh", "3/3", "0/2", "drift", "+L", "refresh"]
 
 
 def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch) -> None:
@@ -693,7 +741,7 @@ def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch)
         interactive_required=2,
     )
 
-    assert captured["rows"][0] == ["5", "Current App", "restore", "local pack", "0/5 need 5", "current", "db-only", "—", "none", "restore"]
+    assert captured["rows"][0] == ["5", "Current App", "restore", "local pack", "0/3", "0/2", "current", "—", "restore"]
 
 
 def test_compact_queue_table_uses_narrow_layout_when_terminal_is_tight(monkeypatch) -> None:
@@ -753,9 +801,9 @@ def test_compact_queue_table_uses_narrow_layout_when_terminal_is_tight(monkeypat
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "Status", "Need", "Quota", "State", "Tmpl", "Action"]
-    assert captured["rows"][0] == ["2", "CNN", "review", "review", "3/5 n2", "cur/ldb/inv", "news", "rev"]
-    assert captured["rows"][1] == ["3", "Facebook", "manual", "m 0/2", "3/5 n2", "cur/ldb/+L", "acct", "man"]
+    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+    assert captured["rows"][0] == ["2", "CNN", "review", "review", "3/3", "0/2", "current", "inv", "rev"]
+    assert captured["rows"][1] == ["3", "Facebook", "manual", "m 0/2", "4/3", "0/2", "current", "+L", "interactive"]
 
 
 def test_compact_warning_line_mentions_static_refresh_need() -> None:
@@ -825,7 +873,7 @@ def test_compact_warning_line_uses_count_summaries_for_large_groups() -> None:
             _row("Telegram", lineage_state="historical_local_only"),
         ]
     )
-    assert warning == "Facebook, X (Twitter) identity mismatch | 3 history-only apps. Press D."
+    assert warning == ""
 
 
 def test_compact_warning_line_mentions_historical_db_only() -> None:
@@ -846,7 +894,66 @@ def test_compact_warning_line_mentions_historical_db_only() -> None:
             )
         ]
     )
-    assert warning == "Facebook Messenger history-only app. Press D."
+    assert warning == ""
+
+
+def test_compact_note_line_mentions_historical_db_only() -> None:
+    note = menu_selection._compact_note_line(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=[],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="Facebook Messenger",
+                lineage_state="historical_db_only",
+                prep_label="hist-db",
+                qa_label="—",
+                next_label="baseline",
+            )
+        ]
+    )
+    assert note == "Facebook Messenger history-only app. Press D."
+
+
+def test_compact_warning_line_keeps_current_scope_identity_mismatch() -> None:
+    warning = menu_selection._compact_warning_line(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=[],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="CNN",
+                lineage_state="current_build_observed",
+                qa_label="valid (id_mismatch)",
+            )
+        ]
+    )
+    assert warning == "CNN identity mismatch. Press D."
+
+
+def test_compact_note_line_keeps_legacy_identity_mismatch() -> None:
+    note = menu_selection._compact_note_line(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=[],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="TikTok",
+                lineage_state="historical_local_only",
+                qa_label="valid (id_mismatch) (L)",
+            )
+        ]
+    )
+    assert note == "TikTok legacy identity note | TikTok history-only app. Press D."
 
 
 def test_run_package_selection_menu_shows_current_build_refresh_summary(monkeypatch, capsys) -> None:

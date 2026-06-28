@@ -42,6 +42,7 @@ from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_ove
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     MIN_WINDOWS_PER_RUN,
     DatasetTrackerConfig,
+    _netstats_summary,
     derive_three_verdicts_for_row,
     evaluate_dataset_validity,
     load_dataset_tracker,
@@ -592,7 +593,13 @@ class DynamicRunOrchestrator:
         # Deterministic dataset validity classification (freeze/profile) must be written to the manifest.
         if tier and str(tier).lower() == "dataset":
             try:
-                entry = {"pcap_size_bytes": next((a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"), 0)}
+                entry = {
+                    "pcap_size_bytes": next(
+                        (a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"),
+                        0,
+                    )
+                }
+                entry.update(_netstats_summary(run_dir))
                 validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
                 # First-class dataset validity (freeze/profile). Written only to manifest.dataset.
                 if isinstance(validity, dict):

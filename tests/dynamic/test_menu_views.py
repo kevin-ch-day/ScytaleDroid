@@ -21,7 +21,11 @@ def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypat
     assert sections.maintenance[1].key == "6"
     assert sections.maintenance[1].label == "Change cohort"
     assert sections.maintenance[2].key == "7"
-    assert sections.maintenance[2].label == "Maintenance tools"
+    assert sections.maintenance[2].label == "Reindex tracker"
+    assert sections.maintenance[3].key == "8"
+    assert sections.maintenance[3].label == "Prune incomplete evidence"
+    assert sections.maintenance[4].key == "9"
+    assert sections.maintenance[4].label == "Legacy structural tools"
 
 
 def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus(monkeypatch, capsys) -> None:

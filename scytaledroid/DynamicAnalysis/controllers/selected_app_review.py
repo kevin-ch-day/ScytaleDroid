@@ -4,6 +4,41 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from scytaledroid.DynamicAnalysis.services.dynamic_target_state import derive_dynamic_target_state
+
+
+def _next_step_lines(*, valid: bool | None, invalid_reason: str) -> list[str]:
+    reason = str(invalid_reason or "").strip().upper()
+    if valid is True:
+        return [
+            "Next step:",
+            "This review is display-only; no acceptance action is required here.",
+            "Return to the app screen if you want supplemental baseline, scripted, or manual evidence.",
+        ]
+    if valid is False:
+        if reason == "PCAP_MISSING":
+            return [
+                "Next step:",
+                "This review is display-only; the stored run remains excluded from quota/publication use.",
+                "Recollect a current-build run after verifying PCAP capture/export is working.",
+            ]
+        if reason == "PCAP_TOO_SMALL":
+            return [
+                "Next step:",
+                "This review is display-only; the stored run remains excluded from quota/publication use.",
+                "Recollect a longer or higher-signal current-build run before relying on it.",
+            ]
+        return [
+            "Next step:",
+            "This review is display-only; the stored run remains excluded from quota/publication use.",
+            "Collect a replacement current-build run before relying on this app for publication/archive readiness.",
+        ]
+    return [
+        "Next step:",
+        "This review is display-only; no stored QA verdict is available to accept or reject here.",
+        "Use run history and diagnostics to decide whether recollection is needed.",
+    ]
+
 
 def render_selected_app_review(
     *,
@@ -32,6 +67,7 @@ def render_selected_app_review(
     else:
         qa_status = "QA unknown"
     invalid_reason = str(getattr(latest_recent, "invalid_reason_code", "") or "—").strip()
+    pcap_failure_detail = str(getattr(latest_recent, "pcap_failure_detail", "") or "").strip()
     rows = [
         ["Run ID", run_id or "—"],
         ["QA status", qa_status],
@@ -39,6 +75,8 @@ def render_selected_app_review(
         ["Ended", str(getattr(latest_recent, "ended_at", None) or "—")],
         ["Invalid reason", invalid_reason or "—"],
     ]
+    if getattr(latest_recent, "valid", None) is False and pcap_failure_detail:
+        rows.append(["PCAP detail", pcap_failure_detail])
     menu_utils.print_table(["Field", "Value"], rows)
     if getattr(latest_recent, "valid", None) is True:
         print(status_messages.status("Latest current-build run is QA valid.", level="success"))
@@ -56,6 +94,9 @@ def render_selected_app_review(
             print_tier1_qa_result(run_id)
         except Exception as exc:
             print(status_messages.status(f"QA detail rendering failed: {exc}", level="warn"))
+    print()
+    for line in _next_step_lines(valid=getattr(latest_recent, "valid", None), invalid_reason=invalid_reason):
+        print(line)
 
 
 def render_selected_app_recent_runs(
@@ -120,13 +161,42 @@ def render_selected_app_diagnostics(
     queue_action: str,
     db_active_sessions: int,
     db_historical_sessions: int,
+    latest_recent: Any = None,
+    has_identity_mismatch: bool = False,
+    live_build_drift: bool | None = None,
     menu_utils: Any,
 ) -> None:
     print()
     menu_utils.print_header("Diagnostics", display_label)
+    target_state = derive_dynamic_target_state(
+        package_name=package_name,
+        state=state,
+        latest_recent=latest_recent,
+        db_active_sessions=db_active_sessions,
+        db_historical_sessions=db_historical_sessions,
+        has_identity_mismatch=has_identity_mismatch,
+        live_build_drift=live_build_drift,
+        study_identity_available=bool(
+            str(getattr(state, "active_version_code", "") or "").strip()
+            or str(getattr(state, "active_base_sha", "") or "").strip()
+        ),
+    )
+    study_build = "—"
+    if target_state.study_identity.version_code:
+        study_build = str(target_state.study_identity.version_code)
     rows = [
         ["Package", package_name],
         ["Recommended action", str(queue_action or "—")],
+        ["Study status", target_state.study_status],
+        ["Live device status", target_state.live_device_status],
+        ["Capture status", target_state.capture_status],
+        ["Publication status", target_state.publication_status],
+        ["Study build", study_build],
+        [
+            "Historical evidence",
+            f"{int(target_state.historical.valid_runs)} valid run(s) across {int(target_state.historical.build_count)} build(s)",
+        ],
+        ["Identity mismatch", "yes" if target_state.has_identity_mismatch else "no"],
         ["Tracker-scoped latest-run state", str(getattr(state, "tracker_status", "unknown") or "unknown")],
         ["Evidence lineage state", str(getattr(state, "evidence_status", "unknown") or "unknown")],
         ["Workflow state", str(getattr(state, "state_status", "unknown") or "unknown")],
@@ -136,6 +206,10 @@ def render_selected_app_diagnostics(
         ["DB current-build evidence", str(int(db_active_sessions))],
         ["DB historical evidence", str(int(db_historical_sessions))],
     ]
+    if target_state.latest_invalid_reason:
+        rows.append(["Latest invalid reason", target_state.latest_invalid_reason])
+    if target_state.latest_pcap_failure_detail:
+        rows.append(["Latest PCAP detail", target_state.latest_pcap_failure_detail])
     menu_utils.print_table(["Field", "Value"], rows)
     top = tuple(getattr(state, "exclusion_reason_top", ()) or ())
     if top:
@@ -148,6 +222,7 @@ def render_selected_app_diagnostics(
 
 
 __all__ = [
+    "_next_step_lines",
     "render_selected_app_diagnostics",
     "render_selected_app_recent_runs",
     "render_selected_app_review",

@@ -44,4 +44,6 @@ def test_run_sql_rowcount_delegates_to_engine(monkeypatch) -> None:
     assert fake.last_sql == "UPDATE table_x SET c=%s WHERE id=%s"
     assert fake.last_params == (1, 2)
     assert fake.last_query_name == "rowcount.test"
-    assert fake.last_context == {"op": "update"}
+    assert fake.last_context is not None
+    assert fake.last_context["op"] == "update"
+    assert "caller" in fake.last_context
