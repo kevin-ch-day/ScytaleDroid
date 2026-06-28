@@ -66,6 +66,7 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
             "matched_line": "versionCode=472224766 minSdk=30 targetSdk=36",
         },
     )
+    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "472143276")
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda: None)
     choices = iter(["1", "0"])
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
@@ -83,6 +84,8 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     assert "tracked-build evidence (local+db)" in out
     assert "tracked quota 3/5 n2" in out
     assert "Installed build 472224766 · tracked static-plan build 472143276" in out
+    assert "Newest harvested APK in workspace: 472143276" in out
+    assert "No harvested APK for installed build 472224766 is present in this workspace yet." in out
     assert "R) Refresh checklist [default]" in out
     assert "Reason: installed build does not match the newest static plan." in out
     assert "Blocked: installed build 472224766 does not match static-plan build 472143276." in out
@@ -151,6 +154,7 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
         return original(**kwargs)
 
     monkeypatch.setattr(guided_run, "_selected_app_state_snapshot", _capturing_snapshot)
+    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "312011000")
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     app = SimpleNamespace(
@@ -180,6 +184,8 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
     assert captured["queue_action"] == "refresh"
     assert "Installed build drift detected · historical evidence (local-only) · QA unknown · tracked quota 0/5 n5" in out
     assert "Installed build 312021000 · tracked static-plan build 312011000" in out
+    assert "Newest harvested APK in workspace: 312011000" in out
+    assert "No harvested APK for installed build 312021000 is present in this workspace yet." in out
     assert "R) Refresh checklist [default]" in out
 
 
@@ -187,6 +193,7 @@ def test_drift_workbench_refresh_checklist_includes_menu_path(monkeypatch, capsy
     choices = iter(["R", "0"])
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *_a, **_k: next(choices))
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda: None)
+    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "22964")
 
     app = SimpleNamespace(
         package_name="org.theguardian.app",
@@ -216,6 +223,7 @@ def test_drift_workbench_refresh_checklist_includes_menu_path(monkeypatch, capsy
     assert "Installed build" in out
     assert "Static plan" in out
     assert "Static run" in out
+    assert "Newest harvested APK in workspace: 22964" in out
     assert "tracked static-plan build, not the newly installed build" in out
     assert "Device Inventory & Harvest" in out
     assert "Static Analysis Pipeline" in out
@@ -229,6 +237,7 @@ def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(mo
     choices = iter(["R", "0"])
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *_a, **_k: next(choices))
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda: None)
+    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "312011000")
 
     app = SimpleNamespace(
         package_name="com.twitter.android",
@@ -256,3 +265,20 @@ def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(mo
     out = capsys.readouterr().out
     assert "Caution:" in out
     assert "Identity mismatch context exists." in out
+
+
+def test_latest_harvested_version_code_detects_highest_workspace_build(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(guided_run._guided_run_capture.app_config, "DATA_DIR", str(tmp_path))
+    package = "com.twitter.android"
+    paths = [
+        tmp_path / "device_apks" / "SER1" / "runs" / "run1" / package / "X_v312011000_12.1.1-release.0" / "harvest_package_manifest.json",
+        tmp_path / "device_apks" / "SER1" / "runs" / "run2" / package / "X_v312021000_12.2.1-release.0" / "harvest_package_manifest.json",
+        tmp_path / "device_apks" / "SER1" / "runs" / "run3" / package / "X_v312031000_12.3.1-release.0" / "harvest_package_manifest.json",
+    ]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+
+    observed = guided_run._guided_run_capture._latest_harvested_version_code(package)
+
+    assert observed == "312031000"

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any, Callable
 
+from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_evidence_text,
     selected_app_qa_text,
@@ -25,6 +28,45 @@ def _drift_build_summary(plan_drift: dict[str, Any]) -> str:
     observed_vc = str(plan_drift.get("observed_version_code") or "").strip() or "unknown"
     expected_vc = str(plan_drift.get("expected_version_code") or "").strip() or "unknown"
     return f"Installed build {observed_vc} · tracked static-plan build {expected_vc}"
+
+
+def _latest_harvested_version_code(package_name: str) -> str | None:
+    package = str(package_name or "").strip()
+    if not package:
+        return None
+    root = Path(app_config.DATA_DIR) / "device_apks"
+    if not root.exists():
+        return None
+    best_num: int | None = None
+    best_text: str | None = None
+    for manifest_path in root.glob(f"*/runs/*/{package}/**/harvest_package_manifest.json"):
+        match = re.search(r"_v(\d+)(?:_|$)", manifest_path.parent.name)
+        if not match:
+            continue
+        version_text = str(match.group(1) or "").strip()
+        if not version_text:
+            continue
+        try:
+            version_num = int(version_text)
+        except ValueError:
+            continue
+        if best_num is None or version_num > best_num:
+            best_num = version_num
+            best_text = version_text
+    return best_text
+
+
+def _drift_harvest_context(package_name: str, plan_drift: dict[str, Any]) -> list[str]:
+    observed_vc = str(plan_drift.get("observed_version_code") or "").strip() or "unknown"
+    harvested_vc = _latest_harvested_version_code(package_name)
+    if not harvested_vc:
+        return ["No harvested APK for this app is present in the workspace yet."]
+    if harvested_vc == observed_vc:
+        return [f"Workspace harvest already includes installed build {observed_vc}."]
+    return [
+        f"Newest harvested APK in workspace: {harvested_vc}",
+        f"No harvested APK for installed build {observed_vc} is present in this workspace yet.",
+    ]
 
 
 def plan_drift_rows(plan_drift: dict[str, Any], *, detailed_installed_build: bool) -> list[list[str]]:
@@ -120,6 +162,8 @@ def render_selected_app_drift_workbench(
         qa_text = selected_app_qa_text(snapshot.qa)
         print(f"Installed build drift detected · {evidence_text} · {qa_text} · tracked quota {snapshot.quota}")
         print(_drift_build_summary(plan_drift))
+        for line in _drift_harvest_context(app.package_name, plan_drift):
+            print(line)
         print()
         menu_utils.print_section("Recommended")
         print("R) Refresh checklist [default]")
@@ -182,6 +226,8 @@ def _render_refresh_checklist(
     print("Current state")
     rows = plan_drift_rows(plan_drift, detailed_installed_build=False)
     menu_utils.print_table(["Field", "Value"], rows)
+    for line in _drift_harvest_context(app.package_name, plan_drift):
+        print(line)
     print()
     print("To clear refresh:")
     print("  1. Back out to Main Menu.")

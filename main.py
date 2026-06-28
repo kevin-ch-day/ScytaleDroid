@@ -123,27 +123,10 @@ def print_banner(*, show_clocks: bool = False) -> None:
     logging_engine.emit_environment_snapshot()
 
 
-def _build_main_menu_sections(
-    menu_actions: list[tuple[str, str, Callable[[], None]]],
-) -> list[tuple[str, list[menu_utils.MenuOption]]]:
-    by_key = {key: menu_utils.MenuOption(key, label) for key, label, _ in menu_actions}
-    return [
-        ("Setup", [by_key["1"]]),
-        ("Analysis", [by_key["2"], by_key["3"], by_key["4"]]),
-        ("Support", [by_key["5"], by_key["6"]]),
-        ("Diagnostics", [by_key["7"], by_key["8"], by_key["9"]]),
-        ("Library", [by_key["10"]]),
-        ("About", [by_key["11"]]),
-    ]
-
-
 def _build_main_menu_options(
     menu_actions: list[tuple[str, str, Callable[[], None]]],
 ) -> list[menu_utils.MenuOption]:
-    options: list[menu_utils.MenuOption] = []
-    for _title, items in _build_main_menu_sections(menu_actions):
-        options.extend(items)
-    return options
+    return [menu_utils.MenuOption(key, label) for key, label, _ in menu_actions]
 
 
 def _describe_main_menu_database(ok: bool, message: str, detail: str) -> str:
