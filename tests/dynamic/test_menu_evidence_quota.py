@@ -18,6 +18,8 @@ def _write_manifest(
     *,
     run_profile: str,
     ended_at: str,
+    countable: bool | None = None,
+    low_signal: bool = False,
 ) -> None:
     run_dir = root / run_id
     (run_dir / "inputs").mkdir(parents=True, exist_ok=True)
@@ -30,7 +32,8 @@ def _write_manifest(
             "paper_eligible": True,
             "run_profile": None,
             "window_count": 24,
-            "low_signal": False,
+            "low_signal": low_signal,
+            "countable": countable,
         },
         "ended_at": ended_at,
     }
@@ -76,3 +79,38 @@ def test_summarize_evidence_quota_counts_manual_after_baselines_by_time(monkeypa
     assert out["quota_runs_counted"] == 5
     assert out["apps_satisfied"] == 1
     assert out["extra_eligible_runs"] == 0
+
+
+def test_summarize_evidence_quota_respects_explicit_non_countable_low_signal_run(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "output" / "evidence" / "dynamic"
+    package = "com.cnn.mobile.android.phone"
+
+    _write_manifest(root, "base-1", package, run_profile="baseline_idle", ended_at="2026-06-28T14:58:38Z", countable=True)
+    _write_manifest(root, "base-2", package, run_profile="baseline_idle", ended_at="2026-06-28T15:03:55Z", countable=True)
+    _write_manifest(
+        root,
+        "base-3-low",
+        package,
+        run_profile="baseline_idle",
+        ended_at="2026-06-28T15:10:02Z",
+        countable=False,
+        low_signal=True,
+    )
+
+    monkeypatch.setattr(menu.app_config, "OUTPUT_DIR", str(tmp_path / "output"))
+    monkeypatch.setattr(
+        menu,
+        "derive_freeze_eligibility",
+        lambda **_kwargs: type(
+            "Eligibility",
+            (),
+            {"paper_eligible": True, "reason_code": None, "all_reason_codes": ()},
+        )(),
+    )
+
+    out = menu._summarize_evidence_quota({package}, _Cfg())
+
+    assert out["quota_runs_counted"] == 2
+    assert out["apps_satisfied"] == 0
+    assert out["extra_eligible_runs"] == 1
+    assert out["low_signal_exploratory_runs"] == 1

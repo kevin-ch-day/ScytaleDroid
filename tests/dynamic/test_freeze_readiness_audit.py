@@ -134,4 +134,4 @@ def test_run_freeze_readiness_audit_counts_manual_after_baselines_by_time(monkey
     )
 
     assert summary.quota_runs_counted == 5
-    assert summary.apps_satisfied == 1
+    assert summary.apps_satisfied == 0

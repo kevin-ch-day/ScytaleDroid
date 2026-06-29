@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
@@ -25,19 +26,7 @@ class RunEventLogger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def log(self, event_type: str, details: dict[str, Any] | None = None) -> None:
-        payload = RunEvent(
-            timestamp=self._now(),
-            event_type=event_type,
-            details=details or {},
-        )
-        # Best-effort logging: evidence-pack deletion mid-run (e.g. an operator
-        # pruning "incomplete" dirs in another terminal) must not hard-crash a run.
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload.__dict__, sort_keys=True) + "\n")
-        except OSError:
-            return
+        append_run_event(self.run_ctx.run_dir, event_type, details)
 
     def finalize(self) -> ArtifactRecord | None:
         if not self.path.exists():
@@ -61,4 +50,25 @@ class RunEventLogger:
         return datetime.now(UTC).isoformat()
 
 
-__all__ = ["RunEvent", "RunEventLogger"]
+def append_run_event(
+    run_dir: Path,
+    event_type: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    payload = RunEvent(
+        timestamp=RunEventLogger._now(),
+        event_type=event_type,
+        details=details or {},
+    )
+    path = run_dir / "notes" / "run_events.jsonl"
+    # Best-effort logging: evidence-pack deletion mid-run (e.g. an operator
+    # pruning "incomplete" dirs in another terminal) must not hard-crash a run.
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload.__dict__, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+__all__ = ["RunEvent", "RunEventLogger", "append_run_event"]

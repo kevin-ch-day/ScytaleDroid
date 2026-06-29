@@ -609,7 +609,7 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
         if isinstance(ds, dict) and ds.get("low_signal") is not None:
             low_signal = bool(ds.get("low_signal"))
     run_profile = str(run.get("run_profile") or "").strip().lower()
-    if run.get("valid_dataset_run") is True and run_profile.startswith("baseline") and low_signal:
+    if run.get("valid_dataset_run") is True and run_profile == "baseline_idle" and low_signal:
         source = "low_signal_policy"
         reason = "LOW_SIGNAL_IDLE"
     elif run.get("valid_dataset_run") is True and not countable and bool(run.get("extra_run")):
@@ -759,11 +759,16 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
         return f"YES ({run_profile or 'dataset'})"
     # Low-signal is a tag, not a validity failure. Only low-signal *idle* baselines
     # are treated as non-quota (retained as exploratory).
-    if validity.get("low_signal") is True and str(run_profile or "").strip().lower() == "baseline_idle":
+    profile_lc = str(run_profile or "").strip().lower()
+    if validity.get("low_signal") is True and profile_lc == "baseline_idle":
         return "NO (LOW_SIGNAL_IDLE)"
-    if str(run_profile or "").strip().lower() == "interaction_manual":
-        return "NO (manual is exploratory)"
     if validity.get("countable") is False:
+        exclusion_reason = str(validity.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        cohort_eligibility = str(validity.get("cohort_eligibility") or "").strip().upper()
+        if exclusion_reason == "EXCLUDED_MANUAL_NON_COHORT":
+            return "NO (manual exploratory)"
+        if cohort_eligibility == "EXTRA":
+            return "NO (extra run)"
         return "NO (extra run)"
     return "UNKNOWN"
 

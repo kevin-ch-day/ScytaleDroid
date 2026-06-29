@@ -27,6 +27,10 @@ class PackageRunCounts:
     interactive_valid_runs: int
     quota_met: bool
     extra_valid_runs: int
+    baseline_extra_valid: int = 0
+    baseline_low_signal_valid: int = 0
+    interactive_extra_valid: int = 0
+    interactive_low_signal_valid: int = 0
 
 
 @dataclass(frozen=True)

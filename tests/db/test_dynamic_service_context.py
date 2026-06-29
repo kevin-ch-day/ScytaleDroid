@@ -171,6 +171,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert bbc["service_key"] == "bbc_first_party"
     assert bbc["owner_class"] == "first_party"
 
+    bbc_live = service_context.resolve_service_for_domain(
+        "api.live.bbcx-internal.com",
+        package_name="bbc.mobile.news.ww",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bbc_live["service_key"] == "bbc_first_party"
+    assert bbc_live["role_class"] == "publisher_api"
+
     ads = service_context.resolve_service_for_domain(
         "googleads.g.doubleclick.net",
         package_name="bbc.mobile.news.ww",
@@ -242,6 +251,24 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert meta_b_graph["service_key"] == "facebook_platform"
     assert meta_b_graph["owner_class"] == "first_party"
+
+    whatsapp_graph = service_context.resolve_service_for_domain(
+        "graph.whatsapp.com",
+        package_name="com.whatsapp",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert whatsapp_graph["service_key"] == "whatsapp_platform"
+    assert whatsapp_graph["owner_class"] == "first_party"
+
+    whatsapp_media = service_context.resolve_service_for_domain(
+        "media-ord5-2.cdn.whatsapp.net",
+        package_name="com.whatsapp",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert whatsapp_media["service_key"] == "whatsapp_platform"
+    assert whatsapp_media["service_category"] == "social_platform"
 
     atlas = service_context.resolve_service_for_domain(
         "clk.atdmt.com",
@@ -333,6 +360,24 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert x_probe["service_key"] == "x_platform"
     assert x_probe["role_class"] == "realtime_engagement"
 
+    x_analytics = service_context.resolve_service_for_domain(
+        "analytics.twitter.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_analytics["service_key"] == "x_platform"
+    assert x_analytics["role_class"] == "analytics_measurement"
+
+    x_chat = service_context.resolve_service_for_domain(
+        "chat-ws.x.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_chat["service_key"] == "x_platform"
+    assert x_chat["role_class"] == "realtime_engagement"
+
     x_video_s = service_context.resolve_service_for_domain(
         "video-s.twimg.com",
         package_name="com.twitter.android",
@@ -404,3 +449,93 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert dianomi_worker["service_key"] == "dianomi"
     assert dianomi_worker["service_category"] == "adtech"
+
+    guardian_api = service_context.resolve_service_for_domain(
+        "mobile.guardianapis.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_api["service_key"] == "guardian_first_party"
+    assert guardian_api["role_class"] == "publisher_api"
+
+    guardian_cdn = service_context.resolve_service_for_domain(
+        "i.guim.co.uk",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_cdn["service_key"] == "guardian_first_party"
+    assert guardian_cdn["role_class"] == "content_delivery"
+
+    guardian_cmp = service_context.resolve_service_for_domain(
+        "cdn.privacy-mgmt.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_cmp["service_key"] == "onetrust_cmp"
+    assert guardian_cmp["role_class"] == "consent_management"
+
+    crashlytics = service_context.resolve_service_for_domain(
+        "firebase-settings.crashlytics.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert crashlytics["service_key"] == "firebase_crashlytics"
+    assert crashlytics["role_class"] == "crash_reporting"
+
+    adjust = service_context.resolve_service_for_domain(
+        "app.adjust.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert adjust["service_key"] == "adjust_attribution"
+    assert adjust["role_class"] == "attribution_measurement"
+
+    mapbox = service_context.resolve_service_for_domain(
+        "config.mapbox.com",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert mapbox["service_key"] == "mapbox_platform"
+    assert mapbox["role_class"] == "sdk_configuration"
+
+    cloudflare = service_context.resolve_service_for_domain(
+        "cdnjs.cloudflare.com",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert cloudflare["service_key"] == "cloudflare_cdnjs"
+    assert cloudflare["role_class"] == "static_asset_delivery"
+
+    amp = service_context.resolve_service_for_domain(
+        "cdn.ampproject.org",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert amp["service_key"] == "google_amp_cache"
+    assert amp["role_class"] == "content_delivery"
+
+    smartadserver = service_context.resolve_service_for_domain(
+        "ssbsync.smartadserver.com",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert smartadserver["service_key"] == "equativ_smartadserver"
+    assert smartadserver["role_class"] == "identity_sync"
+
+    guardian_ophan = service_context.resolve_service_for_domain(
+        "ophan.theguardian.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_ophan["service_key"] == "guardian_first_party"
+    assert guardian_ophan["role_class"] == "publisher_collection"

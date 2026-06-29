@@ -52,8 +52,10 @@ def build_package_selection_row(
     build_state = "—"
     baseline_countable = 0
     baseline_extra = 0
+    baseline_low_signal_supplemental = 0
     interactive_countable = 0
     interactive_extra = 0
+    interactive_low_signal_supplemental = 0
     need_baseline = 0
     need_interactive = 0
     prep_label = "—"
@@ -77,12 +79,16 @@ def build_package_selection_row(
         scoped = build_scoped_dataset_counts_fn(package, runs if isinstance(runs, list) else [], cfg=cfg)
         base_countable = int(scoped["baseline_countable"])
         base_extra = int(scoped["baseline_extra"])
+        base_low_signal = int(scoped.get("baseline_low_signal_supplemental") or 0)
         inter_countable = int(scoped["interactive_countable"])
         inter_extra = int(scoped["interactive_extra"])
+        inter_low_signal = int(scoped.get("interactive_low_signal_supplemental") or 0)
         baseline_countable = base_countable
         baseline_extra = base_extra
+        baseline_low_signal_supplemental = base_low_signal
         interactive_countable = inter_countable
         interactive_extra = inter_extra
+        interactive_low_signal_supplemental = inter_low_signal
         legacy_valid = int(scoped["legacy_valid"])
         legacy_builds = int(scoped["legacy_builds"])
         active_version = str(scoped.get("active_version_code") or "—")
@@ -92,7 +98,7 @@ def build_package_selection_row(
             active_build = f"{active_version} / {active_sha[:10]}"
         elif active_version == "—":
             active_build = "unknown (tracker-only)"
-        active_runs = base_countable + base_extra + inter_countable + inter_extra
+        active_runs = int(scoped.get("technical_valid_active") or 0)
 
         base_label = bucket_progress_label_fn(
             base_countable,
@@ -252,8 +258,10 @@ def build_package_selection_row(
         display_name=display,
         baseline_countable=baseline_countable,
         baseline_extra=baseline_extra,
+        baseline_low_signal_supplemental=baseline_low_signal_supplemental,
         interactive_countable=interactive_countable,
         interactive_extra=interactive_extra,
+        interactive_low_signal_supplemental=interactive_low_signal_supplemental,
         need_baseline=need_baseline,
         need_interactive=need_interactive,
         prep_label=prep_label,

@@ -34,9 +34,12 @@ class DatasetRunRecentSummary:
     interaction_level: str | None
     messaging_activity: str | None
     valid: bool | None
+    countable: bool | None
+    cohort_eligibility: str | None
     invalid_reason_code: str | None
     pcap_failure_detail: str | None
     low_signal: bool | None
+    supplemental_reason: str | None
     run_id: str
     status_label: str
 
@@ -202,6 +205,32 @@ def _status_label(row: DatasetRunRecentSummary) -> str:
     return "UNKNOWN"
 
 
+def _supplemental_reason(
+    *,
+    run_profile: str | None,
+    valid: bool | None,
+    countable: bool | None,
+    low_signal: bool | None,
+    extra_run: bool,
+    cohort_eligibility: str | None,
+) -> str | None:
+    if valid is not True:
+        return None
+    if countable is True:
+        return None
+    profile_lc = str(run_profile or "").strip().lower()
+    cohort_lc = str(cohort_eligibility or "").strip().upper()
+    if profile_lc == "baseline_idle" and low_signal is True:
+        return "LOW_SIGNAL_IDLE"
+    if extra_run or cohort_lc == "EXTRA":
+        if profile_lc == "interaction_manual":
+            return "MANUAL_EXTRA_RUN"
+        if profile_lc == "interaction_scripted":
+            return "SCRIPTED_EXTRA_RUN"
+        return "EXTRA_RUN"
+    return None
+
+
 def _recent_run_summaries(
     runs: list[dict[str, object]],
     *,
@@ -224,6 +253,8 @@ def _recent_run_summaries(
             interaction_level=(str(row.get("interaction_level")) if row.get("interaction_level") else None),
             messaging_activity=(str(row.get("messaging_activity")) if row.get("messaging_activity") else None),
             valid=valid_norm,
+            countable=(True if row.get("countable") is True else (False if row.get("countable") is False else None)),
+            cohort_eligibility=(str(row.get("cohort_eligibility")) if row.get("cohort_eligibility") else None),
             invalid_reason_code=(
                 str(row.get("invalid_reason_code")) if row.get("invalid_reason_code") else None
             ),
@@ -231,6 +262,14 @@ def _recent_run_summaries(
                 str(row.get("pcap_failure_detail")) if row.get("pcap_failure_detail") else None
             ),
             low_signal=(True if row.get("low_signal") is True else (False if row.get("low_signal") is False else None)),
+            supplemental_reason=_supplemental_reason(
+                run_profile=(str(row.get("run_profile")) if row.get("run_profile") else None),
+                valid=valid_norm,
+                countable=(True if row.get("countable") is True else (False if row.get("countable") is False else None)),
+                low_signal=(True if row.get("low_signal") is True else (False if row.get("low_signal") is False else None)),
+                extra_run=bool(row.get("extra_run")),
+                cohort_eligibility=(str(row.get("cohort_eligibility")) if row.get("cohort_eligibility") else None),
+            ),
             run_id=str(row.get("run_id") or ""),
             status_label="",
         )
@@ -242,9 +281,12 @@ def _recent_run_summaries(
             interaction_level=row.interaction_level,
             messaging_activity=row.messaging_activity,
             valid=row.valid,
+            countable=row.countable,
+            cohort_eligibility=row.cohort_eligibility,
             invalid_reason_code=row.invalid_reason_code,
             pcap_failure_detail=row.pcap_failure_detail,
             low_signal=row.low_signal,
+            supplemental_reason=row.supplemental_reason,
             run_id=row.run_id,
             status_label=_status_label(row),
         )
@@ -375,7 +417,16 @@ def load_dataset_run_state(
             int(scoped_counts["baseline_countable"]) >= int(cfg.baseline_required)
             and int(scoped_counts["interactive_countable"]) >= int(cfg.interactive_required)
         ),
-        extra_valid_runs=int(scoped_counts["baseline_extra"]) + int(scoped_counts["interactive_extra"]),
+        extra_valid_runs=(
+            int(scoped_counts["baseline_extra"])
+            + int(scoped_counts.get("baseline_low_signal_supplemental") or 0)
+            + int(scoped_counts["interactive_extra"])
+            + int(scoped_counts.get("interactive_low_signal_supplemental") or 0)
+        ),
+        baseline_extra_valid=int(scoped_counts["baseline_extra"]),
+        baseline_low_signal_valid=int(scoped_counts.get("baseline_low_signal_supplemental") or 0),
+        interactive_extra_valid=int(scoped_counts["interactive_extra"]),
+        interactive_low_signal_valid=int(scoped_counts.get("interactive_low_signal_supplemental") or 0),
     )
     suggested_profile_from_tracker, suggested_slot = _protocol_from_runs(
         package_name=package,

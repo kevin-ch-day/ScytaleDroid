@@ -491,8 +491,8 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
         baseline_required = int(cfg.baseline_required)
         interactive_required = int(cfg.interactive_required)
     except Exception:
-        baseline_required = 1
-        interactive_required = 2
+        baseline_required = 3
+        interactive_required = 4
 
     rows = []
     for i, (name, pkg) in enumerate(app_list):

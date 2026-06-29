@@ -32,6 +32,11 @@ def test_context_for_domain_prefers_curated_suffix_and_package_hints() -> None:
     assert bbc_api["role_class"] == "publisher_api"
     assert bbc_api["basis"] == "curated_exact"
 
+    bbc_live = report._context_for_domain("api.live.bbcx-internal.com", package_name="bbc.mobile.news.ww")
+    assert bbc_live["owner_class"] == "first_party"
+    assert bbc_live["role_class"] == "publisher_api"
+    assert bbc_live["basis"] == "curated_suffix"
+
     airship = report._context_for_domain("device-api.urbanairship.com", package_name="bbc.mobile.news.ww")
     assert airship["owner_class"] == "third_party"
     assert airship["role_class"] == "engagement_push"

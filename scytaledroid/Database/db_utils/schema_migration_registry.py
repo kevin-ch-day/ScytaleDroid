@@ -405,6 +405,7 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
 
     applied_counts: dict[str, int] = {}
     attempt_counts: dict[str, int] = {}
+    failed_counts: dict[str, int] = {}
     status_counts: dict[str, int] = {}
     for row in applied_rows:
         migration_id = str(row.get("migration_id") or "").strip()
@@ -414,12 +415,44 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
             attempt_counts[migration_id] = attempt_counts.get(migration_id, 0) + 1
             if status.lower() == "applied":
                 applied_counts[migration_id] = applied_counts.get(migration_id, 0) + 1
+            elif status.lower() == "failed":
+                failed_counts[migration_id] = failed_counts.get(migration_id, 0) + 1
     db_dupes = {key: value for key, value in applied_counts.items() if value > 1}
     retry_histories = {key: value for key, value in attempt_counts.items() if value > 1}
+    retry_details: list[dict[str, Any]] = []
+    for migration_id, attempt_count in sorted(retry_histories.items()):
+        latest = latest_by_id.get(migration_id) or {}
+        retry_details.append(
+            {
+                "migration_id": migration_id,
+                "attempt_count": int(attempt_count),
+                "applied_attempt_count": int(applied_counts.get(migration_id, 0)),
+                "failed_attempt_count": int(failed_counts.get(migration_id, 0)),
+                "latest_status": str(latest.get("status") or "") or None,
+                "latest_applied_at_utc": latest.get("applied_at_utc"),
+            }
+        )
+    failed_rows = [
+        row
+        for row in applied_rows
+        if str(row.get("status") or "").strip().lower() == "failed"
+    ]
+    latest_failed_migrations = sorted(
+        migration_id
+        for migration_id, latest in latest_by_id.items()
+        if str(latest.get("status") or "").strip().lower() == "failed"
+    )
+    retried_then_applied = sorted(
+        migration_id
+        for migration_id in retry_histories
+        if failed_counts.get(migration_id, 0) > 0
+        and str((latest_by_id.get(migration_id) or {}).get("status") or "").strip().lower() == "applied"
+    )
 
     registered_payload: list[dict[str, Any]] = []
     missing: list[str] = []
     checksum_mismatches: list[dict[str, Any]] = []
+    checksum_mismatch_details: list[dict[str, Any]] = []
     for spec in registry:
         latest = latest_by_id.get(spec.migration_id) or {}
         latest_status = str(latest.get("status") or "").strip().lower()
@@ -427,12 +460,28 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
             missing.append(spec.migration_id)
         db_checksum = str(latest.get("migration_checksum") or "").strip()
         if db_checksum and db_checksum != spec.checksum:
-            checksum_mismatches.append(
+            mismatch = {
+                "migration_id": spec.migration_id,
+                "expected_checksum": spec.checksum,
+                "db_checksum": db_checksum,
+                "db_status": str(latest.get("status") or ""),
+            }
+            checksum_mismatches.append(mismatch)
+            checksum_mismatch_details.append(
                 {
-                    "migration_id": spec.migration_id,
-                    "expected_checksum": spec.checksum,
-                    "db_checksum": db_checksum,
-                    "db_status": str(latest.get("status") or ""),
+                    **mismatch,
+                    "migration_name": spec.migration_name,
+                    "stage": spec.stage,
+                    "apply_mode": spec.apply_mode,
+                    "schema_version_before": spec.schema_version_before,
+                    "schema_version_after": spec.schema_version_after,
+                    "latest_db_applied_at_utc": latest.get("applied_at_utc"),
+                    "latest_db_receipt_path": latest.get("receipt_path"),
+                    "mismatch_classification": (
+                        "applied_registry_drift"
+                        if str(latest.get("status") or "").strip().lower() == "applied"
+                        else "non_applied_checksum_conflict"
+                    ),
                 }
             )
         registered_payload.append(
@@ -464,12 +513,39 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
         "live_schema_version": latest_schema_version(run_sql),
         "registered_migration_count": len(registry),
         "applied_row_count": len(applied_rows),
+        "failed_row_count": len(failed_rows),
         "missing_migration_count": len(missing),
         "duplicate_registry_id_count": len(registry_dupes),
         "duplicate_applied_migration_id_count": len(db_dupes),
         "migration_retry_history_count": len(retry_histories),
+        "migrations_with_failed_history_count": len(failed_counts),
+        "retried_then_applied_count": len(retried_then_applied),
+        "latest_failed_migration_count": len(latest_failed_migrations),
         "registry_chain_issue_count": len(chain_issues),
         "checksum_mismatch_count": len(checksum_mismatches),
+        "applied_checksum_mismatch_count": sum(
+            1
+            for row in checksum_mismatch_details
+            if str(row.get("mismatch_classification") or "") == "applied_registry_drift"
+        ),
+        "non_applied_checksum_conflict_count": sum(
+            1
+            for row in checksum_mismatch_details
+            if str(row.get("mismatch_classification") or "") == "non_applied_checksum_conflict"
+        ),
+        "checksum_mismatch_stage_counts": dict(
+            sorted(
+                Counter(str(row.get("stage") or "") for row in checksum_mismatch_details).items()
+            )
+        ),
+        "checksum_mismatch_classification_counts": dict(
+            sorted(
+                Counter(
+                    str(row.get("mismatch_classification") or "")
+                    for row in checksum_mismatch_details
+                ).items()
+            )
+        ),
         "unregistered_applied_row_count": len(unregistered_applied_rows),
         "applied_status_counts": status_counts,
     }
@@ -481,8 +557,13 @@ def build_schema_migration_report(run_sql: RunSql) -> dict[str, Any]:
         "duplicate_registry_ids": registry_dupes,
         "duplicate_applied_migration_ids": db_dupes,
         "migration_retry_histories": retry_histories,
+        "migration_retry_details": retry_details,
+        "failed_rows": failed_rows,
+        "latest_failed_migrations": latest_failed_migrations,
+        "retried_then_applied_migrations": retried_then_applied,
         "registry_chain_issues": chain_issues,
         "checksum_mismatches": checksum_mismatches,
+        "checksum_mismatch_details": checksum_mismatch_details,
         "unregistered_applied_rows": unregistered_applied_rows,
     }
 
@@ -503,8 +584,11 @@ def write_schema_migration_report_bundle(report: Mapping[str, Any], output_dir: 
             {"migration_id": key, "attempt_count": value}
             for key, value in (report.get("migration_retry_histories") or {}).items()
         ],
+        f"{base}_migration_retry_details.csv": report.get("migration_retry_details") or [],
+        f"{base}_failed_rows.csv": report.get("failed_rows") or [],
         f"{base}_chain_issues.csv": report.get("registry_chain_issues") or [],
         f"{base}_checksum_mismatches.csv": report.get("checksum_mismatches") or [],
+        f"{base}_checksum_mismatch_details.csv": report.get("checksum_mismatch_details") or [],
         f"{base}_unregistered_applied_rows.csv": report.get("unregistered_applied_rows") or [],
     }
     for filename, rows in csv_sections.items():

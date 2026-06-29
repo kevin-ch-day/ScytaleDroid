@@ -64,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"live_schema_version: {summary.get('live_schema_version') or 'unknown'}")
     print(f"registered_migration_count: {summary.get('registered_migration_count')}")
     print(f"applied_row_count: {summary.get('applied_row_count')}")
+    print(f"failed_row_count: {summary.get('failed_row_count')}")
     print(
         "missing_migrations: "
         + (", ".join(payload.get("missing_migrations") or []) if payload.get("missing_migrations") else "(none)")
@@ -77,8 +78,56 @@ def main(argv: list[str] | None = None) -> int:
         "migration_retry_histories: "
         + json.dumps(payload.get("migration_retry_histories") or {}, sort_keys=True)
     )
+    print(
+        "latest_failed_migrations: "
+        + (", ".join(payload.get("latest_failed_migrations") or []) if payload.get("latest_failed_migrations") else "(none)")
+    )
+    print(
+        "retried_then_applied_migrations: "
+        + (", ".join(payload.get("retried_then_applied_migrations") or []) if payload.get("retried_then_applied_migrations") else "(none)")
+    )
     print(f"registry_chain_issue_count: {summary.get('registry_chain_issue_count')}")
     print(f"checksum_mismatch_count: {summary.get('checksum_mismatch_count')}")
+    print(f"applied_checksum_mismatch_count: {summary.get('applied_checksum_mismatch_count')}")
+    print(f"non_applied_checksum_conflict_count: {summary.get('non_applied_checksum_conflict_count')}")
+    print(
+        "checksum_mismatch_stage_counts: "
+        + json.dumps(summary.get("checksum_mismatch_stage_counts") or {}, sort_keys=True)
+    )
+    print(
+        "checksum_mismatch_classification_counts: "
+        + json.dumps(summary.get("checksum_mismatch_classification_counts") or {}, sort_keys=True)
+    )
+    print(
+        "checksum_mismatch_migrations: "
+        + (
+            ", ".join(
+                sorted(
+                    str(row.get("migration_id") or "")
+                    for row in (payload.get("checksum_mismatches") or [])
+                    if str(row.get("migration_id") or "").strip()
+                )
+            )
+            if payload.get("checksum_mismatches")
+            else "(none)"
+        )
+    )
+    for row in payload.get("checksum_mismatch_details") or []:
+        print(
+            "  checksum_mismatch_detail: "
+            + json.dumps(
+                {
+                    "migration_id": row.get("migration_id"),
+                    "stage": row.get("stage"),
+                    "apply_mode": row.get("apply_mode"),
+                    "db_status": row.get("db_status"),
+                    "classification": row.get("mismatch_classification"),
+                    "latest_db_applied_at_utc": row.get("latest_db_applied_at_utc"),
+                },
+                sort_keys=True,
+                default=str,
+            )
+        )
     print(f"unregistered_applied_row_count: {summary.get('unregistered_applied_row_count')}")
     print(f"applied_status_counts: {json.dumps(summary.get('applied_status_counts') or {}, sort_keys=True)}")
     if bundle_files:

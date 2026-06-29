@@ -133,3 +133,123 @@ def test_summarizer_falls_back_to_pcap_report_destinations(tmp_path: Path) -> No
         "example-unresolved.test",
     ]
     assert summary["flags"]["cleartext_http_detected"] == "unknown"
+
+
+def test_summarizer_includes_dataset_quota_and_indicator_fields(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    report_path = tmp_path / "analysis" / "pcap_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "top_dns": [
+                    {"value": "graph.facebook.com", "count": 8},
+                ],
+                "top_sni": [
+                    {"value": "lookaside.facebook.com", "count": 5},
+                ],
+                "service_context": {"status": "ok", "service_count": 2},
+                "service_signals": {
+                    "status": "ok",
+                    "signal_count": 1,
+                    "signals": [{"signal_key": "messaging", "score": 0.9}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-2",
+        created_at="2026-06-15T00:00:00Z",
+        status="success",
+        dataset={
+            "valid_dataset_run": True,
+            "countable": True,
+            "cohort_eligibility": "COUNTABLE",
+            "invalid_reason_code": None,
+        },
+        operator={"run_profile": "interaction_manual"},
+        target={"package_name": "com.facebook.katana"},
+        artifacts=[],
+    )
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["run_profile"] == "interaction_manual"
+    assert summary["dataset_verdict"] == "VALID"
+    assert summary["counts_toward_quota"] is True
+    assert summary["quota_detail"]["countability_label"] == "YES (interaction_manual)"
+    assert summary["quota_detail"]["cohort_eligibility"] == "COUNTABLE"
+    assert summary["verdicts"]["technical"] == "VALID"
+    assert summary["verdicts"]["cohort"] == "COUNTABLE"
+    assert summary["indicators"]["top_dns"] == [{"value": "graph.facebook.com", "count": 8}]
+    assert summary["indicators"]["top_sni"] == [{"value": "lookaside.facebook.com", "count": 5}]
+    assert summary["indicators"]["service_context"]["service_count"] == 2
+    assert summary["indicators"]["service_signals"]["signal_count"] == 1
+    assert "Run profile: interaction_manual." in rendered
+    assert "Dataset verdict: VALID." in rendered
+    assert "Counts toward quota: YES (interaction_manual)." in rendered
+    assert "Network capture present: no." in rendered
+    assert "PCAP valid: unknown." in rendered
+    assert "Top DNS: graph.facebook.com (8)." in rendered
+    assert "Top SNI: lookaside.facebook.com (5)." in rendered
+
+
+def test_summarizer_uses_paper_exclusion_reason_for_valid_supplemental_run(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-3",
+        created_at="2026-06-15T00:00:00Z",
+        status="success",
+        dataset={
+            "valid_dataset_run": True,
+            "countable": False,
+            "cohort_eligibility": "EXCLUDED",
+            "invalid_reason_code": None,
+            "paper_exclusion_primary_reason_code": "EXCLUDED_SCRIPT_ABORT",
+        },
+        operator={"run_profile": "interaction_scripted"},
+        target={"package_name": "com.whatsapp"},
+        artifacts=[],
+    )
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["dataset_verdict"] == "VALID"
+    assert summary["counts_toward_quota"] is False
+    assert summary["quota_detail"]["countability_label"] == "NO (extra run)"
+    assert summary["quota_detail"]["invalid_reason_code"] == "EXCLUDED_SCRIPT_ABORT"
+    assert "Counts toward quota: NO (extra run)." in rendered
+    assert "Invalid reason: EXCLUDED_SCRIPT_ABORT." in rendered
+
+
+def test_summarizer_renders_dash_for_missing_invalid_reason(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-4",
+        created_at="2026-06-15T00:00:00Z",
+        status="success",
+        dataset={
+            "valid_dataset_run": True,
+            "countable": False,
+            "cohort_eligibility": "EXTRA",
+            "invalid_reason_code": None,
+        },
+        operator={"run_profile": "interaction_manual"},
+        target={"package_name": "com.example.app"},
+        artifacts=[],
+    )
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["quota_detail"]["invalid_reason_code"] is None
+    assert "Invalid reason: —." in rendered

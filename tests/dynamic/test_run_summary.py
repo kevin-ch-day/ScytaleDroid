@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 
 from scytaledroid.DynamicAnalysis.core.session import DynamicSessionResult
+from scytaledroid.DynamicAnalysis import run_summary
 from scytaledroid.DynamicAnalysis.run_summary import _build_evidence_lines, print_run_summary
 from scytaledroid.Utils.DisplayUtils import colors
 
@@ -145,3 +146,105 @@ def test_build_evidence_lines_prefers_pcap_failure_summary_from_manifest(capsys)
     assert "Network traffic was observed by Android netstats" in out
     assert "PCAP invalid (0B < 50000B)" not in out
     assert lines[0] == "PCAP: app_only | 0B | invalid"
+
+
+def test_countability_detail_keeps_baseline_connected_countable_when_low_signal(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run_summary,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "com.whatsapp": {
+                    "runs": [
+                        {
+                            "run_id": "run-wa-1",
+                            "run_profile": "baseline_connected",
+                            "valid_dataset_run": True,
+                            "countable": True,
+                            "low_signal": True,
+                            "paper_exclusion_primary_reason_code": None,
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        run_summary,
+        "_load_manifest",
+        lambda _path: {
+            "dataset": {
+                "low_signal": True,
+            }
+        },
+    )
+
+    detail = run_summary._countability_detail("com.whatsapp", "run-wa-1")
+
+    assert detail == "source=tracker_quota_marking, countable=true"
+
+
+def test_countability_detail_marks_baseline_idle_low_signal_as_nonquota(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run_summary,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "com.example.idle": {
+                    "runs": [
+                        {
+                            "run_id": "run-idle-1",
+                            "run_profile": "baseline_idle",
+                            "valid_dataset_run": True,
+                            "countable": False,
+                            "low_signal": True,
+                            "paper_exclusion_primary_reason_code": None,
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        run_summary,
+        "_load_manifest",
+        lambda _path: {
+            "dataset": {
+                "low_signal": True,
+            }
+        },
+    )
+
+    detail = run_summary._countability_detail("com.example.idle", "run-idle-1")
+
+    assert detail == "source=low_signal_policy, countable=false, reason=LOW_SIGNAL_IDLE"
+
+
+def test_countability_label_treats_manual_extra_run_as_extra_not_exploratory() -> None:
+    label = run_summary._countability_label(
+        {
+            "valid_dataset_run": True,
+            "countable": False,
+            "low_signal": False,
+            "cohort_eligibility": "EXTRA",
+            "paper_exclusion_primary_reason_code": None,
+        },
+        "interaction_manual",
+    )
+
+    assert label == "NO (extra run)"
+
+
+def test_countability_label_keeps_manual_non_cohort_reason_when_explicit() -> None:
+    label = run_summary._countability_label(
+        {
+            "valid_dataset_run": True,
+            "countable": False,
+            "low_signal": False,
+            "cohort_eligibility": "SUPPLEMENTAL_VALID",
+            "paper_exclusion_primary_reason_code": "EXCLUDED_MANUAL_NON_COHORT",
+        },
+        "interaction_manual",
+    )
+
+    assert label == "NO (manual exploratory)"

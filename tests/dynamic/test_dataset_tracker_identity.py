@@ -24,10 +24,10 @@ def test_research_dataset_alpha_quota_defaults_are_explicit() -> None:
     cfg = DatasetTrackerConfig()
 
     assert BASELINE_REQUIRED == 3
-    assert INTERACTION_REQUIRED == 2
-    assert TOTAL_REQUIRED_PER_APP == 5
+    assert INTERACTION_REQUIRED == 4
+    assert TOTAL_REQUIRED_PER_APP == 7
     assert cfg.baseline_required == 3
-    assert cfg.interactive_required == 2
+    assert cfg.interactive_required == 4
 
 
 def test_interaction_before_baseline_quota_is_supplemental() -> None:
@@ -164,6 +164,50 @@ def test_quota_marking_scopes_current_build_separately_from_legacy_runs() -> Non
     assert by_id["current-b2"]["counts_toward_quota"] is True
     assert app_entry["quota_met"] is False
     assert app_entry["extra_valid_runs"] == 0
+
+
+def test_low_signal_baseline_idle_is_supplemental_extra_not_countable() -> None:
+    cfg = DatasetTrackerConfig()
+    app_entry = {
+        "runs": [
+            {
+                "run_id": "b1",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "low_signal": False,
+                "started_at": "2026-06-28T01:00:00+00:00",
+            },
+            {
+                "run_id": "b2",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "low_signal": False,
+                "started_at": "2026-06-28T02:00:00+00:00",
+            },
+            {
+                "run_id": "b3-low",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "low_signal": True,
+                "low_signal_reasons": ["PCAP_BYTES_LOW"],
+                "started_at": "2026-06-28T03:00:00+00:00",
+            },
+        ]
+    }
+
+    _apply_quota_marking(app_entry, cfg)
+    by_id = {row["run_id"]: row for row in app_entry["runs"]}
+
+    assert by_id["b1"]["counts_toward_quota"] is True
+    assert by_id["b2"]["counts_toward_quota"] is True
+    assert by_id["b3-low"]["counts_toward_quota"] is False
+    assert by_id["b3-low"]["countable"] is False
+    assert by_id["b3-low"]["extra_run"] == 1
+    assert by_id["b3-low"]["cohort_eligibility"] == "EXTRA"
+    assert app_entry["extra_valid_runs"] == 1
 
 
 def test_evaluate_dataset_validity_uses_summary_netstats_when_entry_omits_total(tmp_path: Path) -> None:

@@ -81,6 +81,13 @@ SCRIPT_LIMITATION_REASON_LABELS: tuple[tuple[str, str], ...] = (
     ("not_available", "not available in this UI/account"),
     ("other", "other limitation"),
 )
+_SCRIPT_LIMITATION_REASON_TEXT = dict(SCRIPT_LIMITATION_REASON_LABELS)
+_SCRIPTED_ARTICLE_LIMITATION_REASONS = {
+    "paywall",
+    "subscription_required",
+    "login_required",
+    "not_available",
+}
 
 
 def _effective_min_sampling_seconds() -> int:
@@ -93,6 +100,20 @@ def _effective_recommended_sampling_seconds() -> int:
     configured = int(getattr(app_config, "DYNAMIC_TARGET_DURATION_S", 180))
     profile_target = int(getattr(profile_config, "RECOMMENDED_SAMPLING_SECONDS", 240))
     return max(configured, profile_target)
+
+
+def _scripted_step_description(step_id: str, default_desc: str) -> str:
+    if step_id == "open_article":
+        return "Open one free article. If paywall/subscription appears, mark limited."
+    if step_id == "scroll_article":
+        return "Scroll the visible article content. If content is blocked, mark limited and continue."
+    return str(default_desc or "").strip()
+
+
+def _scripted_step_action_line(*, limited_or_skip_only: bool = False) -> str:
+    if limited_or_skip_only:
+        return "Action: L=limited | N=skip | D=done"
+    return "Action: D=done | L=limited | N=skip"
 
 
 class ManualScenarioRunner:
@@ -255,16 +276,13 @@ class ManualScenarioRunner:
                 status_detail = ", on-target"
                 level = "info"
                 if overrun_s > 0:
-                    status_detail = f", overrun {overrun_s}s"
-                    # For Paper #3, minor overruns are expected and not a validity problem.
-                    if str(run_ctx.scenario_id or "") != "paper3_profile_v3":
-                        level = "warn"
+                    status_detail = f", overrun {overrun_s}s; overrun alone does not invalidate the run"
                 elif underrun_s > 0:
                     status_detail = f", underrun {underrun_s}s"
                     level = "warn"
                 print(
                     status_messages.status(
-                        f"Protocol timer elapsed: {_format_duration(elapsed)} "
+                        f"Protocol completed in {_format_duration(elapsed)} "
                         f"(target {_format_duration(target_s)}{status_detail}).",
                         level=level,
                     )
@@ -342,7 +360,8 @@ def _run_countdown(
             if remaining > 0:
                 message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
             else:
-                message = f"\rElapsed time: {elapsed_fmt} (target reached){suffix}".ljust(line_width)
+                hold_elapsed_fmt = _format_duration(max(elapsed_i - int(duration_seconds), 0))
+                message = f"\rHold after target: {hold_elapsed_fmt} (target {total} reached){suffix}".ljust(line_width)
             if message != last_rendered:
                 sys.stdout.write(message)
                 sys.stdout.flush()
@@ -490,10 +509,17 @@ def _run_scripted_protocol(
                 "interaction_protocol_version": SCRIPT_PROTOCOL_VERSION,
             },
         )
-    print(status_messages.status(f"Script template: {template_id} (protocol v{SCRIPT_PROTOCOL_VERSION})", level="info"))
+    print(status_messages.status("Scripted interactive run", level="info"))
+    print(status_messages.status(f"Template: {template_id}", level="info"))
     print(
         status_messages.status(
-            "Controls: Enter/D=step complete, N=Skip(not found), S=Stop&Finalize, A=Abort&Discard (then press Enter). Avoid Ctrl+C during scripted steps.",
+            "Controls: D=done | L=limited | N=skip | S=stop/finalize | A=abort",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            "Tip: use D+Enter, L+Enter, or N+Enter. Avoid Ctrl+C.",
             level="info",
         )
     )
@@ -523,22 +549,46 @@ def _run_scripted_protocol(
     pkg_lc = str(getattr(run_ctx, "package_name", "") or "").strip().lower()
     show_snapchat_hints = bool(pkg_lc == "com.snapchat.android" and template_id == "social_feed_basic_v2")
     go_live_start_skipped = False
+    blocked_article_limitation_reason: str | None = None
+    blocked_article_operator_note: str | None = None
     try:
         for idx, (step_id, step_desc, expected_s) in enumerate(steps, start=1):
             step_outcome = "completed"
             limitation_reason: str | None = None
             operator_note: str | None = None
+            skip_stopwatch = False
             print()
-            print(status_messages.status(f"Step {idx}/{len(steps)}: {step_id}", level="info"))
-            print(status_messages.status(f"  {step_desc}", level="info"))
-            print(status_messages.status(f"  Expected duration: {expected_s}s", level="info"))
-            print(
-                status_messages.status(
-                    "  Press Enter when step is complete (in this terminal). "
-                    "If Enter feels flaky, type D+Enter. (L+Enter limited/blocked, N+Enter skip if not found; avoid Ctrl+C here)",
-                    level="info",
+            print(status_messages.status(f"Step {idx}/{len(steps)} — {step_id}", level="info"))
+            print(status_messages.status(_scripted_step_description(step_id, step_desc), level="info"))
+            print(status_messages.status(f"Expected: {expected_s}s", level="info"))
+            if step_id == "scroll_article" and blocked_article_limitation_reason in _SCRIPTED_ARTICLE_LIMITATION_REASONS:
+                reason_text = _SCRIPT_LIMITATION_REASON_TEXT.get(
+                    str(blocked_article_limitation_reason or "").strip(),
+                    str(blocked_article_limitation_reason or "").strip() or "prior limitation",
                 )
-            )
+                print(
+                    status_messages.status(
+                        f"Article unavailable from prior limited open_article step ({reason_text}).",
+                        level="warn",
+                    )
+                )
+                print(status_messages.status(_scripted_step_action_line(limited_or_skip_only=True), level="info"))
+                carry_choice = prompt_utils.get_choice(
+                    ["L", "N", "D"],
+                    default="L",
+                    casefold=True,
+                    invalid_message="Choose L, N, or D.",
+                ).upper()
+                if carry_choice == "L":
+                    step_outcome = "limited"
+                    limitation_reason = blocked_article_limitation_reason
+                    operator_note = blocked_article_operator_note
+                    skip_stopwatch = True
+                elif carry_choice == "N":
+                    step_outcome = "skipped_not_found"
+                    skip_stopwatch = True
+            else:
+                print(status_messages.status(_scripted_step_action_line(), level="info"))
             if show_snapchat_hints:
                 hint = SNAPCHAT_TEMPLATE_HINTS.get(str(step_id))
                 if hint:
@@ -622,6 +672,31 @@ def _run_scripted_protocol(
                     )
                 protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
                 print(status_messages.status(f"Step marked skipped_not_found: {step_id}", level="warn"))
+                protocol["step_count_completed"] = idx
+                continue
+            if skip_stopwatch and step_outcome == "limited":
+                if on_protocol_event:
+                    on_protocol_event(
+                        "STEP_END",
+                        {
+                            "step_id": step_id,
+                            "step_index": idx,
+                            "elapsed_s": 0.0,
+                            "expected_duration_s": expected_s,
+                            "tolerance_s": 0.0,
+                            "within_tolerance": True,
+                            "step_variant": step_variant,
+                            "step_outcome": step_outcome,
+                            "limitation_reason": limitation_reason,
+                            "operator_note": operator_note,
+                        },
+                    )
+                protocol["step_limited_count"] = int(protocol.get("step_limited_count") or 0) + 1
+                if limitation_reason:
+                    key = f"limited_reason_{limitation_reason}_count"
+                    protocol[key] = int(protocol.get(key) or 0) + 1
+                reason_text = limitation_reason or "unspecified"
+                print(status_messages.status(f"Step marked limited: {step_id} ({reason_text})", level="warn"))
                 protocol["step_count_completed"] = idx
                 continue
             if step_id == "call_active":
@@ -716,6 +791,9 @@ def _run_scripted_protocol(
                         protocol[key] = int(protocol.get(key) or 0) + 1
                     reason_text = limitation_reason or "unspecified"
                     print(status_messages.status(f"Step marked limited: {step_id} ({reason_text})", level="warn"))
+                    if step_id == "open_article" and limitation_reason in _SCRIPTED_ARTICLE_LIMITATION_REASONS:
+                        blocked_article_limitation_reason = limitation_reason
+                        blocked_article_operator_note = operator_note
                 if step_id == "start_call":
                     protocol["call_attempted"] = True
                     connected = prompt_utils.prompt_yes_no("Did the call connect?", default=True)
@@ -983,7 +1061,8 @@ def _run_messaging_connected_baseline(
         if remaining > 0:
             message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
         else:
-            message = f"\rElapsed time: {elapsed_fmt} (target reached){suffix}".ljust(line_width)
+            hold_elapsed_fmt = _format_duration(max(elapsed_i - int(target_duration_s), 0))
+            message = f"\rHold after target: {hold_elapsed_fmt} (target {total} reached){suffix}".ljust(line_width)
         if message != last_rendered:
             sys.stdout.write(message)
             sys.stdout.flush()
@@ -1186,6 +1265,38 @@ def _pulse_marker(elapsed_seconds: int) -> str:
     return _timing_pulse_marker(elapsed_seconds)
 
 
+def _drain_stdin_nonblocking(*, max_reads: int = 32) -> None:
+    if not sys.stdin.isatty():
+        return
+    reads = 0
+    try:
+        while reads < max_reads:
+            readable, _, _ = select.select([sys.stdin], [], [], 0.0)
+            if not readable:
+                break
+            sys.stdin.readline()
+            reads += 1
+    except Exception:
+        return
+
+
+def _confirm_script_exit(action: str) -> bool:
+    normalized = str(action or "").strip().lower()
+    if normalized == "stop":
+        confirm = prompt_utils.prompt_text(
+            "Finalize early? This may make the run invalid. Type FINALIZE to continue, or Enter to cancel.",
+            required=False,
+        ).strip()
+        return confirm == "FINALIZE"
+    if normalized == "abort":
+        confirm = prompt_utils.prompt_text(
+            "Abort and discard this run? Type ABORT to continue, or Enter to cancel.",
+            required=False,
+        ).strip()
+        return confirm == "ABORT"
+    return False
+
+
 def _wait_for_step_completion_with_stopwatch(
     *,
     step_index: int,
@@ -1198,49 +1309,82 @@ def _wait_for_step_completion_with_stopwatch(
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         prompt_utils.press_enter_to_continue("Press Enter when step is complete...")
         return ("completed", None, None)
-    # Operators asked for a single stopwatch view (avoid total + per-step dual timers).
-    line_width = 82
+    # Operators asked for a single stopwatch view with a stable prompt line.
+    line_width = 72
+    prompt_line = "Action [D/L/N] \u203a "
+    prompt_width = 64
     last_rendered = None
+    last_render_bucket: int | None = None
+
+    def _render_timer_line(message: str) -> None:
+        nonlocal last_rendered
+        if last_rendered is None:
+            sys.stdout.write(message.ljust(line_width) + "\n")
+            sys.stdout.write(prompt_line)
+            sys.stdout.flush()
+            last_rendered = message
+            return
+        sys.stdout.write("\x1b7")
+        sys.stdout.write("\x1b[1A\r")
+        sys.stdout.write((" " * int(line_width)) + "\r")
+        sys.stdout.write(message.ljust(line_width))
+        sys.stdout.write("\x1b8")
+        sys.stdout.flush()
+        last_rendered = message
+
+    def _clear_step_prompt_lines() -> None:
+        sys.stdout.write("\r" + (" " * int(prompt_width)) + "\r")
+        sys.stdout.write("\x1b[1A\r" + (" " * int(line_width)) + "\r")
+        sys.stdout.write("\x1b[1B\r")
+        sys.stdout.flush()
+
+    _drain_stdin_nonblocking()
+
     try:
         while True:
             total_elapsed_i = int(time.monotonic() - script_started_monotonic)
             total_elapsed_fmt = _format_duration(total_elapsed_i)
             target_fmt = _format_duration(int(target_duration_s))
-            suffix = _pulse_marker(total_elapsed_i)
-            msg = (
-                f"\rElapsed: {total_elapsed_fmt}/{target_fmt} | "
-                f"Step {step_index}/{step_count} {step_id} (Enter/D=done, L=limited, N=skip){suffix}"
-            ).ljust(line_width)
-            if msg != last_rendered:
-                sys.stdout.write(msg)
-                sys.stdout.flush()
-                last_rendered = msg
+            render_bucket = total_elapsed_i // 10
+            msg = f"Elapsed: {total_elapsed_fmt} / {target_fmt} | Step {step_index}/{step_count} — {step_id}"
+            if msg != last_rendered and (last_render_bucket is None or render_bucket != last_render_bucket):
+                _render_timer_line(msg)
+                last_render_bucket = render_bucket
             readable, _, _ = select.select([sys.stdin], [], [], 1.0)
             if readable:
-                action = _parse_timing_action(sys.stdin.readline())
+                raw_line = sys.stdin.readline()
+                if str(raw_line or "").strip() == "":
+                    continue
+                action = _parse_timing_action(raw_line)
                 if action == "abort":
-                    _clear_status_line(line_width)
+                    if not _confirm_script_exit("abort"):
+                        _render_timer_line(msg)
+                        continue
+                    _clear_step_prompt_lines()
                     print()
                     raise ScenarioAbortRequested("ABORT_DISCARD")
                 if action == "stop":
-                    _clear_status_line(line_width)
+                    if not _confirm_script_exit("stop"):
+                        _render_timer_line(msg)
+                        continue
+                    _clear_step_prompt_lines()
                     print()
                     raise _StopScriptEarly("STOP_FINALIZE")
                 if action == "enter":
-                    _clear_status_line(line_width)
+                    _clear_step_prompt_lines()
                     print()
                     return ("completed", None, None)
                 if action == "skip":
-                    _clear_status_line(line_width)
+                    _clear_step_prompt_lines()
                     print()
                     return ("skipped_not_found", None, None)
                 if action == "limited":
-                    _clear_status_line(line_width)
+                    _clear_step_prompt_lines()
                     print()
                     limitation_reason, operator_note = _prompt_scripted_limitation_details(step_id)
                     return ("limited", limitation_reason, operator_note)
     except KeyboardInterrupt:
-        _clear_status_line(line_width)
+        _clear_step_prompt_lines()
         print()
         # In strict freeze/demo mode, do not finalize partially-completed scripted runs.
         strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}

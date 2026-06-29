@@ -159,6 +159,11 @@ def emit_static_run_end_log(
             logger.info("Static RUN_END", extra=logging_engine.ensure_trace(end_payload))
         except Exception:
             pass
+    finally:
+        try:
+            logging_engine.close_static_session_logger(params.session_stamp)
+        except Exception:
+            pass
 
 
 def emit_static_run_start_log(
@@ -175,6 +180,18 @@ def emit_static_run_start_log(
     from scytaledroid.StaticAnalysis.cli.flows import run_dispatch as _dispatch
 
     try:
+        logging_engine.create_static_session_logger(
+            params.session_stamp,
+            context={
+                "subsystem": "static",
+                "scope": scope_target,
+                "scope_label": params.scope_label,
+                "profile": params.profile_label,
+                "execution_id": params.execution_id,
+                "device_serial": getattr(run_ctx, "device_serial", None),
+                "device_model": getattr(run_ctx, "device_model", None),
+            },
+        )
         static_logger = _dispatch.get_run_logger("static", run_ctx)
         run_context_payload = dict(frozen_ctx.__dict__)
         run_context_payload["canonical_grade_requested"] = run_context_payload.pop(

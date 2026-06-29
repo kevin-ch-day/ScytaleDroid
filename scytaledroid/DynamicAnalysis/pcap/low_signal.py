@@ -127,7 +127,71 @@ def compute_low_signal_for_run(
         package_name=package_name,
         run_profile=run_profile,
     )
-    return compute_low_signal_from_evidence_pack(run_dir, cfg=effective)
+    decision = compute_low_signal_from_evidence_pack(run_dir, cfg=effective)
+    if not isinstance(decision, dict):
+        return decision
+
+    reasons = list(decision.get("low_signal_reasons") or [])
+    if "DOMAINS_LOW" in reasons and _should_suppress_domains_low_for_messaging_call(
+        run_dir,
+        package_name=package_name,
+        run_profile=run_profile,
+    ):
+        reasons = [reason for reason in reasons if reason != "DOMAINS_LOW"]
+        decision["low_signal_reasons"] = reasons
+        decision["low_signal"] = bool(reasons)
+    return decision
+
+
+def _should_suppress_domains_low_for_messaging_call(
+    run_dir: Path,
+    *,
+    package_name: str | None,
+    run_profile: str | None,
+) -> bool:
+    pkg = str(package_name or "").strip().lower()
+    profile = str(run_profile or "").strip().lower()
+    if not profile.startswith("interaction"):
+        return False
+
+    messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
+    category = category_for_package(pkg) if pkg else None
+    if not (pkg in messaging_pkgs or category == "messaging"):
+        return False
+
+    manifest = _read_json(run_dir / "run_manifest.json") or {}
+    operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
+    activity = str(operator.get("messaging_activity") or "").strip().lower()
+    if activity not in {"voice_call", "video_call"}:
+        return False
+
+    pf = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
+    metrics = pf.get("metrics") if isinstance(pf.get("metrics"), dict) else {}
+    proxies = pf.get("proxies") if isinstance(pf.get("proxies"), dict) else {}
+
+    try:
+        packet_count = int(metrics.get("packet_count") or 0)
+    except Exception:
+        packet_count = 0
+    try:
+        duration_s = float(metrics.get("capture_duration_s") or 0.0)
+    except Exception:
+        duration_s = 0.0
+    try:
+        udp_ratio = float(proxies.get("udp_ratio") or 0.0)
+    except Exception:
+        udp_ratio = 0.0
+    try:
+        unique_dst_ip_count = int(proxies.get("unique_dst_ip_count") or 0)
+    except Exception:
+        unique_dst_ip_count = 0
+
+    return (
+        packet_count >= 3000
+        and duration_s >= 120.0
+        and udp_ratio >= 0.75
+        and unique_dst_ip_count >= 3
+    )
 
 
 def _effective_low_signal_config(

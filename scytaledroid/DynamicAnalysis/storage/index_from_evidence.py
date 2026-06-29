@@ -79,6 +79,85 @@ def _tracker_truth_for_run(dynamic_run_id: str, package_name: str) -> dict[str, 
     return None
 
 
+def _derived_dataset_truth(
+    ds: dict[str, Any],
+    tracker_truth: dict[str, Any] | None,
+) -> tuple[bool | None, bool | None, str | None]:
+    countable_source = (
+        tracker_truth.get("counts_toward_quota")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("counts_toward_quota") is not None
+        else ds.get("countable")
+    )
+    valid_dataset_source = (
+        tracker_truth.get("valid_dataset_run")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("valid_dataset_run") is not None
+        else ds.get("valid_dataset_run")
+    )
+    invalid_reason_source = (
+        tracker_truth.get("invalid_reason_code")
+        if isinstance(tracker_truth, dict) and "invalid_reason_code" in tracker_truth
+        else ds.get("invalid_reason_code")
+    )
+    if not invalid_reason_source and valid_dataset_source is True and countable_source is False:
+        invalid_reason_source = ds.get("paper_exclusion_primary_reason_code")
+    invalid_reason_text = str(invalid_reason_source or "").strip() or None
+    return countable_source, valid_dataset_source, invalid_reason_text
+
+
+def _derived_low_signal_truth(
+    run_dir: Path,
+    *,
+    package_name: str,
+    run_profile: str | None,
+    ds: dict[str, Any],
+    tracker_truth: dict[str, Any] | None,
+) -> tuple[bool | None, list[str]]:
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_for_run
+
+        derived = compute_low_signal_for_run(
+            run_dir,
+            package_name=package_name,
+            run_profile=run_profile,
+        )
+    except Exception:
+        derived = None
+
+    if isinstance(derived, dict):
+        low_signal = (
+            True
+            if derived.get("low_signal") is True
+            else (False if derived.get("low_signal") is False else None)
+        )
+        reasons = (
+            list(derived.get("low_signal_reasons"))
+            if isinstance(derived.get("low_signal_reasons"), list)
+            else []
+        )
+        return low_signal, reasons
+
+    if isinstance(tracker_truth, dict) and tracker_truth.get("low_signal") is not None:
+        low_signal = True if tracker_truth.get("low_signal") is True else False
+        reasons = (
+            list(tracker_truth.get("low_signal_reasons"))
+            if isinstance(tracker_truth.get("low_signal_reasons"), list)
+            else []
+        )
+        return low_signal, reasons
+
+    low_signal = (
+        True
+        if ds.get("low_signal") is True
+        else (False if ds.get("low_signal") is False else None)
+    )
+    reasons = (
+        list(ds.get("low_signal_reasons"))
+        if isinstance(ds.get("low_signal_reasons"), list)
+        else []
+    )
+    return low_signal, reasons
+
+
 def _ensure_dynamic_network_features_columns() -> None:
     """Best-effort migration for derived/index-only columns.
 
@@ -222,21 +301,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         except Exception:
             return None
 
-    countable_source = (
-        tracker_truth.get("counts_toward_quota")
-        if isinstance(tracker_truth, dict) and tracker_truth.get("counts_toward_quota") is not None
-        else ds.get("countable")
-    )
-    valid_dataset_source = (
-        tracker_truth.get("valid_dataset_run")
-        if isinstance(tracker_truth, dict) and tracker_truth.get("valid_dataset_run") is not None
-        else ds.get("valid_dataset_run")
-    )
-    invalid_reason_source = (
-        tracker_truth.get("invalid_reason_code")
-        if isinstance(tracker_truth, dict) and "invalid_reason_code" in tracker_truth
-        else ds.get("invalid_reason_code")
-    )
+    countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(ds, tracker_truth)
 
     return {
         "dynamic_run_id": rid,
@@ -250,7 +315,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "tier": str(ds.get("tier") or "") or None,
         "countable": 1 if countable_source is True else (0 if countable_source is False else None),
         "valid_dataset_run": 1 if valid_dataset_source is True else (0 if valid_dataset_source is False else None),
-        "invalid_reason_code": str(invalid_reason_source or "") or None,
+        "invalid_reason_code": invalid_reason_source,
         "duration_seconds": int(ds.get("duration_seconds") or 0) or None,
         "sampling_rate_s": sampling_rate_s_int,
         "started_at_utc": _to_mysql_dt(mf.get("started_at")),
@@ -491,20 +556,13 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     elif isinstance(qual.get("feature_schema_version"), str) and qual.get("feature_schema_version").strip():
         schema_ver = qual.get("feature_schema_version").strip()
 
-    countable_source = (
-        tracker_truth.get("counts_toward_quota")
-        if isinstance(tracker_truth, dict) and tracker_truth.get("counts_toward_quota") is not None
-        else ds.get("countable")
-    )
-    valid_dataset_source = (
-        tracker_truth.get("valid_dataset_run")
-        if isinstance(tracker_truth, dict) and tracker_truth.get("valid_dataset_run") is not None
-        else ds.get("valid_dataset_run")
-    )
-    invalid_reason_source = (
-        tracker_truth.get("invalid_reason_code")
-        if isinstance(tracker_truth, dict) and "invalid_reason_code" in tracker_truth
-        else ds.get("invalid_reason_code")
+    countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(ds, tracker_truth)
+    low_signal_source, low_signal_reasons = _derived_low_signal_truth(
+        run_dir,
+        package_name=pkg,
+        run_profile=run_profile,
+        ds=ds,
+        tracker_truth=tracker_truth,
     )
 
     return {
@@ -514,14 +572,10 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         "interaction_level": interaction_level,
         "tier": str(ds.get("tier") or "") or None,
         "valid_dataset_run": 1 if valid_dataset_source is True else (0 if valid_dataset_source is False else None),
-        "invalid_reason_code": str(invalid_reason_source or "") or None,
+        "invalid_reason_code": invalid_reason_source,
         "countable": 1 if countable_source is True else (0 if countable_source is False else None),
-        "low_signal": 1 if ds.get("low_signal") is True else (0 if ds.get("low_signal") is False else None),
-        "low_signal_reasons_json": (
-            json.dumps(ds.get("low_signal_reasons"), sort_keys=True)
-            if isinstance(ds.get("low_signal_reasons"), list)
-            else None
-        ),
+        "low_signal": 1 if low_signal_source is True else (0 if low_signal_source is False else None),
+        "low_signal_reasons_json": json.dumps(low_signal_reasons, sort_keys=True),
         "min_pcap_bytes": int(ds.get("min_pcap_bytes") or 0) or None,
         "min_duration_s": int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120)),
         "feature_schema_version": schema_ver or "v1",

@@ -43,9 +43,17 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 def generate_report(*, packages: list[str] | None = None, output_dir: Path | None = None) -> dict[str, Any]:
     from scytaledroid.Database.db_core import db_queries as core_q
     from scytaledroid.DynamicAnalysis.service_context import resolve_service_for_domain
+    from scytaledroid.DynamicAnalysis.service_context import (
+        default_service_catalog_seed_rows,
+        default_service_domain_map_seed_rows,
+    )
     from scytaledroid.DynamicAnalysis.service_signals import (
         default_service_signal_map_seed_rows,
         default_signal_catalog_seed_rows,
+    )
+    from scripts.db._dynamic_service_seed_overlay import (
+        merge_missing_seed_service_maps,
+        merge_missing_seed_services,
     )
 
     package_filters = [str(value or "").strip().lower() for value in (packages or []) if str(value or "").strip()]
@@ -167,6 +175,8 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
         query_name="dynamic.service_signals.report.service_signal_maps",
     ) or []
 
+    service_rows = merge_missing_seed_services(service_rows, default_service_catalog_seed_rows())
+    service_map_rows = merge_missing_seed_service_maps(service_map_rows, default_service_domain_map_seed_rows())
     signal_rows = _merge_missing_seed_signals(signal_rows, default_signal_catalog_seed_rows())
     service_signal_rows = _merge_missing_seed_service_signal_maps(
         service_signal_rows,

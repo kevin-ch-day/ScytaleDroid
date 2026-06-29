@@ -41,3 +41,19 @@ def test_summarize_pcap_service_context_returns_no_observations_when_empty() -> 
     bundle = summarize_pcap_service_context({}, package_name="bbc.mobile.news.ww")
     assert bundle["service_context"]["status"] == "no_observations"
     assert bundle["service_signals"]["status"] == "no_observations"
+
+
+def test_summarize_pcap_service_context_maps_whatsapp_platform_signal() -> None:
+    report = {
+        "top_dns": [
+            {"value": "g.whatsapp.net", "count": 2},
+        ],
+        "top_sni": [],
+    }
+
+    bundle = summarize_pcap_service_context(report, package_name="com.whatsapp")
+    service_signals = bundle["service_signals"]
+
+    assert service_signals["status"] == "ok"
+    signal_keys = [row["signal_key"] for row in service_signals["signals"]]
+    assert "first_party_social_platform" in signal_keys

@@ -19,6 +19,13 @@ def test_format_text_report_includes_sections() -> None:
         "recent_days_window": 7,
         "old_days_threshold": 90,
         "run_type_filter": None,
+        "summary_counts": {
+            "total_rows": 105,
+            "linked_keep_rows": 100,
+            "safe_prune_candidate_rows": 5,
+            "review_or_blocked_rows": 0,
+            "other_rows": 0,
+        },
         "totals_by_category": [
             {
                 "cleanup_category": "linked_keep",
@@ -73,6 +80,8 @@ def test_format_text_report_includes_sections() -> None:
         },
     }
     text = format_text_report(data)
+    assert "## Summary" in text
+    assert "safe_prune_candidate_rows=5" in text
     assert "cleanup candidates (read-only)" in text
     assert "linked_keep" in text
     assert "dangling_db_only_candidate" in text
@@ -86,6 +95,7 @@ def test_format_text_report_includes_sections() -> None:
     assert "blocked session stamps: 20260430-all-full" in text
     assert "artifact_registry.session_stamp is now the preferred static session marker" in text
     assert "prune_artifact_registry_dangling.py" in text
+    assert "report_artifact_registry_static_detached.py" in text
     assert "prune_artifact_registry_static_detached.py" in text
 
 
@@ -137,6 +147,9 @@ def test_collect_cleanup_candidate_report_queries(monkeypatch: pytest.MonkeyPatc
     )
 
     out = collect_cleanup_candidate_report(fake_run_sql, path_sample_limit=0)
+    assert out["summary_counts"]["total_rows"] == 3
+    assert out["summary_counts"]["linked_keep_rows"] == 3
+    assert out["summary_counts"]["safe_prune_candidate_rows"] == 0
     assert out["totals_by_category"][0]["row_count"] == 3
     assert out["summary_dimensions"][0]["artifact_type"] == "static_report"
     assert out["path_probe"] is None

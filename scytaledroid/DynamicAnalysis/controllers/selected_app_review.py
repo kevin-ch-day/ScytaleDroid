@@ -7,6 +7,26 @@ from typing import Any, Callable
 from scytaledroid.DynamicAnalysis.services.dynamic_target_state import derive_dynamic_target_state
 
 
+def _dataset_impact_label(latest_recent: Any) -> str:
+    valid = getattr(latest_recent, "valid", None)
+    if valid is True:
+        supplemental_reason = str(getattr(latest_recent, "supplemental_reason", "") or "").strip().upper()
+        if supplemental_reason == "LOW_SIGNAL_IDLE":
+            return "supplemental (LOW_SIGNAL_IDLE)"
+        if supplemental_reason == "MANUAL_EXTRA_RUN":
+            return "supplemental (manual extra)"
+        if supplemental_reason == "SCRIPTED_EXTRA_RUN":
+            return "supplemental (scripted extra)"
+        if supplemental_reason == "EXTRA_RUN":
+            return "supplemental (EXTRA_RUN)"
+        if getattr(latest_recent, "countable", None) is True:
+            return "quota-counted"
+        return "valid retained"
+    if valid is False:
+        return "excluded from quota/publication"
+    return "unknown"
+
+
 def _next_step_lines(*, valid: bool | None, invalid_reason: str) -> list[str]:
     reason = str(invalid_reason or "").strip().upper()
     if valid is True:
@@ -71,6 +91,7 @@ def render_selected_app_review(
     rows = [
         ["Run ID", run_id or "—"],
         ["QA status", qa_status],
+        ["Dataset impact", _dataset_impact_label(latest_recent)],
         ["Profile", run_profile_label_fn(getattr(latest_recent, "run_profile", None))],
         ["Ended", str(getattr(latest_recent, "ended_at", None) or "—")],
         ["Invalid reason", invalid_reason or "—"],
@@ -126,10 +147,11 @@ def render_selected_app_recent_runs(
                 str(getattr(row, "ended_at", None) or "—"),
                 run_profile_label_fn(getattr(row, "run_profile", None)),
                 qa_label,
+                _dataset_impact_label(row),
                 str(getattr(row, "run_id", None) or "—"),
             ]
         )
-    menu_utils.print_table(["#", "Ended", "Profile", "QA", "Run ID"], rows)
+    menu_utils.print_table(["#", "Ended", "Profile", "QA", "Dataset", "Run ID"], rows)
     if int(getattr(state, "baseline_idle_pcap_missing_streak", 0) or 0) > 0:
         print(
             status_messages.status(
@@ -201,6 +223,28 @@ def render_selected_app_diagnostics(
         ["Evidence lineage state", str(getattr(state, "evidence_status", "unknown") or "unknown")],
         ["Workflow state", str(getattr(state, "state_status", "unknown") or "unknown")],
         ["Local evidence packs", str(int(getattr(state, "local_evidence_dir_count", 0) or 0))],
+        [
+            "Quota-counted baseline",
+            f"{int(getattr(state.counts, 'baseline_valid_runs', 0) or 0)} / {int(getattr(state, 'baseline_required', 0) or 0)}",
+        ],
+        [
+            "Quota-counted interactive",
+            f"{int(getattr(state.counts, 'interactive_valid_runs', 0) or 0)} / {int(getattr(state, 'interactive_required', 0) or 0)}",
+        ],
+        [
+            "Supplemental baseline",
+            (
+                f"extra={int(getattr(state.counts, 'baseline_extra_valid', 0) or 0)}"
+                f" | low-signal={int(getattr(state.counts, 'baseline_low_signal_valid', 0) or 0)}"
+            ),
+        ],
+        [
+            "Supplemental interactive",
+            (
+                f"extra={int(getattr(state.counts, 'interactive_extra_valid', 0) or 0)}"
+                f" | low-signal={int(getattr(state.counts, 'interactive_low_signal_valid', 0) or 0)}"
+            ),
+        ],
         ["Quota-valid local runs", str(int(getattr(state, "quota_counted_local", 0) or 0))],
         ["Paper-eligible local runs", str(int(getattr(state, "paper_eligible_local", 0) or 0))],
         ["DB current-build evidence", str(int(db_active_sessions))],

@@ -7,7 +7,7 @@ from scytaledroid.DynamicAnalysis import menu_selection
 
 class _Cfg:
     baseline_required = 3
-    interactive_required = 2
+    interactive_required = 4
 
 
 def test_build_package_selection_row_accepts_live_build_drift_for_refresh_action() -> None:
@@ -52,13 +52,13 @@ def test_build_package_selection_row_accepts_live_build_drift_for_refresh_action
         build_scoped_dataset_counts_fn=lambda _package, _runs, cfg: {
             "baseline_countable": 3,
             "baseline_extra": 0,
-            "interactive_countable": 2,
+            "interactive_countable": 4,
             "interactive_extra": 0,
             "legacy_valid": 0,
             "legacy_builds": 0,
             "active_version_code": "19127521",
             "active_base_sha": "abc123",
-            "technical_valid_active": 5,
+            "technical_valid_active": 7,
         },
         resolve_tracker_run_identity_fn=lambda _package, run: (
             str(run.get("version_code") or "") or None,

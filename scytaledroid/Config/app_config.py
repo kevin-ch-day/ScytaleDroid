@@ -51,7 +51,7 @@ except Exception:
 # Quotas are a methods-level contract and must not be overridden via environment variables
 # in dataset-tier collection paths (prevents accidental scope creep).
 DYNAMIC_DATASET_BASELINE_RUNS = 3
-DYNAMIC_DATASET_INTERACTIVE_RUNS = 2
+DYNAMIC_DATASET_INTERACTIVE_RUNS = 4
 # Recommended baseline replicates for exploratory robustness (does not change
 # paper cohort quota/freeze contract unless baseline quota is explicitly changed).
 DYNAMIC_DATASET_BASELINE_RECOMMENDED_RUNS = 3

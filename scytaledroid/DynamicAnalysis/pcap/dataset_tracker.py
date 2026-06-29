@@ -28,7 +28,7 @@ MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
 SHORT_RUN_TOLERANCE_SECONDS = 2.0
 BASELINE_REQUIRED = 3
-INTERACTION_REQUIRED = 2
+INTERACTION_REQUIRED = 4
 TOTAL_REQUIRED_PER_APP = BASELINE_REQUIRED + INTERACTION_REQUIRED
 
 
@@ -697,6 +697,7 @@ def _apply_quota_marking(
         # non-invalidating tag (and baseline_connected is required for messaging apps).
         prof_lc = str(r.get("run_profile") or "").strip().lower()
         if is_valid and prof_lc == "baseline_idle" and bool(r.get("low_signal")):
+            r["extra_run"] = 1
             is_valid = False
         if not is_valid:
             continue

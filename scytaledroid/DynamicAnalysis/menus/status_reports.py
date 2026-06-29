@@ -394,14 +394,14 @@ def render_cohort_status_details(
     quota_counted = int(evidence_summary.get("quota_runs_counted", 0))
     quota_remaining = max(0, int(expected_runs) - quota_counted)
     baseline_remaining = sum(max(0, int(getattr(row, "need_baseline", 0))) for row in row_models)
-    manual_remaining = sum(max(0, int(getattr(row, "need_interactive", 0))) for row in row_models)
+    interactive_remaining = sum(max(0, int(getattr(row, "need_interactive", 0))) for row in row_models)
     static_refresh_needed = sum(1 for row in row_models if bool(getattr(row, "live_build_drift", False)))
     print("Progress")
     print(f"  Apps complete         : {int(evidence_summary.get('apps_satisfied', 0))} / {dataset_apps_total}")
     print(f"  Quota-valid remaining : {quota_remaining}")
     print(f"  Static refresh needed : {static_refresh_needed}")
     print(f"  Baseline runs needed  : {baseline_remaining}")
-    print(f"  Manual runs needed    : {manual_remaining}")
+    print(f"  Interactive needed    : {interactive_remaining}")
     print(
         "  Archive readiness    : "
         + ("ready" if int(evidence_summary.get("apps_satisfied", 0)) >= int(dataset_apps_total) and quota_counted >= int(expected_runs) else "blocked")
@@ -425,7 +425,7 @@ def render_cohort_status_details(
         print(f"  Current-build DB-only : {current_build_db_only_count}")
     print(f"  Active-build counted  : {dataset_valid_runs_total} / {expected_runs}")
     print(f"  Baseline target       : {baseline_required} per app")
-    print(f"  Manual target         : {interactive_required} per app")
+    print(f"  Interactive target    : {interactive_required} per app")
     if (
         historical_valid_runs_total > 0
         or historical_build_count_total > 0
@@ -467,8 +467,12 @@ def render_cohort_build_history(row_models: list[object], build_rows: list[list[
         reason, notes = _history_reason_and_notes(row)
         if int(getattr(row, "baseline_extra", 0)) > 0:
             notes.append("extra baseline outside quota")
+        if int(getattr(row, "baseline_low_signal_supplemental", 0)) > 0:
+            notes.append("low-signal baseline retained")
         if int(getattr(row, "interactive_extra", 0)) > 0:
-            notes.append("extra manual outside quota")
+            notes.append("extra interactive outside quota")
+        if int(getattr(row, "interactive_low_signal_supplemental", 0)) > 0:
+            notes.append("low-signal interactive retained")
         if int(getattr(row, "historical_valid_runs_count", 0)) > 0:
             notes.append("legacy evidence present")
         if str(getattr(row, "lineage_state", "")) == "historical_db_only":
@@ -494,13 +498,13 @@ def render_cohort_build_history(row_models: list[object], build_rows: list[list[
                     required=3,
                     missing=getattr(row, "need_baseline", 0),
                 ),
-                "manual": (
+                "interactive": (
                     "locked"
                     if int(getattr(row, "need_baseline", 0)) > 0
                     else _history_progress_label(
                         getattr(row, "interactive_countable", 0),
                         getattr(row, "interactive_extra", 0),
-                        required=2,
+                        required=int(getattr(row, "interactive_required", 4) or 4),
                         missing=getattr(row, "need_interactive", 0),
                     )
                 ),
@@ -546,28 +550,25 @@ def _history_reason_and_notes(row: object) -> tuple[str, list[str]]:
 def render_cohort_status_help() -> None:
     print()
     menu_utils.print_header("Help", "Queue legend")
-    print("Status   = workflow state only: complete, review, manual, baseline, restore, refresh, legacy, or blocked.")
-    print("Need     = current blocker or gap: review, base 0/3, manual 0/2, current, local+curr, refresh, or local pack.")
-    print("Baseline Runs    = baseline-side valid runs shown as a raw count against the total run target; + extra rolls into the displayed count.")
-    print("Interactive Runs = scripted/manual runs combined for planning; detailed run type remains in history/diagnostics.")
-    print("Build    = build posture for this app in the queue: current, legacy, drift, or unknown.")
-    print("QA       = latest QA badge: ✓, inv, +id, +L, +id+L, or —.")
-    print("Action   = recommended operator move: baseline, interactive, review, refresh, or restore.")
-    print("locked   = manual phase unavailable until baseline minimum is met.")
+    print("Status      = workflow state only: complete, review, interactive, baseline, restore, refresh, or blocked.")
+    print("Baseline    = countable + supplemental baseline runs shown against the baseline target.")
+    print("Interactive = scripted/manual runs combined for planning; detailed run type remains in history/diagnostics.")
+    print("Target      = active target posture in the queue: current, refresh, or unknown.")
+    print("Action      = recommended operator move: baseline, interactive, review, refresh, or restore.")
+    print("+ extra  = additional valid runs retained after the minimum target is already met.")
+    print("locked   = interactive phase unavailable until baseline minimum is met.")
     print("mixed    = current-build and legacy-build evidence both exist.")
     print("refresh  = installed app build differs from the newest static plan. Refresh harvest/static before continuing dataset-mode dynamic capture for this app.")
-    print("drift    = build posture for a refresh-blocked app; harvest/static refresh is required before dynamic continuation.")
+    print("refresh target = installed build differs from the newest static plan; harvest/static refresh is required before dynamic continuation.")
     print("identity mismatch = latest valid run does not match the active build identity; review historical vs current evidence carefully.")
     print("baseline gap = baseline minimum is not met yet for quota/publication use.")
-    print("manual gap   = baseline is complete, but interactive quota is still missing.")
+    print("interactive gap = baseline is complete, but interactive quota is still missing.")
     print("refresh steps: harvest current APK(s), rerun static for that build, regenerate the newest plan, then return to the queue.")
-    print("Detailed local/db/history evidence lineage moved to diagnostics and run history.")
+    print("Detailed local/db/history evidence lineage and QA badges moved to diagnostics and run history.")
     print("db-only  = evidence exists in stored history/DB context but no local pack is present in this workspace.")
-    print("Build=legacy + Evidence=db-only = historical-only context; recollect on the installed build.")
-    print("Build=current + Evidence=db-only = current-build run context is stored, but the local evidence pack is not present here.")
+    print("Current target + DB-only evidence = current-build run context is stored, but the local evidence pack is not present here.")
     print("+L       = latest QA valid, legacy evidence also exists.")
-    print("Status is workflow state only; Build and QA are separate displayed dimensions.")
-    print("Need explains why the app is not done; Action is the recommended next operation.")
+    print("Status is workflow state only; historical lineage stays in Notes/Diagnostics.")
     print("Evidence-authoritative quota = archive/freeze truth.")
     print("Tracker-scoped latest-run state = queue-operating view of the active build.")
     prompt_utils.press_enter_to_continue()
@@ -578,7 +579,7 @@ def render_cohort_status_debug(rows: list[list[str]], row_models: list[object]) 
     menu_utils.print_header("Diagnostics", "Dense raw/debug view; lower-level tracker and queue fields")
     print("This view preserves lower-level queue fields for debugging and the tracker-scoped latest-run state.")
     table_utils.render_table(
-        ["#", "App", "Baseline", "Manual", "Need", "Next Action", "Build", "Quota", "Legacy", "Last QA"],
+        ["#", "App", "Baseline", "Interactive", "Need", "Next Action", "Build", "Quota", "Legacy", "Last QA"],
         rows,
         compact=False,
     )
@@ -627,8 +628,10 @@ def render_cohort_status_debug(rows: list[list[str]], row_models: list[object]) 
                 getattr(row, "display_name", "—"),
                 str(getattr(row, "baseline_countable", 0)),
                 str(getattr(row, "baseline_extra", 0)),
+                str(getattr(row, "baseline_low_signal_supplemental", 0)),
                 str(getattr(row, "interactive_countable", 0)),
                 str(getattr(row, "interactive_extra", 0)),
+                str(getattr(row, "interactive_low_signal_supplemental", 0)),
                 str(getattr(row, "historical_valid_runs_count", 0)),
                 str(getattr(row, "historical_build_count", 0)),
                 str(getattr(row, "need_baseline", 0)),
@@ -640,7 +643,22 @@ def render_cohort_status_debug(rows: list[list[str]], row_models: list[object]) 
             for row in row_models
         ]
         table_utils.render_table(
-            ["App", "Base ct", "Base ex", "Manual ct", "Manual ex", "Legacy", "L builds", "Need B", "Need M", "Lineage", "DB active", "DB hist"],
+            [
+                "App",
+                "Base ct",
+                "Base ex",
+                "Base low",
+                "Inter ct",
+                "Inter ex",
+                "Inter low",
+                "Legacy",
+                "L builds",
+                "Need B",
+                "Need I",
+                "Lineage",
+                "DB active",
+                "DB hist",
+            ],
             raw_rows,
             compact=True,
         )
@@ -663,7 +681,7 @@ def _diagnostic_status_label(row: object) -> str:
     if need_baseline > 0:
         return "baseline"
     if need_interactive > 0:
-        return "manual"
+        return "interactive"
     return "complete"
 
 
@@ -696,7 +714,7 @@ def _render_history_summary_table(rows: list[dict[str, str]]) -> None:
     col_widths = {
         "app": 18,
         "baseline": 17,
-        "manual": 15,
+        "interactive": 15,
         "prep": 8,
         "qa": 11,
     }
@@ -706,7 +724,7 @@ def _render_history_summary_table(rows: list[dict[str, str]]) -> None:
         - (
             col_widths["app"]
             + col_widths["baseline"]
-            + col_widths["manual"]
+            + col_widths["interactive"]
             + col_widths["prep"]
             + col_widths["qa"]
             + 5
@@ -715,7 +733,7 @@ def _render_history_summary_table(rows: list[dict[str, str]]) -> None:
     print(
         f"{'App':<{col_widths['app']}} "
         f"{'Baseline':<{col_widths['baseline']}} "
-        f"{'Manual':<{col_widths['manual']}} "
+        f"{'Interactive':<{col_widths['interactive']}} "
         f"{'Prep':<{col_widths['prep']}} "
         f"{'QA':<{col_widths['qa']}} "
         f"{'Notes'}"
@@ -723,7 +741,7 @@ def _render_history_summary_table(rows: list[dict[str, str]]) -> None:
     print(
         f"{'-' * col_widths['app']} "
         f"{'-' * col_widths['baseline']} "
-        f"{'-' * col_widths['manual']} "
+        f"{'-' * col_widths['interactive']} "
         f"{'-' * col_widths['prep']} "
         f"{'-' * col_widths['qa']} "
         f"{'-' * min(note_width, 32)}"
@@ -739,7 +757,7 @@ def _render_history_summary_table(rows: list[dict[str, str]]) -> None:
         print(
             f"{_truncate_cell(row.get('app'), col_widths['app']):<{col_widths['app']}} "
             f"{_truncate_cell(row.get('baseline'), col_widths['baseline']):<{col_widths['baseline']}} "
-            f"{_truncate_cell(row.get('manual'), col_widths['manual']):<{col_widths['manual']}} "
+            f"{_truncate_cell(row.get('interactive'), col_widths['interactive']):<{col_widths['interactive']}} "
             f"{_truncate_cell(row.get('prep'), col_widths['prep']):<{col_widths['prep']}} "
             f"{_truncate_cell(row.get('qa'), col_widths['qa']):<{col_widths['qa']}} "
             f"{first_line}"
@@ -748,7 +766,7 @@ def _render_history_summary_table(rows: list[dict[str, str]]) -> None:
             print(
                 f"{'':<{col_widths['app']}} "
                 f"{'':<{col_widths['baseline']}} "
-                f"{'':<{col_widths['manual']}} "
+                f"{'':<{col_widths['interactive']}} "
                 f"{'':<{col_widths['prep']}} "
                 f"{'':<{col_widths['qa']}} "
                 f"{continuation}"
