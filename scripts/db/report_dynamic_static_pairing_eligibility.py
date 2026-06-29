@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         base_hash = _norm_sha(row.get("base_apk_sha256"))
         recovery_action = recovery_actions.get((package, base_hash))
         classification = _classify_session(row, recovery_action=recovery_action)
-        dataset_use = _dataset_use_for_classification(classification)
+        dataset_use = _dataset_use_for_session(row, classification=classification)
         sessions.append(
             {
                 "dynamic_run_id": row.get("dynamic_run_id"),
@@ -103,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
                 "started_at_utc": _stringify(row.get("started_at_utc")),
                 "status": row.get("status"),
                 "valid_dataset_run": row.get("valid_dataset_run"),
+                "countable": row.get("countable"),
+                "technical_validity_state": row.get("technical_validity_state"),
+                "quota_state": row.get("quota_state"),
+                "cohort_eligibility_state": row.get("cohort_eligibility_state"),
+                "cohort_paper_eligible": row.get("cohort_paper_eligible"),
+                "low_signal": row.get("low_signal"),
                 "paired_exact_static": bool(row.get("linked_exact_static")),
                 "exact_static_available": bool(row.get("unlinked_exact_static_available")),
                 "recovery_action": recovery_action,
@@ -127,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
             "This report is read-only; it does not update dynamic_sessions.static_run_id.",
             "Exact paired analysis requires a completed canonical identity-valid static run for the same base_apk_sha256.",
             "Rows classified historical_identity_only, restore_required, or unrecoverable_without_archive need external APK bytes before exact static analysis can run.",
+            "recommended_dataset_use prefers normalized governance from v_dynamic_run_context_v1 when available.",
         ],
     }
     if args.json:
@@ -152,55 +159,100 @@ def _fetch_dynamic_sessions(
         package_filter = "AND LOWER(TRIM(ds.package_name)) = %s"
         params.append(str(package_name).strip().lower())
     params.append(limit)
-    return list(
-        core_q.run_sql(
-            f"""
-            SELECT
-              ds.dynamic_run_id,
-              LOWER(TRIM(ds.package_name)) AS package_name,
-              ds.version_code,
-              ds.version_name,
-              LOWER(TRIM(ds.base_apk_sha256)) AS base_apk_sha256,
-              {resolved_static_run_expr} AS static_run_id,
-              ds.status,
-              ds.valid_dataset_run,
-              ds.started_at_utc,
-              CASE
-                WHEN {resolved_static_run_expr} IS NOT NULL
-                 AND EXISTS (
-                   SELECT 1
-                   FROM static_analysis_runs sar
-                    WHERE sar.id = {resolved_static_run_expr}
-                      AND {hash_eq_ds_sar}
-                      AND {sar_qualifying_sql}
-                  )
-                THEN 1 ELSE 0
-              END AS linked_exact_static,
-              CASE
-                WHEN {resolved_static_run_expr} IS NULL
-                 AND ds.base_apk_sha256 IS NOT NULL
-                 AND TRIM(ds.base_apk_sha256) <> ''
-                 AND EXISTS (
-                   SELECT 1
-                   FROM static_analysis_runs sar
-                   WHERE {hash_eq_ds_sar}
-                     AND {sar_qualifying_sql}
-                 )
-                THEN 1 ELSE 0
-              END AS unlinked_exact_static_available
-            FROM dynamic_sessions ds
-            WHERE 1=1
-              {package_filter}
-            ORDER BY ds.started_at_utc DESC, ds.dynamic_run_id
-            LIMIT %s
-            """,
-            tuple(params),
-            fetch="all",
-            dictionary=True,
-            query_name="report_dynamic_static_pairing_eligibility.dynamic_sessions",
-        )
-        or []
-    )
+    base_select = f"""
+        SELECT
+          ds.dynamic_run_id,
+          LOWER(TRIM(ds.package_name)) AS package_name,
+          ds.version_code,
+          ds.version_name,
+          LOWER(TRIM(ds.base_apk_sha256)) AS base_apk_sha256,
+          {resolved_static_run_expr} AS static_run_id,
+          ds.status,
+          {{valid_dataset_run_expr}} AS valid_dataset_run,
+          {{countable_expr}} AS countable,
+          {{technical_validity_state_expr}} AS technical_validity_state,
+          {{quota_state_expr}} AS quota_state,
+          {{cohort_eligibility_state_expr}} AS cohort_eligibility_state,
+          {{cohort_paper_eligible_expr}} AS cohort_paper_eligible,
+          {{low_signal_expr}} AS low_signal,
+          ds.started_at_utc,
+          CASE
+            WHEN {resolved_static_run_expr} IS NOT NULL
+             AND EXISTS (
+               SELECT 1
+               FROM static_analysis_runs sar
+                WHERE sar.id = {resolved_static_run_expr}
+                  AND {hash_eq_ds_sar}
+                  AND {sar_qualifying_sql}
+              )
+            THEN 1 ELSE 0
+          END AS linked_exact_static,
+          CASE
+            WHEN {resolved_static_run_expr} IS NULL
+             AND ds.base_apk_sha256 IS NOT NULL
+             AND TRIM(ds.base_apk_sha256) <> ''
+             AND EXISTS (
+               SELECT 1
+               FROM static_analysis_runs sar
+               WHERE {hash_eq_ds_sar}
+                 AND {sar_qualifying_sql}
+             )
+            THEN 1 ELSE 0
+          END AS unlinked_exact_static_available
+        FROM dynamic_sessions ds
+        {{run_context_join}}
+        WHERE 1=1
+          {package_filter}
+        ORDER BY ds.started_at_utc DESC, ds.dynamic_run_id
+        LIMIT %s
+    """
+    queries = [
+        (
+            base_select.format(
+                valid_dataset_run_expr="ctx.valid_dataset_run",
+                countable_expr="ctx.countable",
+                technical_validity_state_expr="ctx.technical_validity_state",
+                quota_state_expr="ctx.quota_state",
+                cohort_eligibility_state_expr="ctx.cohort_eligibility_state",
+                cohort_paper_eligible_expr="ctx.cohort_paper_eligible",
+                low_signal_expr="ctx.low_signal",
+                run_context_join="LEFT JOIN v_dynamic_run_context_v1 ctx ON ctx.dynamic_run_id = ds.dynamic_run_id",
+            ),
+            "report_dynamic_static_pairing_eligibility.dynamic_sessions.run_context",
+        ),
+        (
+            base_select.format(
+                valid_dataset_run_expr="ds.valid_dataset_run",
+                countable_expr="ds.countable",
+                technical_validity_state_expr="NULL",
+                quota_state_expr="NULL",
+                cohort_eligibility_state_expr="NULL",
+                cohort_paper_eligible_expr="NULL",
+                low_signal_expr="NULL",
+                run_context_join="",
+            ),
+            "report_dynamic_static_pairing_eligibility.dynamic_sessions",
+        ),
+    ]
+    last_exc: Exception | None = None
+    for sql, query_name in queries:
+        try:
+            return list(
+                core_q.run_sql(
+                    sql,
+                    tuple(params),
+                    fetch="all",
+                    dictionary=True,
+                    query_name=query_name,
+                )
+                or []
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        raise last_exc
+    return []
 
 
 def _build_recovery_action_map(
@@ -286,6 +338,29 @@ def _dataset_use_for_classification(classification: str) -> str:
     }.get(classification, "dynamic_only")
 
 
+def _dataset_use_for_session(row: dict[str, Any], *, classification: str) -> str:
+    technical_state = _norm_text(row.get("technical_validity_state")).upper()
+    quota_state = _norm_text(row.get("quota_state")).upper()
+
+    if technical_state == "TECH_INVALID":
+        return "exclude_invalid_dynamic"
+    if technical_state == "TECH_LEGACY_UNKNOWN" or quota_state == "QUOTA_LEGACY_UNKNOWN":
+        return "exclude_legacy_dynamic_unknown"
+
+    if classification == "paired_exact_static":
+        if quota_state == "QUOTA_VALID":
+            return "strict_static_dynamic_pair"
+        if quota_state == "SUPPLEMENTAL_VALID":
+            return "paired_static_dynamic_supplemental_only"
+    if classification == "unpaired_exact_static_available":
+        if quota_state == "QUOTA_VALID":
+            return "strict_static_dynamic_pair_after_link_preview"
+        if quota_state == "SUPPLEMENTAL_VALID":
+            return "paired_static_dynamic_supplemental_after_link_preview"
+
+    return _dataset_use_for_classification(classification)
+
+
 def _package_summary(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     packages: dict[str, dict[str, Any]] = {}
     for row in sessions:
@@ -303,9 +378,14 @@ def _package_summary(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "reharvest_required": 0,
                 "bytes_available_but_static_missing": 0,
                 "dynamic_only_valid": 0,
+                "strict_quota_valid_pairs": 0,
+                "strict_supplemental_pairs": 0,
+                "invalid_dynamic": 0,
+                "legacy_dynamic_unknown": 0,
             },
         )
         classification = str(row.get("classification") or "")
+        dataset_use = str(row.get("recommended_dataset_use") or "")
         bucket["dynamic_sessions"] += 1
         if classification == "paired_exact_static":
             bucket["paired_exact_static"] += 1
@@ -323,6 +403,14 @@ def _package_summary(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             bucket["bytes_available_but_static_missing"] += 1
         else:
             bucket["dynamic_only_valid"] += 1
+        if dataset_use in {"strict_static_dynamic_pair", "strict_static_dynamic_pair_after_link_preview"}:
+            bucket["strict_quota_valid_pairs"] += 1
+        elif dataset_use in {"paired_static_dynamic_supplemental_only", "paired_static_dynamic_supplemental_after_link_preview"}:
+            bucket["strict_supplemental_pairs"] += 1
+        elif dataset_use == "exclude_invalid_dynamic":
+            bucket["invalid_dynamic"] += 1
+        elif dataset_use == "exclude_legacy_dynamic_unknown":
+            bucket["legacy_dynamic_unknown"] += 1
     for bucket in packages.values():
         bucket["recommended_dataset_use"] = _package_dataset_use(bucket)
     return sorted(
@@ -332,6 +420,10 @@ def _package_summary(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _package_dataset_use(bucket: dict[str, Any]) -> str:
+    if int(bucket.get("legacy_dynamic_unknown") or 0) > 0:
+        return "exclude_legacy_dynamic_unknown"
+    if int(bucket.get("invalid_dynamic") or 0) > 0:
+        return "exclude_invalid_dynamic"
     if int(bucket.get("historical_identity_only") or 0) > 0:
         return "exclude_from_paired_analysis_missing_artifact"
     if int(bucket.get("unrecoverable_without_archive") or 0) > 0:
@@ -342,6 +434,8 @@ def _package_dataset_use(bucket: dict[str, Any]) -> str:
         return "reharvest_candidate"
     if int(bucket.get("bytes_available_but_static_missing") or 0) > 0:
         return "static_analysis_candidate"
+    if int(bucket.get("strict_supplemental_pairs") or 0) > 0:
+        return "paired_static_dynamic_supplemental_only"
     if int(bucket.get("unpaired_exact_static_available") or 0) > 0:
         return "strict_static_dynamic_pair_after_link_preview"
     if int(bucket.get("paired_exact_static") or 0) > 0:
@@ -402,6 +496,10 @@ def _print_text(payload: dict[str, Any]) -> None:
 
 def _norm_sha(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _safe_int(value: Any) -> int | None:

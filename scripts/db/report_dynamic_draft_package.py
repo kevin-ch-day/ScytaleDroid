@@ -31,6 +31,9 @@ X_TWITTER_ANCHOR = {
     "historical_delta_rdi": 0.8552,
 }
 
+BASELINE_REQUIRED = 3
+INTERACTIVE_REQUIRED = 4
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -124,6 +127,87 @@ def _interaction_label(run_profile: str) -> str:
     return "unknown"
 
 
+def _scenario_id(manifest: dict[str, Any]) -> str:
+    scenario = manifest.get("scenario") if isinstance(manifest.get("scenario"), dict) else {}
+    return _norm_text(scenario.get("id"))
+
+
+def _window_scores_expected_for_manifest(manifest: dict[str, Any]) -> bool:
+    scenario_id = _scenario_id(manifest).lower()
+    if scenario_id in {"paper3_profile_v3", "profile_v3_phase2_capture"}:
+        return True
+    return scenario_id.startswith("profile_v3")
+
+
+def _evidence_governance_class(
+    *,
+    valid_dataset_run: bool | None,
+    countable: bool | None,
+    low_signal: bool,
+    paper_eligible: bool | None,
+    cohort_eligibility: str,
+) -> str:
+    if valid_dataset_run is not True:
+        return "INVALID_OR_EXCLUDED"
+    if countable is True:
+        return "COUNTABLE"
+    if paper_eligible is False or cohort_eligibility.upper() == "EXCLUDED":
+        return "SUPPLEMENTAL_NONPAPER"
+    if low_signal:
+        return "SUPPLEMENTAL_LOW_SIGNAL"
+    return "SUPPLEMENTAL_EXTRA"
+
+
+def _evidence_governance_class_from_db(
+    *,
+    quota_state: str,
+    technical_validity_state: str,
+    valid_dataset_run: bool | None,
+    countable: bool | None,
+    low_signal: bool,
+    paper_eligible: bool | None,
+    cohort_eligibility: str,
+) -> str:
+    quota_state_norm = _norm_text(quota_state).upper()
+    technical_state_norm = _norm_text(technical_validity_state).upper()
+    if technical_state_norm == "TECH_INVALID":
+        return "INVALID_OR_EXCLUDED"
+    if technical_state_norm == "TECH_VALID":
+        if quota_state_norm == "QUOTA_VALID":
+            return "COUNTABLE"
+        if quota_state_norm == "SUPPLEMENTAL_VALID":
+            if paper_eligible is False or _norm_text(cohort_eligibility).upper() == "EXCLUDED":
+                return "SUPPLEMENTAL_NONPAPER"
+            if low_signal:
+                return "SUPPLEMENTAL_LOW_SIGNAL"
+            return "SUPPLEMENTAL_EXTRA"
+        if quota_state_norm == "QUOTA_INELIGIBLE":
+            return "INVALID_OR_EXCLUDED"
+    return _evidence_governance_class(
+        valid_dataset_run=valid_dataset_run,
+        countable=countable,
+        low_signal=low_signal,
+        paper_eligible=paper_eligible,
+        cohort_eligibility=cohort_eligibility,
+    )
+
+
+def _build_identity_key(row: Mapping[str, Any]) -> tuple[int, str, str]:
+    version_code_raw = _safe_int(row.get("version_code"))
+    version_code = version_code_raw if version_code_raw is not None else -1
+    base_sha = _norm_text(row.get("base_apk_sha256"))
+    version_name = _norm_text(row.get("version_name"))
+    return (version_code, base_sha, version_name)
+
+
+def _current_build_phase_status(*, baseline_countable: int, interactive_countable: int) -> tuple[str, str]:
+    if baseline_countable < BASELINE_REQUIRED:
+        return ("BASELINE_NEEDED", "baseline")
+    if interactive_countable < INTERACTIVE_REQUIRED:
+        return ("INTERACTIVE_NEEDED", "interactive")
+    return ("COMPLETE", "—")
+
+
 def _pcap_relpath(run_dir: Path, manifest: dict[str, Any]) -> str:
     artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), list) else []
     for artifact in artifacts:
@@ -202,6 +286,16 @@ def _load_app_labels(packages: set[str]) -> dict[str, str]:
     return out
 
 
+def _load_active_cohort_context() -> dict[str, Any]:
+    try:
+        from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_context
+
+        context = active_research_cohort_context()
+    except Exception:
+        context = {}
+    return dict(context) if isinstance(context, dict) else {}
+
+
 def _load_dynamic_sessions() -> dict[str, dict[str, Any]]:
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
@@ -209,24 +303,35 @@ def _load_dynamic_sessions() -> dict[str, dict[str, Any]]:
         rows = core_q.run_sql(
             """
             SELECT
-              dynamic_run_id,
-              package_name,
-              device_serial,
-              base_apk_sha256,
-              artifact_set_hash,
-              status,
-              valid_dataset_run,
-              invalid_reason_code,
-              countable,
-              pcap_relpath,
-              pcap_bytes,
-              pcap_valid,
-              operator_run_profile,
-              duration_seconds,
-              version_name,
-              version_code,
-              evidence_path
-            FROM dynamic_sessions
+              ds.dynamic_run_id,
+              ds.package_name,
+              ds.device_serial,
+              ds.base_apk_sha256,
+              ds.artifact_set_hash,
+              ds.status,
+              COALESCE(ctx.valid_dataset_run, ds.valid_dataset_run) AS valid_dataset_run,
+              COALESCE(ctx.invalid_reason_code, ds.invalid_reason_code) AS invalid_reason_code,
+              CASE
+                WHEN ctx.quota_state = 'QUOTA_VALID' THEN 1
+                WHEN ctx.quota_state IN ('SUPPLEMENTAL_VALID', 'QUOTA_INELIGIBLE', 'QUOTA_LEGACY_UNKNOWN') THEN 0
+                ELSE ds.countable
+              END AS countable,
+              ds.pcap_relpath,
+              ds.pcap_bytes,
+              ds.pcap_valid,
+              COALESCE(ctx.effective_run_profile, ds.operator_run_profile) AS operator_run_profile,
+              ds.duration_seconds,
+              ds.version_name,
+              ds.version_code,
+              ds.evidence_path,
+              ctx.quota_state,
+              ctx.technical_validity_state,
+              ctx.cohort_paper_eligible,
+              ctx.cohort_eligibility_state,
+              ctx.low_signal
+            FROM dynamic_sessions ds
+            LEFT JOIN v_dynamic_run_context_v1 ctx
+              ON ctx.dynamic_run_id = ds.dynamic_run_id
             """,
             (),
             fetch="all",
@@ -354,6 +459,20 @@ def _classify_missing_domain_observation_case(row: dict[str, Any], verify_row: d
     )
 
 
+def _split_missing_domain_rows(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    invalid_rows: list[dict[str, Any]] = []
+    index_lag_rows: list[dict[str, Any]] = []
+    for row in rows:
+        reason = _norm_text(row.get("reason"))
+        if reason == "index_lag_candidate":
+            index_lag_rows.append(row)
+        else:
+            invalid_rows.append(row)
+    return invalid_rows, index_lag_rows
+
+
 def _raw_pcap_failure_detail(run_dir: Path, manifest: dict[str, Any], row: dict[str, Any], verify_row: dict[str, Any]) -> str:
     from scytaledroid.DynamicAnalysis.pcap.diagnostics import (
         canonical_pcap_failure_code,
@@ -387,11 +506,28 @@ def _draft_bullets(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi_ro
         f"- Dynamic evidence packs scanned: {summary['dynamic_runs_scanned']}.",
         f"- Dynamic session rows in DB: {summary['dynamic_sessions_in_db']}.",
         f"- Valid dataset runs in the current evidence corpus: {summary['valid_dataset_runs_scanned']}.",
-        f"- Countable runs in the current evidence corpus: {summary['countable_runs_scanned']}.",
+        f"- Quota-valid runs in the current evidence corpus: {summary['countable_runs_scanned']}.",
         f"- Apps seen in the current evidence corpus: {summary['apps_seen']}.",
         f"- Runs with PCAP artifacts present: {summary['runs_with_pcap']}.",
         f"- Runs with `pcap_report.json`: {summary['runs_with_pcap_report']}.",
         f"- Runs with `pcap_features.json`: {summary['runs_with_pcap_features']}.",
+        f"- Runs where per-run ML window scores are expected: {summary['runs_with_window_scores_expected']}.",
+        f"- Runs with per-run ML window score artifacts present: {summary['runs_with_window_scores_available']}.",
+        f"- Valid supplemental runs retained outside quota: {summary['valid_supplemental_runs_scanned']}.",
+        f"- Supplemental low-signal runs retained: {summary['supplemental_low_signal_runs_scanned']}.",
+        f"- Supplemental extra-after-quota runs retained: {summary['supplemental_extra_runs_scanned']}.",
+        f"- Supplemental non-paper runs retained: {summary['supplemental_nonpaper_runs_scanned']}.",
+        f"- Current-build valid runs in the local corpus: {summary['current_build_valid_runs_scanned']}.",
+        f"- Historical-build valid runs retained in the local corpus: {summary['historical_valid_runs_scanned']}.",
+        f"- Packages with multiple build variants in the local corpus: {summary['packages_with_multiple_builds_in_corpus']}.",
+        f"- Apps current-build complete by 3+4 phase targets: {summary['apps_current_build_complete']}.",
+        f"- Apps still needing current-build baseline: {summary['apps_current_build_need_baseline']}.",
+        f"- Apps still needing current-build interactive: {summary['apps_current_build_need_interactive']}.",
+        f"- Active cohort: {summary['active_cohort_label']} ({summary['active_cohort_app_count']} apps).",
+        f"- Active cohort apps with local evidence: {summary['active_cohort_apps_with_local_evidence']}.",
+        f"- Active cohort apps complete: {summary['active_cohort_apps_complete']}.",
+        f"- Active cohort apps still needing baseline/no local evidence: {summary['active_cohort_apps_need_baseline']}.",
+        f"- Active cohort apps still needing interactive: {summary['active_cohort_apps_need_interactive']}.",
         f"- Runs already indexed into `dynamic_domain_observations`: {summary['runs_with_domain_observations_db']}.",
         f"- Runs missing `dynamic_domain_observations` rows: {summary['runs_missing_domain_observations_db']}.",
         f"- Missing-row cases classified as invalid PCAP evidence: {summary['runs_missing_domain_observations_invalid_pcap']}.",
@@ -415,6 +551,27 @@ def _draft_bullets(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi_ro
         lines.extend(
             [
                 "- Some current evidence-backed runs still appear consistent with domain-index lag and may benefit from backfill/reindex review.",
+                "",
+            ]
+        )
+    if int(summary.get("runs_with_window_scores_expected") or 0) == 0:
+        lines.extend(
+            [
+                "- Current corpus is composed of `basic_usage` runs; missing `analysis/ml/v1/window_scores.csv` is expected for these runs.",
+                "",
+            ]
+        )
+    elif int(summary.get("runs_missing_window_scores_when_expected") or 0) == 0:
+        lines.extend(
+            [
+                "- All runs that were expected to materialize per-run ML window scores did so successfully.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- Some runs that were expected to materialize per-run ML window scores are still missing those artifacts.",
                 "",
             ]
         )
@@ -487,6 +644,9 @@ def _draft_paragraphs(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi
     missing_domain_rows = int(summary.get("runs_missing_domain_observations_db") or 0)
     invalid_pcap_missing = int(summary.get("runs_missing_domain_observations_invalid_pcap") or 0)
     index_lag_missing = int(summary.get("runs_missing_domain_observations_index_lag") or 0)
+    expected_window_scores = int(summary.get("runs_with_window_scores_expected") or 0)
+    available_window_scores = int(summary.get("runs_with_window_scores_available") or 0)
+    missing_window_scores = int(summary.get("runs_missing_window_scores_when_expected") or 0)
 
     x_total = len(x_rows)
     x_valid = sum(1 for row in x_rows if int(row.get("valid_dataset_run") or 0) == 1)
@@ -498,9 +658,25 @@ def _draft_paragraphs(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi
         (
             f"The current dynamic corpus contains {total_runs} evidence packs across {apps_seen} apps, "
             f"with {valid_runs} runs presently classified as valid dataset evidence and {countable_runs} runs "
-            f"counted toward the cohort protocol. PCAP-derived reports are present for "
+            f"currently classified as quota-valid under the cohort protocol. PCAP-derived reports are present for "
             f"{int(summary.get('runs_with_pcap_report') or 0)} runs and feature exports are present for "
-            f"{int(summary.get('runs_with_pcap_features') or 0)} runs."
+            f"{int(summary.get('runs_with_pcap_features') or 0)} runs. Outside quota, the corpus presently retains "
+            f"{int(summary.get('valid_supplemental_runs_scanned') or 0)} valid supplemental runs, including "
+            f"{int(summary.get('supplemental_low_signal_runs_scanned') or 0)} low-signal runs, "
+            f"{int(summary.get('supplemental_extra_runs_scanned') or 0)} extra-after-quota runs, and "
+            f"{int(summary.get('supplemental_nonpaper_runs_scanned') or 0)} non-paper supplemental runs. "
+            f"Within the local corpus, {int(summary.get('current_build_valid_runs_scanned') or 0)} valid runs align "
+            f"to the latest observed build per app, while {int(summary.get('historical_valid_runs_scanned') or 0)} "
+            f"valid runs belong to older retained builds. By the current 3-baseline / 4-interactive target, "
+            f"{int(summary.get('apps_current_build_complete') or 0)} apps are complete, "
+            f"{int(summary.get('apps_current_build_need_baseline') or 0)} still need baseline coverage, and "
+            f"{int(summary.get('apps_current_build_need_interactive') or 0)} still need interactive coverage. "
+            f"For the active cohort {summary.get('active_cohort_label') or 'Research cohort'}, "
+            f"{int(summary.get('active_cohort_apps_with_local_evidence') or 0)} of "
+            f"{int(summary.get('active_cohort_app_count') or 0)} cohort apps currently have local evidence, "
+            f"{int(summary.get('active_cohort_apps_complete') or 0)} are complete, "
+            f"{int(summary.get('active_cohort_apps_need_baseline') or 0)} still need baseline or first local capture, "
+            f"and {int(summary.get('active_cohort_apps_need_interactive') or 0)} still need interactive coverage."
         ),
     ]
 
@@ -524,6 +700,19 @@ def _draft_paragraphs(summary: dict[str, Any], x_rows: list[dict[str, Any]], rdi
                 f"split between invalid-PCAP exclusions ({invalid_pcap_missing}) and true indexing follow-up "
                 f"candidates ({index_lag_missing})."
             )
+        )
+
+    if expected_window_scores == 0:
+        paragraphs.append(
+            "The present corpus is composed of `basic_usage` scenario runs rather than profile-v3 strict captures, so the absence of `analysis/ml/v1/window_scores.csv` artifacts should not be treated as missing evidence or a failed ML derivation contract for this package."
+        )
+    elif missing_window_scores == 0:
+        paragraphs.append(
+            f"All {available_window_scores} runs that were expected to emit per-run ML window-score artifacts did so successfully."
+        )
+    else:
+        paragraphs.append(
+            f"{missing_window_scores} runs were expected to emit per-run ML window-score artifacts, but only {available_window_scores} currently expose those files."
         )
 
     if x_total > 0:
@@ -614,13 +803,32 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             or (_safe_int((run_dir / pcap_relpath).stat().st_size) if pcap_exists else None)
         )
         window_scores = _window_scores_path(run_dir)
+        scenario_id = _scenario_id(manifest)
+        window_scores_expected = _window_scores_expected_for_manifest(manifest)
         valid_dataset_run = _normalize_boolish(session_row.get("valid_dataset_run"))
         if valid_dataset_run is None:
             valid_dataset_run = _normalize_boolish(dataset.get("valid_dataset_run"))
         countable = _normalize_boolish(session_row.get("countable"))
         if countable is None:
             countable = _normalize_boolish(dataset.get("countable"))
+        low_signal_db = _normalize_boolish(session_row.get("low_signal"))
+        low_signal = low_signal_db if low_signal_db is not None else (_normalize_boolish(dataset.get("low_signal")) is True)
+        paper_eligible = _normalize_boolish(session_row.get("cohort_paper_eligible"))
+        if paper_eligible is None:
+            paper_eligible = _normalize_boolish(dataset.get("paper_eligible"))
+        cohort_eligibility = _norm_text(session_row.get("cohort_eligibility_state")) or _norm_text(dataset.get("cohort_eligibility"))
+        quota_state = _norm_text(session_row.get("quota_state"))
+        technical_validity_state = _norm_text(session_row.get("technical_validity_state"))
         invalid_reason = _norm_text(session_row.get("invalid_reason_code")) or _norm_text(dataset.get("invalid_reason_code"))
+        evidence_governance_class = _evidence_governance_class_from_db(
+            quota_state=quota_state,
+            technical_validity_state=technical_validity_state,
+            valid_dataset_run=valid_dataset_run,
+            countable=countable,
+            low_signal=low_signal,
+            paper_eligible=paper_eligible,
+            cohort_eligibility=cohort_eligibility,
+        )
         service_signal = _service_signal_summary(report, package_name) if report else {
             "service_count": 0,
             "signal_count": 0,
@@ -634,21 +842,32 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "package_name": package_name,
             "app_label": app_label,
             "device_serial": _norm_text(session_row.get("device_serial")) or _norm_text(target.get("device_serial")),
+            "version_code": _safe_int(session_row.get("version_code")),
+            "version_name": _norm_text(session_row.get("version_name")) or _norm_text(target.get("version_name")),
             "base_apk_sha256": _norm_text(session_row.get("base_apk_sha256")) or _norm_text((manifest.get("run_identity") or {}).get("base_apk_sha256")),
             "artifact_set_hash": _norm_text(session_row.get("artifact_set_hash")) or _norm_text((manifest.get("run_identity") or {}).get("artifact_set_hash")),
             "mode": mode,
             "interaction_label": interaction_label,
             "run_profile": run_profile,
             "status": _norm_text(session_row.get("status")) or _norm_text(manifest.get("status")) or "unknown",
+            "scenario_id": scenario_id,
             "valid_dataset_run": 1 if valid_dataset_run is True else 0 if valid_dataset_run is False else "",
             "invalid_reason_code": invalid_reason,
             "countable": 1 if countable is True else 0 if countable is False else "",
+            "cohort_eligibility": cohort_eligibility,
+            "quota_state": quota_state,
+            "technical_validity_state": technical_validity_state,
+            "paper_eligible": 1 if paper_eligible is True else 0 if paper_eligible is False else "",
+            "low_signal": int(low_signal),
+            "low_signal_reasons_csv": ",".join(str(item) for item in (dataset.get("low_signal_reasons") or []) if str(item)),
+            "evidence_governance_class": evidence_governance_class,
             "pcap_relpath": pcap_relpath,
             "pcap_exists": int(pcap_exists),
             "pcap_bytes": pcap_bytes or 0,
             "pcap_report_exists": int((run_dir / "analysis" / "pcap_report.json").exists()),
             "pcap_features_exists": int((run_dir / "analysis" / "pcap_features.json").exists()),
             "window_scores_exists": int(window_scores is not None),
+            "window_scores_expected": int(window_scores_expected),
             "window_scores_relpath": str(window_scores.relative_to(run_dir)) if window_scores else "",
             "domain_observations_in_db": int(bool(domain_row)),
             "domain_observation_rows_db": int(domain_row.get("observation_rows") or 0),
@@ -676,6 +895,10 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
                 "pcap_report_runs": 0,
                 "pcap_features_runs": 0,
                 "window_scores_runs": 0,
+                "supplemental_valid_runs": 0,
+                "supplemental_low_signal_runs": 0,
+                "supplemental_extra_runs": 0,
+                "supplemental_nonpaper_runs": 0,
                 "domain_indexed_runs": 0,
                 "domain_observation_rows_db": 0,
             },
@@ -689,6 +912,12 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         agg["pcap_report_runs"] += int(row["pcap_report_exists"] == 1)
         agg["pcap_features_runs"] += int(row["pcap_features_exists"] == 1)
         agg["window_scores_runs"] += int(row["window_scores_exists"] == 1)
+        agg["supplemental_valid_runs"] += int(
+            row["evidence_governance_class"] in {"SUPPLEMENTAL_LOW_SIGNAL", "SUPPLEMENTAL_EXTRA", "SUPPLEMENTAL_NONPAPER"}
+        )
+        agg["supplemental_low_signal_runs"] += int(row["evidence_governance_class"] == "SUPPLEMENTAL_LOW_SIGNAL")
+        agg["supplemental_extra_runs"] += int(row["evidence_governance_class"] == "SUPPLEMENTAL_EXTRA")
+        agg["supplemental_nonpaper_runs"] += int(row["evidence_governance_class"] == "SUPPLEMENTAL_NONPAPER")
         agg["domain_indexed_runs"] += int(row["domain_observations_in_db"] == 1)
         agg["domain_observation_rows_db"] += int(row["domain_observation_rows_db"] or 0)
 
@@ -746,6 +975,142 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
     app_rows = sorted(app_rollup.values(), key=lambda row: (row["package_name"]))
     service_signal_rows = sorted(service_signal_rollup.values(), key=lambda row: (row["package_name"]))
     x_rows_sorted = sorted(x_rows, key=lambda row: (row["mode"], row["dynamic_run_id"]))
+    active_cohort_context = _load_active_cohort_context()
+    active_cohort_label = _norm_text(active_cohort_context.get("display_name")) or "Research cohort"
+    active_cohort_key = _norm_text(active_cohort_context.get("cohort_key")).lower()
+    active_cohort_packages = tuple(
+        _norm_text(package).lower()
+        for package in (active_cohort_context.get("packages") or ())
+        if _norm_text(package)
+    )
+    by_package_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in ledger_rows:
+        by_package_rows[str(row.get("package_name") or "")].append(row)
+
+    current_build_rollup_rows: list[dict[str, Any]] = []
+    for package_name, rows in sorted(by_package_rows.items()):
+        if not package_name:
+            continue
+        current_build_key = max((_build_identity_key(row) for row in rows), default=(-1, "", ""))
+        current_rows = [row for row in rows if _build_identity_key(row) == current_build_key]
+        historical_rows = [row for row in rows if _build_identity_key(row) != current_build_key]
+        baseline_countable = sum(
+            1
+            for row in current_rows
+            if str(row.get("mode") or "") == "idle" and int(row.get("countable") or 0) == 1
+        )
+        interactive_countable = sum(
+            1
+            for row in current_rows
+            if str(row.get("mode") or "") == "interactive" and int(row.get("countable") or 0) == 1
+        )
+        readiness_state, next_capture_phase = _current_build_phase_status(
+            baseline_countable=baseline_countable,
+            interactive_countable=interactive_countable,
+        )
+        current_build_rollup_rows.append(
+            {
+                "package_name": package_name,
+                "app_label": _norm_text(current_rows[0].get("app_label")) if current_rows else _norm_text(rows[0].get("app_label")),
+                "current_version_code": current_build_key[0] if current_build_key[0] >= 0 else "",
+                "current_version_name": current_build_key[2],
+                "current_base_apk_sha256": current_build_key[1],
+                "build_variants_seen": len({_build_identity_key(row) for row in rows}),
+                "current_build_readiness_state": readiness_state,
+                "next_capture_phase": next_capture_phase,
+                "current_build_runs_total": len(current_rows),
+                "current_build_valid_runs": sum(1 for row in current_rows if int(row.get("valid_dataset_run") or 0) == 1),
+                "current_build_countable_runs": sum(1 for row in current_rows if int(row.get("countable") or 0) == 1),
+                "current_build_baseline_countable_runs": baseline_countable,
+                "current_build_interactive_countable_runs": interactive_countable,
+                "current_build_baseline_supplemental_runs": sum(
+                    1
+                    for row in current_rows
+                    if str(row.get("mode") or "") == "idle"
+                    and str(row.get("evidence_governance_class") or "")
+                    in {"SUPPLEMENTAL_LOW_SIGNAL", "SUPPLEMENTAL_EXTRA", "SUPPLEMENTAL_NONPAPER"}
+                ),
+                "current_build_interactive_supplemental_runs": sum(
+                    1
+                    for row in current_rows
+                    if str(row.get("mode") or "") == "interactive"
+                    and str(row.get("evidence_governance_class") or "")
+                    in {"SUPPLEMENTAL_LOW_SIGNAL", "SUPPLEMENTAL_EXTRA", "SUPPLEMENTAL_NONPAPER"}
+                ),
+                "current_build_supplemental_valid_runs": sum(
+                    1
+                    for row in current_rows
+                    if str(row.get("evidence_governance_class") or "")
+                    in {"SUPPLEMENTAL_LOW_SIGNAL", "SUPPLEMENTAL_EXTRA", "SUPPLEMENTAL_NONPAPER"}
+                ),
+                "current_build_supplemental_low_signal_runs": sum(
+                    1 for row in current_rows if str(row.get("evidence_governance_class") or "") == "SUPPLEMENTAL_LOW_SIGNAL"
+                ),
+                "current_build_supplemental_extra_runs": sum(
+                    1 for row in current_rows if str(row.get("evidence_governance_class") or "") == "SUPPLEMENTAL_EXTRA"
+                ),
+                "current_build_supplemental_nonpaper_runs": sum(
+                    1 for row in current_rows if str(row.get("evidence_governance_class") or "") == "SUPPLEMENTAL_NONPAPER"
+                ),
+                "current_build_invalid_or_excluded_runs": sum(
+                    1 for row in current_rows if str(row.get("evidence_governance_class") or "") == "INVALID_OR_EXCLUDED"
+                ),
+                "current_build_domain_indexed_runs": sum(
+                    1 for row in current_rows if int(row.get("domain_observations_in_db") or 0) == 1
+                ),
+                "historical_runs_total": len(historical_rows),
+                "historical_valid_runs": sum(1 for row in historical_rows if int(row.get("valid_dataset_run") or 0) == 1),
+                "historical_countable_runs": sum(1 for row in historical_rows if int(row.get("countable") or 0) == 1),
+            }
+        )
+
+    current_build_rollup_by_package = {
+        _norm_text(row.get("package_name")).lower(): row
+        for row in current_build_rollup_rows
+        if _norm_text(row.get("package_name"))
+    }
+    active_cohort_readiness_rows: list[dict[str, Any]] = []
+    for package_name in active_cohort_packages:
+        existing = current_build_rollup_by_package.get(package_name)
+        if existing:
+            active_cohort_readiness_rows.append(
+                {
+                    "cohort_key": active_cohort_key,
+                    "cohort_label": active_cohort_label,
+                    **existing,
+                }
+            )
+            continue
+        active_cohort_readiness_rows.append(
+            {
+                "cohort_key": active_cohort_key,
+                "cohort_label": active_cohort_label,
+                "package_name": package_name,
+                "app_label": label_map.get(package_name, "") or catalog.get(package_name, {}).get("app", "") or package_name,
+                "current_version_code": "",
+                "current_version_name": "",
+                "current_base_apk_sha256": "",
+                "build_variants_seen": 0,
+                "current_build_readiness_state": "NO_LOCAL_EVIDENCE",
+                "next_capture_phase": "baseline",
+                "current_build_runs_total": 0,
+                "current_build_valid_runs": 0,
+                "current_build_countable_runs": 0,
+                "current_build_baseline_countable_runs": 0,
+                "current_build_interactive_countable_runs": 0,
+                "current_build_baseline_supplemental_runs": 0,
+                "current_build_interactive_supplemental_runs": 0,
+                "current_build_supplemental_valid_runs": 0,
+                "current_build_supplemental_low_signal_runs": 0,
+                "current_build_supplemental_extra_runs": 0,
+                "current_build_supplemental_nonpaper_runs": 0,
+                "current_build_invalid_or_excluded_runs": 0,
+                "current_build_domain_indexed_runs": 0,
+                "historical_runs_total": 0,
+                "historical_valid_runs": 0,
+                "historical_countable_runs": 0,
+            }
+        )
 
     rdi_summary = {
         **X_TWITTER_ANCHOR,
@@ -757,6 +1122,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         "note": "No current profile-v3 manifest or per-run ML window score export is available for present X/Twitter runs.",
     }
 
+    invalid_missing_rows, index_lag_rows = _split_missing_domain_rows(missing_domain_rows)
     missing_reason_counts = Counter(row["reason"] for row in missing_domain_rows)
     invalid_pcap_missing = sum(
         count for reason, count in missing_reason_counts.items() if reason.startswith("invalid_pcap_")
@@ -787,12 +1153,77 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         "valid_dataset_runs_scanned": sum(1 for row in ledger_rows if row["valid_dataset_run"] == 1),
         "countable_runs_scanned": sum(1 for row in ledger_rows if row["countable"] == 1),
         "apps_seen": len({row["package_name"] for row in ledger_rows}),
+        "scenario_counts": dict(sorted(Counter(_norm_text(row.get("scenario_id")) for row in ledger_rows).items())),
         "runs_with_pcap": sum(1 for row in ledger_rows if row["pcap_exists"] == 1),
         "runs_with_pcap_report": sum(1 for row in ledger_rows if row["pcap_report_exists"] == 1),
         "runs_with_pcap_features": sum(1 for row in ledger_rows if row["pcap_features_exists"] == 1),
         "runs_with_window_scores": sum(1 for row in ledger_rows if row["window_scores_exists"] == 1),
+        "runs_with_window_scores_expected": sum(1 for row in ledger_rows if row["window_scores_expected"] == 1),
+        "runs_with_window_scores_available": sum(
+            1 for row in ledger_rows if row["window_scores_expected"] == 1 and row["window_scores_exists"] == 1
+        ),
+        "runs_missing_window_scores_when_expected": sum(
+            1 for row in ledger_rows if row["window_scores_expected"] == 1 and row["window_scores_exists"] == 0
+        ),
+        "valid_supplemental_runs_scanned": sum(
+            1
+            for row in ledger_rows
+            if row["evidence_governance_class"] in {"SUPPLEMENTAL_LOW_SIGNAL", "SUPPLEMENTAL_EXTRA", "SUPPLEMENTAL_NONPAPER"}
+        ),
+        "supplemental_low_signal_runs_scanned": sum(
+            1 for row in ledger_rows if row["evidence_governance_class"] == "SUPPLEMENTAL_LOW_SIGNAL"
+        ),
+        "supplemental_extra_runs_scanned": sum(
+            1 for row in ledger_rows if row["evidence_governance_class"] == "SUPPLEMENTAL_EXTRA"
+        ),
+        "supplemental_nonpaper_runs_scanned": sum(
+            1 for row in ledger_rows if row["evidence_governance_class"] == "SUPPLEMENTAL_NONPAPER"
+        ),
+        "packages_with_multiple_builds_in_corpus": sum(
+            1 for row in current_build_rollup_rows if int(row.get("build_variants_seen") or 0) > 1
+        ),
+        "apps_current_build_complete": sum(
+            1 for row in current_build_rollup_rows if str(row.get("current_build_readiness_state") or "") == "COMPLETE"
+        ),
+        "apps_current_build_need_baseline": sum(
+            1 for row in current_build_rollup_rows if str(row.get("current_build_readiness_state") or "") == "BASELINE_NEEDED"
+        ),
+        "apps_current_build_need_interactive": sum(
+            1 for row in current_build_rollup_rows if str(row.get("current_build_readiness_state") or "") == "INTERACTIVE_NEEDED"
+        ),
+        "active_cohort_key": active_cohort_key,
+        "active_cohort_label": active_cohort_label,
+        "active_cohort_app_count": len(active_cohort_readiness_rows),
+        "active_cohort_apps_with_local_evidence": sum(
+            1 for row in active_cohort_readiness_rows if int(row.get("current_build_runs_total") or 0) > 0
+        ),
+        "active_cohort_apps_complete": sum(
+            1 for row in active_cohort_readiness_rows if str(row.get("current_build_readiness_state") or "") == "COMPLETE"
+        ),
+        "active_cohort_apps_need_baseline": sum(
+            1
+            for row in active_cohort_readiness_rows
+            if str(row.get("current_build_readiness_state") or "") in {"BASELINE_NEEDED", "NO_LOCAL_EVIDENCE"}
+        ),
+        "active_cohort_apps_need_interactive": sum(
+            1 for row in active_cohort_readiness_rows if str(row.get("current_build_readiness_state") or "") == "INTERACTIVE_NEEDED"
+        ),
+        "active_cohort_apps_no_local_evidence": sum(
+            1 for row in active_cohort_readiness_rows if str(row.get("current_build_readiness_state") or "") == "NO_LOCAL_EVIDENCE"
+        ),
+        "current_build_countable_runs_scanned": sum(
+            int(row.get("current_build_countable_runs") or 0) for row in current_build_rollup_rows
+        ),
+        "current_build_valid_runs_scanned": sum(
+            int(row.get("current_build_valid_runs") or 0) for row in current_build_rollup_rows
+        ),
+        "historical_valid_runs_scanned": sum(
+            int(row.get("historical_valid_runs") or 0) for row in current_build_rollup_rows
+        ),
         "runs_with_domain_observations_db": sum(1 for row in ledger_rows if row["domain_observations_in_db"] == 1),
         "runs_missing_domain_observations_db": len(missing_domain_rows),
+        "runs_missing_domain_observations_invalid_rows": len(invalid_missing_rows),
+        "runs_missing_domain_observations_index_lag_rows": len(index_lag_rows),
         "runs_missing_domain_observations_invalid_pcap": invalid_pcap_missing,
         "runs_missing_domain_observations_invalid_pcap_by_raw_detail": invalid_pcap_by_raw_detail,
         "runs_missing_domain_observations_invalid_other": invalid_other_missing,
@@ -806,9 +1237,13 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "dynamic_run_ledger_csv": str((output_root / "dynamic_run_ledger.csv").resolve()),
             "dynamic_run_summary_json": str((output_root / "dynamic_run_summary.json").resolve()),
             "app_coverage_table_csv": str((output_root / "app_coverage_table.csv").resolve()),
+            "app_current_build_governance_csv": str((output_root / "app_current_build_governance.csv").resolve()),
+            "active_cohort_current_build_readiness_csv": str((output_root / "active_cohort_current_build_readiness.csv").resolve()),
             "x_twitter_run_table_csv": str((output_root / "x_twitter_run_table.csv").resolve()),
             "x_twitter_rdi_summary_csv": str((output_root / "x_twitter_rdi_summary.csv").resolve()),
             "missing_domain_observation_runs_csv": str((output_root / "missing_domain_observation_runs.csv").resolve()),
+            "invalid_domain_observation_runs_csv": str((output_root / "invalid_domain_observation_runs.csv").resolve()),
+            "domain_index_lag_runs_csv": str((output_root / "domain_index_lag_runs.csv").resolve()),
             "service_signal_coverage_csv": str((output_root / "service_signal_coverage.csv").resolve()),
             "draft_results_bullets_md": str((output_root / "draft_results_bullets.md").resolve()),
             "draft_results_paragraphs_md": str((output_root / "draft_results_paragraphs.md").resolve()),
@@ -818,9 +1253,13 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
 
     _write_csv(output_root / "dynamic_run_ledger.csv", ledger_rows)
     _write_csv(output_root / "app_coverage_table.csv", app_rows)
+    _write_csv(output_root / "app_current_build_governance.csv", current_build_rollup_rows)
+    _write_csv(output_root / "active_cohort_current_build_readiness.csv", active_cohort_readiness_rows)
     _write_csv(output_root / "x_twitter_run_table.csv", x_rows_sorted)
     _write_csv(output_root / "x_twitter_rdi_summary.csv", [rdi_summary])
     _write_csv(output_root / "missing_domain_observation_runs.csv", missing_domain_rows)
+    _write_csv(output_root / "invalid_domain_observation_runs.csv", invalid_missing_rows)
+    _write_csv(output_root / "domain_index_lag_runs.csv", index_lag_rows)
     _write_csv(output_root / "service_signal_coverage.csv", service_signal_rows)
     (output_root / "draft_results_bullets.md").write_text(
         _draft_bullets(summary, x_rows_sorted, rdi_summary) + "\n",

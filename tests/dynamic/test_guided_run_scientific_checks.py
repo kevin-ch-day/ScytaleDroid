@@ -67,3 +67,11 @@ def test_scientific_checks_block_hard_failure_without_warnings(monkeypatch, tmp_
     assert "Signer identity drift detected" in out
     assert "Pre-run scientific checks failed" in out
     assert "Status: READY" not in out
+
+
+def test_print_paper_mode_constants_uses_training_wording(capsys):
+    guided_run._print_paper_mode_constants()
+
+    out = capsys.readouterr().out
+    assert "Training=baseline-only" in out
+    assert "Baseline-only=YES" not in out

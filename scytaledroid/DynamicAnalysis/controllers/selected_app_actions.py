@@ -5,8 +5,11 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
+    selected_app_build_label,
     selected_app_build_text,
+    selected_app_evidence_label,
     selected_app_evidence_text,
+    selected_app_qa_badge,
     selected_app_qa_text,
 )
 
@@ -96,29 +99,27 @@ def build_selected_app_protocol_options(
 
 def _summary_phrase(app: Any) -> str:
     quota = f"quota {int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)}/{int(app.cfg.baseline_required) + int(app.cfg.interactive_required)}"
-    qa_badge = "—"
-
-    if int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs) > 0 or int(app.db_active_sessions) > 0:
-        build_label = "current"
-    elif int(app.historical_valid_local) > 0 or int(app.db_historical_sessions) > 0:
-        build_label = "legacy"
+    active_valid_runs = int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
+    build_label = selected_app_build_label(
+        active_valid_runs=active_valid_runs,
+        legacy_valid_runs=int(app.historical_valid_local),
+        db_active_sessions=int(app.db_active_sessions),
+        db_historical_sessions=int(app.db_historical_sessions),
+    )
+    evidence_label = selected_app_evidence_label(
+        "",
+        technical_valid_active=active_valid_runs,
+        db_active_sessions=int(app.db_active_sessions),
+        historical_valid_runs_count=int(app.historical_valid_local),
+        db_historical_sessions=int(app.db_historical_sessions),
+    )
+    if app.latest_valid is False:
+        effective_latest_valid = False
+    elif app.latest_valid is True and active_valid_runs > 0:
+        effective_latest_valid = True
     else:
-        build_label = "unknown"
-
-    if app.latest_valid is True:
-        qa_badge = "✓"
-    elif app.latest_valid is False:
-        qa_badge = "inv"
-
-    evidence_label = "none"
-    if int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs) > 0:
-        evidence_label = "local+db"
-    elif int(app.db_active_sessions) > 0:
-        evidence_label = "db-only"
-    elif int(app.historical_valid_local) > 0:
-        evidence_label = "local-only"
-    elif int(app.db_historical_sessions) > 0:
-        evidence_label = "db-only"
+        effective_latest_valid = None
+    qa_badge = selected_app_qa_badge(effective_latest_valid)
 
     build = selected_app_build_text(build_label)
     evidence = selected_app_evidence_text(build_label, evidence_label)
@@ -278,11 +279,45 @@ def print_selected_app_workbench_summary(
                 level="info",
             )
         )
-    if app.extra_valid_local > 0:
+        print(
+            status_messages.status(
+                "If login/setup is still in the way, use Interactive run -> Manual first. That preparation run is retained as supplemental evidence outside baseline quota.",
+                level="info",
+            )
+        )
+    baseline_low_signal = int(getattr(app.counts, "baseline_low_signal_valid", 0) or 0)
+    baseline_extra = int(getattr(app.counts, "baseline_extra_valid", 0) or 0)
+    interactive_extra = int(getattr(app.counts, "interactive_extra_valid", 0) or 0)
+    interactive_low_signal = int(getattr(app.counts, "interactive_low_signal_valid", 0) or 0)
+    if baseline_low_signal > 0:
         print()
         print(
             status_messages.status(
-                f"Supplemental current-build evidence: {app.extra_valid_local} extra valid run(s) retained outside quota.",
+                f"Supplemental baseline: {baseline_low_signal} low-signal idle run(s) retained outside quota.",
+                level="info",
+            )
+        )
+    if baseline_extra > 0:
+        print()
+        print(
+            status_messages.status(
+                f"Supplemental baseline: {baseline_extra} extra valid run(s) retained outside quota.",
+                level="info",
+            )
+        )
+    if interactive_extra > 0:
+        print()
+        print(
+            status_messages.status(
+                f"Supplemental interactive: {interactive_extra} extra valid run(s) retained outside quota.",
+                level="info",
+            )
+        )
+    if interactive_low_signal > 0:
+        print()
+        print(
+            status_messages.status(
+                f"Supplemental interactive: {interactive_low_signal} low-signal run(s) retained outside quota.",
                 level="info",
             )
         )
@@ -342,16 +377,7 @@ def handle_selected_app_aux_action(
             return "1"
         return None
     if selected_protocol == "2":
-        if (
-            app.scripted_template_ready
-            and int(app.counts.baseline_valid_runs) >= int(app.cfg.baseline_required)
-            and (
-                str(app.suggested_default_key or "") == "2"
-                or "scripted" in str(app.queue_action or "").lower()
-            )
-        ):
-            return "2"
-        return "3"
+        return "2"
     if selected_protocol == "3":
         return "4"
     return selected_protocol

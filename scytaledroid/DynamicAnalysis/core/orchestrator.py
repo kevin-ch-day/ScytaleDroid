@@ -114,6 +114,16 @@ class DynamicRunOrchestrator:
         try:
             plan_payload = self.plan_payload or self._load_plan_payload()
         except PlanValidationError as exc:
+            dynamic_logger = logging_engine.create_dynamic_run_logger(
+                dynamic_run_id,
+                context={
+                    "subsystem": "dynamic",
+                    "package_name": self.config.package_name,
+                    "device_serial": self.config.device_serial,
+                    "scenario_id": self.config.scenario_id,
+                    "tier": self.config.tier,
+                },
+            )
             run_ctx = RunContext(
                 dynamic_run_id=dynamic_run_id,
                 package_name=self.config.package_name,
@@ -135,6 +145,10 @@ class DynamicRunOrchestrator:
             )
             event_logger = RunEventLogger(run_ctx)
             event_logger.log("plan.validation", build_plan_validation_event(exc.outcome))
+            dynamic_logger.warning(
+                "Dynamic plan validation blocked run",
+                extra=build_plan_validation_event(exc.outcome),
+            )
             event_artifact = event_logger.finalize()
             if event_artifact:
                 manifest = RunManifest(
@@ -147,6 +161,7 @@ class DynamicRunOrchestrator:
                 manifest.add_artifacts([event_artifact])
                 manifest.finalize()
                 writer.write_manifest(manifest)
+            logging_engine.close_dynamic_run_logger(dynamic_run_id)
             raise
         scenario_hint = None
         if self.config.scenario_id == "permission_trigger":
@@ -193,6 +208,16 @@ class DynamicRunOrchestrator:
             proxy_port=self.config.proxy_port,
             scenario_hint=scenario_hint,
             batch_id=self.config.batch_id,
+        )
+        logging_engine.create_dynamic_run_logger(
+            dynamic_run_id,
+            context={
+                "subsystem": "dynamic",
+                "package_name": run_ctx.package_name,
+                "device_serial": run_ctx.device_serial,
+                "scenario_id": run_ctx.scenario_id,
+                "tier": self.config.tier,
+            },
         )
 
         self.logger.info(
@@ -575,8 +600,7 @@ class DynamicRunOrchestrator:
             )
             event_logger.log("pcap_index_failed", {"error": str(exc)})
 
-        summarizer = DynamicRunSummarizer(writer)
-        outputs = summarizer.summarize(manifest)
+        outputs: list[ArtifactRecord] = []
         report = write_pcap_report(manifest, run_dir, event_logger=event_logger)
         if report:
             outputs.append(report)
@@ -749,6 +773,9 @@ class DynamicRunOrchestrator:
                         "countable": bool(manifest.dataset.get("countable", True)),
                     }
                 )
+
+        summarizer = DynamicRunSummarizer(writer)
+        outputs.extend(summarizer.summarize(manifest))
 
         # Finalize structured event log *after* all analysis steps that emit events.
         # This prevents SHA mismatches for the run_events artifact.

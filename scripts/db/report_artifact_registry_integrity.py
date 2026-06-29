@@ -179,10 +179,26 @@ def collect_report(
             "examples": examples,
         }
 
+    totals_rows = [
+        {"run_type": str(a), "link_state": str(b), "count": int(c or 0)} for a, b, c in totals
+    ]
+    summary_counts = {
+        "total_rows": sum(int(row["count"]) for row in totals_rows),
+        "linked_rows": sum(int(row["count"]) for row in totals_rows if row["link_state"] == "linked"),
+        "dangling_static_run_rows": sum(
+            int(row["count"]) for row in totals_rows if row["link_state"] == "dangling_static_run"
+        ),
+        "dangling_dynamic_run_rows": sum(
+            int(row["count"]) for row in totals_rows if row["link_state"] == "dangling_dynamic_run"
+        ),
+        "unknown_run_type_rows": sum(
+            int(row["count"]) for row in totals_rows if row["link_state"] == "unknown_run_type"
+        ),
+    }
+
     return {
-        "totals_by_run_type_link_state": [
-            {"run_type": str(a), "link_state": str(b), "count": int(c or 0)} for a, b, c in totals
-        ],
+        "summary_counts": summary_counts,
+        "totals_by_run_type_link_state": totals_rows,
         "dangling_by_artifact_type": [
             {"run_type": str(a), "artifact_type": str(b), "link_state": str(c), "count": int(d or 0)}
             for a, b, c, d in dangling_by_type
@@ -209,6 +225,15 @@ def format_text_report(data: Mapping[str, Any]) -> str:
     lines: list[str] = []
     lines.append("# artifact_registry integrity (read-only)")
     lines.append("")
+    summary = data.get("summary_counts") or {}
+    if summary:
+        lines.append("## summary")
+        lines.append(f"  total_rows={summary.get('total_rows')}")
+        lines.append(f"  linked_rows={summary.get('linked_rows')}")
+        lines.append(f"  dangling_static_run_rows={summary.get('dangling_static_run_rows')}")
+        lines.append(f"  dangling_dynamic_run_rows={summary.get('dangling_dynamic_run_rows')}")
+        lines.append(f"  unknown_run_type_rows={summary.get('unknown_run_type_rows')}")
+        lines.append("")
     lines.append("## totals by run_type × link_state")
     for row in data.get("totals_by_run_type_link_state") or []:
         lines.append(f"  {row.get('run_type')}\t{row.get('link_state')}\t{row.get('count')}")

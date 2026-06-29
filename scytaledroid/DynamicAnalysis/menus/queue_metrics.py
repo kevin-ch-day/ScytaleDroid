@@ -79,6 +79,13 @@ def summarize_evidence_quota(
             {
                 "bucket": bucket,
                 "run_profile": str(dataset.get("run_profile") or operator.get("run_profile") or ""),
+                "countable": (
+                    True
+                    if dataset.get("countable") is True
+                    else False
+                    if dataset.get("countable") is False
+                    else None
+                ),
                 "low_signal": bool(dataset.get("low_signal")),
                 "protocol_fit": str(operator.get("protocol_fit") or "").strip().lower(),
                 "sort_key": str(payload.get("ended_at") or payload.get("started_at") or run_dir.name),
@@ -93,11 +100,24 @@ def summarize_evidence_quota(
             "interactive_scripted": 0,
         }
         baseline_required = int(getattr(cfg, "baseline_required", 3))
-        interactive_required = int(getattr(cfg, "interactive_required", 2))
+        interactive_required = int(getattr(cfg, "interactive_required", 4))
         for row in rows:
             bucket = str(row.get("bucket") or "")
+            explicit_countable = row.get("countable")
+
+            if explicit_countable is False:
+                out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+                if row.get("protocol_fit") == "poor":
+                    out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
+                if bool(row.get("low_signal")):
+                    out["low_signal_exploratory_runs"] = int(out["low_signal_exploratory_runs"]) + 1
+                continue
+
             if bucket == "baseline":
-                if counts["baseline"] < baseline_required:
+                if explicit_countable is True:
+                    counts["baseline"] += 1
+                    out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
+                elif counts["baseline"] < baseline_required:
                     counts["baseline"] += 1
                     out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
                 else:
@@ -110,7 +130,10 @@ def summarize_evidence_quota(
             bucket_key = "interactive_scripted" if bucket == "interactive_scripted" else "interactive_manual"
             if counts["baseline"] < baseline_required:
                 continue
-            if (
+            if explicit_countable is True:
+                counts[bucket_key] += 1
+                out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
+            elif (
                 counts["interactive_manual"] + counts["interactive_scripted"]
                 < interactive_required
             ):
@@ -128,7 +151,7 @@ def summarize_evidence_quota(
     for counts in per_pkg.values():
         if counts["baseline"] >= int(getattr(cfg, "baseline_required", 3)) and (
             counts["interactive_manual"] + counts["interactive_scripted"]
-        ) >= int(getattr(cfg, "interactive_required", 2)):
+        ) >= int(getattr(cfg, "interactive_required", 4)):
             out["apps_satisfied"] = int(out["apps_satisfied"]) + 1
 
     return out

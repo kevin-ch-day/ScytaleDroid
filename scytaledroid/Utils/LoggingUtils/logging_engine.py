@@ -67,10 +67,21 @@ class LogTarget:
     json_path: Path | None
 
 
+@dataclass(frozen=True)
+class _SessionMirror:
+    adapter: "ContextAdapter"
+    logger: logging.Logger
+    handlers: tuple[logging.Handler, ...]
+
+
 _LOGGERS: dict[str, logging.Logger] = {}
 _HARVEST_LOGGERS: dict[str, ContextAdapter] = {}
+_STATIC_SESSION_LOGGERS: dict[str, _SessionMirror] = {}
+_DYNAMIC_RUN_LOGGERS: dict[str, _SessionMirror] = {}
 
 _HARVEST_SUBDIR = "harvest"
+_STATIC_SUBDIR = "static"
+_DYNAMIC_SUBDIR = "dynamic"
 
 _FILTER_ATTR = "_scd_androguard_filter"
 _LOGURU_FILTER_ATTR = "_scd_loguru_filter"
@@ -159,6 +170,8 @@ def list_log_files() -> dict[str, LogTarget]:
 
     harvest_dir = (base_dir / _HARVEST_SUBDIR).expanduser().resolve()
     files["harvest_runs"] = LogTarget(text_path=harvest_dir, json_path=harvest_dir)
+    static_dir = (base_dir / _STATIC_SUBDIR).expanduser().resolve()
+    files["static_sessions"] = LogTarget(text_path=static_dir, json_path=static_dir)
 
     return files
 
@@ -344,6 +357,193 @@ def close_harvest_run_logger(run_id: str) -> None:
             pass
 
 
+def create_dynamic_run_logger(
+    dynamic_run_id: str,
+    *,
+    started_at: datetime | None = None,
+    context: Mapping[str, object] | None = None,
+) -> ContextAdapter:
+    """Create a dedicated text + JSONL logger for a dynamic analysis run."""
+
+    if not dynamic_run_id:
+        raise ValueError("dynamic_run_id must be provided for dynamic run logging")
+    existing = _DYNAMIC_RUN_LOGGERS.get(dynamic_run_id)
+    if existing is not None:
+        return existing.adapter
+
+    started = started_at or datetime.now(UTC)
+    timestamp = started.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    slug = _slugify(dynamic_run_id)
+    json_filename = f"{timestamp}_run-{slug}.jsonl"
+    text_filename = f"{timestamp}_run-{slug}.log"
+    log_path = (LOG_DIR / _DYNAMIC_SUBDIR / json_filename).expanduser()
+    text_path = (LOG_DIR / _DYNAMIC_SUBDIR / text_filename).expanduser()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger = get_logger("dynamic")
+
+    handler = make_rotating_handler(
+        log_path,
+        max_bytes=10 * 1024 * 1024,
+        backup_count=10,
+        formatter=JsonFormatter(),
+    )
+    handler.setLevel(logging.DEBUG)
+
+    text_handler = make_rotating_handler(
+        text_path,
+        max_bytes=10 * 1024 * 1024,
+        backup_count=10,
+        formatter=SafeFormatter(LOG_FORMAT, DATE_FORMAT),
+    )
+    text_handler.setLevel(logging.DEBUG)
+
+    class _DynamicRunFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple predicate
+            record_dynamic_run_id = getattr(record, "dynamic_run_id", None)
+            record_run = getattr(record, "run_id", None)
+            return record_dynamic_run_id == dynamic_run_id or record_run == dynamic_run_id
+
+    run_filter = _DynamicRunFilter()
+    handler.addFilter(run_filter)
+    text_handler.addFilter(run_filter)
+    logger.addHandler(handler)
+    logger.addHandler(text_handler)
+
+    base_extra: dict[str, object] = {
+        "run_id": dynamic_run_id,
+        "dynamic_run_id": dynamic_run_id,
+        "log_path": str(log_path),
+        "log_path_text": str(text_path),
+        "run_started": started.isoformat(),
+    }
+    if context:
+        base_extra.update({k: v for k, v in context.items() if v is not None})
+
+    adapter = ContextAdapter(logger, base_extra)
+    _DYNAMIC_RUN_LOGGERS[dynamic_run_id] = _SessionMirror(
+        adapter=adapter,
+        logger=logger,
+        handlers=(handler, text_handler),
+    )
+    return adapter
+
+
+def close_dynamic_run_logger(dynamic_run_id: str) -> None:
+    """Close and dispose the dynamic run logger associated with *dynamic_run_id*."""
+
+    mirror = _DYNAMIC_RUN_LOGGERS.pop(dynamic_run_id, None)
+    if mirror is None:
+        return
+
+    for handler in mirror.handlers:
+        try:
+            mirror.logger.removeHandler(handler)
+        except Exception:  # pragma: no cover - defensive cleanup
+            pass
+        try:
+            handler.close()
+        except Exception:  # pragma: no cover - defensive cleanup
+            pass
+
+
+def create_static_session_logger(
+    session_stamp: str,
+    *,
+    started_at: datetime | None = None,
+    context: Mapping[str, object] | None = None,
+) -> ContextAdapter:
+    """Create a dedicated text + JSONL logger for a static analysis session."""
+
+    if not session_stamp:
+        raise ValueError("session_stamp must be provided for static session logging")
+    existing = _STATIC_SESSION_LOGGERS.get(session_stamp)
+    if existing is not None:
+        return existing.adapter
+
+    started = started_at or datetime.now(UTC)
+    timestamp = started.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    slug = _slugify(session_stamp)
+    json_filename = f"{timestamp}_session-{slug}.jsonl"
+    text_filename = f"{timestamp}_session-{slug}.log"
+    log_path = (LOG_DIR / _STATIC_SUBDIR / json_filename).expanduser()
+    text_path = (LOG_DIR / _STATIC_SUBDIR / text_filename).expanduser()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger = get_logger("static")
+
+    handler = make_rotating_handler(
+        log_path,
+        max_bytes=10 * 1024 * 1024,
+        backup_count=10,
+        formatter=JsonFormatter(),
+    )
+    handler.setLevel(logging.DEBUG)
+
+    text_handler = make_rotating_handler(
+        text_path,
+        max_bytes=10 * 1024 * 1024,
+        backup_count=10,
+        formatter=SafeFormatter(LOG_FORMAT, DATE_FORMAT),
+    )
+    text_handler.setLevel(logging.DEBUG)
+
+    class _StaticSessionFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple predicate
+            record_session = getattr(record, "session_stamp", None)
+            record_run = getattr(record, "run_id", None)
+            return record_session == session_stamp or record_run == session_stamp
+
+    session_filter = _StaticSessionFilter()
+    handler.addFilter(session_filter)
+    text_handler.addFilter(session_filter)
+    logger.addHandler(handler)
+    logger.addHandler(text_handler)
+
+    base_extra: dict[str, object] = {
+        "run_id": session_stamp,
+        "session_stamp": session_stamp,
+        "log_path": str(log_path),
+        "log_path_text": str(text_path),
+        "run_started": started.isoformat(),
+    }
+    if context:
+        base_extra.update({k: v for k, v in context.items() if v is not None})
+
+    adapter = ContextAdapter(logger, base_extra)
+    _STATIC_SESSION_LOGGERS[session_stamp] = _SessionMirror(
+        adapter=adapter,
+        logger=logger,
+        handlers=(handler, text_handler),
+    )
+    return adapter
+
+
+def get_static_session_logger(session_stamp: str | None) -> ContextAdapter | None:
+    """Return the dedicated static-session logger when one is active."""
+
+    if not session_stamp:
+        return None
+    state = _STATIC_SESSION_LOGGERS.get(session_stamp)
+    return state.adapter if state is not None else None
+
+
+def close_static_session_logger(session_stamp: str) -> None:
+    """Close and dispose the static-session logger associated with *session_stamp*."""
+
+    state = _STATIC_SESSION_LOGGERS.pop(session_stamp, None)
+    if state is None:
+        return
+
+    logger = state.logger
+    for handler in state.handlers:
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:  # pragma: no cover - defensive cleanup
+            pass
+
+
 def _configure_loguru(
     *, verbosity: str, log_path: Path | None, noise_filter: Callable[[str], bool]
 ) -> None:
@@ -494,11 +694,14 @@ def configure_third_party_loggers(
 
 
 __all__ = [
+    "close_dynamic_run_logger",
     "close_harvest_run_logger",
+    "close_static_session_logger",
     "LogTarget",
     "ContextAdapter",
     "bind_logger",
     "configure_third_party_loggers",
+    "create_static_session_logger",
     "emit_environment_snapshot",
     "ensure_trace",
     "get_app_logger",
@@ -509,7 +712,9 @@ __all__ = [
     "get_error_logger",
     "get_logger",
     "get_metrics_logger",
+    "get_static_session_logger",
     "get_static_logger",
     "list_log_files",
+    "create_dynamic_run_logger",
     "create_harvest_run_logger",
 ]

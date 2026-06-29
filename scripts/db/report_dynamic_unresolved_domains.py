@@ -52,7 +52,15 @@ def _norm_text(value: object) -> str:
 
 def generate_report(*, packages: list[str] | None = None, output_dir: Path | None = None) -> dict[str, Any]:
     from scytaledroid.Database.db_core import db_queries as core_q
-    from scytaledroid.DynamicAnalysis.service_context import resolve_service_for_domain
+    from scytaledroid.DynamicAnalysis.service_context import (
+        default_service_catalog_seed_rows,
+        default_service_domain_map_seed_rows,
+        resolve_service_for_domain,
+    )
+    from scripts.db._dynamic_service_seed_overlay import (
+        merge_missing_seed_service_maps,
+        merge_missing_seed_services,
+    )
 
     package_filters = [str(value or "").strip().lower() for value in (packages or []) if str(value or "").strip()]
     where_clauses = [
@@ -158,6 +166,18 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
             or []
         )
         if isinstance(row, Mapping)
+    )
+    service_rows = tuple(
+        merge_missing_seed_services(
+            list(service_rows),
+            default_service_catalog_seed_rows(),
+        )
+    )
+    map_rows = tuple(
+        merge_missing_seed_service_maps(
+            list(map_rows),
+            default_service_domain_map_seed_rows(),
+        )
     )
 
     unresolved_domain_rows: list[dict[str, Any]] = []

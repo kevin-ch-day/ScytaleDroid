@@ -40,9 +40,29 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
             writer.writerow({key: row.get(key) for key in fields})
 
 
+def _load_network_context_coverage(packages: list[str] | None = None) -> list[dict[str, Any]]:
+    from scripts.db import report_dynamic_legacy_corpus as legacy_report
+
+    db_rows = legacy_report._load_db_rows(packages)
+    local_rows = legacy_report._scan_local_evidence_packs(packages)
+    per_run_rows = [
+        legacy_report._finalize_record(row)
+        for row in legacy_report._merge_records(db_rows, local_rows)
+    ]
+    return legacy_report._build_per_app_rollup(per_run_rows)
+
+
 def generate_report(*, packages: list[str] | None = None, output_dir: Path | None = None) -> dict[str, Any]:
     from scytaledroid.Database.db_core import db_queries as core_q
-    from scytaledroid.DynamicAnalysis.service_context import resolve_service_for_domain
+    from scytaledroid.DynamicAnalysis.service_context import (
+        default_service_catalog_seed_rows,
+        default_service_domain_map_seed_rows,
+        resolve_service_for_domain,
+    )
+    from scripts.db._dynamic_service_seed_overlay import (
+        merge_missing_seed_service_maps,
+        merge_missing_seed_services,
+    )
 
     package_filters = [str(value or "").strip().lower() for value in (packages or []) if str(value or "").strip()]
     if package_filters:
@@ -131,6 +151,8 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
         dictionary=True,
         query_name="dynamic.service_context.report.maps",
     ) or []
+    service_rows = merge_missing_seed_services(service_rows, default_service_catalog_seed_rows())
+    domain_map_rows = merge_missing_seed_service_maps(domain_map_rows, default_service_domain_map_seed_rows())
     obs_rows = core_q.run_sql(
         obs_sql,
         obs_params,
@@ -141,6 +163,12 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
 
     service_tuple = tuple(dict(row) for row in service_rows if isinstance(row, Mapping))
     domain_map_tuple = tuple(dict(row) for row in domain_map_rows if isinstance(row, Mapping))
+    network_context_rows = _load_network_context_coverage(package_filters or None)
+    network_context_by_package = {
+        str(row.get("package_name") or "").strip().lower(): dict(row)
+        for row in network_context_rows
+        if isinstance(row, Mapping) and str(row.get("package_name") or "").strip()
+    }
 
     package_service_rows: list[dict[str, Any]] = []
     unresolved_rows: list[dict[str, Any]] = []
@@ -189,12 +217,19 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
     for package_name in sorted(package_counts):
         counts = package_counts[package_name]
         top = counts.most_common(5)
+        context = network_context_by_package.get(package_name, {})
         package_summary_rows.append(
             {
                 "package_name": package_name,
                 "resolved_service_count": sum(counts.values()),
                 "distinct_services": len(counts),
                 "top_services": ",".join(f"{key}:{value}" for key, value in top),
+                "network_context_state": context.get("network_context_state", ""),
+                "ingest_guidance": context.get("ingest_guidance", ""),
+                "domain_indexed_runs": context.get("domain_indexed_runs", ""),
+                "feature_context_runs": context.get("feature_context_runs", ""),
+                "indicator_context_runs": context.get("indicator_context_runs", ""),
+                "raw_pcap_runs": context.get("raw_pcap_runs", ""),
             }
         )
 
@@ -202,6 +237,7 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
     output_root.mkdir(parents=True, exist_ok=True)
     _write_csv(output_root / "package_service_context.csv", package_service_rows)
     _write_csv(output_root / "package_service_summary.csv", package_summary_rows)
+    _write_csv(output_root / "package_network_context_coverage.csv", network_context_rows)
     _write_csv(output_root / "unresolved_domains.csv", unresolved_rows)
 
     summary = {
@@ -212,10 +248,21 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
         "observed_domain_rows": len(package_service_rows),
         "unresolved_domain_rows": len(unresolved_rows),
         "packages_scanned": len({row["package_name"] for row in package_service_rows}),
+        "packages_with_network_context_coverage": len(network_context_rows),
+        "network_context_state_counts": dict(
+            sorted(
+                Counter(
+                    str(row.get("network_context_state") or "").strip()
+                    for row in network_context_rows
+                    if str(row.get("network_context_state") or "").strip()
+                ).items()
+            )
+        ),
         "service_key_counts": dict(sorted(service_counts.items())),
         "output_files": {
             "package_service_context_csv": str((output_root / "package_service_context.csv").resolve()),
             "package_service_summary_csv": str((output_root / "package_service_summary.csv").resolve()),
+            "package_network_context_coverage_csv": str((output_root / "package_network_context_coverage.csv").resolve()),
             "unresolved_domains_csv": str((output_root / "unresolved_domains.csv").resolve()),
             "summary_json": str((output_root / "summary.json").resolve()),
         },

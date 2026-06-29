@@ -26,7 +26,7 @@ def test_help() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert "usage:" in (proc.stdout or "").lower()
-    assert "refresh derived dynamic run summaries" in (proc.stdout or "").lower()
+    assert "refresh derived dynamic run analysis artifacts" in (proc.stdout or "").lower()
 
 
 def test_refresh_summaries_dry_run_reports_destination_changes_and_skips(tmp_path: Path) -> None:
@@ -129,3 +129,159 @@ def test_refresh_summaries_apply_rewrites_summary(tmp_path: Path) -> None:
     refreshed = json.loads((run_dir / "analysis" / "summary.json").read_text(encoding="utf-8"))
     assert refreshed["destinations_observed"] == ["collector.cdp.cnn.com", "media.cnn.com"]
     assert (run_dir / "analysis" / "summary.md").exists()
+
+
+def test_refresh_summaries_apply_all_derived_invokes_rewriters(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "output" / "evidence" / "dynamic"
+    run_dir = root / "run-1"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "run_manifest_version": 1,
+            "dynamic_run_id": "run-1",
+            "created_at": "2026-06-28T00:00:00Z",
+            "status": "success",
+            "target": {"package_name": "bbc.mobile.news.ww"},
+            "artifacts": [],
+            "outputs": [],
+            "operator": {},
+        },
+    )
+    _write_json(run_dir / "analysis" / "summary.json", {"destinations_observed": []})
+    _write_json(
+        run_dir / "analysis" / "pcap_report.json",
+        {
+            "top_dns": [{"value": "www.bbc.com", "count": 2}],
+            "top_sni": [],
+        },
+    )
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_rewrite(**kwargs):
+        calls.append(kwargs)
+        return {
+            "pcap_report": True,
+            "pcap_features": True,
+            "overlap": True,
+            "summary": True,
+        }
+
+    monkeypatch.setattr(refresh, "_rewrite_derived_artifacts", _fake_rewrite)
+
+    summary = refresh.refresh_summaries(
+        root=root,
+        apply=True,
+        refresh_pcap_report=True,
+        refresh_pcap_features=True,
+        refresh_overlap=True,
+    )
+
+    assert summary["runs_updated"] == 1
+    assert summary["pcap_report_refreshed"] == 1
+    assert summary["pcap_features_refreshed"] == 1
+    assert summary["overlap_refreshed"] == 1
+    assert len(calls) == 1
+    assert calls[0]["refresh_pcap_report"] is True
+    assert calls[0]["refresh_pcap_features"] is True
+    assert calls[0]["refresh_overlap"] is True
+
+
+def test_refresh_summaries_apply_rewrites_summary_even_when_summary_json_is_unchanged(tmp_path: Path) -> None:
+    root = tmp_path / "output" / "evidence" / "dynamic"
+    run_dir = root / "run-1"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "run_manifest_version": 1,
+            "dynamic_run_id": "run-1",
+            "created_at": "2026-06-28T00:00:00Z",
+            "status": "success",
+            "dataset": {
+                "valid_dataset_run": True,
+                "countable": False,
+                "cohort_eligibility": "EXTRA",
+                "invalid_reason_code": None,
+            },
+            "target": {"package_name": "com.example.app"},
+            "artifacts": [],
+            "outputs": [],
+            "operator": {"run_profile": "interaction_manual"},
+        },
+    )
+    expected_summary = {
+        "dynamic_run_id": "run-1",
+        "status": "success",
+        "tier": None,
+        "run_profile": "interaction_manual",
+        "dataset_verdict": "VALID",
+        "counts_toward_quota": False,
+        "quota_detail": {
+            "countable": False,
+            "countability_label": "NO (extra run)",
+            "cohort_eligibility": "EXTRA",
+            "invalid_reason_code": None,
+        },
+        "verdicts": {
+            "technical": "VALID",
+            "protocol": "COMPLIANT",
+            "cohort": "EXTRA",
+        },
+        "dataset": {
+            "valid_dataset_run": True,
+            "countable": False,
+            "cohort_eligibility": "EXTRA",
+            "invalid_reason_code": None,
+        },
+        "target": {"package_name": "com.example.app"},
+        "environment": {},
+        "scenario": {},
+        "observers": [],
+        "destinations_observed": [],
+        "indicators": {
+            "top_dns": [],
+            "top_sni": [],
+            "service_context": {},
+            "service_signals": {},
+        },
+        "telemetry": {
+            "schema_version": None,
+            "counts": None,
+            "stats": None,
+            "quality": {},
+            "network_signal_quality": "none",
+            "network_signal_quality_stored": None,
+            "network_signal_quality_computed": "none",
+            "network_quality_mismatch": False,
+        },
+        "flags": {
+            "network_capture_present": "unknown",
+            "cleartext_http_detected": "unknown",
+            "tls_mitm_suspected": "false",
+            "notable_log_signals": [],
+            "static_watchlist_used": False,
+            "capture_sources": [],
+        },
+        "static_watchlist": None,
+        "capture": {
+            "sources": [],
+            "total_bytes": 0,
+            "pcap_available": None,
+            "pcap_size_bytes": None,
+            "pcap_valid": None,
+            "capture_mode": None,
+            "network_signal_quality": "none",
+            "evidence_sizes": {},
+        },
+        "evidence": [],
+    }
+    _write_json(run_dir / "analysis" / "summary.json", expected_summary)
+    (run_dir / "analysis" / "summary.md").parent.mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis" / "summary.md").write_text("stale markdown", encoding="utf-8")
+
+    summary = refresh.refresh_summaries(root=root, apply=True)
+
+    assert summary["runs_updated"] == 1
+    rendered = (run_dir / "analysis" / "summary.md").read_text(encoding="utf-8")
+    assert "Counts toward quota: NO (extra run)." in rendered
+    assert "Invalid reason: —." in rendered

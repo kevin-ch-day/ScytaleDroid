@@ -31,6 +31,30 @@ CATEGORY_ACTIONS: dict[str, str] = {
     "unknown_link_review": "Unexpected link_state/run_type mix; inspect manually.",
 }
 
+SAFE_PRUNE_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "dangling_db_only_candidate",
+        "static_numeric_missing_sar_candidate",
+        "static_truly_detached_candidate",
+    }
+)
+REVIEW_BLOCKED_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "dangling_recent_keep",
+        "dangling_old_export_first",
+        "dangling_file_present_review",
+        "dynamic_dangling_review",
+        "static_nonnumeric_run_id_review",
+        "static_file_present_detached_review",
+        "static_legacy_overlap_missing_file",
+        "static_legacy_overlap_file_present_review",
+        "static_canonical_residue_review",
+        "static_malformed_run_id_review",
+        "static_unknown_review",
+        "unknown_link_review",
+    }
+)
+
 _STATIC_PRIMARY_REASON_TO_CLEANUP_CATEGORY: dict[str, str] = {
     "truly_detached": "static_truly_detached_candidate",
     "file_present_db_detached": "static_file_present_detached_review",
@@ -90,6 +114,29 @@ def _rebuild_totals_by_category(summary_rows: list[dict[str, Any]]) -> list[dict
         }
         for category, row_count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _build_cleanup_summary_counts(totals_by_category: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {
+        "total_rows": 0,
+        "linked_keep_rows": 0,
+        "safe_prune_candidate_rows": 0,
+        "review_or_blocked_rows": 0,
+        "other_rows": 0,
+    }
+    for row in totals_by_category:
+        category = str(row.get("cleanup_category") or "")
+        row_count = int(row.get("row_count") or 0)
+        counts["total_rows"] += row_count
+        if category == "linked_keep":
+            counts["linked_keep_rows"] += row_count
+        elif category in SAFE_PRUNE_CATEGORIES:
+            counts["safe_prune_candidate_rows"] += row_count
+        elif category in REVIEW_BLOCKED_CATEGORIES:
+            counts["review_or_blocked_rows"] += row_count
+        else:
+            counts["other_rows"] += row_count
+    return counts
 
 
 def _build_static_dangling_summary_dimensions(static_report: Mapping[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -382,6 +429,7 @@ def collect_cleanup_candidate_report(
         for category, items in _build_static_dangling_top_run_ids(static_report).items():
             top_by_category[category] = items
     totals_by_category = _rebuild_totals_by_category(summary_rows)
+    summary_counts = _build_cleanup_summary_counts(totals_by_category)
     allowed_categories = {str(row.get("cleanup_category") or "") for row in totals_by_category}
     top_by_category = {category: items for category, items in top_by_category.items() if category in allowed_categories}
 
@@ -451,6 +499,7 @@ def collect_cleanup_candidate_report(
         "recent_days_window": rd,
         "old_days_threshold": od,
         "run_type_filter": run_type_filter,
+        "summary_counts": summary_counts,
         "totals_by_category": totals_by_category,
         "summary_dimensions": summary_rows,
         "top_run_ids_by_category": {k: v for k, v in top_by_category.items()},
@@ -471,6 +520,17 @@ def format_text_report(data: Mapping[str, Any]) -> str:
     if data.get("run_type_filter"):
         lines.append(f"run_type filter: {data.get('run_type_filter')}")
     lines.append("")
+    summary = data.get("summary_counts")
+    if isinstance(summary, Mapping):
+        lines.append("## Summary")
+        lines.append(f"  total_rows={summary.get('total_rows')}")
+        lines.append(f"  linked_keep_rows={summary.get('linked_keep_rows')}")
+        lines.append(f"  safe_prune_candidate_rows={summary.get('safe_prune_candidate_rows')}")
+        lines.append(f"  review_or_blocked_rows={summary.get('review_or_blocked_rows')}")
+        other = int(summary.get("other_rows") or 0)
+        if other:
+            lines.append(f"  other_rows={other}")
+        lines.append("")
     lines.append("## Totals by cleanup_category")
     for row in data.get("totals_by_category") or []:
         cat = str(row.get("cleanup_category") or "")
@@ -569,8 +629,10 @@ def format_text_report(data: Mapping[str, Any]) -> str:
     lines.append("Notes:")
     lines.append(
         "  This report is SELECT-only. For **scoped** old-dangling deletes (receipt + --apply), use "
-        "scripts/db/prune_artifact_registry_dangling.py. For static-only truly detached rows, use "
-        "scripts/db/prune_artifact_registry_static_detached.py; see docs/maintenance/artifact_registry_cleanup_track.md."
+        "scripts/db/prune_artifact_registry_dangling.py. For static-only truly detached rows, inspect first with "
+        "scripts/db/report_artifact_registry_static_detached.py, then use "
+        "scripts/db/prune_artifact_registry_static_detached.py if the proposal is still clean; "
+        "see docs/maintenance/artifact_registry_cleanup_track.md."
     )
     lines.append(
         "  Workspace maintenance → prune artifact_registry remains a blunt instrument: it deletes **all** "

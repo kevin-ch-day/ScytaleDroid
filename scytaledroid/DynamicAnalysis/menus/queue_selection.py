@@ -69,8 +69,10 @@ class PreparedPackageSelectionRow:
     display_name: str = ""
     baseline_countable: int = 0
     baseline_extra: int = 0
+    baseline_low_signal_supplemental: int = 0
     interactive_countable: int = 0
     interactive_extra: int = 0
+    interactive_low_signal_supplemental: int = 0
     need_baseline: int = 0
     need_interactive: int = 0
     prep_label: str = "—"
@@ -297,7 +299,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             _render_compact_queue_table(
                 row_models,
                 baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
-                interactive_required=int(getattr(prepared.cfg, "interactive_required", 2)),
+                interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
             )
             warnings_line = _compact_warning_line(row_models)
             if warnings_line:
@@ -344,7 +346,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
                 evidence_summary=evidence_summary,
                 row_models=list(prepared.row_models or []),
                 baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
-                interactive_required=int(getattr(prepared.cfg, "interactive_required", 2)),
+                interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
             )
             continue
         if choice_lc in {"y", "history"}:

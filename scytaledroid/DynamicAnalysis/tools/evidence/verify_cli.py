@@ -626,9 +626,9 @@ def run_dynamic_evidence_verify(
         interactive_required = int(cfg.interactive_required)
         valid_required_total = baseline_required + interactive_required
     except Exception:
-        baseline_required = 1
-        interactive_required = 2
-        valid_required_total = 3
+        baseline_required = 3
+        interactive_required = 4
+        valid_required_total = 7
     apps = _summarize_apps(
         rows,
         baseline_required=baseline_required,

@@ -698,9 +698,12 @@ def _selected_app_latest_recent_summary(*, package_name: str, state: Any) -> Any
             interaction_level=getattr(row, "interaction_level", None),
             messaging_activity=getattr(row, "messaging_activity", None),
             valid=valid,
+            countable=getattr(row, "countable", None),
+            cohort_eligibility=getattr(row, "cohort_eligibility", None),
             invalid_reason_code=invalid_reason,
             pcap_failure_detail=str(getattr(row, "pcap_failure_detail", "") or "").strip() or None,
             low_signal=getattr(row, "low_signal", None),
+            supplemental_reason=getattr(row, "supplemental_reason", None),
             run_id=str(getattr(row, "run_id", "") or ""),
             status_label=status_label,
         )
@@ -714,12 +717,23 @@ def _selected_app_latest_recent_summary(*, package_name: str, state: Any) -> Any
                     interaction_level=getattr(fallback, "interaction_level", None),
                     messaging_activity=getattr(fallback, "messaging_activity", None),
                     valid=getattr(fallback, "valid", None),
+                    countable=getattr(fallback, "countable", getattr(tracker_summary, "countable", None)),
+                    cohort_eligibility=getattr(
+                        fallback,
+                        "cohort_eligibility",
+                        getattr(tracker_summary, "cohort_eligibility", None),
+                    ),
                     invalid_reason_code=getattr(fallback, "invalid_reason_code", None),
                     pcap_failure_detail=(
                         getattr(fallback, "pcap_failure_detail", None)
                         or getattr(tracker_summary, "pcap_failure_detail", None)
                     ),
                     low_signal=getattr(fallback, "low_signal", None),
+                    supplemental_reason=getattr(
+                        fallback,
+                        "supplemental_reason",
+                        getattr(tracker_summary, "supplemental_reason", None),
+                    ),
                     run_id=fallback_run_id,
                     status_label=getattr(fallback, "status_label", getattr(tracker_summary, "status_label", "UNKNOWN")),
                 )
@@ -890,7 +904,7 @@ def _print_paper_mode_constants() -> None:
         ("Percentile method", str(getattr(profile_config, "NP_PERCENTILE_METHOD", "linear"))),
         ("Min PCAP bytes", f"{int(profile_config.MIN_PCAP_BYTES)}"),
         ("Models", "Isolation Forest + OC-SVM"),
-        ("Baseline-only training", "YES"),
+        ("Model training", "baseline-only"),
         ("NumPy version", numpy_version),
         ("scikit-learn version", sklearn_version),
     ]
@@ -903,7 +917,7 @@ def _print_paper_mode_constants() -> None:
             f"Min={int(getattr(profile_config, 'MIN_SAMPLING_SECONDS', 180))}s | "
             f"Rec={int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s | "
             f"MinPCAP={int(profile_config.MIN_PCAP_BYTES)} | "
-            f"Models=IF+OCSVM | Baseline-only=YES"
+            f"Models=IF+OCSVM | Training=baseline-only"
         )
         print(status_messages.status(line, level="info"))
         # Keep guided collection fast: no extra prompt here. Operators can switch to
@@ -968,6 +982,104 @@ def _render_selected_app_workbench(
         print_selected_app_workbench_summary_fn=_print_selected_app_workbench_summary,
         handle_selected_app_aux_action_fn=_handle_selected_app_aux_action,
     )
+
+
+def _choose_interactive_mode(
+    *,
+    package_name: str,
+    scripted_template_ready: bool,
+    default_scripted: bool = False,
+) -> str | None:
+    menu_utils.print_header("Interactive Mode")
+    print("1) Manual interactive run [default]")
+    if scripted_template_ready:
+        template_name = str(resolved_template_for_package(package_name) or "").strip()
+        if template_name:
+            print(f"2) Scripted interactive run: {template_name}")
+        else:
+            print("2) Scripted interactive run")
+    else:
+        print("2) Scripted interactive run (unavailable - no template)")
+    print("0) Back")
+    choice = prompt_utils.get_choice(
+        ["1", "2", "0", "B"],
+        default="2" if default_scripted and scripted_template_ready else "1",
+        casefold=True,
+        invalid_message="Choose 1, 2, or 0.",
+        disabled=[] if scripted_template_ready else ["2"],
+    ).upper()
+    if choice in {"0", "B"}:
+        return None
+    if choice == "2":
+        return "interaction_scripted"
+    return "interaction_manual"
+
+
+def _choose_messaging_activity(
+    *,
+    run_profile: str,
+) -> str:
+    scripted = str(run_profile or "").strip().lower() == "interaction_scripted"
+    print()
+    menu_utils.print_header("Messaging Activity (Tag)")
+    if scripted:
+        messaging_options = [
+            menu_utils.MenuOption("1", "Idle", description="browse thread/list surfaces; no sending/calls/media"),
+            menu_utils.MenuOption(
+                "2",
+                "Text",
+                description="send 2 fixed text messages (no media). Use Meta AI/Saved/Note-to-self if needed.",
+            ),
+            menu_utils.MenuOption("3", "Voice Call", description="start call; if connected hold ~90s; end call"),
+            menu_utils.MenuOption("4", "Video Call", description="start video call; if connected hold ~90s; end call"),
+            menu_utils.MenuOption("5", "Mixed", description="text + call (exploratory-only; non-cohort)"),
+        ]
+        default = "2"
+        mapping = {
+            "1": "idle",
+            "2": "text_only",
+            "3": "voice_call",
+            "4": "video_call",
+            "5": "mixed",
+        }
+    else:
+        messaging_options = [
+            menu_utils.MenuOption(
+                "1",
+                "Freeform",
+                description="use the app naturally; setup, browse, text, call, or recover account state as needed",
+            ),
+            menu_utils.MenuOption("2", "Text", description="manual text/chat-focused interaction"),
+            menu_utils.MenuOption("3", "Voice Call", description="manual call-focused interaction"),
+            menu_utils.MenuOption("4", "Video Call", description="manual video-call-focused interaction"),
+            menu_utils.MenuOption("5", "Mixed", description="several actions may occur; this is only a manual activity tag"),
+        ]
+        default = "1"
+        mapping = {
+            "1": "manual_freeform",
+            "2": "text_only",
+            "3": "voice_call",
+            "4": "video_call",
+            "5": "manual_mixed",
+        }
+    menu_utils.render_menu(
+        menu_utils.MenuSpec(
+            items=messaging_options,
+            default=default,
+            exit_label=None,
+            show_exit=False,
+            show_descriptions=True,
+            compact=True,
+        )
+    )
+    valid_choices = menu_utils.selectable_keys(messaging_options, include_exit=False)
+    choice = prompt_utils.get_choice(
+        valid_choices,
+        default=default,
+        invalid_message=f"Choose {valid_choices[0]}-{valid_choices[-1]}.",
+        disabled=[option.key for option in messaging_options if option.disabled],
+    )
+    return mapping[choice]
 
 
 def _select_guided_dataset_action(
@@ -1106,6 +1218,22 @@ def _progress_label(count: int, required: int, *, noun: str = "needed") -> str:
     if missing == 0:
         return f"{count_i}/{required_i} complete"
     return f"{count_i}/{required_i} need {missing}"
+
+
+def _is_manual_preparation_run(
+    *,
+    package_name: str,
+    selected_protocol: str,
+    run_profile: str,
+    counts: Any,
+    cfg: Any,
+) -> bool:
+    return (
+        selected_protocol == "2"
+        and str(run_profile or "").strip().lower() == "interaction_manual"
+        and _is_messaging_package_or_category(package_name)
+        and int(counts.baseline_valid_runs) < int(cfg.baseline_required)
+    )
 
 
 def _run_profile_label(run_profile: str | None) -> str:
@@ -1580,6 +1708,22 @@ def _run_guided_dataset_iteration(
         prompt_utils.press_enter_to_continue()
         return True
 
+    interactive_mode_profile: str | None = None
+    if selected_protocol == "2":
+        interactive_mode_profile = _choose_interactive_mode(
+            package_name=package_name,
+            scripted_template_ready=bool(getattr(app, "scripted_template_ready", False)),
+            default_scripted=bool(
+                app.scripted_template_ready
+                and (
+                    str(app.suggested_default_key or "") == "2"
+                    or "scripted" in str(app.queue_action or "").lower()
+                )
+            ),
+        )
+        if not interactive_mode_profile:
+            return True
+
     if selected_protocol in {"1", "2", "3"}:
         prepared = _prepare_selected_app_capture(
             app=app,
@@ -1596,25 +1740,61 @@ def _run_guided_dataset_iteration(
         run_profile = _canonical_baseline_profile_for_package(package_name)
         interaction_level = "minimal"
     elif selected_protocol == "2":
-        run_profile = "interaction_scripted"
-        interaction_level = "scripted"
+        run_profile = str(interactive_mode_profile or "interaction_manual")
+        interaction_level = "scripted" if run_profile == "interaction_scripted" else "manual"
     else:
         run_profile = "interaction_manual"
         interaction_level = "manual"
+    manual_preparation_run = _is_manual_preparation_run(
+        package_name=package_name,
+        selected_protocol=selected_protocol,
+        run_profile=run_profile,
+        counts=counts,
+        cfg=cfg,
+    )
     if (
         selected_protocol in {"2", "3"}
         and int(counts.baseline_valid_runs) < int(cfg.baseline_required)
     ):
-        print(
-            status_messages.status(
-                "Baseline requirement is not complete: "
-                f"{counts.baseline_valid_runs}/{cfg.baseline_required} valid baseline runs.",
-                level="warn",
+        if manual_preparation_run:
+            print(
+                status_messages.status(
+                    "Baseline requirement is not complete: "
+                    f"{counts.baseline_valid_runs}/{cfg.baseline_required} valid baseline runs.",
+                    level="warn",
+                )
             )
-        )
-        print(status_messages.status("Recommended next run is baseline.", level="warn"))
-        if not prompt_utils.prompt_yes_no("Proceed with interaction anyway?", default=False):
-            return True
+            print(
+                status_messages.status(
+                    "Manual preparation run is allowed for setup-sensitive messaging apps.",
+                    level="info",
+                )
+            )
+            print(
+                status_messages.status(
+                    "Use this when login, account recovery, or thread setup would contaminate a clean connected-idle baseline.",
+                    level="info",
+                )
+            )
+            print(
+                status_messages.status(
+                    "This run will be retained as supplemental evidence; return afterward for a clean baseline capture.",
+                    level="info",
+                )
+            )
+            if not prompt_utils.prompt_yes_no("Start manual preparation run?", default=True):
+                return True
+        else:
+            print(
+                status_messages.status(
+                    "Baseline requirement is not complete: "
+                    f"{counts.baseline_valid_runs}/{cfg.baseline_required} valid baseline runs.",
+                    level="warn",
+                )
+            )
+            print(status_messages.status("Recommended next run is baseline.", level="warn"))
+            if not prompt_utils.prompt_yes_no("Proceed with interaction anyway?", default=False):
+                return True
     counts_toward_completion = _intent_counts_toward_quota(
         run_profile=run_profile,
         baseline_valid_runs=int(counts.baseline_valid_runs),
@@ -1622,7 +1802,12 @@ def _run_guided_dataset_iteration(
         cfg=cfg,
     )
     suggested_key = app.suggested_default_key if app.suggested_is_interactive else "1"
-    if selected_protocol in {"1", "2", "3"} and selected_protocol != suggested_key and not counts_toward_completion:
+    if (
+        selected_protocol in {"1", "2", "3"}
+        and selected_protocol != suggested_key
+        and not counts_toward_completion
+        and not manual_preparation_run
+    ):
         print(
             status_messages.status(
                 "Selected intent is not quota-suggested and will be saved as supplemental evidence (not quota-counted).",
@@ -1647,43 +1832,7 @@ def _run_guided_dataset_iteration(
             # accidentally select known-low-signal "home idle" baselines.
             messaging_activity = "connected_idle"
         else:
-            print()
-            menu_utils.print_header("Messaging Activity (Tag)")
-            messaging_options = [
-                menu_utils.MenuOption("1", "Idle", description="browse thread/list surfaces; no sending/calls/media"),
-                menu_utils.MenuOption(
-                    "2",
-                    "Text",
-                    description="send 2 fixed text messages (no media). Use Meta AI/Saved/Note-to-self if needed.",
-                ),
-                menu_utils.MenuOption("3", "Voice Call", description="start call; if connected hold ~90s; end call"),
-                menu_utils.MenuOption("4", "Video Call", description="start video call; if connected hold ~90s; end call"),
-                menu_utils.MenuOption("5", "Mixed", description="text + call (exploratory-only; non-cohort)"),
-            ]
-            menu_utils.render_menu(
-                menu_utils.MenuSpec(
-                    items=messaging_options,
-                    default="2" if str(run_profile or "").strip().lower() == "interaction_scripted" else "1",
-                    exit_label=None,
-                    show_exit=False,
-                    show_descriptions=True,
-                    compact=True,
-                )
-            )
-            valid_choices = menu_utils.selectable_keys(messaging_options, include_exit=False)
-            choice = prompt_utils.get_choice(
-                valid_choices,
-                default="2" if str(run_profile or "").strip().lower() == "interaction_scripted" else "1",
-                invalid_message=f"Choose {valid_choices[0]}-{valid_choices[-1]}.",
-                disabled=[option.key for option in messaging_options if option.disabled],
-            )
-            messaging_activity = {
-                "1": "idle",
-                "2": "text_only",
-                "3": "voice_call",
-                "4": "video_call",
-                "5": "mixed",
-            }[choice]
+            messaging_activity = _choose_messaging_activity(run_profile=run_profile)
     else:
         # Non-messaging apps: leave unset so downstream can distinguish "not applicable" vs "none".
         messaging_activity = None

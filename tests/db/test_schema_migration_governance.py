@@ -185,6 +185,36 @@ def test_build_schema_migration_report_and_bundle(tmp_path: Path) -> None:
         },
         {
             "migration_entry_id": 2,
+            "migration_id": "20260614_phase_a_typed_replacement_columns_v1",
+            "migration_name": "typed columns",
+            "applied_at_utc": "2026-06-14 00:02:00",
+            "repo_git_commit": "abc123",
+            "schema_version_before": "0.3.1-schema-governance",
+            "schema_version_after": "0.3.2-typed-columns",
+            "migration_checksum": registered_migrations()[1].checksum,
+            "applied_by": "tester",
+            "host_name": "host",
+            "status": "failed",
+            "notes": "transient",
+            "receipt_path": "/tmp/fail.json",
+        },
+        {
+            "migration_entry_id": 3,
+            "migration_id": "20260614_phase_a_typed_replacement_columns_v1",
+            "migration_name": "typed columns",
+            "applied_at_utc": "2026-06-14 00:03:00",
+            "repo_git_commit": "abc123",
+            "schema_version_before": "0.3.1-schema-governance",
+            "schema_version_after": "0.3.2-typed-columns",
+            "migration_checksum": registered_migrations()[1].checksum,
+            "applied_by": "tester",
+            "host_name": "host",
+            "status": "applied",
+            "notes": None,
+            "receipt_path": "/tmp/two.json",
+        },
+        {
+            "migration_entry_id": 4,
             "migration_id": "manual_unregistered_probe",
             "migration_name": "probe",
             "applied_at_utc": "2026-06-14 00:05:00",
@@ -211,16 +241,97 @@ def test_build_schema_migration_report_and_bundle(tmp_path: Path) -> None:
     assert report["summary"]["registered_migration_count"] >= 3
     assert report["summary"]["missing_migration_count"] >= 2
     assert report["summary"]["checksum_mismatch_count"] == 0
+    assert report["summary"]["applied_checksum_mismatch_count"] == 0
+    assert report["summary"]["non_applied_checksum_conflict_count"] == 0
+    assert report["summary"]["checksum_mismatch_stage_counts"] == {}
+    assert report["summary"]["checksum_mismatch_classification_counts"] == {}
     assert report["summary"]["unregistered_applied_row_count"] == 1
+    assert report["summary"]["failed_row_count"] == 1
+    assert report["summary"]["migrations_with_failed_history_count"] == 1
+    assert report["summary"]["retried_then_applied_count"] == 1
+    assert report["summary"]["latest_failed_migration_count"] == 0
     assert report["missing_migrations"]
     assert report["unregistered_applied_rows"][0]["migration_id"] == "manual_unregistered_probe"
+    assert report["latest_failed_migrations"] == []
+    assert report["retried_then_applied_migrations"] == [
+        "20260614_phase_a_typed_replacement_columns_v1"
+    ]
+    assert report["migration_retry_details"] == [
+        {
+            "migration_id": "20260614_phase_a_typed_replacement_columns_v1",
+            "attempt_count": 2,
+            "applied_attempt_count": 1,
+            "failed_attempt_count": 1,
+            "latest_status": "applied",
+            "latest_applied_at_utc": "2026-06-14 00:03:00",
+        }
+    ]
+    assert report["failed_rows"][0]["migration_id"] == "20260614_phase_a_typed_replacement_columns_v1"
+    assert report["checksum_mismatch_details"] == []
 
     files = write_schema_migration_report_bundle(report, tmp_path, stem="schema_migration_report_test")
     payload = json.loads((tmp_path / "schema_migration_report_test.json").read_text(encoding="utf-8"))
     assert payload["summary"]["unregistered_applied_row_count"] == 1
+    assert payload["summary"]["failed_row_count"] == 1
     assert files["json"].endswith("schema_migration_report_test.json")
     assert (tmp_path / "schema_migration_report_test_registered_migrations.csv").is_file()
     assert (tmp_path / "schema_migration_report_test_missing_migrations.txt").is_file()
+    assert (tmp_path / "schema_migration_report_test_migration_retry_details.csv").is_file()
+    assert (tmp_path / "schema_migration_report_test_failed_rows.csv").is_file()
+    assert (tmp_path / "schema_migration_report_test_checksum_mismatch_details.csv").is_file()
+
+
+def test_build_schema_migration_report_includes_checksum_mismatch_details() -> None:
+    spec = registered_migrations()[0]
+    rows = [
+        {
+            "migration_entry_id": 1,
+            "migration_id": spec.migration_id,
+            "migration_name": spec.migration_name,
+            "applied_at_utc": "2026-06-14 00:00:00",
+            "repo_git_commit": "abc123",
+            "schema_version_before": spec.schema_version_before,
+            "schema_version_after": spec.schema_version_after,
+            "migration_checksum": "deadbeef" * 8,
+            "applied_by": "tester",
+            "host_name": "host",
+            "status": "applied",
+            "notes": None,
+            "receipt_path": "/tmp/one.json",
+        },
+    ]
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        if query_name == "schema_migrations.latest_schema_version_from_registry":
+            return {"schema_version_after": spec.schema_version_after}
+        if query_name == "schema_migrations.load_rows":
+            return rows
+        raise AssertionError(f"unexpected query_name: {query_name}")
+
+    report = build_schema_migration_report(fake_run_sql)
+    assert report["summary"]["checksum_mismatch_count"] == 1
+    assert report["summary"]["applied_checksum_mismatch_count"] == 1
+    assert report["summary"]["non_applied_checksum_conflict_count"] == 0
+    assert report["summary"]["checksum_mismatch_stage_counts"] == {spec.stage: 1}
+    assert report["summary"]["checksum_mismatch_classification_counts"] == {
+        "applied_registry_drift": 1
+    }
+    assert report["checksum_mismatch_details"] == [
+        {
+            "migration_id": spec.migration_id,
+            "expected_checksum": spec.checksum,
+            "db_checksum": "deadbeef" * 8,
+            "db_status": "applied",
+            "migration_name": spec.migration_name,
+            "stage": spec.stage,
+            "apply_mode": spec.apply_mode,
+            "schema_version_before": spec.schema_version_before,
+            "schema_version_after": spec.schema_version_after,
+            "latest_db_applied_at_utc": "2026-06-14 00:00:00",
+            "latest_db_receipt_path": "/tmp/one.json",
+            "mismatch_classification": "applied_registry_drift",
+        }
+    ]
 
 
 def test_backfill_typed_replacement_columns_records_counts() -> None:

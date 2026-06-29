@@ -315,6 +315,30 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert dianomi_worker["owner_class"] == "third_party"
     assert dianomi_worker["role_class"] == "adtech_monetization"
 
+    whatsapp_graph = classify_domain("graph.whatsapp.com", package_name="com.whatsapp", references=refs)
+    assert whatsapp_graph["owner_class"] == "first_party"
+    assert whatsapp_graph["role_class"] == "messaging_platform_api"
+
+    whatsapp_call = classify_domain("v.whatsapp.net", package_name="com.whatsapp", references=refs)
+    assert whatsapp_call["owner_class"] == "first_party"
+    assert whatsapp_call["role_class"] == "realtime_call_transport"
+
+    whatsapp_cdn = classify_domain(
+        "media-ord5-2.cdn.whatsapp.net",
+        package_name="com.whatsapp",
+        references=refs,
+    )
+    assert whatsapp_cdn["owner_class"] == "first_party"
+    assert whatsapp_cdn["role_class"] == "content_delivery"
+
+    bbc_live = classify_domain(
+        "api.live.bbcx-internal.com",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_live["owner_class"] == "first_party"
+    assert bbc_live["role_class"] == "publisher_api"
+
 
 def test_index_dynamic_evidence_pack_to_db_includes_domain_context(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-1"
@@ -382,3 +406,55 @@ def test_index_dynamic_evidence_pack_to_db_includes_domain_context(monkeypatch, 
             "role_class": "content_delivery",
         }
     ]
+
+
+def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
+    refs = default_domain_references()
+
+    mapbox = classify_domain("config.mapbox.com", package_name="com.cnn.mobile.android.phone", references=refs)
+    assert mapbox["owner_class"] == "third_party"
+    assert mapbox["role_class"] == "sdk_configuration"
+
+    cloudflare = classify_domain("cdnjs.cloudflare.com", package_name="com.cnn.mobile.android.phone", references=refs)
+    assert cloudflare["owner_class"] == "third_party"
+    assert cloudflare["role_class"] == "static_asset_delivery"
+
+    amp = classify_domain("cdn.ampproject.org", package_name="com.cnn.mobile.android.phone", references=refs)
+    assert amp["owner_class"] == "third_party"
+    assert amp["role_class"] == "content_delivery"
+
+    smartadserver = classify_domain(
+        "ssbsync.smartadserver.com",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert smartadserver["owner_class"] == "third_party"
+    assert smartadserver["role_class"] == "identity_sync"
+
+    cdninstagram = classify_domain("scontent.cdninstagram.com", package_name="com.facebook.katana", references=refs)
+    assert cdninstagram["owner_class"] == "first_party"
+    assert cdninstagram["role_class"] == "content_delivery"
+
+    guardian_api = classify_domain("mobile.guardianapis.com", package_name="com.guardian", references=refs)
+    assert guardian_api["owner_class"] == "first_party"
+    assert guardian_api["role_class"] == "publisher_api"
+
+    guardian_collection = classify_domain("ophan.theguardian.com", package_name="com.guardian", references=refs)
+    assert guardian_collection["owner_class"] == "first_party"
+    assert guardian_collection["role_class"] == "publisher_collection"
+
+    guardian_cmp = classify_domain("cdn.privacy-mgmt.com", package_name="com.guardian", references=refs)
+    assert guardian_cmp["owner_class"] == "third_party"
+    assert guardian_cmp["role_class"] == "consent_management"
+
+    guardian_crash = classify_domain(
+        "firebase-settings.crashlytics.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_crash["owner_class"] == "third_party"
+    assert guardian_crash["role_class"] == "crash_reporting"
+
+    guardian_adjust = classify_domain("app.adjust.com", package_name="com.guardian", references=refs)
+    assert guardian_adjust["owner_class"] == "third_party"
+    assert guardian_adjust["role_class"] == "attribution_measurement"

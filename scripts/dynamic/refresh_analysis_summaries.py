@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Refresh derived dynamic run summaries from existing evidence packs.
+"""Refresh derived dynamic run analysis artifacts from existing evidence packs.
 
 This is a safe derived-artifact maintenance tool. It does not rewrite
 ``run_manifest.json`` or mutate dataset validity/countability flags.
 
-It only regenerates:
+Default behavior regenerates:
 - analysis/summary.json
 - analysis/summary.md
 
-Default mode is dry-run. Use ``--apply`` to write refreshed summaries.
+Optional apply-time flags can also regenerate:
+- analysis/pcap_report.json
+- analysis/pcap_features.json
+- analysis/static_dynamic_overlap.json
+
+Default mode is dry-run. Use ``--apply`` to write refreshed artifacts.
 """
 
 from __future__ import annotations
@@ -28,6 +33,14 @@ if str(_REPO_ROOT) not in sys.path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Rewrite analysis/summary.json and analysis/summary.md.")
+    parser.add_argument("--pcap-report", action="store_true", help="Also regenerate analysis/pcap_report.json in apply mode.")
+    parser.add_argument("--pcap-features", action="store_true", help="Also regenerate analysis/pcap_features.json in apply mode.")
+    parser.add_argument("--overlap", action="store_true", help="Also regenerate analysis/static_dynamic_overlap.json in apply mode.")
+    parser.add_argument(
+        "--all-derived",
+        action="store_true",
+        help="Shortcut for --pcap-report --pcap-features --overlap plus refreshed summaries.",
+    )
     parser.add_argument("--run-id", action="append", default=None, help="Restrict to one or more dynamic run IDs.")
     parser.add_argument("--package", action="append", default=None, help="Restrict to one or more package names.")
     parser.add_argument("--output-root", default=None, help="Override dynamic evidence root for testing or alternate workspaces.")
@@ -143,21 +156,57 @@ def _summary_payload(run_dir: Path, manifest: "RunManifest") -> dict[str, Any]:
     return DynamicRunSummarizer(writer)._build_summary(manifest)
 
 
+def _rewrite_derived_artifacts(
+    *,
+    run_dir: Path,
+    manifest: "RunManifest",
+    refresh_pcap_report: bool,
+    refresh_pcap_features: bool,
+    refresh_overlap: bool,
+) -> dict[str, bool]:
+    from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
+    from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
+    from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
+    from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
+    from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
+
+    writer = EvidencePackWriter(run_dir)
+    changed = {
+        "pcap_report": False,
+        "pcap_features": False,
+        "overlap": False,
+        "summary": False,
+    }
+    if refresh_pcap_report:
+        changed["pcap_report"] = write_pcap_report(manifest, run_dir) is not None
+    if refresh_pcap_features:
+        changed["pcap_features"] = write_pcap_features(manifest, run_dir) is not None
+    if refresh_overlap:
+        changed["overlap"] = write_static_dynamic_overlap(manifest, run_dir) is not None
+    DynamicRunSummarizer(writer).summarize(manifest)
+    changed["summary"] = True
+    return changed
+
+
 def refresh_summaries(
     *,
     root: Path,
     apply: bool,
+    refresh_pcap_report: bool = False,
+    refresh_pcap_features: bool = False,
+    refresh_overlap: bool = False,
     run_ids: set[str] | None = None,
     packages: set[str] | None = None,
 ) -> dict[str, Any]:
-    from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
-
     completed_run_dirs, in_progress, ghost = _completed_run_dirs(root)
     scanned = 0
     matched = 0
     updated = 0
     changed_destinations = 0
     changed_network_capture = 0
+    pcap_report_refreshed = 0
+    pcap_features_refreshed = 0
+    overlap_refreshed = 0
     rows: list[dict[str, Any]] = []
 
     for run_dir in completed_run_dirs:
@@ -199,24 +248,48 @@ def refresh_summaries(
         if row["old_network_capture_present"] != row["new_network_capture_present"]:
             changed_network_capture += 1
 
-        if apply and summary_changed:
-            writer = EvidencePackWriter(run_dir)
-            from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
-
-            DynamicRunSummarizer(writer).summarize(manifest)
+        if apply:
+            changed = _rewrite_derived_artifacts(
+                run_dir=run_dir,
+                manifest=manifest,
+                refresh_pcap_report=refresh_pcap_report,
+                refresh_pcap_features=refresh_pcap_features,
+                refresh_overlap=refresh_overlap,
+            )
             updated += 1
+            pcap_report_refreshed += int(changed["pcap_report"])
+            pcap_features_refreshed += int(changed["pcap_features"])
+            overlap_refreshed += int(changed["overlap"])
+        elif apply and (refresh_pcap_report or refresh_pcap_features or refresh_overlap):
+            changed = _rewrite_derived_artifacts(
+                run_dir=run_dir,
+                manifest=manifest,
+                refresh_pcap_report=refresh_pcap_report,
+                refresh_pcap_features=refresh_pcap_features,
+                refresh_overlap=refresh_overlap,
+            )
+            updated += 1
+            pcap_report_refreshed += int(changed["pcap_report"])
+            pcap_features_refreshed += int(changed["pcap_features"])
+            overlap_refreshed += int(changed["overlap"])
 
     return {
         "dynamic_evidence_root": str(root.resolve()),
         "runs_scanned": scanned,
         "runs_matched": matched,
         "runs_updated": updated,
+        "pcap_report_refreshed": pcap_report_refreshed,
+        "pcap_features_refreshed": pcap_features_refreshed,
+        "overlap_refreshed": overlap_refreshed,
         "runs_with_destination_changes": changed_destinations,
         "runs_with_network_capture_flag_changes": changed_network_capture,
         "in_progress_dirs_skipped": in_progress,
         "ghost_dirs_skipped": ghost,
         "rows": rows,
         "apply_mode": bool(apply),
+        "refresh_pcap_report": bool(refresh_pcap_report),
+        "refresh_pcap_features": bool(refresh_pcap_features),
+        "refresh_overlap": bool(refresh_overlap),
         "no_manifest_writes": True,
     }
 
@@ -225,9 +298,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     root = _dynamic_root(args.output_root)
+    refresh_pcap_report = bool(args.pcap_report or args.all_derived)
+    refresh_pcap_features = bool(args.pcap_features or args.all_derived)
+    refresh_overlap = bool(args.overlap or args.all_derived)
     summary = refresh_summaries(
         root=root,
         apply=bool(args.apply),
+        refresh_pcap_report=refresh_pcap_report,
+        refresh_pcap_features=refresh_pcap_features,
+        refresh_overlap=refresh_overlap,
         run_ids={str(value) for value in (args.run_id or [])} or None,
         packages={str(value) for value in (args.package or [])} or None,
     )
@@ -237,6 +316,9 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"runs_scanned={summary['runs_scanned']} runs_matched={summary['runs_matched']} "
             f"runs_updated={summary['runs_updated']} destination_changes={summary['runs_with_destination_changes']} "
+            f"pcap_report_refreshed={summary['pcap_report_refreshed']} "
+            f"pcap_features_refreshed={summary['pcap_features_refreshed']} "
+            f"overlap_refreshed={summary['overlap_refreshed']} "
             f"in_progress_skipped={len(summary['in_progress_dirs_skipped'])} ghost_skipped={len(summary['ghost_dirs_skipped'])}"
         )
     return 0

@@ -222,6 +222,47 @@ def test_build_dynamic_session_row_prefers_tracker_countability_truth(monkeypatc
     assert row["invalid_reason_code"] is None
 
 
+def test_build_dynamic_session_row_uses_paper_exclusion_reason_for_valid_supplemental_run(tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run126b"
+    (run_dir / "inputs").mkdir(parents=True)
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run126b",
+                "status": "success",
+                "target": {"package_name": "com.example.current"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": False,
+                    "valid_dataset_run": True,
+                    "invalid_reason_code": None,
+                    "paper_exclusion_primary_reason_code": "EXCLUDED_SCRIPT_ABORT",
+                },
+                "operator": {"sampling_rate_s": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "inputs" / "static_dynamic_plan.json").write_text(
+        json.dumps({"package_name": "com.example.current"}),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "summary.json").write_text(
+        json.dumps({"dynamic_run_id": "run126b", "telemetry": {"stats": {}, "quality": {}}}),
+        encoding="utf-8",
+    )
+
+    row = index_from_evidence.build_dynamic_session_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["countable"] == 0
+    assert row["valid_dataset_run"] == 1
+    assert row["invalid_reason_code"] == "EXCLUDED_SCRIPT_ABORT"
+
+
 def test_build_dynamic_network_features_row_prefers_tracker_countability_truth(monkeypatch, tmp_path):
     from scytaledroid.DynamicAnalysis.storage import index_from_evidence
 
@@ -275,3 +316,102 @@ def test_build_dynamic_network_features_row_prefers_tracker_countability_truth(m
     assert row["countable"] == 1
     assert row["valid_dataset_run"] == 1
     assert row["invalid_reason_code"] is None
+
+
+def test_build_dynamic_network_features_row_uses_paper_exclusion_reason_for_valid_supplemental_run(tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run127b"
+    (run_dir / "inputs").mkdir(parents=True)
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run127b",
+                "status": "success",
+                "target": {"package_name": "com.example.current"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": False,
+                    "valid_dataset_run": True,
+                    "invalid_reason_code": None,
+                    "paper_exclusion_primary_reason_code": "EXCLUDED_SCRIPT_ABORT",
+                },
+                "operator": {"sampling_rate_s": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps({"metrics": {}, "proxies": {}, "quality": {"protocol": {}}}),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(json.dumps({}), encoding="utf-8")
+
+    row = index_from_evidence.build_dynamic_network_features_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["countable"] == 0
+    assert row["valid_dataset_run"] == 1
+    assert row["invalid_reason_code"] == "EXCLUDED_SCRIPT_ABORT"
+
+
+def test_build_dynamic_network_features_row_recomputes_low_signal_for_messaging_call(tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run128"
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run128",
+                "status": "success",
+                "target": {"package_name": "com.whatsapp"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": False,
+                    "valid_dataset_run": True,
+                    "low_signal": True,
+                    "low_signal_reasons": ["DOMAINS_LOW"],
+                },
+                "operator": {
+                    "run_profile": "interaction_manual",
+                    "interaction_level": "manual",
+                    "messaging_activity": "voice_call",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "capture_duration_s": 480.0,
+                    "data_size_bytes": 1800000,
+                    "packet_count": 11229,
+                },
+                "proxies": {
+                    "udp_ratio": 0.96,
+                    "unique_dst_ip_count": 7,
+                    "unique_domains_topn": 1,
+                },
+                "quality": {
+                    "protocol": {
+                        "run_profile": "interaction_manual",
+                        "interaction_level": "manual",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(json.dumps({}), encoding="utf-8")
+
+    row = index_from_evidence.build_dynamic_network_features_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["valid_dataset_run"] == 1
+    assert row["countable"] == 0
+    assert row["low_signal"] == 0
+    assert row["low_signal_reasons_json"] == "[]"

@@ -32,17 +32,12 @@ def render_compact_queue_table(
 ) -> None:
     app_width = queue_app_width(terminal_mod=terminal_mod)
     if queue_compact_layout_mode(terminal_mod=terminal_mod) == "narrow":
-        headers = ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+        headers = ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
         table_rows = [
             [
                 row.full_row[0],
                 text_blocks_mod.truncate_visible(row.display_name, app_width),
                 app_queue_state.queue_status_narrow_label(row),
-                app_queue_state.queue_need_narrow_label(
-                    row,
-                    baseline_required=baseline_required,
-                    interactive_required=interactive_required,
-                ),
                 app_queue_state.queue_baseline_runs_label(
                     row,
                     baseline_required=baseline_required,
@@ -51,24 +46,18 @@ def render_compact_queue_table(
                     row,
                     interactive_required=interactive_required,
                 ),
-                app_queue_state.queue_build_label(row),
-                app_queue_state.queue_qa_badge(row.qa_label),
+                app_queue_state.queue_target_label(row),
                 app_queue_state.queue_action_narrow_label(row),
             ]
             for row in rows
         ]
     else:
-        headers = ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
+        headers = ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
         table_rows = [
             [
                 row.full_row[0],
                 text_blocks_mod.truncate_visible(row.display_name, app_width),
-                app_queue_state.queue_state_label(row),
-                app_queue_state.queue_need_label(
-                    row,
-                    baseline_required=baseline_required,
-                    interactive_required=interactive_required,
-                ),
+                app_queue_state.queue_status_label(row),
                 app_queue_state.queue_baseline_runs_label(
                     row,
                     baseline_required=baseline_required,
@@ -77,8 +66,7 @@ def render_compact_queue_table(
                     row,
                     interactive_required=interactive_required,
                 ),
-                app_queue_state.queue_build_label(row),
-                app_queue_state.queue_qa_badge(row.qa_label),
+                app_queue_state.queue_target_label(row),
                 app_queue_state.queue_action_label(row),
             ]
             for row in rows
@@ -125,9 +113,9 @@ def render_queue_summary_block(
     print(f"History     : {' | '.join(history_parts) if history_parts else '—'}")
     print(f"Archive     : {'ready' if freeze_ok else 'blocked'}")
     if not freeze_ok:
-        blocker_text = app_queue_state.archive_blocker_summary(list(prepared.row_models or []))
+        blocker_text = app_queue_state.queue_remaining_summary(list(prepared.row_models or []))
         if blocker_text:
-            print(f"Blocked by  : {blocker_text}")
+            print(f"Remaining   : {blocker_text}")
     if next_row:
         print(f"Next        : {next_row.display_name} — {app_queue_state.display_next_line_action_label(next_row)}")
 
@@ -140,7 +128,7 @@ def render_queue_section_table(
     table_utils_mod: Any,
     show_all: bool = False,
 ) -> None:
-    headers = ["#", "App", "Baseline", "Manual", "Quota", "Prep", "QA", "Action"]
+    headers = ["#", "App", "Baseline", "Interactive", "Quota", "Prep", "QA", "Action"]
     total_required = int(baseline_required) + int(interactive_required)
     table_rows = [
         [
@@ -173,12 +161,13 @@ def render_package_table(
     show_all: bool = False,
 ) -> bool:
     headers = list(headers) if headers else ["#", "App"]
-    selection_headers = ["#", "App", "Baseline", "Manual", "Quota", "Static prep", "Last QA", "Next action"]
+    legacy_selection_headers = ["#", "App", "Baseline", "Manual", "Quota", "Static prep", "Last QA", "Next action"]
+    selection_headers = ["#", "App", "Baseline", "Interactive", "Quota", "Static prep", "Last QA", "Next action"]
     effective_preview = max_preview + 1 if len(rows) == (max_preview + 1) else max_preview
     truncated = len(rows) > effective_preview and not show_all
     rendered_rows = rows if show_all or len(rows) <= effective_preview else rows[:effective_preview]
-    if headers == selection_headers:
-        compact_headers = ["#", "App", "Base", "Manual", "Quota", "Prep", "QA", "Next"]
+    if headers == selection_headers or headers == legacy_selection_headers:
+        compact_headers = ["#", "App", "Base", "Interactive", "Quota", "Prep", "QA", "Next"]
         table_utils_mod.render_table(compact_headers, compact_selection_rows(rendered_rows), compact=False)
     else:
         table_utils_mod.render_table(headers, rendered_rows, compact=False)

@@ -150,3 +150,63 @@ def test_generate_report_groups_unknown_domains_and_candidate_service_matches(tm
     assert "bbc.mobile.news.ww" in pkg_csv
     assert payload["candidate_service_hit_totals"]["permutive"] == 7
     assert payload["candidate_service_hit_totals"]["liveramp"] == 4
+
+
+def test_generate_report_overlays_missing_repo_seed_candidate_matches(tmp_path: Path, monkeypatch) -> None:
+    unresolved = [
+        {
+            "package_name": "bbc.mobile.news.ww",
+            "display_name": "BBC News",
+            "observed_domain": "api.live.bbcx-internal.com",
+            "root_domain": "bbcx-internal.com",
+            "indicator_type": "dns",
+            "indicator_source": "top_dns",
+            "classification_basis": "unclassified",
+            "total_hits": 30,
+            "observation_rows": 1,
+            "observed_run_count": 1,
+            "first_seen_at_utc": "2026-06-29 12:24:16",
+            "last_seen_at_utc": "2026-06-29 12:28:45",
+        },
+    ]
+    services = [
+        {
+            "service_key": "bbc_first_party",
+            "display_name": "BBC First-Party Services",
+            "owner_name": "BBC",
+            "owner_class": "first_party",
+            "service_category": "publisher",
+            "primary_use_case": "news_content_and_api",
+            "source_url": "https://www.bbc.com",
+            "confidence": "high",
+        },
+    ]
+    maps = [
+        {
+            "service_key": "bbc_first_party",
+            "package_name_scope": "bbc.mobile.news.ww",
+            "domain_pattern": "bbc.com",
+            "match_type": "SUFFIX",
+            "role_class": "publisher_api",
+            "source_url": "https://www.bbc.com",
+            "confidence": "high",
+        },
+    ]
+
+    def fake_run_sql(_sql, _params=(), *, fetch="one", dictionary=True, query_name=None):  # noqa: ANN001,ARG001
+        if query_name == "dynamic.unresolved_domains.rows":
+            return unresolved
+        if query_name == "dynamic.unresolved_domains.services":
+            return services
+        if query_name == "dynamic.unresolved_domains.maps":
+            return maps
+        raise AssertionError(f"unexpected query_name={query_name!r}")
+
+    monkeypatch.setattr("scytaledroid.Database.db_core.db_queries.run_sql", fake_run_sql)
+    out_dir = tmp_path / "audit"
+    summary = report.generate_report(output_dir=out_dir)
+
+    assert summary["candidate_service_match_rows"] == 1
+    rows_csv = (out_dir / "unresolved_domain_rows.csv").read_text(encoding="utf-8")
+    assert "bbc_first_party" in rows_csv
+    assert "candidate_service_match" in rows_csv

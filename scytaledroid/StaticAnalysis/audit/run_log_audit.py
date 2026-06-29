@@ -97,6 +97,25 @@ def persistence_audit_candidates(
     )
 
 
+def static_session_log_candidates(
+    session_stamp: str,
+    *,
+    logs_root: Path | None = None,
+) -> tuple[Path | None, Path | None]:
+    root = (logs_root or Path(app_config.LOGS_DIR)).expanduser().resolve() / "static"
+    stamp = session_stamp.strip()
+    if not stamp or not root.is_dir():
+        return (None, None)
+
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", stamp).strip("-") or "run"
+    text_matches = sorted(root.glob(f"*_session-{slug}.log"))
+    json_matches = sorted(root.glob(f"*_session-{slug}.jsonl"))
+    return (
+        text_matches[-1] if text_matches else None,
+        json_matches[-1] if json_matches else None,
+    )
+
+
 def summarize_persistence_audit(path: Path) -> None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -176,6 +195,10 @@ def emit_static_audit_report(
         print(f"Session stamp : {st}")
         if not _looks_like_session_stamp(st):
             print("  Note: stamp does not match typical YYYYMMDD-<slug> pattern; scan still proceeds.")
+        session_text_log, session_json_log = static_session_log_candidates(st, logs_root=root)
+        print("Session logs:")
+        print(f"  [static.log]  {session_text_log or '(not found)'}")
+        print(f"  [static.jsonl] {session_json_log or '(not found)'}")
         pa, mi = persistence_audit_candidates(st, output_root=out_root)
         print("Persistence audits:")
         for label, cand in ("persistence_audit", pa), ("missing_run_ids", mi):
@@ -230,6 +253,7 @@ __all__ = [
     "emit_static_audit_report",
     "persistence_audit_candidates",
     "scan_log_tail",
+    "static_session_log_candidates",
     "summarize_persistence_audit",
     "tail_text_lines",
 ]

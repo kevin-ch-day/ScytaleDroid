@@ -215,6 +215,16 @@ class DynamicAnalysisEngine:
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
+        dynamic_logger = logging_engine.create_dynamic_run_logger(
+            dynamic_run_id,
+            context={
+                "subsystem": "dynamic",
+                "package_name": self.config.package_name,
+                "device_serial": self.config.device_serial,
+                "scenario_id": self.config.scenario_id,
+                "tier": self.config.tier,
+            },
+        )
         run_ctx = RunContext(
             dynamic_run_id=dynamic_run_id,
             package_name=self.config.package_name,
@@ -235,6 +245,10 @@ class DynamicAnalysisEngine:
         )
         event_logger = RunEventLogger(run_ctx)
         event_logger.log("plan.validation", build_plan_validation_event(validation))
+        dynamic_logger.warning(
+            "Dynamic plan validation blocked run",
+            extra=build_plan_validation_event(validation),
+        )
         event_artifact = event_logger.finalize()
         dataset_block = None
         if str(self.config.tier or "").lower() == "dataset":
@@ -282,6 +296,7 @@ class DynamicAnalysisEngine:
             manifest.add_artifacts([event_artifact])
         manifest.finalize()
         writer.write_manifest(manifest)
+        logging_engine.close_dynamic_run_logger(dynamic_run_id)
         return dynamic_run_id, str(run_dir)
 
     def _write_blocked_tools_missing(
@@ -295,6 +310,16 @@ class DynamicAnalysisEngine:
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
+        dynamic_logger = logging_engine.create_dynamic_run_logger(
+            dynamic_run_id,
+            context={
+                "subsystem": "dynamic",
+                "package_name": self.config.package_name,
+                "device_serial": self.config.device_serial,
+                "scenario_id": self.config.scenario_id,
+                "tier": self.config.tier,
+            },
+        )
         run_ctx = RunContext(
             dynamic_run_id=dynamic_run_id,
             package_name=self.config.package_name,
@@ -315,6 +340,15 @@ class DynamicAnalysisEngine:
         )
         event_logger = RunEventLogger(run_ctx)
         event_logger.log("preflight.tools_missing", {"missing_tools": missing_tools, "tier": self.config.tier})
+        dynamic_logger.warning(
+            "Dynamic preflight blocked run",
+            extra={
+                "dynamic_run_id": dynamic_run_id,
+                "event": "preflight.tools_missing",
+                "missing_tools": list(missing_tools),
+                "tier": self.config.tier,
+            },
+        )
         event_artifact = event_logger.finalize()
 
         protocol = peek_next_run_protocol(self.config.package_name, tier=self.config.tier)
@@ -370,6 +404,7 @@ class DynamicAnalysisEngine:
             manifest.add_artifacts([event_artifact])
         manifest.finalize()
         writer.write_manifest(manifest)
+        logging_engine.close_dynamic_run_logger(dynamic_run_id)
         if self.config.interactive:
             print(
                 status_messages.status(
@@ -445,6 +480,12 @@ class DynamicAnalysisEngine:
                     )
         except Exception:
             pass
+        finally:
+            if session_result.dynamic_run_id:
+                try:
+                    logging_engine.close_dynamic_run_logger(session_result.dynamic_run_id)
+                except Exception:
+                    pass
 
     def _attach_engine_outputs(
         self,

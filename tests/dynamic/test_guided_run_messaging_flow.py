@@ -125,6 +125,112 @@ def test_guided_run_workbench_surfaces_messaging_connected_baseline_note(monkeyp
         "Messaging baseline uses connected idle: open an existing conversation thread and keep it visible; no send/call."
         in out
     )
+    assert (
+        "If login/setup is still in the way, use Interactive run -> Manual first. That preparation run is retained as supplemental evidence outside baseline quota."
+        in out
+    )
+
+
+def test_guided_run_messaging_manual_preparation_flow_replaces_double_warning(monkeypatch, capsys) -> None:
+    package = "com.whatsapp"
+    select_package_calls, select_package = one_shot_package_selector(package)
+    choices = iter(["2", "1", "1"])
+    yes_no_calls: list[tuple[str, bool]] = []
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="WhatsApp",
+    )
+    monkeypatch.setattr(guided_run, "_prepare_selected_app_capture", lambda **_k: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            baseline_valid_runs=0,
+            interactive_valid_runs=0,
+            suggested_profile_from_tracker="baseline_connected",
+            effective_suggested_profile="baseline_connected",
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *a, **k: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
+    monkeypatch.setattr(
+        guided_run.prompt_utils,
+        "prompt_yes_no",
+        lambda prompt, default=False, **_kwargs: yes_no_calls.append((prompt, bool(default))) or True,
+    )
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: [],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "Manual preparation run is allowed for setup-sensitive messaging apps." in out
+    assert "Use this when login, account recovery, or thread setup would contaminate a clean connected-idle baseline." in out
+    assert "This run will be retained as supplemental evidence; return afterward for a clean baseline capture." in out
+    assert "Proceed with interaction anyway?" not in out
+    assert "Proceed with supplemental run anyway?" not in out
+    assert yes_no_calls == [("Start manual preparation run?", True)]
+    assert "Messaging Activity (Tag)" in out
+    assert "Select at least one observer." in out
+
+
+def test_guided_run_manual_messaging_activity_menu_is_freeform_first(monkeypatch, capsys) -> None:
+    package = "com.whatsapp"
+    select_package_calls, select_package = one_shot_package_selector(package)
+    choices = iter(["2", "1", "1"])
+    captured_menu: dict[str, object] = {}
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="WhatsApp",
+    )
+    monkeypatch.setattr(guided_run, "_prepare_selected_app_capture", lambda **_k: ("ZY22JK89DR", "moto"))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            baseline_valid_runs=3,
+            interactive_valid_runs=0,
+            suggested_profile_from_tracker="interaction_manual",
+            effective_suggested_profile="interaction_manual",
+        ),
+    )
+    monkeypatch.setattr(
+        guided_run.menu_utils,
+        "render_menu",
+        lambda spec: captured_menu.setdefault(
+            "items",
+            [(str(item.key), str(item.label), str(item.description or "")) for item in spec.items],
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *a, **k: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: [],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "Messaging Activity (Tag)" in out
+    assert captured_menu["items"] == [
+        ("1", "Freeform", "use the app naturally; setup, browse, text, call, or recover account state as needed"),
+        ("2", "Text", "manual text/chat-focused interaction"),
+        ("3", "Voice Call", "manual call-focused interaction"),
+        ("4", "Video Call", "manual video-call-focused interaction"),
+        ("5", "Mixed", "several actions may occur; this is only a manual activity tag"),
+    ]
+    assert "Select at least one observer." in out
 
 
 def test_guided_run_capture_setup_does_not_repeat_recent_tracker_runs(monkeypatch, capsys) -> None:

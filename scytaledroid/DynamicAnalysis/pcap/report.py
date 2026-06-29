@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scytaledroid.Database.db_func.apps.app_labels import fetch_display_name
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
@@ -64,7 +65,20 @@ def write_pcap_report(
 
     reason_codes: list[str] = []
     target = manifest.target if isinstance(manifest.target, dict) else {}
-    package_name = str(target.get("package_name") or target.get("package") or "").strip().lower()
+    package_name_raw = str(target.get("package_name") or target.get("package") or "").strip()
+    package_name = package_name_raw.lower()
+    app_label = str(
+        target.get("display_name")
+        or target.get("app_label")
+        or target.get("label")
+        or ""
+    ).strip() or None
+    if package_name_raw and (not app_label or app_label == package_name_raw):
+        db_label = str(fetch_display_name(package_name_raw) or "").strip()
+        if db_label:
+            app_label = db_label
+    if not app_label:
+        app_label = package_name_raw or None
     if not pcap_artifact or not pcap_rel:
         reason_codes.append("pcap_artifact_missing")
         report_status = "skip"
@@ -77,6 +91,8 @@ def write_pcap_report(
         "pcap_path": str(pcap_path.relative_to(run_dir)) if pcap_path else None,
         "pcap_sha256": pcap_artifact.sha256 if pcap_artifact else None,
         "pcap_size_bytes": pcap_artifact.size_bytes if pcap_artifact else None,
+        "package_name": package_name_raw or None,
+        "app_label": app_label,
         # Convenience summary fields for offline windowing/ML.
         # These duplicate capinfos.parsed values in a stable, easy-to-consume location.
         "packet_count": None,

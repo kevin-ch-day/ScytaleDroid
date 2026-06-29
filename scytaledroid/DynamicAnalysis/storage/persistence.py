@@ -14,6 +14,13 @@ from scytaledroid.Database.db_core.session import database_session
 from scytaledroid.Database.db_queries.dynamic import schema as dynamic_schema
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
+from scytaledroid.DynamicAnalysis.storage.domain_context_index import index_dynamic_domain_context_for_run
+from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+    build_dynamic_network_features_row_from_evidence_pack,
+    upsert_dynamic_network_features_row,
+)
+from scytaledroid.DynamicAnalysis.core.event_logger import append_run_event
+from scytaledroid.DynamicAnalysis.storage.network_indicators import index_network_indicators_for_run
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.Utils.LoggingUtils import logging_engine
@@ -159,6 +166,12 @@ def persist_dynamic_summary(
         )
         raise
 
+    _index_derived_dynamic_artifacts(
+        dynamic_run_id=dynamic_run_id,
+        package_name=config.package_name,
+        evidence_path=result.evidence_path,
+    )
+
 
 def _require_dynamic_schema(*, require: bool) -> bool:
     if dynamic_schema.ensure_all():
@@ -180,6 +193,114 @@ def _insert_dynamic_session(row: Mapping[str, Any]) -> None:
         ON DUPLICATE KEY UPDATE {updates}
     """
     core_q.run_sql_write(sql, tuple(row[col] for col in columns), query_name="dynamic.sessions.upsert")
+
+
+def _index_derived_dynamic_artifacts(
+    *,
+    dynamic_run_id: str,
+    package_name: str,
+    evidence_path: str | None,
+) -> None:
+    run_dir = resolve_evidence_path(evidence_path)
+    if not run_dir or not run_dir.exists():
+        return
+
+    feature_rows = 0
+    indicator_rows = 0
+    domain_rows = 0
+
+    try:
+        feature_row = build_dynamic_network_features_row_from_evidence_pack(run_dir)
+        if feature_row:
+            upsert_dynamic_network_features_row(feature_row)
+            feature_rows = 1
+        append_run_event(
+            run_dir,
+            "dynamic_network_features_indexed",
+            {"dynamic_run_id": dynamic_run_id, "row_count": feature_rows},
+        )
+        _LOGGER.info(
+            "Dynamic network features indexed",
+            extra={"dynamic_run_id": dynamic_run_id, "row_count": feature_rows},
+        )
+    except Exception as exc:  # noqa: BLE001
+        append_run_event(
+            run_dir,
+            "dynamic_network_features_failed",
+            {"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+        )
+        _LOGGER.warning(
+            "Dynamic derived feature indexing failed",
+            extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+        )
+
+    try:
+        indicator_rows = index_network_indicators_for_run(dynamic_run_id, run_dir)
+        append_run_event(
+            run_dir,
+            "dynamic_network_indicators_indexed",
+            {"dynamic_run_id": dynamic_run_id, "row_count": indicator_rows},
+        )
+        _LOGGER.info(
+            "Dynamic network indicators indexed",
+            extra={"dynamic_run_id": dynamic_run_id, "row_count": indicator_rows},
+        )
+    except Exception as exc:  # noqa: BLE001
+        append_run_event(
+            run_dir,
+            "dynamic_network_indicators_failed",
+            {"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+        )
+        _LOGGER.warning(
+            "Dynamic network indicator indexing failed",
+            extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+        )
+
+    try:
+        domain_rows = index_dynamic_domain_context_for_run(dynamic_run_id, package_name, run_dir)
+        append_run_event(
+            run_dir,
+            "dynamic_domain_context_indexed",
+            {"dynamic_run_id": dynamic_run_id, "package_name": package_name, "row_count": domain_rows},
+        )
+        _LOGGER.info(
+            "Dynamic domain context indexed",
+            extra={
+                "dynamic_run_id": dynamic_run_id,
+                "package_name": package_name,
+                "row_count": domain_rows,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        append_run_event(
+            run_dir,
+            "dynamic_domain_context_failed",
+            {"dynamic_run_id": dynamic_run_id, "package_name": package_name, "error": str(exc)},
+        )
+        _LOGGER.warning(
+            "Dynamic domain context indexing failed",
+            extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+        )
+
+    append_run_event(
+        run_dir,
+        "dynamic_derived_indexing_complete",
+        {
+            "dynamic_run_id": dynamic_run_id,
+            "feature_rows": feature_rows,
+            "indicator_rows": indicator_rows,
+            "domain_rows": domain_rows,
+        },
+    )
+    _LOGGER.info(
+        "Dynamic derived indexing complete",
+        extra={
+            "dynamic_run_id": dynamic_run_id,
+            "feature_rows": feature_rows,
+            "indicator_rows": indicator_rows,
+            "domain_rows": domain_rows,
+        },
+    )
 
 
 def _filter_existing_dynamic_session_columns(row: Mapping[str, Any]) -> list[str]:

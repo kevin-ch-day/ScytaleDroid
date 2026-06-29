@@ -101,6 +101,8 @@ def test_guided_run_review_path_does_not_require_device(monkeypatch, capsys) -> 
     assert select_package_calls["count"] == 2
     assert "Stored QA Review" in out
     assert "cnn-run-1" in out
+    assert "Dataset impact" in out
+    assert "excluded from quota/publication" in out
     assert "PCAP detail" in out
     assert "PCAP_DEVICE_FILE_MISSING" in out
     assert "This review is display-only; the stored run remains excluded from quota/publication use." in out
@@ -217,6 +219,102 @@ def test_guided_run_history_and_diagnostics_do_not_require_device(
     assert device_calls == {"select": 0, "preflight": 0}
 
 
+def test_guided_run_recent_runs_show_dataset_impact_labels(monkeypatch, capsys) -> None:
+    package = "com.cnn.mobile.android.phone"
+    select_package_calls, select_package = one_shot_package_selector(package)
+    choice_iter = iter(["H", "0"])
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="CNN",
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            total_runs=7,
+            valid_runs=7,
+            baseline_valid_runs=3,
+            interactive_valid_runs=2,
+            quota_met=True,
+            extra_valid_runs=2,
+            recent_runs=(
+                make_recent_summary(
+                    ended_at="2026-06-29T10:00:00Z",
+                    run_profile="interaction_manual",
+                    interaction_level="manual",
+                    valid=True,
+                    countable=False,
+                    cohort_eligibility="EXTRA",
+                    supplemental_reason="MANUAL_EXTRA_RUN",
+                    run_id="cnn-extra-1",
+                    status_label="VALID",
+                ),
+                make_recent_summary(
+                    ended_at="2026-06-29T09:00:00Z",
+                    run_profile="baseline_idle",
+                    interaction_level="minimal",
+                    valid=True,
+                    countable=False,
+                    cohort_eligibility="EXTRA",
+                    low_signal=True,
+                    supplemental_reason="LOW_SIGNAL_IDLE",
+                    run_id="cnn-low-1",
+                    status_label="VALID (LOW_SIGNAL_IDLE)",
+                ),
+                make_recent_summary(
+                    ended_at="2026-06-29T08:00:00Z",
+                    run_profile="interaction_scripted",
+                    interaction_level="scripted",
+                    valid=True,
+                    countable=False,
+                    cohort_eligibility="EXTRA",
+                    supplemental_reason="SCRIPTED_EXTRA_RUN",
+                    run_id="cnn-script-extra-1",
+                    status_label="VALID",
+                ),
+                make_recent_summary(
+                    ended_at="2026-06-29T07:00:00Z",
+                    run_profile="interaction_scripted",
+                    interaction_level="scripted",
+                    valid=True,
+                    countable=True,
+                    cohort_eligibility="COUNTABLE",
+                    run_id="cnn-count-1",
+                    status_label="VALID",
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choice_iter))
+    monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "Recent Tracker Runs" in out
+    assert "Dataset" in out
+    assert "supplemental" in out
+    assert "quota-counted" in out
+
+
+def test_dataset_impact_label_distinguishes_manual_and_scripted_extra_runs() -> None:
+    manual_row = SimpleNamespace(valid=True, supplemental_reason="MANUAL_EXTRA_RUN", countable=False)
+    scripted_row = SimpleNamespace(valid=True, supplemental_reason="SCRIPTED_EXTRA_RUN", countable=False)
+    low_signal_row = SimpleNamespace(valid=True, supplemental_reason="LOW_SIGNAL_IDLE", countable=False)
+
+    assert selected_app_review._dataset_impact_label(manual_row) == "supplemental (manual extra)"
+    assert selected_app_review._dataset_impact_label(scripted_row) == "supplemental (scripted extra)"
+    assert selected_app_review._dataset_impact_label(low_signal_row) == "supplemental (LOW_SIGNAL_IDLE)"
+
+
 def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, capsys) -> None:
     package = "com.facebook.katana"
     select_package_calls, select_package = one_shot_package_selector(package)
@@ -246,6 +344,7 @@ def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, cap
             suggested_slot=4,
             historical_valid_runs=2,
             historical_build_count=1,
+            interactive_extra_valid=1,
         ),
     )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
@@ -259,7 +358,106 @@ def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, cap
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert "Historical evidence: 2 legacy valid run(s) across 1 older build(s) retained for comparison; not counted toward current quota." in out
-    assert "Supplemental current-build evidence: 1 extra valid run(s) retained outside quota." in out
+    assert "Supplemental interactive: 1 extra valid run(s) retained outside quota." in out
+
+
+def test_guided_run_reports_low_signal_supplemental_current_build_context(monkeypatch, capsys) -> None:
+    package = "com.twitter.android"
+    select_package_calls, select_package = one_shot_package_selector(package)
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="X (Twitter)",
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            total_runs=4,
+            valid_runs=4,
+            baseline_valid_runs=2,
+            interactive_valid_runs=0,
+            quota_met=False,
+            extra_valid_runs=2,
+            local_evidence_dir_count=4,
+            reset_available=True,
+            paper_eligible_local=4,
+            quota_counted_local=2,
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            baseline_idle_low_signal_streak=2,
+            baseline_low_signal_valid=2,
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "Supplemental baseline: 2 low-signal idle run(s) retained outside quota." in out
+    assert "Supplemental interactive:" not in out
+
+
+def test_guided_run_diagnostics_show_supplemental_breakdown(monkeypatch, capsys) -> None:
+    package = "com.cnn.mobile.android.phone"
+    select_package_calls, select_package = one_shot_package_selector(package)
+    choice_iter = iter(["G", "0"])
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="CNN",
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            total_runs=9,
+            valid_runs=9,
+            baseline_valid_runs=3,
+            interactive_valid_runs=4,
+            quota_met=True,
+            extra_valid_runs=2,
+            baseline_extra_valid=1,
+            interactive_extra_valid=1,
+            local_evidence_dir_count=9,
+            reset_available=True,
+            paper_eligible_local=9,
+            quota_counted_local=7,
+            suggested_profile_from_tracker="interaction_manual",
+            effective_suggested_profile="interaction_manual",
+            suggested_slot=None,
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choice_iter))
+    monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "Diagnostics" in out
+    assert "Quota-counted baseline" in out
+    assert "3 / 3" in out
+    assert "Quota-counted interactive" in out
+    assert "4 / 4" in out
+    assert "Supplemental baseline" in out
+    assert "extra=1 | low-signal=0" in out
+    assert "Supplemental interactive" in out
+    assert "extra=1 | low-signal=0" in out
 
 
 def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> None:
@@ -320,7 +518,7 @@ def test_guided_run_current_build_db_only_offers_restore_or_recollect(monkeypatc
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Current build · current-build evidence (db-only) · QA unknown · quota 0/5" in out
+    assert "Current build · current-build evidence (db-only) · QA unknown · quota 0/7" in out
     assert "R) Restore / recollect [default]" in out
     assert "Reason: current-build evidence exists in the DB, but the local evidence pack is missing from this workspace." in out
     assert "Restore / Recollect" in out
@@ -348,7 +546,7 @@ def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) ->
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Unknown build · no current-build evidence · QA unknown · quota 0/5" in out
+    assert "Unknown build · no current-build evidence · QA unknown · quota 0/7" in out
     assert "No dynamic evidence exists yet for com.guardian." in out
     assert "1) Baseline run [default]" in out
     assert "Reason:" not in out

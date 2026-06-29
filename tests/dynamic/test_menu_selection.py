@@ -124,7 +124,7 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert "Current     : 1/3 complete | 1 in progress | 1 review" in out
     assert "History     : 1 local-only" in out
     assert "Archive     : blocked" in out
-    assert "Blocked by  : 1 review | 1 baseline gap | 1 manual" in out
+    assert "Remaining   : 1 review | 1 baseline gap | 1 interactive" in out
     assert "Next        : CNN — interactive" in out
     assert "Warnings:" not in out
     assert "Notes   :" not in out
@@ -141,10 +141,10 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert "H help" in out
     assert "D diagnostics" in out
     assert "B back" in out
-    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
-    assert captured["rows"][0][1:] == ["BBC News", "complete", "—", "4/3", "2/2", "unknown", "✓", "—"]
-    assert captured["rows"][1][1:] == ["CNN", "manual", "manual 0/2", "3/3", "0/2", "unknown", "✓", "interactive"]
-    assert captured["rows"][2][1:] == ["ESPN", "review", "review", "0/3", "0/2", "unknown", "inv", "baseline"]
+    assert captured["headers"] == ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
+    assert captured["rows"][0][1:] == ["BBC News", "complete", "3/3 +1", "2/2", "current", "—"]
+    assert captured["rows"][1][1:] == ["CNN", "interactive", "3/3", "0/2", "current", "interactive"]
+    assert captured["rows"][2][1:] == ["ESPN", "review", "0/3", "0/2", "current", "baseline"]
 
 
 def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeypatch) -> None:
@@ -204,9 +204,9 @@ def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeyp
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
-    assert captured["rows"][0] == ["1", "Facebook Messenger", "baseline", "local+curr", "0/3", "0/2", "legacy", "—", "baseline"]
-    assert captured["rows"][1] == ["2", "The Guardian", "baseline", "base 0/3", "0/3", "0/2", "unknown", "—", "baseline"]
+    assert captured["headers"] == ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
+    assert captured["rows"][0] == ["1", "Facebook Messenger", "baseline", "0/3", "0/2", "current", "baseline"]
+    assert captured["rows"][1] == ["2", "The Guardian", "baseline", "0/3", "0/2", "unknown", "baseline"]
 
 
 def test_display_action_label_uses_review_for_invalid_complete_row() -> None:
@@ -345,7 +345,7 @@ def test_render_package_table_shows_full_list_when_only_one_row_exceeds_preview(
 
     truncated = menu_selection.render_package_table(
         rows,
-        headers=["#", "App", "Baseline", "Manual", "Quota", "Static prep", "Last QA", "Next action"],
+        headers=["#", "App", "Baseline", "Interactive", "Quota", "Static prep", "Last QA", "Next action"],
     )
 
     assert truncated is False
@@ -363,7 +363,7 @@ def test_render_package_table_still_truncates_for_longer_lists(monkeypatch, caps
 
     truncated = menu_selection.render_package_table(
         rows,
-        headers=["#", "App", "Baseline", "Manual", "Quota", "Static prep", "Last QA", "Next action"],
+        headers=["#", "App", "Baseline", "Interactive", "Quota", "Static prep", "Last QA", "Next action"],
     )
 
     assert truncated is True
@@ -407,6 +407,152 @@ def test_build_scoped_dataset_counts_prefers_active_plan_identity_over_latest_tr
     assert scoped["active_base_sha"] == "newsha"
 
 
+def test_build_scoped_dataset_counts_respects_explicit_non_countable_active_run() -> None:
+    class _Cfg2:
+        baseline_required = 3
+        interactive_required = 2
+
+    runs = [
+        {
+            "run_id": "cnn-1",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "baseline_idle",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T14:58:21+00:00",
+            "countable": True,
+        },
+        {
+            "run_id": "cnn-2",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "baseline_idle",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T15:03:39+00:00",
+            "countable": True,
+        },
+        {
+            "run_id": "cnn-3",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "baseline_idle",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T15:09:47+00:00",
+            "countable": False,
+            "low_signal": True,
+            "extra_run": 1,
+        },
+    ]
+
+    scoped = tracker_scope.build_scoped_dataset_counts(
+        "com.cnn.mobile.android.phone",
+        runs,
+        cfg=_Cfg2(),
+        resolve_tracker_run_identity_fn=lambda _pkg, row: (
+            str(row.get("version_code") or "") or None,
+            str(row.get("base_apk_sha256") or "") or None,
+        ),
+        active_identity_fn=lambda _pkg: ("19250507", "sha-new"),
+    )
+
+    assert scoped["baseline_countable"] == 2
+    assert scoped["baseline_extra"] == 0
+    assert scoped["baseline_low_signal_supplemental"] == 1
+    assert scoped["interactive_countable"] == 0
+    assert scoped["technical_valid_active"] == 3
+
+
+def test_build_scoped_dataset_counts_tracks_explicit_non_countable_interactive_extra() -> None:
+    class _Cfg2:
+        baseline_required = 3
+        interactive_required = 2
+
+    runs = [
+        {
+            "run_id": "cnn-b1",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "baseline_idle",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T14:58:21+00:00",
+            "countable": True,
+        },
+        {
+            "run_id": "cnn-b2",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "baseline_idle",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T15:03:39+00:00",
+            "countable": True,
+        },
+        {
+            "run_id": "cnn-b3",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "baseline_idle",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T15:09:47+00:00",
+            "countable": True,
+        },
+        {
+            "run_id": "cnn-i1",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "interaction_manual",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T15:11:47+00:00",
+            "countable": True,
+        },
+        {
+            "run_id": "cnn-i2",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "interaction_manual",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T15:13:47+00:00",
+            "countable": True,
+        },
+        {
+            "run_id": "cnn-i3-extra",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "interaction_manual",
+            "version_code": "19250507",
+            "base_apk_sha256": "sha-new",
+            "ended_at": "2026-06-28T15:15:47+00:00",
+            "countable": False,
+            "extra_run": 1,
+        },
+    ]
+
+    scoped = tracker_scope.build_scoped_dataset_counts(
+        "com.cnn.mobile.android.phone",
+        runs,
+        cfg=_Cfg2(),
+        resolve_tracker_run_identity_fn=lambda _pkg, row: (
+            str(row.get("version_code") or "") or None,
+            str(row.get("base_apk_sha256") or "") or None,
+        ),
+        active_identity_fn=lambda _pkg: ("19250507", "sha-new"),
+    )
+
+    assert scoped["baseline_countable"] == 3
+    assert scoped["interactive_countable"] == 2
+    assert scoped["interactive_extra"] == 1
+    assert scoped["interactive_manual_extra"] == 1
+    assert scoped["interactive_low_signal_supplemental"] == 0
+    assert scoped["technical_valid_active"] == 6
+
+
 def test_render_package_table_uses_manual_column_and_extra_counts(monkeypatch, capsys) -> None:
     captured = {}
     rows = [[
@@ -427,11 +573,11 @@ def test_render_package_table_uses_manual_column_and_extra_counts(monkeypatch, c
 
     truncated = menu_selection.render_package_table(
         rows,
-        headers=["#", "App", "Baseline", "Manual", "Quota", "Static prep", "Last QA", "Next action"],
+        headers=["#", "App", "Baseline", "Interactive", "Quota", "Static prep", "Last QA", "Next action"],
     )
 
     assert truncated is False
-    assert captured["headers"] == ["#", "App", "Base", "Manual", "Quota", "Prep", "QA", "Next"]
+    assert captured["headers"] == ["#", "App", "Base", "Interactive", "Quota", "Prep", "QA", "Next"]
     assert captured["rows"] == [[
         "1",
         "BBC News",
@@ -525,7 +671,7 @@ def test_render_queue_section_table_preserves_mixed_validl_and_invalid_states(mo
         show_all=True,
     )
 
-    assert captured["headers"] == ["#", "App", "Baseline", "Manual", "Quota", "Prep", "QA", "Action"]
+    assert captured["headers"] == ["#", "App", "Baseline", "Interactive", "Quota", "Prep", "QA", "Action"]
     assert captured["rows"][0][2] == "3/3 +1 extra"
     assert captured["rows"][0][3] == "0/2 need 2"
     assert captured["rows"][0][5] == "mixed"
@@ -608,10 +754,10 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
-    assert captured["rows"][0] == ["1", "BBC News", "complete", "—", "4/3", "2/2", "unknown", "✓", "—"]
-    assert captured["rows"][1] == ["2", "Facebook", "manual", "manual 0/2", "4/3", "0/2", "unknown", "+L", "interactive"]
-    assert captured["rows"][2] == ["3", "ESPN", "review", "review", "0/3", "0/2", "unknown", "inv", "baseline"]
+    assert captured["headers"] == ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
+    assert captured["rows"][0] == ["1", "BBC News", "complete", "3/3 +1", "2/2", "current", "—"]
+    assert captured["rows"][1] == ["2", "Facebook", "interactive", "3/3 +1", "0/2", "current", "interactive"]
+    assert captured["rows"][2] == ["3", "ESPN", "review", "0/3", "0/2", "current", "baseline"]
 
 
 def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> None:
@@ -653,8 +799,70 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
-    assert captured["rows"][0] == ["4", "Facebook", "refresh", "refresh", "4/3", "0/2", "drift", "+L", "refresh"]
+    assert captured["headers"] == ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
+    assert captured["rows"][0] == ["4", "Facebook", "refresh", "3/3 +1", "0/2", "refresh", "refresh"]
+
+
+def test_compact_queue_table_shows_supplemental_suffixes_without_inflating_quota(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["2"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=1,
+                dataset_valid_runs_count=5,
+                package_name="com.cnn.mobile.android.phone",
+                display_name="CNN",
+                baseline_countable=3,
+                baseline_extra=0,
+                interactive_countable=2,
+                interactive_extra=1,
+                need_baseline=0,
+                need_interactive=0,
+                prep_label="current",
+                qa_label="valid",
+                next_label="—",
+                lineage_state="current_build_observed",
+            ),
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["15"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=2,
+                package_name="com.twitter.android",
+                display_name="X (Twitter)",
+                baseline_countable=2,
+                baseline_extra=0,
+                baseline_low_signal_supplemental=2,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=1,
+                need_interactive=2,
+                prep_label="current",
+                qa_label="valid (L)",
+                next_label="baseline",
+                lineage_state="current_build_observed",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["headers"] == ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
+    assert captured["rows"][0] == ["2", "CNN", "complete", "3/3", "2/2 +1", "current", "—"]
+    assert captured["rows"][1] == ["15", "X (Twitter)", "baseline", "2/3 +2 low", "0/2", "current", "baseline"]
 
 
 def test_compact_queue_table_shows_x_baseline_against_baseline_target(monkeypatch) -> None:
@@ -700,8 +908,8 @@ def test_compact_queue_table_shows_x_baseline_against_baseline_target(monkeypatc
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
-    assert captured["rows"][0] == ["15", "X (Twitter)", "refresh", "refresh", "3/3", "0/2", "drift", "+L", "refresh"]
+    assert captured["headers"] == ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
+    assert captured["rows"][0] == ["15", "X (Twitter)", "refresh", "3/3", "0/2", "refresh", "refresh"]
 
 
 def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch) -> None:
@@ -741,7 +949,7 @@ def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch)
         interactive_required=2,
     )
 
-    assert captured["rows"][0] == ["5", "Current App", "restore", "local pack", "0/3", "0/2", "current", "—", "restore"]
+    assert captured["rows"][0] == ["5", "Current App", "restore", "0/3", "0/2", "current", "restore"]
 
 
 def test_compact_queue_table_uses_narrow_layout_when_terminal_is_tight(monkeypatch) -> None:
@@ -801,9 +1009,9 @@ def test_compact_queue_table_uses_narrow_layout_when_terminal_is_tight(monkeypat
         interactive_required=2,
     )
 
-    assert captured["headers"] == ["#", "App", "State", "Need", "Baseline", "Interactive", "Build", "QA", "Next"]
-    assert captured["rows"][0] == ["2", "CNN", "review", "review", "3/3", "0/2", "current", "inv", "rev"]
-    assert captured["rows"][1] == ["3", "Facebook", "manual", "m 0/2", "4/3", "0/2", "current", "+L", "interactive"]
+    assert captured["headers"] == ["#", "App", "Status", "Baseline", "Interactive", "Target", "Action"]
+    assert captured["rows"][0] == ["2", "CNN", "review", "3/3", "0/2", "current", "rev"]
+    assert captured["rows"][1] == ["3", "Facebook", "interactive", "3/3 +1", "0/2", "current", "interactive"]
 
 
 def test_compact_warning_line_mentions_static_refresh_need() -> None:
@@ -864,16 +1072,39 @@ def test_compact_warning_line_uses_count_summaries_for_large_groups() -> None:
             **kwargs,
         )
 
-    warning = menu_selection._compact_warning_line(
+    rows = [
+        _row("Facebook", prep_label="mixed", qa_label="valid (id_mismatch)"),
+        _row("X (Twitter)", prep_label="mixed", qa_label="valid (id_mismatch)"),
+        _row("Signal", lineage_state="historical_db_only"),
+        _row("Snapchat", lineage_state="historical_db_only"),
+        _row("Telegram", lineage_state="historical_local_only"),
+    ]
+    warning = menu_selection._compact_warning_line(rows)
+    note = menu_selection._compact_note_line(rows)
+
+    assert warning == ""
+    assert note == "Facebook, X (Twitter) mixed current/legacy evidence | 3 history-only apps. Press D."
+
+
+def test_compact_note_line_mentions_mixed_current_legacy_context() -> None:
+    note = menu_selection._compact_note_line(
         [
-            _row("Facebook", qa_label="valid (id_mismatch)"),
-            _row("X (Twitter)", qa_label="valid (id_mismatch)"),
-            _row("Signal", lineage_state="historical_db_only"),
-            _row("Snapchat", lineage_state="historical_db_only"),
-            _row("Telegram", lineage_state="historical_local_only"),
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=[],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                display_name="CNN",
+                prep_label="mixed",
+                lineage_state="current_build_observed",
+                qa_label="valid (L)",
+                next_label="baseline",
+            )
         ]
     )
-    assert warning == ""
+    assert note == "CNN mixed current/legacy evidence. Press D."
 
 
 def test_compact_warning_line_mentions_historical_db_only() -> None:
@@ -1014,7 +1245,7 @@ def test_run_package_selection_menu_shows_current_build_refresh_summary(monkeypa
     assert result is None
     out = capsys.readouterr().out
     assert "Current     : 0/1 complete | 1 drift" in out
-    assert "Blocked by  : 1 refresh | 1 manual" in out
+    assert "Remaining   : 1 refresh | 1 interactive" in out
 
 
 def test_archive_blocker_summary_keeps_refresh_visible_with_overlapping_counts() -> None:

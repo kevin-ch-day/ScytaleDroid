@@ -139,8 +139,10 @@ def build_scoped_dataset_counts(
     out = {
         "baseline_countable": 0,
         "baseline_extra": 0,
+        "baseline_low_signal_supplemental": 0,
         "interactive_countable": 0,
         "interactive_extra": 0,
+        "interactive_low_signal_supplemental": 0,
         "interactive_scripted_countable": 0,
         "interactive_scripted_extra": 0,
         "interactive_manual_countable": 0,
@@ -155,8 +157,8 @@ def build_scoped_dataset_counts(
         "active_base_sha": active_identity[1] or "",
     }
 
-    baseline_needed = max(0, int(getattr(cfg, "baseline_required", 1)))
-    interactive_needed = max(0, int(getattr(cfg, "interactive_required", 2)))
+    baseline_needed = max(0, int(getattr(cfg, "baseline_required", 3)))
+    interactive_needed = max(0, int(getattr(cfg, "interactive_required", 4)))
     baseline_seen = 0
     interactive_seen = 0
     indexed: list[tuple[int, dict]] = [(i, r) for i, r in enumerate(active_runs)]
@@ -173,6 +175,53 @@ def build_scoped_dataset_counts(
             continue
         is_baseline = prof.startswith("baseline") or ("baseline" in prof) or ("idle" in prof)
         is_interactive = ("interaction" in prof) or ("interactive" in prof)
+        countable_raw = r.get("countable")
+        explicit_countable = (
+            True
+            if countable_raw is True
+            else False
+            if countable_raw is False
+            else None
+        )
+
+        # Prefer the tracker/finalization truth when present. This avoids
+        # recomputing quota progress from profile order alone for runs that were
+        # intentionally retained as valid-but-supplemental.
+        if explicit_countable is not None:
+            if not explicit_countable:
+                if bool(r.get("extra_run")):
+                    if is_baseline:
+                        if prof == "baseline_idle" and bool(r.get("low_signal")):
+                            out["baseline_low_signal_supplemental"] += 1
+                        else:
+                            out["baseline_extra"] += 1
+                    elif is_interactive:
+                        kind = "other"
+                        if "interaction_manual" in prof or prof.endswith("_manual") or "manual" in prof:
+                            kind = "manual"
+                        elif "interaction_scripted" in prof or "scripted" in prof or "script" in prof:
+                            kind = "scripted"
+                        if bool(r.get("low_signal")):
+                            out["interactive_low_signal_supplemental"] += 1
+                        else:
+                            out["interactive_extra"] += 1
+                            out[f"interactive_{kind}_extra"] += 1
+                continue
+            if is_baseline:
+                baseline_seen += 1
+                out["baseline_countable"] += 1
+                continue
+            if is_interactive:
+                kind = "other"
+                if "interaction_manual" in prof or prof.endswith("_manual") or "manual" in prof:
+                    kind = "manual"
+                elif "interaction_scripted" in prof or "scripted" in prof or "script" in prof:
+                    kind = "scripted"
+                interactive_seen += 1
+                out["interactive_countable"] += 1
+                out[f"interactive_{kind}_countable"] += 1
+                continue
+
         if is_baseline:
             if baseline_seen < baseline_needed:
                 baseline_seen += 1

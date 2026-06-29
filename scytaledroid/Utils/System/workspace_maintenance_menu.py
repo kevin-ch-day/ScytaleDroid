@@ -261,9 +261,9 @@ def _show_dashboard() -> None:
                 elif "interactive" in prof:
                     rec["interactive"] += 1
 
-    baseline_required = 1
-    interactive_required = 2
-    valid_required = 3
+    baseline_required = 3
+    interactive_required = 4
+    valid_required = 7
     try:
         from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 

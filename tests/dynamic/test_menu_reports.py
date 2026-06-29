@@ -38,7 +38,7 @@ def test_render_cohort_status_details_includes_historical_context(monkeypatch, c
             SimpleNamespace(need_baseline=0, need_interactive=2, live_build_drift=True),
         ],
         baseline_required=3,
-        interactive_required=2,
+        interactive_required=4,
     )
 
     out = capsys.readouterr().out
@@ -46,7 +46,7 @@ def test_render_cohort_status_details_includes_historical_context(monkeypatch, c
     assert "Quota-valid remaining : 68" in out
     assert "Static refresh needed : 1" in out
     assert "Baseline runs needed  : 3" in out
-    assert "Manual runs needed    : 4" in out
+    assert "Interactive needed    : 4" in out
     assert "Evidence-authoritative quota" in out
     assert "Quota-valid runs      : 12 / 80" in out
     assert "Tracker-scoped latest-run state" in out
@@ -80,14 +80,13 @@ def test_render_cohort_status_help_mentions_supplemental_and_historical(monkeypa
     assert "+L" in out
     assert "+ extra" in out
     assert "db-only" in out
-    assert "Build=legacy + Evidence=db-only" in out
-    assert "Build=current + Evidence=db-only" in out
-    assert "drift" in out
+    assert "Current target + DB-only evidence" in out
+    assert "refresh target" in out
     assert "refresh steps" in out
     assert "installed app build differs from the newest static plan" in out
     assert "identity mismatch" in out
     assert "baseline gap" in out
-    assert "manual gap" in out
+    assert "interactive gap" in out
     out_lc = out.lower()
     assert "evidence-authoritative quota" in out_lc
     assert "tracker-scoped latest-run state" in out_lc
@@ -106,7 +105,7 @@ def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, caps
                 interactive_countable=0,
                 interactive_extra=0,
                 need_baseline=0,
-                need_interactive=2,
+                need_interactive=4,
                 prep_label="mixed",
                 qa_label="valid (L)",
                 historical_valid_runs_count=1,
@@ -121,7 +120,7 @@ def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, caps
     assert "History" in out
     assert "Build lineage and why an app looks current, mixed, or legacy" in out
     assert "Baseline" in out
-    assert "Manual" in out
+    assert "Interactive" in out
     assert "Build identity detail" in out
     assert "only historical DB lineage exists" in out
     assert "exists; extra" in out
@@ -130,7 +129,7 @@ def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, caps
     assert "present" in out
     assert "historical DB-only evidence" in out
     assert "3/3 +1 extra" in out
-    assert "0/2 need 2" in out
+    assert "0/4 need 4" in out
 
 
 def test_render_cohort_build_history_wraps_multiple_notes(monkeypatch, capsys) -> None:
@@ -146,7 +145,7 @@ def test_render_cohort_build_history_wraps_multiple_notes(monkeypatch, capsys) -
                 interactive_countable=0,
                 interactive_extra=0,
                 need_baseline=0,
-                need_interactive=2,
+                need_interactive=4,
                 prep_label="mixed",
                 qa_label="valid (id_mismatch) (L)",
                 historical_valid_runs_count=1,
@@ -185,7 +184,7 @@ def test_render_cohort_build_history_explains_stale_and_review_rows(monkeypatch,
                 interactive_countable=0,
                 interactive_extra=0,
                 need_baseline=0,
-                need_interactive=2,
+                need_interactive=4,
                 prep_label="stale",
                 qa_label="valid (L)",
                 historical_valid_runs_count=1,
@@ -196,7 +195,7 @@ def test_render_cohort_build_history_explains_stale_and_review_rows(monkeypatch,
                 display_name="CNN",
                 baseline_countable=3,
                 baseline_extra=0,
-                interactive_countable=2,
+                interactive_countable=4,
                 interactive_extra=0,
                 need_baseline=0,
                 need_interactive=0,
@@ -221,7 +220,7 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
 
     menu_reports.render_cohort_status_debug(
-        [["1", "Facebook", "3/3 complete (+1 extra)", "0/2 need 2", "2I", "manual interaction", "mixed", "3/5 need 2", "1", "valid (L)"]],
+        [["1", "Facebook", "3/3 complete (+1 extra)", "0/4 need 4", "4I", "manual interaction", "mixed", "3/7 need 4", "1", "valid (L)"]],
         [
             SimpleNamespace(
                 display_name="Facebook",
@@ -232,7 +231,7 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
                 historical_valid_runs_count=1,
                 historical_build_count=1,
                 need_baseline=0,
-                need_interactive=2,
+                need_interactive=4,
                 lineage_state="historical_db_only",
                 db_active_sessions=0,
                 db_historical_sessions=11,
@@ -263,15 +262,15 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
 
     menu_reports.render_cohort_status_debug(
         [
-            ["1", "CNN", "3/3 complete", "2/2 complete", "0", "review QA", "current", "5/5 complete", "0", "invalid"],
-            ["2", "Facebook", "3/3 complete", "0/2 need 2", "2I", "refresh static", "stale", "3/5 need 2", "1", "valid (L)"],
+            ["1", "CNN", "3/3 complete", "4/4 complete", "0", "review QA", "current", "7/7 complete", "0", "invalid"],
+            ["2", "Facebook", "3/3 complete", "0/4 need 4", "4I", "refresh static", "stale", "3/7 need 4", "1", "valid (L)"],
         ],
         [
             SimpleNamespace(
                 display_name="CNN",
                 baseline_countable=3,
                 baseline_extra=0,
-                interactive_countable=2,
+                interactive_countable=4,
                 interactive_extra=0,
                 historical_valid_runs_count=0,
                 historical_build_count=0,
@@ -293,7 +292,7 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
                 historical_valid_runs_count=1,
                 historical_build_count=1,
                 need_baseline=0,
-                need_interactive=2,
+                need_interactive=4,
                 lineage_state="current_build_stale",
                 db_active_sessions=4,
                 db_historical_sessions=20,

@@ -276,6 +276,13 @@ def selected_app_state_snapshot(
     queue_action_manual: str,
     queue_action_scripted: str,
 ) -> SelectedAppStateSnapshot:
+    effective_latest_valid: bool | None
+    if latest_valid is False:
+        effective_latest_valid = False
+    elif latest_valid is True and int(active_valid_runs) > 0:
+        effective_latest_valid = True
+    else:
+        effective_latest_valid = None
     return SelectedAppStateSnapshot(
         build=selected_app_build_label(
             active_valid_runs=active_valid_runs,
@@ -291,7 +298,7 @@ def selected_app_state_snapshot(
             historical_valid_runs_count=legacy_valid_runs,
             technical_valid_active=active_valid_runs,
         ),
-        qa=selected_app_qa_badge(latest_valid),
+        qa=selected_app_qa_badge(effective_latest_valid),
         need=selected_app_need_label(
             queue_action=queue_action,
             baseline_valid_runs=baseline_valid_runs,

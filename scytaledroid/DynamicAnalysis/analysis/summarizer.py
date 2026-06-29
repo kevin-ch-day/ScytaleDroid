@@ -37,7 +37,8 @@ class DynamicRunSummarizer:
         ]
 
     def _build_summary(self, manifest: RunManifest) -> dict[str, Any]:
-        destinations = self._load_destinations(manifest)
+        pcap_report = self._load_pcap_report()
+        destinations = self._load_destinations(manifest, pcap_report=pcap_report)
         cleartext_flag = self._detect_cleartext(destinations)
         notable_logs = self._scan_log_signals(manifest)
         tls_mitm = "true" if "SSLHandshakeException" in notable_logs else "false"
@@ -87,15 +88,61 @@ class DynamicRunSummarizer:
             telemetry_quality["netstats_warning"] = "netstats_missing"
         if network_signal_quality == "netstats_zero_bytes":
             telemetry_quality["netstats_warning"] = "netstats_zero_bytes"
+        dataset = manifest.dataset if isinstance(manifest.dataset, dict) else {}
+        operator = manifest.operator if isinstance(manifest.operator, dict) else {}
+        invalid_reason = str(dataset.get("invalid_reason_code") or "").strip() or None
+        if not invalid_reason and dataset.get("valid_dataset_run") is True and dataset.get("countable") is False:
+            invalid_reason = str(dataset.get("paper_exclusion_primary_reason_code") or "").strip() or None
+        countability_label = self._countability_label(
+            dataset=dataset,
+            run_profile=operator.get("run_profile"),
+            invalid_reason=invalid_reason,
+        )
+        dataset_verdict = (
+            "VALID"
+            if dataset.get("valid_dataset_run") is True
+            else "INVALID"
+            if dataset.get("valid_dataset_run") is False
+            else None
+        )
         return {
             "dynamic_run_id": manifest.dynamic_run_id,
             "status": manifest.status,
             "tier": tier,
+            "run_profile": operator.get("run_profile"),
+            "dataset_verdict": dataset_verdict,
+            "counts_toward_quota": dataset.get("countable"),
+            "quota_detail": {
+                "countable": dataset.get("countable"),
+                "countability_label": countability_label,
+                "cohort_eligibility": dataset.get("cohort_eligibility"),
+                "invalid_reason_code": invalid_reason,
+            },
+            "verdicts": {
+                "technical": dataset_verdict,
+                "protocol": "COMPLIANT" if dataset_verdict == "VALID" else ("NON_COMPLIANT" if dataset_verdict == "INVALID" else None),
+                "cohort": dataset.get("cohort_eligibility"),
+            },
+            "dataset": dataset,
             "target": manifest.target,
             "environment": manifest.environment,
             "scenario": manifest.scenario,
             "observers": [asdict(observer) for observer in manifest.observers],
             "destinations_observed": destinations,
+            "indicators": {
+                "top_dns": pcap_report.get("top_dns") if isinstance(pcap_report.get("top_dns"), list) else [],
+                "top_sni": pcap_report.get("top_sni") if isinstance(pcap_report.get("top_sni"), list) else [],
+                "service_context": (
+                    pcap_report.get("service_context")
+                    if isinstance(pcap_report.get("service_context"), dict)
+                    else {}
+                ),
+                "service_signals": (
+                    pcap_report.get("service_signals")
+                    if isinstance(pcap_report.get("service_signals"), dict)
+                    else {}
+                ),
+            },
             "telemetry": {
                 "schema_version": telemetry_schema_version,
                 "counts": telemetry_counts,
@@ -155,8 +202,19 @@ class DynamicRunSummarizer:
         capture_bytes_text = f"{capture_bytes} bytes" if isinstance(capture_bytes, int) else "unknown"
         capture_mode = capture.get("capture_mode") or "unknown"
         pcap_valid = capture.get("pcap_valid")
-        pcap_valid_text = "true" if pcap_valid is True else "false" if pcap_valid is False else "unknown"
+        pcap_valid_text = self._bool_text(pcap_valid)
         target = summary.get("target", {}) or {}
+        dataset = summary.get("dataset", {}) or {}
+        quota_detail = summary.get("quota_detail", {}) or {}
+        indicators = summary.get("indicators", {}) or {}
+        cleartext_http_text = self._bool_text(summary.get("flags", {}).get("cleartext_http_detected"))
+        network_capture_text = self._bool_text(summary.get("flags", {}).get("network_capture_present"))
+        static_watchlist_text = self._bool_text(summary.get("flags", {}).get("static_watchlist_used"))
+        invalid_reason_text = self._display_text(quota_detail.get("invalid_reason_code"))
+        top_dns = indicators.get("top_dns") or []
+        top_sni = indicators.get("top_sni") or []
+        top_dns_text = self._top_indicator_text(top_dns)
+        top_sni_text = self._top_indicator_text(top_sni)
         lines = [
             "# Dynamic Run Summary",
             "",
@@ -165,19 +223,26 @@ class DynamicRunSummarizer:
             f"- Tier: {summary.get('tier', 'unknown')}.",
             f"- Scenario: {summary['scenario'].get('id', 'unknown')}",
             f"- Package: {target.get('package_name', 'unknown')}.",
+            f"- Run profile: {summary.get('run_profile', 'unknown')}.",
             f"- Device: {environment.get('device_model', 'unknown')} / {environment.get('android_version', 'unknown')}.",
             f"- Security patch: {environment.get('security_patch_level', 'unknown')}.",
             f"- Play Services: {environment.get('play_services_version', 'unknown')}.",
             "",
             "## Observations",
             f"- Destinations observed: {destinations_text}.",
-            f"- Cleartext HTTP detected: {summary['flags'].get('cleartext_http_detected')}.",
-            f"- Network capture present: {summary['flags'].get('network_capture_present')}.",
+            f"- Cleartext HTTP detected: {cleartext_http_text}.",
+            f"- Network capture present: {network_capture_text}.",
             f"- Network capture sources: {capture_sources_text} ({capture_bytes_text}).",
             f"- Capture mode: {capture_mode}.",
             f"- PCAP valid: {pcap_valid_text}.",
-            f"- Static watchlist used: {summary['flags'].get('static_watchlist_used')}.",
-            f"- TLS MITM suspected: {summary['flags'].get('tls_mitm_suspected')}.",
+            f"- Dataset verdict: {summary.get('dataset_verdict', 'unknown')}.",
+            f"- Counts toward quota: {quota_detail.get('countability_label') or 'UNKNOWN'}.",
+            f"- Cohort eligibility: {quota_detail.get('cohort_eligibility')}.",
+            f"- Invalid reason: {invalid_reason_text}.",
+            f"- Static watchlist used: {static_watchlist_text}.",
+            f"- TLS MITM suspected: {self._bool_text(summary['flags'].get('tls_mitm_suspected'))}.",
+            f"- Top DNS: {top_dns_text}.",
+            f"- Top SNI: {top_sni_text}.",
             "",
             "## Telemetry",
             f"- Schema version: {summary.get('telemetry', {}).get('schema_version')}.",
@@ -193,6 +258,43 @@ class DynamicRunSummarizer:
         lines.append("")
         return "\n".join(lines)
 
+    @staticmethod
+    def _bool_text(value: object) -> str:
+        if value is True or str(value).strip().lower() == "true":
+            return "yes"
+        if value is False or str(value).strip().lower() == "false":
+            return "no"
+        return "unknown"
+
+    @staticmethod
+    def _display_text(value: object) -> str:
+        text = str(value or "").strip()
+        return text or "—"
+
+    def _countability_label(
+        self,
+        *,
+        dataset: dict[str, Any],
+        run_profile: object,
+        invalid_reason: str | None,
+    ) -> str:
+        if dataset.get("valid_dataset_run") is False:
+            return f"NO ({str(invalid_reason or 'INVALID').strip() or 'INVALID'})"
+        if dataset.get("countable") is True:
+            return f"YES ({str(run_profile or 'dataset').strip() or 'dataset'})"
+        profile_lc = str(run_profile or "").strip().lower()
+        exclusion_reason = str(dataset.get("paper_exclusion_primary_reason_code") or "").strip().upper()
+        cohort_eligibility = str(dataset.get("cohort_eligibility") or "").strip().upper()
+        if dataset.get("low_signal") is True and profile_lc == "baseline_idle":
+            return "NO (LOW_SIGNAL_IDLE)"
+        if exclusion_reason == "EXCLUDED_MANUAL_NON_COHORT":
+            return "NO (manual exploratory)"
+        if cohort_eligibility == "EXTRA":
+            return "NO (extra run)"
+        if dataset.get("countable") is False:
+            return "NO (extra run)"
+        return "UNKNOWN"
+
     def _artifact_record(self, path: Path, artifact_type: str, produced_by: str) -> ArtifactRecord:
         sha256 = self.writer.hash_file(path)
         return ArtifactRecord(
@@ -205,7 +307,7 @@ class DynamicRunSummarizer:
             pull_status="n/a",
         )
 
-    def _load_destinations(self, manifest: RunManifest) -> list[str]:
+    def _load_destinations(self, manifest: RunManifest, pcap_report: dict[str, Any] | None = None) -> list[str]:
         for artifact in manifest.artifacts:
             if artifact.type != "network_flow_summary":
                 continue
@@ -217,14 +319,30 @@ class DynamicRunSummarizer:
             destinations = payload.get("destinations", [])
             if isinstance(destinations, list):
                 return [str(item) for item in destinations]
-        report_path = self.writer.run_dir / "analysis/pcap_report.json"
-        if not report_path.exists():
-            return []
-        try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
+        report = pcap_report if isinstance(pcap_report, dict) else self._load_pcap_report()
         return self._destinations_from_pcap_report(report)
+
+    def _load_pcap_report(self) -> dict[str, Any]:
+        report_path = self.writer.run_dir / "analysis" / "pcap_report.json"
+        if not report_path.exists():
+            return {}
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _top_indicator_text(self, items: list[dict[str, Any]]) -> str:
+        out: list[str] = []
+        for item in items[:3]:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("value") or "").strip()
+            count = item.get("count")
+            if not value:
+                continue
+            out.append(f"{value} ({count})" if count is not None else value)
+        return ", ".join(out) if out else "none"
 
     def _detect_cleartext(self, destinations: list[str]) -> str:
         if not destinations:

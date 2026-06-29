@@ -100,7 +100,9 @@ def test_load_dataset_run_state_ignores_legacy_identity_runs(monkeypatch) -> Non
             "baseline_countable": 0,
             "interactive_countable": 0,
             "baseline_extra": 0,
+            "baseline_low_signal_supplemental": 0,
             "interactive_extra": 0,
+            "interactive_low_signal_supplemental": 0,
         },
     )
     monkeypatch.setattr(dataset_run_state, "_evidence_state", lambda _pkg: ("ok", 1))

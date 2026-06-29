@@ -34,4 +34,3 @@ def get_run_logger(category: str, ctx: RunContext) -> logging_engine.ContextAdap
     base = logging_engine.get_logger(category)
     extra = logging_engine.ensure_trace(ctx.to_extra())
     return logging_engine.ContextAdapter(base, extra)
-

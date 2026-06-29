@@ -7,12 +7,22 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_build_compact_label,
-    selected_app_build_label,
     selected_app_evidence_compact_label,
     selected_app_evidence_label,
     selected_app_qa_badge_from_label,
 )
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
+
+
+def _supplemental_suffix(*, extra: int = 0, low_signal: int = 0) -> str:
+    parts: list[str] = []
+    extra_i = max(0, int(extra))
+    low_i = max(0, int(low_signal))
+    if extra_i > 0:
+        parts.append(f"+{extra_i}")
+    if low_i > 0:
+        parts.append(f"+{low_i} low")
+    return (" " + " ".join(parts)) if parts else ""
 
 
 def recommended_reason(row: Any) -> str:
@@ -30,8 +40,13 @@ def recommended_reason(row: Any) -> str:
         return f"baseline runs needed: {row.need_baseline}"
     if row.need_interactive > 0:
         return f"baseline complete, interactive runs needed: {row.need_interactive}"
-    if row.baseline_extra > 0 or row.interactive_extra > 0:
-        extra_total = int(row.baseline_extra) + int(row.interactive_extra)
+    extra_total = (
+        int(row.baseline_extra)
+        + int(getattr(row, "baseline_low_signal_supplemental", 0) or 0)
+        + int(row.interactive_extra)
+        + int(getattr(row, "interactive_low_signal_supplemental", 0) or 0)
+    )
+    if extra_total > 0:
         return f"quota complete, {extra_total} extra run(s) retained"
     return "quota state up to date"
 
@@ -52,7 +67,6 @@ def compact_warning_line(row_models: list[Any]) -> str:
         return f"{len(names)} {plural_label}"
 
     issues: list[str] = []
-    mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
     mismatch_rows = [
         row.display_name
         for row in row_models
@@ -65,14 +79,6 @@ def compact_warning_line(row_models: list[Any]) -> str:
         if row.lineage_state == "current_build_db_only"
     ]
 
-    if mixed_rows:
-        issues.append(
-            _format_issue(
-                mixed_rows,
-                singular_suffix="mixed current/legacy evidence",
-                plural_label="mixed current/legacy evidence states",
-            )
-        )
     if mismatch_rows:
         issues.append(
             _format_issue(
@@ -111,6 +117,7 @@ def compact_note_line(row_models: list[Any]) -> str:
         return f"{len(names)} {plural_label}"
 
     issues: list[str] = []
+    mixed_rows = [row.display_name for row in row_models if row.prep_label == "mixed"]
     legacy_mismatch_rows = [
         row.display_name
         for row in row_models
@@ -122,6 +129,14 @@ def compact_note_line(row_models: list[Any]) -> str:
         for row in row_models
         if row.lineage_state in {"historical_local_only", "historical_db_only"}
     ]
+    if mixed_rows:
+        issues.append(
+            _format_issue(
+                mixed_rows,
+                singular_suffix="mixed current/legacy evidence",
+                plural_label="mixed current/legacy evidence states",
+            )
+        )
     if legacy_mismatch_rows:
         issues.append(
             _format_issue(
@@ -197,6 +212,25 @@ def archive_blocker_summary(row_models: list[Any]) -> str:
     return " | ".join(parts)
 
 
+def queue_remaining_summary(row_models: list[Any]) -> str:
+    if not row_models:
+        return ""
+    review_count = sum(1 for row in row_models if queue_state_label(row) == "review")
+    refresh_count = sum(1 for row in row_models if row.live_build_drift)
+    baseline_count = sum(1 for row in row_models if row.need_baseline > 0)
+    interactive_count = sum(1 for row in row_models if row.need_baseline <= 0 and row.need_interactive > 0)
+    parts: list[str] = []
+    if review_count > 0:
+        parts.append(f"{review_count} review")
+    if refresh_count > 0:
+        parts.append(f"{refresh_count} refresh")
+    if baseline_count > 0:
+        parts.append(f"{baseline_count} baseline gap{'s' if baseline_count != 1 else ''}")
+    if interactive_count > 0:
+        parts.append(f"{interactive_count} interactive")
+    return " | ".join(parts)
+
+
 def queue_state_label(row: Any) -> str:
     if row.live_build_drift:
         return "refresh"
@@ -217,6 +251,19 @@ def queue_state_label(row: Any) -> str:
     if row.prep_label == "mixed":
         return "review"
     return "blocked"
+
+
+def queue_status_label(row: Any) -> str:
+    return {
+        "complete": "complete",
+        "review": "review",
+        "baseline": "baseline",
+        "manual": "interactive",
+        "refresh": "refresh",
+        "restore": "restore",
+        "legacy": "baseline",
+        "blocked": "blocked",
+    }.get(queue_state_label(row), queue_state_label(row))
 
 
 def queue_need_label(
@@ -245,7 +292,12 @@ def queue_need_label(
 
 def queue_runs_label(row: Any, *, total_required: int) -> str:
     countable = int(row.baseline_countable) + int(row.interactive_countable)
-    extra = int(row.baseline_extra) + int(row.interactive_extra)
+    extra = (
+        int(row.baseline_extra)
+        + int(getattr(row, "baseline_low_signal_supplemental", 0) or 0)
+        + int(row.interactive_extra)
+        + int(getattr(row, "interactive_low_signal_supplemental", 0) or 0)
+    )
     missing = int(row.need_baseline) + int(row.need_interactive)
     if missing <= 0:
         if extra > 0:
@@ -255,24 +307,35 @@ def queue_runs_label(row: Any, *, total_required: int) -> str:
 
 
 def queue_baseline_runs_label(row: Any, *, baseline_required: int) -> str:
-    count = int(row.baseline_countable) + int(row.baseline_extra)
-    return f"{count}/{int(baseline_required)}"
+    return (
+        f"{int(row.baseline_countable)}/{int(baseline_required)}"
+        + _supplemental_suffix(
+            extra=int(row.baseline_extra),
+            low_signal=int(getattr(row, "baseline_low_signal_supplemental", 0) or 0),
+        )
+    )
 
 
 def queue_interactive_runs_label(row: Any, *, interactive_required: int) -> str:
-    count = int(row.interactive_countable) + int(row.interactive_extra)
-    return f"{count}/{int(interactive_required)}"
+    return (
+        f"{int(row.interactive_countable)}/{int(interactive_required)}"
+        + _supplemental_suffix(
+            extra=int(row.interactive_extra),
+            low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
+        )
+    )
+
+
+def queue_target_label(row: Any) -> str:
+    if bool(getattr(row, "live_build_drift", False)):
+        return "refresh"
+    if str(getattr(row, "lineage_state", "") or "") == "no_evidence_anywhere":
+        return "unknown"
+    return "current"
 
 
 def queue_build_label(row: Any) -> str:
-    return selected_app_build_label(
-        active_valid_runs=int(getattr(row, "technical_valid_active", 0) or 0),
-        legacy_valid_runs=int(getattr(row, "historical_valid_runs_count", 0) or 0),
-        db_active_sessions=int(getattr(row, "db_active_sessions", 0) or 0),
-        db_historical_sessions=int(getattr(row, "db_historical_sessions", 0) or 0),
-        lineage_state=str(getattr(row, "lineage_state", "") or ""),
-        live_build_drift=bool(getattr(row, "live_build_drift", False)),
-    )
+    return queue_target_label(row)
 
 
 def queue_evidence_label(row: Any) -> str:
@@ -342,15 +405,15 @@ def queue_state_summary_label(row: Any) -> str:
 
 def queue_status_narrow_label(row: Any) -> str:
     return {
-        "complete": "done",
+        "complete": "complete",
         "review": "review",
         "baseline": "baseline",
-        "manual": "manual",
+        "manual": "interactive",
         "refresh": "refresh",
         "restore": "restore",
-        "legacy": "legacy",
+        "legacy": "baseline",
         "blocked": "block",
-    }.get(queue_state_label(row), queue_state_label(row))
+    }.get(queue_state_label(row), queue_status_label(row))
 
 
 def queue_need_narrow_label(
@@ -589,11 +652,14 @@ __all__ = [
     "queue_need_label",
     "queue_need_narrow_label",
     "queue_qa_badge",
+    "queue_remaining_summary",
     "queue_runs_label",
     "queue_runs_narrow_label",
     "queue_state_label",
+    "queue_status_label",
     "queue_state_summary_label",
     "queue_status_narrow_label",
+    "queue_target_label",
     "queue_template_label",
     "recommended_reason",
 ]

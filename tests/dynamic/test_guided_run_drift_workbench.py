@@ -82,7 +82,7 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     assert "Static Plan / Device Drift" not in out
     assert "Installed build drift detected" in out
     assert "tracked-build evidence (local+db)" in out
-    assert "tracked quota 3/5 n2" in out
+    assert "tracked quota 3/7 n4" in out
     assert "Installed build 472224766 · tracked static-plan build 472143276" in out
     assert "Newest harvested APK in workspace: 472143276" in out
     assert "No harvested APK for installed build 472224766 is present in this workspace yet." in out
@@ -136,13 +136,32 @@ def test_selected_app_state_snapshot_supports_refresh_action() -> None:
         baseline_valid_runs=0,
         interactive_valid_runs=0,
         baseline_required=3,
-        interactive_required=2,
+        interactive_required=4,
         extra_valid_runs=0,
     )
 
     assert snapshot.need == "refresh"
     assert snapshot.action == "refresh"
-    assert snapshot.quota == "0/5 n5"
+    assert snapshot.quota == "0/7 n7"
+
+
+def test_selected_app_state_snapshot_masks_valid_qa_without_current_local_evidence() -> None:
+    snapshot = guided_run._selected_app_state_snapshot(
+        lineage_state="no_evidence_anywhere",
+        active_valid_runs=0,
+        legacy_valid_runs=2,
+        db_active_sessions=4,
+        db_historical_sessions=7,
+        latest_valid=True,
+        queue_action="baseline",
+        baseline_valid_runs=0,
+        interactive_valid_runs=0,
+        baseline_required=3,
+        interactive_required=4,
+        extra_valid_runs=0,
+    )
+
+    assert snapshot.qa == "—"
 
 
 def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, capsys) -> None:
@@ -166,7 +185,7 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
         db_historical_sessions=0,
         latest_valid=None,
         counts=SimpleNamespace(baseline_valid_runs=0, interactive_valid_runs=0),
-        cfg=SimpleNamespace(baseline_required=3, interactive_required=2),
+        cfg=SimpleNamespace(baseline_required=3, interactive_required=4),
         extra_valid_local=0,
         has_identity_mismatch=False,
         state=SimpleNamespace(),
@@ -182,7 +201,7 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
 
     out = capsys.readouterr().out
     assert captured["queue_action"] == "refresh"
-    assert "Installed build drift detected · historical evidence (local-only) · QA unknown · tracked quota 0/5 n5" in out
+    assert "Installed build drift detected · historical evidence (local-only) · QA unknown · tracked quota 0/7 n7" in out
     assert "Installed build 312021000 · tracked static-plan build 312011000" in out
     assert "Newest harvested APK in workspace: 312011000" in out
     assert "No harvested APK for installed build 312021000 is present in this workspace yet." in out
@@ -204,7 +223,7 @@ def test_drift_workbench_refresh_checklist_includes_menu_path(monkeypatch, capsy
         db_historical_sessions=0,
         latest_valid=None,
         counts=SimpleNamespace(baseline_valid_runs=0, interactive_valid_runs=0),
-        cfg=SimpleNamespace(baseline_required=3, interactive_required=2),
+        cfg=SimpleNamespace(baseline_required=3, interactive_required=4),
         extra_valid_local=0,
         has_identity_mismatch=False,
         state=SimpleNamespace(),
@@ -248,7 +267,7 @@ def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(mo
         db_historical_sessions=0,
         latest_valid=None,
         counts=SimpleNamespace(baseline_valid_runs=0, interactive_valid_runs=0),
-        cfg=SimpleNamespace(baseline_required=3, interactive_required=2),
+        cfg=SimpleNamespace(baseline_required=3, interactive_required=4),
         extra_valid_local=0,
         has_identity_mismatch=True,
         state=SimpleNamespace(),

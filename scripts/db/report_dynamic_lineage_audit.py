@@ -466,7 +466,7 @@ def generate_report(*, output_dir: Path | None = None, package_filter: str | Non
     profiles = _load_app_profiles(target_packages)
     db_lineage = _load_db_dynamic_lineage_context(target_packages)
     baseline_required = 3
-    interactive_required = 2
+    interactive_required = 4
 
     per_app_rows: list[dict[str, Any]] = []
     per_identity_rows: list[dict[str, Any]] = []

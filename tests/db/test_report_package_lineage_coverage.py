@@ -203,7 +203,100 @@ def test_pairing_eligibility_restore_blocks_package_strict_pair_use() -> None:
             "reharvest_required": 0,
             "bytes_available_but_static_missing": 0,
             "dynamic_only_valid": 0,
+            "strict_quota_valid_pairs": 0,
+            "strict_supplemental_pairs": 0,
+            "invalid_dynamic": 0,
+            "legacy_dynamic_unknown": 0,
             "recommended_dataset_use": "exclude_from_paired_analysis_missing_artifact",
+        }
+    ]
+
+
+def test_pairing_eligibility_dataset_use_prefers_normalized_governance() -> None:
+    from scripts.db import report_dynamic_static_pairing_eligibility as pairing
+
+    assert (
+        pairing._dataset_use_for_session(
+            {
+                "technical_validity_state": "TECH_VALID",
+                "quota_state": "QUOTA_VALID",
+            },
+            classification="paired_exact_static",
+        )
+        == "strict_static_dynamic_pair"
+    )
+    assert (
+        pairing._dataset_use_for_session(
+            {
+                "technical_validity_state": "TECH_VALID",
+                "quota_state": "SUPPLEMENTAL_VALID",
+            },
+            classification="paired_exact_static",
+        )
+        == "paired_static_dynamic_supplemental_only"
+    )
+    assert (
+        pairing._dataset_use_for_session(
+            {
+                "technical_validity_state": "TECH_INVALID",
+                "quota_state": "QUOTA_INELIGIBLE",
+            },
+            classification="paired_exact_static",
+        )
+        == "exclude_invalid_dynamic"
+    )
+    assert (
+        pairing._dataset_use_for_session(
+            {
+                "technical_validity_state": "TECH_LEGACY_UNKNOWN",
+                "quota_state": "QUOTA_LEGACY_UNKNOWN",
+            },
+            classification="paired_exact_static",
+        )
+        == "exclude_legacy_dynamic_unknown"
+    )
+
+
+def test_pairing_eligibility_package_summary_tracks_governance_buckets() -> None:
+    from scripts.db import report_dynamic_static_pairing_eligibility as pairing
+
+    packages = pairing._package_summary(
+        [
+            {
+                "package_name": "com.example",
+                "classification": "paired_exact_static",
+                "recommended_dataset_use": "strict_static_dynamic_pair",
+            },
+            {
+                "package_name": "com.example",
+                "classification": "paired_exact_static",
+                "recommended_dataset_use": "paired_static_dynamic_supplemental_only",
+            },
+            {
+                "package_name": "com.example",
+                "classification": "paired_exact_static",
+                "recommended_dataset_use": "exclude_invalid_dynamic",
+            },
+        ]
+    )
+
+    assert packages == [
+        {
+            "package_name": "com.example",
+            "dynamic_sessions": 3,
+            "paired_exact_static": 3,
+            "unpaired_exact_static_available": 0,
+            "historical_identity_only": 0,
+            "unrecoverable_without_archive": 0,
+            "restore_required": 0,
+            "reharvest_required": 0,
+            "bytes_available_but_static_missing": 0,
+            "dynamic_only_valid": 0,
+            "strict_quota_valid_pairs": 1,
+            "strict_supplemental_pairs": 1,
+            "invalid_dynamic": 1,
+            "legacy_dynamic_unknown": 0,
+            "recommended_dataset_use": "exclude_invalid_dynamic",
         }
     ]
 
