@@ -14,6 +14,8 @@ from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
+from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name, package_slug
+from scytaledroid.DynamicAnalysis.utils.pcap_minima import effective_min_pcap_bytes_for_run_profile
 
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 PCAPDROID_COMPONENT = "com.emanuelef.remote_capture/.activities.CaptureCtrl"
@@ -32,9 +34,14 @@ def _effective_min_pcap_bytes(run_ctx: RunContext) -> int:
     Dataset/freeze runs should use the freeze contract floor; other modes keep the
     operational fallback from app config.
     """
-    profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
+    profile = str(getattr(run_ctx, "run_profile", "") or "").strip()
     if profile.startswith("baseline_") or profile.startswith("interaction_"):
-        return int(getattr(profile_config, "MIN_PCAP_BYTES", MIN_PCAP_BYTES))
+        return int(
+            effective_min_pcap_bytes_for_run_profile(
+                run_profile=profile,
+                scenario_id=str(getattr(run_ctx, "scenario_id", "") or ""),
+            )
+        )
     return int(MIN_PCAP_BYTES)
 
 
@@ -58,7 +65,8 @@ class PcapdroidCaptureObserver(Observer):
         capture_dir.mkdir(parents=True, exist_ok=True)
         meta_path = capture_dir / "pcapdroid_capture_meta.json"
 
-        pcap_name = f"scytaledroid_{run_ctx.dynamic_run_id}.pcap"
+        package_name = str(run_ctx.package_name or "").strip()
+        pcap_name = make_pcap_capture_name(package_name, run_ctx.dynamic_run_id)
         device_path = f"{PCAPDROID_DOWNLOAD_DIR}/{pcap_name}"
         api_key = self._api_key
         capture_start = time.time()
@@ -107,7 +115,10 @@ class PcapdroidCaptureObserver(Observer):
                 {
                     "pcap_name": pcap_name,
                     "device_path": device_path,
-                    "app_filter": run_ctx.package_name,
+                    "app_filter": package_name,
+                    "package_name": package_name,
+                    "package_slug": package_slug(package_name),
+                    "pcap_name_scheme": "scytaledroid_{package_slug}_{dynamic_run_id}.pcap",
                     "capture_mode": CAPTURE_MODE,
                     "pcapdroid_package": PCAPDROID_PACKAGE,
                     "api_key_present": bool(api_key),

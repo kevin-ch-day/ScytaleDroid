@@ -1,28 +1,14 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
-from pathlib import Path
 
 from scytaledroid.Database.db_utils import dynamic_domain_context as catalog
 from scytaledroid.DynamicAnalysis.domain_context import DomainReference, classify_domain, default_domain_references
 from scytaledroid.DynamicAnalysis.storage import domain_context_index
 
 
-def test_backfill_dynamic_domain_context_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "backfill_dynamic_domain_context.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert (proc.stdout or "").lower().startswith("usage:")
+def test_backfill_dynamic_domain_context_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/backfill_dynamic_domain_context.py")
 
 
 def test_apply_dynamic_domain_context_migration_records_schema_and_seeds(monkeypatch) -> None:
@@ -266,6 +252,10 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     google_time = classify_domain("time.google.com", package_name="com.twitter.android", references=refs)
     assert google_time["owner_class"] == "third_party"
     assert google_time["role_class"] == "google_infrastructure"
+
+    akamai_whoami = classify_domain("whoami.akamai.net", package_name="com.zhiliaoapp.musically", references=refs)
+    assert akamai_whoami["owner_class"] == "third_party"
+    assert akamai_whoami["role_class"] == "network_diagnostics"
 
     cnn_ngtv = classify_domain("freeview.ngtv.io", package_name="com.cnn.mobile.android.phone", references=refs)
     assert cnn_ngtv["owner_class"] == "first_party"

@@ -11,6 +11,8 @@ from typing import Any
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
+from scytaledroid.DynamicAnalysis.pcap.identity import ensure_features_capture_identity
+from scytaledroid.DynamicAnalysis.pcap.posture import summarize_traffic_posture
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 
 
@@ -36,7 +38,13 @@ def write_pcap_features(
     except (OSError, json.JSONDecodeError):
         _log(event_logger, "pcap_features_skip", {"reason": "pcap_report_invalid"})
         return None
-    features = _extract_features(report, cfg, operator=(manifest.operator or {}), target=(manifest.target or {}))
+    features = _extract_features(
+        report,
+        cfg,
+        operator=(manifest.operator or {}),
+        target=(manifest.target or {}),
+        dynamic_run_id=manifest.dynamic_run_id,
+    )
     if not features:
         _log(event_logger, "pcap_features_skip", {"reason": "pcap_features_empty"})
         return None
@@ -44,6 +52,14 @@ def write_pcap_features(
     # Optional enrichment from the PCAP itself (metadata only; no payload inspection).
     # This produces window-ready per-second summaries and destination diversity counts.
     _enrich_features_from_pcap(features, report, run_dir, event_logger=event_logger)
+    ensure_features_capture_identity(
+        features,
+        dynamic_run_id=manifest.dynamic_run_id,
+        package_name=str((manifest.target or {}).get("package_name") or "").strip() or None,
+        app_label=str((manifest.target or {}).get("display_name") or (manifest.target or {}).get("app_label") or "").strip() or None,
+        report=report,
+    )
+    _refresh_traffic_posture(features)
 
     output_path = run_dir / "analysis/pcap_features.json"
     output_path.write_text(json.dumps(features, indent=2, sort_keys=True), encoding="utf-8")
@@ -64,6 +80,7 @@ def _extract_features(
     *,
     operator: dict[str, Any] | None = None,
     target: dict[str, Any] | None = None,
+    dynamic_run_id: str | None = None,
 ) -> dict[str, Any]:
     package_name = str((target or {}).get("package_name") or (target or {}).get("package") or "").strip().lower()
     capinfos = (report.get("capinfos") or {}).get("parsed") or {}
@@ -185,6 +202,16 @@ def _extract_features(
     transport_health = report.get("transport_health") or {}
     issue_packet_ratio = _safe_float(transport_health.get("issue_packet_ratio")) if isinstance(transport_health, dict) else None
     reset_packet_ratio = _safe_float(transport_health.get("reset_packet_ratio")) if isinstance(transport_health, dict) else None
+    lifecycle_summary = (
+        transport_health.get("lifecycle_summary")
+        if isinstance(transport_health, dict) and isinstance(transport_health.get("lifecycle_summary"), dict)
+        else {}
+    )
+    fingerprint_summary = (
+        report.get("tls_fingerprints")
+        if isinstance(report.get("tls_fingerprints"), dict)
+        else {}
+    )
     context_bundle = summarize_pcap_service_context(report, package_name=package_name)
     service_context = context_bundle.get("service_context") or {}
     service_signals = context_bundle.get("service_signals") or {}
@@ -194,7 +221,7 @@ def _extract_features(
     return {
         # Backwards-compatible feature schema tag (Paper #2). New keys must only be
         # appended; existing key semantics must not change.
-        "feature_schema_version": "v1.1",
+        "feature_schema_version": "v1.2",
         "metrics": {
             "packet_count": packet_count,
             "data_size_bytes": data_bytes,
@@ -232,6 +259,18 @@ def _extract_features(
             "tls_ratio": tls_ratio,
             "tcp_issue_packet_ratio": issue_packet_ratio,
             "tcp_reset_packet_ratio": reset_packet_ratio,
+            "tcp_reset_stream_ratio": _safe_float(lifecycle_summary.get("reset_stream_ratio")),
+            "tcp_clean_close_stream_ratio": _safe_float(lifecycle_summary.get("clean_close_stream_ratio")),
+            "tcp_partial_stream_ratio": _safe_float(lifecycle_summary.get("partial_stream_ratio")),
+            "tcp_issue_stream_ratio": _safe_float(lifecycle_summary.get("issue_stream_ratio")),
+            "tls_client_hello_count": _safe_int(fingerprint_summary.get("client_hello_count")),
+            "tls_server_hello_count": _safe_int(fingerprint_summary.get("server_hello_count")),
+            "unique_ja3_count": _safe_int(fingerprint_summary.get("unique_ja3_count")),
+            "unique_ja4_count": _safe_int(fingerprint_summary.get("unique_ja4_count")),
+            "unique_ja3s_count": _safe_int(fingerprint_summary.get("unique_ja3s_count")),
+            "top1_ja3_share": _safe_float(fingerprint_summary.get("top1_ja3_share")),
+            "top1_ja4_share": _safe_float(fingerprint_summary.get("top1_ja4_share")),
+            "top1_ja3s_share": _safe_float(fingerprint_summary.get("top1_ja3s_share")),
             "first_party_service_hits": _safe_int((owner_hits or {}).get("first_party")) if isinstance(owner_hits, dict) else None,
             "third_party_service_hits": _safe_int((owner_hits or {}).get("third_party")) if isinstance(owner_hits, dict) else None,
             "privacy_signal_hits": _safe_int((focus_hits or {}).get("privacy")) if isinstance(focus_hits, dict) else None,
@@ -245,7 +284,7 @@ def _extract_features(
                 "status": "not_attempted",
                 "reason": None,
             },
-            "feature_schema_version": "v1.1",
+            "feature_schema_version": "v1.2",
             "protocol": {
                 "run_profile": (operator or {}).get("run_profile"),
                 "run_sequence": (operator or {}).get("run_sequence"),
@@ -273,6 +312,14 @@ def _extract_features(
         "visibility": {
             "status": "not_attempted",
             "summary": {},
+        },
+        "traffic_posture": {
+            "status": "not_attempted",
+            "summary": {},
+        },
+        "fingerprints": {
+            "status": "ok" if isinstance(fingerprint_summary, dict) and fingerprint_summary else "not_attempted",
+            "summary": fingerprint_summary if isinstance(fingerprint_summary, dict) else {},
         },
         "transport_health": {
             "status": "from_report" if isinstance(transport_health, dict) and transport_health else "not_attempted",
@@ -391,6 +438,29 @@ def _enrich_features_from_pcap(
     visibility["summary"] = stats.get("tls_quic_visibility") or {}
     enrich["status"] = "ok"
     enrich["reason"] = None
+
+
+def _refresh_traffic_posture(features: dict[str, Any]) -> None:
+    posture = features.get("traffic_posture")
+    if not isinstance(posture, dict):
+        posture = {"status": "not_attempted", "summary": {}}
+        features["traffic_posture"] = posture
+
+    metrics = features.get("metrics") if isinstance(features.get("metrics"), dict) else {}
+    direction = features.get("direction") if isinstance(features.get("direction"), dict) else {}
+    flows = features.get("flows") if isinstance(features.get("flows"), dict) else {}
+    bursts = features.get("bursts") if isinstance(features.get("bursts"), dict) else {}
+    visibility = features.get("visibility") if isinstance(features.get("visibility"), dict) else {}
+
+    summary = summarize_traffic_posture(
+        metrics=metrics,
+        direction_summary=direction.get("summary") if isinstance(direction.get("summary"), dict) else {},
+        flow_summary=flows.get("summary") if isinstance(flows.get("summary"), dict) else {},
+        burst_summary=bursts.get("summary") if isinstance(bursts.get("summary"), dict) else {},
+        visibility_summary=visibility.get("summary") if isinstance(visibility.get("summary"), dict) else {},
+    )
+    posture["summary"] = summary
+    posture["status"] = "ok" if any(value is not None for value in summary.values()) else "not_attempted"
 
 
 def _concentration(items: list[dict[str, Any]], total: int, top_n: int) -> float | None:

@@ -47,6 +47,16 @@ data/db/scytaledroid.sqlite
 # Operational DB tooling (posture checks, view recreation helpers). Exclude ad-hoc local dumps only.
 scripts/db/local_*.sql
 scripts/db/*.local.sql
+/backups/
+/backup/
+/dumps/
+/dump/
+/db_backups/
+*.sql.gz
+*.sql.xz
+*.dump
+*.dmp
+*.sqlite3
 *.log
 *.tmp
 *.bak

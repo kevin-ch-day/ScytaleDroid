@@ -3,28 +3,14 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-
-def _print_help() -> None:
-    print("usage: publication_exports.py [-h]")
-    print()
-    print("Generate frozen-archive publication exports.")
-    print()
-    print("options:")
-    print("  -h, --help  show this help message and exit")
-
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from scytaledroid.Reporting.services.publication_exports_service import main
+from _service_wrapper import run_service_wrapper
 
 
 if __name__ == "__main__":  # pragma: no cover
-    if any(arg in {"-h", "--help"} for arg in sys.argv[1:]):
-        _print_help()
-        raise SystemExit(0)
-    raise SystemExit(main())
+    raise SystemExit(
+        run_service_wrapper(
+            __file__,
+            service_module="scytaledroid.Reporting.services.publication_exports_service",
+            help_summary="Generate frozen-archive publication exports.",
+        )
+    )

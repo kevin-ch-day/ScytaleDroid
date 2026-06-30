@@ -1,26 +1,11 @@
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-
 from scytaledroid.Database.db_utils import dynamic_service_context as catalog
 from scytaledroid.DynamicAnalysis import service_context
 
 
-def test_backfill_dynamic_service_context_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "backfill_dynamic_service_context.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert (proc.stdout or "").lower().startswith("usage:")
+def test_backfill_dynamic_service_context_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/backfill_dynamic_service_context.py")
 
 
 def test_apply_dynamic_service_context_migration_records_schema_and_seeds(monkeypatch) -> None:
@@ -404,6 +389,16 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert google_time["service_key"] == "google_platform"
     assert google_time["service_category"] == "platform_infrastructure"
+
+    akamai_whoami = service_context.resolve_service_for_domain(
+        "whoami.akamai.net",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert akamai_whoami["service_key"] == "akamai_diagnostics"
+    assert akamai_whoami["service_category"] == "platform_infrastructure"
+    assert akamai_whoami["role_class"] == "network_diagnostics"
 
     mux = service_context.resolve_service_for_domain(
         "out053a3bejgh7t0phqa0csou.litix.io",

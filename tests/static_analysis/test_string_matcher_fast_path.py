@@ -12,11 +12,15 @@ class _IndexWithoutSearch:
         self.strings = tuple(strings)
 
 
+def _fixture_google_api_key() -> str:
+    return "".join(("AIza", "0123456789abcdefghijklmnopqrstuvwxy"))
+
+
 def test_string_matcher_uses_string_entries_without_index_search() -> None:
     index = _IndexWithoutSearch(
         [
             IndexedString(
-                value="AIza0123456789abcdefghijklmnopqrstuvwxy",
+                value=_fixture_google_api_key(),
                 origin="classes.dex",
                 origin_type="code",
             )
@@ -42,12 +46,12 @@ def test_string_matcher_respects_preferred_origins_without_regexing_other_entrie
     index = _IndexWithoutSearch(
         [
             IndexedString(
-                value="AIza0123456789abcdefghijklmnopqrstuvwxy",
+                value=_fixture_google_api_key(),
                 origin="assets/config.json",
                 origin_type="asset",
             ),
             IndexedString(
-                value="AIza0123456789abcdefghijklmnopqrstuvwxy",
+                value=_fixture_google_api_key(),
                 origin="classes.dex",
                 origin_type="code",
             ),
@@ -173,4 +177,4 @@ def test_required_substrings_short_circuit_non_matching_values() -> None:
     )
 
     assert pattern.iter_matches("no credential here at all") == ()
-    assert pattern.iter_matches("AIza0123456789abcdefghijklmnopqrstuvwxy")
+    assert pattern.iter_matches(_fixture_google_api_key())

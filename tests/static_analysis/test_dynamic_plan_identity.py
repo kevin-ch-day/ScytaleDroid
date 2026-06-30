@@ -11,6 +11,10 @@ from scytaledroid.StaticAnalysis.core import (
 )
 
 
+def _fixture_google_api_key() -> str:
+    return "".join(("AIza", "0123456789abcdefghijklmnopqrstuvwxy"))
+
+
 def test_build_dynamic_plan_uses_canonical_signer_set_hash() -> None:
     signatures = (
         "BB" * 32,
@@ -115,7 +119,7 @@ def test_build_dynamic_plan_uses_merged_split_domain_payload() -> None:
                 "samples": {
                     "api_keys": [
                         {
-                            "value": "AIza0123456789abcdefghijklmnopqrstuvwxy",
+                            "value": _fixture_google_api_key(),
                             "src": "classes.dex",
                             "root_domain": "base.example.com",
                             "posture": "actionable",

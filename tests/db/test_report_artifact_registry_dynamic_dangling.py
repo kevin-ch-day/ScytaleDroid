@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scytaledroid.Database.db_utils.artifact_registry_dynamic_dangling import (
@@ -11,19 +9,8 @@ from scytaledroid.Database.db_utils.artifact_registry_dynamic_dangling import (
 )
 
 
-def test_help_is_safe_without_pythonpath() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_artifact_registry_dynamic_dangling.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
+def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
+    out = assert_safe_script_help("scripts/db/report_artifact_registry_dynamic_dangling.py").lower()
     assert out.startswith("usage:")
     assert "dangling dynamic" in out
     assert "--output-dir" in out

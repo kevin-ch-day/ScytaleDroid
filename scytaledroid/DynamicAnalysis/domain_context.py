@@ -518,6 +518,17 @@ def default_domain_references() -> tuple[DomainReference, ...]:
         ),
         DomainReference(
             "",
+            "whoami.akamai.net",
+            "EXACT",
+            "third_party",
+            "network_diagnostics",
+            "medium",
+            "curated_exact",
+            source_url="https://www.akamai.com/blog/developers/introducing-new-whoami-tool-dns-resolver-information",
+            notes="Akamai diagnostic hostname used for resolver and edge information; classify as infrastructure rather than app first-party traffic.",
+        ),
+        DomainReference(
+            "",
             "gpp-decoder.dianomi.workers.dev",
             "EXACT",
             "third_party",

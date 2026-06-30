@@ -29,6 +29,12 @@ _EVENT_FIELDS: tuple[tuple[str, str], ...] = (
     ("keep_alive_ack", "tcp.analysis.keep_alive_ack"),
 )
 
+_LIFECYCLE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("syn", "tcp.flags.syn"),
+    ("ack", "tcp.flags.ack"),
+    ("fin", "tcp.flags.fin"),
+)
+
 
 def summarize_transport_health(pcap_path: Path, *, tshark_path: str | None = None) -> dict[str, Any]:
     tp = tshark_path or shutil.which("tshark")
@@ -54,6 +60,8 @@ def summarize_transport_health(pcap_path: Path, *, tshark_path: str | None = Non
     for _, field in _EVENT_FIELDS:
         cmd.extend(["-e", field])
     cmd.extend(["-e", "tcp.flags.reset"])
+    for _, field in _LIFECYCLE_FIELDS:
+        cmd.extend(["-e", field])
 
     completed = subprocess.run(
         cmd,
@@ -69,6 +77,7 @@ def summarize_transport_health(pcap_path: Path, *, tshark_path: str | None = Non
     tcp_packet_count = 0
     reset_packet_count = 0
     issue_packet_count = 0
+    lifecycle_counts = {name: 0 for name, _ in _LIFECYCLE_FIELDS}
 
     for line in (completed.stdout or "").splitlines():
         parts = line.rstrip("\n").split("\t")
@@ -76,7 +85,15 @@ def summarize_transport_health(pcap_path: Path, *, tshark_path: str | None = Non
             continue
         tcp_packet_count += 1
         stream_id = str(parts[0] or "").strip() or "unknown"
-        stats = stream_stats.setdefault(stream_id, {"issue_packets": 0, "reset": 0, **{name: 0 for name, _ in _EVENT_FIELDS}})
+        stats = stream_stats.setdefault(
+            stream_id,
+            {
+                "issue_packets": 0,
+                "reset": 0,
+                **{name: 0 for name, _ in _EVENT_FIELDS},
+                **{name: 0 for name, _ in _LIFECYCLE_FIELDS},
+            },
+        )
         issue_seen = False
 
         for idx, (name, _field) in enumerate(_EVENT_FIELDS, start=1):
@@ -90,6 +107,12 @@ def summarize_transport_health(pcap_path: Path, *, tshark_path: str | None = Non
             reset_packet_count += 1
             stats["reset"] += 1
             issue_seen = True
+
+        for offset, (name, _field) in enumerate(_LIFECYCLE_FIELDS, start=1):
+            lifecycle_idx = reset_idx + offset
+            if _truthy(parts[lifecycle_idx] if lifecycle_idx < len(parts) else ""):
+                lifecycle_counts[name] += 1
+                stats[name] += 1
 
         if issue_seen:
             issue_packet_count += 1
@@ -110,6 +133,28 @@ def summarize_transport_health(pcap_path: Path, *, tshark_path: str | None = Non
         row.update({key: int(value) for key, value in stats.items()})
         top_streams.append(row)
 
+    stream_count = len(stream_stats)
+    issue_stream_count = 0
+    reset_stream_count = 0
+    clean_close_stream_count = 0
+    partial_stream_count = 0
+    handshake_seen_stream_count = 0
+    for stats in stream_stats.values():
+        saw_issue = int(stats.get("issue_packets", 0)) > 0
+        saw_reset = int(stats.get("reset", 0)) > 0
+        saw_fin = int(stats.get("fin", 0)) > 0
+        saw_syn = int(stats.get("syn", 0)) > 0
+        if saw_issue:
+            issue_stream_count += 1
+        if saw_reset:
+            reset_stream_count += 1
+        elif saw_fin:
+            clean_close_stream_count += 1
+        else:
+            partial_stream_count += 1
+        if saw_syn:
+            handshake_seen_stream_count += 1
+
     issue_ratio = None
     reset_ratio = None
     if tcp_packet_count > 0:
@@ -124,7 +169,20 @@ def summarize_transport_health(pcap_path: Path, *, tshark_path: str | None = Non
         "reset_packet_count": int(reset_packet_count),
         "reset_packet_ratio": reset_ratio,
         "event_counts": event_counts,
-        "affected_stream_count": sum(1 for stats in stream_stats.values() if int(stats.get("issue_packets", 0)) > 0),
+        "affected_stream_count": int(issue_stream_count),
+        "lifecycle_packet_counts": lifecycle_counts,
+        "lifecycle_summary": {
+            "stream_count": int(stream_count),
+            "handshake_seen_stream_count": int(handshake_seen_stream_count),
+            "issue_stream_count": int(issue_stream_count),
+            "reset_stream_count": int(reset_stream_count),
+            "clean_close_stream_count": int(clean_close_stream_count),
+            "partial_stream_count": int(partial_stream_count),
+            "issue_stream_ratio": (float(issue_stream_count) / float(stream_count)) if stream_count > 0 else None,
+            "reset_stream_ratio": (float(reset_stream_count) / float(stream_count)) if stream_count > 0 else None,
+            "clean_close_stream_ratio": (float(clean_close_stream_count) / float(stream_count)) if stream_count > 0 else None,
+            "partial_stream_ratio": (float(partial_stream_count) / float(stream_count)) if stream_count > 0 else None,
+        },
         "top_streams": top_streams,
     }
 

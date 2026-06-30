@@ -47,3 +47,25 @@ def test_dynamic_run_context_view_exposes_domain_service_signal_rollups() -> Non
     assert "COUNT(DISTINCT sig.signal_id) AS matched_signal_count" in sql
     assert "service_keys_csv" in sql
     assert "signal_keys_csv" in sql
+
+
+def test_dynamic_run_context_view_exposes_extended_pcap_feature_columns() -> None:
+    sql = _manifest_sql()
+
+    assert "nf.flow_count" in sql
+    assert "nf.tcp_stream_count" in sql
+    assert "nf.active_second_count" in sql
+    assert "nf.active_second_ratio" in sql
+    assert "nf.top_flow_byte_share" in sql
+    assert "nf.tls_visible" in sql
+    assert "nf.tls_handshake_packets" in sql
+    assert "nf.tls_handshakes_per_min" in sql
+    assert "nf.tcp_reset_stream_ratio" in sql
+    assert "nf.tcp_clean_close_stream_count" in sql
+    assert "nf.unique_ja3_count" in sql
+    assert "nf.unique_ja4_count" in sql
+    assert "nf.top1_ja3_share" in sql
+    assert "nf.tls_sni_unique_count" in sql
+    assert "nf.quic_candidate_packets" in sql
+    assert "nf.tcp_issue_packet_count" in sql
+    assert "nf.direction_outbound_bytes" in sql

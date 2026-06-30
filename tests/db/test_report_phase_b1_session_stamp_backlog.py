@@ -1,43 +1,22 @@
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-
 from scytaledroid.Database.db_utils.phase_b1_join_key_normalization import (
     backlog_session_stamp_target_columns,
     planned_backlog_session_stamp_alter_sql,
 )
 
-
-def test_report_phase_b1_session_stamp_backlog_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_phase_b1_session_stamp_backlog.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert (proc.stdout or "").lower().startswith("usage:")
+def test_phase_b1_session_stamp_backlog_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/phase_b1_session_stamp_backlog.py")
+    assert_safe_script_help("scripts/db/phase_b1_session_stamp_backlog.py", "report")
+    assert_safe_script_help("scripts/db/phase_b1_session_stamp_backlog.py", "apply")
 
 
-def test_apply_phase_b1_session_stamp_backlog_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "apply_phase_b1_session_stamp_backlog.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert (proc.stdout or "").lower().startswith("usage:")
+def test_report_phase_b1_session_stamp_backlog_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/report_phase_b1_session_stamp_backlog.py")
+
+
+def test_apply_phase_b1_session_stamp_backlog_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/apply_phase_b1_session_stamp_backlog.py")
 
 
 def test_backlog_session_stamp_targets_match_second_wave_contract() -> None:

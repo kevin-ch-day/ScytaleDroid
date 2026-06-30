@@ -16,13 +16,17 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+from _bundle_report_cli import (
+    bootstrap_repo_root,
+    check_db_enabled,
+    default_output_dir,
+    load_core_db,
+    summarize_bundle,
+)
+
+_REPO_ROOT = bootstrap_repo_root(__file__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -50,39 +54,24 @@ def _log(verbose: bool, message: str) -> None:
         sys.stderr.write(f"{message}\n")
 
 
-def _default_output_dir() -> Path:
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return _REPO_ROOT / "output" / "audit" / "artifact_registry_dynamic_dangling" / stamp
-
-
-def _load_db() -> tuple[Any, Any]:
-    from scytaledroid.Database.db_core import db_config
-    from scytaledroid.Database.db_core import db_queries as core_q
-
-    return db_config, core_q
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     try:
-        db_config, core_q = _load_db()
-        if str(db_config.DB_CONFIG.get("engine") or "").lower() == "disabled":
-            sys.stderr.write("DB disabled; dynamic dangling audit needs the core database.\n")
+        db_config, core_q = load_core_db()
+        if check_db_enabled(db_config, "DB disabled; dynamic dangling audit needs the core database."):
             return 2
         from scytaledroid.Database.db_utils.artifact_registry_dynamic_dangling import (
             collect_artifact_registry_dynamic_dangling_report,
             write_artifact_registry_dynamic_dangling_bundle,
         )
 
-        output_dir = Path(args.output_dir) if args.output_dir else _default_output_dir()
+        output_dir = Path(args.output_dir) if args.output_dir else default_output_dir(_REPO_ROOT, "artifact_registry_dynamic_dangling")
         _log(args.verbose, "collecting dynamic dangling registry audit")
         report = collect_artifact_registry_dynamic_dangling_report(core_q.run_sql, repo_root=_REPO_ROOT)
         files = write_artifact_registry_dynamic_dangling_bundle(report, output_dir)
-        summary = dict(report.get("summary") or {})
-        summary["output_dir"] = str(output_dir)
-        summary["written_files"] = [str(path) for path in files]
+        summary = summarize_bundle(report, files, output_dir)
         (output_dir / "summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True, default=str),
             encoding="utf-8",

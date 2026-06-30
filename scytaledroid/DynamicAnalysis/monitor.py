@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name
 from scytaledroid.Utils.DisplayUtils import status_messages
 
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
@@ -19,6 +20,7 @@ PCAPDROID_DIR = "/sdcard/Download/PCAPdroid"
 class RunMonitorConfig:
     device_serial: str
     run_id: str
+    package_name: str
     notes_dir: Path
     poll_s: float = 2.0
     interactive: bool = True
@@ -45,7 +47,8 @@ class RunMonitor:
     def _run(self) -> None:
         notes_path = self.config.notes_dir / "run_monitor.jsonl"
         notes_path.parent.mkdir(parents=True, exist_ok=True)
-        pcap_path = f"{PCAPDROID_DIR}/scytaledroid_{self.config.run_id}.pcap"
+        pcap_name = make_pcap_capture_name(self.config.package_name, self.config.run_id)
+        pcap_path = f"{PCAPDROID_DIR}/{pcap_name}"
         while not self._stop_event.is_set():
             snapshot = {
                 "ts": time.time(),
