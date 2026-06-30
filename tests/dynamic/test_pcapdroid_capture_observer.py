@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name
 from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PcapdroidCaptureObserver
 
 
@@ -59,6 +60,9 @@ def test_start_clears_status_error_when_fallback_probe_confirms_capture(monkeypa
     assert handle.payload is not None
     meta_path = Path(handle.payload["meta_path"])
     payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert payload["pcap_name"] == make_pcap_capture_name("com.example.app", "run-1")
+    assert payload["package_name"] == "com.example.app"
+    assert payload["package_slug"] == "com_example_app"
     assert payload["status_check"] == {
         "ok": True,
         "error": None,
@@ -101,6 +105,7 @@ def test_start_marks_direct_probe_status_when_available(monkeypatch, tmp_path: P
     assert handle.payload is not None
     meta_path = Path(handle.payload["meta_path"])
     payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert payload["pcap_name"] == make_pcap_capture_name("com.example.app", "run-1")
     assert payload["status_check"] == {
         "ok": True,
         "error": None,
@@ -143,8 +148,16 @@ def test_start_records_unavailable_source_without_error(monkeypatch, tmp_path: P
     assert handle.payload is not None
     meta_path = Path(handle.payload["meta_path"])
     payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert payload["pcap_name_scheme"] == "scytaledroid_{package_slug}_{dynamic_run_id}.pcap"
     assert payload["status_check"] == {
         "ok": None,
         "error": None,
         "source": "unavailable",
     }
+
+
+def test_make_pcap_capture_name_uses_package_slug_and_run_id() -> None:
+    assert (
+        make_pcap_capture_name("com.cnn.mobile.android.phone", "run-42")
+        == "scytaledroid_com_cnn_mobile_android_phone_run-42.pcap"
+    )

@@ -415,3 +415,355 @@ def test_build_dynamic_network_features_row_recomputes_low_signal_for_messaging_
     assert row["countable"] == 0
     assert row["low_signal"] == 0
     assert row["low_signal_reasons_json"] == "[]"
+
+
+def test_build_dynamic_network_features_row_promotes_flow_and_tls_report_fields(tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run129"
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run129",
+                "status": "success",
+                "target": {"package_name": "com.example.network"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": True,
+                    "valid_dataset_run": True,
+                },
+                "operator": {
+                    "run_profile": "interaction_manual",
+                    "interaction_level": "manual",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"capture_duration_s": 240.0},
+                "proxies": {},
+                "quality": {"protocol": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "direction_summary": {
+                    "outbound_bytes": 1200,
+                    "inbound_bytes": 6400,
+                    "unknown_bytes": 12,
+                    "outbound_packets": 20,
+                    "inbound_packets": 40,
+                    "unknown_packets": 1,
+                },
+                "flow_summary": {
+                    "flow_count": 15,
+                    "tcp_stream_count": 11,
+                    "udp_flow_count": 4,
+                },
+                "burst_summary": {
+                    "active_second_count": 32,
+                    "burst_count": 7,
+                    "max_burst_duration_s": 8.0,
+                    "median_burst_duration_s": 2.0,
+                    "median_interburst_gap_s": 3.0,
+                },
+                "tls_quic_visibility": {
+                    "tls_visible": True,
+                    "tls_handshake_packets": 21,
+                    "tls_client_hello_packets": 10,
+                    "tls_server_hello_packets": 9,
+                    "tls_sni_unique_count": 6,
+                    "tls_alpn_unique_count": 2,
+                    "quic_candidate_packets": 5,
+                },
+                "transport_health": {
+                    "issue_packet_count": 4,
+                    "reset_packet_count": 2,
+                    "lifecycle_summary": {
+                        "stream_count": 11,
+                        "handshake_seen_stream_count": 9,
+                        "issue_stream_count": 3,
+                        "reset_stream_count": 2,
+                        "clean_close_stream_count": 6,
+                        "partial_stream_count": 3,
+                    },
+                },
+                "tls_fingerprints": {
+                    "client_hello_count": 12,
+                    "server_hello_count": 11,
+                    "unique_ja3_count": 3,
+                    "unique_ja4_count": 2,
+                    "unique_ja3s_count": 2,
+                    "top1_ja3_share": 0.5,
+                    "top1_ja4_share": 0.75,
+                    "top1_ja3s_share": 0.6,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    row = index_from_evidence.build_dynamic_network_features_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["direction_outbound_bytes"] == 1200
+    assert row["direction_inbound_packets"] == 40
+    assert row["flow_count"] == 15
+    assert row["tcp_stream_count"] == 11
+    assert row["udp_flow_count"] == 4
+    assert row["active_second_count"] == 32
+    assert row["burst_count"] == 7
+    assert row["max_burst_duration_s"] == 8.0
+    assert row["median_interburst_gap_s"] == 3.0
+    assert row["outbound_packet_ratio"] == 20.0 / 61.0
+    assert row["inbound_packet_ratio"] == 40.0 / 61.0
+    assert row["outbound_byte_ratio"] == 1200.0 / 7612.0
+    assert row["inbound_byte_ratio"] == 6400.0 / 7612.0
+    assert row["direction_confident_packet_ratio"] is None
+    assert row["active_second_ratio"] == 32.0 / 240.0
+    assert row["bursts_per_min"] == 7.0 / 4.0
+    assert row["median_packets_per_flow"] is None
+    assert row["median_bytes_per_flow"] is None
+    assert row["top_flow_packet_share"] is None
+    assert row["top_flow_byte_share"] is None
+    assert row["tls_handshakes_per_min"] == 21.0 / 4.0
+    assert row["tls_visible"] == 1
+    assert row["tls_handshake_packets"] == 21
+    assert row["tls_sni_unique_count"] == 6
+    assert row["quic_candidate_packets"] == 5
+    assert row["tcp_issue_packet_count"] == 4
+    assert row["tcp_reset_packet_count"] == 2
+    assert row["tcp_stream_count_lifecycle"] == 11
+    assert row["tcp_handshake_seen_stream_count"] == 9
+    assert row["tcp_issue_stream_count"] == 3
+    assert row["tcp_reset_stream_count"] == 2
+    assert row["tcp_clean_close_stream_count"] == 6
+    assert row["tcp_partial_stream_count"] == 3
+    assert row["tls_client_hello_count"] == 12
+    assert row["tls_server_hello_count"] == 11
+    assert row["unique_ja3_count"] == 3
+    assert row["unique_ja4_count"] == 2
+    assert row["unique_ja3s_count"] == 2
+    assert row["top1_ja3_share"] == 0.5
+
+
+def test_build_dynamic_network_features_row_backfills_transport_lifecycle_from_pcap(monkeypatch, tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run130"
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "artifacts" / "pcapdroid_capture").mkdir(parents=True)
+    (run_dir / "artifacts" / "pcapdroid_capture" / "sample.pcap").write_bytes(b"pcap")
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run130",
+                "status": "success",
+                "target": {"package_name": "com.example.transport"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": True,
+                    "valid_dataset_run": True,
+                },
+                "operator": {
+                    "run_profile": "interaction_manual",
+                    "interaction_level": "manual",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"capture_duration_s": 240.0},
+                "proxies": {},
+                "quality": {"protocol": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "pcap_path": "artifacts/pcapdroid_capture/sample.pcap",
+                "direction_summary": {},
+                "flow_summary": {},
+                "burst_summary": {},
+                "tls_quic_visibility": {},
+                "transport_health": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.storage.index_from_evidence.summarize_transport_health",
+        lambda *args, **kwargs: {
+            "issue_packet_count": 5,
+            "reset_packet_count": 1,
+            "lifecycle_summary": {
+                "stream_count": 4,
+                "handshake_seen_stream_count": 3,
+                "issue_stream_count": 2,
+                "reset_stream_count": 1,
+                "clean_close_stream_count": 2,
+                "partial_stream_count": 1,
+                "issue_stream_ratio": 0.5,
+                "reset_stream_ratio": 0.25,
+                "clean_close_stream_ratio": 0.5,
+                "partial_stream_ratio": 0.25,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.storage.index_from_evidence.summarize_tls_fingerprints",
+        lambda *args, **kwargs: {
+            "client_hello_count": 4,
+            "server_hello_count": 3,
+            "unique_ja3_count": 2,
+            "unique_ja4_count": 2,
+            "unique_ja3s_count": 1,
+            "top1_ja3_share": 0.75,
+            "top1_ja4_share": 0.75,
+            "top1_ja3s_share": 1.0,
+        },
+    )
+
+    row = index_from_evidence.build_dynamic_network_features_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["tcp_issue_packet_count"] == 5
+    assert row["tcp_reset_packet_count"] == 1
+    assert row["tcp_stream_count_lifecycle"] == 4
+    assert row["tcp_handshake_seen_stream_count"] == 3
+    assert row["tcp_issue_stream_count"] == 2
+    assert row["tcp_reset_stream_count"] == 1
+    assert row["tcp_clean_close_stream_count"] == 2
+    assert row["tcp_partial_stream_count"] == 1
+    assert row["tcp_issue_stream_ratio"] == 0.5
+    assert row["tcp_reset_stream_ratio"] == 0.25
+    assert row["tcp_clean_close_stream_ratio"] == 0.5
+    assert row["tcp_partial_stream_ratio"] == 0.25
+    assert row["tls_client_hello_count"] == 4
+    assert row["tls_server_hello_count"] == 3
+    assert row["unique_ja3_count"] == 2
+    assert row["unique_ja4_count"] == 2
+    assert row["unique_ja3s_count"] == 1
+    assert row["top1_ja3_share"] == 0.75
+
+
+def test_build_dynamic_network_features_row_uses_pcap_features_summaries_when_report_blocks_missing(tmp_path):
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run131"
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run131",
+                "status": "success",
+                "target": {"package_name": "com.example.modern"},
+                "dataset": {
+                    "tier": "dataset",
+                    "countable": True,
+                    "valid_dataset_run": True,
+                },
+                "operator": {
+                    "run_profile": "interaction_manual",
+                    "interaction_level": "manual",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"capture_duration_s": 240.0},
+                "proxies": {},
+                "quality": {"protocol": {}},
+                "visibility": {
+                    "status": "ok",
+                    "summary": {
+                        "tls_visible": True,
+                        "tls_handshake_packets": 8,
+                        "tls_client_hello_packets": 4,
+                        "tls_server_hello_packets": 4,
+                        "tls_sni_unique_count": 2,
+                        "tls_alpn_unique_count": 1,
+                        "quic_candidate_packets": 0,
+                    },
+                },
+                "transport_health": {
+                    "status": "ok",
+                    "summary": {
+                        "issue_packet_count": 1,
+                        "reset_packet_count": 0,
+                        "lifecycle_summary": {
+                            "stream_count": 2,
+                            "handshake_seen_stream_count": 2,
+                            "issue_stream_count": 1,
+                            "reset_stream_count": 0,
+                            "clean_close_stream_count": 1,
+                            "partial_stream_count": 1,
+                            "issue_stream_ratio": 0.5,
+                            "reset_stream_ratio": 0.0,
+                            "clean_close_stream_ratio": 0.5,
+                            "partial_stream_ratio": 0.5,
+                        },
+                    },
+                },
+                "fingerprints": {
+                    "status": "ok",
+                    "summary": {
+                        "client_hello_count": 4,
+                        "server_hello_count": 4,
+                        "unique_ja3_count": 2,
+                        "unique_ja4_count": 2,
+                        "unique_ja3s_count": 1,
+                        "top1_ja3_share": 0.75,
+                        "top1_ja4_share": 0.75,
+                        "top1_ja3s_share": 1.0,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "direction_summary": {},
+                "flow_summary": {},
+                "burst_summary": {},
+                "tls_quic_visibility": {},
+                "transport_health": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    row = index_from_evidence.build_dynamic_network_features_row_from_evidence_pack(run_dir)
+
+    assert row is not None
+    assert row["tls_visible"] == 1
+    assert row["tls_handshake_packets"] == 8
+    assert row["tls_client_hello_packets"] == 4
+    assert row["tls_server_hello_packets"] == 4
+    assert row["tls_sni_unique_count"] == 2
+    assert row["tls_alpn_unique_count"] == 1
+    assert row["tcp_issue_packet_count"] == 1
+    assert row["tcp_stream_count_lifecycle"] == 2
+    assert row["tcp_issue_stream_ratio"] == 0.5
+    assert row["unique_ja3_count"] == 2
+    assert row["unique_ja4_count"] == 2
+    assert row["unique_ja3s_count"] == 1
+    assert row["top1_ja4_share"] == 0.75

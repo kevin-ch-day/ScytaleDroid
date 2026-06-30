@@ -24,6 +24,10 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
 )
 
 
+def _fixture_google_api_key() -> str:
+    return "".join(("AIza", "0123456789abcdefghijklmnopqrstuvwxy"))
+
+
 def test_high_entropy_suppresses_script_blob_noise() -> None:
     blob = (
         '!function(e,t){if("object"==typeof exports&&"object"==typeof module)'
@@ -297,7 +301,7 @@ def test_secrets_detector_keeps_split_code_origin_secret_candidates() -> None:
     index = StringIndex(
         strings=(
             IndexedString(
-                value="REDACTED_GOOGLE_API_KEY",
+                value=_fixture_google_api_key(),
                 origin="classes.dex",
                 origin_type="code",
                 context="Authorization: Bearer token GoogleSignIn OkHttp",
@@ -319,7 +323,7 @@ def test_secrets_detector_keeps_split_raw_secret_candidates_with_embedded_key_pr
     index = StringIndex(
         strings=(
             IndexedString(
-                value='{"apiKey":"REDACTED_GOOGLE_API_KEY"}',
+                value='{"apiKey":"' + _fixture_google_api_key() + '"}',
                 origin="res/raw/firebase_config.json",
                 origin_type="raw",
                 confidence="low",
@@ -373,7 +377,7 @@ def test_placeholder_aws_secret_is_rejected() -> None:
 
 
 def test_realistic_google_api_key_still_matches() -> None:
-    text = "REDACTED_GOOGLE_API_KEY"
+    text = _fixture_google_api_key()
 
     matches = list(_classify_token(text))
 
@@ -431,7 +435,7 @@ def test_google_key_and_google_endpoint_form_actionable_pair() -> None:
     index = StringIndex(
         strings=(
             IndexedString(
-                value="REDACTED_GOOGLE_API_KEY",
+                value=_fixture_google_api_key(),
                 origin="classes.dex",
                 origin_type="code",
                 context="Authorization: Bearer token OkHttpClient GoogleSignIn",
@@ -536,7 +540,7 @@ def test_merge_payloads_preserves_posture_and_pair_fields() -> None:
                 "samples": {
                     "api_keys": [
                         {
-                            "value": "REDACTED_GOOGLE_API_KEY",
+                            "value": _fixture_google_api_key(),
                             "value_masked": "AIza…vwxy",
                             "src": "classes.dex",
                             "tag": "google_api_key",

@@ -7,7 +7,7 @@ We want one canonical source of "what are the minima" so that:
 all report and enforce the same values.
 
 Policy:
-- min_windows is global (MIN_WINDOWS_PER_RUN)
+- min_windows is global (20 unless explicitly changed in the tracker contract)
 - min_pcap_bytes is phase-specific for Profile v3 (idle vs scripted)
 
 Optional env overrides exist to support operational experiments without code changes.
@@ -20,7 +20,8 @@ from __future__ import annotations
 import os
 
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import MIN_WINDOWS_PER_RUN
+
+DEFAULT_MIN_WINDOWS_PER_RUN = 20
 
 
 def _env_int(name: str) -> int | None:
@@ -34,7 +35,7 @@ def _env_int(name: str) -> int | None:
 
 
 def effective_min_windows_per_run() -> int:
-    return int(MIN_WINDOWS_PER_RUN)
+    return int(DEFAULT_MIN_WINDOWS_PER_RUN)
 
 
 def effective_min_pcap_bytes_idle() -> int:
@@ -65,4 +66,3 @@ __all__ = [
     "effective_min_pcap_bytes_scripted",
     "effective_min_pcap_bytes_for_phase",
 ]
-

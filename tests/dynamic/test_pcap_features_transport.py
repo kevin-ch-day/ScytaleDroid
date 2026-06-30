@@ -30,6 +30,22 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
         "transport_health": {
             "issue_packet_ratio": 0.12,
             "reset_packet_ratio": 0.03,
+            "lifecycle_summary": {
+                "reset_stream_ratio": 0.25,
+                "clean_close_stream_ratio": 0.5,
+                "partial_stream_ratio": 0.25,
+                "issue_stream_ratio": 0.5,
+            },
+        },
+        "tls_fingerprints": {
+            "client_hello_count": 3,
+            "server_hello_count": 2,
+            "unique_ja3_count": 2,
+            "unique_ja4_count": 2,
+            "unique_ja3s_count": 1,
+            "top1_ja3_share": 2.0 / 3.0,
+            "top1_ja4_share": 2.0 / 3.0,
+            "top1_ja3s_share": 1.0,
         },
     }
     out = _extract_features(
@@ -52,6 +68,16 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
     assert proxies["tls_ratio"] == 0.5
     assert proxies["tcp_issue_packet_ratio"] == 0.12
     assert proxies["tcp_reset_packet_ratio"] == 0.03
+    assert proxies["tcp_reset_stream_ratio"] == 0.25
+    assert proxies["tcp_clean_close_stream_ratio"] == 0.5
+    assert proxies["tcp_partial_stream_ratio"] == 0.25
+    assert proxies["tcp_issue_stream_ratio"] == 0.5
+    assert proxies["tls_client_hello_count"] == 3
+    assert proxies["tls_server_hello_count"] == 2
+    assert proxies["unique_ja3_count"] == 2
+    assert proxies["unique_ja4_count"] == 2
+    assert proxies["unique_ja3s_count"] == 1
+    assert proxies["top1_ja3_share"] == 2.0 / 3.0
     assert proxies["unique_domains_topn"] == 2
     assert proxies["first_party_service_hits"] == 4
     assert proxies["third_party_service_hits"] == 5
@@ -82,6 +108,7 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
                     "tcp_packet_count": 10,
                     "issue_packet_count": 2,
                     "issue_packet_ratio": 0.2,
+                    "lifecycle_summary": {"reset_stream_ratio": 0.5},
                     "top_streams": [{"tcp_stream": "7", "issue_packets": 2}],
                 },
             }
@@ -106,7 +133,7 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
             "unique_dst_port_count": 3,
             "direction_summary": {"outbound_packets": 5, "inbound_packets": 4, "unknown_packets": 1},
             "flow_summary": {"flow_count": 2, "top_flows": []},
-            "burst_summary": {"burst_count": 2},
+            "burst_summary": {"burst_count": 2, "active_second_count": 2},
             "tls_quic_visibility": {"tls_handshake_packets": 2, "quic_candidate_packets": 1},
         },
     )
@@ -129,12 +156,23 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
     assert artifact is not None
 
     payload = json.loads((run_dir / "analysis" / "pcap_features.json").read_text(encoding="utf-8"))
+    assert payload["quality"]["capture_identity"]["dynamic_run_id"] == "run-1"
+    assert payload["quality"]["capture_identity"]["package_name"] == "bbc.mobile.news.ww"
+    assert payload["quality"]["capture_identity"]["package_slug"] == "bbc_mobile_news_ww"
+    assert payload["quality"]["capture_identity"]["pcap_capture_name"] == "app.pcap"
     assert payload["direction"]["status"] == "ok"
     assert payload["direction"]["summary"]["outbound_packets"] == 5
     assert payload["flows"]["summary"]["flow_count"] == 2
     assert payload["bursts"]["summary"]["burst_count"] == 2
     assert payload["visibility"]["summary"]["tls_handshake_packets"] == 2
+    assert payload["traffic_posture"]["status"] == "ok"
+    assert payload["traffic_posture"]["summary"]["outbound_packet_ratio"] == 0.5
+    assert payload["traffic_posture"]["summary"]["inbound_packet_ratio"] == 0.4
+    assert payload["traffic_posture"]["summary"]["active_second_ratio"] == 0.2
+    assert payload["traffic_posture"]["summary"]["tls_handshakes_per_min"] == 12.0
+    assert payload["fingerprints"]["status"] == "not_attempted"
     assert payload["transport_health"]["status"] == "from_report"
     assert payload["transport_health"]["summary"]["issue_packet_count"] == 2
+    assert payload["transport_health"]["summary"]["lifecycle_summary"]["reset_stream_ratio"] == 0.5
     assert payload["service_context"]["status"] == "no_observations"
     assert payload["service_signals"]["status"] == "no_observations"

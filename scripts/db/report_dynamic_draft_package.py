@@ -22,6 +22,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.DynamicAnalysis.pcap.naming import package_slug
+
 X_TWITTER_ANCHOR = {
     "package_name": "com.twitter.android",
     "app_label": "X (Twitter)",
@@ -797,6 +799,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         interaction_label = _interaction_label(run_profile)
         pcap_relpath = _norm_text(session_row.get("pcap_relpath")) or _pcap_relpath(run_dir, manifest)
         pcap_exists = _pcap_exists(run_dir, pcap_relpath)
+        pcap_name = Path(pcap_relpath).name if pcap_relpath else ""
         pcap_bytes = (
             _safe_int(report.get("pcap_size_bytes"))
             or _safe_int(session_row.get("pcap_bytes"))
@@ -862,6 +865,8 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "low_signal_reasons_csv": ",".join(str(item) for item in (dataset.get("low_signal_reasons") or []) if str(item)),
             "evidence_governance_class": evidence_governance_class,
             "pcap_relpath": pcap_relpath,
+            "pcap_name": pcap_name,
+            "pcap_package_slug": package_slug(package_name),
             "pcap_exists": int(pcap_exists),
             "pcap_bytes": pcap_bytes or 0,
             "pcap_report_exists": int((run_dir / "analysis" / "pcap_report.json").exists()),

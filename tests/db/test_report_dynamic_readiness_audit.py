@@ -2,26 +2,13 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_readiness_audit as report
 
 
-def test_help_is_safe_without_pythonpath() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_readiness_audit.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
+def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
+    out = assert_safe_script_help("scripts/db/report_dynamic_readiness_audit.py").lower()
     assert out.startswith("usage:")
     assert "--output-dir" in out
     assert "dynamic readiness" in out

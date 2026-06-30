@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
 import pytest
 
 from scytaledroid.Database.db_utils.artifact_registry_cleanup_report import (
@@ -335,17 +332,5 @@ def test_collect_cleanup_candidate_report_skips_static_diagnostics_for_dynamic_f
     assert out["static_diagnostics_summary"] is None
 
 
-def test_script_help_is_safe_without_pythonpath() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_artifact_registry_cleanup_candidates.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or proc.stderr).strip().lower()
-    assert out.startswith("usage:")
+def test_script_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/report_artifact_registry_cleanup_candidates.py", timeout=15)

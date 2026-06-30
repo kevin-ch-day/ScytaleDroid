@@ -68,6 +68,11 @@ MIN_WINDOWS_BASELINE = 30
 MIN_PCAP_BYTES = 50_000
 MIN_PCAP_BYTES_FALLBACK = MIN_PCAP_BYTES
 
+# Messaging connected-idle baselines are legitimately quieter than generic app
+# baselines. Keep a separate hard floor so true thread-visible holds do not get
+# rejected just because they do not resemble media/news/feed traffic.
+MIN_PCAP_BYTES_BASELINE_CONNECTED = 20_000
+
 # Profile v3 (Paper #3) phase-specific PCAP bytes minima.
 #
 # Rationale:

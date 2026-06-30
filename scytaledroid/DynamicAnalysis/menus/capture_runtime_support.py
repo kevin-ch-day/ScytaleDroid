@@ -158,10 +158,21 @@ def print_tier1_qa_result(dynamic_run_id: str) -> None:
     if row.get("telemetry_partial"):
         failures.append("telemetry_partial_samples")
 
+    blocking_failures = {"tier_not_dataset", "status_not_success"}
     if failures:
+        if any(code in blocking_failures for code in failures):
+            message = (
+                f"Tier-1 QA: FAIL ({', '.join(failures)}) "
+                "[quality gate; does not override technical dataset validity]"
+            )
+        else:
+            message = (
+                f"Tier-1 QA: advisory ({', '.join(failures)}) "
+                "[quality gate attention; run can still remain technically valid]"
+            )
         print(
             status_messages.status(
-                f"Tier-1 QA: FAIL ({', '.join(failures)}) [quality gate; does not override technical dataset validity]",
+                message,
                 level="warn",
             )
         )

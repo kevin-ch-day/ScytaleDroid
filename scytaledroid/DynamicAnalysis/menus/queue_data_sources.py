@@ -45,11 +45,15 @@ def resolve_live_build_drift_map(
         observed_vc = str(observed.get("version_code") or "").strip()
         if not observed_vc or observed_vc == expected_vc:
             continue
+        static_run_id = (
+            str(newest.get("static_run_id") or "").strip()
+            or str(identity.get("static_run_id") or "").strip()
+        )
         out[pkg.lower()] = {
             "expected_version_code": expected_vc,
             "expected_version_name": str(newest.get("version_name") or "").strip(),
             "observed_version_code": observed_vc,
-            "static_run_id": str(newest.get("static_run_id") or "").strip(),
+            "static_run_id": static_run_id,
         }
     return out
 

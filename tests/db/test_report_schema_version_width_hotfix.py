@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 from scytaledroid.Database.db_utils.schema_version_width_hotfix import (
@@ -13,34 +11,18 @@ from scytaledroid.Database.db_utils.schema_version_width_hotfix import (
 )
 
 
-def test_report_schema_version_width_hotfix_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_schema_version_width_hotfix.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert (proc.stdout or "").lower().startswith("usage:")
+def test_schema_version_width_hotfix_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/schema_version_width_hotfix.py")
+    assert_safe_script_help("scripts/db/schema_version_width_hotfix.py", "report")
+    assert_safe_script_help("scripts/db/schema_version_width_hotfix.py", "apply")
 
 
-def test_apply_schema_version_width_hotfix_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "apply_schema_version_width_hotfix.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert (proc.stdout or "").lower().startswith("usage:")
+def test_report_schema_version_width_hotfix_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/report_schema_version_width_hotfix.py")
+
+
+def test_apply_schema_version_width_hotfix_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/apply_schema_version_width_hotfix.py")
 
 
 def test_schema_version_width_hotfix_targets_match_runtime_contract() -> None:

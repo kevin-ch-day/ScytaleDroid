@@ -902,7 +902,11 @@ def _print_paper_mode_constants() -> None:
         ("Recommended time", f"{int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s"),
         ("Percentile threshold", f"{int(profile_config.THRESHOLD_PERCENTILE)}"),
         ("Percentile method", str(getattr(profile_config, "NP_PERCENTILE_METHOD", "linear"))),
-        ("Min PCAP bytes", f"{int(profile_config.MIN_PCAP_BYTES)}"),
+        (
+            "Min PCAP bytes",
+            f"{int(profile_config.MIN_PCAP_BYTES)} "
+            f"(connected baseline: {int(getattr(profile_config, 'MIN_PCAP_BYTES_BASELINE_CONNECTED', profile_config.MIN_PCAP_BYTES))})",
+        ),
         ("Models", "Isolation Forest + OC-SVM"),
         ("Model training", "baseline-only"),
         ("NumPy version", numpy_version),
@@ -916,7 +920,8 @@ def _print_paper_mode_constants() -> None:
             f"Window={int(profile_config.WINDOW_SIZE_S)}s/{int(profile_config.WINDOW_STRIDE_S)}s | "
             f"Min={int(getattr(profile_config, 'MIN_SAMPLING_SECONDS', 180))}s | "
             f"Rec={int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s | "
-            f"MinPCAP={int(profile_config.MIN_PCAP_BYTES)} | "
+            f"MinPCAP={int(profile_config.MIN_PCAP_BYTES)} "
+            f"(connected {int(getattr(profile_config, 'MIN_PCAP_BYTES_BASELINE_CONNECTED', profile_config.MIN_PCAP_BYTES))}) | "
             f"Models=IF+OCSVM | Training=baseline-only"
         )
         print(status_messages.status(line, level="info"))
@@ -1456,9 +1461,20 @@ def _device_preflight_checks(device_serial: str) -> bool:
 
 
 def _post_run_integrity_check(result) -> None:
+    min_pcap_bytes = int(profile_config.MIN_PCAP_BYTES)
+    try:
+        evidence_path = Path(str(getattr(result, "evidence_path", "") or "").strip())
+        manifest_path = evidence_path / "run_manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            dataset = manifest.get("dataset") if isinstance(manifest, dict) else {}
+            if isinstance(dataset, dict) and dataset.get("min_pcap_bytes") not in (None, ""):
+                min_pcap_bytes = int(dataset.get("min_pcap_bytes"))
+    except Exception:
+        pass
     _post_run_integrity_check_impl(
         result,
-        min_pcap_bytes=int(profile_config.MIN_PCAP_BYTES),
+        min_pcap_bytes=min_pcap_bytes,
         min_windows=int(getattr(profile_config, "MIN_WINDOWS_PER_RUN", 20)),
         ui_level=str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower(),
     )

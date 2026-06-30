@@ -74,6 +74,17 @@ def test_write_pcap_report_appends_advanced_sections(monkeypatch, tmp_path: Path
             "top_streams": [{"tcp_stream": "7", "issue_packets": 2}],
         },
     )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.summarize_tls_fingerprints",
+        lambda *args, **kwargs: {
+            "client_hello_count": 3,
+            "server_hello_count": 2,
+            "unique_ja3_count": 2,
+            "unique_ja4_count": 2,
+            "unique_ja3s_count": 2,
+            "top1_ja3_share": 2.0 / 3.0,
+        },
+    )
 
     manifest = RunManifest(
         run_manifest_version=1,
@@ -98,6 +109,7 @@ def test_write_pcap_report_appends_advanced_sections(monkeypatch, tmp_path: Path
     assert payload["flow_summary"]["flow_count"] == 2
     assert payload["burst_summary"]["burst_count"] == 1
     assert payload["tls_quic_visibility"]["tls_handshake_packets"] == 2
+    assert payload["tls_fingerprints"]["unique_ja3_count"] == 2
     assert payload["transport_health"]["issue_packet_count"] == 2
     assert payload["service_context"]["status"] == "no_observations"
     assert payload["service_signals"]["status"] == "no_observations"
@@ -225,3 +237,79 @@ def test_write_pcap_report_prefers_db_display_name_when_manifest_label_missing(m
     payload = json.loads((run_dir / "analysis" / "pcap_report.json").read_text(encoding="utf-8"))
     assert payload["package_name"] == "com.whatsapp"
     assert payload["app_label"] == "WhatsApp"
+
+
+def test_write_pcap_report_recovers_small_pcap_from_meta_when_capture_artifact_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
+
+    run_dir = tmp_path / "run-1"
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    capture_dir.mkdir(parents=True)
+    pcap_path = capture_dir / "scytaledroid_run-1.pcap"
+    pcap_path.write_bytes(b"pcap-too-small")
+    (capture_dir / "pcapdroid_capture_meta.json").write_text(
+        json.dumps(
+            {
+                "pcap_name": "scytaledroid_run-1.pcap",
+                "resolved_pcap_name": "scytaledroid_run-1.pcap",
+                "pcap_size_bytes": len(b"pcap-too-small"),
+                "pcap_valid": False,
+                "min_pcap_bytes": 50000,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("shutil.which", lambda tool: tool)
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report._run_capinfos",
+        lambda *args, **kwargs: {"raw": "", "parsed": {"packet_count": 1, "data_size_bytes": 14, "capture_duration_s": 1.0}, "error": None},
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report._run_protocol_hierarchy",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report._run_top_fields_with_stats",
+        lambda *args, **kwargs: {"items": [], "total_count": 0, "unique_count": 0, "top1_share": None},
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.scan_pcap_timeseries_and_destinations",
+        lambda *args, **kwargs: {
+            "direction_summary": {},
+            "flow_summary": {},
+            "burst_summary": {},
+            "tls_quic_visibility": {},
+        },
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.summarize_transport_health",
+        lambda *args, **kwargs: {},
+    )
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-1",
+        created_at="2026-06-15T00:00:00Z",
+        target={"package_name": "com.whatsapp"},
+        artifacts=[
+            ArtifactRecord(
+                relative_path="artifacts/pcapdroid_capture/pcapdroid_capture_meta.json",
+                type="pcapdroid_capture_meta",
+                produced_by="pcapdroid_capture",
+            )
+        ],
+    )
+    artifact = write_pcap_report(manifest, run_dir)
+    assert artifact is not None
+
+    payload = json.loads((run_dir / "analysis" / "pcap_report.json").read_text(encoding="utf-8"))
+    assert payload["pcap_path"] == "artifacts/pcapdroid_capture/scytaledroid_run-1.pcap"
+    assert payload["pcap_capture_name"] == "scytaledroid_run-1.pcap"
+    assert payload["pcap_size_bytes"] == len(b"pcap-too-small")
+    assert payload["capture_identity"]["dynamic_run_id"] == "run-1"
+    assert payload["capture_identity"]["package_name"] == "com.whatsapp"
+    assert payload["capture_identity"]["package_slug"] == "com_whatsapp"
+    assert payload["report_status"] == "ok"

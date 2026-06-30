@@ -23,6 +23,9 @@ from scytaledroid.DynamicAnalysis.tracker_scope import (
     default_resolve_tracker_run_identity,
     scope_tracker_runs_to_active_identity,
 )
+from scytaledroid.DynamicAnalysis.utils.pcap_minima import (
+    effective_min_pcap_bytes_for_run_profile,
+)
 
 MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
@@ -200,6 +203,16 @@ def update_dataset_tracker(
         )
     validity = evaluate_dataset_validity(run_dir, manifest, run_entry, cfg)
     run_entry.update(validity)
+    explicit_countable = dataset.get("countable")
+    if explicit_countable is True or explicit_countable is False:
+        if not (
+            explicit_countable is False
+            and _should_ignore_stale_explicit_noncountable(dataset, operator, validity)
+        ):
+            run_entry["countable"] = explicit_countable
+    explicit_cohort_eligibility = dataset.get("cohort_eligibility")
+    if isinstance(explicit_cohort_eligibility, str) and explicit_cohort_eligibility.strip():
+        run_entry["cohort_eligibility"] = explicit_cohort_eligibility.strip()
     run_entry.update(
         _derive_paper_eligibility_fields(
             run_dir,
@@ -268,6 +281,28 @@ def update_dataset_tracker(
         },
     )
     return tracker_path
+
+
+def _should_ignore_stale_explicit_noncountable(
+    dataset: dict[str, Any],
+    operator: dict[str, Any],
+    validity: dict[str, Any],
+) -> bool:
+    """Allow repaired quota-intended runs to re-enter normal quota marking.
+
+    Older manifests can permanently cache ``countable=false`` when a run originally
+    finalized invalid and is later repaired by regenerating derived PCAP artifacts.
+    If the run was quota-intended at capture time and now recomputes as valid, treat
+    the stale explicit false as repairable cache state rather than a lasting policy
+    override.
+    """
+    if dataset.get("countable") is not False:
+        return False
+    if dataset.get("valid_dataset_run") is not False:
+        return False
+    if validity.get("valid_dataset_run") is not True:
+        return False
+    return bool(operator.get("counts_toward_completion") is True)
 
 
 def load_dataset_tracker() -> dict[str, Any]:
@@ -563,6 +598,7 @@ def recompute_dataset_tracker(*, config: DatasetTrackerConfig | None = None) -> 
             started_at=raw.get("started_at"),
             ended_at=raw.get("ended_at"),
             status=str(raw.get("status") or "unknown"),
+            dataset=dict(raw.get("dataset") or {}) if isinstance(raw.get("dataset"), dict) else {},
             target=target,
             environment=environment if isinstance(environment, dict) else {},
             scenario=scenario if isinstance(scenario, dict) else {},
@@ -696,17 +732,29 @@ def _apply_quota_marking(
         # Important: do NOT apply this to baseline_connected; "low_signal" is a
         # non-invalidating tag (and baseline_connected is required for messaging apps).
         prof_lc = str(r.get("run_profile") or "").strip().lower()
+        explicit_countable = r.get("countable")
+        explicit_non_countable = explicit_countable is False
+        explicit_yes_countable = explicit_countable is True
         if is_valid and prof_lc == "baseline_idle" and bool(r.get("low_signal")):
             r["extra_run"] = 1
             is_valid = False
         if not is_valid:
+            continue
+        if explicit_non_countable:
+            r["extra_run"] = 1
             continue
         prof = str(r.get("run_profile") or "")
         is_baseline = _is_baseline_profile(prof, cfg)
         is_interactive = _is_interactive_profile(prof, cfg)
 
         counted = False
-        if is_baseline and baseline_seen < baseline_needed:
+        if explicit_yes_countable:
+            counted = True
+            if is_baseline:
+                baseline_seen += 1
+            elif is_interactive:
+                interactive_seen += 1
+        elif is_baseline and baseline_seen < baseline_needed:
             baseline_seen += 1
             counted = True
         elif (
@@ -762,6 +810,37 @@ def _pcap_size(manifest: RunManifest) -> int | None:
     return None
 
 
+def _pcap_size_with_meta_fallback(run_dir: Path, manifest: RunManifest) -> int | None:
+    direct = _pcap_size(manifest)
+    if direct is not None:
+        return direct
+    meta_rel = None
+    for artifact in manifest.artifacts:
+        if artifact.type == "pcapdroid_capture_meta" and artifact.relative_path:
+            meta_rel = artifact.relative_path
+            break
+    if not meta_rel:
+        return None
+    meta_path = run_dir / meta_rel
+    try:
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    meta_size = payload.get("pcap_size_bytes")
+    if isinstance(meta_size, int):
+        return meta_size
+    resolved_name = payload.get("resolved_pcap_name") or payload.get("pcap_name")
+    if not isinstance(resolved_name, str) or not resolved_name.strip():
+        return None
+    candidate = run_dir / "artifacts" / "pcapdroid_capture" / resolved_name
+    if not candidate.exists():
+        return None
+    try:
+        return int(candidate.stat().st_size)
+    except OSError:
+        return None
+
+
 def _pcap_report_status(run_dir: Path) -> str | None:
     report_path = run_dir / "analysis/pcap_report.json"
     if not report_path.exists():
@@ -803,8 +882,28 @@ def evaluate_dataset_validity(
     except Exception:
         netstats_total_bytes = 0
 
-    # Dataset protocol metadata is part of the Paper #2 dataset contract.
     operator = manifest.operator if isinstance(manifest.operator, dict) else {}
+    min_bytes = int(
+        effective_min_pcap_bytes_for_run_profile(
+            run_profile=str(operator.get("run_profile") or ""),
+            scenario_id=str((manifest.scenario or {}).get("id") or ""),
+        )
+    )
+
+    def _invalid_current(
+        code: str,
+        flags_payload: dict[str, int],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return _invalid(
+            code,
+            flags_payload,
+            run_dir,
+            min_pcap_bytes=min_bytes,
+            **kwargs,
+        )
+
+    # Dataset protocol metadata is part of the Paper #2 dataset contract.
     missing_protocol = []
     if not operator.get("run_profile"):
         missing_protocol.append("run_profile")
@@ -813,10 +912,9 @@ def evaluate_dataset_validity(
     if not operator.get("interaction_level"):
         missing_protocol.append("interaction_level")
     if missing_protocol:
-        return _invalid(
+        return _invalid_current(
             "PCAP_PARSE_ERROR",
             {**flags, "protocol_missing": 1},
-            run_dir,
         )
 
     # Capture interrupted (observer failure) is always invalid for dataset tier.
@@ -826,21 +924,24 @@ def evaluate_dataset_validity(
     # - Otherwise, fall back to CAPTURE_INTERRUPTED.
     #
     # This avoids "CAPTURE_INTERRUPTED" masking the actionable remediation ("PCAP too small").
-    min_bytes = int(MIN_PCAP_BYTES)
     pcap_size = entry.get("pcap_size_bytes")
     try:
-        pcap_size_int = int(pcap_size or 0)
+        pcap_size_int = int(
+            pcap_size
+            if pcap_size is not None
+            else (_pcap_size_with_meta_fallback(run_dir, manifest) or 0)
+        )
     except Exception:
         pcap_size_int = 0
     for obs in manifest.observers or []:
         if getattr(obs, "observer_id", None) == "pcapdroid_capture":
             if str(getattr(obs, "status", "")).lower() == "failed":
+                observer_error = str(getattr(obs, "error", "") or "").strip().lower()
                 if pcap_size_int <= 0:
                     detail = _pcap_failure_detail(run_dir)
-                    return _invalid(
+                    return _invalid_current(
                         "PCAP_MISSING",
                         flags,
-                        run_dir,
                         pcap_failure_detail=detail,
                         pcap_failure_summary=_pcap_failure_summary(
                             detail,
@@ -855,8 +956,13 @@ def evaluate_dataset_validity(
                         timeline_complete=timeline_state.get("timeline_complete"),
                     )
                 if pcap_size_int < min_bytes:
-                    return _invalid("PCAP_TOO_SMALL", flags, run_dir)
-                return _invalid("CAPTURE_INTERRUPTED", flags, run_dir)
+                    return _invalid_current("PCAP_TOO_SMALL", flags)
+                if "too small" in observer_error or "smaller than minimum" in observer_error:
+                    # Older runs may have been marked observer-failed under a
+                    # stricter generic floor even though the retained PCAP is
+                    # acceptable under the current run-profile threshold.
+                    break
+                return _invalid_current("CAPTURE_INTERRUPTED", flags)
 
     report = _load_report(run_dir)
     telemetry_seconds = _sampling_duration_seconds(run_dir)
@@ -889,10 +995,9 @@ def evaluate_dataset_validity(
             },
         )
     if sampling_source == "missing":
-        return _invalid(
+        return _invalid_current(
             "INSUFFICIENT_DURATION",
             flags,
-            run_dir,
             window_count_original=None,
             window_count_final=None,
             window_count_source="missing",
@@ -902,10 +1007,9 @@ def evaluate_dataset_validity(
         )
 
     if float(sampling_seconds) < _effective_min_sampling_seconds():
-        return _invalid(
+        return _invalid_current(
             "INSUFFICIENT_DURATION",
             flags,
-            run_dir,
             window_count_original=None,
             window_count_final=None,
             window_count_source="sampling_duration_seconds",
@@ -956,10 +1060,9 @@ def evaluate_dataset_validity(
             window_count_final = int(recompute_wc)
             window_count_source = "recompute_capinfos_capture_duration_s"
         else:
-            return _invalid(
+            return _invalid_current(
                 "INSUFFICIENT_DURATION",
                 {**flags, "window_count_too_low": 1, "retry_attempted": 1},
-                run_dir,
                 window_count_original=int(window_count_original),
                 window_count_final=(int(recompute_wc) if recompute_wc is not None else int(window_count_original)),
                 window_count_source=(
@@ -975,10 +1078,9 @@ def evaluate_dataset_validity(
     # PCAP size policy.
     if pcap_size_int <= 0:
         detail = _pcap_failure_detail(run_dir)
-        return _invalid(
+        return _invalid_current(
             "PCAP_MISSING",
             flags,
-            run_dir,
             pcap_failure_detail=detail,
             pcap_failure_summary=_pcap_failure_summary(
                 detail,
@@ -993,14 +1095,13 @@ def evaluate_dataset_validity(
             timeline_complete=timeline_state.get("timeline_complete"),
         )
     if pcap_size_int < min_bytes:
-        return _invalid("PCAP_TOO_SMALL", flags, run_dir)
+        return _invalid_current("PCAP_TOO_SMALL", flags)
 
     # PCAP report must exist and not be skipped for dataset tier.
     if report is None:
-        return _invalid(
+        return _invalid_current(
             "PCAP_REPORT_MISSING",
             flags,
-            run_dir,
             window_count_original=int(window_count_original),
             window_count_final=int(window_count_final),
             window_count_source=window_count_source,
@@ -1010,10 +1111,9 @@ def evaluate_dataset_validity(
         )
     report_status = report.get("report_status")
     if report_status is None:
-        return _invalid(
+        return _invalid_current(
             "PCAP_REPORT_MISSING",
             flags,
-            run_dir,
             window_count_original=int(window_count_original),
             window_count_final=int(window_count_final),
             window_count_source=window_count_source,
@@ -1023,10 +1123,9 @@ def evaluate_dataset_validity(
         )
     if str(report_status).lower() == "skip":
         detail = _pcap_failure_detail(run_dir)
-        return _invalid(
+        return _invalid_current(
             "PCAP_REPORT_SKIP",
             flags,
-            run_dir,
             window_count_original=int(window_count_original),
             window_count_final=int(window_count_final),
             window_count_source=window_count_source,
@@ -1051,10 +1150,9 @@ def evaluate_dataset_validity(
     missing = report.get("missing_tools") or []
     missing_set = {str(x).lower() for x in missing if x}
     if "tshark" in missing_set:
-        return _invalid(
+        return _invalid_current(
             "MISSING_TOOLS_TSHARK",
             flags,
-            run_dir,
             window_count_original=int(window_count_original),
             window_count_final=int(window_count_final),
             window_count_source=window_count_source,
@@ -1063,10 +1161,9 @@ def evaluate_dataset_validity(
             sampling_duration_seconds=telemetry_seconds,
         )
     if "capinfos" in missing_set:
-        return _invalid(
+        return _invalid_current(
             "MISSING_TOOLS_CAPINFOS",
             flags,
-            run_dir,
             window_count_original=int(window_count_original),
             window_count_final=int(window_count_final),
             window_count_source=window_count_source,
@@ -1086,10 +1183,9 @@ def evaluate_dataset_validity(
         if no_traffic_int == 1:
             flags["no_traffic_observed"] = 1
         else:
-            return _invalid(
+            return _invalid_current(
                 "PCAP_REPORT_EMPTY_NO_REASON",
                 flags,
-                run_dir,
                 window_count_original=int(window_count_original),
                 window_count_final=int(window_count_final),
                 window_count_source=window_count_source,
@@ -1103,10 +1199,9 @@ def evaluate_dataset_validity(
         # We intentionally map this to a report parse error-like code to avoid
         # expanding the locked enum set for Paper #2.
         detail = "PCAP_PARSE_FAILED" if pcap_size_int > 0 else _pcap_failure_detail(run_dir)
-        return _invalid(
+        return _invalid_current(
             "PCAP_PARSE_ERROR",
             flags,
-            run_dir,
             window_count_original=int(window_count_original),
             window_count_final=int(window_count_final),
             window_count_source=window_count_source,
@@ -1442,6 +1537,7 @@ def _invalid(
     flags: dict[str, int],
     run_dir: Path,
     *,
+    min_pcap_bytes: int | None = None,
     window_count: int | None = None,
     window_count_original: int | None = None,
     window_count_final: int | None = None,
@@ -1471,7 +1567,7 @@ def _invalid(
         "sampling_duration_seconds": telemetry_sampling,
         "actual_sampling_seconds": actual_sampling_seconds,
         "actual_sampling_seconds_source": actual_sampling_seconds_source,
-        "min_pcap_bytes": int(MIN_PCAP_BYTES),
+        "min_pcap_bytes": int(min_pcap_bytes if min_pcap_bytes is not None else MIN_PCAP_BYTES),
         "netstats_observed_bytes": netstats_observed_bytes,
         "pcap_available": pcap_available,
         "pcap_size_bytes": pcap_size_bytes,

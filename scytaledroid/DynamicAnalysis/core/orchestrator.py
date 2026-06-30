@@ -70,6 +70,9 @@ from scytaledroid.DynamicAnalysis.scenarios import (
     ScenarioResult,
 )
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
+from scytaledroid.DynamicAnalysis.utils.pcap_minima import (
+    effective_min_pcap_bytes_for_run_profile,
+)
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.version_utils import get_git_commit
@@ -333,6 +336,7 @@ class DynamicRunOrchestrator:
                     RunMonitorConfig(
                         device_serial=run_ctx.device_serial,
                         run_id=run_ctx.dynamic_run_id,
+                        package_name=run_ctx.package_name,
                         notes_dir=run_ctx.notes_dir,
                         interactive=run_ctx.interactive,
                         verbose=verbose,
@@ -905,6 +909,12 @@ class DynamicRunOrchestrator:
         writer: EvidencePackWriter,
     ) -> RunManifest:
         created_at = self._now()
+        effective_min_pcap_bytes = int(
+            effective_min_pcap_bytes_for_run_profile(
+                run_profile=str(getattr(run_ctx, "run_profile", None) or ""),
+                scenario_id=str(run_ctx.scenario_id or ""),
+            )
+        )
         plan_artifact = None
         if plan_payload:
             plan_path = writer.write_json(
@@ -944,7 +954,7 @@ class DynamicRunOrchestrator:
                 "invalid_reason_code": None,
                 # Record the effective PCAP minima for this run (visibility only; dataset-tier
                 # gating is computed deterministically later).
-                "min_pcap_bytes": int(getattr(profile_config, "MIN_PCAP_BYTES", 50000)),
+                "min_pcap_bytes": effective_min_pcap_bytes,
                 "short_run": 0,
                 "no_traffic_observed": 0,
                 "capture_policy_version": int(getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)),
@@ -1046,7 +1056,7 @@ class DynamicRunOrchestrator:
                     "interactive": bool(run_ctx.interactive),
                     "tier": self.config.tier,
                     "sampling_rate_s": self.config.sampling_rate_s,
-                    "min_pcap_bytes": int(getattr(profile_config, "MIN_PCAP_BYTES", 50000)),
+                    "min_pcap_bytes": effective_min_pcap_bytes,
                     "require_dynamic_schema": bool(getattr(self.config, "require_dynamic_schema", True)),
                     "observer_prompts_enabled": bool(getattr(self.config, "observer_prompts_enabled", False)),
                     "pcapdroid_api_key_present": bool(getattr(self.config, "pcapdroid_api_key", None)),
@@ -1065,23 +1075,6 @@ class DynamicRunOrchestrator:
                 },
             },
         )
-        # For Profile v3 (Paper #3) captures, use phase-specific minima in the manifest so
-        # operator UX and post-run receipts reflect the actual contract.
-        try:
-            scenario_id = str(run_ctx.scenario_id or "").strip()
-            rp = str(getattr(run_ctx, "run_profile", None) or "").strip().lower()
-            if scenario_id == "paper3_profile_v3":
-                min_idle = int(getattr(profile_config, "MIN_PCAP_BYTES_V3_IDLE", 0))
-                min_scripted = int(
-                    getattr(profile_config, "MIN_PCAP_BYTES_V3_SCRIPTED", getattr(profile_config, "MIN_PCAP_BYTES", 50_000))
-                )
-                eff = min_idle if rp == "baseline_idle" else (min_scripted if rp == "interaction_scripted" else min_scripted)
-                if isinstance(manifest.dataset, dict):
-                    manifest.dataset["min_pcap_bytes"] = int(eff)
-                if isinstance(manifest.operator, dict) and isinstance(manifest.operator.get("run_context"), dict):
-                    manifest.operator["run_context"]["min_pcap_bytes"] = int(eff)
-        except Exception:
-            pass
         if plan_artifact:
             manifest.add_artifacts([plan_artifact])
         dep_artifact = self._attach_dep_snapshot(run_ctx, writer, manifest)

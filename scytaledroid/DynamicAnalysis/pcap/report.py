@@ -14,6 +14,8 @@ from scytaledroid.Database.db_func.apps.app_labels import fetch_display_name
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
+from scytaledroid.DynamicAnalysis.pcap.fingerprints import summarize_tls_fingerprints
+from scytaledroid.DynamicAnalysis.pcap.identity import ensure_report_capture_identity
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 from scytaledroid.DynamicAnalysis.pcap.transport_health import summarize_transport_health
 
@@ -48,7 +50,7 @@ def write_pcap_report(
     report_path = run_dir / "analysis/pcap_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
-    pcap_artifact = _find_pcap_artifact(manifest)
+    pcap_artifact = _find_pcap_artifact(manifest, run_dir)
     pcap_rel = pcap_artifact.relative_path if pcap_artifact else None
     pcap_path = (run_dir / pcap_rel) if pcap_rel else None
     capinfos_path = shutil.which("capinfos")
@@ -125,6 +127,7 @@ def write_pcap_report(
         "flow_summary": {},
         "burst_summary": {},
         "tls_quic_visibility": {},
+        "tls_fingerprints": {},
         "transport_health": {},
         "service_context": {},
         "service_signals": {},
@@ -190,6 +193,14 @@ def write_pcap_report(
             report["transport_health"] = summarize_transport_health(pcap_path, tshark_path=tshark_path)
         except Exception as exc:  # noqa: BLE001
             _log(event_logger, "pcap_report_transport_health_failed", {"error": str(exc)})
+        try:
+            report["tls_fingerprints"] = summarize_tls_fingerprints(
+                pcap_path,
+                tshark_path=tshark_path,
+                top_n=cfg.top_n,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log(event_logger, "pcap_report_tls_fingerprint_failed", {"error": str(exc)})
     elif report_status != "skip" and not tshark_path:
         _log(event_logger, "pcap_report_partial", {"reason": "tshark_missing"})
 
@@ -200,6 +211,13 @@ def write_pcap_report(
     else:
         report["service_context"] = context_bundle.get("service_context") or {}
         report["service_signals"] = context_bundle.get("service_signals") or {}
+
+    ensure_report_capture_identity(
+        report,
+        dynamic_run_id=manifest.dynamic_run_id,
+        package_name=package_name_raw or None,
+        app_label=app_label,
+    )
 
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return ArtifactRecord(
@@ -213,10 +231,41 @@ def write_pcap_report(
     )
 
 
-def _find_pcap_artifact(manifest: RunManifest):
+def _find_pcap_artifact(manifest: RunManifest, run_dir: Path):
     for artifact in manifest.artifacts:
         if artifact.type == "pcapdroid_capture":
             return artifact
+    meta_rel = None
+    for artifact in manifest.artifacts:
+        if artifact.type == "pcapdroid_capture_meta" and artifact.relative_path:
+            meta_rel = artifact.relative_path
+            break
+    if not meta_rel:
+        return None
+    meta_path = run_dir / meta_rel
+    try:
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    resolved_name = payload.get("resolved_pcap_name") or payload.get("pcap_name")
+    if not isinstance(resolved_name, str) or not resolved_name.strip():
+        return None
+    candidate = run_dir / "artifacts" / "pcapdroid_capture" / resolved_name
+    if not candidate.exists():
+        return None
+    try:
+        size_bytes = int(candidate.stat().st_size)
+    except OSError:
+        size_bytes = None
+    return ArtifactRecord(
+        relative_path=str(candidate.relative_to(run_dir)),
+        type="pcapdroid_capture",
+        produced_by="pcapdroid_capture",
+        sha256=None,
+        size_bytes=size_bytes,
+        origin="host",
+        pull_status="n/a",
+    )
     return None
 
 

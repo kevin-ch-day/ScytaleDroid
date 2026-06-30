@@ -20,6 +20,9 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+from scytaledroid.DynamicAnalysis.pcap.fingerprints import summarize_tls_fingerprints
+from scytaledroid.DynamicAnalysis.pcap.posture import summarize_traffic_posture
+from scytaledroid.DynamicAnalysis.pcap.transport_health import summarize_transport_health
 from scytaledroid.DynamicAnalysis.storage.domain_context_index import index_dynamic_domain_context_for_run
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
@@ -196,6 +199,33 @@ def _ensure_dynamic_network_features_columns() -> None:
         "new_domain_rate_per_min",
         "new_sni_rate_per_min",
         "new_dns_rate_per_min",
+        "max_burst_duration_s",
+        "median_burst_duration_s",
+        "median_interburst_gap_s",
+        "outbound_packet_ratio",
+        "inbound_packet_ratio",
+        "outbound_byte_ratio",
+        "inbound_byte_ratio",
+        "direction_confident_packet_ratio",
+        "active_second_ratio",
+        "bursts_per_min",
+        "median_packets_per_flow",
+        "median_bytes_per_flow",
+        "top_flow_packet_share",
+        "top_flow_byte_share",
+        "tls_handshakes_per_min",
+        "tcp_reset_stream_ratio",
+        "tcp_clean_close_stream_ratio",
+        "tcp_partial_stream_ratio",
+        "tcp_issue_stream_ratio",
+        "top1_ja3_share",
+        "top1_ja4_share",
+        "top1_ja3s_share",
+    ]
+    add_bigint = [
+        "direction_outbound_bytes",
+        "direction_inbound_bytes",
+        "direction_unknown_bytes",
     ]
     add_int = [
         "unique_dst_ip_count",
@@ -204,13 +234,49 @@ def _ensure_dynamic_network_features_columns() -> None:
         "dns_observation_count",
         "unique_sni_count",
         "unique_dns_qname_count",
+        "direction_outbound_packets",
+        "direction_inbound_packets",
+        "direction_unknown_packets",
+        "flow_count",
+        "tcp_stream_count",
+        "udp_flow_count",
+        "active_second_count",
+        "burst_count",
+        "tls_handshake_packets",
+        "tls_client_hello_packets",
+        "tls_server_hello_packets",
+        "tls_sni_unique_count",
+        "tls_alpn_unique_count",
+        "quic_candidate_packets",
+        "tcp_issue_packet_count",
+        "tcp_reset_packet_count",
+        "tcp_stream_count_lifecycle",
+        "tcp_handshake_seen_stream_count",
+        "tcp_issue_stream_count",
+        "tcp_reset_stream_count",
+        "tcp_clean_close_stream_count",
+        "tcp_partial_stream_count",
+        "tls_client_hello_count",
+        "tls_server_hello_count",
+        "unique_ja3_count",
+        "unique_ja4_count",
+        "unique_ja3s_count",
+    ]
+    add_bool = [
+        "tls_visible",
     ]
     for col in add_float:
         if col not in existing:
             alters.append(f"ADD COLUMN {col} DOUBLE DEFAULT NULL")
+    for col in add_bigint:
+        if col not in existing:
+            alters.append(f"ADD COLUMN {col} BIGINT DEFAULT NULL")
     for col in add_int:
         if col not in existing:
             alters.append(f"ADD COLUMN {col} INT DEFAULT NULL")
+    for col in add_bool:
+        if col not in existing:
+            alters.append(f"ADD COLUMN {col} TINYINT(1) DEFAULT NULL")
 
     if not alters:
         return
@@ -407,8 +473,16 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     metrics = pf.get("metrics") if isinstance(pf.get("metrics"), dict) else {}
     proxies = pf.get("proxies") if isinstance(pf.get("proxies"), dict) else {}
     qual = pf.get("quality") if isinstance(pf.get("quality"), dict) else {}
+    posture_block = pf.get("traffic_posture") if isinstance(pf.get("traffic_posture"), dict) else {}
+    posture_summary = (
+        posture_block.get("summary")
+        if isinstance(posture_block.get("summary"), dict)
+        else {}
+    )
 
     pr = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
+    rel = pr.get("pcap_path") if isinstance(pr.get("pcap_path"), str) else None
+    pcap_path = (run_dir / rel) if rel else None
 
     # Optional accelerator: for older runs, pcap_features.json may not include the
     # window-ready enrichment metrics yet. We can derive them from the PCAP at
@@ -426,8 +500,6 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     ) or any(proxies.get(k) is None for k in ("unique_dst_ip_count", "unique_dst_port_count"))
 
     if need_ts:
-        rel = pr.get("pcap_path") if isinstance(pr.get("pcap_path"), str) else None
-        pcap_path = (run_dir / rel) if rel else None
         if pcap_path and pcap_path.exists():
             try:
                 ts = scan_pcap_timeseries_and_destinations(pcap_path)
@@ -451,6 +523,182 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
                         proxies[k] = ts.get(k)
 
     # Fill missing diversity proxies from pcap_report.json (no tshark scan needed).
+    direction = pr.get("direction_summary") if isinstance(pr.get("direction_summary"), dict) else {}
+    flow = pr.get("flow_summary") if isinstance(pr.get("flow_summary"), dict) else {}
+    burst = pr.get("burst_summary") if isinstance(pr.get("burst_summary"), dict) else {}
+    visibility = pr.get("tls_quic_visibility") if isinstance(pr.get("tls_quic_visibility"), dict) else {}
+    transport_health = pr.get("transport_health") if isinstance(pr.get("transport_health"), dict) else {}
+    lifecycle = (
+        transport_health.get("lifecycle_summary")
+        if isinstance(transport_health.get("lifecycle_summary"), dict)
+        else {}
+    )
+    tls_fingerprints = pr.get("tls_fingerprints") if isinstance(pr.get("tls_fingerprints"), dict) else {}
+    need_transport_health = any(
+        transport_health.get(key) is None
+        for key in ("issue_packet_count", "reset_packet_count")
+    ) or not lifecycle
+    if need_transport_health and pcap_path and pcap_path.exists():
+        try:
+            derived_transport_health = summarize_transport_health(pcap_path)
+        except Exception:
+            derived_transport_health = None
+        if isinstance(derived_transport_health, dict):
+            if not transport_health:
+                transport_health = {}
+            for key, value in derived_transport_health.items():
+                if transport_health.get(key) in (None, {}, []):
+                    transport_health[key] = value
+            lifecycle = (
+                transport_health.get("lifecycle_summary")
+                if isinstance(transport_health.get("lifecycle_summary"), dict)
+                else {}
+            )
+    if lifecycle:
+        if proxies.get("tcp_reset_stream_ratio") is None and lifecycle.get("reset_stream_ratio") is not None:
+            proxies["tcp_reset_stream_ratio"] = lifecycle.get("reset_stream_ratio")
+        if (
+            proxies.get("tcp_clean_close_stream_ratio") is None
+            and lifecycle.get("clean_close_stream_ratio") is not None
+        ):
+            proxies["tcp_clean_close_stream_ratio"] = lifecycle.get("clean_close_stream_ratio")
+        if proxies.get("tcp_partial_stream_ratio") is None and lifecycle.get("partial_stream_ratio") is not None:
+            proxies["tcp_partial_stream_ratio"] = lifecycle.get("partial_stream_ratio")
+        if proxies.get("tcp_issue_stream_ratio") is None and lifecycle.get("issue_stream_ratio") is not None:
+            proxies["tcp_issue_stream_ratio"] = lifecycle.get("issue_stream_ratio")
+    need_tls_fingerprints = any(
+        tls_fingerprints.get(key) is None
+        for key in ("unique_ja3_count", "unique_ja4_count", "unique_ja3s_count")
+    )
+    if need_tls_fingerprints and pcap_path and pcap_path.exists():
+        try:
+            derived_tls_fingerprints = summarize_tls_fingerprints(pcap_path)
+        except Exception:
+            derived_tls_fingerprints = None
+        if isinstance(derived_tls_fingerprints, dict):
+            if not tls_fingerprints:
+                tls_fingerprints = {}
+            for key, value in derived_tls_fingerprints.items():
+                if tls_fingerprints.get(key) in (None, {}, []):
+                    tls_fingerprints[key] = value
+    if tls_fingerprints:
+        for proxy_key in (
+            "tls_client_hello_count",
+            "tls_server_hello_count",
+            "unique_ja3_count",
+            "unique_ja4_count",
+            "unique_ja3s_count",
+            "top1_ja3_share",
+            "top1_ja4_share",
+            "top1_ja3s_share",
+        ):
+            source_key = proxy_key
+            if proxies.get(proxy_key) is None and tls_fingerprints.get(source_key) is not None:
+                proxies[proxy_key] = tls_fingerprints.get(source_key)
+
+    pf_direction = pf.get("direction") if isinstance(pf.get("direction"), dict) else {}
+    pf_flows = pf.get("flows") if isinstance(pf.get("flows"), dict) else {}
+    pf_bursts = pf.get("bursts") if isinstance(pf.get("bursts"), dict) else {}
+    pf_visibility = pf.get("visibility") if isinstance(pf.get("visibility"), dict) else {}
+    pf_transport_health = pf.get("transport_health") if isinstance(pf.get("transport_health"), dict) else {}
+    pf_fingerprints = pf.get("fingerprints") if isinstance(pf.get("fingerprints"), dict) else {}
+
+    pf_direction_summary = (
+        pf_direction.get("summary")
+        if isinstance(pf_direction.get("summary"), dict)
+        else {}
+    )
+    pf_flow_summary = (
+        pf_flows.get("summary")
+        if isinstance(pf_flows.get("summary"), dict)
+        else {}
+    )
+    pf_burst_summary = (
+        pf_bursts.get("summary")
+        if isinstance(pf_bursts.get("summary"), dict)
+        else {}
+    )
+    pf_visibility_summary = (
+        pf_visibility.get("summary")
+        if isinstance(pf_visibility.get("summary"), dict)
+        else {}
+    )
+    pf_transport_summary = (
+        pf_transport_health.get("summary")
+        if isinstance(pf_transport_health.get("summary"), dict)
+        else {}
+    )
+    pf_fingerprint_summary = (
+        pf_fingerprints.get("summary")
+        if isinstance(pf_fingerprints.get("summary"), dict)
+        else {}
+    )
+
+    if not direction and pf_direction_summary:
+        direction = pf_direction_summary
+    if not flow and pf_flow_summary:
+        flow = pf_flow_summary
+    if not burst and pf_burst_summary:
+        burst = pf_burst_summary
+    if not visibility and pf_visibility_summary:
+        visibility = pf_visibility_summary
+    if not transport_health and pf_transport_summary:
+        transport_health = pf_transport_summary
+    if not tls_fingerprints and pf_fingerprint_summary:
+        tls_fingerprints = pf_fingerprint_summary
+    if not lifecycle and isinstance(transport_health.get("lifecycle_summary"), dict):
+        lifecycle = transport_health.get("lifecycle_summary") or {}
+    if lifecycle:
+        if proxies.get("tcp_reset_stream_ratio") is None and lifecycle.get("reset_stream_ratio") is not None:
+            proxies["tcp_reset_stream_ratio"] = lifecycle.get("reset_stream_ratio")
+        if (
+            proxies.get("tcp_clean_close_stream_ratio") is None
+            and lifecycle.get("clean_close_stream_ratio") is not None
+        ):
+            proxies["tcp_clean_close_stream_ratio"] = lifecycle.get("clean_close_stream_ratio")
+        if proxies.get("tcp_partial_stream_ratio") is None and lifecycle.get("partial_stream_ratio") is not None:
+            proxies["tcp_partial_stream_ratio"] = lifecycle.get("partial_stream_ratio")
+        if proxies.get("tcp_issue_stream_ratio") is None and lifecycle.get("issue_stream_ratio") is not None:
+            proxies["tcp_issue_stream_ratio"] = lifecycle.get("issue_stream_ratio")
+    if tls_fingerprints:
+        for proxy_key in (
+            "tls_client_hello_count",
+            "tls_server_hello_count",
+            "unique_ja3_count",
+            "unique_ja4_count",
+            "unique_ja3s_count",
+            "top1_ja3_share",
+            "top1_ja4_share",
+            "top1_ja3s_share",
+        ):
+            if proxies.get(proxy_key) is None and tls_fingerprints.get(proxy_key) is not None:
+                proxies[proxy_key] = tls_fingerprints.get(proxy_key)
+
+    if not posture_summary:
+        posture_summary = summarize_traffic_posture(
+            metrics=metrics,
+            direction_summary=(
+                pf_direction_summary
+                if pf_direction_summary
+                else direction
+            ),
+            flow_summary=(
+                pf_flow_summary
+                if pf_flow_summary
+                else flow
+            ),
+            burst_summary=(
+                pf_burst_summary
+                if pf_burst_summary
+                else burst
+            ),
+            visibility_summary=(
+                pf_visibility_summary
+                if pf_visibility_summary
+                else visibility
+            ),
+        )
+
     def _safe_int(value: object) -> int | None:
         try:
             return int(value)  # type: ignore[arg-type]
@@ -541,6 +789,43 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         if proxies.get("new_dns_rate_per_min") is None and dns_u is not None:
             proxies["new_dns_rate_per_min"] = float(dns_ui) / float(denom_min)
 
+    report_extras = {
+        "direction_outbound_bytes": _safe_int(direction.get("outbound_bytes")),
+        "direction_inbound_bytes": _safe_int(direction.get("inbound_bytes")),
+        "direction_unknown_bytes": _safe_int(direction.get("unknown_bytes")),
+        "direction_outbound_packets": _safe_int(direction.get("outbound_packets")),
+        "direction_inbound_packets": _safe_int(direction.get("inbound_packets")),
+        "direction_unknown_packets": _safe_int(direction.get("unknown_packets")),
+        "flow_count": _safe_int(flow.get("flow_count")),
+        "tcp_stream_count": _safe_int(flow.get("tcp_stream_count")),
+        "udp_flow_count": _safe_int(flow.get("udp_flow_count")),
+        "active_second_count": _safe_int(burst.get("active_second_count")),
+        "burst_count": _safe_int(burst.get("burst_count")),
+        "max_burst_duration_s": burst.get("max_burst_duration_s"),
+        "median_burst_duration_s": burst.get("median_burst_duration_s"),
+        "median_interburst_gap_s": burst.get("median_interburst_gap_s"),
+        "tls_visible": visibility.get("tls_visible"),
+        "tls_handshake_packets": _safe_int(visibility.get("tls_handshake_packets")),
+        "tls_client_hello_packets": _safe_int(visibility.get("tls_client_hello_packets")),
+        "tls_server_hello_packets": _safe_int(visibility.get("tls_server_hello_packets")),
+        "tls_sni_unique_count": _safe_int(visibility.get("tls_sni_unique_count")),
+        "tls_alpn_unique_count": _safe_int(visibility.get("tls_alpn_unique_count")),
+        "quic_candidate_packets": _safe_int(visibility.get("quic_candidate_packets")),
+        "tcp_issue_packet_count": _safe_int(transport_health.get("issue_packet_count")),
+        "tcp_reset_packet_count": _safe_int(transport_health.get("reset_packet_count")),
+        "tcp_stream_count_lifecycle": _safe_int(lifecycle.get("stream_count")),
+        "tcp_handshake_seen_stream_count": _safe_int(lifecycle.get("handshake_seen_stream_count")),
+        "tcp_issue_stream_count": _safe_int(lifecycle.get("issue_stream_count")),
+        "tcp_reset_stream_count": _safe_int(lifecycle.get("reset_stream_count")),
+        "tcp_clean_close_stream_count": _safe_int(lifecycle.get("clean_close_stream_count")),
+        "tcp_partial_stream_count": _safe_int(lifecycle.get("partial_stream_count")),
+        "tls_client_hello_count": _safe_int(tls_fingerprints.get("client_hello_count")),
+        "tls_server_hello_count": _safe_int(tls_fingerprints.get("server_hello_count")),
+        "unique_ja3_count": _safe_int(tls_fingerprints.get("unique_ja3_count")),
+        "unique_ja4_count": _safe_int(tls_fingerprints.get("unique_ja4_count")),
+        "unique_ja3s_count": _safe_int(tls_fingerprints.get("unique_ja3s_count")),
+    }
+
     # In pcap_features.json we store protocol tags under quality.protocol
     proto = qual.get("protocol") if isinstance(qual.get("protocol"), dict) else {}
     run_profile = str(proto.get("run_profile") or op.get("run_profile") or "").strip() or None
@@ -622,6 +907,59 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         "top_sni_total": int(proxies.get("top_sni_total")) if proxies.get("top_sni_total") is not None else None,
         "dns_concentration": float(proxies.get("dns_concentration")) if proxies.get("dns_concentration") is not None else None,
         "sni_concentration": float(proxies.get("sni_concentration")) if proxies.get("sni_concentration") is not None else None,
+        "direction_outbound_bytes": report_extras["direction_outbound_bytes"],
+        "direction_inbound_bytes": report_extras["direction_inbound_bytes"],
+        "direction_unknown_bytes": report_extras["direction_unknown_bytes"],
+        "direction_outbound_packets": report_extras["direction_outbound_packets"],
+        "direction_inbound_packets": report_extras["direction_inbound_packets"],
+        "direction_unknown_packets": report_extras["direction_unknown_packets"],
+        "flow_count": report_extras["flow_count"],
+        "tcp_stream_count": report_extras["tcp_stream_count"],
+        "udp_flow_count": report_extras["udp_flow_count"],
+        "active_second_count": report_extras["active_second_count"],
+        "burst_count": report_extras["burst_count"],
+        "max_burst_duration_s": float(report_extras["max_burst_duration_s"]) if report_extras["max_burst_duration_s"] is not None else None,
+        "median_burst_duration_s": float(report_extras["median_burst_duration_s"]) if report_extras["median_burst_duration_s"] is not None else None,
+        "median_interburst_gap_s": float(report_extras["median_interburst_gap_s"]) if report_extras["median_interburst_gap_s"] is not None else None,
+        "outbound_packet_ratio": float(posture_summary.get("outbound_packet_ratio")) if posture_summary.get("outbound_packet_ratio") is not None else None,
+        "inbound_packet_ratio": float(posture_summary.get("inbound_packet_ratio")) if posture_summary.get("inbound_packet_ratio") is not None else None,
+        "outbound_byte_ratio": float(posture_summary.get("outbound_byte_ratio")) if posture_summary.get("outbound_byte_ratio") is not None else None,
+        "inbound_byte_ratio": float(posture_summary.get("inbound_byte_ratio")) if posture_summary.get("inbound_byte_ratio") is not None else None,
+        "direction_confident_packet_ratio": float(posture_summary.get("direction_confident_packet_ratio")) if posture_summary.get("direction_confident_packet_ratio") is not None else None,
+        "active_second_ratio": float(posture_summary.get("active_second_ratio")) if posture_summary.get("active_second_ratio") is not None else None,
+        "bursts_per_min": float(posture_summary.get("bursts_per_min")) if posture_summary.get("bursts_per_min") is not None else None,
+        "median_packets_per_flow": float(posture_summary.get("median_packets_per_flow")) if posture_summary.get("median_packets_per_flow") is not None else None,
+        "median_bytes_per_flow": float(posture_summary.get("median_bytes_per_flow")) if posture_summary.get("median_bytes_per_flow") is not None else None,
+        "top_flow_packet_share": float(posture_summary.get("top_flow_packet_share")) if posture_summary.get("top_flow_packet_share") is not None else None,
+        "top_flow_byte_share": float(posture_summary.get("top_flow_byte_share")) if posture_summary.get("top_flow_byte_share") is not None else None,
+        "tls_handshakes_per_min": float(posture_summary.get("tls_handshakes_per_min")) if posture_summary.get("tls_handshakes_per_min") is not None else None,
+        "tcp_reset_stream_ratio": float(proxies.get("tcp_reset_stream_ratio")) if proxies.get("tcp_reset_stream_ratio") is not None else None,
+        "tcp_clean_close_stream_ratio": float(proxies.get("tcp_clean_close_stream_ratio")) if proxies.get("tcp_clean_close_stream_ratio") is not None else None,
+        "tcp_partial_stream_ratio": float(proxies.get("tcp_partial_stream_ratio")) if proxies.get("tcp_partial_stream_ratio") is not None else None,
+        "tcp_issue_stream_ratio": float(proxies.get("tcp_issue_stream_ratio")) if proxies.get("tcp_issue_stream_ratio") is not None else None,
+        "top1_ja3_share": float(proxies.get("top1_ja3_share")) if proxies.get("top1_ja3_share") is not None else None,
+        "top1_ja4_share": float(proxies.get("top1_ja4_share")) if proxies.get("top1_ja4_share") is not None else None,
+        "top1_ja3s_share": float(proxies.get("top1_ja3s_share")) if proxies.get("top1_ja3s_share") is not None else None,
+        "tls_visible": 1 if report_extras["tls_visible"] is True else (0 if report_extras["tls_visible"] is False else None),
+        "tls_handshake_packets": report_extras["tls_handshake_packets"],
+        "tls_client_hello_packets": report_extras["tls_client_hello_packets"],
+        "tls_server_hello_packets": report_extras["tls_server_hello_packets"],
+        "tls_sni_unique_count": report_extras["tls_sni_unique_count"],
+        "tls_alpn_unique_count": report_extras["tls_alpn_unique_count"],
+        "quic_candidate_packets": report_extras["quic_candidate_packets"],
+        "tcp_issue_packet_count": report_extras["tcp_issue_packet_count"],
+        "tcp_reset_packet_count": report_extras["tcp_reset_packet_count"],
+        "tcp_stream_count_lifecycle": report_extras["tcp_stream_count_lifecycle"],
+        "tcp_handshake_seen_stream_count": report_extras["tcp_handshake_seen_stream_count"],
+        "tcp_issue_stream_count": report_extras["tcp_issue_stream_count"],
+        "tcp_reset_stream_count": report_extras["tcp_reset_stream_count"],
+        "tcp_clean_close_stream_count": report_extras["tcp_clean_close_stream_count"],
+        "tcp_partial_stream_count": report_extras["tcp_partial_stream_count"],
+        "tls_client_hello_count": report_extras["tls_client_hello_count"],
+        "tls_server_hello_count": report_extras["tls_server_hello_count"],
+        "unique_ja3_count": report_extras["unique_ja3_count"],
+        "unique_ja4_count": report_extras["unique_ja4_count"],
+        "unique_ja3s_count": report_extras["unique_ja3s_count"],
     }
 
 

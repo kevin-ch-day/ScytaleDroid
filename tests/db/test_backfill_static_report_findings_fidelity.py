@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import backfill_static_report_findings_fidelity as script
@@ -54,20 +52,9 @@ def _run_health_payload(*, session_stamp: str, package_name: str) -> dict[str, o
     }
 
 
-def test_help_is_safe_without_pythonpath() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    path = repo / "scripts" / "db" / "backfill_static_report_findings_fidelity.py"
-    proc = subprocess.run(
-        [sys.executable, str(path), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.lower().startswith("usage:")
-    assert "--apply" in proc.stdout
+def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
+    out = assert_safe_script_help("scripts/db/backfill_static_report_findings_fidelity.py")
+    assert "--apply" in out
 
 
 def test_dry_run_reports_missing_targets(tmp_path: Path, monkeypatch, capsys) -> None:
