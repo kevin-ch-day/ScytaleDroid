@@ -28,14 +28,14 @@ def test_resolved_template_uses_override_when_present(tmp_path: Path, monkeypatc
 
 def test_news_packages_resolve_to_news_reader_template() -> None:
     category_map._load_mapping.cache_clear()
-    assert category_map.resolved_template_for_package("bbc.mobile.news.ww") == "news_reader_basic_v1"
-    assert category_map.resolved_template_for_package("com.cnn.mobile.android.phone") == "news_reader_basic_v1"
-    assert category_map.resolved_template_for_package("com.guardian") == "news_reader_basic_v1"
+    assert category_map.resolved_template_for_package("bbc.mobile.news.ww") == "news_reader_behavior_v2"
+    assert category_map.resolved_template_for_package("com.cnn.mobile.android.phone") == "news_reader_behavior_v2"
+    assert category_map.resolved_template_for_package("com.guardian") == "news_reader_behavior_v2"
 
 
 def test_v3_news_overrides_resolve_without_catalog_membership(monkeypatch) -> None:
     monkeypatch.setenv("SCYTALEDROID_TEMPLATE_MAP_PROFILE", "v3")
     category_map._load_v3_catalog.cache_clear()
-    assert category_map.resolved_template_for_package("bbc.mobile.news.ww") == "news_reader_basic_v1"
-    assert category_map.resolved_template_for_package("com.cnn.mobile.android.phone") == "news_reader_basic_v1"
-    assert category_map.resolved_template_for_package("com.guardian") == "news_reader_basic_v1"
+    assert category_map.resolved_template_for_package("bbc.mobile.news.ww") == "news_reader_behavior_v2"
+    assert category_map.resolved_template_for_package("com.cnn.mobile.android.phone") == "news_reader_behavior_v2"
+    assert category_map.resolved_template_for_package("com.guardian") == "news_reader_behavior_v2"

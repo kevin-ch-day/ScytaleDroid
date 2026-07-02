@@ -9,6 +9,7 @@ from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
 from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_static_handoff_plan_summary
+from scytaledroid.DynamicAnalysis.menus.queue_metrics import resolve_active_cohort_evidence_quota_summary
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.Utils.DisplayUtils import status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
@@ -31,12 +32,11 @@ class DynamicMenuSections:
         ]
 
 
-def _quota_reason_text(summary) -> str:
+def _quota_reason_text(summary, *, quota_valid: int) -> str:
     reason = _humanize_code(summary.first_failing_reason)
     expected = int(getattr(summary, "expected_valid_runs", 0) or 0)
-    quota_valid = int(getattr(summary, "quota_runs_counted", 0) or 0)
     if str(getattr(summary, "first_failing_reason", "") or "").strip().upper() == "QUOTA_NOT_SATISFIED" and expected > 0:
-        remaining = max(0, expected - quota_valid)
+        remaining = max(0, expected - int(quota_valid))
         return f"{reason} — {remaining} quota-valid runs remaining"
     return reason
 
@@ -44,19 +44,24 @@ def _quota_reason_text(summary) -> str:
 def build_dynamic_menu_sections() -> DynamicMenuSections:
     return DynamicMenuSections(
         primary_actions=[
-            MenuOption("1", "Focused app run"),
-            MenuOption("2", "App queue / next action"),
+            MenuOption("1", "Focused app run", description="pick one app and run baseline or interactive"),
+            MenuOption(
+                "2",
+                "App queue / next action",
+                description="recommended next steps across the cohort",
+                badge="primary",
+            ),
         ],
         validation=[
-            MenuOption("3", "State summary"),
-            MenuOption("4", "Archive readiness"),
+            MenuOption("3", "State summary", description="cohort health and collection progress"),
+            MenuOption("4", "Archive readiness", description="freeze gate and publication blockers"),
         ],
         maintenance=[
-            MenuOption("5", "Verify capture environment"),
-            MenuOption("6", "Change cohort"),
-            MenuOption("7", "Reindex tracker"),
-            MenuOption("8", "Prune incomplete evidence"),
-            MenuOption("9", "Legacy structural tools"),
+            MenuOption("5", "Verify capture environment", description="host PCAP tools and prerequisites"),
+            MenuOption("6", "Change cohort", description="switch active research dataset scope"),
+            MenuOption("7", "Reindex tracker", description="rebuild tracker index from evidence packs"),
+            MenuOption("8", "Prune incomplete evidence", description="remove abandoned partial capture dirs"),
+            MenuOption("9", "Legacy structural tools", description="archived structural cohort utilities"),
         ],
         archive_export=[],
     )
@@ -99,11 +104,18 @@ def render_dynamic_menu_overview() -> None:
         if int(summary.total_runs) == 0
         else f"{summary.total_runs} packs ({summary.valid_runs} valid)"
     )
-    quota_valid = int(getattr(summary, "quota_runs_counted", 0) or 0)
+    try:
+        quota_summary = resolve_active_cohort_evidence_quota_summary()
+    except Exception:
+        quota_summary = {}
+    quota_valid = int(quota_summary.get("quota_runs_counted", 0) or 0)
+    if quota_valid <= 0:
+        quota_valid = int(getattr(summary, "quota_runs_counted", 0) or 0)
     expected_valid = int(getattr(summary, "expected_valid_runs", 0) or 0)
-    supplemental_valid = max(0, int(getattr(summary, "valid_runs", 0) or 0) - quota_valid)
+    extra_retained = int(quota_summary.get("extra_eligible_runs", 0) or 0)
+    baseline_ml_pool = int(quota_summary.get("baseline_ml_pool_runs", 0) or 0)
     freeze_text = "ready" if summary.can_freeze else "blocked"
-    reason_text = _quota_reason_text(summary)
+    reason_text = _quota_reason_text(summary, quota_valid=quota_valid)
     cohort_label = active_research_cohort_label()
     try:
         selected_device = device_manager.describe_active_device()
@@ -125,8 +137,13 @@ def render_dynamic_menu_overview() -> None:
         summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
         summary_cards.summary_item("Quota", quota_text, value_style="muted"),
         *(
-            [summary_cards.summary_item("Supplemental", f"{supplemental_valid} outside quota", value_style="muted")]
-            if supplemental_valid > 0
+            [summary_cards.summary_item("ML pool", f"{baseline_ml_pool} supplemental baselines", value_style="muted")]
+            if baseline_ml_pool > 0
+            else []
+        ),
+        *(
+            [summary_cards.summary_item("Retained extra", f"{extra_retained} outside quota", value_style="muted")]
+            if extra_retained > 0
             else []
         ),
         summary_cards.summary_item(
@@ -170,6 +187,8 @@ def _next_step_text(
     reason_code = str(getattr(summary, "first_failing_reason", "") or "").strip().upper()
     if reason_code == "QUOTA_NOT_SATISFIED":
         return "Next: open App queue / next action to continue collection."
+    if bool(getattr(summary, "can_freeze", False)):
+        return "Next: quota satisfied — run supplemental baselines (ML training pool) or review Archive readiness."
     if not bool(getattr(summary, "can_freeze", False)):
         return "Next: review Archive readiness for the current blocker."
     return "Next: archive readiness checks are satisfied."

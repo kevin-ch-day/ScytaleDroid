@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.core.static_context import compute_static_context
 from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
@@ -75,6 +76,7 @@ def export_pcap_features_csv(
                 "messaging_activity": (manifest.get("operator") or {}).get("messaging_activity"),
             }
         )
+        row.update(_qualification_export_fields(dataset))
         row.update(static_cols)
         rows.append(row)
     if not rows:
@@ -309,8 +311,13 @@ def _build_run_summary_row(
         "udp_ratio": proxies.get("udp_ratio"),
         "unique_domains": unique_domains,
     }
+    row.update(_qualification_export_fields(dataset))
     row.update(static_cols)
     return row
+
+
+def _qualification_export_fields(dataset: dict[str, Any]) -> dict[str, Any]:
+    return qualification_fields_from_dataset(dataset)
 
 
 def _protocol_ratio(rows: list[dict[str, Any]], protocol: str) -> float | None:

@@ -62,11 +62,11 @@ def run_dynamic_analysis_menu(callbacks: DynamicAnalysisMenuCallbacks) -> None:
         render_dynamic_menu_overview()
         print()
         menu_utils.print_section("Run")
-        menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=True, compact=True)
         print()
         menu_utils.print_section("Tools")
-        menu_utils.print_menu(sections.validation, show_exit=False, show_descriptions=False, compact=True)
-        menu_utils.print_menu(sections.maintenance, show_exit=False, show_descriptions=False, compact=True)
+        menu_utils.print_menu(sections.validation, show_exit=False, show_descriptions=True, compact=True)
+        menu_utils.print_menu(sections.maintenance, show_exit=False, show_descriptions=True, compact=True)
         menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(options, include_exit=True),

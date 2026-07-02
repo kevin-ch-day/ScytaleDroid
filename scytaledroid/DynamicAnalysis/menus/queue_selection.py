@@ -10,6 +10,7 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
 from scytaledroid.DynamicAnalysis import app_queue_state as _app_queue_state
+from scytaledroid.DynamicAnalysis.queue_operator_ui import queue_selection_shortcut_hint
 from scytaledroid.DynamicAnalysis.menus.queue_data_sources import (
     resolve_db_dynamic_lineage_context_map as _resolve_db_dynamic_lineage_context_map_impl,
     resolve_live_build_drift_map as _resolve_live_build_drift_map_impl,
@@ -271,6 +272,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
 
     while True:
         if prepared.dataset_apps_total > 0:
+            menu_utils.print_header("App Queue", "Select an app for capture or review")
             evidence_summary = evidence_summary or summarize_evidence_quota_fn(prepared.dataset_pkgs, prepared.cfg)
             quota = int(evidence_summary.get("quota_runs_counted", 0)) if evidence_summary else 0
             apps_ok = int(evidence_summary.get("apps_satisfied", 0)) if evidence_summary else 0
@@ -293,27 +295,22 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
                 next_row=next_row,
             )
 
-            if next_row:
-                print()
-
             _render_compact_queue_table(
                 row_models,
                 baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
                 interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
+                next_row=next_row,
             )
             warnings_line = _compact_warning_line(row_models)
             if warnings_line:
                 print()
-                print(f"Warnings: {warnings_line}")
+                print(status_messages.status(warnings_line, level="warn"))
             notes_line = _compact_note_line(row_models)
             if notes_line:
-                print()
-                print(f"Notes   : {notes_line}")
+                print(status_messages.status(notes_line, level="info"))
             print()
         print()
-        print("Select an app by number or name.")
-        shortcuts = ["S summary", "Y history", "H help", "D diagnostics", "B back"]
-        print(f"Shortcuts         : {' | '.join(shortcuts)}")
+        menu_utils.print_hint(queue_selection_shortcut_hint())
         choice = prompt_utils.prompt_text("Choose app # / name", required=False).strip()
 
         if not choice:
@@ -352,7 +349,25 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
         if choice_lc in {"y", "history"}:
             from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_build_history
 
-            render_cohort_build_history(list(prepared.row_models or []), prepared.build_rows)
+            render_cohort_build_history(
+                list(prepared.row_models or []),
+                prepared.build_rows,
+                baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
+                interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
+            )
+            continue
+        if choice_lc in {"v", "grouped", "view"}:
+            from scytaledroid.DynamicAnalysis import app_queue_rendering
+
+            app_queue_rendering.render_queue_grouped_sections(
+                row_models,
+                baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
+                interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
+                table_utils_mod=table_utils,
+                menu_utils_mod=menu_utils,
+                next_row=next_row,
+            )
+            prompt_utils.press_enter_to_continue()
             continue
         if choice_lc in {"h", "help"}:
             from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_help
@@ -362,7 +377,11 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
         if choice_lc in {"d", "debug", "diagnostics"}:
             from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_debug
 
-            render_cohort_status_debug(prepared.rows, list(prepared.row_models or []))
+            render_cohort_status_debug(
+                list(prepared.row_models or []),
+                baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
+                interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
+            )
             continue
         if choice_lc in {"0", "b", "back", "cancel"}:
             return None
@@ -370,7 +389,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
         if index is not None:
             package_name, _, _, _ = prepared.packages[index]
             return package_name
-        print(status_messages.status("Invalid choice. Enter an app number/name or use S, Y, H, D, or B.", level="warn"))
+        print(status_messages.status("Invalid choice. Enter an app number/name or use S, V, Y, H, D, or B.", level="warn"))
 
 
 def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
@@ -394,6 +413,7 @@ def _render_compact_queue_table(
     *,
     baseline_required: int,
     interactive_required: int,
+    next_row: PreparedPackageSelectionRow | None = None,
 ) -> None:
     _app_queue_rendering.render_compact_queue_table(
         rows,
@@ -402,6 +422,7 @@ def _render_compact_queue_table(
         terminal_mod=terminal,
         table_utils_mod=table_utils,
         text_blocks_mod=text_blocks,
+        next_row=next_row,
     )
 
 

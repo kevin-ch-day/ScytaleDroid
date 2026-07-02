@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
+from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
@@ -98,6 +98,7 @@ class DynamicRunSummarizer:
             run_profile=operator.get("run_profile"),
             invalid_reason=invalid_reason,
         )
+        qualification = qualification_fields_from_dataset(dataset)
         dataset_verdict = (
             "VALID"
             if dataset.get("valid_dataset_run") is True
@@ -118,6 +119,7 @@ class DynamicRunSummarizer:
                 "cohort_eligibility": dataset.get("cohort_eligibility"),
                 "invalid_reason_code": invalid_reason,
             },
+            "evidence_qualification": qualification,
             "verdicts": {
                 "technical": dataset_verdict,
                 "protocol": "COMPLIANT" if dataset_verdict == "VALID" else ("NON_COMPLIANT" if dataset_verdict == "INVALID" else None),

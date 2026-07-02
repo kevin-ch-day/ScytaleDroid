@@ -3,7 +3,7 @@
   "categories": {
     "social_feed": "social_feed_basic_v2",
     "messaging": "messaging_basic_v1",
-    "news_reader": "news_reader_basic_v1"
+    "news_reader": "news_reader_behavior_v2"
   },
   "packages": {
     "bbc.mobile.news.ww": "news_reader",

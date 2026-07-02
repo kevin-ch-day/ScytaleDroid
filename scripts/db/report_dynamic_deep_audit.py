@@ -54,6 +54,72 @@ KNOWN_LIMITATIONS = [
     "quality/readiness scores are audit heuristics for prioritization and paper readiness, not vulnerability severity scores.",
 ]
 
+SERVICE_MAPPING_GAP_FIELDS = (
+    "package",
+    "app_label",
+    "domain",
+    "root_domain",
+    "observed_count",
+    "gap_type",
+    "suggested_service_key",
+    "confidence",
+    "recommended_action",
+)
+
+STATIC_DYNAMIC_BRIDGE_GAP_FIELDS = (
+    "package",
+    "app_label",
+    "static_run_id",
+    "gap_key",
+    "gap_class",
+    "severity",
+    "current_value",
+    "expected_value",
+    "source_surface",
+    "recommended_followup",
+)
+
+CAPTURE_FAILURE_FIELDS = (
+    "run_id",
+    "package",
+    "app_label",
+    "pcap_failure_detail",
+    "pcap_manifest_artifact_registered",
+    "pcap_recovered_unregistered",
+    "pcap_recovered_path_mismatch",
+    "netstats_observed_bytes",
+    "pcap_size_bytes",
+    "timeline_available",
+    "valid_pack",
+    "recommended_action",
+)
+
+STATIC_ENRICHMENT_GAP_FIELDS = (
+    "package",
+    "app_label",
+    "static_run_id",
+    "plan_present",
+    "endpoint_inventory_status",
+    "enriched_domain_metadata_present",
+    "actionable_corroboration_present",
+    "gap_type",
+    "recommended_action",
+)
+
+PHASE_COVERAGE_FIELDS = (
+    "run_id",
+    "package",
+    "app_label",
+    "run_profile",
+    "template_id",
+    "timeline_available",
+    "timeline_complete",
+    "phase_count",
+    "transport_phase_rows",
+    "phase_attribution_status",
+    "recommended_action",
+)
+
 
 @dataclass(frozen=True)
 class RunPhaseCoverage:
@@ -70,11 +136,25 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", default=None, help="Optional explicit output directory.")
     parser.add_argument(
+        "--package",
+        default=None,
+        help="Optional package-name filter for a scoped read-only audit.",
+    )
+    parser.add_argument(
         "--overlay-latest-static",
         action="store_true",
         help=(
             "Read-only reanalysis mode: synthesize a temporary static plan from the latest "
             "matching stored static report instead of relying only on the embedded dynamic evidence plan."
+        ),
+    )
+    parser.add_argument(
+        "--overlay-reanalyse-strings",
+        action="store_true",
+        help=(
+            "Read-only overlay refinement: rebuild temporary static string/domain enrichment from the "
+            "latest matching static report APK path before synthesizing the overlay plan. Implies "
+            "--overlay-latest-static and does not mutate stored reports or dynamic evidence packs."
         ),
     )
     return parser
@@ -96,21 +176,26 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+def _write_csv(
+    path: Path,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    fieldnames: Sequence[str] | None = None,
+) -> None:
     row_list = list(rows)
-    if not row_list:
-        path.write_text("", encoding="utf-8")
-        return
-    fieldnames: list[str] = []
+    resolved_fieldnames: list[str] = [str(key) for key in (fieldnames or ())]
     for row in row_list:
         for key in row:
-            if key not in fieldnames:
-                fieldnames.append(str(key))
+            if key not in resolved_fieldnames:
+                resolved_fieldnames.append(str(key))
+    if not resolved_fieldnames:
+        path.write_text("", encoding="utf-8")
+        return
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=resolved_fieldnames)
         writer.writeheader()
         for row in row_list:
-            writer.writerow({key: row.get(key) for key in fieldnames})
+            writer.writerow({key: row.get(key) for key in resolved_fieldnames})
 
 
 def _norm_text(value: Any) -> str:
@@ -281,6 +366,14 @@ def _collect_dynamic_domains(report: Mapping[str, Any] | None) -> set[str]:
     return {value for value in domains if value}
 
 
+def _domain_observed(static_domain: str, observed_domains: set[str]) -> bool:
+    domain = _normalize_domain(static_domain)
+    if not domain:
+        return False
+    suffix = f".{domain}"
+    return any(observed == domain or observed.endswith(suffix) for observed in observed_domains)
+
+
 def _plan_enrichment(plan: Mapping[str, Any] | None) -> dict[str, Any]:
     network = plan.get("network_targets") if isinstance(plan, Mapping) and isinstance(plan.get("network_targets"), dict) else {}
     domain_sources = network.get("domain_sources") if isinstance(network.get("domain_sources"), list) else []
@@ -351,7 +444,7 @@ def _corroboration_from_plan_and_report(
         domain = _normalize_domain(row.get("domain"))
         if not domain:
             continue
-        if domain not in dynamic_domains:
+        if not _domain_observed(domain, dynamic_domains):
             continue
         corroborated_total += 1
         postures = row.get("postures") if isinstance(row.get("postures"), list) else []
@@ -382,6 +475,7 @@ def _plan_overlay_bundle(
     embedded_plan: Mapping[str, Any] | None,
     static_run_id: int | None,
     overlay_latest_static: bool,
+    overlay_reanalyse_strings: bool = False,
 ) -> dict[str, Any]:
     embedded_enrichment = _plan_enrichment(embedded_plan)
     bundle: dict[str, Any] = {
@@ -404,6 +498,7 @@ def _plan_overlay_bundle(
         package,
         embedded_plan=embedded_plan,
         static_run_id=static_run_id,
+        reanalyse_strings=bool(overlay_reanalyse_strings),
     )
     if not isinstance(overlay_plan, Mapping):
         return bundle
@@ -454,26 +549,82 @@ def _pcap_artifact_info(
     artifact_rel = ""
     artifact_exists = False
     local_path: Path | None = None
+    manifest_artifact_registered = False
+    manifest_artifact_path_missing = False
     for artifact in manifest.get("artifacts") or []:
         if not isinstance(artifact, Mapping):
             continue
         if artifact.get("type") != "pcapdroid_capture":
             continue
+        manifest_artifact_registered = True
         artifact_rel = str(artifact.get("relative_path") or "").strip()
         if artifact_rel:
             candidate = run_dir / artifact_rel
-            if candidate.exists():
+            if candidate.is_file():
                 artifact_exists = True
                 local_path = candidate
+            else:
+                manifest_artifact_path_missing = True
+        else:
+            manifest_artifact_path_missing = True
             break
     meta_path = run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json"
     meta_payload = _read_json(meta_path)
+
+    def _local_pcap_candidate(value: Any) -> Path | None:
+        text = _norm_text(value)
+        if not text:
+            return None
+        candidate = Path(text)
+        if not candidate.is_absolute():
+            candidate = run_dir / candidate
+        try:
+            candidate.resolve().relative_to(run_dir.resolve())
+        except (OSError, ValueError):
+            return None
+        if candidate.is_file() and candidate.suffix.lower() in {".pcap", ".pcapng"}:
+            return candidate
+        return None
+
+    recovered_unregistered_pcap = False
+    recovered_path_mismatch = False
+    if local_path is None:
+        for value in (
+            (report or {}).get("pcap_path"),
+            (report or {}).get("pcap_capture_name"),
+            (meta_payload or {}).get("pcap_name"),
+            (meta_payload or {}).get("resolved_pcap_name"),
+        ):
+            candidate = _local_pcap_candidate(value)
+            if candidate is None and _norm_text(value) and not str(value).startswith("artifacts/"):
+                candidate = _local_pcap_candidate(Path("artifacts") / "pcapdroid_capture" / _norm_text(value))
+            if candidate is not None:
+                local_path = candidate
+                artifact_rel = str(candidate.relative_to(run_dir))
+                artifact_exists = True
+                recovered_unregistered_pcap = not manifest_artifact_registered
+                recovered_path_mismatch = manifest_artifact_registered and manifest_artifact_path_missing
+                break
+    if local_path is None:
+        capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+        for candidate in sorted(capture_dir.glob("*.pcap*")):
+            if candidate.is_file() and candidate.suffix.lower() in {".pcap", ".pcapng"}:
+                local_path = candidate
+                artifact_rel = str(candidate.relative_to(run_dir))
+                artifact_exists = True
+                recovered_unregistered_pcap = not manifest_artifact_registered
+                recovered_path_mismatch = manifest_artifact_registered and manifest_artifact_path_missing
+                break
+
     pcap_size_bytes = _safe_int(
         (report or {}).get("pcap_size_bytes"),
         _safe_int((summary_payload or {}).get("pcap_size_bytes"), _safe_int((meta_payload or {}).get("pcap_size_bytes"))),
     )
-    if pcap_size_bytes <= 0 and local_path is not None and local_path.exists():
-        pcap_size_bytes = _safe_int(local_path.stat().st_size)
+    if local_path is not None and local_path.exists():
+        try:
+            pcap_size_bytes = _safe_int(local_path.stat().st_size)
+        except OSError:
+            pcap_size_bytes = 0
     issue_codes = set(extract_verify_issue_codes(verify_row))
     canonical = canonical_pcap_failure_code(
         artifact_rel=artifact_rel,
@@ -484,6 +635,10 @@ def _pcap_artifact_info(
         verify_row=verify_row,
     )
     detail = deep_audit_pcap_failure_detail(canonical)
+    if recovered_unregistered_pcap and pcap_size_bytes > 0 and str((report or {}).get("report_status") or "") == "ok":
+        detail = "PCAP_ARTIFACT_UNREGISTERED"
+    elif recovered_path_mismatch and pcap_size_bytes > 0 and str((report or {}).get("report_status") or "") == "ok":
+        detail = "PCAP_ARTIFACT_PATH_MISMATCH"
     pcap_present = bool(artifact_exists and pcap_size_bytes > 0)
     return {
         "pcap_present": pcap_present,
@@ -491,6 +646,9 @@ def _pcap_artifact_info(
         "pcap_failure_detail": detail,
         "pcap_artifact_relative_path": artifact_rel,
         "pcap_local_path": str(local_path.resolve()) if local_path is not None and local_path.exists() else None,
+        "pcap_manifest_artifact_registered": bool(manifest_artifact_registered),
+        "pcap_recovered_unregistered": bool(recovered_unregistered_pcap),
+        "pcap_recovered_path_mismatch": bool(recovered_path_mismatch),
         "capinfos_parsed": bool(((report or {}).get("capinfos") or {}).get("parsed")),
         "tshark_ok": str((report or {}).get("report_status") or "") == "ok",
         "report_present": isinstance(report, Mapping) and bool(report),
@@ -593,7 +751,13 @@ def _phase_coverage(
     )
 
 
-def _collect_run_records(output_root: Path, *, overlay_latest_static: bool = False) -> list[dict[str, Any]]:
+def _collect_run_records(
+    output_root: Path,
+    *,
+    overlay_latest_static: bool = False,
+    overlay_reanalyse_strings: bool = False,
+    package_filter: str | None = None,
+) -> list[dict[str, Any]]:
     from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
     from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import verify_dynamic_evidence_packs
 
@@ -604,6 +768,7 @@ def _collect_run_records(output_root: Path, *, overlay_latest_static: bool = Fal
         if isinstance(row, Mapping)
     }
     rows: list[dict[str, Any]] = []
+    normalized_package_filter = _norm_text(package_filter).lower()
     for manifest_path in sorted(output_root.glob("*/run_manifest.json")):
         run_dir = manifest_path.parent
         manifest = _read_json(manifest_path) or {}
@@ -612,6 +777,8 @@ def _collect_run_records(output_root: Path, *, overlay_latest_static: bool = Fal
         operator = manifest.get("operator") if isinstance(manifest.get("operator"), Mapping) else {}
         dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), Mapping) else {}
         package = _norm_text(target.get("package_name")).lower() or "_unknown"
+        if normalized_package_filter and package != normalized_package_filter:
+            continue
         app_label = _norm_text(target.get("display_name") or target.get("app_label") or package)
         run_profile = _norm_text(operator.get("run_profile") or dataset.get("run_profile"))
         interaction_mode = _interaction_mode(run_profile, _norm_text(operator.get("interaction_level")))
@@ -637,7 +804,8 @@ def _collect_run_records(output_root: Path, *, overlay_latest_static: bool = Fal
             package=package,
             embedded_plan=embedded_plan,
             static_run_id=static_run_id,
-            overlay_latest_static=overlay_latest_static,
+            overlay_latest_static=bool(overlay_latest_static or overlay_reanalyse_strings),
+            overlay_reanalyse_strings=bool(overlay_reanalyse_strings),
         )
         plan = plan_bundle["plan"] if isinstance(plan_bundle.get("plan"), Mapping) else {}
         service_bundle = summarize_pcap_service_context(report, package_name=package)
@@ -958,6 +1126,41 @@ def _context_resolution_score(run: Mapping[str, Any], limitations: list[str]) ->
     return min(score, QUALITY_WEIGHTS["context_resolution"]), service_rate, signal_rate
 
 
+def _run_has_static_endpoint_inventory(run: Mapping[str, Any]) -> bool:
+    corroboration = run.get("corroboration") if isinstance(run.get("corroboration"), Mapping) else {}
+    return _safe_int(corroboration.get("static_domains_total")) > 0
+
+
+def _static_endpoint_inventory_status(
+    join_row: Mapping[str, Any] | None,
+    runs: Sequence[Mapping[str, Any]],
+) -> str:
+    status = _norm_text((join_row or {}).get("static_endpoint_inventory_status") or "unknown").lower()
+    if status == "present":
+        return "present"
+    if any(_run_has_static_endpoint_inventory(run) for run in runs):
+        return "present"
+    return status or "unknown"
+
+
+def _pcap_requires_recollection(run: Mapping[str, Any]) -> bool:
+    pcap_info = run.get("pcap_info") if isinstance(run.get("pcap_info"), Mapping) else {}
+    detail = _norm_text(pcap_info.get("pcap_failure_detail"))
+    if not detail or detail in {"PCAP_ARTIFACT_UNREGISTERED", "PCAP_ARTIFACT_PATH_MISMATCH"}:
+        return False
+    if bool(pcap_info.get("pcap_present")):
+        return False
+    return _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes")) > 0
+
+
+def _pcap_needs_validity_review(run: Mapping[str, Any]) -> bool:
+    pcap_info = run.get("pcap_info") if isinstance(run.get("pcap_info"), Mapping) else {}
+    detail = _norm_text(pcap_info.get("pcap_failure_detail"))
+    if not detail or detail in {"PCAP_ARTIFACT_UNREGISTERED", "PCAP_ARTIFACT_PATH_MISMATCH"}:
+        return False
+    return bool(pcap_info.get("pcap_present")) and not bool(run.get("valid_pack"))
+
+
 def _static_guidance_bridge_score(run: Mapping[str, Any], join_row: Mapping[str, Any] | None, limitations: list[str]) -> int:
     corroboration = run.get("corroboration") if isinstance(run.get("corroboration"), Mapping) else {}
     plan = run.get("plan") if isinstance(run.get("plan"), Mapping) else {}
@@ -966,7 +1169,7 @@ def _static_guidance_bridge_score(run: Mapping[str, Any], join_row: Mapping[str,
         score += 3
     else:
         limitations.append("static_plan_missing")
-    endpoint_status = _norm_text((join_row or {}).get("static_endpoint_inventory_status"))
+    endpoint_status = _static_endpoint_inventory_status(join_row, [run])
     if endpoint_status == "present":
         score += 2
     elif endpoint_status == "missing":
@@ -1047,6 +1250,9 @@ def _score_run(run: Mapping[str, Any], join_row: Mapping[str, Any] | None) -> di
         "context_resolution_score": context_score,
         "static_guidance_bridge_score": bridge_score,
         "pcap_present": int(bool(pcap_info.get("pcap_present"))),
+        "pcap_manifest_artifact_registered": int(bool(pcap_info.get("pcap_manifest_artifact_registered"))),
+        "pcap_recovered_unregistered": int(bool(pcap_info.get("pcap_recovered_unregistered"))),
+        "pcap_recovered_path_mismatch": int(bool(pcap_info.get("pcap_recovered_path_mismatch"))),
         "pcap_size_bytes": _safe_int(pcap_info.get("pcap_size_bytes")),
         "netstats_observed_bytes": _safe_int(telemetry.get("netstats_observed_bytes")),
         "pcap_netstats_consistency": run.get("pcap_netstats_consistency"),
@@ -1083,6 +1289,8 @@ def _gap_class_for_key(key: str) -> str:
         return "true_missing_data"
     if key in {"pcap_capture_gap"}:
         return "true_missing_data"
+    if key in {"pcap_artifact_registration_gap"}:
+        return "ledger_bug"
     return "not_yet_supported"
 
 
@@ -1097,7 +1305,7 @@ def _bridge_gaps_for_package(
     static_run_id = ""
     if isinstance(join_row, Mapping):
         static_run_id = str(join_row.get("static_run_id") or "")
-    endpoint_status = _norm_text((join_row or {}).get("static_endpoint_inventory_status") or "unknown")
+    endpoint_status = _static_endpoint_inventory_status(join_row, runs)
     if endpoint_status in {"missing", "unknown"}:
         rows.append(
             {
@@ -1176,9 +1384,26 @@ def _bridge_gaps_for_package(
                 "recommended_followup": "repair_service_mapping",
             }
         )
+    artifact_registration_details = {"PCAP_ARTIFACT_UNREGISTERED", "PCAP_ARTIFACT_PATH_MISMATCH"}
+    if any(_norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail")) in artifact_registration_details for run in runs):
+        rows.append(
+            {
+                "package": package,
+                "app_label": app_label,
+                "static_run_id": static_run_id,
+                "gap_key": "pcap_artifact_registration_gap",
+                "gap_class": "ledger_bug",
+                "severity": "medium",
+                "current_value": "local PCAP exists but artifact ledger is missing or points at the wrong path",
+                "expected_value": "manifest artifact ledger references the local PCAP path",
+                "source_surface": "run_manifest.artifacts + analysis/pcap_report.json",
+                "recommended_followup": "repair_artifact_registration",
+            }
+        )
     if any(
         _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail"))
-        and _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes")) > 0
+        and _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail")) not in artifact_registration_details
+        and _pcap_requires_recollection(run)
         for run in runs
     ):
         rows.append(
@@ -1193,6 +1418,26 @@ def _bridge_gaps_for_package(
                 "expected_value": "PCAP available when traffic is observed",
                 "source_surface": "pcapdroid_capture + telemetry",
                 "recommended_followup": "recollect_capture",
+            }
+        )
+    if any(
+        _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail"))
+        and _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail")) not in artifact_registration_details
+        and _pcap_needs_validity_review(run)
+        for run in runs
+    ):
+        rows.append(
+            {
+                "package": package,
+                "app_label": app_label,
+                "static_run_id": static_run_id,
+                "gap_key": "pcap_validity_review_gap",
+                "gap_class": "governance_review",
+                "severity": "medium",
+                "current_value": "local PCAP is registered and non-empty but run remains invalid",
+                "expected_value": "validity state reviewed without changing quota automatically",
+                "source_surface": "run_manifest.dataset + run_manifest.artifacts + pcap_report",
+                "recommended_followup": "review_invalid_pcap_state",
             }
         )
     if any(getattr(run.get("phase"), "timeline_available", False) for run in runs):
@@ -1256,11 +1501,16 @@ def _static_enrichment_gap_rows(
         app_label = str(runs[0]["app_label"])
         join_row = join_rows.get(package) if isinstance(join_rows, Mapping) else None
         static_run_id = str((join_row or {}).get("static_run_id") or "")
-        endpoint_status = _norm_text((join_row or {}).get("static_endpoint_inventory_status") or "unknown")
+        endpoint_status = _static_endpoint_inventory_status(join_row, runs)
         plan_present = any(bool(run.get("plan")) for run in runs)
         enriched = any(bool((run.get("corroboration") or {}).get("enriched_domain_metadata_present")) for run in runs)
-        actionable = any(_safe_int((run.get("corroboration") or {}).get("corroborated_actionable_domains")) > 0 for run in runs)
-        if endpoint_status == "present" and enriched and actionable:
+        actionable_required = any(
+            _safe_int((run.get("corroboration") or {}).get("actionable_static_domain_rows")) > 0 for run in runs
+        )
+        actionable = any(
+            _safe_int((run.get("corroboration") or {}).get("corroborated_actionable_domains")) > 0 for run in runs
+        )
+        if endpoint_status == "present" and enriched and (actionable or not actionable_required):
             continue
         if not plan_present:
             gap_type = "static_plan_missing"
@@ -1318,10 +1568,11 @@ def _template_label(package_name: str) -> str:
     template_id = str(requested_script_template(package_name=package_name) or "").strip().lower()
     if template_id in {"", "unknown"}:
         return "none"
-    if template_id == "news_reader_basic_v1":
+    if template_id in {"news_reader_basic_v1", "news_reader_behavior_v2"}:
         return "news"
     if template_id in {
         "facebook_basic_v2",
+        "facebook_behavior_v3",
         "x_twitter_full_session_v1",
         "tiktok_basic_v1",
         "tiktok_basic_v2",
@@ -1342,11 +1593,21 @@ def _template_label(package_name: str) -> str:
     return "generic"
 
 
+def _requested_template_id(package_name: str) -> str:
+    from scytaledroid.DynamicAnalysis.scenarios.manual_templates import requested_script_template
+
+    template_id = str(requested_script_template(package_name=package_name) or "").strip()
+    if template_id.lower() in {"", "unknown"}:
+        return ""
+    return template_id
+
+
 def _top_gap_for_app(
     *,
     baseline_valid_count: int,
     manual_valid_count: int,
     pcap_failure_count: int,
+    pcap_recollect_failure_count: int,
     static_endpoint_inventory_status: str,
     static_plan_enriched: bool,
     unresolved_service_total: int,
@@ -1354,8 +1615,10 @@ def _top_gap_for_app(
     scripted_phase_available: bool,
     template_label: str,
 ) -> str:
-    if pcap_failure_count > 0 and baseline_valid_count + manual_valid_count == 0:
+    if pcap_recollect_failure_count > 0 and baseline_valid_count + manual_valid_count == 0:
         return "capture_problem"
+    if pcap_failure_count > 0 and baseline_valid_count + manual_valid_count == 0:
+        return "excluded_or_invalid"
     if baseline_valid_count < 3:
         return "needs_baseline_runs"
     if manual_valid_count < 2:
@@ -1366,6 +1629,8 @@ def _top_gap_for_app(
         return "needs_static_enrichment"
     if unresolved_service_total > 0:
         return "needs_service_mapping"
+    if pcap_recollect_failure_count > 0:
+        return "capture_problem"
     if provider_authority_status == "join_gap":
         return "provider_authority_join_gap"
     return "paper_ready"
@@ -1379,10 +1644,13 @@ def _recommend_for_app(
     metrics: Mapping[str, Any],
 ) -> dict[str, Any]:
     template_label = _template_label(package)
+    requested_template_id = _requested_template_id(package)
     baseline_valid_count = int(metrics["baseline_valid_count"])
     manual_valid_count = int(metrics["manual_valid_count"])
     scripted_valid_count = int(metrics["scripted_valid_count"])
     pcap_failure_count = int(metrics["pcap_failure_count"])
+    pcap_recollect_failure_count = int(metrics.get("pcap_recollect_failure_count", pcap_failure_count))
+    pcap_validity_review_count = int(metrics.get("pcap_validity_review_count", 0))
     unresolved_service_total = int(metrics["unresolved_service_total"])
     static_endpoint_inventory_status = str(metrics["static_endpoint_inventory_status"])
     static_plan_enriched = bool(metrics["static_plan_enriched"])
@@ -1394,11 +1662,22 @@ def _recommend_for_app(
     reason = "review dynamic evidence manually"
     expected_observation = "clarify current evidence posture"
     evidence_source = "audit"
-    if pcap_failure_count > 0 and int(metrics["valid_run_count"]) == 0:
+    if _norm_text(metrics.get("top_gap")) == "paper_ready":
+        priority = "low"
+        reason = "dynamic readiness gates are already satisfied"
+        expected_observation = "review existing evidence instead of collecting another run"
+        evidence_source = "app_readiness"
+    elif pcap_recollect_failure_count > 0 and int(metrics["valid_run_count"]) == 0:
         next_action = "recollect_capture"
         priority = "high"
         reason = "network telemetry exists but PCAP evidence is failing or absent"
         expected_observation = "valid PCAP artifact with parseable network evidence"
+        evidence_source = "capture_failure_audit"
+    elif pcap_validity_review_count > 0 and int(metrics["valid_run_count"]) == 0:
+        next_action = "review_invalid_pcap_state"
+        priority = "high"
+        reason = "registered PCAP evidence exists but dataset validity remains invalid"
+        expected_observation = "explain validator state without making the run quota-valid automatically"
         evidence_source = "capture_failure_audit"
     elif baseline_valid_count < 3:
         next_action = "baseline"
@@ -1414,12 +1693,22 @@ def _recommend_for_app(
         evidence_source = "quota_state"
     elif template_label != "none" and not scripted_phase_available:
         next_action = "scripted_interaction"
-        recommended_template = "news_reader_basic_v1" if template_label == "news" else template_label
+        recommended_template = (
+            "news_reader_behavior_v2"
+            if template_label == "news"
+            else requested_template_id
+        )
         recommended_phase = "open_article" if template_label == "news" else "template_guided"
         priority = "medium"
         reason = "scripted template exists but no valid scripted phase coverage is present"
         expected_observation = "phase-bounded dynamic behavior under a repeatable template"
         evidence_source = "phase_coverage_audit"
+    elif pcap_recollect_failure_count > 0:
+        next_action = "recollect_capture"
+        priority = "high"
+        reason = "one or more otherwise useful runs still have missing or empty PCAP evidence"
+        expected_observation = "replacement run with registered parseable PCAP evidence"
+        evidence_source = "capture_failure_audit"
     elif static_endpoint_inventory_status != "present" or not static_plan_enriched:
         next_action = "repair_static_enrichment"
         priority = "high"
@@ -1470,13 +1759,14 @@ def _readiness_tier(
     static_endpoint_inventory_status: str,
     unresolved_service_total: int,
     pcap_failure_count: int,
+    pcap_recollect_failure_count: int,
     valid_run_count: int,
     scripted_phase_available: bool,
     template_label: str,
 ) -> str:
-    if valid_run_count == 0 and pcap_failure_count > 0:
+    if valid_run_count == 0 and pcap_recollect_failure_count > 0:
         return "capture_problem"
-    if valid_run_count == 0 and pcap_failure_count == 0:
+    if valid_run_count == 0:
         return "excluded_or_invalid"
     if baseline_valid_count < 3:
         return "needs_baseline_runs"
@@ -1488,6 +1778,8 @@ def _readiness_tier(
         return "needs_static_enrichment"
     if unresolved_service_total > 0:
         return "needs_service_mapping"
+    if pcap_recollect_failure_count > 0:
+        return "capture_problem"
     if avg_quality < 60.0 and pcap_failure_count > 0:
         return "capture_problem"
     if avg_quality >= 75.0:
@@ -1524,6 +1816,8 @@ def _app_readiness_rows(
             else 0.0
         )
         pcap_failure_count = sum(1 for run in runs if _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail")))
+        pcap_recollect_failure_count = sum(1 for run in runs if _pcap_requires_recollection(run))
+        pcap_validity_review_count = sum(1 for run in runs if _pcap_needs_validity_review(run))
         unresolved_service_total = sum(_safe_int(run.get("unresolved_service_count")) for run in valid_runs)
         unresolved_signal_total = sum(_safe_int(run.get("unresolved_signal_count")) for run in valid_runs)
         service_count_total = sum(_safe_int(run.get("service_count")) for run in valid_runs)
@@ -1535,7 +1829,7 @@ def _app_readiness_rows(
         if signal_count_total + unresolved_signal_total > 0:
             signal_resolution_rate = signal_count_total / float(signal_count_total + unresolved_signal_total)
         static_plan_enriched = any(bool((run.get("corroboration") or {}).get("enriched_domain_metadata_present")) for run in valid_runs)
-        static_endpoint_inventory_status = _norm_text((join_row or {}).get("static_endpoint_inventory_status") or "unknown")
+        static_endpoint_inventory_status = _static_endpoint_inventory_status(join_row, valid_runs)
         provider_authority_status = _provider_authority_status(join_row)
         baseline_manual_delta_available = bool(baseline_valid_count > 0 and manual_valid_count > 0)
         scripted_phase_available = any(getattr(run.get("phase"), "timeline_available", False) for run in scripted_runs)
@@ -1645,8 +1939,8 @@ def _app_readiness_rows(
             READINESS_WEIGHTS["capture_reliability"],
             round(
                 10.0
-                if pcap_failure_count == 0
-                else max(0.0, 10.0 - float(pcap_failure_count * 3))
+                if pcap_recollect_failure_count == 0
+                else max(0.0, 10.0 - float(pcap_recollect_failure_count * 3))
             ),
         )
         readiness_score = float(
@@ -1664,6 +1958,7 @@ def _app_readiness_rows(
             static_endpoint_inventory_status=static_endpoint_inventory_status,
             unresolved_service_total=unresolved_service_total,
             pcap_failure_count=pcap_failure_count,
+            pcap_recollect_failure_count=pcap_recollect_failure_count,
             valid_run_count=len(valid_runs),
             scripted_phase_available=scripted_phase_available,
             template_label=template_label,
@@ -1672,6 +1967,7 @@ def _app_readiness_rows(
             baseline_valid_count=baseline_valid_count,
             manual_valid_count=manual_valid_count,
             pcap_failure_count=pcap_failure_count,
+            pcap_recollect_failure_count=pcap_recollect_failure_count,
             static_endpoint_inventory_status=static_endpoint_inventory_status,
             static_plan_enriched=static_plan_enriched,
             unresolved_service_total=unresolved_service_total,
@@ -1689,10 +1985,13 @@ def _app_readiness_rows(
                 "manual_valid_count": manual_valid_count,
                 "scripted_valid_count": scripted_valid_count,
                 "pcap_failure_count": pcap_failure_count,
+                "pcap_recollect_failure_count": pcap_recollect_failure_count,
+                "pcap_validity_review_count": pcap_validity_review_count,
                 "unresolved_service_total": unresolved_service_total,
                 "static_endpoint_inventory_status": static_endpoint_inventory_status,
                 "static_plan_enriched": static_plan_enriched,
                 "scripted_phase_available": scripted_phase_available,
+                "top_gap": top_gap,
             },
         )
         readiness_rows.append(
@@ -1709,6 +2008,8 @@ def _app_readiness_rows(
                 "app_complete": int(app_complete),
                 "avg_evidence_quality_score": round(avg_quality, 2),
                 "pcap_failure_count": pcap_failure_count,
+                "pcap_recollect_failure_count": pcap_recollect_failure_count,
+                "pcap_validity_review_count": pcap_validity_review_count,
                 "service_resolution_rate": round(service_resolution_rate, 4) if service_resolution_rate is not None else "",
                 "signal_resolution_rate": round(signal_resolution_rate, 4) if signal_resolution_rate is not None else "",
                 "baseline_manual_delta_available": int(baseline_manual_delta_available),
@@ -1783,19 +2084,29 @@ def _capture_failure_rows(runs: Sequence[Mapping[str, Any]]) -> list[dict[str, A
         detail = _norm_text(pcap_info.get("pcap_failure_detail"))
         if not detail:
             continue
+        netstats_observed_bytes = _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes"))
+        if detail in {"PCAP_ARTIFACT_UNREGISTERED", "PCAP_ARTIFACT_PATH_MISMATCH"}:
+            recommended_action = "repair_artifact_registration"
+        elif bool(pcap_info.get("pcap_present")) and not bool(run.get("valid_pack")):
+            recommended_action = "review_invalid_pcap_state"
+        elif netstats_observed_bytes > 0:
+            recommended_action = "recollect_capture"
+        else:
+            recommended_action = "review_capture_environment"
         rows.append(
             {
                 "run_id": run["run_id"],
                 "package": run["package"],
                 "app_label": run["app_label"],
                 "pcap_failure_detail": detail,
-                "netstats_observed_bytes": _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes")),
+                "pcap_manifest_artifact_registered": int(bool(pcap_info.get("pcap_manifest_artifact_registered"))),
+                "pcap_recovered_unregistered": int(bool(pcap_info.get("pcap_recovered_unregistered"))),
+                "pcap_recovered_path_mismatch": int(bool(pcap_info.get("pcap_recovered_path_mismatch"))),
+                "netstats_observed_bytes": netstats_observed_bytes,
                 "pcap_size_bytes": _safe_int(pcap_info.get("pcap_size_bytes")),
                 "timeline_available": int(bool(getattr(run.get("phase"), "timeline_available", False))),
                 "valid_pack": int(bool(run.get("valid_pack"))),
-                "recommended_action": "recollect_capture"
-                if _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes")) > 0
-                else "review_capture_environment",
+                "recommended_action": recommended_action,
             }
         )
     return rows
@@ -1838,7 +2149,7 @@ def _paper_pattern_rows(
             (service_resolution_rate >= 0.0 and service_resolution_rate < 1.0)
             or (signal_resolution_rate >= 0.0 and signal_resolution_rate < 1.0)
         )
-        capture_reliability_gap_flag = _safe_int(readiness.get("pcap_failure_count")) > 0
+        capture_reliability_gap_flag = _safe_int(readiness.get("pcap_recollect_failure_count")) > 0
         scripted_gap_flag = _norm_text(readiness.get("research_readiness_tier")) == "needs_scripted_validation"
 
         pattern_count = sum(
@@ -1953,9 +2264,21 @@ def _paper_pattern_summary_rows(
     return rows
 
 
-def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bool = False) -> dict[str, Any]:
+def generate_report(
+    *,
+    output_dir: Path | None = None,
+    overlay_latest_static: bool = False,
+    overlay_reanalyse_strings: bool = False,
+    package_filter: str | None = None,
+) -> dict[str, Any]:
     root = _dynamic_root()
-    run_rows = _collect_run_records(root, overlay_latest_static=overlay_latest_static)
+    overlay_enabled = bool(overlay_latest_static or overlay_reanalyse_strings)
+    run_rows = _collect_run_records(
+        root,
+        overlay_latest_static=overlay_enabled,
+        overlay_reanalyse_strings=bool(overlay_reanalyse_strings),
+        package_filter=package_filter,
+    )
     app_profiles = _load_app_profiles(str(row["package"]) for row in run_rows)
     for row in run_rows:
         package = str(row["package"])
@@ -1986,7 +2309,7 @@ def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bo
     phase_rows = _phase_coverage_rows(run_rows)
 
     if output_dir is None:
-        output_dir = _REPO_ROOT / "output" / "audit" / "dynamic_deep_audit" / datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+        output_dir = _REPO_ROOT / "output" / "audit" / "dynamic_deep_audit" / datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S-%f")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     run_rows_sorted = sorted(scored_runs, key=lambda row: (str(row["package"]), str(row["run_id"])))
@@ -2003,20 +2326,39 @@ def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bo
 
     _write_csv(output_dir / "run_evidence_quality.csv", run_rows_sorted)
     _write_csv(output_dir / "app_dynamic_readiness.csv", readiness_rows_sorted)
-    _write_csv(output_dir / "static_dynamic_bridge_gaps.csv", bridge_gap_rows_sorted)
+    _write_csv(
+        output_dir / "static_dynamic_bridge_gaps.csv",
+        bridge_gap_rows_sorted,
+        fieldnames=STATIC_DYNAMIC_BRIDGE_GAP_FIELDS,
+    )
     _write_csv(output_dir / "static_guided_dynamic_recommendations.csv", recommendation_rows_sorted)
     _write_csv(output_dir / "behavioral_stability_audit.csv", stability_rows_sorted)
     _write_csv(output_dir / "paper_pattern_matrix.csv", paper_pattern_rows_sorted)
     _write_csv(output_dir / "paper_pattern_summary.csv", paper_pattern_summary_rows_sorted)
-    _write_csv(output_dir / "capture_failure_audit.csv", capture_failure_rows_sorted)
-    _write_csv(output_dir / "service_mapping_gap_audit.csv", service_gap_rows_sorted)
-    _write_csv(output_dir / "static_enrichment_gap_audit.csv", static_enrichment_rows_sorted)
-    _write_csv(output_dir / "phase_coverage_audit.csv", phase_rows_sorted)
+    _write_csv(
+        output_dir / "capture_failure_audit.csv",
+        capture_failure_rows_sorted,
+        fieldnames=CAPTURE_FAILURE_FIELDS,
+    )
+    _write_csv(output_dir / "service_mapping_gap_audit.csv", service_gap_rows_sorted, fieldnames=SERVICE_MAPPING_GAP_FIELDS)
+    _write_csv(
+        output_dir / "static_enrichment_gap_audit.csv",
+        static_enrichment_rows_sorted,
+        fieldnames=STATIC_ENRICHMENT_GAP_FIELDS,
+    )
+    _write_csv(output_dir / "phase_coverage_audit.csv", phase_rows_sorted, fieldnames=PHASE_COVERAGE_FIELDS)
 
     summary = {
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "dynamic_root": str(root.resolve()),
-        "plan_analysis_mode": "overlay_latest_static" if overlay_latest_static else "embedded_plan",
+        "package_filter": _norm_text(package_filter).lower() or None,
+        "plan_analysis_mode": (
+            "overlay_string_reanalysis"
+            if overlay_reanalyse_strings
+            else "overlay_latest_static"
+            if overlay_enabled
+            else "embedded_plan"
+        ),
         "runs_scanned": len(run_rows_sorted),
         "valid_runs": sum(1 for row in run_rows_sorted if int(row["valid_pack"]) == 1),
         "invalid_or_skipped_runs": sum(1 for row in run_rows_sorted if int(row["valid_pack"]) != 1),
@@ -2025,6 +2367,9 @@ def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bo
         "readiness_tier_counts": dict(sorted(Counter(str(row["research_readiness_tier"]) for row in readiness_rows_sorted).items())),
         "top_gap_counts": dict(sorted(Counter(str(row["top_gap"]) for row in readiness_rows_sorted).items())),
         "capture_failure_counts": dict(sorted(Counter(str(row["pcap_failure_detail"]) for row in capture_failure_rows_sorted).items())),
+        "capture_failure_action_counts": dict(
+            sorted(Counter(str(row["recommended_action"]) for row in capture_failure_rows_sorted).items())
+        ),
         "service_mapping_gap_counts": dict(sorted(Counter(str(row["gap_type"]) for row in service_gap_rows_sorted).items())),
         "static_enrichment_gap_counts": dict(sorted(Counter(str(row["gap_type"]) for row in static_enrichment_rows_sorted).items())),
         "phase_coverage_counts": dict(sorted(Counter(str(row["phase_attribution_status"]) for row in phase_rows_sorted).items())),
@@ -2097,7 +2442,7 @@ def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bo
             sorted(Counter(str(row["recommended_run_intent"]) for row in recommendation_rows_sorted).items())
         ),
     }
-    if overlay_latest_static:
+    if overlay_enabled:
         embedded_enriched = sum(
             1
             for run in run_rows
@@ -2128,6 +2473,9 @@ def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bo
                 "runs_using_overlay_latest_static": sum(
                     1 for run in run_rows if _norm_text(run.get("plan_source")) == "overlay_latest_static"
                 ),
+                "runs_using_overlay_string_reanalysis": sum(
+                    1 for run in run_rows if _norm_text(run.get("plan_source")) == "overlay_string_reanalysis"
+                ),
                 "embedded_stale_plan_runs": sum(1 for run in run_rows if bool(run.get("embedded_plan_stale"))),
                 "runs_with_enriched_domain_metadata_embedded": embedded_enriched,
                 "runs_with_enriched_domain_metadata_overlay": overlay_enriched,
@@ -2140,9 +2488,14 @@ def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bo
                 ),
             }
         )
-        summary["known_limitations"] = list(summary.get("known_limitations") or []) + [
+        limitations = [
             "overlay_latest_static is a read-only reanalysis mode and does not mutate historical embedded plans inside dynamic evidence packs.",
         ]
+        if overlay_reanalyse_strings:
+            limitations.append(
+                "overlay_string_reanalysis rebuilds a temporary static string/domain inventory from the latest stored static APK path and does not mutate stored reports or dynamic evidence packs."
+            )
+        summary["known_limitations"] = list(summary.get("known_limitations") or []) + limitations
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return summary
 
@@ -2150,7 +2503,12 @@ def generate_report(*, output_dir: Path | None = None, overlay_latest_static: bo
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     output_dir = Path(args.output_dir).resolve() if args.output_dir else None
-    summary = generate_report(output_dir=output_dir, overlay_latest_static=bool(args.overlay_latest_static))
+    summary = generate_report(
+        output_dir=output_dir,
+        overlay_latest_static=bool(args.overlay_latest_static or args.overlay_reanalyse_strings),
+        overlay_reanalyse_strings=bool(args.overlay_reanalyse_strings),
+        package_filter=args.package,
+    )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 

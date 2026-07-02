@@ -15,7 +15,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
 )
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
 
 
 def _dynamic_evidence_root() -> Path:
@@ -389,7 +389,19 @@ def _fetch_paper2_ordering_db() -> list[str]:  # pragma: no cover
 
 def _render_app_runs(root: Path, display_name: str, package_name: str, runs: list[dict]) -> None:
     print()
-    menu_utils.print_header(f"{display_name}", subtitle=package_name)
+    valid_count = sum(1 for r in runs if r.get("valid") is True and r.get("countable") is not False)
+    invalid_count = sum(1 for r in runs if r.get("valid") is False and r.get("countable") is not False)
+    summary_cards.print_summary_card(
+        display_name,
+        [
+            summary_cards.summary_item("Package", package_name, value_style="muted"),
+            summary_cards.summary_item("Runs", str(len(runs)), value_style="accent"),
+            summary_cards.summary_item("Valid", str(valid_count), value_style="success"),
+            summary_cards.summary_item("Invalid", str(invalid_count), value_style="warning" if invalid_count else "muted"),
+        ],
+        subtitle="Evidence runs",
+    )
+    print()
     if not runs:
         print(status_messages.status("No runs found.", level="info"))
         return
@@ -481,7 +493,6 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
         app_list = sorted([(labels.get(p, p), p) for p in packages], key=lambda x: x[0].lower())
 
     print()
-    menu_utils.print_header("Select App", "View runs and reasons")
     from scytaledroid.Utils.DisplayUtils import display_settings, table_utils
 
     try:
@@ -495,9 +506,13 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
         interactive_required = 4
 
     rows = []
+    total_runs = 0
+    total_valid = 0
     for i, (name, pkg) in enumerate(app_list):
         runs = _runs_for_package(root, pkg)
+        total_runs += len(runs)
         valid = sum(1 for r in runs if r.get("valid") is True and r.get("countable") is not False)
+        total_valid += valid
         invalid = sum(1 for r in runs if r.get("valid") is False and r.get("countable") is not False)
         base_valid = sum(
             1
@@ -524,9 +539,26 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
                 f"{inter_valid}/{interactive_required}",
             ]
         )
+    summary_cards.print_summary_card(
+        "Dynamic evidence",
+        [
+            summary_cards.summary_item("Apps", str(len(app_list)), value_style="accent"),
+            summary_cards.summary_item("Runs", str(total_runs), value_style="muted"),
+            summary_cards.summary_item("Valid", str(total_valid), value_style="success"),
+            summary_cards.summary_item("Baseline target", f"{baseline_required} per app", value_style="muted"),
+            summary_cards.summary_item("Interactive target", f"{interactive_required} per app", value_style="muted"),
+        ],
+        subtitle="Select app to view runs and reasons",
+    )
+    print()
     table_kwargs = display_settings.apply_table_defaults({"compact": True, "accent_first_column": True})
-    table_utils.render_table(["#", "App", "Runs", "Valid", "Invalid", "Base", "Int"], rows, **table_kwargs)
-    print(status_messages.status("0 = Back", level="info"))
+    table_utils.render_table(
+        ["#", "App", "Runs", "Valid", "Invalid", "Baseline", "Interactive"],
+        rows,
+        **table_kwargs,
+    )
+    print()
+    menu_utils.print_hint("Select an app by number · 0 back")
 
     options = [str(i) for i in range(1, len(app_list) + 1)]
     sel = prompt_utils.get_choice(options + ["0"], default="1", prompt="Select app # ")
@@ -539,10 +571,11 @@ def evidence_view_app_runs(*, pause: bool = True) -> None:
 
     print()
     items2 = [
-        menu_utils.MenuOption("D", "Delete a run (local)"),
-        menu_utils.MenuOption("X", "Delete invalid runs for this app (local)"),
+        menu_utils.MenuOption("D", "Delete a run (local)", description="remove one evidence pack by run #"),
+        menu_utils.MenuOption("X", "Delete invalid runs for this app (local)", description="bulk-delete invalid packs"),
     ]
-    menu_utils.render_menu(menu_utils.MenuSpec(items=items2, exit_label="Back", show_exit=True))
+    menu_utils.print_menu(items2, show_descriptions=True, compact=True)
+    menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
     action = prompt_utils.get_choice(
         menu_utils.selectable_keys(items2, include_exit=True),
         default="0",

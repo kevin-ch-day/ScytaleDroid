@@ -72,6 +72,16 @@ def test_identity_linked_requires_identity_and_some_corroboration() -> None:
     )
 
 
+def test_pcap_capture_paths_supports_pcapng(tmp_path: Path) -> None:
+    capture_dir = tmp_path / "pcapdroid_capture"
+    capture_dir.mkdir()
+    pcapng = capture_dir / "app_capture.pcapng"
+    pcapng.write_bytes(b"pcapng")
+    (capture_dir / "app_capture.pcapng.json").write_text("{}", encoding="utf-8")
+
+    assert report._pcap_capture_paths(capture_dir) == (str(pcapng),)
+
+
 def test_classify_readiness_level_uses_ordered_progression() -> None:
     status = report._classify_readiness_level(
         static_plan_present=True,

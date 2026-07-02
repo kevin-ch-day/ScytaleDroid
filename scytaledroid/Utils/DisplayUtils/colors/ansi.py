@@ -14,6 +14,10 @@ from .palette import get_palette
 
 RESET = "\033[0m"
 CURSOR_UP_ONE = "\033[F"
+CURSOR_UP_ONE_LINE = "\033[1A"
+CURSOR_DOWN_ONE_LINE = "\033[1B"
+SAVE_CURSOR = "\0337"
+RESTORE_CURSOR = "\0338"
 CLEAR_LINE = "\033[K"
 CR = "\r"
 _ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
@@ -109,8 +113,12 @@ def has_ansi(text: str) -> bool:
 __all__ = [
     "CLEAR_LINE",
     "CR",
+    "CURSOR_DOWN_ONE_LINE",
     "CURSOR_UP_ONE",
+    "CURSOR_UP_ONE_LINE",
+    "RESTORE_CURSOR",
     "RESET",
+    "SAVE_CURSOR",
     "apply",
     "colors_enabled",
     "has_ansi",

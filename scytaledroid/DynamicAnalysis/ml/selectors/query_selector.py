@@ -18,10 +18,8 @@ try:  # optional DB access for candidate discovery
 except Exception:  # pragma: no cover
     core_q = None
 
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
-    derive_run_mode,
-    load_run_inputs,
-)
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import derive_run_mode, load_run_inputs
+from scytaledroid.DynamicAnalysis.run_qualification import run_included_in_default_analysis
 
 from .models import QueryParams, RunRef, SelectionResult
 
@@ -126,8 +124,16 @@ class QuerySelector:
                 excluded[rid] = {"reason": "tier_filter_mismatch", "tier": tier}
                 continue
             if self.params.require_valid_dataset_run:
-                if ds.get("valid_dataset_run") is not True:
-                    excluded[rid] = {"reason": "invalid_dataset_run"}
+                if not run_included_in_default_analysis(
+                    valid_dataset_run=ds.get("valid_dataset_run"),
+                    paper_eligible=ds.get("paper_eligible"),
+                ):
+                    reason = (
+                        "invalid_dataset_run"
+                        if ds.get("valid_dataset_run") is not True
+                        else "paper_ineligible"
+                    )
+                    excluded[rid] = {"reason": reason}
                     continue
 
             mode, mode_source = derive_run_mode(inputs)

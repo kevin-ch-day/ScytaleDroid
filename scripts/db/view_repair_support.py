@@ -79,6 +79,7 @@ def web_consumer_extension_ddls(
         CREATE_V_WEB_APP_STATIC_HANDOFF_READINESS_V1,
         CREATE_V_WEB_APP_STRING_SAMPLES,
         CREATE_V_WEB_APP_STRING_SUMMARY,
+        CREATE_V_WEB_DYNAMIC_APP_QUEUE_V1,
         CREATE_V_WEB_RUNTIME_RUN_DETAIL,
         CREATE_V_WEB_RUNTIME_RUN_INDEX,
         CREATE_V_WEB_STATIC_DYNAMIC_APP_SUMMARY,
@@ -113,6 +114,7 @@ def web_consumer_extension_ddls(
         ("v_dynamic_run_context_v1", CREATE_V_DYNAMIC_RUN_CONTEXT_V1),
         ("v_web_runtime_run_index", CREATE_V_WEB_RUNTIME_RUN_INDEX),
         ("v_web_runtime_run_detail", CREATE_V_WEB_RUNTIME_RUN_DETAIL),
+        ("v_web_dynamic_app_queue_v1", CREATE_V_WEB_DYNAMIC_APP_QUEUE_V1),
     ]
     out: list[tuple[str, str]] = []
     for name, ddl in chain:
@@ -186,6 +188,7 @@ EXPECTED_VIEW_OBJECTS: tuple[str, ...] = (
     "v_web_app_static_handoff_readiness_v1",
     "v_web_runtime_run_index",
     "v_web_runtime_run_detail",
+    "v_web_dynamic_app_queue_v1",
     "v_artifact_registry_integrity",
     "v_current_artifact_registry",
     "vw_latest_apk_per_package",

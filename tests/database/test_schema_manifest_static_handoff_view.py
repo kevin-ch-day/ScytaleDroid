@@ -68,6 +68,7 @@ def test_schema_manifest_includes_core_reporting_views():
         "CREATE OR REPLACE VIEW v_web_app_static_handoff_readiness_v1",
         "CREATE OR REPLACE VIEW v_web_runtime_run_index",
         "CREATE OR REPLACE VIEW v_web_runtime_run_detail",
+        "CREATE OR REPLACE VIEW v_web_dynamic_app_queue_v1",
         "CREATE OR REPLACE VIEW v_artifact_registry_integrity",
         "CREATE OR REPLACE VIEW v_current_artifact_registry",
         "CREATE OR REPLACE VIEW v_static_masvs_findings_v1",

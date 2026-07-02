@@ -175,6 +175,18 @@ def _sha256_file(path: Path) -> str | None:
         return None
 
 
+def _pcap_capture_paths(capture_dir: Path) -> tuple[str, ...]:
+    if not capture_dir.exists():
+        return tuple()
+    return tuple(
+        sorted(
+            str(path)
+            for path in capture_dir.glob("*.pcap*")
+            if path.is_file() and path.suffix.lower() in {".pcap", ".pcapng"}
+        )
+    )
+
+
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
 
@@ -502,12 +514,7 @@ def _scan_dynamic_evidence_packs(
         inputs = load_run_inputs(run_dir)
         preflight = compute_ml_preflight(inputs) if inputs is not None else None
 
-        pcap_paths = tuple(
-            sorted(
-                str(path)
-                for path in [run_dir / "artifacts" / "pcapdroid_capture" / item.name for item in (run_dir / "artifacts" / "pcapdroid_capture").glob("*.pcap")]
-            )
-        ) if (run_dir / "artifacts" / "pcapdroid_capture").exists() else tuple()
+        pcap_paths = _pcap_capture_paths(run_dir / "artifacts" / "pcapdroid_capture")
         logcat_paths = tuple(
             sorted(
                 str(path)

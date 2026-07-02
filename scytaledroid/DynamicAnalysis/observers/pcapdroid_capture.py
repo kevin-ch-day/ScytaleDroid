@@ -40,6 +40,8 @@ def _effective_min_pcap_bytes(run_ctx: RunContext) -> int:
             effective_min_pcap_bytes_for_run_profile(
                 run_profile=profile,
                 scenario_id=str(getattr(run_ctx, "scenario_id", "") or ""),
+                package_name=str(getattr(run_ctx, "package_name", "") or ""),
+                messaging_activity=str(getattr(run_ctx, "messaging_activity", "") or ""),
             )
         )
     return int(MIN_PCAP_BYTES)

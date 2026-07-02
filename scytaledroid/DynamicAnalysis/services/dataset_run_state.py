@@ -39,6 +39,7 @@ class DatasetRunRecentSummary:
     invalid_reason_code: str | None
     pcap_failure_detail: str | None
     low_signal: bool | None
+    baseline_not_idle: bool | None
     supplemental_reason: str | None
     run_id: str
     status_label: str
@@ -192,6 +193,8 @@ def _status_label(row: DatasetRunRecentSummary) -> str:
         label = "VALID"
         if str(row.run_profile or "").strip().lower() == "baseline_idle" and row.low_signal is True:
             label += " (LOW_SIGNAL_IDLE)"
+        if str(row.run_profile or "").strip().lower() == "baseline_idle" and row.baseline_not_idle is True:
+            label += " (BASELINE_NOT_IDLE)"
         return label
     if row.valid is False:
         label = f"INVALID:{row.invalid_reason_code or 'UNKNOWN'}"
@@ -211,6 +214,7 @@ def _supplemental_reason(
     valid: bool | None,
     countable: bool | None,
     low_signal: bool | None,
+    baseline_not_idle: bool | None,
     extra_run: bool,
     cohort_eligibility: str | None,
 ) -> str | None:
@@ -222,6 +226,8 @@ def _supplemental_reason(
     cohort_lc = str(cohort_eligibility or "").strip().upper()
     if profile_lc == "baseline_idle" and low_signal is True:
         return "LOW_SIGNAL_IDLE"
+    if profile_lc == "baseline_idle" and baseline_not_idle is True:
+        return "BASELINE_NOT_IDLE"
     if extra_run or cohort_lc == "EXTRA":
         if profile_lc == "interaction_manual":
             return "MANUAL_EXTRA_RUN"
@@ -262,11 +268,21 @@ def _recent_run_summaries(
                 str(row.get("pcap_failure_detail")) if row.get("pcap_failure_detail") else None
             ),
             low_signal=(True if row.get("low_signal") is True else (False if row.get("low_signal") is False else None)),
+            baseline_not_idle=(
+                True
+                if row.get("baseline_not_idle") is True
+                else (False if row.get("baseline_not_idle") is False else None)
+            ),
             supplemental_reason=_supplemental_reason(
                 run_profile=(str(row.get("run_profile")) if row.get("run_profile") else None),
                 valid=valid_norm,
                 countable=(True if row.get("countable") is True else (False if row.get("countable") is False else None)),
                 low_signal=(True if row.get("low_signal") is True else (False if row.get("low_signal") is False else None)),
+                baseline_not_idle=(
+                    True
+                    if row.get("baseline_not_idle") is True
+                    else (False if row.get("baseline_not_idle") is False else None)
+                ),
                 extra_run=bool(row.get("extra_run")),
                 cohort_eligibility=(str(row.get("cohort_eligibility")) if row.get("cohort_eligibility") else None),
             ),
@@ -286,6 +302,7 @@ def _recent_run_summaries(
             invalid_reason_code=row.invalid_reason_code,
             pcap_failure_detail=row.pcap_failure_detail,
             low_signal=row.low_signal,
+            baseline_not_idle=row.baseline_not_idle,
             supplemental_reason=row.supplemental_reason,
             run_id=row.run_id,
             status_label=_status_label(row),

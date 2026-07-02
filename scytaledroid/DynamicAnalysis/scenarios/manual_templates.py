@@ -32,6 +32,23 @@ SCRIPT_STEPS_NEWS_READER_BASIC_V1: tuple[tuple[str, str, int], ...] = (
     ("hold_foreground", "Remain on foreground until timer completes.", 55),
 )
 
+SCRIPT_STEPS_NEWS_READER_BEHAVIOR_V2: tuple[tuple[str, str, int], ...] = (
+    ("open_home", "Open the app and wait on the main/home feed.", 30),
+    ("scroll_headlines", "Slowly scroll the headline/feed list.", 45),
+    (
+        "open_article",
+        "Open one article. If it opens, hold briefly. If subscription wall appears, mark subscription_required.",
+        30,
+    ),
+    ("article_scroll", "Article-opened branch: scroll visible article content.", 45),
+    ("article_return_home", "Article-opened branch: return Home and hold briefly.", 15),
+    ("subscription_wall_observe", "Subscription branch: observe subscription wall.", 30),
+    ("subscription_options_observe", "Subscription branch: open subscription options, hold, then return.", 30),
+    ("subscription_return_home", "Subscription branch: return Home and hold briefly.", 15),
+    ("video_or_media_optional", "Optional: open a visible video/media item, watch/hold, then return Home.", 30),
+    ("final_hold", "Remain on the main feed until target duration completes.", 0),
+)
+
 SCRIPT_STEPS_MESSAGING_IDLE_V1: tuple[tuple[str, str, int], ...] = (
     ("open_thread", "Open a recent conversation thread and keep it visible (stay in thread).", 25),
     ("scroll_thread", "Scroll slightly within the thread (no typing/sending).", 20),
@@ -88,6 +105,26 @@ SCRIPT_STEPS_WHATSAPP_TEXT_V1: tuple[tuple[str, str, int], ...] = (
     ("hold_foreground", "Remain on foreground until timer completes.", 0),
 )
 
+SCRIPT_STEPS_WHATSAPP_TEXT_BEHAVIOR_V2: tuple[tuple[str, str, int], ...] = (
+    ("open_app", "Open WhatsApp and wait for initial sync.", 10),
+    ("open_control_chat", "Open the designated control/test chat and wait for the thread to settle.", 15),
+    ("send_text_1", "Send fixed text message 1 to the control/test chat.", 15),
+    ("hold_15s_1", "Hold the chat in foreground for 15 seconds after text message 1.", 15),
+    ("send_text_2", "Send fixed text message 2 to the same control/test chat.", 15),
+    ("hold_15s_2", "Hold the chat in foreground for 15 seconds after text message 2.", 15),
+    ("send_text_3", "Send fixed text message 3 to the same control/test chat.", 15),
+    ("hold_15s_3", "Hold the chat in foreground for 15 seconds after text message 3.", 15),
+    (
+        "receive_reply_or_wait",
+        "If a controlled contact can reply, wait for the reply/sync; otherwise hold the chat and mark limited.",
+        30,
+    ),
+    ("send_emoji_optional", "Optional controlled action: send one emoji or sticker, then hold briefly.", 15),
+    ("send_small_image_optional", "Optional controlled action: send one small safe test image, then hold briefly.", 20),
+    ("return_chat_list", "Return to the WhatsApp chat list.", 10),
+    ("hold_foreground", "Remain on foreground until timer completes.", 0),
+)
+
 SCRIPT_STEPS_WHATSAPP_VOICE_V1: tuple[tuple[str, str, int], ...] = (
     ("open_thread", "Open a recent conversation thread (stay in thread).", 20),
     ("start_call", "Initiate a voice call to a test contact.", 15),
@@ -120,6 +157,63 @@ SCRIPT_STEPS_FACEBOOK_BASIC_V2: tuple[tuple[str, str, int], ...] = (
     ("open_marketplace", "Open Marketplace briefly and scroll.", 20),
     ("open_notifications", "Open Notifications and scroll slightly.", 20),
     ("hold_foreground", "Remain on foreground until timer completes.", 0),
+)
+
+SCRIPT_STEPS_FACEBOOK_BEHAVIOR_V3: tuple[tuple[str, str, int], ...] = (
+    # Naming: merged open+hold pairs use `{surface}_view` (durations sum the old pair).
+    # Return-to-home merges use `{section}_return_home`; return-to-Friends uses `friends_return_view`.
+    ("home_feed", "Open Facebook Home feed and hold without scrolling.", 35),
+    ("profile_view", "Open profile page and hold.", 25),
+    ("profile_return_home", "Return Home from profile and hold briefly.", 20),
+    ("friends_view", "Open Friends page and hold.", 20),
+    ("friends_scroll", "Scroll Friends page slowly.", 15),
+    ("friend_suggestions_view", "Open Suggestions / People You May Know and hold.", 20),
+    ("friend_suggestions_scroll", "Scroll suggestions slowly.", 15),
+    ("friends_return_view", "Return to Friends page and hold.", 20),
+    (
+        "friend_request_accept_1",
+        "If visible and controlled, accept/add one known control friend request; otherwise mark limited or skip.",
+        15,
+    ),
+    (
+        "friend_request_accept_2",
+        "If visible and controlled, accept/add a second known control friend request; otherwise mark limited or skip.",
+        15,
+    ),
+    ("text_post_composer_open_1", "Open text post composer for test post 1.", 10),
+    ("text_post_submit_1", "Submit test text post 1 in active mode; draft/discard in draft mode.", 30),
+    ("text_post_return_home_1", "Return Home after text post 1 and settle.", 15),
+    ("text_post_composer_open_2", "Open text post composer for optional repeat 2.", 10),
+    ("text_post_submit_2", "Submit test text post 2 in active mode; draft/discard in draft mode.", 30),
+    ("text_post_return_home_2", "Return Home after text post 2 and settle.", 15),
+    ("text_post_composer_open_3", "Open text post composer for optional repeat 3.", 10),
+    ("text_post_submit_3", "Submit test text post 3 in active mode; draft/discard in draft mode.", 30),
+    ("text_post_return_home_3", "Return Home after text post 3 and settle.", 15),
+    ("photo_post_composer_open_1", "Open photo post composer for test photo post 1.", 10),
+    ("photo_attach_1", "Attach a safe test image for photo post 1.", 15),
+    ("photo_post_submit_1", "Submit photo post 1 in active mode; draft/discard in draft mode.", 45),
+    ("photo_post_return_home_1", "Return Home after photo post 1 and settle.", 15),
+    ("photo_post_composer_open_2", "Open photo post composer for optional repeat 2.", 10),
+    ("photo_attach_2", "Attach a safe test image for optional photo post 2.", 15),
+    ("photo_post_submit_2", "Submit photo post 2 in active mode; draft/discard in draft mode.", 45),
+    ("photo_post_return_home_2", "Return Home after photo post 2 and settle.", 15),
+    ("photo_post_composer_open_3", "Open photo post composer for optional repeat 3.", 10),
+    ("photo_attach_3", "Attach a safe test image for optional photo post 3.", 15),
+    ("photo_post_submit_3", "Submit photo post 3 in active mode; draft/discard in draft mode.", 45),
+    ("photo_post_return_home_3", "Return Home after photo post 3 and settle.", 15),
+    ("reels_watch_first", "Open Reels and watch the first reel for 20s.", 25),
+    ("reels_scroll", "Scroll once in Reels.", 5),
+    ("reels_watch_2", "Watch the next Reel for 20s.", 20),
+    ("reels_return_home", "Return Home from Reels and settle.", 15),
+    ("stories_view_first", "Open Stories and view one segment for 15-20s.", 25),
+    ("stories_return_home", "Return Home from Stories and settle.", 15),
+    ("marketplace_view", "Open Marketplace and hold.", 25),
+    ("marketplace_scroll", "Scroll Marketplace slowly.", 20),
+    ("marketplace_return_home", "Return Home from Marketplace and settle.", 15),
+    ("notifications_view", "Open Notifications and hold.", 20),
+    ("notifications_scroll", "Scroll Notifications slowly.", 15),
+    ("notifications_return_home", "Return Home from Notifications and settle.", 15),
+    ("final_home_hold", "Remain on Home feed until target duration completes.", 0),
 )
 
 SCRIPT_STEPS_SNAPCHAT_BASIC_V1: tuple[tuple[str, str, int], ...] = (
@@ -343,15 +437,26 @@ V3_SCRIPTED_REPRO_TIPS: dict[str, tuple[str, ...]] = {
         "Scroll feed continuously; pause to watch a clip; open comments; return.",
         "Avoid external links; Inbox step is optional (skip if missing).",
     ),
+    "facebook_behavior_v3": (
+        "Use the controlled Facebook test account only.",
+        "Active mode may publish/delete test content; record cleanup as its own phase if measured during capture.",
+        "Use H+Enter to record a manual return-home/reset marker whenever the UI is on the wrong surface.",
+    ),
     "news_reader_basic_v1": (
         "Use the public home/feed surface only; avoid login, comments, or sharing.",
         "Open one article, scroll slowly, then return to the home/feed screen. If a paywall/subscription wall appears, mark the affected step limited rather than skipping.",
+    ),
+    "news_reader_behavior_v2": (
+        "Use public/home feed surfaces; avoid login, comments, or sharing.",
+        "If an article is blocked by subscription/login, follow the matching branch instead of scrolling blocked content.",
+        "Subscription walls are useful runtime phases; observe them rather than treating them as failed article reads.",
     ),
 }
 
 _TEMPLATE_DEFINITIONS: dict[str, tuple[tuple[str, str, int], ...]] = {
     "social_feed_basic_v2": SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2,
     "news_reader_basic_v1": SCRIPT_STEPS_NEWS_READER_BASIC_V1,
+    "news_reader_behavior_v2": SCRIPT_STEPS_NEWS_READER_BEHAVIOR_V2,
     "messaging_idle_v1": SCRIPT_STEPS_MESSAGING_IDLE_V1,
     "messaging_text_v1": SCRIPT_STEPS_MESSAGING_TEXT_V1,
     "messaging_voice_v1": SCRIPT_STEPS_MESSAGING_VOICE_V1,
@@ -359,9 +464,11 @@ _TEMPLATE_DEFINITIONS: dict[str, tuple[tuple[str, str, int], ...]] = {
     "messaging_call_basic_v1": SCRIPT_STEPS_MESSAGING_CALL_BASIC_V1,
     "whatsapp_idle_v1": SCRIPT_STEPS_WHATSAPP_IDLE_V1,
     "whatsapp_text_v1": SCRIPT_STEPS_WHATSAPP_TEXT_V1,
+    "whatsapp_text_behavior_v2": SCRIPT_STEPS_WHATSAPP_TEXT_BEHAVIOR_V2,
     "whatsapp_voice_v1": SCRIPT_STEPS_WHATSAPP_VOICE_V1,
     "whatsapp_video_v1": SCRIPT_STEPS_WHATSAPP_VIDEO_V1,
     "facebook_basic_v2": SCRIPT_STEPS_FACEBOOK_BASIC_V2,
+    "facebook_behavior_v3": SCRIPT_STEPS_FACEBOOK_BEHAVIOR_V3,
     "snapchat_basic_v1": SCRIPT_STEPS_SNAPCHAT_BASIC_V1,
     "x_twitter_full_session_v1": SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1,
     "social_messaging_basic_v1": SCRIPT_STEPS_SOCIAL_MESSAGING_BASIC_V1,
@@ -400,6 +507,8 @@ def resolve_script_template(
         return ("messaging_text_v1", SCRIPT_STEPS_MESSAGING_TEXT_V1)
     if template_id == "facebook_basic_v2":
         return ("facebook_basic_v2", SCRIPT_STEPS_FACEBOOK_BASIC_V2)
+    if template_id == "facebook_behavior_v3":
+        return ("facebook_behavior_v3", SCRIPT_STEPS_FACEBOOK_BEHAVIOR_V3)
     if template_id == "whatsapp_basic_v1":
         if msg_activity in {"voice_call"}:
             return ("whatsapp_voice_v1", SCRIPT_STEPS_WHATSAPP_VOICE_V1)
@@ -409,7 +518,7 @@ def resolve_script_template(
             return ("messaging_call_basic_v1", SCRIPT_STEPS_MESSAGING_CALL_BASIC_V1)
         if msg_activity in {"idle", "none", ""}:
             return ("whatsapp_idle_v1", SCRIPT_STEPS_WHATSAPP_IDLE_V1)
-        return ("whatsapp_text_v1", SCRIPT_STEPS_WHATSAPP_TEXT_V1)
+        return ("whatsapp_text_behavior_v2", SCRIPT_STEPS_WHATSAPP_TEXT_BEHAVIOR_V2)
     if template_id == "x_twitter_full_session_v1":
         return ("x_twitter_full_session_v1", SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1)
     if template_id == "snapchat_basic_v1":
@@ -418,6 +527,8 @@ def resolve_script_template(
         return ("social_feed_basic_v2", SCRIPT_STEPS_SOCIAL_FEED_BASIC_V2)
     if template_id == "news_reader_basic_v1":
         return ("news_reader_basic_v1", SCRIPT_STEPS_NEWS_READER_BASIC_V1)
+    if template_id == "news_reader_behavior_v2":
+        return ("news_reader_behavior_v2", SCRIPT_STEPS_NEWS_READER_BEHAVIOR_V2)
     if template_id == "social_messaging_basic_v1":
         return ("social_messaging_basic_v1", SCRIPT_STEPS_SOCIAL_MESSAGING_BASIC_V1)
     if template_id == "discord_basic_v1":

@@ -80,14 +80,14 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert "Static Plan / Device Drift" not in out
-    assert "Installed build drift detected" in out
+    assert "installed build drift" in out
     assert "tracked-build evidence (local+db)" in out
-    assert "tracked quota 3/7 n4" in out
+    assert "3/7 n4" in out
     assert "Installed build 472224766 · tracked static-plan build 472143276" in out
     assert "Newest harvested APK in workspace: 472143276" in out
     assert "No harvested APK for installed build 472224766 is present in this workspace yet." in out
-    assert "R) Refresh checklist [default]" in out
-    assert "Reason: installed build does not match the newest static plan." in out
+    assert "R) Refresh checklist" in out
+    assert "installed build does not match the newest static plan" in out
     assert "Blocked: installed build 472224766 does not match static-plan build 472143276." in out
     assert "Refresh harvest/static for this app or choose another app." in out
     assert "472224766" in out
@@ -201,11 +201,13 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
 
     out = capsys.readouterr().out
     assert captured["queue_action"] == "refresh"
-    assert "Installed build drift detected · historical evidence (local-only) · QA unknown · tracked quota 0/7 n7" in out
+    assert "historical evidence (local-only)" in out
+    assert "QA unknown" in out
+    assert "0/7 n7" in out
     assert "Installed build 312021000 · tracked static-plan build 312011000" in out
     assert "Newest harvested APK in workspace: 312011000" in out
     assert "No harvested APK for installed build 312021000 is present in this workspace yet." in out
-    assert "R) Refresh checklist [default]" in out
+    assert "R) Refresh checklist" in out
 
 
 def test_drift_workbench_refresh_checklist_includes_menu_path(monkeypatch, capsys) -> None:
@@ -282,8 +284,7 @@ def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(mo
     guided_run._render_selected_app_drift_workbench(app=app, plan_drift=plan_drift)
 
     out = capsys.readouterr().out
-    assert "Caution:" in out
-    assert "Identity mismatch context exists." in out
+    assert "identity mismatch context exists" in out.lower()
 
 
 def test_latest_harvested_version_code_detects_highest_workspace_build(tmp_path, monkeypatch) -> None:

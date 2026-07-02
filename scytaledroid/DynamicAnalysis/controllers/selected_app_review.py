@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from scytaledroid.DynamicAnalysis.services.dynamic_target_state import derive_dynamic_target_state
+from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 
 def _dataset_impact_label(latest_recent: Any) -> str:
@@ -12,13 +13,15 @@ def _dataset_impact_label(latest_recent: Any) -> str:
     if valid is True:
         supplemental_reason = str(getattr(latest_recent, "supplemental_reason", "") or "").strip().upper()
         if supplemental_reason == "LOW_SIGNAL_IDLE":
-            return "supplemental (LOW_SIGNAL_IDLE)"
+            return "ML training pool (LOW_SIGNAL_IDLE)"
+        if supplemental_reason == "BASELINE_NOT_IDLE":
+            return "ML training pool (BASELINE_NOT_IDLE)"
         if supplemental_reason == "MANUAL_EXTRA_RUN":
-            return "supplemental (manual extra)"
+            return "retained extra (manual extra)"
         if supplemental_reason == "SCRIPTED_EXTRA_RUN":
-            return "supplemental (scripted extra)"
+            return "retained extra (scripted extra)"
         if supplemental_reason == "EXTRA_RUN":
-            return "supplemental (EXTRA_RUN)"
+            return "ML training pool (supplemental baseline)"
         if getattr(latest_recent, "countable", None) is True:
             return "quota-counted"
         return "valid retained"
@@ -33,7 +36,7 @@ def _next_step_lines(*, valid: bool | None, invalid_reason: str) -> list[str]:
         return [
             "Next step:",
             "This review is display-only; no acceptance action is required here.",
-            "Return to the app screen if you want supplemental baseline, scripted, or manual evidence.",
+            "Return to the app screen for supplemental baseline, interactive, or manual evidence.",
         ]
     if valid is False:
         if reason == "PCAP_MISSING":
@@ -60,6 +63,22 @@ def _next_step_lines(*, valid: bool | None, invalid_reason: str) -> list[str]:
     ]
 
 
+def _qa_status_label(valid: bool | None) -> str:
+    if valid is True:
+        return "QA valid"
+    if valid is False:
+        return "QA invalid"
+    return "QA unknown"
+
+
+def _qa_value_style(valid: bool | None) -> str:
+    if valid is True:
+        return "success"
+    if valid is False:
+        return "warning"
+    return "muted"
+
+
 def render_selected_app_review(
     *,
     display_label: str,
@@ -80,28 +99,34 @@ def render_selected_app_review(
         )
         return
     run_id = str(getattr(latest_recent, "run_id", "") or "").strip()
-    if getattr(latest_recent, "valid", None) is True:
-        qa_status = "QA valid"
-    elif getattr(latest_recent, "valid", None) is False:
-        qa_status = "QA invalid"
-    else:
-        qa_status = "QA unknown"
+    valid = getattr(latest_recent, "valid", None)
+    qa_status = _qa_status_label(valid)
     invalid_reason = str(getattr(latest_recent, "invalid_reason_code", "") or "—").strip()
     pcap_failure_detail = str(getattr(latest_recent, "pcap_failure_detail", "") or "").strip()
+    dataset_impact = _dataset_impact_label(latest_recent)
+    profile_label = run_profile_label_fn(getattr(latest_recent, "run_profile", None))
+    print_summary_card(
+        display_label,
+        [
+            summary_item("QA", qa_status, value_style=_qa_value_style(valid)),
+            summary_item("Dataset impact", dataset_impact, value_style="accent"),
+            summary_item("Profile", profile_label, value_style="muted"),
+            summary_item("Run ID", run_id or "—", value_style="muted"),
+            summary_item("Ended", str(getattr(latest_recent, "ended_at", None) or "—"), value_style="muted"),
+        ],
+        subtitle="Stored QA review",
+    )
+    print()
     rows = [
-        ["Run ID", run_id or "—"],
-        ["QA status", qa_status],
-        ["Dataset impact", _dataset_impact_label(latest_recent)],
-        ["Profile", run_profile_label_fn(getattr(latest_recent, "run_profile", None))],
-        ["Ended", str(getattr(latest_recent, "ended_at", None) or "—")],
         ["Invalid reason", invalid_reason or "—"],
     ]
-    if getattr(latest_recent, "valid", None) is False and pcap_failure_detail:
+    if valid is False and pcap_failure_detail:
         rows.append(["PCAP detail", pcap_failure_detail])
-    menu_utils.print_table(["Field", "Value"], rows)
-    if getattr(latest_recent, "valid", None) is True:
+    if len(rows) > 0:
+        menu_utils.print_table(["Field", "Value"], rows)
+    if valid is True:
         print(status_messages.status("Latest current-build run is QA valid.", level="success"))
-    elif getattr(latest_recent, "valid", None) is False:
+    elif valid is False:
         print(
             status_messages.status(
                 "Latest current-build run is QA invalid and excluded from quota/publication use.",
@@ -116,8 +141,12 @@ def render_selected_app_review(
         except Exception as exc:
             print(status_messages.status(f"QA detail rendering failed: {exc}", level="warn"))
     print()
-    for line in _next_step_lines(valid=getattr(latest_recent, "valid", None), invalid_reason=invalid_reason):
-        print(line)
+    next_lines = _next_step_lines(valid=valid, invalid_reason=invalid_reason)
+    if next_lines:
+        print(status_messages.status(next_lines[0], level="info"))
+        for line in next_lines[1:]:
+            if line.strip():
+                print(status_messages.status(line, level="info", show_prefix=False))
 
 
 def render_selected_app_recent_runs(
@@ -133,6 +162,8 @@ def render_selected_app_recent_runs(
     if not recent_runs:
         print(status_messages.status("No recent tracker-scoped runs are stored for this app.", level="warn"))
         return
+    print(status_messages.status(f"{len(recent_runs)} recent tracker-scoped run(s) on file.", level="info"))
+    print()
     rows: list[list[str]] = []
     for index, row in enumerate(recent_runs, start=1):
         if getattr(row, "valid", None) is True:
@@ -189,7 +220,6 @@ def render_selected_app_diagnostics(
     menu_utils: Any,
 ) -> None:
     print()
-    menu_utils.print_header("Diagnostics", display_label)
     target_state = derive_dynamic_target_state(
         package_name=package_name,
         state=state,
@@ -206,14 +236,35 @@ def render_selected_app_diagnostics(
     study_build = "—"
     if target_state.study_identity.version_code:
         study_build = str(target_state.study_identity.version_code)
+    ml_pool_total = int(getattr(state.counts, "baseline_extra_valid", 0) or 0) + int(
+        getattr(state.counts, "baseline_low_signal_valid", 0) or 0
+    )
+    print_summary_card(
+        display_label,
+        [
+            summary_item("Recommended", str(queue_action or "—"), value_style="accent"),
+            summary_item("Study", target_state.study_status, value_style="muted"),
+            summary_item("Live device", target_state.live_device_status, value_style="muted"),
+            summary_item("Capture", target_state.capture_status, value_style="muted"),
+            summary_item("Publication", target_state.publication_status, value_style="muted"),
+            summary_item("Study build", study_build, value_style="muted"),
+            summary_item(
+                "Quota baseline",
+                f"{int(getattr(state.counts, 'baseline_valid_runs', 0) or 0)} / {int(getattr(state, 'baseline_required', 0) or 0)}",
+                value_style="muted",
+            ),
+            summary_item(
+                "Quota interactive",
+                f"{int(getattr(state.counts, 'interactive_valid_runs', 0) or 0)} / {int(getattr(state, 'interactive_required', 0) or 0)}",
+                value_style="muted",
+            ),
+            summary_item("ML pool", str(ml_pool_total), value_style="accent" if ml_pool_total > 0 else "muted"),
+        ],
+        subtitle="Diagnostics",
+    )
+    print()
     rows = [
         ["Package", package_name],
-        ["Recommended action", str(queue_action or "—")],
-        ["Study status", target_state.study_status],
-        ["Live device status", target_state.live_device_status],
-        ["Capture status", target_state.capture_status],
-        ["Publication status", target_state.publication_status],
-        ["Study build", study_build],
         [
             "Historical evidence",
             f"{int(target_state.historical.valid_runs)} valid run(s) across {int(target_state.historical.build_count)} build(s)",
@@ -232,14 +283,15 @@ def render_selected_app_diagnostics(
             f"{int(getattr(state.counts, 'interactive_valid_runs', 0) or 0)} / {int(getattr(state, 'interactive_required', 0) or 0)}",
         ],
         [
-            "Supplemental baseline",
+            "ML training pool (baseline)",
             (
-                f"extra={int(getattr(state.counts, 'baseline_extra_valid', 0) or 0)}"
+                f"supplemental={int(getattr(state.counts, 'baseline_extra_valid', 0) or 0)}"
                 f" | low-signal={int(getattr(state.counts, 'baseline_low_signal_valid', 0) or 0)}"
+                f" | total={int(getattr(state.counts, 'baseline_extra_valid', 0) or 0) + int(getattr(state.counts, 'baseline_low_signal_valid', 0) or 0)}"
             ),
         ],
         [
-            "Supplemental interactive",
+            "Retained extra interactive",
             (
                 f"extra={int(getattr(state.counts, 'interactive_extra_valid', 0) or 0)}"
                 f" | low-signal={int(getattr(state.counts, 'interactive_low_signal_valid', 0) or 0)}"
@@ -254,6 +306,7 @@ def render_selected_app_diagnostics(
         rows.append(["Latest invalid reason", target_state.latest_invalid_reason])
     if target_state.latest_pcap_failure_detail:
         rows.append(["Latest PCAP detail", target_state.latest_pcap_failure_detail])
+    menu_utils.print_section("Detail")
     menu_utils.print_table(["Field", "Value"], rows)
     top = tuple(getattr(state, "exclusion_reason_top", ()) or ())
     if top:

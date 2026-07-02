@@ -54,6 +54,24 @@ _COMMON_PACKAGE_TOKENS = {
     "release",
     "www",
 }
+_PACKAGE_FIRST_PARTY_ROOTS: Mapping[str, tuple[str, ...]] = {
+    "com.zhiliaoapp.musically": (
+        "byteoversea.com",
+        "ibytedtos.com",
+        "ibyteimg.com",
+        "isnssdk.com",
+        "musical.ly",
+        "sgsnssdk.com",
+        "tiktok.com",
+        "tiktokcdn.com",
+        "tiktokcdn-eu.com",
+        "tiktokcdn-us.com",
+        "tiktokv.com",
+        "tiktokv.eu",
+        "tiktokv.us",
+        "ttwstatic.com",
+    ),
+}
 
 
 def summarize_xref_context(value: str | None, *, limit: int = 120) -> str | None:
@@ -101,6 +119,16 @@ def _package_tokens(package_name: str | None) -> set[str]:
     }
 
 
+def _is_package_first_party_root(root_domain: str, package_name: str | None) -> bool:
+    package = str(package_name or "").strip().lower()
+    if not root_domain or not package:
+        return False
+    roots = _PACKAGE_FIRST_PARTY_ROOTS.get(package)
+    if not roots:
+        return False
+    return any(root_domain == root or root_domain.endswith(f".{root}") for root in roots)
+
+
 def classify_ownership(
     *,
     root_domain: str | None,
@@ -122,6 +150,8 @@ def classify_ownership(
         return "documentary"
     if provider and provider.lower() in {"google_analytics", "gtag", "firebase", "admob", "adjust", "appsflyer", "segment", "mixpanel"}:
         return "analytics"
+    if _is_package_first_party_root(root, package_name):
+        return "first_party"
     if any(root.endswith(suffix) for suffix in _CLOUD_STORAGE_ROOTS):
         return "cloud_storage"
     if any(marker in root for marker in _CDN_ROOTS):
@@ -141,6 +171,8 @@ def initial_posture(
     confidence: str | None,
 ) -> str:
     if bucket == "high_entropy":
+        return "exploratory"
+    if ownership_class == "documentary":
         return "exploratory"
     if bucket in {"api_keys", "http_cleartext"}:
         return "actionable"

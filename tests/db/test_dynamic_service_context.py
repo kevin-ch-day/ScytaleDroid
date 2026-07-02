@@ -165,6 +165,16 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert bbc_live["service_key"] == "bbc_first_party"
     assert bbc_live["role_class"] == "publisher_api"
 
+    bbc_piano = service_context.resolve_service_for_domain(
+        "buy-eu.piano.io",
+        package_name="bbc.mobile.news.ww",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bbc_piano["service_key"] == "piano"
+    assert bbc_piano["service_category"] == "subscription_paywall"
+    assert bbc_piano["role_class"] == "subscription_paywall"
+
     ads = service_context.resolve_service_for_domain(
         "googleads.g.doubleclick.net",
         package_name="bbc.mobile.news.ww",
@@ -191,6 +201,7 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert oracle["service_key"] == "oracle_cloud"
     assert oracle["service_category"] == "platform_infrastructure"
+    assert oracle["role_class"] == "hosted_backend_infrastructure"
 
     meta_sdk = service_context.resolve_service_for_domain(
         "graph.facebook.com",
@@ -263,6 +274,52 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert atlas["service_key"] == "microsoft_ads_atlas"
     assert atlas["service_category"] == "adtech"
+
+    instagram_api = service_context.resolve_service_for_domain(
+        "i.instagram.com",
+        package_name="com.instagram.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert instagram_api["service_key"] == "instagram_platform"
+    assert instagram_api["owner_class"] == "first_party"
+
+    instagram_cdn = service_context.resolve_service_for_domain(
+        "scontent.cdninstagram.com",
+        package_name="com.instagram.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert instagram_cdn["service_key"] == "instagram_media_cdn"
+    assert instagram_cdn["role_class"] == "content_delivery"
+
+    instagram_whatsapp = service_context.resolve_service_for_domain(
+        "v.whatsapp.net",
+        package_name="com.instagram.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert instagram_whatsapp["service_key"] == "whatsapp_platform"
+    assert instagram_whatsapp["role_class"] == "realtime_call_transport"
+
+    messenger_privacy_gateway = service_context.resolve_service_for_domain(
+        "meta.privacy-gateway.cloudflare.com",
+        package_name="com.facebook.orca",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert messenger_privacy_gateway["service_key"] == "cloudflare_privacy_gateway"
+    assert messenger_privacy_gateway["role_class"] == "privacy_gateway"
+
+    messenger_home = service_context.resolve_service_for_domain(
+        "messenger.com",
+        package_name="com.facebook.orca",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert messenger_home["service_key"] == "facebook_platform"
+    assert messenger_home["owner_class"] == "first_party"
+    assert messenger_home["role_class"] == "messaging_platform_api"
 
     x_api = service_context.resolve_service_for_domain(
         "api.x.com",
@@ -381,6 +438,239 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert x_ads["service_key"] == "x_ads_platform"
     assert x_ads["owner_class"] == "first_party"
 
+    linkedin_home = service_context.resolve_service_for_domain(
+        "www.linkedin.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_home["service_key"] == "linkedin_platform"
+    assert linkedin_home["owner_class"] == "first_party"
+
+    linkedin_perf = service_context.resolve_service_for_domain(
+        "rum6.perf.linkedin.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_perf["service_key"] == "linkedin_platform"
+    assert linkedin_perf["role_class"] == "performance_telemetry"
+
+    linkedin_media = service_context.resolve_service_for_domain(
+        "media.licdn.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_media["service_key"] == "linkedin_cdn"
+    assert linkedin_media["service_category"] == "content_delivery"
+
+    linkedin_bot_defense = service_context.resolve_service_for_domain(
+        "collector-pxdojv695v.protechts.net",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_bot_defense["service_key"] == "human_security_bot_defense"
+    assert linkedin_bot_defense["service_category"] == "security_or_bot_defense"
+
+    linkedin_dns = service_context.resolve_service_for_domain(
+        "b.ns1p.net",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_dns["service_key"] == "ns1_connect"
+    assert linkedin_dns["role_class"] == "managed_dns_edge"
+
+    pinterest_api = service_context.resolve_service_for_domain(
+        "api.pinterest.com",
+        package_name="com.pinterest",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert pinterest_api["service_key"] == "pinterest_platform"
+    assert pinterest_api["owner_class"] == "first_party"
+
+    pinterest_media = service_context.resolve_service_for_domain(
+        "i.pinimg.com",
+        package_name="com.pinterest",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert pinterest_media["service_key"] == "pinterest_media_cdn"
+    assert pinterest_media["service_category"] == "content_delivery"
+
+    pinterest_recaptcha = service_context.resolve_service_for_domain(
+        "www.recaptcha.net",
+        package_name="com.pinterest",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert pinterest_recaptcha["service_key"] == "google_recaptcha"
+    assert pinterest_recaptcha["service_category"] == "security_or_bot_defense"
+
+    reddit_api = service_context.resolve_service_for_domain(
+        "gql-fed.reddit.com",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert reddit_api["service_key"] == "reddit_platform"
+    assert reddit_api["role_class"] == "community_platform_api"
+
+    reddit_media = service_context.resolve_service_for_domain(
+        "preview.redd.it",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert reddit_media["service_key"] == "reddit_media_cdn"
+    assert reddit_media["service_category"] == "content_delivery"
+
+    appsflyer_onelink = service_context.resolve_service_for_domain(
+        "i.sng.link",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert appsflyer_onelink["service_key"] == "appsflyer"
+    assert appsflyer_onelink["role_class"] == "attribution_deep_link"
+
+    snapchat_api = service_context.resolve_service_for_domain(
+        "gcp.api.snapchat.com",
+        package_name="com.snapchat.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert snapchat_api["service_key"] == "snapchat_platform"
+    assert snapchat_api["owner_class"] == "first_party"
+
+    snapchat_cdn = service_context.resolve_service_for_domain(
+        "cf-st.sc-cdn.net",
+        package_name="com.snapchat.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert snapchat_cdn["service_key"] == "snapchat_cdn"
+    assert snapchat_cdn["service_category"] == "content_delivery"
+
+    signal_chat = service_context.resolve_service_for_domain(
+        "chat.signal.org",
+        package_name="org.thoughtcrime.securesms",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert signal_chat["service_key"] == "signal_platform"
+    assert signal_chat["role_class"] == "encrypted_messaging_api"
+
+    signal_turn = service_context.resolve_service_for_domain(
+        "turn.cloudflare.com",
+        package_name="org.thoughtcrime.securesms",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert signal_turn["service_key"] == "cloudflare_realtime_relay"
+    assert signal_turn["role_class"] == "turn_relay"
+
+    firebase_installations = service_context.resolve_service_for_domain(
+        "firebaseinstallations.googleapis.com",
+        package_name="org.thoughtcrime.securesms",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert firebase_installations["service_key"] == "firebase_installations"
+    assert firebase_installations["role_class"] == "installation_identity"
+
+    linkedin_google_stun = service_context.resolve_service_for_domain(
+        "stun.l.google.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_google_stun["service_key"] == "google_platform"
+    assert linkedin_google_stun["role_class"] == "stun_relay"
+
+    google_play_media = service_context.resolve_service_for_domain(
+        "play-lh.googleusercontent.com",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert google_play_media["service_key"] == "google_platform"
+    assert google_play_media["role_class"] == "content_delivery"
+
+    reddit_recaptcha = service_context.resolve_service_for_domain(
+        "www.recaptcha.net",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert reddit_recaptcha["service_key"] == "google_recaptcha"
+
+    linkedin_microsoft_fpt = service_context.resolve_service_for_domain(
+        "fpt.dfp.microsoft.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_microsoft_fpt["service_key"] == "microsoft_fraud_protection"
+    assert linkedin_microsoft_fpt["role_class"] == "device_fingerprinting"
+
+    messenger_whatsapp = service_context.resolve_service_for_domain(
+        "v.whatsapp.net",
+        package_name="com.facebook.orca",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert messenger_whatsapp["service_key"] == "whatsapp_platform"
+    assert messenger_whatsapp["role_class"] == "realtime_call_transport"
+
+    tiktok_cdn = service_context.resolve_service_for_domain(
+        "sf16-sg.tiktokcdn.com",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert tiktok_cdn["service_key"] == "tiktok_platform"
+    assert tiktok_cdn["role_class"] == "content_delivery"
+
+    tiktok_api = service_context.resolve_service_for_domain(
+        "api16-normal-useast5.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert tiktok_api["service_key"] == "tiktok_platform"
+    assert tiktok_api["role_class"] == "social_graph_api"
+
+    tiktok_aggr = service_context.resolve_service_for_domain(
+        "aggr16-normal.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert tiktok_aggr["service_key"] == "tiktok_platform"
+    assert tiktok_aggr["role_class"] == "performance_telemetry"
+
+    tiktok_tnc = service_context.resolve_service_for_domain(
+        "tnc16-normal-useast5.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert tiktok_tnc["service_key"] == "tiktok_platform"
+    assert tiktok_tnc["role_class"] == "sdk_configuration"
+
+    tiktok_attribution = service_context.resolve_service_for_domain(
+        "ug-attribution.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert tiktok_attribution["service_key"] == "tiktok_platform"
+    assert tiktok_attribution["role_class"] == "attribution_measurement"
+
     google_time = service_context.resolve_service_for_domain(
         "time.google.com",
         package_name="com.twitter.android",
@@ -436,6 +726,16 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert wbd["service_key"] == "wbd_streaming_platform"
     assert wbd["owner_class"] == "first_party"
 
+    wbd_freeview = service_context.resolve_service_for_domain(
+        "freeview.ngtv.io",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert wbd_freeview["service_key"] == "wbd_streaming_platform"
+    assert wbd_freeview["role_class"] == "streaming_delivery"
+    assert wbd_freeview["confidence"] == "medium"
+
     dianomi_worker = service_context.resolve_service_for_domain(
         "gpp-decoder.dianomi.workers.dev",
         package_name="com.cnn.mobile.android.phone",
@@ -472,6 +772,33 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert guardian_cmp["service_key"] == "onetrust_cmp"
     assert guardian_cmp["role_class"] == "consent_management"
 
+    bbc_cmp = service_context.resolve_service_for_domain(
+        "cdn.privacy-mgmt.com",
+        package_name="bbc.mobile.news.ww",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bbc_cmp["service_key"] == "sourcepoint_cmp"
+    assert bbc_cmp["role_class"] == "consent_management"
+
+    guardian_braze = service_context.resolve_service_for_domain(
+        "sdk.fra-01.braze.eu",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_braze["service_key"] == "braze_sdk"
+    assert guardian_braze["service_category"] == "engagement"
+
+    guardian_confiant = service_context.resolve_service_for_domain(
+        "cdn.confiant-integrations.net",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_confiant["service_key"] == "confiant_ad_security"
+    assert guardian_confiant["role_class"] == "ad_security"
+
     crashlytics = service_context.resolve_service_for_domain(
         "firebase-settings.crashlytics.com",
         package_name="com.guardian",
@@ -498,6 +825,24 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert mapbox["service_key"] == "mapbox_platform"
     assert mapbox["role_class"] == "sdk_configuration"
+
+    cnn_audience = service_context.resolve_service_for_domain(
+        "audience.cnn.com",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert cnn_audience["service_key"] == "cnn_first_party"
+    assert cnn_audience["role_class"] == "publisher_collection"
+
+    cnn_smetrics = service_context.resolve_service_for_domain(
+        "smetrics.cnn.com",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert cnn_smetrics["service_key"] == "cnn_first_party"
+    assert cnn_smetrics["role_class"] == "publisher_collection"
 
     cloudflare = service_context.resolve_service_for_domain(
         "cdnjs.cloudflare.com",

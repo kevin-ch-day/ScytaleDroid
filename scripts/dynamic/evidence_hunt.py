@@ -425,23 +425,22 @@ def cmd_per_app(args: argparse.Namespace) -> int:
             per[pkg]["excluded::EXCLUDED_UNKNOWN_BUCKET"] += 1
             continue
 
-        # Low-signal baseline rule (menu._summarize_evidence_quota).
-        if (
-            bucket == "baseline"
-            and bool(ds.get("low_signal"))
-            and str(ds.get("invalid_reason_code") or "").strip().upper() in {"", "LOW_SIGNAL_IDLE"}
-        ):
-            per[pkg]["flag_low_signal_baseline"] += 1
+        explicit_countable = True if ds.get("countable") is True else False if ds.get("countable") is False else None
+        if explicit_countable is False:
             per[pkg]["extra_eligible"] += 1
+            if bucket == "baseline" and bool(ds.get("low_signal")):
+                per[pkg]["flag_low_signal_baseline"] += 1
             continue
 
         needed = int(cfg.baseline_required if bucket == "baseline" else cfg.interactive_required)
         seen_key = f"quota_seen::{bucket}"
-        if int(per[pkg].get(seen_key, 0)) < needed:
+        if explicit_countable is True or int(per[pkg].get(seen_key, 0)) < needed:
             per[pkg][seen_key] += 1
             per[pkg]["quota_counted"] += 1
         else:
             per[pkg]["extra_eligible"] += 1
+        if bucket == "baseline" and bool(ds.get("low_signal")):
+            per[pkg]["flag_low_signal_baseline"] += 1
 
     # Print in a stable way: most shortfall first.
     out_rows = []

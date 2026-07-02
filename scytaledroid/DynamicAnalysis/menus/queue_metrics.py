@@ -34,6 +34,7 @@ def summarize_evidence_quota(
         "apps_satisfied": 0,
         "excluded_runs": 0,
         "extra_eligible_runs": 0,
+        "baseline_ml_pool_runs": 0,
         "protocol_fit_poor_runs": 0,
         "low_signal_exploratory_runs": 0,
     }
@@ -107,6 +108,8 @@ def summarize_evidence_quota(
 
             if explicit_countable is False:
                 out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+                if bucket == "baseline":
+                    out["baseline_ml_pool_runs"] = int(out["baseline_ml_pool_runs"]) + 1
                 if row.get("protocol_fit") == "poor":
                     out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
                 if bool(row.get("low_signal")):
@@ -122,14 +125,16 @@ def summarize_evidence_quota(
                     out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
                 else:
                     out["extra_eligible_runs"] = int(out["extra_eligible_runs"]) + 1
+                    out["baseline_ml_pool_runs"] = int(out["baseline_ml_pool_runs"]) + 1
                 if row.get("protocol_fit") == "poor":
                     out["protocol_fit_poor_runs"] = int(out["protocol_fit_poor_runs"]) + 1
                 if bool(row.get("low_signal")):
                     out["low_signal_exploratory_runs"] = int(out["low_signal_exploratory_runs"]) + 1
                 continue
-            bucket_key = "interactive_scripted" if bucket == "interactive_scripted" else "interactive_manual"
-            if counts["baseline"] < baseline_required:
+
+            if bucket == "unknown":
                 continue
+            bucket_key = "interactive_scripted" if bucket == "interactive_scripted" else "interactive_manual"
             if explicit_countable is True:
                 counts[bucket_key] += 1
                 out["quota_runs_counted"] = int(out["quota_runs_counted"]) + 1
@@ -155,3 +160,31 @@ def summarize_evidence_quota(
             out["apps_satisfied"] = int(out["apps_satisfied"]) + 1
 
     return out
+
+
+def resolve_active_cohort_evidence_quota_summary() -> dict[str, int | bool]:
+    """Queue-aligned quota summary for the active research cohort."""
+    from scytaledroid.Config import app_config, profile_config
+    from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
+    from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
+    from scytaledroid.DynamicAnalysis.tracker_scope import (
+        min_windows_per_run as _min_windows_per_run,
+        run_profile_bucket as _run_profile_bucket,
+    )
+
+    cfg = DatasetTrackerConfig()
+    dataset_pkgs = {
+        str(package).strip().lower()
+        for package in active_research_cohort_packages()
+        if str(package).strip()
+    }
+    return summarize_evidence_quota(
+        dataset_pkgs,
+        cfg,
+        output_dir=app_config.OUTPUT_DIR,
+        derive_freeze_eligibility_fn=derive_freeze_eligibility,
+        min_windows=_min_windows_per_run(),
+        required_capture_policy_version=int(profile_config.PAPER_CONTRACT_VERSION),
+        run_profile_bucket_fn=_run_profile_bucket,
+    )

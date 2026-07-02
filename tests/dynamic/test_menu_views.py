@@ -56,6 +56,11 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
             "ready_for_guided_dataset_run": True,
         },
     )
+    monkeypatch.setattr(
+        menu_views,
+        "resolve_active_cohort_evidence_quota_summary",
+        lambda: {"quota_runs_counted": 1, "extra_eligible_runs": 0},
+    )
 
     menu_views.render_dynamic_menu_overview()
 
@@ -72,7 +77,7 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
     assert "Next: open App queue / next action to continue collection." in out
 
 
-def test_render_dynamic_menu_overview_surfaces_supplemental_valid_runs(monkeypatch, capsys) -> None:
+def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_views, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(menu_views.device_manager, "describe_active_device", lambda: "None")
     monkeypatch.setattr(
@@ -96,6 +101,11 @@ def test_render_dynamic_menu_overview_surfaces_supplemental_valid_runs(monkeypat
             "ready_for_guided_dataset_run": True,
         },
     )
+    monkeypatch.setattr(
+        menu_views,
+        "resolve_active_cohort_evidence_quota_summary",
+        lambda: {"quota_runs_counted": 15, "extra_eligible_runs": 3},
+    )
 
     menu_views.render_dynamic_menu_overview()
 
@@ -105,7 +115,7 @@ def test_render_dynamic_menu_overview_surfaces_supplemental_valid_runs(monkeypat
     assert "19 packs (18 valid)" in out
     assert "Quota" in out
     assert "15 / 80 valid (65 remaining)" in out
-    assert "Supplemental" in out
+    assert "Retained extra" in out
     assert "3 outside quota" in out
     assert "quota not satisfied — 65 quota-valid runs remaining" in out
     assert "Next: select a capture device, then open App queue / next action." in out

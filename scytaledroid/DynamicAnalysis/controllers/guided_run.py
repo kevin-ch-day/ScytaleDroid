@@ -51,6 +51,7 @@ from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
     active_research_cohort_packages,
 )
 from scytaledroid.DynamicAnalysis.run_dynamic_analysis import execute_dynamic_run_spec
+from scytaledroid.DynamicAnalysis.run_qualification import baseline_ml_training_pool_count
 from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
 from scytaledroid.DynamicAnalysis.scenarios.manual import preview_script_template_for_package
 from scytaledroid.DynamicAnalysis.services.dataset_run_state import load_dataset_run_state
@@ -155,6 +156,8 @@ def _queue_action_key(action: str | None) -> str:
         return _QUEUE_ACTION_REFRESH
     if text == "baseline":
         return _QUEUE_ACTION_BASELINE
+    if text == "supplemental baseline":
+        return "supplemental_baseline"
     if text == "scripted interaction":
         return _QUEUE_ACTION_SCRIPTED
     if text == "manual interaction":
@@ -849,6 +852,20 @@ def _intent_counts_toward_quota(
     return False
 
 
+def _is_supplemental_baseline_capture(
+    *,
+    selected_protocol: str,
+    run_profile: str,
+    baseline_valid_runs: int,
+    cfg: Any,
+) -> bool:
+    if str(selected_protocol or "").strip() != "1":
+        return False
+    if not str(run_profile or "").strip().lower().startswith("baseline"):
+        return False
+    return int(baseline_valid_runs) >= int(cfg.baseline_required)
+
+
 def _is_interactive_profile(profile: str) -> bool:
     p = str(profile or "").strip().lower()
     return ("interaction" in p) or ("interactive" in p) or ("script" in p)
@@ -981,6 +998,7 @@ def _render_selected_app_workbench(
         print_tier1_qa_result=print_tier1_qa_result,
         menu_utils=menu_utils,
         prompt_utils=prompt_utils,
+        status_messages=status_messages,
         queue_action_key_fn=_queue_action_key,
         queue_action_review_qa=_QUEUE_ACTION_REVIEW_QA,
         build_selected_app_protocol_options_fn=_build_selected_app_protocol_options,
@@ -996,16 +1014,30 @@ def _choose_interactive_mode(
     default_scripted: bool = False,
 ) -> str | None:
     menu_utils.print_header("Interactive Mode")
-    print("1) Manual interactive run [default]")
+    scripted_desc = "scripted template run"
+    scripted_disabled = False
     if scripted_template_ready:
         template_name = str(resolved_template_for_package(package_name) or "").strip()
         if template_name:
-            print(f"2) Scripted interactive run: {template_name}")
-        else:
-            print("2) Scripted interactive run")
+            scripted_desc = f"template: {template_name}"
     else:
-        print("2) Scripted interactive run (unavailable - no template)")
-    print("0) Back")
+        scripted_desc = "unavailable — no template for this package"
+        scripted_disabled = True
+    menu_utils.print_menu(
+        [
+            menu_utils.MenuOption("1", "Manual interactive run", description="operator-driven session"),
+            menu_utils.MenuOption(
+                "2",
+                "Scripted interactive run",
+                description=scripted_desc,
+                disabled=scripted_disabled,
+            ),
+        ],
+        default="2" if default_scripted and scripted_template_ready else "1",
+        show_descriptions=True,
+        compact=True,
+    )
+    menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
     choice = prompt_utils.get_choice(
         ["1", "2", "0", "B"],
         default="2" if default_scripted and scripted_template_ready else "1",
@@ -1794,7 +1826,7 @@ def _run_guided_dataset_iteration(
             )
             print(
                 status_messages.status(
-                    "This run will be retained as supplemental evidence; return afterward for a clean baseline capture.",
+                    "This run will be retained as extra evidence; return afterward for a clean baseline capture.",
                     level="info",
                 )
             )
@@ -1818,7 +1850,26 @@ def _run_guided_dataset_iteration(
         cfg=cfg,
     )
     suggested_key = app.suggested_default_key if app.suggested_is_interactive else "1"
-    if (
+    supplemental_baseline = _is_supplemental_baseline_capture(
+        selected_protocol=selected_protocol,
+        run_profile=run_profile,
+        baseline_valid_runs=int(counts.baseline_valid_runs),
+        cfg=cfg,
+    )
+    if supplemental_baseline:
+        pool = baseline_ml_training_pool_count(
+            extra_valid=int(getattr(counts, "baseline_extra_valid", 0) or 0),
+            low_signal_retained=int(getattr(counts, "baseline_low_signal_valid", 0) or 0),
+        )
+        print(
+            status_messages.status(
+                "Supplemental baseline: joins the ML training pool for pattern averaging "
+                f"({pool} supplemental on file; {int(counts.baseline_valid_runs)} quota-counted). "
+                "Run as many as needed.",
+                level="info",
+            )
+        )
+    elif (
         selected_protocol in {"1", "2", "3"}
         and selected_protocol != suggested_key
         and not counts_toward_completion
@@ -1826,11 +1877,11 @@ def _run_guided_dataset_iteration(
     ):
         print(
             status_messages.status(
-                "Selected intent is not quota-suggested and will be saved as supplemental evidence (not quota-counted).",
+                "Selected intent is not quota-suggested and will be saved as retained extra evidence (not quota-counted).",
                 level="warn",
             )
         )
-        proceed = prompt_utils.prompt_yes_no("Proceed with supplemental run anyway?", default=False)
+        proceed = prompt_utils.prompt_yes_no("Proceed with retained extra run anyway?", default=False)
         if not proceed:
             print(status_messages.status("Run canceled. Choose the suggested intent to fill quota.", level="info"))
             return True
@@ -1920,8 +1971,10 @@ def _run_guided_dataset_iteration(
     prof_lc = str(run_profile or "").strip().lower()
     if counts_toward_completion:
         paper_impact_label = "Cohort quota impact: YES (if VALID)"
+    elif supplemental_baseline:
+        paper_impact_label = "Cohort quota: NO · supplemental baseline (ML training pool)"
     else:
-        paper_impact_label = "Cohort quota impact: NO (supplemental evidence / policy)"
+        paper_impact_label = "Cohort quota impact: NO (retained extra evidence / policy)"
 
     print(
         paper_impact_label
@@ -1994,6 +2047,21 @@ def _run_guided_dataset_iteration(
     )
     result = execute_dynamic_run_spec(spec)
     print_run_summary(result, label)
+    if supplemental_baseline and str(getattr(result, "status", "")).lower() == "success":
+        try:
+            fresh_state = load_dataset_run_state(package_name, config=cfg)
+            pool_after = baseline_ml_training_pool_count(
+                extra_valid=int(fresh_state.counts.baseline_extra_valid),
+                low_signal_retained=int(fresh_state.counts.baseline_low_signal_valid),
+            )
+            print(
+                status_messages.status(
+                    f"ML training pool: {pool_after} supplemental baseline(s) on file for this app.",
+                    level="info",
+                )
+            )
+        except Exception:
+            pass
     _post_run_integrity_check(result)
     if result.dynamic_run_id and print_tier1_qa_result:
         print_tier1_qa_result(result.dynamic_run_id)
@@ -2076,7 +2144,11 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
         if isinstance(payload, dict):
             operator_existing = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
             observed_template = str(operator_existing.get("template_id_actual") or operator_existing.get("template_id") or "").strip()
-            is_text_template = observed_template.endswith("_text_v1") or observed_template in {"messaging_text_v1", "whatsapp_text_v1"}
+            is_text_template = observed_template.endswith("_text_v1") or observed_template in {
+                "messaging_text_v1",
+                "whatsapp_text_v1",
+                "whatsapp_text_behavior_v2",
+            }
             if _is_messaging_package_or_category(str(package_name or "").strip().lower()) and not is_text_template:
                 send_detected = prompt_utils.prompt_yes_no(
                     "Did this scripted run send messages outside of the template steps? (protocol violation)",

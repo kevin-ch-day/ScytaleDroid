@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+import re
 import select
 import sys
 import time
@@ -18,7 +19,6 @@ from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     SNAPCHAT_TEMPLATE_HINTS,
-    V3_BASELINE_REPRO_TIPS,
     V3_SCRIPTED_REPRO_TIPS,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
@@ -28,7 +28,13 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     resolve_script_template as _resolve_script_template_for_package,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    countdown_action_prompt_line as _timing_countdown_action_prompt_line,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     clear_status_line as _timing_clear_status_line,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    clear_prompt_and_previous_line as _timing_clear_prompt_and_previous_line,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     format_duration as _timing_format_duration,
@@ -41,6 +47,9 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     pulse_marker as _timing_pulse_marker,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
+    rewrite_previous_line_preserving_prompt as _timing_rewrite_previous_line_preserving_prompt,
 )
 from scytaledroid.DynamicAnalysis.templates.category_map import (
     category_for_package,
@@ -75,19 +84,82 @@ CALL_CONNECT_TIMEOUT_S = 30
 CALL_MIN_CONNECTED_DURATION_S = 90
 
 SCRIPT_LIMITATION_REASON_LABELS: tuple[tuple[str, str], ...] = (
-    ("paywall", "paywall / subscription wall"),
-    ("subscription_required", "subscription required"),
+    ("subscription_required", "subscription required / paywall shown"),
     ("login_required", "login required"),
-    ("not_available", "not available in this UI/account"),
-    ("other", "other limitation"),
+    ("not_available_in_ui_or_account", "not available in this UI/account"),
+    ("region_or_content_unavailable", "region or content unavailable"),
+    ("app_error", "app error"),
+    ("operator_other", "other limitation"),
 )
-_SCRIPT_LIMITATION_REASON_TEXT = dict(SCRIPT_LIMITATION_REASON_LABELS)
+_SCRIPT_LIMITATION_REASON_TEXT = {
+    **dict(SCRIPT_LIMITATION_REASON_LABELS),
+    "paywall": "subscription required / paywall shown",
+    "not_available": "not available in this UI/account",
+    "other": "other limitation",
+}
 _SCRIPTED_ARTICLE_LIMITATION_REASONS = {
     "paywall",
     "subscription_required",
     "login_required",
     "not_available",
+    "not_available_in_ui_or_account",
+    "region_or_content_unavailable",
+    "app_error",
+    "operator_other",
 }
+_NEWS_BEHAVIOR_V2 = "news_reader_behavior_v2"
+_NEWS_SUBSCRIPTION_BRANCH_CHOICES = {
+    "1": "subscription_wall_observed",
+    "2": "subscription_options_observed",
+    "3": "return_home",
+    "4": "skip_article_branch",
+}
+
+_FACEBOOK_BEHAVIOR_V3 = "facebook_behavior_v3"
+_FACEBOOK_CONTROL_ACCOUNT_MODES = {
+    "1": "observation_only",
+    "2": "draft_only",
+    "3": "control_account_active",
+}
+_FACEBOOK_MUTATING_STEP_PREFIXES = (
+    "friend_request_accept_",
+    "text_post_submit_",
+    "photo_post_submit_",
+)
+_TERMINAL_HOLD_STEP_IDS = frozenset({"final_hold", "final_home_hold", "hold_foreground", "user_activity"})
+
+
+def _apply_script_early_stop(
+    protocol: dict[str, object],
+    *,
+    active_step_id: str | None,
+) -> None:
+    protocol["script_exit_code"] = int(protocol.get("script_exit_code") or 0)
+    protocol["stopped_early"] = True
+    deviations = protocol.get("deviation_codes")
+    if not isinstance(deviations, list):
+        deviations = []
+        protocol["deviation_codes"] = deviations
+    if "STOPPED_EARLY" not in deviations:
+        deviations.append("STOPPED_EARLY")
+    if str(active_step_id or "").strip() in _TERMINAL_HOLD_STEP_IDS:
+        planned = int(protocol.get("step_count_planned") or 0)
+        if planned > 0:
+            protocol["step_count_completed"] = planned
+            protocol["terminal_hold_finalize"] = True
+            protocol["stopped_early"] = False
+            if "STOPPED_EARLY" in deviations:
+                deviations.remove("STOPPED_EARLY")
+            if "TERMINAL_HOLD_FINALIZE" not in deviations:
+                deviations.append("TERMINAL_HOLD_FINALIZE")
+        print(
+            status_messages.status(
+                "Final hold finalize recorded; completing scripted protocol.",
+                level="info",
+            )
+        )
+        return
+    print(status_messages.status("Stop requested; finalizing run early.", level="warn"))
 
 
 def _effective_min_sampling_seconds() -> int:
@@ -104,16 +176,350 @@ def _effective_recommended_sampling_seconds() -> int:
 
 def _scripted_step_description(step_id: str, default_desc: str) -> str:
     if step_id == "open_article":
-        return "Open one free article. If paywall/subscription appears, mark limited."
-    if step_id == "scroll_article":
+        return "Open one article. If subscription/paywall appears, mark subscription_required."
+    if step_id in {"scroll_article", "article_scroll"}:
         return "Scroll the visible article content. If content is blocked, mark limited and continue."
     return str(default_desc or "").strip()
 
 
 def _scripted_step_action_line(*, limited_or_skip_only: bool = False) -> str:
     if limited_or_skip_only:
-        return "Action: L=limited | N=skip | D=done"
-    return "Action: D=done | L=limited | N=skip"
+        return "Action: L=limited | N=skip | D=done | H=return home/reset"
+    return "Action: D=done | L=limited | N=skip | H=return home/reset"
+
+
+def _prompt_facebook_control_account_mode() -> str:
+    print(status_messages.status("Facebook control-account behavior mode:", level="info"))
+    print("  1) Observation only")
+    print("  2) Draft only")
+    print("  3) Control-account active mode [recommended for research]")
+    choice = prompt_utils.get_choice(
+        ["1", "2", "3"],
+        default="3",
+        invalid_message="Choose 1, 2, or 3.",
+    )
+    return _FACEBOOK_CONTROL_ACCOUNT_MODES.get(str(choice), "control_account_active")
+
+
+def _prompt_facebook_repeat_plan() -> dict[str, int]:
+    print(status_messages.status("Facebook behavior repeats:", level="info"))
+    print("Repeat text post action? 0=no repeat, 1=repeat once, 2=repeat two more times")
+    text_choice = prompt_utils.get_choice(
+        ["0", "1", "2"],
+        default="0",
+        invalid_message="Choose 0, 1, or 2.",
+    )
+    print("Repeat photo post action? 0=no repeat, 1=repeat once, 2=repeat two more times")
+    photo_choice = prompt_utils.get_choice(
+        ["0", "1", "2"],
+        default="0",
+        invalid_message="Choose 0, 1, or 2.",
+    )
+    return {
+        "text_post_submit": _repeat_choice_to_total(text_choice, max_total=3),
+        "photo_post_submit": _repeat_choice_to_total(photo_choice, max_total=3),
+        "friend_request_accept": 2,
+    }
+
+
+def _repeat_choice_to_total(choice: object, *, max_total: int) -> int:
+    try:
+        repeat_count = int(str(choice).strip())
+    except (TypeError, ValueError):
+        repeat_count = 0
+    return min(max(repeat_count + 1, 1), int(max_total))
+
+
+def _repeat_metadata_for_step(
+    step_id: str,
+    *,
+    repeat_plan: dict[str, int] | None = None,
+) -> dict[str, object]:
+    for prefix, group, total in (
+        ("text_post_", "text_post_submit", 3),
+        ("photo_", "photo_post_submit", 3),
+        ("friend_request_accept_", "friend_request_accept", 2),
+    ):
+        if not step_id.startswith(prefix):
+            continue
+        suffix = step_id.rsplit("_", 1)[-1]
+        if suffix.isdigit():
+            repeat_index = int(suffix)
+            planned_total = int((repeat_plan or {}).get(group) or total)
+            planned_total = min(max(planned_total, 0), int(total))
+            return {
+                "repeat_group": group,
+                "repeat_index": repeat_index,
+                "repeat_total": planned_total,
+                "repeat_max_total": total,
+                "repeat_enabled": bool(repeat_index <= planned_total),
+            }
+    if step_id.startswith("send_text_"):
+        suffix = step_id.rsplit("_", 1)[-1]
+        if suffix.isdigit():
+            return {
+                "repeat_group": "text_message",
+                "repeat_index": int(suffix),
+                "repeat_total": 3,
+                "repeat_max_total": 3,
+                "repeat_enabled": True,
+            }
+    if step_id.startswith("hold_15s_"):
+        suffix = step_id.rsplit("_", 1)[-1]
+        if suffix.isdigit():
+            return {
+                "repeat_group": "post_text_hold",
+                "repeat_index": int(suffix),
+                "repeat_total": 3,
+                "repeat_max_total": 3,
+                "repeat_enabled": True,
+            }
+    return {
+        "repeat_group": None,
+        "repeat_index": None,
+        "repeat_total": None,
+        "repeat_max_total": None,
+        "repeat_enabled": None,
+    }
+
+
+def _whatsapp_text_behavior_metadata(
+    *,
+    template_id: str,
+    step_id: str,
+    step_outcome: str | None = None,
+) -> dict[str, object]:
+    if template_id != "whatsapp_text_behavior_v2":
+        return {}
+    completed = str(step_outcome or "").strip().lower() == "completed"
+    metadata: dict[str, object] = {
+        "account_context": "control_test_chat",
+        "control_account": True,
+        "control_account_mode": "controlled_contact",
+        "mutation_allowed": True,
+        "cleanup_expected": True,
+        "mutation_candidate": False,
+        "mutation_performed": False,
+        "message_type": None,
+        "traffic_phase": "foreground_hold",
+    }
+    if step_id == "open_app":
+        metadata.update({"traffic_phase": "connected_idle"})
+    elif step_id == "open_control_chat":
+        metadata.update({"traffic_phase": "chat_open_or_sync"})
+    elif step_id.startswith("send_text_"):
+        metadata.update(
+            {
+                "message_type": "text",
+                "traffic_phase": "text_send",
+                "mutation_candidate": True,
+                "mutation_performed": completed,
+            }
+        )
+        metadata.update(_repeat_metadata_for_step(step_id))
+    elif step_id.startswith("hold_15s_"):
+        metadata.update({"traffic_phase": "post_send_hold"})
+        metadata.update(_repeat_metadata_for_step(step_id))
+    elif step_id == "receive_reply_or_wait":
+        metadata.update({"message_type": "reply_or_sync", "traffic_phase": "reply_or_sync_wait"})
+    elif step_id == "send_emoji_optional":
+        metadata.update(
+            {
+                "message_type": "emoji_or_sticker",
+                "traffic_phase": "optional_message_send",
+                "mutation_candidate": True,
+                "mutation_performed": completed,
+            }
+        )
+    elif step_id == "send_small_image_optional":
+        metadata.update(
+            {
+                "message_type": "small_image",
+                "traffic_phase": "optional_media_send",
+                "mutation_candidate": True,
+                "mutation_performed": completed,
+            }
+        )
+    elif step_id == "return_chat_list":
+        metadata.update({"traffic_phase": "return_chat_list"})
+    elif step_id == "hold_foreground":
+        metadata.update({"traffic_phase": "foreground_hold"})
+    return metadata
+
+
+def _facebook_traffic_phase_for_step(step_id: str) -> str:
+    sid = str(step_id or "").strip()
+    if sid in {"home_feed", "final_home_hold"}:
+        return "home_feed_hold"
+    if sid in {"profile_view", "profile_return_home"}:
+        return "profile_surface"
+    if sid.startswith("friends_") or sid.startswith("friend_suggestions_"):
+        return "friends_surface"
+    if sid.startswith("friend_request_accept_"):
+        return "friend_request_mutate"
+    if sid.startswith("text_post_"):
+        return "text_post_flow"
+    if sid.startswith("photo_post_") or sid.startswith("photo_attach_"):
+        return "photo_post_flow"
+    if sid.startswith("reels_"):
+        return "reels_surface"
+    if sid.startswith("stories_"):
+        return "stories_surface"
+    if sid.startswith("marketplace_"):
+        return "marketplace_surface"
+    if sid.startswith("notifications_"):
+        return "notifications_surface"
+    return "foreground_hold"
+
+
+def _scripted_step_metadata(
+    *,
+    template_id: str,
+    step_id: str,
+    facebook_mode: str | None = None,
+    step_outcome: str | None = None,
+    repeat_plan: dict[str, int] | None = None,
+) -> dict[str, object]:
+    if template_id != _FACEBOOK_BEHAVIOR_V3:
+        return {}
+    mode = str(facebook_mode or "control_account_active").strip().lower()
+    mutation_allowed = mode == "control_account_active"
+    mutation_candidate = step_id.startswith(_FACEBOOK_MUTATING_STEP_PREFIXES)
+    mutation_performed = bool(
+        mutation_allowed
+        and mutation_candidate
+        and str(step_outcome or "").strip().lower() == "completed"
+    )
+    metadata: dict[str, object] = {
+        "account_context": "control_test_account",
+        "control_account": True,
+        "control_account_mode": mode,
+        "mutation_allowed": bool(mutation_allowed),
+        "cleanup_expected": bool(mutation_allowed),
+        "mutation_candidate": bool(mutation_candidate),
+        "mutation_performed": bool(mutation_performed),
+        "traffic_phase": _facebook_traffic_phase_for_step(step_id),
+    }
+    metadata.update(_repeat_metadata_for_step(step_id, repeat_plan=repeat_plan))
+    return metadata
+
+
+def _news_step_metadata(
+    *,
+    template_id: str,
+    step_id: str,
+    article_branch: str | None = None,
+    subscription_choice: str | None = None,
+    step_outcome: str | None = None,
+) -> dict[str, object]:
+    if template_id != _NEWS_BEHAVIOR_V2:
+        return {}
+    branch = str(article_branch or "").strip() or None
+    subscription_options_opened = bool(subscription_choice == "subscription_options_observed")
+    subscription_wall_observed = bool(
+        branch == "subscription_required"
+        and step_id in {"subscription_wall_observe", "subscription_options_observe", "subscription_return_home"}
+        and str(step_outcome or "completed") != "skipped_branch_not_taken"
+    )
+    return_home_performed = bool(
+        step_id in {"article_return_home", "subscription_return_home", "video_or_media_optional"}
+        and str(step_outcome or "completed") != "skipped_branch_not_taken"
+    )
+    return {
+        "branch_taken": branch,
+        "article_branch": branch,
+        "subscription_wall_observed": subscription_wall_observed,
+        "subscription_options_opened": bool(
+            subscription_options_opened
+            and step_id == "subscription_options_observe"
+            and str(step_outcome or "completed") != "skipped_branch_not_taken"
+        ),
+        "return_home_performed": return_home_performed,
+        "protocol_fit": "limited_but_compliant" if branch in {"subscription_required", "login_required"} else None,
+    }
+
+
+def _prompt_news_subscription_branch() -> str:
+    print(status_messages.status("Article content is blocked by subscription requirement.", level="warn"))
+    print("  1) Observe subscription wall for 30 seconds")
+    print("  2) Open subscription options, hold 30 seconds, then return")
+    print("  3) Return Home")
+    print("  4) Skip article branch")
+    choice = prompt_utils.get_choice(
+        ["1", "2", "3", "4"],
+        default="1",
+        invalid_message="Choose 1, 2, 3, or 4.",
+    )
+    return _NEWS_SUBSCRIPTION_BRANCH_CHOICES.get(str(choice), "subscription_wall_observed")
+
+
+def _normalize_limitation_reason(reason: str | None) -> str | None:
+    token = str(reason or "").strip().lower()
+    if token in {"paywall", "subscription", "subscription_wall"}:
+        return "subscription_required"
+    if token == "not_available":
+        return "not_available_in_ui_or_account"
+    if token == "other":
+        return "operator_other"
+    return token or None
+
+
+def _script_step_event_metadata(
+    *,
+    template_id: str,
+    step_id: str,
+    facebook_mode: str | None = None,
+    repeat_plan: dict[str, int] | None = None,
+    article_branch: str | None = None,
+    subscription_choice: str | None = None,
+    step_outcome: str | None = None,
+) -> dict[str, object]:
+    return {
+        **_whatsapp_text_behavior_metadata(
+            template_id=template_id,
+            step_id=step_id,
+            step_outcome=step_outcome,
+        ),
+        **_scripted_step_metadata(
+            template_id=template_id,
+            step_id=step_id,
+            facebook_mode=facebook_mode,
+            step_outcome=step_outcome,
+            repeat_plan=repeat_plan,
+        ),
+        **_news_step_metadata(
+            template_id=template_id,
+            step_id=step_id,
+            article_branch=article_branch,
+            subscription_choice=subscription_choice,
+            step_outcome=step_outcome,
+        ),
+    }
+
+
+def _news_branch_skip_reason(
+    *,
+    step_id: str,
+    article_branch: str | None,
+    subscription_choice: str | None,
+) -> str | None:
+    branch = str(article_branch or "").strip()
+    choice = str(subscription_choice or "").strip()
+    if step_id in {"article_scroll", "article_return_home"}:
+        return None if branch == "article_opened" else "article_branch_not_opened"
+    if step_id == "subscription_wall_observe":
+        if branch != "subscription_required":
+            return "subscription_branch_not_taken"
+        return None if choice in {"subscription_wall_observed", "subscription_options_observed"} else "subscription_wall_observe_not_selected"
+    if step_id == "subscription_options_observe":
+        if branch != "subscription_required":
+            return "subscription_branch_not_taken"
+        return None if choice == "subscription_options_observed" else "subscription_options_not_selected"
+    if step_id == "subscription_return_home":
+        if branch != "subscription_required":
+            return "subscription_branch_not_taken"
+        return None if choice in {"subscription_wall_observed", "subscription_options_observed", "return_home"} else "subscription_return_home_not_selected"
+    return None
 
 
 class ManualScenarioRunner:
@@ -187,15 +593,8 @@ class ManualScenarioRunner:
                     block.append("  - Perform exactly one refresh/check action around minute 2")
                     block.append("  - Do not type, send, call, upload media, search, or open external links")
                 else:
-                    block.append("  - Keep the app in the foreground")
-                    block.append("  - Minimize interactions (baseline capture)")
-                if str(run_ctx.scenario_id or "") == "paper3_profile_v3":
-                    tips = V3_BASELINE_REPRO_TIPS.get(str(getattr(run_ctx, "package_name", "") or "").strip().lower())
-                    if tips:
-                        block.append("")
-                        block.append("Repro tips:")
-                        for t in tips:
-                            block.append(f"  - {t}")
+                    block.append("  - Get the app running, then leave it in the foreground")
+                    block.append("  - Best-effort idle; interact only if needed (e.g., prevent screen lock)")
             else:
                 block.append("  - Keep the app in the foreground")
                 block.append("  - Use the app normally")
@@ -204,26 +603,6 @@ class ManualScenarioRunner:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
             _maybe_show_raw_high_value_permissions(run_ctx)
 
-            # Paper #3 operator hardening: baseline runs are easy to "accidentally interact" with.
-            # In strict mode, offer an explicit preflight pause to force-stop and relaunch before the timer starts.
-            strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
-            if (
-                strict
-                and str(run_ctx.scenario_id or "") == "paper3_profile_v3"
-                and str(profile or "").strip().lower().startswith("baseline")
-            ):
-                pkg_lc = str(getattr(run_ctx, "package_name", "") or "").strip().lower()
-                if pkg_lc in V3_BASELINE_REPRO_TIPS:
-                    # Allow disabling if the operator is running rapid repeats.
-                    pref = str(os.environ.get("SCYTALEDROID_V3_PREFLIGHT_FORCESTOP") or "1").strip().lower()
-                    if pref in {"1", "true", "yes", "on"}:
-                        print(
-                            status_messages.status(
-                                "Preflight (recommended): force-stop the app now, then relaunch to the home surface and return here.",
-                                level="warn",
-                            )
-                        )
-                        prompt_utils.press_enter_to_continue("Press Enter when the app is relaunched and idle in foreground...")
             prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
             started_at = datetime.now(UTC)
             if on_start:
@@ -253,7 +632,16 @@ class ManualScenarioRunner:
                             level="info",
                         )
                     )
-                    ended_at = _run_countdown(duration_seconds, continue_after_target=True)
+                    pkg = str(getattr(run_ctx, "package_name", "") or "").strip()
+                    ended_at = _run_countdown(
+                        duration_seconds,
+                        continue_after_target=True,
+                        timer_detail="baseline idle",
+                        device_serial=getattr(run_ctx, "device_serial", None),
+                        foreground_package=pkg,
+                        checkpoint_messages=_baseline_idle_checkpoint_messages(pkg),
+                        on_protocol_event=on_protocol_event,
+                    )
                 else:
                     ended_at = _run_stopwatch()
             elif duration_seconds:
@@ -273,10 +661,22 @@ class ManualScenarioRunner:
                 target_s = int((protocol or {}).get("target_duration_s") or duration_seconds or rec_s)
                 overrun_s = int((protocol or {}).get("target_overrun_s") or 0)
                 underrun_s = int((protocol or {}).get("target_underrun_s") or 0)
+                stopped_early = bool((protocol or {}).get("stopped_early"))
+                terminal_hold_finalize = bool((protocol or {}).get("terminal_hold_finalize"))
+                completed_steps = int((protocol or {}).get("step_count_completed") or 0)
+                planned_steps = int((protocol or {}).get("step_count_planned") or 0)
                 status_detail = ", on-target"
                 level = "info"
-                if overrun_s > 0:
-                    status_detail = f", overrun {overrun_s}s; overrun alone does not invalidate the run"
+                if terminal_hold_finalize and planned_steps > 0:
+                    status_detail = f", final hold completed ({completed_steps}/{planned_steps})"
+                elif stopped_early and planned_steps > 0:
+                    status_detail = (
+                        f", stopped early at step {completed_steps}/{planned_steps}; "
+                        "incomplete script will not count toward cohort quota"
+                    )
+                    level = "warn"
+                elif overrun_s > 0:
+                    status_detail = f", overrun {overrun_s}s; overrun alone does not invalidate technical validity"
                 elif underrun_s > 0:
                     status_detail = f", underrun {underrun_s}s"
                     level = "warn"
@@ -335,13 +735,218 @@ def _prompt_interaction_level(profile: str | None) -> str:
     return mapping.get(selection, mapping[default_key])
 
 
+_FOREGROUND_DRIFT_CHECK_INTERVAL_S = 30
+
+
+def _read_device_foreground_package(device_serial: str | None) -> str | None:
+    serial = str(device_serial or "").strip()
+    if not serial:
+        return None
+    try:
+        from scytaledroid.DeviceAnalysis.adb import client as adb_client
+
+        if not adb_client.is_available():
+            return None
+        completed = adb_client.run_shell_command(serial, ["dumpsys", "window"], timeout=10)
+        text = str(getattr(completed, "stdout", "") or "")
+    except Exception:
+        return None
+    for line in text.splitlines():
+        if "mCurrentFocus" not in line and "mFocusedApp" not in line:
+            continue
+        match = re.search(r"u0\s+([a-zA-Z0-9_.]+)/", line)
+        if match:
+            return str(match.group(1))
+    return None
+
+
+def _baseline_idle_checkpoint_messages(package_name: str) -> dict[int, str]:
+    pkg = str(package_name or "").strip() or "the target app"
+    return {
+        120: (
+            f"120s checkpoint: keep {pkg} in the foreground; "
+            "nudge only if needed to prevent screen lock."
+        ),
+    }
+
+
+def _run_baseline_interactive_loop(
+    target_duration_s: int,
+    *,
+    continue_after_target: bool = True,
+    timer_detail: str = "",
+    device_serial: str | None = None,
+    foreground_package: str | None = None,
+    checkpoint_messages: dict[int, str] | None = None,
+    on_elapsed: Callable[[int, Callable[[str, str], None]], None] | None = None,
+    on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
+) -> datetime:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        time.sleep(max(int(target_duration_s), 0))
+        return datetime.now(UTC)
+
+    start = time.monotonic()
+    line_width = 72
+    prompt_line = _timing_countdown_action_prompt_line()
+    prompt_width = max(len(prompt_line), 64)
+    last_rendered: str | None = None
+    last_render_bucket: int | None = None
+    target_reached_announced = False
+    checkpoint_emitted: set[int] = set()
+    last_foreground_warn_s = -999
+
+    def _render_timer_line(message: str) -> None:
+        nonlocal last_rendered
+        if last_rendered is None:
+            sys.stdout.write(message.ljust(line_width) + "\n")
+            sys.stdout.write(prompt_line)
+            sys.stdout.flush()
+            last_rendered = message
+            return
+        _timing_rewrite_previous_line_preserving_prompt(message, line_width=line_width)
+        last_rendered = message
+
+    def _clear_timer_lines() -> None:
+        _timing_clear_prompt_and_previous_line(line_width=line_width, prompt_width=prompt_width)
+
+    def _emit_status_and_restore_timer(message: str, *, level: str = "info") -> None:
+        nonlocal last_rendered, last_render_bucket
+        _clear_timer_lines()
+        print(status_messages.status(message, level=level))
+        last_rendered = None
+        last_render_bucket = None
+
+    _drain_stdin_nonblocking()
+
+    try:
+        while True:
+            elapsed_i = int(time.monotonic() - start)
+            remaining = max(int(target_duration_s) - elapsed_i, 0)
+            total = _format_duration(int(target_duration_s))
+            elapsed_fmt = _format_duration(elapsed_i)
+            suffix = _pulse_marker(elapsed_i)
+            detail = f" | {timer_detail}" if str(timer_detail or "").strip() else ""
+            if remaining > 0:
+                timer_msg = f"Elapsed: {elapsed_fmt} / {total}{detail}{suffix}"
+            else:
+                hold_elapsed_fmt = _format_duration(max(elapsed_i - int(target_duration_s), 0))
+                timer_msg = f"Hold after target: {hold_elapsed_fmt} / {total}{detail}{suffix}"
+
+            if on_elapsed is not None:
+                on_elapsed(elapsed_i, lambda message, level="info": _emit_status_and_restore_timer(message, level=level))
+
+            for checkpoint_s, checkpoint_msg in sorted((checkpoint_messages or {}).items()):
+                if checkpoint_s in checkpoint_emitted or elapsed_i < int(checkpoint_s):
+                    continue
+                checkpoint_emitted.add(int(checkpoint_s))
+                _emit_status_and_restore_timer(checkpoint_msg, level="info")
+                if on_protocol_event:
+                    on_protocol_event(
+                        f"BASELINE_IDLE_CHECKPOINT_{int(checkpoint_s)}",
+                        {"elapsed_s": int(elapsed_i), "checkpoint_s": int(checkpoint_s)},
+                    )
+
+            expected_pkg = str(foreground_package or "").strip()
+            if (
+                expected_pkg
+                and device_serial
+                and elapsed_i > 0
+                and elapsed_i % _FOREGROUND_DRIFT_CHECK_INTERVAL_S == 0
+                and elapsed_i != last_foreground_warn_s
+            ):
+                last_foreground_warn_s = elapsed_i
+                actual_pkg = _read_device_foreground_package(device_serial)
+                if actual_pkg and actual_pkg != expected_pkg:
+                    _emit_status_and_restore_timer(
+                        (
+                            f"Foreground drift: expected {expected_pkg}, saw {actual_pkg}. "
+                            "Return to the target app to keep baseline valid."
+                        ),
+                        level="warn",
+                    )
+                    if on_protocol_event:
+                        on_protocol_event(
+                            "BASELINE_FOREGROUND_DRIFT",
+                            {
+                                "elapsed_s": int(elapsed_i),
+                                "expected_package": expected_pkg,
+                                "actual_package": actual_pkg,
+                            },
+                        )
+
+            render_bucket = elapsed_i // 10
+            if timer_msg != last_rendered and (last_render_bucket is None or render_bucket != last_render_bucket):
+                _render_timer_line(timer_msg)
+                last_render_bucket = render_bucket
+
+            if remaining <= 0 and not target_reached_announced:
+                _emit_status_and_restore_timer(
+                    "Target reached. Keep collecting if needed; press Enter when finished.",
+                    level="info",
+                )
+                target_reached_announced = True
+                if not continue_after_target:
+                    _clear_timer_lines()
+                    print()
+                    break
+
+            readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+            if not readable:
+                continue
+            raw_line = sys.stdin.readline()
+            if str(raw_line or "").strip() == "":
+                continue
+            action = _parse_timing_action(raw_line)
+            if action == "abort":
+                if not _confirm_script_exit("abort"):
+                    _render_timer_line(timer_msg)
+                    continue
+                _clear_timer_lines()
+                print()
+                raise ScenarioAbortRequested("ABORT_DISCARD")
+            if action == "stop":
+                if not _confirm_script_exit("stop"):
+                    _render_timer_line(timer_msg)
+                    continue
+                _clear_timer_lines()
+                print()
+                break
+            if action == "enter":
+                if _should_continue_collecting(elapsed_s=elapsed_i, target_s=int(target_duration_s)):
+                    _render_timer_line(timer_msg)
+                    continue
+                _clear_timer_lines()
+                print()
+                break
+    except KeyboardInterrupt:
+        _clear_timer_lines()
+        print()
+        raise ScenarioAbortRequested("ABORT_DISCARD") from None
+    return datetime.now(UTC)
+
+
 def _run_countdown(
     duration_seconds: int,
     *,
     continue_after_target: bool = False,
     allow_early_stop: bool = True,
     ignore_stop_inputs: bool = False,
+    timer_detail: str = "",
+    device_serial: str | None = None,
+    foreground_package: str | None = None,
+    checkpoint_messages: dict[int, str] | None = None,
+    on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
 ) -> datetime:
+    if allow_early_stop and not ignore_stop_inputs:
+        return _run_baseline_interactive_loop(
+            int(duration_seconds),
+            continue_after_target=continue_after_target,
+            timer_detail=timer_detail,
+            device_serial=device_serial,
+            foreground_package=foreground_package,
+            checkpoint_messages=checkpoint_messages,
+            on_protocol_event=on_protocol_event,
+        )
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         time.sleep(max(duration_seconds, 0))
         return datetime.now(UTC)
@@ -459,6 +1064,16 @@ def _run_scripted_protocol(
     template_id, steps = _resolve_script_template(run_ctx)
     requested_template_id = _requested_script_template(run_ctx)
     template_hash = _build_template_hash(template_id, steps)
+    facebook_mode = (
+        _prompt_facebook_control_account_mode()
+        if template_id == _FACEBOOK_BEHAVIOR_V3
+        else None
+    )
+    facebook_repeat_plan = (
+        _prompt_facebook_repeat_plan()
+        if template_id == _FACEBOOK_BEHAVIOR_V3
+        else None
+    )
     protocol: dict[str, object] = {
         "interaction_protocol_version": SCRIPT_PROTOCOL_VERSION,
         "template_id": template_id,
@@ -489,6 +1104,17 @@ def _run_scripted_protocol(
         "ai_provider": None,
         "ai_prompt_id": None,
     }
+    if template_id == _FACEBOOK_BEHAVIOR_V3:
+        protocol.update(
+            {
+                "account_context": "control_test_account",
+                "control_account": True,
+                "control_account_mode": facebook_mode,
+                "mutation_allowed": facebook_mode == "control_account_active",
+                "cleanup_expected": facebook_mode == "control_account_active",
+                "repeat_plan": dict(facebook_repeat_plan or {}),
+            }
+        )
     started_monotonic = time.monotonic()
     strict_paper = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
     is_paper3 = str(getattr(run_ctx, "scenario_id", "") or "").strip() == "paper3_profile_v3"
@@ -507,13 +1133,30 @@ def _run_scripted_protocol(
                 "script_hash": template_hash,
                 "step_count_planned": len(steps),
                 "interaction_protocol_version": SCRIPT_PROTOCOL_VERSION,
+                "account_context": protocol.get("account_context"),
+                "control_account": protocol.get("control_account"),
+                "control_account_mode": protocol.get("control_account_mode"),
+                "mutation_allowed": protocol.get("mutation_allowed"),
+                "cleanup_expected": protocol.get("cleanup_expected"),
+                "repeat_plan": protocol.get("repeat_plan"),
+                "article_branch": protocol.get("article_branch"),
+                "subscription_branch_choice": protocol.get("subscription_branch_choice"),
+                "protocol_fit": protocol.get("protocol_fit"),
             },
         )
     print(status_messages.status("Scripted interactive run", level="info"))
     print(status_messages.status(f"Template: {template_id}", level="info"))
+    guided_pace_s = sum(int(step[2]) for step in steps)
     print(
         status_messages.status(
-            "Controls: D=done | L=limited | N=skip | S=stop/finalize | A=abort",
+            f"Plan: {len(steps)} steps (~{_format_duration(guided_pace_s)} guided pacing), "
+            f"target {_format_duration(int(target_duration_s))}",
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            "Controls: D=done | L=limited | N=skip | H=return home/reset | S=stop/finalize | A=abort",
             level="info",
         )
     )
@@ -551,8 +1194,12 @@ def _run_scripted_protocol(
     go_live_start_skipped = False
     blocked_article_limitation_reason: str | None = None
     blocked_article_operator_note: str | None = None
+    article_branch: str | None = None
+    subscription_choice: str | None = None
+    active_step_id: str | None = None
     try:
         for idx, (step_id, step_desc, expected_s) in enumerate(steps, start=1):
+            active_step_id = str(step_id)
             step_outcome = "completed"
             limitation_reason: str | None = None
             operator_note: str | None = None
@@ -561,7 +1208,29 @@ def _run_scripted_protocol(
             print(status_messages.status(f"Step {idx}/{len(steps)} — {step_id}", level="info"))
             print(status_messages.status(_scripted_step_description(step_id, step_desc), level="info"))
             print(status_messages.status(f"Expected: {expected_s}s", level="info"))
-            if step_id == "scroll_article" and blocked_article_limitation_reason in _SCRIPTED_ARTICLE_LIMITATION_REASONS:
+            if str(step_id) in _TERMINAL_HOLD_STEP_IDS:
+                print(
+                    status_messages.status(
+                        "Final hold: keep the app in the foreground. "
+                        "Press D when finished (avoid Ctrl+C; use S+FINALIZE only if needed).",
+                        level="warn",
+                    )
+                )
+            if template_id == _NEWS_BEHAVIOR_V2:
+                branch_skip_reason = _news_branch_skip_reason(
+                    step_id=step_id,
+                    article_branch=article_branch,
+                    subscription_choice=subscription_choice,
+                )
+                if branch_skip_reason:
+                    step_outcome = "skipped_branch_not_taken"
+                    limitation_reason = branch_skip_reason
+                    skip_stopwatch = True
+            if (
+                template_id != _NEWS_BEHAVIOR_V2
+                and step_id == "scroll_article"
+                and blocked_article_limitation_reason in _SCRIPTED_ARTICLE_LIMITATION_REASONS
+            ):
                 reason_text = _SCRIPT_LIMITATION_REASON_TEXT.get(
                     str(blocked_article_limitation_reason or "").strip(),
                     str(blocked_article_limitation_reason or "").strip() or "prior limitation",
@@ -641,6 +1310,18 @@ def _run_scripted_protocol(
                     protocol["ai_used"] = True
                     protocol["ai_provider"] = "grok"
                     protocol["ai_prompt_id"] = "grok_prompt_01"
+            current_step_metadata = _script_step_event_metadata(
+                template_id=template_id,
+                step_id=step_id,
+                facebook_mode=facebook_mode,
+                repeat_plan=facebook_repeat_plan,
+                article_branch=article_branch,
+                subscription_choice=subscription_choice,
+            )
+            if current_step_metadata.get("repeat_enabled") is False:
+                step_outcome = "skipped_optional_repeat"
+                limitation_reason = "optional_repeat_not_selected"
+                skip_stopwatch = True
             if on_protocol_event:
                 on_protocol_event(
                     "STEP_START",
@@ -649,6 +1330,7 @@ def _run_scripted_protocol(
                         "step_index": idx,
                         "expected_duration_s": expected_s,
                         "step_variant": step_variant,
+                        **current_step_metadata,
                     },
                 )
             step_elapsed = 0.0
@@ -668,10 +1350,82 @@ def _run_scripted_protocol(
                             "step_outcome": step_outcome,
                             "limitation_reason": limitation_reason,
                             "operator_note": operator_note,
+                            "operator_result": step_outcome,
+                            **_script_step_event_metadata(
+                                template_id=template_id,
+                                step_id=step_id,
+                                facebook_mode=facebook_mode,
+                                step_outcome=step_outcome,
+                                repeat_plan=facebook_repeat_plan,
+                                article_branch=article_branch,
+                                subscription_choice=subscription_choice,
+                            ),
                         },
                     )
                 protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
                 print(status_messages.status(f"Step marked skipped_not_found: {step_id}", level="warn"))
+                protocol["step_count_completed"] = idx
+                continue
+            if skip_stopwatch and step_outcome == "skipped_optional_repeat":
+                if on_protocol_event:
+                    on_protocol_event(
+                        "STEP_END",
+                        {
+                            "step_id": step_id,
+                            "step_index": idx,
+                            "elapsed_s": 0.0,
+                            "expected_duration_s": expected_s,
+                            "tolerance_s": 0.0,
+                            "within_tolerance": True,
+                            "step_variant": step_variant,
+                            "step_outcome": step_outcome,
+                            "limitation_reason": limitation_reason,
+                            "operator_note": operator_note,
+                            "operator_result": step_outcome,
+                            **_script_step_event_metadata(
+                                template_id=template_id,
+                                step_id=step_id,
+                                facebook_mode=facebook_mode,
+                                step_outcome=step_outcome,
+                                repeat_plan=facebook_repeat_plan,
+                                article_branch=article_branch,
+                                subscription_choice=subscription_choice,
+                            ),
+                        },
+                    )
+                protocol["step_skipped_optional_repeat_count"] = int(protocol.get("step_skipped_optional_repeat_count") or 0) + 1
+                print(status_messages.status(f"Step skipped optional repeat: {step_id}", level="info"))
+                protocol["step_count_completed"] = idx
+                continue
+            if skip_stopwatch and step_outcome == "skipped_branch_not_taken":
+                if on_protocol_event:
+                    on_protocol_event(
+                        "STEP_END",
+                        {
+                            "step_id": step_id,
+                            "step_index": idx,
+                            "elapsed_s": 0.0,
+                            "expected_duration_s": expected_s,
+                            "tolerance_s": 0.0,
+                            "within_tolerance": True,
+                            "step_variant": step_variant,
+                            "step_outcome": step_outcome,
+                            "limitation_reason": limitation_reason,
+                            "operator_note": operator_note,
+                            "operator_result": step_outcome,
+                            **_script_step_event_metadata(
+                                template_id=template_id,
+                                step_id=step_id,
+                                facebook_mode=facebook_mode,
+                                step_outcome=step_outcome,
+                                repeat_plan=facebook_repeat_plan,
+                                article_branch=article_branch,
+                                subscription_choice=subscription_choice,
+                            ),
+                        },
+                    )
+                protocol["step_skipped_branch_not_taken_count"] = int(protocol.get("step_skipped_branch_not_taken_count") or 0) + 1
+                print(status_messages.status(f"Step skipped branch not taken: {step_id}", level="info"))
                 protocol["step_count_completed"] = idx
                 continue
             if skip_stopwatch and step_outcome == "limited":
@@ -689,6 +1443,16 @@ def _run_scripted_protocol(
                             "step_outcome": step_outcome,
                             "limitation_reason": limitation_reason,
                             "operator_note": operator_note,
+                            "operator_result": step_outcome,
+                            **_script_step_event_metadata(
+                                template_id=template_id,
+                                step_id=step_id,
+                                facebook_mode=facebook_mode,
+                                step_outcome=step_outcome,
+                                repeat_plan=facebook_repeat_plan,
+                                article_branch=article_branch,
+                                subscription_choice=subscription_choice,
+                            ),
                         },
                     )
                 protocol["step_limited_count"] = int(protocol.get("step_limited_count") or 0) + 1
@@ -733,6 +1497,16 @@ def _run_scripted_protocol(
                                 "step_outcome": step_outcome,
                                 "limitation_reason": limitation_reason,
                                 "operator_note": operator_note,
+                                "operator_result": step_outcome,
+                                **_script_step_event_metadata(
+                                    template_id=template_id,
+                                    step_id=step_id,
+                                    facebook_mode=facebook_mode,
+                                    step_outcome=step_outcome,
+                                    repeat_plan=facebook_repeat_plan,
+                                    article_branch=article_branch,
+                                    subscription_choice=subscription_choice,
+                                ),
                             },
                         )
                     protocol["step_skipped_not_found_count"] = int(protocol.get("step_skipped_not_found_count") or 0) + 1
@@ -766,8 +1540,10 @@ def _run_scripted_protocol(
                         allow_early_stop=not (strict_paper and is_paper3),
                         ignore_stop_inputs=bool(strict_paper and is_paper3),
                     )
+                    protocol["duration_pad_applied_in_loop"] = True
             else:
                 step_start = time.monotonic()
+                guided_remaining_s = sum(int(step[2]) for step in steps[idx - 1 :])
                 step_outcome = _wait_for_step_completion_with_stopwatch(
                     step_index=idx,
                     step_count=len(steps),
@@ -775,6 +1551,30 @@ def _run_scripted_protocol(
                     script_started_monotonic=started_monotonic,
                     step_started_monotonic=step_start,
                     target_duration_s=int(target_duration_s),
+                    guided_remaining_s=guided_remaining_s,
+                    on_phase_marker=(
+                        (
+                            lambda marker, _idx=idx, _step_id=step_id: on_protocol_event(
+                                "PHASE_MARKER",
+                                {
+                                    "step_id": _step_id,
+                                    "step_index": _idx,
+                                    **_script_step_event_metadata(
+                                        template_id=template_id,
+                                        step_id=_step_id,
+                                        facebook_mode=facebook_mode,
+                                        step_outcome="completed",
+                                        repeat_plan=facebook_repeat_plan,
+                                        article_branch=article_branch,
+                                        subscription_choice=subscription_choice,
+                                    ),
+                                    **marker,
+                                },
+                            )
+                        )
+                        if on_protocol_event
+                        else None
+                    ),
                 )
                 if isinstance(step_outcome, tuple):
                     step_outcome, limitation_reason, operator_note = step_outcome
@@ -807,6 +1607,21 @@ def _run_scripted_protocol(
                         protocol["call_end_reason"] = "user_end"
                 if step_id == "end_call" and protocol.get("call_attempted") is True:
                     protocol["call_end_reason"] = protocol.get("call_end_reason") or "user_end"
+                if step_id == "open_article":
+                    limitation_reason = _normalize_limitation_reason(limitation_reason)
+                    if step_outcome == "completed":
+                        article_branch = "article_opened"
+                    elif limitation_reason:
+                        article_branch = limitation_reason
+                        if limitation_reason == "subscription_required":
+                            subscription_choice = _prompt_news_subscription_branch()
+                        protocol["article_branch"] = article_branch
+                        protocol["protocol_fit"] = (
+                            "limited_but_compliant"
+                            if article_branch in {"subscription_required", "login_required"}
+                            else "limited"
+                        )
+                        protocol["subscription_branch_choice"] = subscription_choice
             tolerance = min(max(0.25 * float(expected_s), 5.0), 30.0)
             within = step_elapsed <= (float(expected_s) + tolerance)
             if not within:
@@ -828,18 +1643,31 @@ def _run_scripted_protocol(
                         "step_outcome": step_outcome,
                         "limitation_reason": limitation_reason,
                         "operator_note": operator_note,
+                        "operator_result": step_outcome,
+                        **_script_step_event_metadata(
+                            template_id=template_id,
+                            step_id=step_id,
+                            facebook_mode=facebook_mode,
+                            step_outcome=step_outcome,
+                            repeat_plan=facebook_repeat_plan,
+                            article_branch=article_branch,
+                            subscription_choice=subscription_choice,
+                        ),
                     },
                 )
             protocol["step_count_completed"] = idx
     except _StopScriptEarly:
-        protocol["script_exit_code"] = int(protocol.get("script_exit_code") or 0) or 130
-        deviations = protocol.get("deviation_codes")
-        if isinstance(deviations, list):
-            deviations.append("STOPPED_EARLY")
-        print(status_messages.status("Stop requested; finalizing run early.", level="warn"))
+        _apply_script_early_stop(protocol, active_step_id=active_step_id)
+    except KeyboardInterrupt:
+        strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if strict:
+            raise ScenarioAbortRequested("ABORT_DISCARD") from None
+        _apply_script_early_stop(protocol, active_step_id=active_step_id)
     elapsed_total = int(time.monotonic() - started_monotonic)
     remaining = max(int(target_duration_s) - elapsed_total, 0)
-    if remaining > 0 and int(protocol.get("script_exit_code") or 0) == 0:
+    if remaining > 0 and int(protocol.get("script_exit_code") or 0) == 0 and not bool(
+        protocol.get("duration_pad_applied_in_loop")
+    ):
         # Safety: ensure scripted runs honor target duration even if the template
         # omitted an explicit hold step.
         print(status_messages.status(f"Protocol completed; hold foreground for {remaining}s.", level="info"))
@@ -896,6 +1724,14 @@ def _run_scripted_protocol(
                 "ai_used": protocol.get("ai_used"),
                 "ai_provider": protocol.get("ai_provider"),
                 "ai_prompt_id": protocol.get("ai_prompt_id"),
+                "account_context": protocol.get("account_context"),
+                "control_account": protocol.get("control_account"),
+                "control_account_mode": protocol.get("control_account_mode"),
+                "mutation_allowed": protocol.get("mutation_allowed"),
+                "cleanup_expected": protocol.get("cleanup_expected"),
+                "repeat_plan": protocol.get("repeat_plan"),
+                "terminal_hold_finalize": protocol.get("terminal_hold_finalize"),
+                "stopped_early": protocol.get("stopped_early"),
             },
         )
     if (
@@ -915,6 +1751,7 @@ def _run_scripted_protocol(
         "messaging_text_v1",
         "whatsapp_idle_v1",
         "whatsapp_text_v1",
+        "whatsapp_text_behavior_v2",
     }
     if (
         template_id in non_call_messaging_templates
@@ -981,35 +1818,24 @@ def _run_messaging_connected_baseline(
             },
         )
 
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
-        time.sleep(max(int(target_duration_s), 0))
-        if on_protocol_event:
-            on_protocol_event(
-                "BASELINE_CONNECTED_END",
-                {"target_duration_s": int(target_duration_s), "advisory_prompts_emitted": 0},
-            )
-        return datetime.now(UTC)
-
-    start = time.monotonic()
-    line_width = 56
-    last_rendered = None
     action_idx = 0
     refresh_emitted = False
     checkpoint_emitted = False
     advisory_prompts_emitted = 0
-    target_reached_announced = False
-    while True:
-        elapsed_i = int(time.monotonic() - start)
-        remaining = max(int(target_duration_s) - elapsed_i, 0)
+    pkg = str(getattr(run_ctx, "package_name", "") or "").strip()
 
+    def _on_elapsed(
+        elapsed_i: int,
+        emit_status: Callable[[str, str], None],
+    ) -> None:
+        nonlocal action_idx, refresh_emitted, checkpoint_emitted, advisory_prompts_emitted
         while action_idx < len(action_schedule_s) and elapsed_i >= int(action_schedule_s[action_idx]):
-            _clear_status_line(line_width)
             advisory_prompts_emitted += 1
             prompt_msg = (
                 "Baseline-connected prompt: perform one allowed non-mutating check "
                 "(small thread scroll OR chat-list/thread switch), then continue holding foreground."
             )
-            print(status_messages.status(prompt_msg, level="info"))
+            emit_status(prompt_msg, "info")
             if on_protocol_event:
                 on_protocol_event(
                     "BASELINE_CONNECTED_ACTION_PROMPT",
@@ -1022,13 +1848,10 @@ def _run_messaging_connected_baseline(
             action_idx += 1
 
         if (not refresh_emitted) and elapsed_i >= int(refresh_check_s):
-            _clear_status_line(line_width)
             advisory_prompts_emitted += 1
-            print(
-                status_messages.status(
-                    "Baseline-connected prompt: perform the single refresh/check action now, then return to thread and hold.",
-                    level="info",
-                )
+            emit_status(
+                "Baseline-connected prompt: perform the single refresh/check action now, then return to thread and hold.",
+                "info",
             )
             if on_protocol_event:
                 on_protocol_event(
@@ -1041,12 +1864,9 @@ def _run_messaging_connected_baseline(
             refresh_emitted = True
 
         if (not checkpoint_emitted) and elapsed_i >= 120:
-            _clear_status_line(line_width)
-            print(
-                status_messages.status(
-                    "120s checkpoint: if packet span appears low, do one allowed non-mutating check action now.",
-                    level="warn",
-                )
+            emit_status(
+                "120s checkpoint: if packet span appears low, do one allowed non-mutating check action now.",
+                "warn",
             )
             if on_protocol_event:
                 on_protocol_event(
@@ -1055,40 +1875,15 @@ def _run_messaging_connected_baseline(
                 )
             checkpoint_emitted = True
 
-        total = _format_duration(int(target_duration_s))
-        elapsed_fmt = _format_duration(elapsed_i)
-        suffix = _pulse_marker(elapsed_i)
-        if remaining > 0:
-            message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
-        else:
-            hold_elapsed_fmt = _format_duration(max(elapsed_i - int(target_duration_s), 0))
-            message = f"\rHold after target: {hold_elapsed_fmt} (target {total} reached){suffix}".ljust(line_width)
-        if message != last_rendered:
-            sys.stdout.write(message)
-            sys.stdout.flush()
-            last_rendered = message
-        if remaining <= 0 and not target_reached_announced:
-            _clear_status_line(line_width)
-            print(
-                status_messages.status(
-                    "Target reached. Keep collecting if needed; press Enter when finished.",
-                    level="info",
-                )
-            )
-            target_reached_announced = True
-        readable, _, _ = select.select([sys.stdin], [], [], 1.0)
-        if readable:
-            action = _parse_timing_action(sys.stdin.readline())
-            if action == "abort":
-                _clear_status_line(line_width)
-                print()
-                raise ScenarioAbortRequested("ABORT_DISCARD")
-            if action in {"enter", "stop"}:
-                if _should_continue_collecting(elapsed_s=elapsed_i, target_s=int(target_duration_s)):
-                    continue
-                _clear_status_line(line_width)
-                print()
-                break
+    ended_at = _run_baseline_interactive_loop(
+        int(target_duration_s),
+        continue_after_target=True,
+        timer_detail="connected baseline",
+        device_serial=getattr(run_ctx, "device_serial", None),
+        foreground_package=pkg,
+        on_elapsed=_on_elapsed,
+        on_protocol_event=on_protocol_event,
+    )
     if on_protocol_event:
         on_protocol_event(
             "BASELINE_CONNECTED_END",
@@ -1102,7 +1897,7 @@ def _run_messaging_connected_baseline(
     protocol["advisory_prompts_emitted"] = int(advisory_prompts_emitted)
     protocol["refresh_prompt_emitted"] = bool(refresh_emitted)
     protocol["checkpoint_120_emitted"] = bool(checkpoint_emitted)
-    return datetime.now(UTC)
+    return ended_at
 
 
 def _build_baseline_connected_schedule(*, run_id: str, target_duration_s: int) -> tuple[list[int], int]:
@@ -1210,8 +2005,54 @@ def _build_template_hash(template_id: str, steps: tuple[tuple[str, str, int], ..
         "step3_variant_rule": (
             "open_info_or_media: allowed variants are info|media; variant must be recorded"
         ),
+        "control_account_metadata": (
+            {
+                "account_context": "control_test_account",
+                "mutation_allowed_modes": ["control_account_active"],
+                "cleanup_expected_modes": ["control_account_active"],
+                "repeat_groups": {
+                    "friend_request_accept": 2,
+                    "text_post_submit": 3,
+                    "photo_post_submit": 3,
+                },
+            }
+            if template_id == _FACEBOOK_BEHAVIOR_V3
+            else None
+        ),
+        "news_branch_metadata": (
+            {
+                "article_branch_values": [
+                    "article_opened",
+                    "subscription_required",
+                    "login_required",
+                    "not_available_in_ui_or_account",
+                    "region_or_content_unavailable",
+                    "app_error",
+                    "operator_other",
+                ],
+                "subscription_branch_choices": dict(_NEWS_SUBSCRIPTION_BRANCH_CHOICES),
+                "subscription_protocol_fit": "limited_but_compliant",
+            }
+            if template_id == _NEWS_BEHAVIOR_V2
+            else None
+        ),
         "steps": [
-            {"id": sid, "text": sdesc, "expected_s": int(sexp)}
+            {
+                "id": sid,
+                "text": sdesc,
+                "expected_s": int(sexp),
+                **_script_step_event_metadata(
+                    template_id=template_id,
+                    step_id=sid,
+                    facebook_mode="control_account_active",
+                    repeat_plan={
+                        "text_post_submit": 3,
+                        "photo_post_submit": 3,
+                        "friend_request_accept": 2,
+                    },
+                    article_branch="article_opened",
+                ),
+            }
             for sid, sdesc, sexp in steps
         ],
     }
@@ -1305,13 +2146,15 @@ def _wait_for_step_completion_with_stopwatch(
     script_started_monotonic: float,
     step_started_monotonic: float,
     target_duration_s: int,
+    guided_remaining_s: int | None = None,
+    on_phase_marker: Callable[[dict[str, object]], None] | None = None,
 ) -> tuple[str, str | None, str | None]:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         prompt_utils.press_enter_to_continue("Press Enter when step is complete...")
         return ("completed", None, None)
     # Operators asked for a single stopwatch view with a stable prompt line.
     line_width = 72
-    prompt_line = "Action [D/L/N] \u203a "
+    prompt_line = "Action [D/L/N/H] \u203a "
     prompt_width = 64
     last_rendered = None
     last_render_bucket: int | None = None
@@ -1324,19 +2167,11 @@ def _wait_for_step_completion_with_stopwatch(
             sys.stdout.flush()
             last_rendered = message
             return
-        sys.stdout.write("\x1b7")
-        sys.stdout.write("\x1b[1A\r")
-        sys.stdout.write((" " * int(line_width)) + "\r")
-        sys.stdout.write(message.ljust(line_width))
-        sys.stdout.write("\x1b8")
-        sys.stdout.flush()
+        _timing_rewrite_previous_line_preserving_prompt(message, line_width=line_width)
         last_rendered = message
 
     def _clear_step_prompt_lines() -> None:
-        sys.stdout.write("\r" + (" " * int(prompt_width)) + "\r")
-        sys.stdout.write("\x1b[1A\r" + (" " * int(line_width)) + "\r")
-        sys.stdout.write("\x1b[1B\r")
-        sys.stdout.flush()
+        _timing_clear_prompt_and_previous_line(line_width=line_width, prompt_width=prompt_width)
 
     _drain_stdin_nonblocking()
 
@@ -1347,6 +2182,13 @@ def _wait_for_step_completion_with_stopwatch(
             target_fmt = _format_duration(int(target_duration_s))
             render_bucket = total_elapsed_i // 10
             msg = f"Elapsed: {total_elapsed_fmt} / {target_fmt} | Step {step_index}/{step_count} — {step_id}"
+            if guided_remaining_s is not None and int(guided_remaining_s) > 0:
+                msg = f"{msg} | ~{_format_duration(int(guided_remaining_s))} guided remaining"
+            if (
+                str(step_id) in _TERMINAL_HOLD_STEP_IDS
+                and total_elapsed_i >= int(target_duration_s)
+            ):
+                msg = f"{msg} | Target reached — press D to complete"
             if msg != last_rendered and (last_render_bucket is None or render_bucket != last_render_bucket):
                 _render_timer_line(msg)
                 last_render_bucket = render_bucket
@@ -1383,6 +2225,20 @@ def _wait_for_step_completion_with_stopwatch(
                     print()
                     limitation_reason, operator_note = _prompt_scripted_limitation_details(step_id)
                     return ("limited", limitation_reason, operator_note)
+                if action == "return_home":
+                    if on_phase_marker:
+                        on_phase_marker(
+                            {
+                                "phase_id": "return_home_manual",
+                                "phase_label": "Return Home Manual",
+                                "operator_result": "done",
+                                "mutation_performed": False,
+                            }
+                        )
+                    print(status_messages.status("Return-home/reset marker recorded.", level="info"))
+                    _clear_step_prompt_lines()
+                    print()
+                    return ("completed", None, None)
     except KeyboardInterrupt:
         _clear_step_prompt_lines()
         print()
@@ -1403,7 +2259,7 @@ def _prompt_scripted_limitation_details(step_id: str) -> tuple[str, str | None]:
         default="1",
         invalid_message=f"Choose 1-{len(SCRIPT_LIMITATION_REASON_LABELS)}.",
     )
-    limitation_reason = SCRIPT_LIMITATION_REASON_LABELS[int(choice) - 1][0]
+    limitation_reason = _normalize_limitation_reason(SCRIPT_LIMITATION_REASON_LABELS[int(choice) - 1][0])
     operator_note = prompt_utils.prompt_text(
         "Optional operator note",
         required=False,

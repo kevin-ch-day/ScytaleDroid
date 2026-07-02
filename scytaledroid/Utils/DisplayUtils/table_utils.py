@@ -34,7 +34,13 @@ def _pad_visible_right(text: str, width: int) -> str:
     return " " * (width - visible) + text
 
 
-def _shrink_widths(widths: list[int], available: int, padding: int) -> list[int]:
+def _shrink_widths(
+    widths: list[int],
+    available: int,
+    padding: int,
+    *,
+    min_widths: Sequence[int] | None = None,
+) -> list[int]:
     if not widths:
         return widths
     total_padding = padding * (len(widths) - 1)
@@ -43,12 +49,13 @@ def _shrink_widths(widths: list[int], available: int, padding: int) -> list[int]
         return widths
 
     adjusted = widths[:]
-    min_width = 4
+    floors = list(min_widths or [])
     changed = True
     while sum(adjusted) > target and changed:
         changed = False
         for idx in reversed(range(len(adjusted))):
-            if adjusted[idx] > min_width and sum(adjusted) > target:
+            floor = floors[idx] if idx < len(floors) else 4
+            if adjusted[idx] > floor and sum(adjusted) > target:
                 adjusted[idx] -= 1
                 changed = True
     return adjusted
@@ -68,6 +75,7 @@ def render_table(
     zebra: bool = False,
     max_rows: int | None = None,
     footer: str | None = None,
+    min_widths: Sequence[int] | None = None,
 ) -> None:
     """Render a simple left-aligned ASCII table."""
 
@@ -85,8 +93,13 @@ def render_table(
         for idx, cell in enumerate(row):
             widths[idx] = max(widths[idx], text_blocks.visible_width(_stringify(cell)))
 
+    if min_widths:
+        for idx, floor in enumerate(min_widths):
+            if idx < len(widths):
+                widths[idx] = max(widths[idx], max(1, int(floor)))
+
     term_width = get_terminal_width()
-    widths = _shrink_widths(widths, term_width, padding)
+    widths = _shrink_widths(widths, term_width, padding, min_widths=min_widths)
 
     pad = " " * (1 if compact else padding)
     header_cells = [

@@ -163,3 +163,36 @@ def test_default_service_signal_map_seeds_cover_meta_sdk_and_microsoft_ads_atlas
     assert "ad_measurement_or_verification" in by_service["freewheel"]
     assert "third_party_analytics_measurement" in by_service["mux_data"]
     assert "third_party_advertising" in by_service["brightline_ctv"]
+    assert "first_party_social_platform" in by_service["instagram_platform"]
+    assert "first_party_social_platform" in by_service["instagram_media_cdn"]
+    assert "first_party_social_platform" in by_service["linkedin_platform"]
+    assert "first_party_social_platform" in by_service["linkedin_cdn"]
+    assert "first_party_social_platform" in by_service["pinterest_platform"]
+    assert "first_party_social_platform" in by_service["pinterest_media_cdn"]
+    assert "consent_management_platform" in by_service["onetrust_cmp"]
+    assert "consent_management_platform" in by_service["sourcepoint_cmp"]
+    assert "subscription_or_paywall_platform" in by_service["piano"]
+    assert "third_party_analytics_measurement" in by_service["piano"]
+    assert "push_or_engagement_platform" in by_service["braze_sdk"]
+    assert "ad_measurement_or_verification" in by_service["confiant_ad_security"]
+    assert "bot_or_abuse_prevention" in by_service["confiant_ad_security"]
+    assert "privacy_gateway_or_proxy" in by_service["cloudflare_privacy_gateway"]
+    assert "shared_platform_infrastructure" in by_service["cloudflare_privacy_gateway"]
+    assert "bot_or_abuse_prevention" in by_service["google_recaptcha"]
+    assert "bot_or_abuse_prevention" in by_service["human_security_bot_defense"]
+    assert "shared_platform_infrastructure" in by_service["ns1_connect"]
+    assert "shared_platform_infrastructure" in by_service["akamai_diagnostics"]
+    assert "first_party_social_platform" in by_service["reddit_platform"]
+    assert "first_party_social_platform" in by_service["reddit_media_cdn"]
+    assert "first_party_social_platform" in by_service["snapchat_platform"]
+    assert "first_party_social_platform" in by_service["snapchat_cdn"]
+    assert "first_party_social_platform" in by_service["signal_platform"]
+    assert "identity_or_tag_management" in by_service["firebase_installations"]
+    assert "shared_platform_infrastructure" in by_service["cloudflare_realtime_relay"]
+    assert "bot_or_abuse_prevention" in by_service["microsoft_fraud_protection"]
+
+    signals = {row["signal_key"] for row in service_signals.default_signal_catalog_seed_rows()}
+    assert "consent_management_platform" in signals
+    assert "subscription_or_paywall_platform" in signals
+    assert "bot_or_abuse_prevention" in signals
+    assert "privacy_gateway_or_proxy" in signals

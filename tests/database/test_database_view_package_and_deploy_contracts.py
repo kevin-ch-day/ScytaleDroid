@@ -75,6 +75,29 @@ def test_web_runtime_run_index_prefers_dynamic_run_context_semantics() -> None:
     assert "FROM dynamic_sessions ds" not in sql
 
 
+def test_web_dynamic_app_queue_v1_uses_cohort_and_quota_semantics() -> None:
+    sql = views.CREATE_V_WEB_DYNAMIC_APP_QUEUE_V1
+    assert "CREATE OR REPLACE VIEW v_web_dynamic_app_queue_v1" in sql
+    assert "research_cohort_members" in sql
+    assert "research_dataset_beta" in sql
+    assert "v_dynamic_run_context_v1" in sql
+    assert "baseline_quota_counted" in sql
+    assert "interactive_quota_counted" in sql
+    assert "current_build_baseline_quota_counted" in sql
+    assert "all_build_baseline_quota_counted" in sql
+    assert "legacy_unknown_runs" in sql
+    assert "baseline_extra_valid" in sql
+    assert "baseline_low_signal_retained" in sql
+    assert "collection_status" in sql
+    assert "quota_gap_label" in sql
+    assert "data_scope" in sql
+    assert "db_current_build" in sql
+    assert "latest_scoped_valid_dataset_run" in sql
+    assert "current_build_invalid_run_count" in sql
+    assert "3 AS baseline_required" in sql
+    assert "4 AS interactive_required" in sql
+
+
 def test_web_runtime_run_detail_enriches_dynamic_sessions_with_context_states() -> None:
     sql = views.CREATE_V_WEB_RUNTIME_RUN_DETAIL
     assert "FROM dynamic_sessions ds" in sql

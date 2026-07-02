@@ -22,6 +22,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis import (
     correlate_static_roots_with_dynamic_indicators,
     dynamic_indicators_from_report,
 )
+from scytaledroid.StaticAnalysis.modules.string_analysis.enrichment import initial_posture
 
 
 def _fixture_google_api_key() -> str:
@@ -431,6 +432,57 @@ def test_documentary_http_urls_do_not_raise_cleartext_bucket() -> None:
     assert payload["counts"]["http_cleartext"] == 0
 
 
+def test_common_library_documentation_http_urls_do_not_raise_cleartext_bucket() -> None:
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="http://protobuf.dev/programming-guides/enum/#java",
+                origin="classes.dex",
+                origin_type="code",
+            ),
+            IndexedString(
+                value="http://dashif.org/guidelines/thumbnail_tile",
+                origin="classes.dex",
+                origin_type="code",
+            ),
+            IndexedString(
+                value="http://unicode.org/reports/tr35/",
+                origin="classes.dex",
+                origin_type="code",
+            ),
+            IndexedString(
+                value="http://sourceforge.net/projects/slf4j/",
+                origin="classes.dex",
+                origin_type="code",
+            ),
+        )
+    )
+
+    payload = _analyse_strings_from_index(
+        index,
+        mode="both",
+        min_entropy=4.8,
+        max_samples=5,
+        cleartext_only=False,
+        include_https_risk=False,
+    )
+
+    assert payload["counts"]["endpoints"] == 0
+    assert payload["counts"]["http_cleartext"] == 0
+
+
+def test_documentary_cleartext_posture_stays_exploratory() -> None:
+    assert (
+        initial_posture(
+            bucket="http_cleartext",
+            risk_tag="http_cleartext",
+            ownership_class="documentary",
+            confidence="high",
+        )
+        == "exploratory"
+    )
+
+
 def test_google_key_and_google_endpoint_form_actionable_pair() -> None:
     index = StringIndex(
         strings=(
@@ -529,6 +581,47 @@ def test_documentary_and_local_strings_classify_ownership() -> None:
     uri_sample = payload["selected_samples"]["uris"][0]
     assert uri_sample["ownership_class"] == "local_or_non_network"
     assert payload["counts"]["endpoints"] == 0
+
+
+def test_tiktok_package_family_domains_classify_first_party() -> None:
+    index = StringIndex(
+        strings=(
+            IndexedString(
+                value="https://api16-normal-useast5.tiktokv.us/service",
+                origin="classes.dex",
+                origin_type="code",
+            ),
+            IndexedString(
+                value="https://lf16-cdn-tos.tiktokcdn-us.com/asset.js",
+                origin="classes.dex",
+                origin_type="code",
+            ),
+            IndexedString(
+                value="https://p19-oec-va.ibyteimg.com/img.webp",
+                origin="classes.dex",
+                origin_type="code",
+            ),
+        )
+    )
+
+    payload = _analyse_strings_from_index(
+        index,
+        mode="both",
+        min_entropy=4.8,
+        max_samples=5,
+        cleartext_only=False,
+        include_https_risk=False,
+        artifact_context={"package_name": "com.zhiliaoapp.musically"},
+    )
+
+    endpoint_samples = payload["samples"]["endpoints"]
+    ownership_by_root = {
+        sample["root_domain"]: sample["ownership_class"]
+        for sample in endpoint_samples
+    }
+    assert ownership_by_root["tiktokv.us"] == "first_party"
+    assert ownership_by_root["tiktokcdn-us.com"] == "first_party"
+    assert ownership_by_root["ibyteimg.com"] == "first_party"
 
 
 def test_merge_payloads_preserves_posture_and_pair_fields() -> None:

@@ -72,6 +72,16 @@ def test_classify_record_boundaries() -> None:
     ) == ("INVALID_EXCLUDED", "invalid or PCAP-excluded evidence")
 
 
+def test_has_pcap_artifact_supports_pcapng(tmp_path: Path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    capture_dir = artifacts_dir / "pcapdroid_capture"
+    capture_dir.mkdir(parents=True)
+    (capture_dir / "capture.pcapng").write_bytes(b"pcapng")
+    (capture_dir / "capture.pcapng.json").write_text("{}", encoding="utf-8")
+
+    assert report._has_pcap_artifact(artifacts_dir) is True
+
+
 def test_generate_report_writes_expected_outputs_and_rollups(tmp_path: Path) -> None:
     db_rows = [
         {

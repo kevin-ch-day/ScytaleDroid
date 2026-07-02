@@ -11,18 +11,52 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_evidence_label,
     selected_app_qa_badge_from_label,
 )
+from scytaledroid.DynamicAnalysis.run_qualification import (
+    bucket_detail_column_label,
+    bucket_evidence_label,
+    bucket_quota_label,
+    format_quota_progress_compact,
+    format_quota_progress_label,
+    format_supplemental_column_label,
+    format_supplemental_suffix,
+    row_baseline_ml_pool_size,
+    supplemental_baseline_queue_action,
+)
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
 
 
 def _supplemental_suffix(*, extra: int = 0, low_signal: int = 0) -> str:
-    parts: list[str] = []
-    extra_i = max(0, int(extra))
-    low_i = max(0, int(low_signal))
-    if extra_i > 0:
-        parts.append(f"+{extra_i}")
-    if low_i > 0:
-        parts.append(f"+{low_i} low")
-    return (" " + " ".join(parts)) if parts else ""
+    return format_supplemental_suffix(extra=extra, low_signal=low_signal)
+
+
+def queue_supplemental_column_label(*, extra: int = 0, low_signal: int = 0) -> str:
+    """Compact supplemental evidence label for queue table columns."""
+    return format_supplemental_column_label(extra=extra, low_signal=low_signal)
+
+
+_QUEUE_TABLE_APP_LABEL_OVERRIDES: dict[str, str] = {
+    "facebook messenger": "Facebook Msg",
+    "x (twitter)": "X",
+    "the guardian": "Guardian",
+}
+
+
+def queue_table_app_label(display_name: object) -> str:
+    """Compact app label for the queue table (full name remains elsewhere)."""
+    raw = str(display_name or "").strip()
+    if not raw:
+        return "—"
+    override = _QUEUE_TABLE_APP_LABEL_OVERRIDES.get(raw.casefold())
+    if override:
+        return override
+    if re.fullmatch(r"x\s*\(twitter\)", raw, flags=re.IGNORECASE):
+        return "X"
+    messenger_suffix = " messenger"
+    if raw.casefold().endswith(messenger_suffix):
+        return f"{raw[: -len(messenger_suffix)]} Msg"
+    if raw.startswith("The ") and len(raw) > 4:
+        return raw[4:].strip()
+    return raw
 
 
 def recommended_reason(row: Any) -> str:
@@ -40,6 +74,11 @@ def recommended_reason(row: Any) -> str:
         return f"baseline runs needed: {row.need_baseline}"
     if row.need_interactive > 0:
         return f"baseline complete, interactive runs needed: {row.need_interactive}"
+    baseline_pool = row_baseline_ml_pool_size(row)
+    if baseline_pool > 0:
+        return f"quota complete; ML training pool has {baseline_pool} supplemental baseline(s)"
+    if supplemental_baseline_queue_action(getattr(row, "next_label", None)):
+        return "quota complete; supplemental baselines improve ML training and pattern averages"
     extra_total = (
         int(row.baseline_extra)
         + int(getattr(row, "baseline_low_signal_supplemental", 0) or 0)
@@ -49,6 +88,111 @@ def recommended_reason(row: Any) -> str:
     if extra_total > 0:
         return f"quota complete, {extra_total} extra run(s) retained"
     return "quota state up to date"
+
+
+def lineage_rank(lineage_state: str) -> int:
+    order = {
+        "current_build_observed": 0,
+        "current_build_db_only": 1,
+        "historical_local_only": 2,
+        "historical_db_only": 3,
+        "no_evidence_anywhere": 4,
+    }
+    return order.get(str(lineage_state or ""), 9)
+
+
+def capture_candidate_priority(row: Any) -> tuple[int, int, int, int, str]:
+    state = str(getattr(row, "lineage_state", "") or "")
+    need_baseline = int(getattr(row, "need_baseline", 0) or 0)
+    need_interactive = int(getattr(row, "need_interactive", 0) or 0)
+    if need_baseline <= 0 and need_interactive > 0:
+        phase_rank = 0
+        remaining = need_interactive
+        scope_rank = lineage_rank(state)
+    elif need_baseline > 0:
+        phase_rank = 1
+        remaining = need_baseline
+        scope_rank = {
+            "no_evidence_anywhere": 0,
+            "historical_local_only": 1,
+            "historical_db_only": 2,
+            "current_build_observed": 3,
+            "current_build_db_only": 4,
+        }.get(state, 9)
+    else:
+        phase_rank = 9
+        remaining = 99
+        scope_rank = 9
+    current_progress = -(
+        int(getattr(row, "baseline_countable", 0) or 0)
+        + int(getattr(row, "interactive_countable", 0) or 0)
+    )
+    display_name = str(getattr(row, "display_name", "") or "").strip().lower()
+    return (phase_rank, scope_rank, remaining, current_progress, display_name)
+
+
+def select_capture_candidates(rows: list[Any], *, limit: int = 5) -> list[Any]:
+    filtered = [
+        row
+        for row in rows
+        if not getattr(row, "live_build_drift", False)
+        and (
+            int(getattr(row, "need_baseline", 0) or 0) > 0
+            or int(getattr(row, "need_interactive", 0) or 0) > 0
+        )
+    ]
+    if not filtered:
+        return []
+    ranked = sorted(filtered, key=capture_candidate_priority)
+    return ranked[: max(1, int(limit))]
+
+
+def build_drift_app_summaries(
+    row_models: list[Any],
+    *,
+    queue_status_label_fn,
+    baseline_label_fn,
+    interactive_label_fn,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for row in row_models:
+        if not getattr(row, "live_build_drift", False):
+            continue
+        lineage_state = str(getattr(row, "lineage_state", "") or "")
+        if lineage_state == "current_build_observed":
+            evidence_scope = "current-build evidence exists, but it is no longer live-current after device drift"
+        elif lineage_state == "current_build_db_only":
+            evidence_scope = "DB-known current-build evidence exists, but live device drift blocks new current-build claims"
+        else:
+            evidence_scope = "older build evidence remains historically valid, but not live-current"
+        rows.append(
+            {
+                "package_name": str(getattr(row, "package_name", "") or "").strip(),
+                "app": str(getattr(row, "display_name", "") or "").strip(),
+                "status": str(queue_status_label_fn(row) or "").strip(),
+                "baseline": str(baseline_label_fn(row) or "").strip(),
+                "interactive": str(interactive_label_fn(row) or "").strip(),
+                "installed_build": str(getattr(row, "live_observed_version_code", "") or "").strip() or "unknown",
+                "static_plan_build": str(getattr(row, "live_expected_version_code", "") or "").strip() or "unknown",
+                "static_plan_version_name": str(getattr(row, "live_expected_version_name", "") or "").strip() or "unknown",
+                "static_run_id": str(getattr(row, "live_static_run_id", "") or "").strip() or "unknown",
+                "lineage_state": lineage_state,
+                "evidence_scope": evidence_scope,
+                "recommendation": "refresh inventory/harvest/static before new live-current capture",
+            }
+        )
+    return sorted(rows, key=lambda item: (item["app"].lower(), item["package_name"]))
+
+
+def format_capture_plan_line(rows: list[Any], *, limit: int = 3) -> str:
+    candidates = select_capture_candidates(rows, limit=limit)
+    if not candidates:
+        return ""
+    parts: list[str] = []
+    for index, row in enumerate(candidates, start=1):
+        action = display_action_label(row)
+        parts.append(f"{index}. {getattr(row, 'display_name', '?')} ({action})")
+    return " | ".join(parts)
 
 
 def compact_warning_line(row_models: list[Any]) -> str:
@@ -232,23 +376,26 @@ def queue_remaining_summary(row_models: list[Any]) -> str:
 
 
 def queue_state_label(row: Any) -> str:
-    if row.live_build_drift:
+    if bool(getattr(row, "live_build_drift", False)):
         return "refresh"
-    if row.lineage_state == "current_build_db_only":
+    lineage_state = str(getattr(row, "lineage_state", "") or "")
+    if lineage_state == "current_build_db_only":
         return "restore"
-    if row.lineage_state in {"historical_local_only", "historical_db_only"}:
-        if row.need_baseline > 0:
+    if lineage_state in {"historical_local_only", "historical_db_only"}:
+        if int(getattr(row, "need_baseline", 0) or 0) > 0:
             return "baseline"
         return "legacy"
-    if str(row.qa_label).startswith("invalid"):
+    if str(getattr(row, "qa_label", "") or "").startswith("invalid"):
         return "review"
-    if row.need_baseline > 0:
+    if int(getattr(row, "need_baseline", 0) or 0) > 0:
         return "baseline"
-    if row.need_interactive > 0:
+    if int(getattr(row, "need_interactive", 0) or 0) > 0:
         return "manual"
-    if row.next_label == "—":
+    if supplemental_baseline_queue_action(getattr(row, "next_label", None)):
         return "complete"
-    if row.prep_label == "mixed":
+    if str(getattr(row, "next_label", "") or "") == "—":
+        return "complete"
+    if str(getattr(row, "prep_label", "") or "") == "mixed":
         return "review"
     return "blocked"
 
@@ -290,6 +437,56 @@ def queue_need_label(
     return "—"
 
 
+def queue_quota_gap_label(row: Any) -> str:
+    """Compact quota shortfall for archive math (e.g. 3B, 2I, 3B 2I)."""
+    parts: list[str] = []
+    need_baseline = int(getattr(row, "need_baseline", 0) or 0)
+    need_interactive = int(getattr(row, "need_interactive", 0) or 0)
+    if need_baseline > 0:
+        parts.append(f"{need_baseline}B")
+    if need_interactive > 0:
+        parts.append(f"{need_interactive}I")
+    return " ".join(parts) if parts else "—"
+
+
+def queue_table_qa_label(row: Any) -> str:
+    return compact_qa_label(str(getattr(row, "qa_label", "") or "—"))
+
+
+def queue_table_next_label(row: Any, *, narrow: bool = False) -> str:
+    action = display_action_label(row)
+    if action == "—":
+        return "—"
+    if action == "ml_pool":
+        return "ML pool" if not narrow else "ml"
+    if narrow:
+        return queue_action_narrow_label(row)
+    return action
+
+
+def queue_table_build_label(row: Any) -> str:
+    return compact_prep_label(str(getattr(row, "prep_label", "") or "—"))
+
+
+def queue_row_is_next_recommended(row: Any, next_row: Any | None) -> bool:
+    if next_row is None:
+        return False
+    row_pkg = str(getattr(row, "package_name", "") or "").strip().lower()
+    next_pkg = str(getattr(next_row, "package_name", "") or "").strip().lower()
+    if row_pkg and next_pkg and row_pkg == next_pkg:
+        return True
+    row_name = str(getattr(row, "display_name", "") or "").strip().casefold()
+    next_name = str(getattr(next_row, "display_name", "") or "").strip().casefold()
+    return bool(row_name and next_name and row_name == next_name)
+
+
+def queue_table_index_label(row: Any, *, next_row: Any | None = None) -> str:
+    idx = str((getattr(row, "full_row", None) or ["—"])[0])
+    if queue_row_is_next_recommended(row, next_row):
+        return f">{idx}"
+    return idx
+
+
 def queue_runs_label(row: Any, *, total_required: int) -> str:
     countable = int(row.baseline_countable) + int(row.interactive_countable)
     extra = (
@@ -306,24 +503,96 @@ def queue_runs_label(row: Any, *, total_required: int) -> str:
     return f"{countable}/{int(total_required)} need {missing}"
 
 
+def queue_baseline_evidence_label(row: Any, *, baseline_required: int) -> str:
+    return bucket_evidence_label(
+        countable=int(row.baseline_countable),
+        extra=int(row.baseline_extra),
+        low_signal=int(getattr(row, "baseline_low_signal_supplemental", 0) or 0),
+        required=int(baseline_required),
+    )
+
+
+def queue_interactive_evidence_label(row: Any, *, interactive_required: int) -> str:
+    if int(getattr(row, "need_baseline", 0) or 0) > 0:
+        return "locked"
+    return bucket_evidence_label(
+        countable=int(row.interactive_countable),
+        extra=int(row.interactive_extra),
+        low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
+        required=int(interactive_required),
+    )
+
+
 def queue_baseline_runs_label(row: Any, *, baseline_required: int) -> str:
-    return (
-        f"{int(row.baseline_countable)}/{int(baseline_required)}"
-        + _supplemental_suffix(
-            extra=int(row.baseline_extra),
-            low_signal=int(getattr(row, "baseline_low_signal_supplemental", 0) or 0),
-        )
+    return queue_baseline_evidence_label(row, baseline_required=baseline_required)
+
+
+def queue_baseline_quota_label(row: Any, *, baseline_required: int) -> str:
+    return bucket_quota_label(
+        countable=int(row.baseline_countable),
+        required=int(baseline_required),
+    )
+
+
+def queue_baseline_detail_label(row: Any, *, baseline_required: int) -> str:
+    return bucket_detail_column_label(
+        countable=int(row.baseline_countable),
+        extra=int(row.baseline_extra),
+        low_signal=int(getattr(row, "baseline_low_signal_supplemental", 0) or 0),
+        required=int(baseline_required),
+    )
+
+
+def queue_baseline_supplemental_label(row: Any, *, baseline_required: int) -> str:
+    return queue_baseline_detail_label(row, baseline_required=baseline_required)
+
+
+def queue_baseline_progress_label(row: Any, *, baseline_required: int, compact: bool = False) -> str:
+    formatter = format_quota_progress_compact if compact else format_quota_progress_label
+    return formatter(
+        countable=int(row.baseline_countable),
+        extra=int(row.baseline_extra),
+        low_signal=int(getattr(row, "baseline_low_signal_supplemental", 0) or 0),
+        required=int(baseline_required),
+    )
+
+
+def queue_interactive_progress_label(row: Any, *, interactive_required: int, compact: bool = False) -> str:
+    if int(getattr(row, "need_baseline", 0) or 0) > 0:
+        return "locked"
+    formatter = format_quota_progress_compact if compact else format_quota_progress_label
+    return formatter(
+        countable=int(row.interactive_countable),
+        extra=int(row.interactive_extra),
+        low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
+        required=int(interactive_required),
     )
 
 
 def queue_interactive_runs_label(row: Any, *, interactive_required: int) -> str:
-    return (
-        f"{int(row.interactive_countable)}/{int(interactive_required)}"
-        + _supplemental_suffix(
-            extra=int(row.interactive_extra),
-            low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
-        )
+    return queue_interactive_evidence_label(row, interactive_required=interactive_required)
+
+
+def queue_interactive_quota_label(row: Any, *, interactive_required: int) -> str:
+    return bucket_quota_label(
+        countable=int(row.interactive_countable),
+        required=int(interactive_required),
     )
+
+
+def queue_interactive_detail_label(row: Any, *, interactive_required: int) -> str:
+    if int(getattr(row, "need_baseline", 0) or 0) > 0:
+        return "—"
+    return bucket_detail_column_label(
+        countable=int(row.interactive_countable),
+        extra=int(row.interactive_extra),
+        low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
+        required=int(interactive_required),
+    )
+
+
+def queue_interactive_supplemental_label(row: Any, *, interactive_required: int) -> str:
+    return queue_interactive_detail_label(row, interactive_required=interactive_required)
 
 
 def queue_target_label(row: Any) -> str:
@@ -356,11 +625,12 @@ def queue_template_label(package_name: str) -> str:
     template_id = str(resolved_template_for_package(package_name) or "").strip()
     if not template_id:
         return "none"
-    if template_id == "news_reader_basic_v1":
+    if template_id in {"news_reader_basic_v1", "news_reader_behavior_v2"}:
         return "news"
     if template_id in {
         "social_feed_basic_v2",
         "facebook_basic_v2",
+        "facebook_behavior_v3",
         "snapchat_basic_v1",
         "x_twitter_full_session_v1",
         "social_messaging_basic_v1",
@@ -371,6 +641,7 @@ def queue_template_label(package_name: str) -> str:
         "messaging_call_basic_v1",
         "whatsapp_idle_v1",
         "whatsapp_text_v1",
+        "whatsapp_text_behavior_v2",
         "whatsapp_voice_v1",
         "whatsapp_video_v1",
         "tiktok_basic_v1",
@@ -384,6 +655,8 @@ def queue_action_label(row: Any) -> str:
     action = display_action_label(row)
     if action == "baseline":
         return "baseline"
+    if action == "ml_pool":
+        return "ml_pool"
     if action == "interactive":
         return "interactive"
     return action
@@ -458,14 +731,17 @@ def queue_action_narrow_label(row: Any) -> str:
 
 
 def display_action_label(row: Any) -> str:
-    if row.live_build_drift:
-        return "refresh"
-    if row.lineage_state == "current_build_db_only":
-        return "restore"
-    action = main_action_label(row.next_label)
-    if action != "manual":
-        return action
-    return "interactive"
+    """Map queue workflow state to the operator-facing next-move label."""
+    state = queue_state_label(row)
+    if state == "complete":
+        if supplemental_baseline_queue_action(getattr(row, "next_label", None)):
+            return "ml_pool"
+        return "—"
+    if state == "manual":
+        return "interactive"
+    if state == "legacy":
+        return "baseline"
+    return state
 
 
 def display_next_line_action_label(row: Any) -> str:
@@ -474,32 +750,44 @@ def display_next_line_action_label(row: Any) -> str:
         return "interactive"
     if action == "review":
         return "review QA"
+    if action == "ml_pool":
+        return "supplemental baseline"
     return action
 
 
-def next_recommendation_priority(row: Any) -> tuple[int, str]:
+def next_recommendation_priority(row: Any) -> tuple[int, int, str]:
     action = display_action_label(row)
     lineage_state = str(row.lineage_state or "")
     if action == "review":
-        return (0, row.display_name)
+        return (0, 0, row.display_name)
     if action == "refresh":
-        return (1, row.display_name)
+        return (1, 0, row.display_name)
     if action == "restore":
-        return (2, row.display_name)
+        return (2, 0, row.display_name)
     if action == "interactive":
-        return (3, row.display_name)
+        return (3, 0, row.display_name)
     if action == "baseline":
         if lineage_state == "no_evidence_anywhere":
-            return (4, row.display_name)
+            return (4, 0, row.display_name)
         if lineage_state == "historical_local_only":
-            return (5, row.display_name)
+            return (5, 0, row.display_name)
         if lineage_state == "historical_db_only":
-            return (6, row.display_name)
-        return (7, row.display_name)
-    return (99, row.display_name)
+            return (6, 0, row.display_name)
+        return (7, 0, row.display_name)
+    if action == "ml_pool":
+        return (8, -row_baseline_ml_pool_size(row), row.display_name)
+    return (99, 0, row.display_name)
 
 
 def next_recommended_row(rows: list[Any]) -> Any | None:
+    if not rows:
+        return None
+    review_rows = [row for row in rows if display_action_label(row) == "review"]
+    if review_rows:
+        return min(review_rows, key=next_recommendation_priority)
+    capture_ready = select_capture_candidates(rows, limit=1)
+    if capture_ready:
+        return capture_ready[0]
     candidates = [row for row in rows if display_action_label(row) != "—"]
     if not candidates:
         return None
@@ -510,6 +798,7 @@ def group_queue_sections(row_models: list[Any]) -> list[tuple[str, list[Any]]]:
     needs_refresh: list[Any] = []
     ready_manual: list[Any] = []
     needs_baseline: list[Any] = []
+    ml_training_ready: list[Any] = []
     complete_or_extra: list[Any] = []
     other_blocked: list[Any] = []
     for row in row_models:
@@ -517,16 +806,19 @@ def group_queue_sections(row_models: list[Any]) -> list[tuple[str, list[Any]]]:
             needs_refresh.append(row)
         elif row.need_baseline > 0:
             needs_baseline.append(row)
-        elif row.need_interactive > 0 and row.next_label == "manual interaction":
+        elif row.need_interactive > 0 and row.next_label in {"manual interaction", "scripted interaction"}:
             ready_manual.append(row)
-        elif row.next_label == "—":
+        elif supplemental_baseline_queue_action(getattr(row, "next_label", None)):
+            ml_training_ready.append(row)
+        elif str(getattr(row, "next_label", "") or "") == "—":
             complete_or_extra.append(row)
         else:
             other_blocked.append(row)
     sections: list[tuple[str, list[Any]]] = []
     sections.append(("Needs static refresh", needs_refresh))
-    sections.append(("Ready for manual interaction", ready_manual))
+    sections.append(("Ready for interactive capture", ready_manual))
     sections.append(("Needs baseline capture", needs_baseline))
+    sections.append(("ML training pool (optional)", ml_training_ready))
     sections.append(("Complete / over-quota", complete_or_extra))
     if other_blocked:
         sections.append(("Other / blocked", other_blocked))
@@ -546,8 +838,7 @@ def main_progress_label(
     missing_i = max(0, int(missing if missing is not None else max(required_i - count_i, 0)))
     if missing_i == 0:
         if extra_i > 0:
-            suffix = " extra" if extra_i == 1 else " extras"
-            return f"{count_i}/{required_i} +{extra_i}{suffix}"
+            return f"{count_i}/{required_i}{format_supplemental_suffix(extra=extra_i)}"
         return f"{count_i}/{required_i} complete"
     return f"{count_i}/{required_i} need {missing_i}"
 
@@ -639,7 +930,10 @@ __all__ = [
     "compact_warning_line",
     "display_action_label",
     "display_next_line_action_label",
-    "group_queue_sections",
+    "build_drift_app_summaries",
+    "capture_candidate_priority",
+    "format_capture_plan_line",
+    "lineage_rank",
     "main_action_label",
     "main_progress_label",
     "manual_progress_label",
@@ -649,12 +943,27 @@ __all__ = [
     "queue_action_narrow_label",
     "queue_build_label",
     "queue_evidence_label",
-    "queue_need_label",
+    "queue_quota_gap_label",
+    "queue_table_build_label",
+    "queue_table_index_label",
+    "queue_table_next_label",
+    "queue_table_qa_label",
+    "queue_row_is_next_recommended",
     "queue_need_narrow_label",
     "queue_qa_badge",
     "queue_remaining_summary",
     "queue_runs_label",
     "queue_runs_narrow_label",
+    "queue_baseline_detail_label",
+    "queue_baseline_evidence_label",
+    "queue_interactive_detail_label",
+    "queue_interactive_evidence_label",
+    "queue_baseline_progress_label",
+    "queue_baseline_supplemental_label",
+    "queue_interactive_progress_label",
+    "queue_interactive_quota_label",
+    "queue_interactive_supplemental_label",
+    "queue_table_app_label",
     "queue_state_label",
     "queue_status_label",
     "queue_state_summary_label",
@@ -662,4 +971,5 @@ __all__ = [
     "queue_target_label",
     "queue_template_label",
     "recommended_reason",
+    "select_capture_candidates",
 ]

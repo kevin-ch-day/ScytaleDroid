@@ -34,15 +34,15 @@ def selected_app_queue_action(
         return ("refresh", "installed build does not match the newest static plan")
     baseline_missing = max(0, int(baseline_required) - int(baseline_valid_runs))
     interactive_missing = max(0, int(interactive_required) - int(interactive_valid_runs))
-    if baseline_missing <= 0 and interactive_missing <= 0 and latest_valid is False:
+    if int(active_valid_runs) <= 0 and int(db_active_sessions) > 0:
+        return ("restore local evidence", "current-build evidence exists in the DB, but the local evidence pack is missing")
+    if latest_valid is False:
         detail = (
             str(latest_pcap_failure_detail or "").strip().upper()
             or str(latest_invalid_reason or "").strip().upper()
             or "UNKNOWN"
         )
         return ("review QA", f"latest current-build QA invalid ({detail})")
-    if int(active_valid_runs) <= 0 and int(db_active_sessions) > 0:
-        return ("restore local evidence", "current-build evidence exists in the DB, but the local evidence pack is missing")
     if baseline_missing > 0:
         suffix = "" if baseline_missing == 1 else "s"
         return ("baseline", f"{baseline_missing} baseline run{suffix} needed")
@@ -50,7 +50,7 @@ def selected_app_queue_action(
         action = "scripted interaction" if scripted_template_ready else "manual interaction"
         suffix = "" if interactive_missing == 1 else "s"
         return (action, f"{interactive_missing} interactive run{suffix} needed")
-    return ("—", None)
+    return ("supplemental baseline", "supplemental baselines improve ML training and pattern averages")
 
 
 def selected_app_build_label(

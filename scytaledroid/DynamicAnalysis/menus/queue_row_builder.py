@@ -100,25 +100,30 @@ def build_package_selection_row(
             active_build = "unknown (tracker-only)"
         active_runs = int(scoped.get("technical_valid_active") or 0)
 
+        need_base = max(0, int(cfg.baseline_required) - base_countable)
+        need_inter = max(0, int(cfg.interactive_required) - inter_countable)
+        need_baseline = need_base
+        need_interactive = need_inter
+        baseline_complete = base_countable >= int(cfg.baseline_required)
+
         base_label = bucket_progress_label_fn(
             base_countable,
             int(cfg.baseline_required),
             extra_count=base_extra,
+            low_signal=base_low_signal,
+            need=need_base,
         )
-        baseline_complete = base_countable >= int(cfg.baseline_required)
         inter_label = (
             bucket_progress_label_fn(
                 inter_countable,
                 int(cfg.interactive_required),
                 extra_count=inter_extra,
+                low_signal=inter_low_signal,
+                need=need_inter,
             )
             if baseline_complete
             else "locked"
         )
-        need_base = max(0, int(cfg.baseline_required) - base_countable)
-        need_inter = max(0, int(cfg.interactive_required) - inter_countable)
-        need_baseline = need_base
-        need_interactive = need_inter
         if need_base == 0 and need_inter == 0:
             dataset_complete_count = 1
         dataset_valid_runs_count = base_countable + inter_countable
@@ -136,6 +141,7 @@ def build_package_selection_row(
             base_countable + inter_countable,
             total_required,
             extra_count=base_extra + inter_extra,
+            low_signal=base_low_signal + inter_low_signal,
         )
         legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
         build_label = static_build_label_fn(active_runs, legacy_valid)
