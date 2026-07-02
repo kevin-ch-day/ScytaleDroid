@@ -799,6 +799,10 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     assert cdninstagram["owner_class"] == "first_party"
     assert cdninstagram["role_class"] == "content_delivery"
 
+    giphy = classify_domain("media4.giphy.com", package_name="com.facebook.katana", references=refs)
+    assert giphy["owner_class"] == "third_party"
+    assert giphy["role_class"] == "content_delivery"
+
     guardian_api = classify_domain("mobile.guardianapis.com", package_name="com.guardian", references=refs)
     assert guardian_api["owner_class"] == "first_party"
     assert guardian_api["role_class"] == "publisher_api"

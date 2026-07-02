@@ -593,8 +593,9 @@ class ManualScenarioRunner:
                     block.append("  - Perform exactly one refresh/check action around minute 2")
                     block.append("  - Do not type, send, call, upload media, search, or open external links")
                 else:
-                    block.append("  - Get the app running, then leave it in the foreground")
-                    block.append("  - Best-effort idle; interact only if needed (e.g., prevent screen lock)")
+                    block.extend(
+                        _baseline_idle_behavior_lines(getattr(run_ctx, "package_name", "") or "")
+                    )
             else:
                 block.append("  - Keep the app in the foreground")
                 block.append("  - Use the app normally")
@@ -760,9 +761,41 @@ def _read_device_foreground_package(device_serial: str | None) -> str | None:
     return None
 
 
+def _baseline_idle_behavior_lines(package_name: str) -> list[str]:
+    pkg = str(package_name or "").strip()
+    category = str(category_for_package(pkg) or "").strip().lower()
+    if category == "news_reader":
+        return [
+            "  - Get the app into a calm foreground surface before the timer starts",
+            "  - Prefer a stable article or section over a live home/feed surface when possible",
+            "  - Avoid autoplay video, podcasts/audio, search, sign-in, and support/paywall flows",
+            "  - Best-effort idle after setup; interact only if needed (e.g., prevent screen lock)",
+        ]
+    return [
+        "  - Get the app running, then leave it in the foreground",
+        "  - Best-effort idle; interact only if needed (e.g., prevent screen lock)",
+    ]
+
+
 def _baseline_idle_checkpoint_messages(package_name: str) -> dict[int, str]:
     pkg = str(package_name or "").strip() or "the target app"
+    category = str(category_for_package(pkg) or "").strip().lower()
+    if category == "news_reader":
+        return {
+            60: (
+                f"60s checkpoint: if {pkg} is still on a live home/feed surface, "
+                "move once to a calm article or section, then go idle again."
+            ),
+            120: (
+                f"120s checkpoint: keep {pkg} in the foreground; avoid autoplay video, "
+                "podcasts/audio, search, sign-in, and support/paywall flows."
+            ),
+        }
     return {
+        60: (
+            f"60s checkpoint: keep {pkg} in the foreground; "
+            "nudge only if needed to prevent screen lock."
+        ),
         120: (
             f"120s checkpoint: keep {pkg} in the foreground; "
             "nudge only if needed to prevent screen lock."

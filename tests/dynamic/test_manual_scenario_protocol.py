@@ -1105,6 +1105,14 @@ def test_baseline_idle_checkpoint_messages_include_package() -> None:
     assert "com.twitter.android" in messages[60]
 
 
+def test_baseline_idle_checkpoint_messages_are_news_reader_specific() -> None:
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _baseline_idle_checkpoint_messages
+
+    messages = _baseline_idle_checkpoint_messages("com.guardian")
+    assert "calm article or section" in messages[60]
+    assert "autoplay video" in messages[120]
+
+
 def test_terminal_hold_early_stop_completes_protocol(monkeypatch, tmp_path: Path) -> None:
     runner = ManualScenarioRunner()
     ctx = _ctx(tmp_path)
