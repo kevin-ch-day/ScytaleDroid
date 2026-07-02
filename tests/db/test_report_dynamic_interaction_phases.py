@@ -202,6 +202,7 @@ def test_generate_report_exports_phase_and_transport_rows(tmp_path: Path, monkey
     assert summary["scripted_runs_seen"] == 1
     assert summary["timeline_complete_runs"] == 1
     assert summary["phase_rows_exported"] == 2
+    assert summary["marker_rows_exported"] == 2
     assert summary["transport_rows_exported"] == 2
     assert summary["scripted_runs_valid_pcap"] == 1
     assert summary["scripted_runs_invalid_pcap"] == 0
@@ -220,6 +221,14 @@ def test_generate_report_exports_phase_and_transport_rows(tmp_path: Path, monkey
     assert phase_rows[1]["step_outcome"] == "limited"
     assert phase_rows[1]["limitation_reason"] == "paywall"
     assert phase_rows[1]["notes_present"] == "True"
+
+    with (out_dir / "protocol_phase_markers.csv").open(encoding="utf-8") as handle:
+        marker_rows = list(csv.DictReader(handle))
+    assert len(marker_rows) == 2
+    assert marker_rows[0]["marker_type"] == "step_window"
+    assert marker_rows[0]["phase_id"] == "open_home"
+    assert marker_rows[1]["phase_id"] == "scroll_headlines"
+    assert marker_rows[1]["limitation_reason"] == "paywall"
 
     with (out_dir / "phase_packet_transport_summary.csv").open(encoding="utf-8") as handle:
         transport_rows = list(csv.DictReader(handle))
@@ -282,6 +291,7 @@ def test_generate_report_keeps_timeline_rows_when_pcap_missing(tmp_path: Path, m
     assert summary["scripted_runs_seen"] == 1
     assert summary["timeline_complete_runs"] == 1
     assert summary["phase_rows_exported"] == 2
+    assert summary["marker_rows_exported"] == 2
     assert summary["transport_rows_exported"] == 0
     assert summary["scripted_runs_with_timeline_but_no_pcap"] == 1
     assert summary["scripted_runs_invalid_pcap"] == 1
@@ -311,6 +321,7 @@ def test_main_prints_pcap_counters(capsys, monkeypatch, tmp_path: Path) -> None:
             "timeline_complete_runs": 1,
             "timeline_incomplete_runs": 0,
             "phase_rows_exported": 6,
+            "marker_rows_exported": 6,
             "transport_rows_exported": 0,
             "scripted_runs_valid_pcap": 0,
             "scripted_runs_invalid_pcap": 1,
@@ -326,7 +337,7 @@ def test_main_prints_pcap_counters(capsys, monkeypatch, tmp_path: Path) -> None:
     out = capsys.readouterr().out
     assert rc == 0
     assert "scripted_runs_seen=1" in out
-    assert "phase_rows_exported=6 transport_rows_exported=0" in out
+    assert "phase_rows_exported=6 marker_rows_exported=6 transport_rows_exported=0" in out
     assert "scripted_runs_valid_pcap=0" in out
     assert "scripted_runs_invalid_pcap=1" in out
     assert "scripted_runs_with_timeline_but_no_pcap=1" in out

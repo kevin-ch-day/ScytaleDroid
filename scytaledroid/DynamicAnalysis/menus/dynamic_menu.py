@@ -80,7 +80,10 @@ from scytaledroid.DynamicAnalysis.menus.queue_selection import (
     run_package_selection_menu as _run_package_selection_menu_impl,
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.profile_loader import load_operational_profiles, load_profile_packages
+from scytaledroid.DynamicAnalysis.run_qualification import (
+    format_bucket_queue_label,
+    format_quota_progress_label,
+)
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
     active_research_cohort_key,
@@ -242,32 +245,36 @@ def _next_action_from_need(need_baseline: int, need_interactive: int) -> str:
     return _next_action_from_need_impl(need_baseline, need_interactive)
 
 
-def _quota_progress_label(count: int, required: int, *, extra_count: int = 0) -> str:
-    count_i = max(0, int(count))
-    required_i = max(0, int(required))
-    extra_i = max(0, int(extra_count))
-    missing = max(0, required_i - count_i)
-    if required_i <= 0:
-        return str(count_i + extra_i)
-    if missing == 0:
-        suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
-        return f"{count_i}/{required_i} complete{suffix}"
-    suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
-    return f"{count_i}/{required_i} need {missing}{suffix}"
+def _quota_progress_label(
+    count: int,
+    required: int,
+    *,
+    extra_count: int = 0,
+    low_signal: int = 0,
+) -> str:
+    return format_quota_progress_label(
+        countable=int(count),
+        required=int(required),
+        extra=int(extra_count),
+        low_signal=int(low_signal),
+    )
 
 
-def _bucket_progress_label(count: int, required: int, *, extra_count: int = 0) -> str:
-    count_i = max(0, int(count))
-    required_i = max(0, int(required))
-    extra_i = max(0, int(extra_count))
-    missing = max(0, required_i - count_i)
-    if required_i <= 0:
-        return str(count_i + extra_i)
-    if missing == 0:
-        suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
-        return f"{count_i}/{required_i} complete{suffix}"
-    suffix = f" (+{extra_i} extra)" if extra_i > 0 else ""
-    return f"{count_i}/{required_i} need {missing}{suffix}"
+def _bucket_progress_label(
+    count: int,
+    required: int,
+    *,
+    extra_count: int = 0,
+    low_signal: int = 0,
+    need: int = 0,
+) -> str:
+    return format_bucket_queue_label(
+        countable=int(count),
+        extra=int(extra_count),
+        low_signal=int(low_signal),
+        required=int(required),
+        need=int(need),
+    )
 
 
 def _static_build_label(active_runs: int, legacy_valid: int) -> str:

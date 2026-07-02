@@ -1,10 +1,10 @@
 {
   "version": "v3",
   "packages": {
-    "bbc.mobile.news.ww": "news_reader_basic_v1",
-    "com.cnn.mobile.android.phone": "news_reader_basic_v1",
+    "bbc.mobile.news.ww": "news_reader_behavior_v2",
+    "com.cnn.mobile.android.phone": "news_reader_behavior_v2",
     "com.discord": "discord_basic_v1",
-    "com.guardian": "news_reader_basic_v1",
+    "com.guardian": "news_reader_behavior_v2",
     "com.google.android.apps.docs": "drive_browse_search_open_star_v1",
     "com.google.android.apps.docs.editors.docs": "docs_open_edit_comment_refresh_v1",
     "com.google.android.apps.docs.editors.sheets": "sheets_open_edit_sort_row_refresh_v1",

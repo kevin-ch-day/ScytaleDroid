@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import sys
 
+from scytaledroid.Utils.DisplayUtils.colors.ansi import (
+    CR,
+    CURSOR_DOWN_ONE_LINE,
+    CURSOR_UP_ONE_LINE,
+    RESTORE_CURSOR,
+    SAVE_CURSOR,
+)
+
 
 def format_duration(seconds: int) -> str:
     if seconds < 60:
@@ -37,6 +45,26 @@ def clear_status_line(line_width: int) -> None:
     sys.stdout.flush()
 
 
+def rewrite_previous_line_preserving_prompt(message: str, *, line_width: int) -> None:
+    sys.stdout.write(SAVE_CURSOR)
+    sys.stdout.write(CURSOR_UP_ONE_LINE + CR)
+    sys.stdout.write((" " * int(line_width)) + CR)
+    sys.stdout.write(str(message).ljust(int(line_width)))
+    sys.stdout.write(RESTORE_CURSOR)
+    sys.stdout.flush()
+
+
+def clear_prompt_and_previous_line(*, line_width: int, prompt_width: int) -> None:
+    sys.stdout.write(CR + (" " * int(prompt_width)) + CR)
+    sys.stdout.write(CURSOR_UP_ONE_LINE + CR + (" " * int(line_width)) + CR)
+    sys.stdout.write(CURSOR_DOWN_ONE_LINE + CR)
+    sys.stdout.flush()
+
+
+def countdown_action_prompt_line() -> str:
+    return "Action [Enter=stop | S=finalize | A=abort] \u203a "
+
+
 def parse_timing_action(raw: str | None) -> str:
     token = str(raw or "").strip().lower()
     if token == "":
@@ -51,13 +79,18 @@ def parse_timing_action(raw: str | None) -> str:
         return "abort"
     if token in {"n", "skip", "notfound", "not_found"}:
         return "skip"
+    if token in {"h", "home", "reset", "return_home"}:
+        return "return_home"
     return "other"
 
 
 __all__ = [
     "clear_status_line",
+    "clear_prompt_and_previous_line",
+    "countdown_action_prompt_line",
     "format_duration",
     "format_duration_precise",
     "parse_timing_action",
     "pulse_marker",
+    "rewrite_previous_line_preserving_prompt",
 ]

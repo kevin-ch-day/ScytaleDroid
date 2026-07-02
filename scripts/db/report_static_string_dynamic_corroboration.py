@@ -77,6 +77,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print compact progress to stderr.",
     )
     parser.add_argument(
+        "--package",
+        dest="package_name",
+        default=None,
+        help="Only scan dynamic evidence packs for this package name.",
+    )
+    parser.add_argument(
         "--overlay-latest-static",
         action="store_true",
         help=(
@@ -133,21 +139,26 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
 
 
-def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+def _write_csv(
+    path: Path,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    fieldnames: Sequence[str] | None = None,
+) -> None:
     row_list = list(rows)
-    if not row_list:
-        path.write_text("", encoding="utf-8")
-        return
-    fieldnames: list[str] = []
+    resolved_fieldnames: list[str] = [str(key) for key in (fieldnames or ())]
     for row in row_list:
         for key in row.keys():
-            if key not in fieldnames:
-                fieldnames.append(str(key))
+            if key not in resolved_fieldnames:
+                resolved_fieldnames.append(str(key))
+    if not resolved_fieldnames:
+        path.write_text("", encoding="utf-8")
+        return
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=resolved_fieldnames)
         writer.writeheader()
         for row in row_list:
-            writer.writerow({key: row.get(key) for key in fieldnames})
+            writer.writerow({key: row.get(key) for key in resolved_fieldnames})
 
 
 def _repo_rel(path: Path | None) -> str | None:
@@ -195,6 +206,15 @@ def _dynamic_run_dirs(output_root: Path) -> list[Path]:
     return sorted(
         path for path in evidence_root.iterdir() if path.is_dir() and (path / "run_manifest.json").exists()
     )
+
+
+def _run_dir_package_name(run_dir: Path) -> str | None:
+    manifest = _read_json(run_dir / "run_manifest.json")
+    if not isinstance(manifest, Mapping):
+        return None
+    target = manifest.get("target") if isinstance(manifest.get("target"), Mapping) else {}
+    package_name = _norm_text_or_none(target.get("package_name"))
+    return package_name.lower() if package_name else None
 
 
 def _dynamic_domains_from_report(report: Mapping[str, Any] | None) -> set[str]:
@@ -280,6 +300,9 @@ def _identity_map(plan: Mapping[str, Any] | None) -> Mapping[str, Any]:
     return identity if isinstance(identity, Mapping) else {}
 
 
+_OVERLAY_REPORT_CACHE: dict[str, tuple[object, ...]] = {}
+
+
 def _select_overlay_report(
     package_name: str | None,
     *,
@@ -291,7 +314,11 @@ def _select_overlay_report(
 
     from scytaledroid.StaticAnalysis.persistence.reports import reports_for_package
 
-    stored_reports = reports_for_package(package_norm)
+    cache_key = package_norm.lower()
+    stored_reports = _OVERLAY_REPORT_CACHE.get(cache_key)
+    if stored_reports is None:
+        stored_reports = tuple(reports_for_package(package_norm))
+        _OVERLAY_REPORT_CACHE[cache_key] = stored_reports
     if not stored_reports:
         return None, None
 
@@ -325,7 +352,7 @@ def _select_overlay_report(
     return best, _repo_rel(best.path)
 
 
-_OVERLAY_PLAN_CACHE: dict[tuple[str, bool], tuple[dict[str, Any] | None, str | None, str]] = {}
+_OVERLAY_PLAN_CACHE: dict[tuple[str, bool, int | None], tuple[dict[str, Any] | None, str | None, str]] = {}
 
 
 def _reanalyse_string_payload_from_report(
@@ -363,7 +390,7 @@ def _overlay_plan_from_static_report(
     if stored is None:
         return None, None, "embedded"
 
-    cache_key = (str(stored.path), bool(reanalyse_strings))
+    cache_key = (str(stored.path), bool(reanalyse_strings), static_run_id)
     cached = _OVERLAY_PLAN_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -401,6 +428,15 @@ def _overlay_plan_from_static_report(
         static_run_id=static_run_id,
         schema_version=_norm_text_or_none(metadata.get("schema_version")),
     )
+    if (
+        reanalyse_strings
+        and not _domain_sources(plan)
+        and _domain_sources(embedded_plan)
+        and not isinstance(metadata.get("post_run_string_payload"), Mapping)
+    ):
+        result = (None, rel_path, "embedded")
+        _OVERLAY_PLAN_CACHE[cache_key] = result
+        return result
     source = "overlay_string_reanalysis" if reanalyse_strings else "overlay_latest_static"
     result = (dict(plan), rel_path, source)
     _OVERLAY_PLAN_CACHE[cache_key] = result
@@ -792,6 +828,7 @@ def _corroboration_row(
             plan = overlaid_plan
         else:
             plan_source = "embedded"
+            overlay_static_report_path = None
 
     dynamic_domains = _dynamic_domains_from_report(report)
     domain_rows = _domain_sources(plan)
@@ -996,13 +1033,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_dir:
         out_dir = Path(args.output_dir)
     else:
-        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
         out_dir = output_root / "audit" / "static_string_dynamic_corroboration" / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[CorroborationRow] = []
     run_dirs_for_rows: list[tuple[Path, CorroborationRow]] = []
+    package_filter = _norm_text_or_none(args.package_name)
+    package_filter_lc = package_filter.lower() if package_filter else None
     for run_dir in _dynamic_run_dirs(output_root):
+        if package_filter_lc and _run_dir_package_name(run_dir) != package_filter_lc:
+            continue
         _log(args.verbose, f"scan {run_dir.name}")
         row = _corroboration_row(
             run_dir,
@@ -1014,6 +1055,8 @@ def main(argv: list[str] | None = None) -> int:
             run_dirs_for_rows.append((run_dir, row))
 
     summary = _summary(rows)
+    if package_filter:
+        summary["package_filter"] = package_filter
     if args.overlay_latest_static:
         summary["assumptions"] = list(summary.get("assumptions") or []) + [
             "overlay_latest_static_reports_read_only",
@@ -1030,6 +1073,7 @@ def main(argv: list[str] | None = None) -> int:
             "String reanalysis overlay rebuilds temporary static endpoint/domain inventory from the latest stored static report APK path without mutating stored reports or historical dynamic evidence packs.",
         ]
     row_dicts = [_row_dict(row) for row in rows]
+    row_fieldnames = list(row_dicts[0].keys()) if row_dicts else []
     detail_rows: list[dict[str, Any]] = []
     for run_dir, row in run_dirs_for_rows:
         detail_rows.extend(
@@ -1054,8 +1098,12 @@ def main(argv: list[str] | None = None) -> int:
     _write_json(out_dir / "summary.json", summary)
     _write_csv(out_dir / "corroboration_matrix.csv", row_dicts)
     _write_csv(out_dir / "corroboration_detail.csv", detail_rows)
-    _write_csv(out_dir / "actionable_corroboration.csv", actionable_rows)
-    _write_csv(out_dir / "pair_group_corroboration.csv", pair_rows)
+    _write_csv(out_dir / "actionable_corroboration.csv", actionable_rows, fieldnames=row_fieldnames)
+    _write_csv(
+        out_dir / "pair_group_corroboration.csv",
+        pair_rows,
+        fieldnames=("dynamic_run_id", "package_name", "pair_group"),
+    )
 
     summary["output_dir"] = str(out_dir)
     summary["output_files"] = {

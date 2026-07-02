@@ -16,6 +16,8 @@ from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Database.db_utils.artifact_registry import record_artifacts
 from scytaledroid.DynamicAnalysis.storage.domain_context_index import index_dynamic_domain_context_for_run
 from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+    _derived_dataset_truth,
+    _tracker_truth_for_run,
     build_dynamic_network_features_row_from_evidence_pack,
     upsert_dynamic_network_features_row,
 )
@@ -739,14 +741,20 @@ def _extract_dataset_truth(
         for key, value in payload_dataset.items():
             dataset.setdefault(str(key), value)
 
-    if dataset:
-        countable = _dataset_bool_to_db(dataset.get("countable"))
-        valid_dataset_run = _dataset_bool_to_db(dataset.get("valid_dataset_run"))
-        invalid_reason_code = str(dataset.get("invalid_reason_code") or "").strip() or None
-    else:
-        countable = None
-        valid_dataset_run = None
-        invalid_reason_code = None
+    dynamic_run_id = str(payload.get("dynamic_run_id") or "").strip()
+    package_name = str(getattr(config, "package_name", "") or "").strip()
+    tracker_truth = (
+        _tracker_truth_for_run(dynamic_run_id, package_name)
+        if dynamic_run_id and package_name
+        else None
+    )
+    countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(
+        dataset if dataset else {},
+        tracker_truth,
+    )
+    countable = _dataset_bool_to_db(countable_source)
+    valid_dataset_run = _dataset_bool_to_db(valid_dataset_source)
+    invalid_reason_code = invalid_reason_source
 
     if countable is None:
         counts_toward_completion = getattr(config, "counts_toward_completion", None)

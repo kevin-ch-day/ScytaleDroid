@@ -21,6 +21,15 @@ def test_run_feature_matrix_fieldnames_include_expected_headers() -> None:
     assert "unresolved_share" in fields
 
 
+def test_find_pcap_path_supports_pcapng(tmp_path) -> None:
+    capture_dir = tmp_path / "artifacts" / "pcapdroid_capture"
+    capture_dir.mkdir(parents=True)
+    pcapng = capture_dir / "capture.pcapng"
+    pcapng.write_bytes(b"pcapng")
+
+    assert report._find_pcap_path(tmp_path) == pcapng
+
+
 def test_comparison_depth_and_readiness_labels_cover_expected_states() -> None:
     assert report._comparison_depth_label(baseline_runs=3, interactive_runs=3) == "tested"
     assert report._comparison_depth_label(baseline_runs=2, interactive_runs=2) == "limited"
@@ -50,6 +59,7 @@ def test_build_app_rollups_classifies_stable_vs_interaction_broadened() -> None:
                 "package_name": "com.whatsapp",
                 "app_label": "WhatsApp",
                 "stats_eligible": 1,
+                "valid_dataset_run": 1,
                 "countable": 1,
                 "quota_state": "QUOTA_VALID",
                 "interaction_mode": "baseline",
@@ -69,6 +79,7 @@ def test_build_app_rollups_classifies_stable_vs_interaction_broadened() -> None:
                 "package_name": "com.whatsapp",
                 "app_label": "WhatsApp",
                 "stats_eligible": 1,
+                "valid_dataset_run": 1,
                 "countable": 1,
                 "quota_state": "QUOTA_VALID",
                 "interaction_mode": "baseline",
@@ -88,6 +99,7 @@ def test_build_app_rollups_classifies_stable_vs_interaction_broadened() -> None:
                 "package_name": "com.whatsapp",
                 "app_label": "WhatsApp",
                 "stats_eligible": 1,
+                "valid_dataset_run": 1,
                 "countable": 0,
                 "quota_state": "SUPPLEMENTAL_VALID",
                 "interaction_mode": "manual",
@@ -107,6 +119,7 @@ def test_build_app_rollups_classifies_stable_vs_interaction_broadened() -> None:
                 "package_name": "com.whatsapp",
                 "app_label": "WhatsApp",
                 "stats_eligible": 1,
+                "valid_dataset_run": 1,
                 "countable": 0,
                 "quota_state": "SUPPLEMENTAL_VALID",
                 "interaction_mode": "manual",
@@ -130,6 +143,8 @@ def test_build_app_rollups_classifies_stable_vs_interaction_broadened() -> None:
     assert len(app_rollups) == 1
     rollup = app_rollups[0]
     assert rollup["interpretation"] == "interaction-broadened"
+    assert rollup["countable_runs"] == 2
+    assert rollup["analysis_included_runs"] == 4
     assert rollup["baseline_stability"] == 1.0
     assert rollup["interactive_broadening"] == 4.5
     assert any(row["metric"] == "unique_ja4_count" for row in baseline_vs_interactive)
@@ -185,6 +200,48 @@ def test_build_cross_app_metric_summary_counts_shift_directions() -> None:
     assert ja4["apps_large_effect"] == 1
 
 
+def test_service_fingerprint_associations_count_top_ja4_once_per_run() -> None:
+    feature_rows = [
+        {
+            "dynamic_run_id": "run-a",
+            "package_name": "com.example.a",
+            "stats_eligible": 1,
+            "unique_ja4_count": 2,
+            "top1_ja4_share": 0.8,
+            "top_ja4": "ja4-a",
+        },
+        {
+            "dynamic_run_id": "run-b",
+            "package_name": "com.example.b",
+            "stats_eligible": 1,
+            "unique_ja4_count": 3,
+            "top1_ja4_share": 0.7,
+            "top_ja4": "ja4-b",
+        },
+        {
+            "dynamic_run_id": "run-c",
+            "package_name": "com.example.c",
+            "stats_eligible": 1,
+            "unique_ja4_count": 4,
+            "top1_ja4_share": 0.6,
+            "top_ja4": "ja4-b",
+        },
+    ]
+    domain_service_rows = [
+        {"dynamic_run_id": "run-a", "service_category": "analytics", "observed_domain": "a1.example.com"},
+        {"dynamic_run_id": "run-a", "service_category": "analytics", "observed_domain": "a2.example.com"},
+        {"dynamic_run_id": "run-a", "service_category": "analytics", "observed_domain": "a3.example.com"},
+        {"dynamic_run_id": "run-b", "service_category": "analytics", "observed_domain": "b.example.com"},
+        {"dynamic_run_id": "run-c", "service_category": "analytics", "observed_domain": "c.example.com"},
+    ]
+
+    rows = report._build_service_fingerprint_associations(feature_rows, domain_service_rows)
+
+    analytics = next(row for row in rows if row["service_family"] == "analytics")
+    assert analytics["run_count"] == 3
+    assert analytics["common_top_ja4"] == "ja4-b"
+
+
 def test_build_app_rollups_skips_packages_without_stats_eligible_runs() -> None:
     by_package = {
         "com.example.empty": [
@@ -202,6 +259,7 @@ def test_build_app_rollups_skips_packages_without_stats_eligible_runs() -> None:
                 "package_name": "com.example.good",
                 "app_label": "Good App",
                 "stats_eligible": 1,
+                "valid_dataset_run": 1,
                 "countable": 1,
                 "quota_state": "QUOTA_VALID",
                 "interaction_mode": "baseline",

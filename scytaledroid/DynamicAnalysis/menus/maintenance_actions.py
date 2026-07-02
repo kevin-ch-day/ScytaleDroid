@@ -296,6 +296,33 @@ def repair_reindex_tracker(*, callbacks: DynamicMaintenanceCallbacks) -> None:
     print(status_messages.status(f"Tracker reindexed from evidence: {out}", level="success"))
     print(status_messages.status(f"Report: {report_path}", level="info"))
 
+    db_sync: dict[str, object] = {"attempted": False, "skipped_reason": None}
+    try:
+        from scytaledroid.Database.db_core import db_config
+        from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
+
+        if str(db_config.DB_CONFIG.get("engine") or "").lower() == "disabled":
+            db_sync["skipped_reason"] = "db_disabled"
+        else:
+            db_sync["attempted"] = True
+            db_result = index_dynamic_evidence_packs_to_db(evidence_root)
+            db_sync.update(db_result if isinstance(db_result, dict) else {"ok": bool(db_result)})
+            indexed = int((db_result or {}).get("ok") or 0) if isinstance(db_result, dict) else 0
+            print(
+                status_messages.status(
+                    f"DB sync from evidence complete | indexed={indexed} "
+                    f"scanned={(db_result or {}).get('scanned') if isinstance(db_result, dict) else '?'}",
+                    level="success" if indexed else "warn",
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        db_sync["error"] = str(exc)
+        print(status_messages.status(f"DB sync from evidence failed (tracker reindex still saved): {exc}", level="warn"))
+
+    if db_sync.get("attempted"):
+        report_payload["db_sync"] = db_sync
+        report_path.write_text(json.dumps(report_payload, indent=2, sort_keys=True), encoding="utf-8")
+
 
 def run_freeze_readiness_audit_action() -> None:
     from scytaledroid.DynamicAnalysis.menus.status_reports import run_freeze_readiness_audit_report

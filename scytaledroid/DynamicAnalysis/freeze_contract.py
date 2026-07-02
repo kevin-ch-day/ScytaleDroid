@@ -53,7 +53,7 @@ def build_freeze_contract_snapshot() -> dict[str, Any]:
             "category_map": mapping_snapshot(),
             "canonical_template_ids": {
                 "social_feed": "social_feed_basic_v2",
-                "social_facebook": "facebook_basic_v2",
+                "social_facebook": "facebook_behavior_v3",
                 "social_camera_story": "snapchat_basic_v1",
                 "social_microblog": "x_twitter_full_session_v1",
                 "messaging": "messaging_basic_v1",

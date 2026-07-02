@@ -651,6 +651,8 @@ def run_ml_query_mode(
                 "training_mode": training_mode,
                 "baseline_provenance": {
                     "baseline_run_id": str(baseline_run_ids[0]) if baseline_run_ids else None,
+                    "baseline_run_ids": [str(rid) for rid in baseline_run_ids],
+                    "baseline_run_count": int(len(baseline_run_ids)),
                     "baseline_pcap_bytes_ok": bool(baseline_bytes_ok),
                     "baseline_windows_ok": bool(baseline_windows_ok),
                     "fallback_reason": (

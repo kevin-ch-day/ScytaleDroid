@@ -133,6 +133,15 @@ def _is_false(value: Any) -> bool:
     return value in (False, 0, "0", "false", "FALSE", "no", "NO")
 
 
+def _has_pcap_artifact(artifacts_dir: Path) -> bool:
+    if not artifacts_dir.exists():
+        return False
+    return any(
+        path.is_file() and path.suffix.lower() in {".pcap", ".pcapng"}
+        for path in artifacts_dir.rglob("*.pcap*")
+    )
+
+
 def _list_sample(values: Iterable[str], *, limit: int = 5) -> str:
     out: list[str] = []
     for value in values:
@@ -380,7 +389,7 @@ def _scan_local_evidence_packs(package_filter: Sequence[str] | None = None) -> l
             or _first_present(summary or {}, ["dynamic_run_id"])
             or run_dir.name
         )
-        pcap_exists = any((run_dir / "artifacts").rglob("*.pcap")) if (run_dir / "artifacts").exists() else False
+        pcap_exists = _has_pcap_artifact(run_dir / "artifacts")
         top_domains: list[str] = []
         if isinstance(pcap_report, Mapping):
             for key in ("top_dns_qnames", "top_sni_server_names", "service_domains"):

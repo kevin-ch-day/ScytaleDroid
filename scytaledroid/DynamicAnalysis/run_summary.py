@@ -116,6 +116,13 @@ def print_run_summary(result, duration_label: str) -> None:
                         "LOW_SIGNAL_IDLE (retained, not quota-counted)",
                     )
                 )
+            elif valid is True and validity.get("baseline_not_idle") is True:
+                lines.append(
+                    (
+                        "Exploratory class",
+                        "BASELINE_NOT_IDLE (ML training pool, not quota-counted)",
+                    )
+                )
             min_bytes = validity.get("min_pcap_bytes")
             if min_bytes is not None:
                 lines.append(("MIN_PCAP_BYTES", str(min_bytes)))
@@ -762,6 +769,8 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
     profile_lc = str(run_profile or "").strip().lower()
     if validity.get("low_signal") is True and profile_lc == "baseline_idle":
         return "NO (LOW_SIGNAL_IDLE)"
+    if validity.get("baseline_not_idle") is True and profile_lc == "baseline_idle":
+        return "NO (BASELINE_NOT_IDLE)"
     if validity.get("countable") is False:
         exclusion_reason = str(validity.get("paper_exclusion_primary_reason_code") or "").strip().upper()
         cohort_eligibility = str(validity.get("cohort_eligibility") or "").strip().upper()

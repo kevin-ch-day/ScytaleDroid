@@ -42,25 +42,25 @@ def test_render_cohort_status_details_includes_historical_context(monkeypatch, c
     )
 
     out = capsys.readouterr().out
-    assert "Progress" in out
-    assert "Quota-valid remaining : 68" in out
-    assert "Static refresh needed : 1" in out
-    assert "Baseline runs needed  : 3" in out
-    assert "Interactive needed    : 4" in out
+    assert "Cohort summary" in out
+    assert "Quota-valid remaining: 68" in out
+    assert "Static refresh needed: 1" in out
+    assert "Baseline runs needed: 3" in out
+    assert "Interactive needed: 4" in out
     assert "Evidence-authoritative quota" in out
-    assert "Quota-valid runs      : 12 / 80" in out
+    assert "Quota-valid runs: 12 / 80" in out
     assert "Tracker-scoped latest-run state" in out
     assert "Historical context" in out
     assert "Current-build complete: 9 / 16" in out
-    assert "Current-build active  : 1" in out
-    assert "Current-build review  : 1" in out
-    assert "Current-build stale   : 2" in out
-    assert "Current-build DB-only : 1" in out
-    assert "Mixed apps            : 1" in out
-    assert "Historical local-only : 2" in out
-    assert "Historical DB-only    : 5" in out
-    assert "No evidence anywhere  : 1" in out
-    assert "Legacy valid runs     : 3" in out
+    assert "Current-build active: 1" in out
+    assert "Current-build review: 1" in out
+    assert "Current-build stale: 2" in out
+    assert "Current-build DB-only: 1" in out
+    assert "Mixed apps: 1" in out
+    assert "Historical local-only: 2" in out
+    assert "Historical DB-only: 5" in out
+    assert "No evidence anywhere: 1" in out
+    assert "Legacy valid runs: 3" in out
     assert "Meaning" in out
     assert "Evidence-authoritative quota drives archive/freeze readiness." in out
     assert "Tracker-scoped latest-run state describes active-build queue posture." in out
@@ -69,7 +69,7 @@ def test_render_cohort_status_details_includes_historical_context(monkeypatch, c
     assert "Historical DB-only means older dynamic lineage exists in the DB" in out
 
 
-def test_render_cohort_status_help_mentions_supplemental_and_historical(monkeypatch, capsys) -> None:
+def test_render_cohort_status_help_mentions_retained_extra_and_historical(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
 
     menu_reports.render_cohort_status_help()
@@ -78,10 +78,12 @@ def test_render_cohort_status_help_mentions_supplemental_and_historical(monkeypa
     assert "locked" in out
     assert "mixed" in out
     assert "+L" in out
-    assert "+ extra" in out
+    assert "3/3" in out
+    assert "+1 extra" in out
+    assert "Next" in out
+    assert "Build" in out
     assert "db-only" in out
-    assert "Current target + DB-only evidence" in out
-    assert "refresh target" in out
+    assert "Status=restore + DB-only evidence" in out
     assert "refresh steps" in out
     assert "installed app build differs from the newest static plan" in out
     assert "identity mismatch" in out
@@ -117,19 +119,21 @@ def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, caps
     )
 
     out = capsys.readouterr().out
-    assert "History" in out
+    out_flat = " ".join(out.split())
+    assert "Build history" in out
     assert "Build lineage and why an app looks current, mixed, or legacy" in out
     assert "Baseline" in out
     assert "Interactive" in out
     assert "Build identity detail" in out
     assert "only historical DB lineage exists" in out
     assert "exists; extra" in out
-    assert "baseline outside quota" in out
-    assert "legacy evidence" in out
+    assert "baseline retained beyond quota cap" in out_flat
+    assert "legacy evidence" in out_flat
     assert "present" in out
     assert "historical DB-only evidence" in out
-    assert "3/3 +1 extra" in out
-    assert "0/4 need 4" in out
+    assert "3/3 (+1 extra)" not in out or "4/3" in out
+    assert "4/3" in out
+    assert "0/4" in out
 
 
 def test_render_cohort_build_history_wraps_multiple_notes(monkeypatch, capsys) -> None:
@@ -157,12 +161,13 @@ def test_render_cohort_build_history_wraps_multiple_notes(monkeypatch, capsys) -
     )
 
     out = capsys.readouterr().out
+    out_flat = " ".join(out.split())
     assert "current-build" in out
     assert "current-build evidence" in out
     assert "missing locally" in out
     assert "extra" in out
-    assert "baseline outside quota" in out
-    assert "legacy evidence" in out
+    assert "baseline retained beyond quota cap" in out_flat
+    assert "legacy evidence" in out_flat
     assert "present" in out
     assert "DB-only" in out
     assert "evidence" in out
@@ -220,9 +225,9 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
 
     menu_reports.render_cohort_status_debug(
-        [["1", "Facebook", "3/3 complete (+1 extra)", "0/4 need 4", "4I", "manual interaction", "mixed", "3/7 need 4", "1", "valid (L)"]],
         [
             SimpleNamespace(
+                full_row=["1"],
                 display_name="Facebook",
                 baseline_countable=3,
                 baseline_extra=1,
@@ -232,11 +237,16 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
                 historical_build_count=1,
                 need_baseline=0,
                 need_interactive=4,
+                prep_label="mixed",
+                qa_label="valid (L)",
+                next_label="manual interaction",
                 lineage_state="historical_db_only",
                 db_active_sessions=0,
                 db_historical_sessions=11,
             )
         ],
+        baseline_required=3,
+        interactive_required=4,
     )
 
     out = capsys.readouterr().out
@@ -247,8 +257,8 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
     assert "only historical DB lineage exists" in out
     assert "hist=11" in out
     assert "Raw state extract" in out
-    assert "historical" in out
-    assert "11" in out
+    assert "3/3" in out
+    assert "4I" in out
 
 
 def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeypatch, capsys) -> None:
@@ -262,11 +272,8 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
 
     menu_reports.render_cohort_status_debug(
         [
-            ["1", "CNN", "3/3 complete", "4/4 complete", "0", "review QA", "current", "7/7 complete", "0", "invalid"],
-            ["2", "Facebook", "3/3 complete", "0/4 need 4", "4I", "refresh static", "stale", "3/7 need 4", "1", "valid (L)"],
-        ],
-        [
             SimpleNamespace(
+                full_row=["1"],
                 display_name="CNN",
                 baseline_countable=3,
                 baseline_extra=0,
@@ -276,13 +283,16 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
                 historical_build_count=0,
                 need_baseline=0,
                 need_interactive=0,
+                prep_label="current",
+                qa_label="invalid",
+                next_label="review QA",
                 lineage_state="current_build_observed",
                 db_active_sessions=6,
                 db_historical_sessions=0,
-                qa_label="invalid",
                 live_build_drift=False,
             ),
             SimpleNamespace(
+                full_row=["2"],
                 display_name="Facebook",
                 package_name="com.facebook.katana",
                 baseline_countable=3,
@@ -293,10 +303,12 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
                 historical_build_count=1,
                 need_baseline=0,
                 need_interactive=4,
+                prep_label="stale",
+                qa_label="valid (L)",
+                next_label="refresh static",
                 lineage_state="current_build_stale",
                 db_active_sessions=4,
                 db_historical_sessions=20,
-                qa_label="valid (L)",
                 live_build_drift=True,
                 live_expected_version_code="472143276",
                 live_expected_version_name="565.0.0.49.74",
@@ -304,6 +316,8 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
                 live_static_run_id="4290",
             ),
         ],
+        baseline_required=3,
+        interactive_required=4,
     )
 
     out = capsys.readouterr().out

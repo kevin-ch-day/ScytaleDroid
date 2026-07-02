@@ -18,6 +18,7 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_templates import template_ste
 
 
 TIMELINE_RELATIVE_PATH = "analysis/interaction_timeline.json"
+PROTOCOL_PHASE_MARKERS_RELATIVE_PATH = "analysis/protocol_phase_markers.jsonl"
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ def build_interaction_timeline_from_run_dir(
     script_start: dict[str, Any] | None = None
     script_end: dict[str, Any] | None = None
     step_rows: dict[int, dict[str, Any]] = {}
+    phase_markers: list[dict[str, Any]] = []
     limitations: list[str] = []
 
     for event in events:
@@ -83,6 +85,25 @@ def build_interaction_timeline_from_run_dir(
                     "step_variant": details.get("step_variant"),
                     "planned_duration_sec": _coerce_int(details.get("expected_duration_s")),
                     "actual_start_timestamp": timestamp or None,
+                    "account_context": details.get("account_context"),
+                    "control_account": _coerce_bool(details.get("control_account")),
+                    "control_account_mode": details.get("control_account_mode"),
+                    "mutation_allowed": _coerce_bool(details.get("mutation_allowed")),
+                    "cleanup_expected": _coerce_bool(details.get("cleanup_expected")),
+                    "mutation_candidate": _coerce_bool(details.get("mutation_candidate")),
+                    "repeat_group": details.get("repeat_group"),
+                    "repeat_index": _coerce_int(details.get("repeat_index")),
+                    "repeat_total": _coerce_int(details.get("repeat_total")),
+                    "repeat_max_total": _coerce_int(details.get("repeat_max_total")),
+                    "repeat_enabled": _coerce_bool(details.get("repeat_enabled")),
+                    "branch_taken": details.get("branch_taken"),
+                    "article_branch": details.get("article_branch"),
+                    "subscription_wall_observed": _coerce_bool(details.get("subscription_wall_observed")),
+                    "subscription_options_opened": _coerce_bool(details.get("subscription_options_opened")),
+                    "return_home_performed": _coerce_bool(details.get("return_home_performed")),
+                    "protocol_fit": details.get("protocol_fit"),
+                    "message_type": details.get("message_type"),
+                    "traffic_phase": details.get("traffic_phase"),
                 }
             )
         elif event_type == "STEP_END":
@@ -98,8 +119,59 @@ def build_interaction_timeline_from_run_dir(
                     "actual_end_timestamp": timestamp or None,
                     "actual_duration_sec": _coerce_float(details.get("elapsed_s")),
                     "step_outcome": str(details.get("step_outcome") or "").strip() or None,
+                    "operator_result": str(details.get("operator_result") or details.get("step_outcome") or "").strip() or None,
                     "limitation_reason": str(details.get("limitation_reason") or "").strip() or None,
                     "operator_note": str(details.get("operator_note") or "").strip() or None,
+                    "account_context": details.get("account_context") or row.get("account_context"),
+                    "control_account": _coerce_bool(details.get("control_account")),
+                    "control_account_mode": details.get("control_account_mode") or row.get("control_account_mode"),
+                    "mutation_allowed": _coerce_bool(details.get("mutation_allowed")),
+                    "cleanup_expected": _coerce_bool(details.get("cleanup_expected")),
+                    "mutation_candidate": _coerce_bool(details.get("mutation_candidate")),
+                    "mutation_performed": _coerce_bool(details.get("mutation_performed")),
+                    "repeat_group": details.get("repeat_group") or row.get("repeat_group"),
+                    "repeat_index": _coerce_int(details.get("repeat_index")) or row.get("repeat_index"),
+                    "repeat_total": _coerce_int(details.get("repeat_total")) or row.get("repeat_total"),
+                    "repeat_max_total": _coerce_int(details.get("repeat_max_total")) or row.get("repeat_max_total"),
+                    "repeat_enabled": _coerce_bool(details.get("repeat_enabled")),
+                    "branch_taken": details.get("branch_taken") or row.get("branch_taken"),
+                    "article_branch": details.get("article_branch") or row.get("article_branch"),
+                    "subscription_wall_observed": _coerce_bool(details.get("subscription_wall_observed")),
+                    "subscription_options_opened": _coerce_bool(details.get("subscription_options_opened")),
+                    "return_home_performed": _coerce_bool(details.get("return_home_performed")),
+                    "protocol_fit": details.get("protocol_fit") or row.get("protocol_fit"),
+                    "message_type": details.get("message_type") or row.get("message_type"),
+                    "traffic_phase": details.get("traffic_phase") or row.get("traffic_phase"),
+                }
+            )
+        elif event_type == "PHASE_MARKER":
+            phase_markers.append(
+                {
+                    "timestamp": timestamp or None,
+                    "step_id": details.get("step_id"),
+                    "step_index": _coerce_int(details.get("step_index")),
+                    "phase_id": details.get("phase_id"),
+                    "phase_label": details.get("phase_label"),
+                    "operator_result": details.get("operator_result"),
+                    "account_context": details.get("account_context"),
+                    "control_account": _coerce_bool(details.get("control_account")),
+                    "control_account_mode": details.get("control_account_mode"),
+                    "mutation_allowed": _coerce_bool(details.get("mutation_allowed")),
+                    "cleanup_expected": _coerce_bool(details.get("cleanup_expected")),
+                    "mutation_performed": _coerce_bool(details.get("mutation_performed")),
+                    "repeat_group": details.get("repeat_group"),
+                    "repeat_index": _coerce_int(details.get("repeat_index")),
+                    "repeat_total": _coerce_int(details.get("repeat_total")),
+                    "repeat_max_total": _coerce_int(details.get("repeat_max_total")),
+                    "repeat_enabled": _coerce_bool(details.get("repeat_enabled")),
+                    "branch_taken": details.get("branch_taken"),
+                    "article_branch": details.get("article_branch"),
+                    "subscription_wall_observed": _coerce_bool(details.get("subscription_wall_observed")),
+                    "subscription_options_opened": _coerce_bool(details.get("subscription_options_opened")),
+                    "return_home_performed": _coerce_bool(details.get("return_home_performed")),
+                    "protocol_fit": details.get("protocol_fit"),
+                    "message_type": details.get("message_type"),
+                    "traffic_phase": details.get("traffic_phase"),
                 }
             )
 
@@ -148,7 +220,7 @@ def build_interaction_timeline_from_run_dir(
         step_outcome = str(row.get("step_outcome") or "").strip().lower() or None
         limitation_reason = str(row.get("limitation_reason") or "").strip() or None
         operator_note = str(row.get("operator_note") or "").strip() or None
-        operator_completed = bool(end_ts and step_outcome != "skipped_not_found")
+        operator_completed = bool(end_ts and step_outcome not in {"skipped_not_found", "skipped_optional_repeat"})
         notes: list[str] = []
         if step_outcome and step_outcome != "completed":
             notes.append(f"outcome={step_outcome}")
@@ -171,9 +243,28 @@ def build_interaction_timeline_from_run_dir(
                 "actual_duration_sec": actual_duration,
                 "operator_prompt": planned_prompt,
                 "operator_completed": operator_completed,
+                "operator_result": row.get("operator_result") or step_outcome or "unknown",
                 "step_outcome": step_outcome or "unknown",
                 "limitation_reason": limitation_reason,
                 "operator_note": operator_note,
+                "account_context": row.get("account_context"),
+                "control_account": bool(row.get("control_account")) if row.get("control_account") is not None else False,
+                "control_account_mode": row.get("control_account_mode"),
+                "mutation_allowed": bool(row.get("mutation_allowed")) if row.get("mutation_allowed") is not None else False,
+                "cleanup_expected": bool(row.get("cleanup_expected")) if row.get("cleanup_expected") is not None else False,
+                "mutation_candidate": bool(row.get("mutation_candidate")) if row.get("mutation_candidate") is not None else False,
+                "mutation_performed": bool(row.get("mutation_performed")) if row.get("mutation_performed") is not None else False,
+                "repeat_group": row.get("repeat_group"),
+                "repeat_index": row.get("repeat_index"),
+                "repeat_total": row.get("repeat_total"),
+                "repeat_max_total": row.get("repeat_max_total"),
+                "repeat_enabled": row.get("repeat_enabled"),
+                "branch_taken": row.get("branch_taken"),
+                "article_branch": row.get("article_branch"),
+                "subscription_wall_observed": bool(row.get("subscription_wall_observed")) if row.get("subscription_wall_observed") is not None else False,
+                "subscription_options_opened": bool(row.get("subscription_options_opened")) if row.get("subscription_options_opened") is not None else False,
+                "return_home_performed": bool(row.get("return_home_performed")) if row.get("return_home_performed") is not None else False,
+                "protocol_fit": row.get("protocol_fit"),
                 "notes": "; ".join(notes),
             }
         )
@@ -199,6 +290,7 @@ def build_interaction_timeline_from_run_dir(
         "completed_step_count": completed_step_count,
         "timeline_complete": bool(timeline_complete),
         "steps": steps,
+        "phase_markers": phase_markers,
         "limitations": sorted({item for item in limitations if item}),
     }
 
@@ -216,6 +308,131 @@ def write_interaction_timeline_artifact(
     return ArtifactRecord(
         relative_path=TIMELINE_RELATIVE_PATH,
         type="interaction_timeline",
+        sha256=writer.hash_file(path),
+        size_bytes=path.stat().st_size,
+        produced_by="interaction_timeline",
+        origin="host",
+        pull_status="n/a",
+    )
+
+
+def build_protocol_phase_marker_rows(timeline: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten an interaction timeline into JSONL-friendly PCAP phase markers."""
+    if not isinstance(timeline, dict):
+        return []
+    common = {
+        "schema_name": "scytaledroid.protocol_phase_marker",
+        "schema_version": "1.0",
+        "run_id": timeline.get("run_id"),
+        "package": timeline.get("package"),
+        "scenario_id": timeline.get("scenario_id"),
+        "template_id": timeline.get("template_id"),
+        "template_hash": timeline.get("template_hash"),
+        "mapping_version": timeline.get("mapping_version"),
+    }
+    rows: list[dict[str, Any]] = []
+    for step in timeline.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        rows.append(
+            {
+                **common,
+                "marker_type": "step_window",
+                "step_id": step.get("step_id"),
+                "step_index": step.get("step_index"),
+                "phase_id": step.get("step_id"),
+                "phase_label": step.get("phase_label"),
+                "start_time": step.get("actual_start_timestamp"),
+                "end_time": step.get("actual_end_timestamp"),
+                "planned_duration_sec": step.get("planned_duration_sec"),
+                "actual_duration_sec": step.get("actual_duration_sec"),
+                "operator_result": step.get("operator_result") or step.get("step_outcome"),
+                "step_outcome": step.get("step_outcome"),
+                "limitation_reason": step.get("limitation_reason"),
+                "account_context": step.get("account_context"),
+                "control_account": bool(step.get("control_account")),
+                "control_account_mode": step.get("control_account_mode"),
+                "mutation_allowed": bool(step.get("mutation_allowed")),
+                "mutation_candidate": bool(step.get("mutation_candidate")),
+                "mutation_performed": bool(step.get("mutation_performed")),
+                "cleanup_expected": bool(step.get("cleanup_expected")),
+                "repeat_group": step.get("repeat_group"),
+                "repeat_index": step.get("repeat_index"),
+                "repeat_total": step.get("repeat_total"),
+                "repeat_max_total": step.get("repeat_max_total"),
+                "repeat_enabled": step.get("repeat_enabled"),
+                "message_type": step.get("message_type"),
+                "traffic_phase": step.get("traffic_phase"),
+                "branch_taken": step.get("branch_taken"),
+                "article_branch": step.get("article_branch"),
+                "subscription_wall_observed": bool(step.get("subscription_wall_observed")),
+                "subscription_options_opened": bool(step.get("subscription_options_opened")),
+                "return_home_performed": bool(step.get("return_home_performed")),
+                "protocol_fit": step.get("protocol_fit"),
+            }
+        )
+    for marker in timeline.get("phase_markers") or []:
+        if not isinstance(marker, dict):
+            continue
+        rows.append(
+            {
+                **common,
+                "marker_type": "operator_marker",
+                "step_id": marker.get("step_id"),
+                "step_index": marker.get("step_index"),
+                "phase_id": marker.get("phase_id"),
+                "phase_label": marker.get("phase_label"),
+                "start_time": marker.get("timestamp"),
+                "end_time": marker.get("timestamp"),
+                "planned_duration_sec": None,
+                "actual_duration_sec": None,
+                "operator_result": marker.get("operator_result"),
+                "step_outcome": None,
+                "limitation_reason": None,
+                "account_context": marker.get("account_context"),
+                "control_account": bool(marker.get("control_account")),
+                "control_account_mode": marker.get("control_account_mode"),
+                "mutation_allowed": bool(marker.get("mutation_allowed")),
+                "mutation_candidate": False,
+                "mutation_performed": bool(marker.get("mutation_performed")),
+                "cleanup_expected": bool(marker.get("cleanup_expected")),
+                "repeat_group": marker.get("repeat_group"),
+                "repeat_index": marker.get("repeat_index"),
+                "repeat_total": marker.get("repeat_total"),
+                "repeat_max_total": marker.get("repeat_max_total"),
+                "repeat_enabled": marker.get("repeat_enabled"),
+                "message_type": marker.get("message_type"),
+                "traffic_phase": marker.get("traffic_phase"),
+                "branch_taken": marker.get("branch_taken"),
+                "article_branch": marker.get("article_branch"),
+                "subscription_wall_observed": bool(marker.get("subscription_wall_observed")),
+                "subscription_options_opened": bool(marker.get("subscription_options_opened")),
+                "return_home_performed": bool(marker.get("return_home_performed")),
+                "protocol_fit": marker.get("protocol_fit"),
+            }
+        )
+    return rows
+
+
+def write_protocol_phase_markers_artifact(
+    *,
+    writer: EvidencePackWriter,
+    manifest: dict[str, Any] | RunManifest,
+) -> ArtifactRecord | None:
+    manifest_payload = manifest_to_dict(manifest) if isinstance(manifest, RunManifest) else manifest
+    timeline = _read_json(writer.run_dir / TIMELINE_RELATIVE_PATH)
+    if not isinstance(timeline, dict):
+        timeline = build_interaction_timeline_from_run_dir(writer.run_dir, manifest=manifest_payload)
+    if not isinstance(timeline, dict):
+        return None
+    rows = build_protocol_phase_marker_rows(timeline)
+    if not rows:
+        return None
+    content = "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n"
+    path = writer.write_text(PROTOCOL_PHASE_MARKERS_RELATIVE_PATH, content)
+    return ArtifactRecord(
+        relative_path=PROTOCOL_PHASE_MARKERS_RELATIVE_PATH,
+        type="protocol_phase_markers",
         sha256=writer.hash_file(path),
         size_bytes=path.stat().st_size,
         produced_by="interaction_timeline",
@@ -434,8 +651,9 @@ def _pcap_path(run_dir: Path, *, manifest: dict[str, Any] | None = None) -> Path
             path = run_dir / rel
             if path.exists() and path.is_file():
                 return path
-    for candidate in sorted((run_dir / "artifacts" / "pcapdroid_capture").glob("*.pcap")):
-        return candidate
+    for candidate in sorted((run_dir / "artifacts" / "pcapdroid_capture").glob("*.pcap*")):
+        if candidate.is_file() and candidate.suffix.lower() in {".pcap", ".pcapng"}:
+            return candidate
     return None
 
 
@@ -474,6 +692,21 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    token = str(value).strip().lower()
+    if token in {"1", "true", "yes", "on"}:
+        return True
+    if token in {"0", "false", "no", "off"}:
+        return False
+    return None
 
 
 def _parse_iso8601(value: str) -> datetime | None:
@@ -519,10 +752,13 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "PROTOCOL_PHASE_MARKERS_RELATIVE_PATH",
     "TIMELINE_RELATIVE_PATH",
     "PhasePacketRecord",
     "build_interaction_timeline_from_run_dir",
+    "build_protocol_phase_marker_rows",
     "extract_phase_packet_timeline",
     "phase_packet_transport_summary",
     "write_interaction_timeline_artifact",
+    "write_protocol_phase_markers_artifact",
 ]

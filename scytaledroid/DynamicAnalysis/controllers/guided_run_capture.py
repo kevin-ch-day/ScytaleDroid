@@ -11,6 +11,7 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_evidence_text,
     selected_app_qa_text,
 )
+from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 
 def _drift_evidence_text(build: str, evidence: str) -> str:
@@ -114,11 +115,40 @@ def render_static_plan_build_drift_block(
     menu_utils: Any,
     status_messages: Any,
 ) -> None:
-    menu_utils.print_header("Static Plan / Device Drift")
-    rows = [["App", display_label], *plan_drift_rows(plan_drift, detailed_installed_build=True)]
-    menu_utils.print_table(["Field", "Value"], rows)
+    observed_vc = str(plan_drift.get("observed_version_code") or "").strip() or "unknown"
+    expected_vc = str(plan_drift.get("expected_version_code") or "").strip() or "unknown"
+    print_summary_card(
+        display_label,
+        [
+            summary_item("Status", "installed build drift", value_style="warning"),
+            summary_item("Installed", observed_vc, value_style="accent"),
+            summary_item("Tracked plan", expected_vc, value_style="muted"),
+            summary_item("Static run", str(plan_drift.get("static_run_id") or "unknown"), value_style="muted"),
+        ],
+        subtitle="Static plan / device drift",
+    )
+    print()
     print_plan_drift_warning(plan_drift, status_messages=status_messages)
     print_plan_drift_blocked_message(plan_drift, status_messages=status_messages)
+
+
+def _drift_workbench_summary_items(
+    *,
+    evidence_text: str,
+    qa_text: str,
+    quota: str,
+    plan_drift: dict[str, Any],
+) -> list[Any]:
+    observed_vc = str(plan_drift.get("observed_version_code") or "").strip() or "unknown"
+    expected_vc = str(plan_drift.get("expected_version_code") or "").strip() or "unknown"
+    return [
+        summary_item("Status", "installed build drift", value_style="warning"),
+        summary_item("Installed", observed_vc, value_style="accent"),
+        summary_item("Tracked plan", expected_vc, value_style="muted"),
+        summary_item("Evidence", evidence_text, value_style="muted"),
+        summary_item("QA", qa_text, value_style="muted"),
+        summary_item("Quota", quota, value_style="muted"),
+    ]
 
 
 def render_selected_app_drift_workbench(
@@ -134,10 +164,9 @@ def render_selected_app_drift_workbench(
     selected_app_state_snapshot_fn: Callable[..., Any],
     render_selected_app_recent_runs_fn: Callable[[Any], None],
     render_selected_app_diagnostics_fn: Callable[..., None],
-) -> None:
+    ) -> None:
     while True:
         active_valid_runs = selected_app_active_valid_runs_fn(app)
-        menu_utils.print_header(app.display_label)
         lineage_state = selected_app_lineage_state_fn(
             active_valid_runs=active_valid_runs,
             legacy_valid_runs=app.historical_valid_local,
@@ -160,23 +189,47 @@ def render_selected_app_drift_workbench(
         )
         evidence_text = _drift_evidence_text(snapshot.build, snapshot.evidence)
         qa_text = selected_app_qa_text(snapshot.qa)
-        print(f"Installed build drift detected · {evidence_text} · {qa_text} · tracked quota {snapshot.quota}")
-        print(_drift_build_summary(plan_drift))
+        print_summary_card(
+            app.display_label,
+            _drift_workbench_summary_items(
+                evidence_text=evidence_text,
+                qa_text=qa_text,
+                quota=str(snapshot.quota),
+                plan_drift=plan_drift,
+            ),
+            footer=_drift_build_summary(plan_drift),
+        )
         for line in _drift_harvest_context(app.package_name, plan_drift):
-            print(line)
-        print()
-        menu_utils.print_section("Recommended")
-        print("R) Refresh checklist [default]")
-        print("Reason: installed build does not match the newest static plan.")
+            print(status_messages.status(line, level="info"))
         print()
         print_plan_drift_warning(plan_drift, status_messages=status_messages)
         print_plan_drift_blocked_message(plan_drift, status_messages=status_messages)
         print()
-        menu_utils.print_section("Review / inspect")
-        print("H) Run history")
-        print("G) Diagnostics")
+        menu_utils.print_section("Recommended")
+        menu_utils.print_menu(
+            [
+                menu_utils.MenuOption(
+                    "R",
+                    "Refresh checklist",
+                    description="installed build does not match the newest static plan",
+                    badge="suggested",
+                ),
+            ],
+            default="R",
+            show_descriptions=True,
+            compact=True,
+        )
         print()
-        print("0) Back")
+        menu_utils.print_section("Review / inspect")
+        menu_utils.print_menu(
+            [
+                menu_utils.MenuOption("H", "Run history", description="recent tracker-scoped runs"),
+                menu_utils.MenuOption("G", "Diagnostics", description="study, capture, and quota detail"),
+            ],
+            show_descriptions=True,
+            compact=True,
+        )
+        menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
         choice = prompt_utils.get_choice(
             ["R", "H", "G", "0", "B"],
             default="R",
@@ -190,6 +243,7 @@ def render_selected_app_drift_workbench(
                 app=app,
                 plan_drift=plan_drift,
                 menu_utils=menu_utils,
+                status_messages=status_messages,
             )
             prompt_utils.press_enter_to_continue()
             continue
@@ -218,36 +272,54 @@ def _render_refresh_checklist(
     app: Any,
     plan_drift: dict[str, Any],
     menu_utils: Any,
+    status_messages: Any,
 ) -> None:
     menu_utils.print_header("Refresh checklist", app.display_label)
-    print("This app is blocked because the installed build does not match the newest static plan.")
-    print("Current baseline/interactive counts below belong to the tracked static-plan build, not the newly installed build.")
+    print(
+        status_messages.status(
+            "Blocked: installed build does not match the newest static plan. "
+            "Counts below belong to the tracked static-plan build, not the newly installed build.",
+            level="warn",
+        )
+    )
     print()
-    print("Current state")
+    menu_utils.print_section("Current state")
     rows = plan_drift_rows(plan_drift, detailed_installed_build=False)
     menu_utils.print_table(["Field", "Value"], rows)
     for line in _drift_harvest_context(app.package_name, plan_drift):
-        print(line)
+        print(status_messages.status(line, level="info"))
     print()
-    print("To clear refresh:")
-    print("  1. Back out to Main Menu.")
-    print("  2. Open Device Inventory & Harvest.")
-    print("  3. Refresh inventory if the snapshot is stale.")
-    print("  4. Execute harvest and choose a scope that includes this app.")
-    print("  5. Pull the current APK/build.")
-    print("  6. Open Static Analysis Pipeline.")
-    print("  7. Choose Analyze one app.")
-    print("  8. Analyze this app/package.")
-    print("  9. Return to Dynamic Analysis → App queue / next action.")
-    print(" 10. Confirm this app no longer shows Build=drift / Action=refresh.")
+    menu_utils.print_section("To clear refresh")
+    steps = [
+        "Back out to Main Menu.",
+        "Open Device Inventory & Harvest.",
+        "Refresh inventory if the snapshot is stale.",
+        "Execute harvest and choose a scope that includes this app.",
+        "Pull the current APK/build.",
+        "Open Static Analysis Pipeline.",
+        "Choose Analyze one app.",
+        "Analyze this app/package.",
+        "Return to Dynamic Analysis → App queue / next action.",
+        "Confirm this app no longer shows Status=refresh in the app queue.",
+    ]
+    for index, step_text in enumerate(steps, start=1):
+        print(status_messages.step(step_text, progress=(index, len(steps))))
     if bool(getattr(app, "has_identity_mismatch", False)):
         print()
-        print("Caution:")
-        print("  Identity mismatch context exists. Check diagnostics before reusing older evidence.")
+        print(
+            status_messages.status(
+                "Caution: identity mismatch context exists. Check diagnostics before reusing older evidence.",
+                level="warn",
+            )
+        )
     print()
-    print("After refresh clears:")
-    print("  Return to the app queue and follow the updated recommended action for this app.")
-    print("  The refreshed app version should be treated as the new current build target for dataset-mode runs.")
+    print(
+        status_messages.status(
+            "After refresh clears: return to the app queue and follow the updated recommended action. "
+            "The refreshed app version should be treated as the new current build target for dataset-mode runs.",
+            level="info",
+        )
+    )
 
 
 def print_capture_device_choice(
@@ -257,17 +329,19 @@ def print_capture_device_choice(
     menu_utils: Any,
     status_messages: Any,
 ) -> None:
-    menu_utils.print_section("Capture device")
-    print(
-        "  "
-        + " · ".join(
-            [
-                details["name"],
-                details["serial"],
-                f"Android {details['android']}",
-                details["type"],
-            ]
-        )
+    print_summary_card(
+        "Capture device",
+        [
+            summary_item("Device", details["name"], value_style="accent"),
+            summary_item("Serial", details["serial"], value_style="muted"),
+            summary_item("Android", details["android"], value_style="muted"),
+            summary_item("Type", details["type"], value_style="muted"),
+            summary_item(
+                "ADB",
+                "connected" if detected else "not detected",
+                value_style="success" if detected else "warning",
+            ),
+        ],
     )
     if not detected:
         print(
@@ -304,11 +378,12 @@ def choose_capture_device(
 
     menu_utils.print_menu(
         [
-            menu_utils.MenuOption("1", "Keep selected device"),
-            menu_utils.MenuOption("2", "Change device"),
+            menu_utils.MenuOption("1", "Keep selected device", description="wait for adb reconnect on current serial"),
+            menu_utils.MenuOption("2", "Change device", description="pick a different capture device"),
         ],
+        default="1",
+        show_descriptions=True,
         show_exit=False,
-        show_descriptions=False,
         compact=True,
     )
     menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
@@ -344,7 +419,14 @@ def prepare_selected_app_capture(
     render_selected_app_drift_workbench_fn: Callable[..., None],
 ) -> tuple[str, str] | None:
     print()
-    menu_utils.print_header("Capture Setup", app.display_label)
+    print_summary_card(
+        app.display_label,
+        [
+            summary_item("Package", app.package_name, value_style="muted"),
+        ],
+        subtitle="Capture setup",
+    )
+    print()
     print_paper_mode_constants_fn()
     selected = choose_capture_device_fn(device_ctx)
     if not selected:

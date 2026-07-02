@@ -1389,6 +1389,351 @@ LEFT JOIN v_static_handoff_v1 h
   ON h.static_run_id = sar.id;
 """
 
+CREATE_V_WEB_DYNAMIC_APP_QUEUE_V1 = """
+CREATE OR REPLACE VIEW v_web_dynamic_app_queue_v1 AS
+WITH cohort_apps_raw AS (
+  SELECT
+    CONVERT(rcm.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
+    rc.cohort_key,
+    rcm.sort_order,
+    COALESCE(NULLIF(a.display_name, ''), rcm.package_name) AS app_label
+  FROM research_cohort_members rcm
+  INNER JOIN research_cohorts rc
+    ON rc.cohort_id = rcm.cohort_id
+  LEFT JOIN apps a
+    ON CONVERT(a.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+     = CONVERT(rcm.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+  WHERE rc.is_active = 1
+    AND rcm.is_active = 1
+),
+cohort_apps AS (
+  SELECT
+    ranked.package_name,
+    ranked.cohort_key,
+    ranked.sort_order,
+    ranked.app_label
+  FROM (
+    SELECT
+      raw.package_name,
+      raw.cohort_key,
+      raw.sort_order,
+      raw.app_label,
+      ROW_NUMBER() OVER (
+        PARTITION BY raw.package_name
+        ORDER BY
+          CASE raw.cohort_key
+            WHEN 'research_dataset_beta' THEN 0
+            WHEN 'research_dataset_alpha' THEN 1
+            ELSE 2
+          END,
+          raw.sort_order,
+          raw.cohort_key
+      ) AS cohort_rank
+    FROM cohort_apps_raw raw
+  ) ranked
+  WHERE ranked.cohort_rank = 1
+),
+static_targets AS (
+  SELECT
+    CONVERT(sds.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
+    COALESCE(sds.has_static_data, 0) AS has_static_data,
+    sds.latest_static_run_id,
+    sds.latest_version_name,
+    sds.latest_version_code,
+    sds.latest_dynamic_run_id,
+    LOWER(TRIM(CONVERT(COALESCE(sds.latest_apk_sha256, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci)) AS latest_apk_sha256_lc
+  FROM v_web_static_dynamic_app_summary sds
+),
+profiled_runs AS (
+  SELECT
+    CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
+    ctx.quota_state,
+    CASE
+      WHEN st.latest_apk_sha256_lc <> ''
+       AND LOWER(TRIM(CONVERT(COALESCE(ctx.base_apk_sha256, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci)) = st.latest_apk_sha256_lc
+        THEN 1
+      ELSE 0
+    END AS current_build_flag,
+    CASE
+      WHEN INSTR(
+             LOWER(CONVERT(COALESCE(ctx.effective_run_profile, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci),
+             'baseline_idle'
+           ) = 1
+        OR INSTR(
+             LOWER(CONVERT(COALESCE(ctx.effective_run_profile, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci),
+             'baseline'
+           ) > 0
+        OR INSTR(
+             LOWER(CONVERT(COALESCE(ctx.effective_run_profile, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci),
+             'idle'
+           ) > 0
+        THEN 'baseline'
+      WHEN INSTR(
+             LOWER(CONVERT(COALESCE(ctx.effective_run_profile, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci),
+             'interaction_'
+           ) = 1
+        OR INSTR(
+             LOWER(CONVERT(COALESCE(ctx.effective_run_profile, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci),
+             'interactive'
+           ) > 0
+        THEN 'interactive'
+      ELSE 'other'
+    END AS profile_bucket,
+    CASE
+      WHEN ctx.quota_state = 'QUOTA_VALID' THEN 1
+      ELSE 0
+    END AS quota_counted_flag,
+    CASE
+      WHEN ctx.quota_state = 'SUPPLEMENTAL_VALID' AND COALESCE(ctx.low_signal, 0) = 0 THEN 1
+      ELSE 0
+    END AS extra_valid_flag,
+    CASE
+      WHEN ctx.quota_state = 'SUPPLEMENTAL_VALID' AND COALESCE(ctx.low_signal, 0) = 1 THEN 1
+      ELSE 0
+    END AS low_signal_retained_flag
+  FROM v_dynamic_run_context_v1 ctx
+  LEFT JOIN static_targets st
+    ON st.package_name = CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+  WHERE ctx.valid_dataset_run = 1
+),
+run_totals AS (
+  SELECT
+    CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
+    COUNT(*) AS dynamic_run_count,
+    SUM(CASE WHEN ctx.valid_dataset_run = 0 THEN 1 ELSE 0 END) AS invalid_run_count,
+    SUM(
+      CASE
+        WHEN ctx.valid_dataset_run = 0
+         AND st.latest_apk_sha256_lc <> ''
+         AND LOWER(TRIM(CONVERT(COALESCE(ctx.base_apk_sha256, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci)) = st.latest_apk_sha256_lc
+          THEN 1
+        ELSE 0
+      END
+    ) AS current_build_invalid_run_count,
+    SUM(CASE WHEN ctx.valid_dataset_run IS NULL THEN 1 ELSE 0 END) AS legacy_unknown_runs
+  FROM v_dynamic_run_context_v1 ctx
+  LEFT JOIN static_targets st
+    ON st.package_name = CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+  GROUP BY CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+),
+latest_scoped_run AS (
+  SELECT
+    ranked.package_name,
+    ranked.valid_dataset_run AS latest_scoped_valid_dataset_run,
+    ranked.invalid_reason_code AS latest_scoped_invalid_reason_code
+  FROM (
+    SELECT
+      CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci AS package_name,
+      ctx.valid_dataset_run,
+      ctx.invalid_reason_code,
+      ROW_NUMBER() OVER (
+        PARTITION BY CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+        ORDER BY ctx.started_at_utc DESC, ctx.dynamic_run_id DESC
+      ) AS rn
+    FROM v_dynamic_run_context_v1 ctx
+    LEFT JOIN static_targets st
+      ON st.package_name = CONVERT(ctx.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+    WHERE COALESCE(st.latest_apk_sha256_lc, '') = ''
+       OR LOWER(TRIM(CONVERT(COALESCE(ctx.base_apk_sha256, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci)) = st.latest_apk_sha256_lc
+  ) ranked
+  WHERE ranked.rn = 1
+),
+bucket_counts_all AS (
+  SELECT
+    ca.package_name,
+    SUM(CASE WHEN pr.profile_bucket = 'baseline' THEN pr.quota_counted_flag ELSE 0 END) AS baseline_quota_counted,
+    SUM(CASE WHEN pr.profile_bucket = 'baseline' THEN pr.extra_valid_flag ELSE 0 END) AS baseline_extra_valid,
+    SUM(CASE WHEN pr.profile_bucket = 'baseline' THEN pr.low_signal_retained_flag ELSE 0 END) AS baseline_low_signal_retained,
+    SUM(CASE WHEN pr.profile_bucket = 'interactive' THEN pr.quota_counted_flag ELSE 0 END) AS interactive_quota_counted,
+    SUM(CASE WHEN pr.profile_bucket = 'interactive' THEN pr.extra_valid_flag ELSE 0 END) AS interactive_extra_valid,
+    SUM(CASE WHEN pr.profile_bucket = 'interactive' THEN pr.low_signal_retained_flag ELSE 0 END) AS interactive_low_signal_retained
+  FROM cohort_apps ca
+  LEFT JOIN profiled_runs pr
+    ON pr.package_name = ca.package_name
+  GROUP BY ca.package_name
+),
+bucket_counts_current AS (
+  SELECT
+    ca.package_name,
+    SUM(CASE WHEN pr.profile_bucket = 'baseline' AND pr.current_build_flag = 1 THEN pr.quota_counted_flag ELSE 0 END) AS baseline_quota_counted,
+    SUM(CASE WHEN pr.profile_bucket = 'baseline' AND pr.current_build_flag = 1 THEN pr.extra_valid_flag ELSE 0 END) AS baseline_extra_valid,
+    SUM(CASE WHEN pr.profile_bucket = 'baseline' AND pr.current_build_flag = 1 THEN pr.low_signal_retained_flag ELSE 0 END) AS baseline_low_signal_retained,
+    SUM(CASE WHEN pr.profile_bucket = 'interactive' AND pr.current_build_flag = 1 THEN pr.quota_counted_flag ELSE 0 END) AS interactive_quota_counted,
+    SUM(CASE WHEN pr.profile_bucket = 'interactive' AND pr.current_build_flag = 1 THEN pr.extra_valid_flag ELSE 0 END) AS interactive_extra_valid,
+    SUM(CASE WHEN pr.profile_bucket = 'interactive' AND pr.current_build_flag = 1 THEN pr.low_signal_retained_flag ELSE 0 END) AS interactive_low_signal_retained
+  FROM cohort_apps ca
+  LEFT JOIN profiled_runs pr
+    ON pr.package_name = ca.package_name
+  GROUP BY ca.package_name
+),
+queue_core AS (
+  SELECT
+    ca.package_name,
+    ca.app_label,
+    ca.cohort_key,
+    ca.sort_order,
+    3 AS baseline_required,
+    4 AS interactive_required,
+    COALESCE(st.has_static_data, 0) AS has_static_data,
+    st.latest_static_run_id,
+    st.latest_version_name,
+    st.latest_version_code,
+    st.latest_dynamic_run_id,
+    st.latest_apk_sha256_lc,
+    COALESCE(rt.dynamic_run_count, 0) AS dynamic_run_count,
+    COALESCE(rt.invalid_run_count, 0) AS invalid_run_count,
+    COALESCE(rt.current_build_invalid_run_count, 0) AS current_build_invalid_run_count,
+    COALESCE(rt.legacy_unknown_runs, 0) AS legacy_unknown_runs,
+    lsr.latest_scoped_valid_dataset_run,
+    lsr.latest_scoped_invalid_reason_code,
+    COALESCE(bca.baseline_quota_counted, 0) AS all_build_baseline_quota_counted,
+    COALESCE(bca.baseline_extra_valid, 0) AS all_build_baseline_extra_valid,
+    COALESCE(bca.baseline_low_signal_retained, 0) AS all_build_baseline_low_signal_retained,
+    COALESCE(bca.interactive_quota_counted, 0) AS all_build_interactive_quota_counted,
+    COALESCE(bca.interactive_extra_valid, 0) AS all_build_interactive_extra_valid,
+    COALESCE(bca.interactive_low_signal_retained, 0) AS all_build_interactive_low_signal_retained,
+    COALESCE(bcc.baseline_quota_counted, 0) AS current_build_baseline_quota_counted,
+    COALESCE(bcc.baseline_extra_valid, 0) AS current_build_baseline_extra_valid,
+    COALESCE(bcc.baseline_low_signal_retained, 0) AS current_build_baseline_low_signal_retained,
+    COALESCE(bcc.interactive_quota_counted, 0) AS current_build_interactive_quota_counted,
+    COALESCE(bcc.interactive_extra_valid, 0) AS current_build_interactive_extra_valid,
+    COALESCE(bcc.interactive_low_signal_retained, 0) AS current_build_interactive_low_signal_retained,
+    CASE
+      WHEN COALESCE(st.latest_apk_sha256_lc, '') <> '' THEN COALESCE(bcc.baseline_quota_counted, 0)
+      ELSE COALESCE(bca.baseline_quota_counted, 0)
+    END AS baseline_quota_counted,
+    CASE
+      WHEN COALESCE(st.latest_apk_sha256_lc, '') <> '' THEN COALESCE(bcc.baseline_extra_valid, 0)
+      ELSE COALESCE(bca.baseline_extra_valid, 0)
+    END AS baseline_extra_valid,
+    CASE
+      WHEN COALESCE(st.latest_apk_sha256_lc, '') <> '' THEN COALESCE(bcc.baseline_low_signal_retained, 0)
+      ELSE COALESCE(bca.baseline_low_signal_retained, 0)
+    END AS baseline_low_signal_retained,
+    CASE
+      WHEN COALESCE(st.latest_apk_sha256_lc, '') <> '' THEN COALESCE(bcc.interactive_quota_counted, 0)
+      ELSE COALESCE(bca.interactive_quota_counted, 0)
+    END AS interactive_quota_counted,
+    CASE
+      WHEN COALESCE(st.latest_apk_sha256_lc, '') <> '' THEN COALESCE(bcc.interactive_extra_valid, 0)
+      ELSE COALESCE(bca.interactive_extra_valid, 0)
+    END AS interactive_extra_valid,
+    CASE
+      WHEN COALESCE(st.latest_apk_sha256_lc, '') <> '' THEN COALESCE(bcc.interactive_low_signal_retained, 0)
+      ELSE COALESCE(bca.interactive_low_signal_retained, 0)
+    END AS interactive_low_signal_retained
+  FROM cohort_apps ca
+  LEFT JOIN static_targets st
+    ON st.package_name = ca.package_name
+  LEFT JOIN bucket_counts_all bca
+    ON bca.package_name = ca.package_name
+  LEFT JOIN bucket_counts_current bcc
+    ON bcc.package_name = ca.package_name
+  LEFT JOIN run_totals rt
+    ON rt.package_name = ca.package_name
+  LEFT JOIN latest_scoped_run lsr
+    ON lsr.package_name = ca.package_name
+),
+queue_ready AS (
+  SELECT
+    qc.*,
+    GREATEST(0, qc.baseline_required - qc.baseline_quota_counted) AS need_baseline,
+    GREATEST(0, qc.interactive_required - qc.interactive_quota_counted) AS need_interactive,
+    CASE
+      WHEN COALESCE(qc.latest_apk_sha256_lc, '') <> '' THEN 'db_current_build'
+      ELSE 'db_all_builds'
+    END AS data_scope
+  FROM queue_core qc
+)
+SELECT
+  qr.package_name,
+  qr.app_label,
+  qr.cohort_key,
+  qr.sort_order,
+  qr.baseline_required,
+  qr.interactive_required,
+  qr.baseline_quota_counted,
+  qr.baseline_extra_valid,
+  qr.baseline_low_signal_retained,
+  qr.baseline_quota_counted + qr.baseline_extra_valid + qr.baseline_low_signal_retained AS baseline_total_valid,
+  qr.interactive_quota_counted,
+  qr.interactive_extra_valid,
+  qr.interactive_low_signal_retained,
+  qr.interactive_quota_counted + qr.interactive_extra_valid + qr.interactive_low_signal_retained AS interactive_total_valid,
+  qr.all_build_baseline_quota_counted,
+  qr.all_build_interactive_quota_counted,
+  qr.current_build_baseline_quota_counted,
+  qr.current_build_interactive_quota_counted,
+  qr.need_baseline,
+  qr.need_interactive,
+  CASE
+    WHEN qr.need_baseline = 0 AND qr.need_interactive = 0 THEN 1
+    ELSE 0
+  END AS quota_satisfied,
+  qr.dynamic_run_count,
+  qr.invalid_run_count,
+  qr.current_build_invalid_run_count,
+  qr.latest_scoped_valid_dataset_run,
+  qr.latest_scoped_invalid_reason_code,
+  qr.legacy_unknown_runs,
+  qr.has_static_data,
+  qr.latest_static_run_id,
+  qr.latest_version_name,
+  qr.latest_version_code,
+  qr.latest_dynamic_run_id,
+  qr.data_scope,
+  TRIM(BOTH ' ' FROM CONCAT_WS(
+    ' ',
+    CASE
+      WHEN qr.need_baseline > 0 THEN CONCAT(qr.need_baseline, 'B')
+      ELSE NULL
+    END,
+    CASE
+      WHEN qr.need_interactive > 0 THEN CONCAT(qr.need_interactive, 'I')
+      ELSE NULL
+    END
+  )) AS quota_gap_label,
+  CASE
+    WHEN qr.has_static_data = 0 THEN 'needs_static'
+    WHEN qr.need_baseline > 0 THEN 'baseline'
+    WHEN qr.need_interactive > 0 THEN 'interactive'
+    WHEN qr.latest_scoped_valid_dataset_run = 0 THEN 'review'
+    WHEN qr.legacy_unknown_runs > 0
+     AND qr.baseline_quota_counted = 0
+     AND qr.interactive_quota_counted = 0
+      THEN 'legacy'
+    ELSE 'complete'
+  END AS collection_status,
+  CASE
+    WHEN qr.has_static_data = 0 THEN 'static'
+    WHEN qr.need_baseline > 0 THEN CONCAT('base ', qr.baseline_quota_counted, '/3')
+    WHEN qr.need_interactive > 0 THEN CONCAT('manual ', qr.interactive_quota_counted, '/4')
+    ELSE '—'
+  END AS need_label,
+  CASE
+    WHEN qr.latest_scoped_valid_dataset_run = 0 THEN 'invalid'
+    WHEN qr.has_static_data = 0 THEN 'no static'
+    WHEN qr.legacy_unknown_runs > 0
+     AND qr.baseline_quota_counted = 0
+     AND qr.interactive_quota_counted = 0
+      THEN CONCAT('legacy ', qr.legacy_unknown_runs)
+    WHEN qr.legacy_unknown_runs > 0 THEN 'ok+L'
+    ELSE 'ok'
+  END AS qa_label,
+  CASE
+    WHEN qr.need_baseline > 0 THEN CONCAT('baseline slot ', LEAST(qr.baseline_quota_counted + 1, qr.baseline_required))
+    WHEN qr.need_interactive > 0 THEN CONCAT('manual slot ', LEAST(qr.interactive_quota_counted + 1, qr.interactive_required))
+    ELSE '—'
+  END AS next_action_hint,
+  CONCAT(qr.baseline_quota_counted, '/', qr.baseline_required) AS baseline_quota_label,
+  CONCAT(qr.interactive_quota_counted, '/', qr.interactive_required) AS interactive_quota_label,
+  CASE
+    WHEN qr.need_baseline > 0 THEN 'locked'
+    ELSE CONCAT(qr.interactive_quota_counted, '/', qr.interactive_required)
+  END AS interactive_display_label
+FROM queue_ready qr;
+"""
+
 __all__ = [
     "CREATE_V_WEB_APP_DIRECTORY",
     "CREATE_V_WEB_RUNTIME_RUN_INDEX",
@@ -1407,4 +1752,5 @@ __all__ = [
     "CREATE_V_WEB_STATIC_DYNAMIC_APP_SUMMARY",
     "CREATE_V_WEB_APP_MASVS_LATEST_V1",
     "CREATE_V_WEB_APP_STATIC_HANDOFF_READINESS_V1",
+    "CREATE_V_WEB_DYNAMIC_APP_QUEUE_V1",
 ]

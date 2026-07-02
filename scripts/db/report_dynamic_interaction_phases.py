@@ -51,12 +51,14 @@ def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) ->
 def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
     from scytaledroid.DynamicAnalysis.pcap.interaction_phases import (
         build_interaction_timeline_from_run_dir,
+        build_protocol_phase_marker_rows,
         phase_packet_transport_summary,
     )
     from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
 
     root = _dynamic_root()
     phase_rows: list[dict[str, Any]] = []
+    marker_rows: list[dict[str, Any]] = []
     transport_rows: list[dict[str, Any]] = []
 
     scripted_runs_seen = 0
@@ -136,8 +138,27 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
                     "actual_start_timestamp": step.get("actual_start_timestamp"),
                     "actual_end_timestamp": step.get("actual_end_timestamp"),
                     "operator_completed": step.get("operator_completed"),
+                    "operator_result": step.get("operator_result"),
                     "step_outcome": step.get("step_outcome"),
                     "limitation_reason": step.get("limitation_reason"),
+                    "account_context": step.get("account_context"),
+                    "control_account": step.get("control_account"),
+                    "control_account_mode": step.get("control_account_mode"),
+                    "mutation_allowed": step.get("mutation_allowed"),
+                    "mutation_candidate": step.get("mutation_candidate"),
+                    "mutation_performed": step.get("mutation_performed"),
+                    "cleanup_expected": step.get("cleanup_expected"),
+                    "repeat_group": step.get("repeat_group"),
+                    "repeat_index": step.get("repeat_index"),
+                    "repeat_total": step.get("repeat_total"),
+                    "repeat_max_total": step.get("repeat_max_total"),
+                    "repeat_enabled": step.get("repeat_enabled"),
+                    "branch_taken": step.get("branch_taken"),
+                    "article_branch": step.get("article_branch"),
+                    "subscription_wall_observed": step.get("subscription_wall_observed"),
+                    "subscription_options_opened": step.get("subscription_options_opened"),
+                    "return_home_performed": step.get("return_home_performed"),
+                    "protocol_fit": step.get("protocol_fit"),
                     "notes_present": bool(str(step.get("operator_note") or step.get("notes") or "").strip()),
                     "operator_note": step.get("operator_note"),
                     "notes": step.get("notes"),
@@ -145,6 +166,44 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
                     "pcap_available": pcap_available,
                     "invalid_reason_code": invalid_reason,
                     "pcap_failure_detail": pcap_failure_detail,
+                }
+            )
+
+        for row in build_protocol_phase_marker_rows(timeline):
+            marker_rows.append(
+                {
+                    "package": package,
+                    "app_label": app_label,
+                    "run_id": run_id,
+                    "template_id": str(timeline.get("template_id") or ""),
+                    "marker_type": row.get("marker_type"),
+                    "step_index": row.get("step_index"),
+                    "step_id": row.get("step_id"),
+                    "phase_id": row.get("phase_id"),
+                    "phase_label": row.get("phase_label"),
+                    "start_time": row.get("start_time"),
+                    "end_time": row.get("end_time"),
+                    "operator_result": row.get("operator_result"),
+                    "step_outcome": row.get("step_outcome"),
+                    "limitation_reason": row.get("limitation_reason"),
+                    "account_context": row.get("account_context"),
+                    "control_account": row.get("control_account"),
+                    "control_account_mode": row.get("control_account_mode"),
+                    "mutation_allowed": row.get("mutation_allowed"),
+                    "mutation_candidate": row.get("mutation_candidate"),
+                    "mutation_performed": row.get("mutation_performed"),
+                    "cleanup_expected": row.get("cleanup_expected"),
+                    "repeat_group": row.get("repeat_group"),
+                    "repeat_index": row.get("repeat_index"),
+                    "repeat_total": row.get("repeat_total"),
+                    "repeat_max_total": row.get("repeat_max_total"),
+                    "repeat_enabled": row.get("repeat_enabled"),
+                    "branch_taken": row.get("branch_taken"),
+                    "article_branch": row.get("article_branch"),
+                    "subscription_wall_observed": row.get("subscription_wall_observed"),
+                    "subscription_options_opened": row.get("subscription_options_opened"),
+                    "return_home_performed": row.get("return_home_performed"),
+                    "protocol_fit": row.get("protocol_fit"),
                 }
             )
 
@@ -187,9 +246,11 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     phase_rows.sort(key=lambda row: (str(row.get("package") or ""), str(row.get("run_id") or ""), int(row.get("step_index") or 0)))
+    marker_rows.sort(key=lambda row: (str(row.get("package") or ""), str(row.get("run_id") or ""), int(row.get("step_index") or 0), str(row.get("marker_type") or "")))
     transport_rows.sort(key=lambda row: (str(row.get("package") or ""), str(row.get("run_id") or ""), int(row.get("step_index") or 0)))
 
     phase_path = output_dir / "interaction_phase_summary.csv"
+    marker_path = output_dir / "protocol_phase_markers.csv"
     transport_path = output_dir / "phase_packet_transport_summary.csv"
     summary_path = output_dir / "summary.json"
 
@@ -211,8 +272,27 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "actual_start_timestamp",
             "actual_end_timestamp",
             "operator_completed",
+            "operator_result",
             "step_outcome",
             "limitation_reason",
+            "account_context",
+            "control_account",
+            "control_account_mode",
+            "mutation_allowed",
+            "mutation_candidate",
+            "mutation_performed",
+            "cleanup_expected",
+            "repeat_group",
+            "repeat_index",
+            "repeat_total",
+            "repeat_max_total",
+            "repeat_enabled",
+            "branch_taken",
+            "article_branch",
+            "subscription_wall_observed",
+            "subscription_options_opened",
+            "return_home_performed",
+            "protocol_fit",
             "notes_present",
             "operator_note",
             "notes",
@@ -220,6 +300,44 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
             "pcap_available",
             "invalid_reason_code",
             "pcap_failure_detail",
+        ],
+    )
+    _write_csv(
+        marker_path,
+        marker_rows,
+        [
+            "package",
+            "app_label",
+            "run_id",
+            "template_id",
+            "marker_type",
+            "step_index",
+            "step_id",
+            "phase_id",
+            "phase_label",
+            "start_time",
+            "end_time",
+            "operator_result",
+            "step_outcome",
+            "limitation_reason",
+            "account_context",
+            "control_account",
+            "control_account_mode",
+            "mutation_allowed",
+            "mutation_candidate",
+            "mutation_performed",
+            "cleanup_expected",
+            "repeat_group",
+            "repeat_index",
+            "repeat_total",
+            "repeat_max_total",
+            "repeat_enabled",
+            "branch_taken",
+            "article_branch",
+            "subscription_wall_observed",
+            "subscription_options_opened",
+            "return_home_performed",
+            "protocol_fit",
         ],
     )
     _write_csv(
@@ -254,6 +372,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         "dynamic_root": str(root.resolve()),
         "scripted_runs_seen": scripted_runs_seen,
         "phase_rows_exported": len(phase_rows),
+        "marker_rows_exported": len(marker_rows),
         "transport_rows_exported": len(transport_rows),
         "timeline_complete_runs": complete_timelines,
         "timeline_incomplete_runs": incomplete_timelines,
@@ -266,6 +385,7 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         "scripted_runs_invalid_pcap_by_detail": dict(sorted(invalid_pcap_detail_counts.items())),
         "output_files": {
             "interaction_phase_summary_csv": str(phase_path.resolve()),
+            "protocol_phase_markers_csv": str(marker_path.resolve()),
             "phase_packet_transport_summary_csv": str(transport_path.resolve()),
             "summary_json": str(summary_path.resolve()),
         },
@@ -289,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "phase_rows_exported="
         f"{summary['phase_rows_exported']} "
+        f"marker_rows_exported={summary['marker_rows_exported']} "
         f"transport_rows_exported={summary['transport_rows_exported']}"
     )
     print(

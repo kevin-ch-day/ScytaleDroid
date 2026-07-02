@@ -38,7 +38,11 @@ list = [
   "android.com",           # includes schemas.android.com
   "khronos.org",           # graphics specs
   "bouncycastle.org",      # crypto docs
+  "dashif.org",            # DASH streaming spec/guideline references
   "slf4j.org",             # logging docs
+  "protobuf.dev",          # protobuf language/reference docs
+  "sourceforge.net",       # legacy OSS project/reference links
+  "unicode.org",           # Unicode spec/data references
   "googlesource.com",      # source references
   "lolengine.net",         # shader blog used in comments/examples
   "purl.org",              # metadata namespaces

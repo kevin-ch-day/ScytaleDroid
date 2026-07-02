@@ -201,15 +201,47 @@ def update_dataset_tracker(
             if isinstance(dataset.get("low_signal_reasons"), list)
             else []
         )
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.baseline_activity import (
+            compute_baseline_activity_for_run,
+        )
+
+        activity = compute_baseline_activity_for_run(
+            run_dir,
+            package_name=str(package),
+            run_profile=str(operator.get("run_profile") or ""),
+        )
+        if isinstance(activity, dict):
+            run_entry["baseline_not_idle"] = (
+                True
+                if activity.get("baseline_not_idle") is True
+                else (False if activity.get("baseline_not_idle") is False else None)
+            )
+            run_entry["baseline_not_idle_reasons"] = (
+                list(activity.get("baseline_not_idle_reasons"))
+                if isinstance(activity.get("baseline_not_idle_reasons"), list)
+                else []
+            )
+            if activity.get("exploratory_class"):
+                run_entry["exploratory_class"] = activity.get("exploratory_class")
+    except Exception:
+        if dataset.get("baseline_not_idle") is not None:
+            run_entry["baseline_not_idle"] = (
+                True
+                if dataset.get("baseline_not_idle") is True
+                else (False if dataset.get("baseline_not_idle") is False else None)
+            )
     validity = evaluate_dataset_validity(run_dir, manifest, run_entry, cfg)
     run_entry.update(validity)
     explicit_countable = dataset.get("countable")
     if explicit_countable is True or explicit_countable is False:
         if not (
             explicit_countable is False
-            and _should_ignore_stale_explicit_noncountable(dataset, operator, validity)
+            and _should_ignore_stale_explicit_noncountable(dataset, operator, validity, run_entry)
         ):
             run_entry["countable"] = explicit_countable
+        else:
+            run_entry["countable"] = None
     explicit_cohort_eligibility = dataset.get("cohort_eligibility")
     if isinstance(explicit_cohort_eligibility, str) and explicit_cohort_eligibility.strip():
         run_entry["cohort_eligibility"] = explicit_cohort_eligibility.strip()
@@ -287,6 +319,7 @@ def _should_ignore_stale_explicit_noncountable(
     dataset: dict[str, Any],
     operator: dict[str, Any],
     validity: dict[str, Any],
+    run_entry: dict[str, Any] | None = None,
 ) -> bool:
     """Allow repaired quota-intended runs to re-enter normal quota marking.
 
@@ -298,11 +331,21 @@ def _should_ignore_stale_explicit_noncountable(
     """
     if dataset.get("countable") is not False:
         return False
-    if dataset.get("valid_dataset_run") is not False:
-        return False
     if validity.get("valid_dataset_run") is not True:
         return False
-    return bool(operator.get("counts_toward_completion") is True)
+    if operator.get("counts_toward_completion") is not True:
+        return False
+    if dataset.get("valid_dataset_run") is False:
+        return True
+    profile_lc = str(operator.get("run_profile") or "").strip().lower()
+    stale_low_signal_false = (
+        profile_lc == "baseline_idle"
+        and dataset.get("valid_dataset_run") is True
+        and dataset.get("low_signal") is True
+        and isinstance(run_entry, dict)
+        and run_entry.get("low_signal") is False
+    )
+    return bool(stale_low_signal_false)
 
 
 def load_dataset_tracker() -> dict[str, Any]:
@@ -393,22 +436,28 @@ def _normalize_tracker_payload(
             runs = []
             entry["runs"] = runs
 
-        # Opportunistic repair: older trackers may have manual runs marked as paper-excluded
-        # under now-retired policy. Refresh eligibility in-memory so quota/progress displays
-        # reflect current rules even if the operator hasn't reindexed yet.
+        # Opportunistic repair: older trackers may have runs marked paper-excluded
+        # under now-retired policy. Refresh eligibility in-memory so quota/progress
+        # displays reflect current rules even if the operator hasn't reindexed yet.
         for r in runs:
             if not isinstance(r, dict):
                 continue
             primary = str(r.get("paper_exclusion_primary_reason_code") or "").strip()
             prof = str(r.get("run_profile") or "").strip().lower()
+            valid_dataset_run = r.get("valid_dataset_run")
             # Opportunistic repairs for known policy shifts where the tracker can
             # hold stale cached eligibility state.
             #
             # - Manual runs may become cohort-eligible.
             # - Protocol fit feedback is informational (not an exclusion).
+            # - Superseded scripted templates may remain compatible with their
+            #   current successor templates.
+            # - A technically invalid run must not remain cached as eligible.
             if (
                 (primary == "EXCLUDED_MANUAL_NON_COHORT" and "manual" in prof)
                 or (primary == "EXCLUDED_PROTOCOL_FIT_POOR")
+                or (primary == "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH")
+                or (r.get("paper_eligible") is True and valid_dataset_run is False)
             ):
                 if _refresh_paper_eligibility_in_place(r):
                     if isinstance(dirty, list) and dirty:
@@ -717,6 +766,7 @@ def _apply_quota_marking(
 
     baseline_seen = 0
     interactive_seen = 0
+    unknown_profile_seen = 0
     quota_met_at: str | None = None
     quota_met_run_id: str | None = None
     for _, r in indexed:
@@ -734,8 +784,10 @@ def _apply_quota_marking(
         prof_lc = str(r.get("run_profile") or "").strip().lower()
         explicit_countable = r.get("countable")
         explicit_non_countable = explicit_countable is False
-        explicit_yes_countable = explicit_countable is True
         if is_valid and prof_lc == "baseline_idle" and bool(r.get("low_signal")):
+            r["extra_run"] = 1
+            is_valid = False
+        if is_valid and prof_lc == "baseline_idle" and bool(r.get("baseline_not_idle")):
             r["extra_run"] = 1
             is_valid = False
         if not is_valid:
@@ -748,29 +800,20 @@ def _apply_quota_marking(
         is_interactive = _is_interactive_profile(prof, cfg)
 
         counted = False
-        if explicit_yes_countable:
-            counted = True
-            if is_baseline:
-                baseline_seen += 1
-            elif is_interactive:
-                interactive_seen += 1
-        elif is_baseline and baseline_seen < baseline_needed:
+        if is_baseline and baseline_seen < baseline_needed:
             baseline_seen += 1
             counted = True
-        elif (
-            is_interactive
-            and baseline_seen >= baseline_needed
-            and interactive_seen < interactive_needed
-        ):
+        elif is_interactive and interactive_seen < interactive_needed:
             interactive_seen += 1
             counted = True
-        elif (baseline_seen + interactive_seen) < needed and not (is_baseline or is_interactive):
+        elif (baseline_seen + interactive_seen + unknown_profile_seen) < needed and not (is_baseline or is_interactive):
             # If profile tagging is inconsistent/unknown, still allow runs to fill
             # total quota slots rather than failing closed. Do not let extra baseline
             # runs satisfy interactive quota (Paper #2 quota is strict).
+            unknown_profile_seen += 1
             counted = True
 
-        if counted and (baseline_seen + interactive_seen) <= needed:
+        if counted and (baseline_seen + interactive_seen + unknown_profile_seen) <= needed:
             r["counts_toward_quota"] = True
             if (
                 quota_met_at is None
@@ -883,10 +926,13 @@ def evaluate_dataset_validity(
         netstats_total_bytes = 0
 
     operator = manifest.operator if isinstance(manifest.operator, dict) else {}
+    target = manifest.target if isinstance(manifest.target, dict) else {}
     min_bytes = int(
         effective_min_pcap_bytes_for_run_profile(
             run_profile=str(operator.get("run_profile") or ""),
             scenario_id=str((manifest.scenario or {}).get("id") or ""),
+            package_name=str(target.get("package_name") or entry.get("package_name") or ""),
+            messaging_activity=str(operator.get("messaging_activity") or entry.get("messaging_activity") or ""),
         )
     )
 

@@ -51,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         from scytaledroid.DynamicAnalysis.storage.domain_context_index import (
             index_dynamic_domain_context_from_evidence_packs,
+            index_dynamic_domain_context_from_network_indicators,
+            refresh_dynamic_domain_observation_classifications,
         )
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
@@ -62,6 +64,18 @@ def main(argv: list[str] | None = None) -> int:
 
     migration_payload: dict[str, object] = {}
     backfill_result: dict[str, object] = {"scanned": 0, "indexed_rows": 0, "errors": 0}
+    indicator_backfill_result: dict[str, object] = {
+        "scanned": 0,
+        "indexed_rows": 0,
+        "errors": 0,
+        "only_missing": True,
+    }
+    refresh_result: dict[str, object] = {
+        "scanned": 0,
+        "updated_rows": 0,
+        "errors": 0,
+        "unknown_only": False,
+    }
     if args.apply:
         try:
             with database_session() as db:
@@ -69,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
                     migration_payload = apply_dynamic_domain_context_migration(core_q.run_sql)
                     hotfix_payload = apply_dynamic_domain_context_collation_hotfix(core_q.run_sql)
             backfill_result = index_dynamic_domain_context_from_evidence_packs(args.evidence_root)
+            indicator_backfill_result = index_dynamic_domain_context_from_network_indicators(only_missing=True)
+            refresh_result = refresh_dynamic_domain_observation_classifications(unknown_only=False)
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"Apply/backfill failed: {exc}\n")
             return 2
@@ -93,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         "migration": migration_payload,
         "hotfix": hotfix_payload,
         "backfill": backfill_result,
+        "indicator_backfill": indicator_backfill_result,
+        "classification_refresh": refresh_result,
     }
 
     receipt_path: str | None = None
@@ -114,7 +132,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"reference_rows: {migration_payload.get('reference_rows_after') or migration_payload.get('reference_rows_visible')}")
     print(f"runs_scanned: {backfill_result.get('scanned')}")
     print(f"observation_rows_indexed: {backfill_result.get('indexed_rows')}")
+    print(f"indicator_runs_scanned: {indicator_backfill_result.get('scanned')}")
+    print(f"indicator_observation_rows_indexed: {indicator_backfill_result.get('indexed_rows')}")
+    print(f"classification_refresh_scanned: {refresh_result.get('scanned')}")
+    print(f"classification_refresh_updated: {refresh_result.get('updated_rows')}")
     print(f"errors: {backfill_result.get('errors')}")
+    print(f"indicator_errors: {indicator_backfill_result.get('errors')}")
+    print(f"classification_refresh_errors: {refresh_result.get('errors')}")
     if receipt_path:
         print(f"receipt_json: {receipt_path}")
     if not args.apply:

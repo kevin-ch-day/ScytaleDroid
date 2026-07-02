@@ -12,6 +12,16 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_qa_badge,
     selected_app_qa_text,
 )
+from scytaledroid.DynamicAnalysis.queue_operator_ui import workbench_ml_pool_phrase
+from scytaledroid.DynamicAnalysis.run_qualification import (
+    baseline_ml_training_pool_count,
+    cohort_baseline_ml_pool_total,
+    format_baseline_ml_training_pool_phrase,
+    format_workbench_qualification_lines,
+    row_baseline_ml_pool_size,
+    supplemental_baseline_queue_action,
+)
+from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 
 def build_selected_app_protocol_options(
@@ -40,14 +50,14 @@ def build_selected_app_protocol_options(
     def _baseline_option_description() -> str:
         if int(counts.baseline_valid_runs) < int(cfg.baseline_required):
             return "suggested · counts toward quota"
-        return "supplemental · outside quota"
+        return "supplemental · ML training pool"
 
     def _interactive_option_description(*, template_available: bool = True) -> str:
         if not baseline_complete:
             return "held until baseline complete"
         if int(counts.interactive_valid_runs) < int(cfg.interactive_required):
             return "counts toward quota"
-        return "supplemental · outside quota"
+        return "retained extra · outside quota"
 
     options = [
         menu_utils.MenuOption(
@@ -97,6 +107,48 @@ def build_selected_app_protocol_options(
     return options
 
 
+def _workbench_summary_card_items(app: Any) -> list[Any]:
+    quota = f"quota {int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)}/{int(app.cfg.baseline_required) + int(app.cfg.interactive_required)}"
+    active_valid_runs = int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
+    build_label = selected_app_build_label(
+        active_valid_runs=active_valid_runs,
+        legacy_valid_runs=int(app.historical_valid_local),
+        db_active_sessions=int(app.db_active_sessions),
+        db_historical_sessions=int(app.db_historical_sessions),
+    )
+    evidence_label = selected_app_evidence_label(
+        "",
+        technical_valid_active=active_valid_runs,
+        db_active_sessions=int(app.db_active_sessions),
+        historical_valid_runs_count=int(app.historical_valid_local),
+        db_historical_sessions=int(app.db_historical_sessions),
+    )
+    if app.latest_valid is False:
+        effective_latest_valid = False
+    elif app.latest_valid is True and active_valid_runs > 0:
+        effective_latest_valid = True
+    else:
+        effective_latest_valid = None
+    qa_badge = selected_app_qa_badge(effective_latest_valid)
+
+    items = [
+        summary_item("Build", selected_app_build_text(build_label)),
+        summary_item("Evidence", selected_app_evidence_text(build_label, evidence_label)),
+        summary_item("QA", selected_app_qa_text(qa_badge)),
+        summary_item("Quota", quota),
+    ]
+    pool_phrase = format_baseline_ml_training_pool_phrase(
+        extra_valid=int(getattr(app.counts, "baseline_extra_valid", 0) or 0),
+        low_signal_retained=int(getattr(app.counts, "baseline_low_signal_valid", 0) or 0),
+        compact=True,
+    )
+    if pool_phrase:
+        items.append(summary_item("ML pool", pool_phrase.replace("ML pool ", ""), value_style="accent"))
+    elif int(app.counts.baseline_valid_runs) >= int(app.cfg.baseline_required):
+        items.append(summary_item("ML pool", "empty — run supplemental baselines", value_style="muted"))
+    return items
+
+
 def _summary_phrase(app: Any) -> str:
     quota = f"quota {int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)}/{int(app.cfg.baseline_required) + int(app.cfg.interactive_required)}"
     active_valid_runs = int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
@@ -124,7 +176,13 @@ def _summary_phrase(app: Any) -> str:
     build = selected_app_build_text(build_label)
     evidence = selected_app_evidence_text(build_label, evidence_label)
     qa = selected_app_qa_text(qa_badge)
-    return f"{build} · {evidence} · {qa} · {quota}"
+    pool_phrase = format_baseline_ml_training_pool_phrase(
+        extra_valid=int(getattr(app.counts, "baseline_extra_valid", 0) or 0),
+        low_signal_retained=int(getattr(app.counts, "baseline_low_signal_valid", 0) or 0),
+        compact=True,
+    )
+    pool_suffix = f" · {pool_phrase}" if pool_phrase else ""
+    return f"{build} · {evidence} · {qa} · {quota}{pool_suffix}"
 
 
 def _recommended_action(
@@ -145,17 +203,26 @@ def _recommended_action(
         return "A", "QA needs review before this app can be treated as archive-ready."
     if action_key == queue_action_restore_local and "R" in option_keys:
         return "R", "current-build evidence exists in the DB, but the local evidence pack is missing from this workspace."
+    if action_key in {"supplemental_baseline", "supplemental baseline"}:
+        pool = baseline_ml_training_pool_count(
+            extra_valid=int(getattr(app.counts, "baseline_extra_valid", 0) or 0),
+            low_signal_retained=int(getattr(app.counts, "baseline_low_signal_valid", 0) or 0),
+        )
+        return (
+            "1",
+            str(app.queue_reason or f"ML training pool has {pool} supplemental baseline(s); run more for pattern averages."),
+        )
     if action_key == "baseline":
         return "1", str(app.queue_reason or "baseline quota is not yet met.")
     if action_key in {"scripted_interaction", "manual_interaction"} and "2" in option_keys:
         return "2", str(app.queue_reason or "interactive quota is still missing.")
     if getattr(app.counts, "quota_met", False) and app.latest_valid is True:
-        return "2", "quota is already satisfied; this run would be supplemental."
+        return "1", "baseline quota is satisfied; supplemental baselines improve ML training and pattern averages."
     if int(app.counts.baseline_valid_runs) < int(app.cfg.baseline_required):
         return "1", f"baseline quota is not yet met ({int(app.counts.baseline_valid_runs)}/{int(app.cfg.baseline_required)})."
     if int(app.counts.interactive_valid_runs) < int(app.cfg.interactive_required):
         return "2", f"interactive quota is still missing ({int(app.counts.interactive_valid_runs)}/{int(app.cfg.interactive_required)})."
-    return "2", "interactive collection is available as supplemental work."
+    return "2", "interactive collection is available as retained extra work."
 
 
 def _action_line(key: str, label: str, *, is_default: bool = False, disabled: bool = False) -> str:
@@ -167,6 +234,26 @@ def _action_line(key: str, label: str, *, is_default: bool = False, disabled: bo
     return line
 
 
+def _workbench_option_label(key: str, option_map: dict[str, Any]) -> str:
+    if key == "1":
+        return "Baseline run"
+    if key == "2":
+        return "Interactive run"
+    if key == "3":
+        return "Test app"
+    if key == "A":
+        return "Review QA"
+    if key == "H":
+        return "Run history"
+    if key == "G":
+        return "Diagnostics"
+    if key == "X":
+        return "Reset app"
+    if key == "R":
+        return "Restore / recollect"
+    return str(option_map[key].label)
+
+
 def _render_recommended_screen(
     *,
     app: Any,
@@ -174,70 +261,97 @@ def _render_recommended_screen(
     default_choice: str,
     reason: str,
     menu_utils: Any,
+    status_messages: Any | None = None,
 ) -> None:
     option_map = {str(option.key): option for option in protocol_options}
-
-    def _label(key: str) -> str:
-        option = option_map[key]
-        raw = str(option.label)
-        if key == "1":
-            return "Baseline run"
-        if key == "2":
-            return "Interactive run"
-        if key == "3":
-            return "Test app"
-        if key == "A":
-            return "Review QA"
-        if key == "H":
-            return "Run history"
-        if key == "G":
-            return "Diagnostics"
-        if key == "X":
-            return "Reset app"
-        if key == "R":
-            return "Restore / recollect"
-        return raw
-
-    print(_summary_phrase(app))
-    print()
     run_keys = [key for key in ["1", "2", "3"] if key in option_map]
+    inspect_keys = [key for key in ["A", "H", "G", "R", "X"] if key in option_map and key != default_choice]
+
+    print_summary_card(app.display_label, _workbench_summary_card_items(app))
+    print()
+
     if default_choice in run_keys:
         menu_utils.print_section("Run Option")
-        for key in run_keys:
-            option = option_map[key]
-            print(
-                _action_line(
+        menu_utils.print_menu(
+            [
+                menu_utils.MenuOption(
                     key,
-                    _label(key),
-                    is_default=(key == default_choice),
-                    disabled=bool(option.disabled),
+                    _workbench_option_label(key, option_map),
+                    description=str(option_map[key].description or "") or None,
+                    badge=("suggested" if key == default_choice else option_map[key].badge),
+                    disabled=bool(option_map[key].disabled),
+                )
+                for key in run_keys
+            ],
+            default=default_choice,
+            show_descriptions=True,
+            compact=True,
+        )
+        if (
+            default_choice == "1"
+            and int(app.counts.baseline_valid_runs) >= int(app.cfg.baseline_required)
+            and status_messages is not None
+        ):
+            print()
+            print(
+                status_messages.status(
+                    workbench_ml_pool_phrase(
+                        extra_valid=int(getattr(app.counts, "baseline_extra_valid", 0) or 0),
+                        low_signal_retained=int(getattr(app.counts, "baseline_low_signal_valid", 0) or 0),
+                    )
+                    + " Run as many supplemental baselines as needed.",
+                    level="info",
                 )
             )
     else:
         menu_utils.print_section("Recommended")
-        print(
-            _action_line(
-                default_choice,
-                _label(default_choice),
-                is_default=True,
-                disabled=bool(getattr(option_map.get(default_choice), "disabled", False)),
-            )
+        menu_utils.print_menu(
+            [
+                menu_utils.MenuOption(
+                    default_choice,
+                    _workbench_option_label(default_choice, option_map),
+                    description=reason,
+                    badge="suggested",
+                    disabled=bool(getattr(option_map.get(default_choice), "disabled", False)),
+                )
+            ],
+            default=default_choice,
+            show_descriptions=True,
+            compact=True,
         )
-        print(f"Reason: {reason}")
         if run_keys:
             print()
             menu_utils.print_section("Run Option")
-            for key in run_keys:
-                option = option_map[key]
-                print(_action_line(key, _label(key), disabled=bool(option.disabled)))
+            menu_utils.print_menu(
+                [
+                    menu_utils.MenuOption(
+                        key,
+                        _workbench_option_label(key, option_map),
+                        description=str(option_map[key].description or "") or None,
+                        disabled=bool(option_map[key].disabled),
+                    )
+                    for key in run_keys
+                ],
+                show_descriptions=True,
+                compact=True,
+            )
 
-    inspect_keys = [key for key in ["A", "H", "G", "R", "X"] if key in option_map and key != default_choice]
     if inspect_keys:
         print()
         menu_utils.print_section("Review / inspect")
-        for key in inspect_keys:
-            option = option_map[key]
-            print(_action_line(key, _label(key), disabled=bool(option.disabled)))
+        menu_utils.print_menu(
+            [
+                menu_utils.MenuOption(
+                    key,
+                    _workbench_option_label(key, option_map),
+                    description=str(option_map[key].description or "") or None,
+                    disabled=bool(option_map[key].disabled),
+                )
+                for key in inspect_keys
+            ],
+            show_descriptions=True,
+            compact=True,
+        )
 
     print()
     print("0) Back")
@@ -268,6 +382,9 @@ def print_selected_app_workbench_summary(
         db_historical_sessions=app.db_historical_sessions,
         include_why=True,
     )
+    print()
+    for line in format_workbench_qualification_lines(app):
+        print(line)
     if (
         is_messaging_package_or_category_fn(app.package_name)
         and int(app.counts.baseline_valid_runs) < int(app.cfg.baseline_required)
@@ -281,43 +398,7 @@ def print_selected_app_workbench_summary(
         )
         print(
             status_messages.status(
-                "If login/setup is still in the way, use Interactive run -> Manual first. That preparation run is retained as supplemental evidence outside baseline quota.",
-                level="info",
-            )
-        )
-    baseline_low_signal = int(getattr(app.counts, "baseline_low_signal_valid", 0) or 0)
-    baseline_extra = int(getattr(app.counts, "baseline_extra_valid", 0) or 0)
-    interactive_extra = int(getattr(app.counts, "interactive_extra_valid", 0) or 0)
-    interactive_low_signal = int(getattr(app.counts, "interactive_low_signal_valid", 0) or 0)
-    if baseline_low_signal > 0:
-        print()
-        print(
-            status_messages.status(
-                f"Supplemental baseline: {baseline_low_signal} low-signal idle run(s) retained outside quota.",
-                level="info",
-            )
-        )
-    if baseline_extra > 0:
-        print()
-        print(
-            status_messages.status(
-                f"Supplemental baseline: {baseline_extra} extra valid run(s) retained outside quota.",
-                level="info",
-            )
-        )
-    if interactive_extra > 0:
-        print()
-        print(
-            status_messages.status(
-                f"Supplemental interactive: {interactive_extra} extra valid run(s) retained outside quota.",
-                level="info",
-            )
-        )
-    if interactive_low_signal > 0:
-        print()
-        print(
-            status_messages.status(
-                f"Supplemental interactive: {interactive_low_signal} low-signal run(s) retained outside quota.",
+                "If login/setup is still in the way, use Interactive run -> Manual first. That preparation run is retained as extra evidence outside baseline quota.",
                 level="info",
             )
         )
@@ -389,6 +470,7 @@ def render_selected_app_workbench(
     print_tier1_qa_result: Callable[[str], None] | None,
     menu_utils: Any,
     prompt_utils: Any,
+    status_messages: Any,
     queue_action_key_fn: Callable[[str | None], str],
     queue_action_review_qa: str,
     build_selected_app_protocol_options_fn: Callable[[Any], list[Any]],
@@ -403,7 +485,6 @@ def render_selected_app_workbench(
         queue_action_review_qa=queue_action_review_qa,
         queue_action_restore_local="restore_local_evidence",
     )
-    menu_utils.print_header(app.display_label)
     print_selected_app_workbench_summary_fn(app)
     print()
     while True:
@@ -413,6 +494,7 @@ def render_selected_app_workbench(
             default_choice=default_choice,
             reason=reason,
             menu_utils=menu_utils,
+            status_messages=status_messages,
         )
         selected_protocol = prompt_utils.get_choice(
             [str(option.key) for option in protocol_options if not option.disabled] + ["0", "B"],

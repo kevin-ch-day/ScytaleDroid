@@ -26,6 +26,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.DynamicAnalysis.run_qualification import analysis_included_rows, row_analysis_included
+
 RUN_FEATURE_MATRIX_FIELDS: tuple[str, ...] = (
     "dynamic_run_id",
     "package_name",
@@ -42,6 +44,7 @@ RUN_FEATURE_MATRIX_FIELDS: tuple[str, ...] = (
     "messaging_activity",
     "valid_dataset_run",
     "countable",
+    "analysis_included",
     "quota_state",
     "technical_validity_state",
     "supplemental_class",
@@ -107,6 +110,7 @@ APP_ROLLUP_FIELDS: tuple[str, ...] = (
     "package_name",
     "runs_total",
     "countable_runs",
+    "analysis_included_runs",
     "supplemental_runs",
     "baseline_runs",
     "interactive_runs",
@@ -193,6 +197,7 @@ ASSOCIATION_FIELDS: tuple[str, ...] = (
 PAPER_TABLE_FIELDS: tuple[str, ...] = (
     "app",
     "countable_runs",
+    "analysis_included_runs",
     "runtime_domains_median",
     "service_families",
     "unique_ja4_median",
@@ -578,11 +583,15 @@ def _interaction_mode(run_profile: str, interaction_level: str) -> str:
 
 
 def _find_pcap_path(evidence_root: Path) -> Path | None:
-    direct = evidence_root / "artifacts" / "pcapdroid_capture" / "capture.pcap"
-    if direct.exists():
-        return direct
-    candidates = sorted((evidence_root / "artifacts" / "pcapdroid_capture").glob("*.pcap"))
-    return candidates[0] if candidates else None
+    capture_dir = evidence_root / "artifacts" / "pcapdroid_capture"
+    for name in ("capture.pcap", "capture.pcapng"):
+        direct = capture_dir / name
+        if direct.is_file():
+            return direct
+    for candidate in sorted(capture_dir.glob("*.pcap*")):
+        if candidate.is_file() and candidate.suffix.lower() in {".pcap", ".pcapng"}:
+            return candidate
+    return None
 
 
 def _sql_filter_clause(packages: Sequence[str]) -> tuple[str, tuple[str, ...]]:
@@ -703,7 +712,7 @@ def _load_domain_service_rows(packages: Sequence[str]) -> list[dict[str, Any]]:
                 UPPER(TRIM(COALESCE(sdm.match_type, ''))) = 'SUFFIX'
                 AND (
                   LOWER(TRIM(COALESCE(obs.observed_domain, ''))) = LOWER(TRIM(COALESCE(sdm.domain_pattern, '')))
-                  OR LOWER(TRIM(COALESCE(obs.observed_domain, ''))) LIKE CONCAT('%.', LOWER(TRIM(COALESCE(sdm.domain_pattern, ''))))
+                  OR LOWER(TRIM(COALESCE(obs.observed_domain, ''))) LIKE CONCAT('%%.', LOWER(TRIM(COALESCE(sdm.domain_pattern, ''))))
                 )
               )
          )
@@ -967,6 +976,14 @@ def _build_run_feature_matrix(
             "messaging_activity": _norm_text(row.get("messaging_activity")),
             "valid_dataset_run": _safe_int(row.get("valid_dataset_run")),
             "countable": _safe_int(row.get("countable")),
+            "analysis_included": 1
+            if row_analysis_included(
+                {
+                    "valid_dataset_run": row.get("valid_dataset_run"),
+                    "paper_eligible": row.get("paper_eligible"),
+                }
+            )
+            else 0,
             "quota_state": _norm_text(row.get("quota_state")),
             "technical_validity_state": _norm_text(row.get("technical_validity_state")),
             "supplemental_class": _supplemental_class(row),
@@ -1077,6 +1094,7 @@ def _build_app_rollups(by_package: Mapping[str, Sequence[Mapping[str, Any]]]) ->
         if not stats_rows:
             continue
         countable_rows = [row for row in stats_rows if _safe_int(row.get("countable")) == 1]
+        analysis_rows = analysis_included_rows(stats_rows)
         supplemental_rows = [row for row in stats_rows if _norm_text(row.get("quota_state")) == "SUPPLEMENTAL_VALID"]
         baseline_rows = [row for row in stats_rows if _norm_text(row.get("interaction_mode")) == "baseline"]
         interactive_rows = [row for row in stats_rows if _norm_text(row.get("interaction_mode")) != "baseline"]
@@ -1183,6 +1201,7 @@ def _build_app_rollups(by_package: Mapping[str, Sequence[Mapping[str, Any]]]) ->
                 "package_name": package_name,
                 "runs_total": len(stats_rows),
                 "countable_runs": len(countable_rows),
+                "analysis_included_runs": len(analysis_rows),
                 "supplemental_runs": len(supplemental_rows),
                 "baseline_runs": len(baseline_rows),
                 "interactive_runs": len(interactive_rows),
@@ -1204,11 +1223,12 @@ def _build_app_rollups(by_package: Mapping[str, Sequence[Mapping[str, Any]]]) ->
             }
         )
 
-        domain_values = [float(row["domain_count"]) for row in countable_rows if row.get("domain_count") is not None]
+        domain_values = [float(row["domain_count"]) for row in analysis_rows if row.get("domain_count") is not None]
         paper_rows.append(
             {
                 "app": app_label,
                 "countable_runs": len(countable_rows),
+                "analysis_included_runs": len(analysis_rows),
                 "runtime_domains_median": _median_iqr(domain_values)[0],
                 "service_families": family_text,
                 "unique_ja4_median": med_ja4,
@@ -1401,6 +1421,7 @@ def _build_service_fingerprint_associations(
     family_domains: dict[str, set[str]] = defaultdict(set)
     family_top_ja4: dict[str, Counter[str]] = defaultdict(Counter)
     family_apps: dict[str, set[str]] = defaultdict(set)
+    family_run_top_ja4_seen: set[tuple[str, str]] = set()
     for row in domain_service_rows:
         run_id = _norm_text(row.get("dynamic_run_id"))
         feature_row = eligible_runs.get(run_id)
@@ -1412,13 +1433,15 @@ def _build_service_fingerprint_associations(
         family_apps[family].add(_norm_text(feature_row.get("package_name")))
         family_runs[family].append(feature_row)
         top_ja4 = _norm_text(feature_row.get("top_ja4"))
-        if top_ja4:
+        family_run_key = (family, run_id)
+        if top_ja4 and family_run_key not in family_run_top_ja4_seen:
             family_top_ja4[family][top_ja4] += 1
+            family_run_top_ja4_seen.add(family_run_key)
 
     out: list[dict[str, Any]] = []
     for family in sorted(family_runs):
         rows = family_runs[family]
-        unique_rows = { _norm_text(row.get("dynamic_run_id")): row for row in rows }.values()
+        unique_rows = list({_norm_text(row.get("dynamic_run_id")): row for row in rows}.values())
         ja4_values = [float(row["unique_ja4_count"]) for row in unique_rows if row.get("unique_ja4_count") is not None]
         top_shares = [float(row["top1_ja4_share"]) for row in unique_rows if row.get("top1_ja4_share") is not None]
         if not ja4_values:
@@ -1437,7 +1460,7 @@ def _build_service_fingerprint_associations(
             {
                 "service_family": family,
                 "apps_seen": len(family_apps[family]),
-                "run_count": len(list(unique_rows)),
+                "run_count": len(unique_rows),
                 "median_unique_ja4": med_ja4,
                 "common_top_ja4": family_top_ja4[family].most_common(1)[0][0] if family_top_ja4[family] else "",
                 "median_top_ja4_share": med_top_share,

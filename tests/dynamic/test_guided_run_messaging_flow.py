@@ -126,7 +126,7 @@ def test_guided_run_workbench_surfaces_messaging_connected_baseline_note(monkeyp
         in out
     )
     assert (
-        "If login/setup is still in the way, use Interactive run -> Manual first. That preparation run is retained as supplemental evidence outside baseline quota."
+        "If login/setup is still in the way, use Interactive run -> Manual first. That preparation run is retained as extra evidence outside baseline quota."
         in out
     )
 
@@ -172,9 +172,9 @@ def test_guided_run_messaging_manual_preparation_flow_replaces_double_warning(mo
     assert select_package_calls["count"] == 2
     assert "Manual preparation run is allowed for setup-sensitive messaging apps." in out
     assert "Use this when login, account recovery, or thread setup would contaminate a clean connected-idle baseline." in out
-    assert "This run will be retained as supplemental evidence; return afterward for a clean baseline capture." in out
+    assert "This run will be retained as extra evidence; return afterward for a clean baseline capture." in out
     assert "Proceed with interaction anyway?" not in out
-    assert "Proceed with supplemental run anyway?" not in out
+    assert "Proceed with retained extra run anyway?" not in out
     assert yes_no_calls == [("Start manual preparation run?", True)]
     assert "Messaging Activity (Tag)" in out
     assert "Select at least one observer." in out
@@ -282,5 +282,5 @@ def test_guided_run_capture_setup_does_not_repeat_recent_tracker_runs(monkeypatc
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Capture Setup" in out
+    assert "Capture setup" in out
     assert "Recent Tracker Runs" not in out

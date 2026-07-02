@@ -209,6 +209,68 @@ def test_persist_dynamic_summary_persists_dataset_truth_from_manifest(monkeypatc
     assert inserted["invalid_reason_code"] is None
 
 
+def test_persist_dynamic_summary_prefers_tracker_counts_toward_quota(monkeypatch, tmp_path):
+    monkeypatch.setattr(persistence.dynamic_schema, "ensure_all", lambda: True)
+    captured = {"writes": [], "many": []}
+
+    monkeypatch.setattr(
+        persistence.core_q,
+        "run_sql_write",
+        lambda *args, **kwargs: captured["writes"].append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        persistence.core_q,
+        "run_sql_many",
+        lambda *args, **kwargs: captured["many"].append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        persistence,
+        "_tracker_truth_for_run",
+        lambda dynamic_run_id, package_name: {
+            "run_id": dynamic_run_id,
+            "counts_toward_quota": True,
+            "valid_dataset_run": True,
+        },
+    )
+
+    manifest = {
+        "dataset": {
+            "tier": "dataset",
+            "countable": False,
+            "valid_dataset_run": True,
+            "invalid_reason_code": None,
+        }
+    }
+    (tmp_path / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _make_result(tmp_path, "success")
+    payload = {"dynamic_run_id": "run-123", "plan": {}}
+    config = DynamicSessionConfig(
+        package_name="com.example.app",
+        duration_seconds=30,
+        tier="dataset",
+        counts_toward_completion=False,
+    )
+
+    persistence.persist_dynamic_summary(config, result, payload)
+
+    session_call = next(
+        (
+            entry
+            for entry in captured["writes"]
+            if "INSERT INTO dynamic_sessions" in str(entry[0][0])
+        ),
+        None,
+    )
+    assert session_call is not None
+    sql = str(session_call[0][0])
+    params = list(session_call[0][1])
+    columns = [part.strip() for part in sql.split("(", 1)[1].split(")", 1)[0].split(",")]
+    inserted = dict(zip(columns, params, strict=False))
+    assert inserted["countable"] == 1
+    assert inserted["valid_dataset_run"] == 1
+
+
 def test_persist_dynamic_summary_indexes_derived_dynamic_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(persistence.dynamic_schema, "ensure_all", lambda: True)
     monkeypatch.setattr(

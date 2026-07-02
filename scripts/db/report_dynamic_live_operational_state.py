@@ -34,22 +34,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 
 @dataclass(frozen=True)
-class DriftRow:
-    package_name: str
-    app: str
-    status: str
-    baseline: str
-    interactive: str
-    installed_build: str
-    static_plan_build: str
-    static_plan_version_name: str
-    static_run_id: str
-    lineage_state: str
-    evidence_scope: str
-    recommendation: str
-
-
-@dataclass(frozen=True)
 class CaptureCandidate:
     priority: int
     package_name: str
@@ -113,123 +97,6 @@ def _norm_text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _lineage_rank(lineage_state: str) -> int:
-    order = {
-        "current_build_observed": 0,
-        "current_build_db_only": 1,
-        "historical_local_only": 2,
-        "historical_db_only": 3,
-        "no_evidence_anywhere": 4,
-    }
-    return order.get(str(lineage_state or ""), 9)
-
-
-def _build_scope_text(row: Any) -> str:
-    lineage_state = _norm_text(getattr(row, "lineage_state", ""))
-    if getattr(row, "live_build_drift", False):
-        if lineage_state == "current_build_observed":
-            return "current-build evidence exists, but it is no longer live-current after device drift"
-        if lineage_state == "current_build_db_only":
-            return "DB-known current-build evidence exists, but live device drift blocks new current-build claims"
-        return "older build evidence remains historically valid, but not live-current"
-    if lineage_state == "current_build_observed":
-        return "current-build evidence aligned"
-    if lineage_state == "current_build_db_only":
-        return "DB-only current-build evidence"
-    if lineage_state == "historical_local_only":
-        return "legacy local evidence only"
-    if lineage_state == "historical_db_only":
-        return "legacy DB-only evidence only"
-    return "no evidence yet"
-
-
-def _drift_rows(row_models: Sequence[Any], *, queue_status_label_fn, baseline_label_fn, interactive_label_fn) -> list[DriftRow]:
-    rows: list[DriftRow] = []
-    for row in row_models:
-        if not getattr(row, "live_build_drift", False):
-            continue
-        rows.append(
-            DriftRow(
-                package_name=_norm_text(getattr(row, "package_name", "")),
-                app=_norm_text(getattr(row, "display_name", "")),
-                status=_norm_text(queue_status_label_fn(row)),
-                baseline=_norm_text(baseline_label_fn(row)),
-                interactive=_norm_text(interactive_label_fn(row)),
-                installed_build=_norm_text(getattr(row, "live_observed_version_code", "")) or "unknown",
-                static_plan_build=_norm_text(getattr(row, "live_expected_version_code", "")) or "unknown",
-                static_plan_version_name=_norm_text(getattr(row, "live_expected_version_name", "")) or "unknown",
-                static_run_id=_norm_text(getattr(row, "live_static_run_id", "")) or "unknown",
-                lineage_state=_norm_text(getattr(row, "lineage_state", "")),
-                evidence_scope=_build_scope_text(row),
-                recommendation="refresh inventory/harvest/static before new live-current capture",
-            )
-        )
-    return sorted(rows, key=lambda item: (item.app.lower(), item.package_name))
-
-
-def _capture_candidate_priority(row: Any) -> tuple[int, int, int, int, str]:
-    state = _norm_text(getattr(row, "lineage_state", ""))
-    need_baseline = int(getattr(row, "need_baseline", 0) or 0)
-    need_interactive = int(getattr(row, "need_interactive", 0) or 0)
-    if need_baseline <= 0 and need_interactive > 0:
-        phase_rank = 0
-        remaining = need_interactive
-    elif need_baseline > 0:
-        phase_rank = 1
-        remaining = need_baseline
-    else:
-        phase_rank = 9
-        remaining = 99
-    current_progress = -(
-        int(getattr(row, "baseline_countable", 0) or 0)
-        + int(getattr(row, "interactive_countable", 0) or 0)
-    )
-    return (
-        phase_rank,
-        _lineage_rank(state),
-        remaining,
-        current_progress,
-        _norm_text(getattr(row, "display_name", "")).lower(),
-    )
-
-
-def _capture_candidates(
-    row_models: Sequence[Any],
-    *,
-    queue_status_label_fn,
-    baseline_label_fn,
-    interactive_label_fn,
-    recommended_reason_fn,
-    candidate_limit: int,
-) -> list[CaptureCandidate]:
-    candidates: list[CaptureCandidate] = []
-    filtered = [
-        row
-        for row in row_models
-        if not getattr(row, "live_build_drift", False)
-        and (int(getattr(row, "need_baseline", 0) or 0) > 0 or int(getattr(row, "need_interactive", 0) or 0) > 0)
-    ]
-    for priority, row in enumerate(sorted(filtered, key=_capture_candidate_priority)[: max(1, int(candidate_limit))], start=1):
-        need_baseline = int(getattr(row, "need_baseline", 0) or 0)
-        need_interactive = int(getattr(row, "need_interactive", 0) or 0)
-        next_action = "interactive" if need_baseline <= 0 and need_interactive > 0 else "baseline"
-        candidates.append(
-            CaptureCandidate(
-                priority=priority,
-                package_name=_norm_text(getattr(row, "package_name", "")),
-                app=_norm_text(getattr(row, "display_name", "")),
-                status=_norm_text(queue_status_label_fn(row)),
-                next_action=next_action,
-                baseline=_norm_text(baseline_label_fn(row)),
-                interactive=_norm_text(interactive_label_fn(row)),
-                lineage_state=_norm_text(getattr(row, "lineage_state", "")),
-                likely_quota_impact="YES",
-                rationale=_norm_text(recommended_reason_fn(row)),
-            )
-        )
-    return candidates
-
-
 def _freeze_guidance(
     *,
     drift_count: int,
@@ -289,21 +156,35 @@ def summarize_prepared_view(
     interactive_label_fn,
     recommended_reason_fn,
 ) -> dict[str, Any]:
+    from scytaledroid.DynamicAnalysis import app_queue_state
+
     row_models = list(getattr(prepared, "row_models", None) or [])
-    drift_rows = _drift_rows(
+    drift_rows = app_queue_state.build_drift_app_summaries(
         row_models,
         queue_status_label_fn=queue_status_label_fn,
         baseline_label_fn=baseline_label_fn,
         interactive_label_fn=interactive_label_fn,
     )
-    candidates = _capture_candidates(
-        row_models,
-        queue_status_label_fn=queue_status_label_fn,
-        baseline_label_fn=baseline_label_fn,
-        interactive_label_fn=interactive_label_fn,
-        recommended_reason_fn=recommended_reason_fn,
-        candidate_limit=candidate_limit,
-    )
+    capture_rows = app_queue_state.select_capture_candidates(row_models, limit=candidate_limit)
+    candidates = []
+    for priority, row in enumerate(capture_rows, start=1):
+        need_baseline = int(getattr(row, "need_baseline", 0) or 0)
+        need_interactive = int(getattr(row, "need_interactive", 0) or 0)
+        next_action = "interactive" if need_baseline <= 0 and need_interactive > 0 else "baseline"
+        candidates.append(
+            CaptureCandidate(
+                priority=priority,
+                package_name=_norm_text(getattr(row, "package_name", "")),
+                app=_norm_text(getattr(row, "display_name", "")),
+                status=_norm_text(queue_status_label_fn(row)),
+                next_action=next_action,
+                baseline=_norm_text(baseline_label_fn(row)),
+                interactive=_norm_text(interactive_label_fn(row)),
+                lineage_state=_norm_text(getattr(row, "lineage_state", "")),
+                likely_quota_impact="YES",
+                rationale=_norm_text(recommended_reason_fn(row)),
+            )
+        )
     guidance = _freeze_guidance(
         drift_count=len(drift_rows),
         capture_candidates=candidates,
@@ -340,7 +221,7 @@ def summarize_prepared_view(
         },
         "evidence_quota_summary": evidence_summary,
         "freeze_guidance": guidance,
-        "drift_apps": [asdict(row) for row in drift_rows],
+        "drift_apps": list(drift_rows),
         "capture_candidates": [asdict(row) for row in candidates],
     }
 

@@ -21,6 +21,9 @@ _CHAT_LIKE_BASELINE_PACKAGES = {
     "com.snapchat.android",
 }
 _RELAXED_IDLE_MIN_BYTES = 500_000  # 500KB
+_CONNECTED_BASELINE_MIN_PACKETS = 150
+_CONNECTED_BASELINE_MIN_DOMAINS = 1
+
 
 @dataclass(frozen=True)
 class LowSignalConfig:
@@ -140,7 +143,240 @@ def compute_low_signal_for_run(
         reasons = [reason for reason in reasons if reason != "DOMAINS_LOW"]
         decision["low_signal_reasons"] = reasons
         decision["low_signal"] = bool(reasons)
+    if _should_suppress_low_signal_for_connected_baseline(
+        run_dir,
+        package_name=package_name,
+        run_profile=run_profile,
+        reasons=reasons,
+        cfg=effective,
+    ):
+        reasons = []
+        decision["low_signal_reasons"] = reasons
+        decision["low_signal"] = False
+    elif _should_suppress_bytes_low_for_idle_baseline(
+        run_dir,
+        run_profile=run_profile,
+        reasons=reasons,
+        cfg=effective,
+    ):
+        reasons = [reason for reason in reasons if reason != "PCAP_BYTES_LOW"]
+        decision["low_signal_reasons"] = reasons
+        decision["low_signal"] = bool(reasons)
+    elif _should_suppress_low_signal_for_messaging_interaction(
+        run_dir,
+        package_name=package_name,
+        run_profile=run_profile,
+        reasons=reasons,
+        cfg=effective,
+    ):
+        reasons = []
+        decision["low_signal_reasons"] = reasons
+        decision["low_signal"] = False
     return decision
+
+
+def _should_suppress_low_signal_for_messaging_interaction(
+    run_dir: Path,
+    *,
+    package_name: str | None,
+    run_profile: str | None,
+    reasons: list[str],
+    cfg: LowSignalConfig,
+) -> bool:
+    """Messaging interaction runs can be legitimately quiet; keep them valid with warnings only."""
+    profile = str(run_profile or "").strip().lower()
+    if not profile.startswith("interaction"):
+        return False
+    if not _is_chat_like_package(package_name):
+        return False
+    if not reasons:
+        return False
+    allowed_quiet_reasons = {"PCAP_BYTES_LOW", "PCAP_PACKETS_LOW", "DOMAINS_LOW"}
+    if any(reason not in allowed_quiet_reasons for reason in reasons):
+        return False
+
+    metrics = _baseline_evidence_metrics(run_dir)
+    return (
+        metrics["pcap_quality_ok"]
+        and metrics["duration_s"] >= float(cfg.min_capture_duration_s)
+        and metrics["packet_count"] > 0
+        and metrics["has_evidence"]
+    )
+
+
+def _should_suppress_low_signal_for_connected_baseline(
+    run_dir: Path,
+    *,
+    package_name: str | None,
+    run_profile: str | None,
+    reasons: list[str],
+    cfg: LowSignalConfig,
+) -> bool:
+    """Treat quiet connected-idle messaging baselines as sufficient when corroborated."""
+    profile = str(run_profile or "").strip().lower()
+    if profile != "baseline_connected":
+        return False
+    if not _is_chat_like_package(package_name):
+        return False
+    if not reasons:
+        return False
+    allowed_quiet_reasons = {"PCAP_BYTES_LOW", "PCAP_PACKETS_LOW", "DOMAINS_LOW"}
+    if any(reason not in allowed_quiet_reasons for reason in reasons):
+        return False
+
+    metrics = _baseline_evidence_metrics(run_dir)
+    return (
+        metrics["pcap_quality_ok"]
+        and metrics["duration_s"] >= float(cfg.min_capture_duration_s)
+        and metrics["packet_count"] >= _CONNECTED_BASELINE_MIN_PACKETS
+        and metrics["domain_count"] >= _CONNECTED_BASELINE_MIN_DOMAINS
+        and metrics["has_evidence"]
+    )
+
+
+def _should_suppress_bytes_low_for_idle_baseline(
+    run_dir: Path,
+    *,
+    run_profile: str | None,
+    reasons: list[str],
+    cfg: LowSignalConfig,
+) -> bool:
+    """Do not penalize intentionally quiet idle baselines for bytes alone.
+
+    Baseline-idle protocol asks the operator to keep the app mostly idle. If the
+    capture is long enough and has enough packet/domain evidence, low byte volume
+    by itself is not evidence that the baseline is uninformative.
+    """
+    profile = str(run_profile or "").strip().lower()
+    if profile != "baseline_idle":
+        return False
+    if reasons != ["PCAP_BYTES_LOW"]:
+        return False
+
+    metrics = _baseline_evidence_metrics(run_dir)
+    return (
+        metrics["pcap_quality_ok"]
+        and metrics["duration_s"] >= float(cfg.min_capture_duration_s)
+        and metrics["packet_count"] >= int(cfg.min_packet_count)
+        and metrics["domain_count"] >= int(cfg.min_unique_domains_topn)
+        and metrics["has_evidence"]
+    )
+
+
+def _baseline_evidence_metrics(run_dir: Path) -> dict[str, Any]:
+    pf = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
+    report = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
+    metrics = pf.get("metrics") if isinstance(pf.get("metrics"), dict) else {}
+    proxies = pf.get("proxies") if isinstance(pf.get("proxies"), dict) else {}
+    quality = pf.get("quality") if isinstance(pf.get("quality"), dict) else {}
+    capinfos = report.get("capinfos") if isinstance(report.get("capinfos"), dict) else {}
+    capinfos_parsed = capinfos.get("parsed") if isinstance(capinfos.get("parsed"), dict) else {}
+
+    pcap_quality_ok = True
+    if quality.get("pcap_valid") is False:
+        pcap_quality_ok = False
+    report_status = str(quality.get("report_status") or report.get("report_status") or "").strip().lower()
+    if report_status and report_status != "ok":
+        pcap_quality_ok = False
+
+    duration_s = _safe_float(
+        metrics.get("capture_duration_s"),
+        fallback=report.get("capture_duration_s") or capinfos_parsed.get("capture_duration_s"),
+    )
+    packet_count = _safe_int(
+        metrics.get("packet_count"),
+        fallback=report.get("packet_count") or capinfos_parsed.get("packet_count"),
+    )
+    domain_count = _safe_int(
+        proxies.get("unique_domains_topn"),
+        fallback=report.get("service_domain_unique_count")
+        or report.get("service_domain_count")
+        or _count_top_domains(report),
+    )
+    service_count = _service_count(pf, report)
+    ja4_count = _safe_int(
+        proxies.get("unique_ja4_count"),
+        fallback=_nested_int(pf, ("fingerprints", "summary", "unique_ja4_count"))
+        or _nested_int(report, ("tls_fingerprints", "unique_ja4_count")),
+    )
+    tls_hello_count = _safe_int(
+        proxies.get("tls_client_hello_count"),
+        fallback=_nested_int(report, ("tls_fingerprints", "client_hello_count")),
+    )
+
+    has_evidence = bool(domain_count > 0 or service_count > 0 or ja4_count > 0 or tls_hello_count > 0)
+    return {
+        "pcap_quality_ok": pcap_quality_ok,
+        "duration_s": duration_s,
+        "packet_count": packet_count,
+        "domain_count": domain_count,
+        "service_count": service_count,
+        "ja4_count": ja4_count,
+        "tls_hello_count": tls_hello_count,
+        "has_evidence": has_evidence,
+    }
+
+
+def _safe_float(value: Any, *, fallback: Any = None) -> float:
+    for candidate in (value, fallback):
+        try:
+            if candidate is not None and candidate != "":
+                return float(candidate)
+        except Exception:
+            continue
+    return 0.0
+
+
+def _safe_int(value: Any, *, fallback: Any = None) -> int:
+    for candidate in (value, fallback):
+        try:
+            if candidate is not None and candidate != "":
+                return int(candidate)
+        except Exception:
+            continue
+    return 0
+
+
+def _nested_int(mapping: dict[str, Any], keys: tuple[str, ...]) -> int | None:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    try:
+        return int(current) if current not in (None, "") else None
+    except Exception:
+        return None
+
+
+def _count_top_domains(report: dict[str, Any]) -> int:
+    domains: set[str] = set()
+    for key in ("top_sni_server_names", "top_dns_qnames", "service_domains"):
+        value = report.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if isinstance(item, dict):
+                text = str(item.get("value") or item.get("domain") or item.get("name") or "").strip()
+            else:
+                text = str(item or "").strip()
+            if text:
+                domains.add(text.lower())
+    return len(domains)
+
+
+def _service_count(pf: dict[str, Any], report: dict[str, Any]) -> int:
+    for source in (pf, report):
+        service_context = source.get("service_context") if isinstance(source.get("service_context"), dict) else {}
+        summary = service_context.get("summary") if isinstance(service_context.get("summary"), dict) else service_context
+        for key in ("service_count", "matched_service_count"):
+            count = _safe_int(summary.get(key)) if isinstance(summary, dict) else 0
+            if count:
+                return count
+        services = summary.get("services") if isinstance(summary, dict) else None
+        if isinstance(services, list) and services:
+            return len(services)
+    return 0
 
 
 def _should_suppress_domains_low_for_messaging_call(
@@ -202,20 +438,32 @@ def _effective_low_signal_config(
 ) -> LowSignalConfig:
     pkg = str(package_name or "").strip().lower()
     profile = str(run_profile or "").strip().lower()
-    if not profile.startswith("baseline"):
-        return config
+    if profile.startswith("baseline") and _is_chat_like_package(pkg):
+        # Messaging/chat idle can be comparatively quiet; relax byte threshold only.
+        return LowSignalConfig(
+            min_capture_duration_s=float(config.min_capture_duration_s),
+            min_data_size_bytes=min(int(config.min_data_size_bytes), int(_RELAXED_IDLE_MIN_BYTES)),
+            min_packet_count=int(config.min_packet_count),
+            min_unique_domains_topn=int(config.min_unique_domains_topn),
+        )
+    if profile.startswith("interaction") and _is_chat_like_package(pkg):
+        # Interaction on messaging apps: relax byte/packet/domain floors when capture is structurally valid.
+        return LowSignalConfig(
+            min_capture_duration_s=float(config.min_capture_duration_s),
+            min_data_size_bytes=min(int(config.min_data_size_bytes), int(_RELAXED_IDLE_MIN_BYTES)),
+            min_packet_count=min(int(config.min_packet_count), 250),
+            min_unique_domains_topn=min(int(config.min_unique_domains_topn), 1),
+        )
+    return config
+
+
+def _is_chat_like_package(package_name: str | None) -> bool:
+    pkg = str(package_name or "").strip().lower()
+    if not pkg:
+        return False
     messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
-    category = category_for_package(pkg) if pkg else None
-    is_chat_like = pkg in _CHAT_LIKE_BASELINE_PACKAGES or pkg in messaging_pkgs or category == "messaging"
-    if not is_chat_like:
-        return config
-    # Messaging/chat idle can be comparatively quiet; relax byte threshold only.
-    return LowSignalConfig(
-        min_capture_duration_s=float(config.min_capture_duration_s),
-        min_data_size_bytes=min(int(config.min_data_size_bytes), int(_RELAXED_IDLE_MIN_BYTES)),
-        min_packet_count=int(config.min_packet_count),
-        min_unique_domains_topn=int(config.min_unique_domains_topn),
-    )
+    category = category_for_package(pkg)
+    return pkg in _CHAT_LIKE_BASELINE_PACKAGES or pkg in messaging_pkgs or category == "messaging"
 
 
 __all__ = [

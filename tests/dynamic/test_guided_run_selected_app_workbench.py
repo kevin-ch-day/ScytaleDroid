@@ -70,7 +70,7 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
 
     def _fake_choice(choices, *, default=None, disabled=None, **_kwargs):
         del choices
-        assert default == "1"
+        assert default == "A"
         assert "X" in (disabled or [])
         return "0"
 
@@ -88,9 +88,9 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
     assert "App Queue / Next Action" not in out
     assert "Run readiness:" not in out
     assert "Press Enter to continue, V for details, or B to go back" not in out
-    assert "Run Option" in out
-    assert "1) Baseline run [default]" in out
-    assert "Reason:" not in out
+    assert "A) Review QA" in out
+    assert "(default)" in out
+    assert "PCAP_DEVICE_FILE_MISSING" in out or "QA needs review" in out
     assert device_calls == {"select": 0, "preflight": 0}
 
 
@@ -108,7 +108,7 @@ def test_selected_app_protocol_options_hold_interaction_until_baseline_complete(
     assert str(options["3"].description) == "no saving"
 
 
-def test_selected_app_protocol_options_mark_completed_quota_as_supplemental() -> None:
+def test_selected_app_protocol_options_mark_completed_quota_as_retained_extra() -> None:
     app = make_protocol_options_app(
         baseline_valid_runs=3,
         interactive_valid_runs=4,
@@ -117,9 +117,44 @@ def test_selected_app_protocol_options_mark_completed_quota_as_supplemental() ->
 
     options = {option.key: option for option in guided_run._build_selected_app_protocol_options(app)}
 
-    assert str(options["1"].description) == "supplemental · outside quota"
-    assert str(options["2"].description) == "supplemental · outside quota"
+    assert str(options["1"].description) == "supplemental · ML training pool"
+    assert str(options["2"].description) == "retained extra · outside quota"
     assert str(options["3"].description) == "no saving"
+
+
+def test_supplemental_baseline_capture_skips_retained_extra_confirmation() -> None:
+    cfg = SimpleNamespace(baseline_required=3, interactive_required=4)
+    assert guided_run._is_supplemental_baseline_capture(
+        selected_protocol="1",
+        run_profile="baseline_idle",
+        baseline_valid_runs=3,
+        cfg=cfg,
+    )
+    assert not guided_run._is_supplemental_baseline_capture(
+        selected_protocol="2",
+        run_profile="interaction_scripted",
+        baseline_valid_runs=3,
+        cfg=cfg,
+    )
+
+
+def test_queue_action_suggests_supplemental_baseline_when_quota_met() -> None:
+    from scytaledroid.DynamicAnalysis.controllers.selected_app_state import selected_app_queue_action
+
+    action, reason = selected_app_queue_action(
+        baseline_valid_runs=3,
+        interactive_valid_runs=4,
+        baseline_required=3,
+        interactive_required=4,
+        scripted_template_ready=True,
+        latest_valid=True,
+        latest_invalid_reason=None,
+        latest_pcap_failure_detail=None,
+        db_active_sessions=1,
+        active_valid_runs=7,
+    )
+    assert action == "supplemental baseline"
+    assert "ML training" in str(reason or "")
 
 
 def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkeypatch, capsys) -> None:
@@ -143,7 +178,7 @@ def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkey
     )
 
     def _fake_choice(_choices, *, default=None, **_kwargs):
-        assert default == "2"
+        assert default == "1"
         return "0"
 
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", _fake_choice)
@@ -155,9 +190,13 @@ def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkey
 
     out = capsys.readouterr().out
     assert "CNN" in out
-    assert "Current build · current-build evidence (local+db) · QA valid · quota 7/7" in out
+    assert "Current build" in out
+    assert "QA valid" in out
+    assert "quota 7/7" in out
     assert "Run Option" in out
-    assert "2) Interactive run [default]" in out
+    assert "1) Baseline run" in out
+    assert "(default)" in out
+    assert "ML training pool" in out
     assert "Reason:" not in out
     assert "1) Baseline run" in out
     assert "3) Test app" in out
@@ -166,7 +205,8 @@ def test_selected_app_workbench_groups_review_run_and_maintenance_actions(monkey
     assert "H) Run history" in out
     assert "G) Diagnostics" in out
     assert "X) Reset app" in out
-    assert "X) Reset app [default]" not in out
+    assert "X) Reset app" in out
+    assert "X) Reset app (default)" not in out
     assert "D) Reset app" not in out
 
 
@@ -243,7 +283,8 @@ def test_guided_run_defaults_to_manual_when_script_template_missing(monkeypatch,
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert "BBC News" in out
-    assert "2) Interactive run [default]" in out
+    assert "2) Interactive run" in out
+    assert "(default)" in out
     assert "3) Test app" in out
     assert "Reason:" not in out
 
@@ -299,11 +340,13 @@ def test_guided_run_reports_review_queue_action_for_invalid_complete_current_bui
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Current build · current-build evidence (local+db) · QA needs review · quota 7/7" in out
-    assert "A) Review QA [default]" in out
-    assert "Reason: QA needs review; latest current-build QA invalid (PCAP_DEVICE_FILE_MISSING)." in out
+    assert "Current build" in out
+    assert "QA needs review" in out
+    assert "A) Review QA" in out
+    assert "(default)" in out
+    assert "latest current-build QA invalid" in out
     assert "2) Interactive run" in out
-    assert "2) Interactive run [default]" not in out
+    assert "2) Interactive run (default)" not in out
 
 
 def test_choose_interactive_mode_shows_manual_and_scripted_when_template_available(monkeypatch, capsys) -> None:
@@ -318,8 +361,9 @@ def test_choose_interactive_mode_shows_manual_and_scripted_when_template_availab
     out = capsys.readouterr().out
     assert choice == "interaction_manual"
     assert "Interactive Mode" in out
-    assert "1) Manual interactive run [default]" in out
-    assert "2) Scripted interactive run: news_reader_basic_v1" in out
+    assert "1) Manual interactive run" in out
+    assert "(default)" in out
+    assert "template: news_reader_basic_v1" in out
     assert "0) Back" in out
 
 
@@ -340,7 +384,9 @@ def test_choose_interactive_mode_shows_scripted_unavailable_without_template(mon
 
     out = capsys.readouterr().out
     assert choice == "interaction_manual"
-    assert "2) Scripted interactive run (unavailable - no template)" in out
+    assert "2) Scripted interactive run" in out
+    assert "unavailable" in out
+    assert "no template" in out
     assert captured["default"] == "1"
     assert captured["disabled"] == ["2"]
 

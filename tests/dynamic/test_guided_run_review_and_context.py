@@ -117,7 +117,7 @@ def test_guided_run_review_path_does_not_require_device(monkeypatch, capsys) -> 
         (
             True,
             "",
-            "Return to the app screen if you want supplemental baseline, scripted, or manual evidence.",
+            "Return to the app screen for supplemental baseline, interactive, or manual evidence.",
         ),
         (
             False,
@@ -212,10 +212,10 @@ def test_guided_run_history_and_diagnostics_do_not_require_device(
     assert select_package_calls["count"] == 2
     assert expected_header in out
     if expected_header == "Diagnostics":
-        assert "Study status" in out
-        assert "Live device status" in out
-        assert "Capture status" in out
-        assert "Publication status" in out
+        assert "Study" in out
+        assert "Live device" in out
+        assert "Capture" in out
+        assert "Publication" in out
     assert device_calls == {"select": 0, "preflight": 0}
 
 
@@ -301,7 +301,7 @@ def test_guided_run_recent_runs_show_dataset_impact_labels(monkeypatch, capsys) 
     assert select_package_calls["count"] == 2
     assert "Recent Tracker Runs" in out
     assert "Dataset" in out
-    assert "supplemental" in out
+    assert "retained extra" in out
     assert "quota-counted" in out
 
 
@@ -310,12 +310,24 @@ def test_dataset_impact_label_distinguishes_manual_and_scripted_extra_runs() -> 
     scripted_row = SimpleNamespace(valid=True, supplemental_reason="SCRIPTED_EXTRA_RUN", countable=False)
     low_signal_row = SimpleNamespace(valid=True, supplemental_reason="LOW_SIGNAL_IDLE", countable=False)
 
-    assert selected_app_review._dataset_impact_label(manual_row) == "supplemental (manual extra)"
-    assert selected_app_review._dataset_impact_label(scripted_row) == "supplemental (scripted extra)"
-    assert selected_app_review._dataset_impact_label(low_signal_row) == "supplemental (LOW_SIGNAL_IDLE)"
+    assert selected_app_review._dataset_impact_label(manual_row) == "retained extra (manual extra)"
+    assert selected_app_review._dataset_impact_label(scripted_row) == "retained extra (scripted extra)"
+    assert selected_app_review._dataset_impact_label(low_signal_row) == "ML training pool (LOW_SIGNAL_IDLE)"
+    baseline_not_idle_row = SimpleNamespace(
+        valid=True, supplemental_reason="BASELINE_NOT_IDLE", countable=False
+    )
+    extra_baseline_row = SimpleNamespace(valid=True, supplemental_reason="EXTRA_RUN", countable=False)
+    assert (
+        selected_app_review._dataset_impact_label(baseline_not_idle_row)
+        == "ML training pool (BASELINE_NOT_IDLE)"
+    )
+    assert (
+        selected_app_review._dataset_impact_label(extra_baseline_row)
+        == "ML training pool (supplemental baseline)"
+    )
 
 
-def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, capsys) -> None:
+def test_guided_run_reports_historical_and_retained_extra_context(monkeypatch, capsys) -> None:
     package = "com.facebook.katana"
     select_package_calls, select_package = one_shot_package_selector(package)
 
@@ -358,10 +370,12 @@ def test_guided_run_reports_historical_and_supplemental_context(monkeypatch, cap
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert "Historical evidence: 2 legacy valid run(s) across 1 older build(s) retained for comparison; not counted toward current quota." in out
-    assert "Supplemental interactive: 1 extra valid run(s) retained outside quota." in out
+    assert "Qualification" in out
+    assert "Baseline     3/3" in out
+    assert "Interactive  0/4 (+1 extra)" in out
 
 
-def test_guided_run_reports_low_signal_supplemental_current_build_context(monkeypatch, capsys) -> None:
+def test_guided_run_reports_low_signal_retained_extra_current_build_context(monkeypatch, capsys) -> None:
     package = "com.twitter.android"
     select_package_calls, select_package = one_shot_package_selector(package)
 
@@ -402,11 +416,12 @@ def test_guided_run_reports_low_signal_supplemental_current_build_context(monkey
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Supplemental baseline: 2 low-signal idle run(s) retained outside quota." in out
-    assert "Supplemental interactive:" not in out
+    assert "Retained extra baseline: 2 low-signal idle run(s) retained outside quota." not in out
+    assert "Qualification" in out
+    assert "Baseline     2/3 (+2 low)" in out
 
 
-def test_guided_run_diagnostics_show_supplemental_breakdown(monkeypatch, capsys) -> None:
+def test_guided_run_diagnostics_show_retained_extra_breakdown(monkeypatch, capsys) -> None:
     package = "com.cnn.mobile.android.phone"
     select_package_calls, select_package = one_shot_package_selector(package)
     choice_iter = iter(["G", "0"])
@@ -454,9 +469,9 @@ def test_guided_run_diagnostics_show_supplemental_breakdown(monkeypatch, capsys)
     assert "3 / 3" in out
     assert "Quota-counted interactive" in out
     assert "4 / 4" in out
-    assert "Supplemental baseline" in out
-    assert "extra=1 | low-signal=0" in out
-    assert "Supplemental interactive" in out
+    assert "ML training pool (baseline)" in out
+    assert "supplemental=1 | low-signal=0 | total=1" in out
+    assert "Retained extra interactive" in out
     assert "extra=1 | low-signal=0" in out
 
 
@@ -483,8 +498,8 @@ def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> N
     assert select_package_calls["count"] == 2
     assert "Why:" in out
     assert "Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace." in out
-    assert "1) Baseline run [default]" in out
-    assert "Reason:" not in out
+    assert "1) Baseline run" in out
+    assert "(default)" in out
     assert "Collect baseline evidence for the installed build." in out
 
 
@@ -518,9 +533,11 @@ def test_guided_run_current_build_db_only_offers_restore_or_recollect(monkeypatc
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Current build · current-build evidence (db-only) · QA unknown · quota 0/7" in out
-    assert "R) Restore / recollect [default]" in out
-    assert "Reason: current-build evidence exists in the DB, but the local evidence pack is missing from this workspace." in out
+    assert "Current build" in out
+    assert "db-only" in out
+    assert "R) Restore / recollect" in out
+    assert "(default)" in out
+    assert "local evidence pack is missing" in out
     assert "Restore / Recollect" in out
     assert "Restore the missing evidence pack if you have it, or recollect a current-build baseline now." in out
     assert any("Start baseline recollection for the installed build now?" in prompt for prompt in prompts)
@@ -546,10 +563,11 @@ def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) ->
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Unknown build · no current-build evidence · QA unknown · quota 0/7" in out
+    assert "Unknown build" in out
+    assert "no current-build evidence" in out
     assert "No dynamic evidence exists yet for com.guardian." in out
-    assert "1) Baseline run [default]" in out
-    assert "Reason:" not in out
+    assert "1) Baseline run" in out
+    assert "(default)" in out
 
 
 def test_selected_app_latest_recent_summary_does_not_replace_scoped_current_run_with_newer_unscoped_run(

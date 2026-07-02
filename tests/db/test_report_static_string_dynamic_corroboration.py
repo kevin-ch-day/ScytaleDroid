@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.db import report_static_string_dynamic_corroboration as report
 from scytaledroid.Config import app_config
@@ -32,8 +33,95 @@ def test_help() -> None:
     assert out.startswith("usage:")
     assert "corroboration" in out
     assert "--output-dir" in out
+    assert "--package" in out
     assert "--overlay-latest-static" in out
     assert "--overlay-reanalyse-strings" in out
+
+
+def test_select_overlay_report_caches_reports_for_package(monkeypatch, tmp_path: Path) -> None:
+    report._OVERLAY_REPORT_CACHE.clear()
+
+    calls: list[str] = []
+    stored = SimpleNamespace(
+        path=tmp_path / "report.json",
+        report=SimpleNamespace(metadata={"base_apk_sha256": "a" * 64}),
+    )
+
+    def fake_reports_for_package(package_name: str):
+        calls.append(package_name)
+        return [stored]
+
+    import scytaledroid.StaticAnalysis.persistence.reports as reports_store
+
+    monkeypatch.setattr(reports_store, "reports_for_package", fake_reports_for_package)
+
+    embedded_plan = {"run_identity": {"base_apk_sha256": "a" * 64}}
+    first, first_path = report._select_overlay_report("com.example.app", embedded_plan=embedded_plan)
+    second, second_path = report._select_overlay_report("com.example.app", embedded_plan=embedded_plan)
+
+    assert first is stored
+    assert second is stored
+    assert first_path == second_path
+    assert calls == ["com.example.app"]
+
+
+def test_main_package_filter_skips_non_target_runs(monkeypatch, tmp_path: Path) -> None:
+    target_dir = tmp_path / "output" / "evidence" / "dynamic" / "target-run"
+    other_dir = tmp_path / "output" / "evidence" / "dynamic" / "other-run"
+    processed: list[str] = []
+
+    monkeypatch.setattr(report, "_dynamic_run_dirs", lambda _output_root: [target_dir, other_dir])
+    monkeypatch.setattr(
+        report,
+        "_run_dir_package_name",
+        lambda run_dir: "com.target.app" if run_dir == target_dir else "com.other.app",
+    )
+
+    def fake_corroboration_row(run_dir: Path, **_kwargs):
+        processed.append(run_dir.name)
+        return report.CorroborationRow(
+            dynamic_run_id=run_dir.name,
+            package_name="com.target.app",
+            static_run_id=1,
+            static_handoff_hash="a" * 64,
+            static_domains_total=0,
+            static_domains_actionable=0,
+            static_domains_exploratory=0,
+            dynamic_domains_total=0,
+            corroborated_domains_total=0,
+            corroborated_actionable_domains=0,
+            corroborated_exploratory_domains=0,
+            corroborated_pair_groups=(),
+            enriched_domain_metadata_present=False,
+            overlap_report_present=False,
+            plan_path=None,
+            report_path=None,
+            overlap_path=None,
+        )
+
+    monkeypatch.setattr(report, "_corroboration_row", fake_corroboration_row)
+    monkeypatch.setattr(report, "_detail_rows_for_run_dir", lambda *_args, **_kwargs: [])
+
+    rc = report.main(
+        [
+            "--output-dir",
+            str(tmp_path / "audit"),
+            "--package",
+            "COM.Target.App",
+        ]
+    )
+
+    assert rc == 0
+    assert processed == ["target-run"]
+    summary = json.loads((tmp_path / "audit" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["package_filter"] == "COM.Target.App"
+    assert summary["dynamic_runs_scanned"] == 1
+    assert (tmp_path / "audit" / "actionable_corroboration.csv").read_text(
+        encoding="utf-8"
+    ).startswith("dynamic_run_id,package_name")
+    assert (tmp_path / "audit" / "pair_group_corroboration.csv").read_text(
+        encoding="utf-8"
+    ).strip() == "dynamic_run_id,package_name,pair_group"
 
 
 def test_summary_reports_actionable_corroboration_and_missing_enrichment() -> None:
@@ -651,4 +739,106 @@ def test_overlay_string_reanalysis_uses_current_apk_overlay_without_mutating_pac
     assert row.corroborated_domains_total == 1
     assert row.plan_source == "overlay_string_reanalysis"
     assert row.overlay_static_report_path is not None
+    assert plan_path.read_bytes() == original_bytes
+
+
+def test_empty_overlay_string_reanalysis_preserves_embedded_plan(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    report._OVERLAY_REPORT_CACHE.clear()
+    report._OVERLAY_PLAN_CACHE.clear()
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
+
+    reports_dir = tmp_path / "data" / "static_analysis" / "reports" / "latest"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    static_report = StaticAnalysisReport(
+        file_path="/tmp/missing.apk",
+        relative_path=None,
+        file_name="missing.apk",
+        file_size=123,
+        hashes={"sha256": "d" * 64},
+        manifest=ManifestSummary(
+            package_name="com.example.emptyreanalysis",
+            version_name="1.0",
+            version_code="123",
+            app_label="Empty Reanalysis",
+        ),
+        manifest_flags=ManifestFlags(),
+        permissions=PermissionSummary(),
+        components=ComponentSummary(),
+        exported_components=ComponentSummary(),
+        metadata={
+            "package": "com.example.emptyreanalysis",
+            "base_apk_sha256": "deadbeef" * 8,
+            "artifact_set_hash": "feedface" * 8,
+            "run_signature": "cafebabe" * 8,
+            "session_stamp": "20260616-all-full",
+        },
+    )
+    report_path = reports_dir / ("d" * 64 + ".json")
+    report_path.write_text(json.dumps(static_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+
+    monkeypatch.setattr(
+        report,
+        "_reanalyse_string_payload_from_report",
+        lambda *args, **kwargs: {"counts": {}, "samples": {}, "selected_samples": {}},
+    )
+
+    run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run-empty-reanalysis"
+    (run_dir / "inputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-empty-reanalysis",
+                "target": {"package_name": "com.example.emptyreanalysis", "static_run_id": 102},
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_plan = {
+        "run_identity": {
+            "base_apk_sha256": "deadbeef" * 8,
+            "artifact_set_hash": "feedface" * 8,
+            "run_signature": "cafebabe" * 8,
+            "static_handoff_hash": "e" * 64,
+        },
+        "network_targets": {
+            "domains": ["api.example.com"],
+            "cleartext_domains": [],
+            "domain_sources": [
+                {
+                    "domain": "api.example.com",
+                    "sources": ["strings"],
+                    "buckets": ["endpoints"],
+                    "postures": [],
+                    "ownership_classes": [],
+                    "api_contexts": [],
+                    "pair_groups": [],
+                    "verification_statuses": [],
+                }
+            ],
+        },
+    }
+    plan_path = run_dir / "inputs" / "static_dynamic_plan.json"
+    plan_path.write_text(json.dumps(original_plan, indent=2, sort_keys=True), encoding="utf-8")
+    original_bytes = plan_path.read_bytes()
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps({"top_dns": [{"value": "api.example.com", "count": 2}]}),
+        encoding="utf-8",
+    )
+
+    row = report._corroboration_row(
+        run_dir,
+        overlay_latest_static=True,
+        overlay_reanalyse_strings=True,
+    )
+
+    assert row is not None
+    assert row.static_domains_total == 1
+    assert row.corroborated_domains_total == 1
+    assert row.plan_source == "embedded"
+    assert row.overlay_static_report_path is None
     assert plan_path.read_bytes() == original_bytes

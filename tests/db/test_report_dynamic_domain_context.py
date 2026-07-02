@@ -82,8 +82,8 @@ def test_context_for_domain_resolves_new_curated_provider_suffixes_and_exact_hos
         package_name="com.zhiliaoapp.musically",
     )
     assert oracle["owner_class"] == "third_party"
-    assert oracle["role_class"] == "cloud_infrastructure"
-    assert oracle["basis"] == "curated_suffix"
+    assert oracle["role_class"] == "hosted_backend_infrastructure"
+    assert oracle["basis"] == "curated_exact"
 
     meta_third_party = report._context_for_domain(
         "graph.facebook.com",

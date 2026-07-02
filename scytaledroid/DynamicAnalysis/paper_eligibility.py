@@ -17,6 +17,7 @@ _MESSAGING_PACKAGES_LC = {p.lower() for p in MESSAGING_PACKAGES}
 _SOCIAL_TEMPLATE_ALLOWED = {
     "social_feed_basic_v2",
     "facebook_basic_v2",
+    "facebook_behavior_v3",
     "snapchat_basic_v1",
     "x_twitter_full_session_v1",
 }
@@ -31,12 +32,19 @@ _MESSAGING_TEMPLATE_ALLOWED = {
     "messaging_video_v1",
     "whatsapp_idle_v1",
     "whatsapp_text_v1",
+    "whatsapp_text_behavior_v2",
     "whatsapp_voice_v1",
     "whatsapp_video_v1",
     # Mixed/call exploratory template.
     "messaging_call_basic_v1",
 }
 _LEGACY_TEMPLATE_IDS = {"social_feed_basic", "messaging_basic"}
+_TEMPLATE_SUCCESSOR_COMPATIBILITY = {
+    # Superseded scripted templates that remain paper-usable when the run itself
+    # satisfied the current protocol/version/step/hash checks.
+    "facebook_behavior_v3": {"facebook_basic_v2"},
+    "news_reader_behavior_v2": {"news_reader_basic_v1"},
+}
 
 EXCLUSION_REASON_CODES: tuple[str, ...] = (
     "EXCLUDED_SCRIPT_HASH_MISMATCH",
@@ -240,6 +248,7 @@ def derive_paper_eligibility(
             elif expected_template:
                 if (
                     observed_template != expected_template
+                    and observed_template not in _TEMPLATE_SUCCESSOR_COMPATIBILITY.get(expected_template, set())
                     and not call_template_exception
                     and not messaging_activity_template_exception
                 ):
@@ -250,7 +259,11 @@ def derive_paper_eligibility(
             if not script_hash:
                 reasons.append("EXCLUDED_SCRIPT_HASH_MISMATCH")
             # Text-mode messaging templates may legitimately send messages.
-            if _is_truthy(op.get("script_protocol_send")) and not str(observed_template).endswith("_text_v1"):
+            scripted_text_templates = {"messaging_text_v1", "whatsapp_text_v1", "whatsapp_text_behavior_v2"}
+            if _is_truthy(op.get("script_protocol_send")) and (
+                str(observed_template) not in scripted_text_templates
+                and not str(observed_template).endswith("_text_v1")
+            ):
                 reasons.append("EXCLUDED_SCRIPT_PROTOCOL_SEND")
             if _is_truthy(op.get("script_call_in_non_call_template")):
                 reasons.append("EXCLUDED_PROTOCOL_CALL_ACTION_IN_NON_CALL_TEMPLATE")

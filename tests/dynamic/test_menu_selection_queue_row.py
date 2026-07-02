@@ -45,8 +45,13 @@ def test_build_package_selection_row_accepts_live_build_drift_for_refresh_action
         },
         db_lineage_context={"db_active_sessions": 1, "db_historical_sessions": 0, "db_total_sessions": 1},
         truncate_visible_fn=lambda value, _limit: value,
-        bucket_progress_label_fn=lambda count, required, extra_count=0: f"{count}/{required}" + (f" +{extra_count}" if extra_count else ""),
-        quota_progress_label_fn=lambda count, required, extra_count=0: f"{count}/{required}" + (f" +{extra_count}" if extra_count else ""),
+        bucket_progress_label_fn=lambda count, required, extra_count=0, low_signal=0, need=0: (
+            f"{count + extra_count + low_signal}/{required}"
+            + (f" need {need}" if need else "")
+        ),
+        quota_progress_label_fn=lambda count, required, extra_count=0, low_signal=0: (
+            f"{count}/{required}" + (f" +{extra_count + low_signal}" if (extra_count + low_signal) else "")
+        ),
         static_build_label_fn=lambda active_runs, legacy_valid: "current" if active_runs or not legacy_valid else "legacy",
         next_action_from_need_fn=lambda need: need,
         build_scoped_dataset_counts_fn=lambda _package, _runs, cfg: {

@@ -11,11 +11,13 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import median
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+from scytaledroid.DynamicAnalysis.run_qualification import analysis_included_rows, row_analysis_included
 
 FOCUS_PACKAGES: dict[str, str] = {
     "bbc.mobile.news.ww": "BBC News",
@@ -27,6 +29,101 @@ FOCUS_PACKAGES: dict[str, str] = {
     "com.whatsapp": "WhatsApp",
     "com.zhiliaoapp.musically": "TikTok",
 }
+
+FINGERPRINT_RUN_FIELDS = (
+    "app_label",
+    "package_name",
+    "version_code",
+    "version_name",
+    "run_id",
+    "run_profile",
+    "interaction_mode",
+    "mode_bucket",
+    "valid_dataset_run",
+    "countable",
+    "technical_validity_state",
+    "quota_state",
+    "pcap_valid",
+    "pcap_bytes",
+    "domains_count",
+    "sni_count",
+    "tls_client_hello_count",
+    "tls_server_hello_count",
+    "unique_ja3_count",
+    "unique_ja3s_count",
+    "unique_ja4_count",
+    "top_ja3",
+    "top_ja3_share",
+    "top_ja4",
+    "top_ja4_share",
+    "top_alpn",
+    "top_sni",
+    "service_families_observed",
+    "service_categories_csv",
+    "service_keys_csv",
+    "owner_classes_csv",
+    "role_classes_csv",
+    "quic_candidate_packets",
+    "tls_handshake_packets",
+    "invalid_reason_code",
+)
+
+FINGERPRINT_APP_ROLLUP_FIELDS = (
+    "app_label",
+    "package_name",
+    "countable_runs",
+    "analysis_included_runs",
+    "supplemental_runs",
+    "median_unique_ja3_count",
+    "median_unique_ja4_count",
+    "median_unique_ja3s_count",
+    "max_unique_ja4_count",
+    "median_top_ja4_share",
+    "baseline_fingerprint_diversity",
+    "interactive_fingerprint_diversity",
+    "baseline_median_unique_ja4_count",
+    "interactive_median_unique_ja4_count",
+    "service_families_observed",
+    "interpretation",
+)
+
+FINGERPRINT_PAPER_TABLE_FIELDS = (
+    "app",
+    "package_name",
+    "countable_runs",
+    "analysis_included_runs",
+    "runtime_domains_median",
+    "unique_ja4_median",
+    "unique_ja3_median",
+    "top_ja4_share_median",
+    "main_service_families",
+    "interpretation",
+)
+
+FINGERPRINT_BASELINE_INTERACTIVE_FIELDS = (
+    "app_label",
+    "package_name",
+    "baseline_runs",
+    "interactive_runs",
+    "baseline_median_unique_ja4_count",
+    "interactive_median_unique_ja4_count",
+    "baseline_median_top_ja4_share",
+    "interactive_median_top_ja4_share",
+)
+
+FINGERPRINT_RECOMPUTE_MISMATCH_FIELDS = (
+    "dynamic_run_id",
+    "package_name",
+    "app_label",
+    "run_profile",
+    "domains_count",
+    "db_unique_ja4_count",
+    "recomputed_unique_ja4_count",
+    "recomputed_top_ja4",
+    "pcap_bytes",
+    "evidence_path",
+    "diagnosis",
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -76,21 +173,21 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
-def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]], *, fieldnames: Sequence[str] | None = None) -> None:
     row_list = list(rows)
-    if not row_list:
-        path.write_text("", encoding="utf-8")
-        return
-    fieldnames: list[str] = []
+    resolved_fieldnames: list[str] = [str(key) for key in (fieldnames or ())]
     for row in row_list:
         for key in row:
-            if key not in fieldnames:
-                fieldnames.append(str(key))
+            if key not in resolved_fieldnames:
+                resolved_fieldnames.append(str(key))
+    if not resolved_fieldnames:
+        path.write_text("", encoding="utf-8")
+        return
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=resolved_fieldnames)
         writer.writeheader()
         for row in row_list:
-            writer.writerow({key: row.get(key) for key in fieldnames})
+            writer.writerow({key: row.get(key) for key in resolved_fieldnames})
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -157,11 +254,14 @@ def _first_top_count(items: Any) -> int | None:
 
 
 def _find_pcap_path(evidence_root: Path) -> Path | None:
-    direct = evidence_root / "artifacts" / "pcapdroid_capture" / "capture.pcap"
-    if direct.exists():
-        return direct
-    for path in sorted((evidence_root / "artifacts" / "pcapdroid_capture").glob("*.pcap")):
-        return path
+    capture_dir = evidence_root / "artifacts" / "pcapdroid_capture"
+    for name in ("capture.pcap", "capture.pcapng"):
+        direct = capture_dir / name
+        if direct.is_file():
+            return direct
+    for path in sorted(capture_dir.glob("*.pcap*")):
+        if path.is_file() and path.suffix.lower() in {".pcap", ".pcapng"}:
+            return path
     return None
 
 
@@ -258,7 +358,7 @@ def _load_service_family_rows(packages: Sequence[str]) -> dict[str, dict[str, st
                 UPPER(TRIM(COALESCE(sdm.match_type, ''))) = 'SUFFIX'
                 AND (
                   LOWER(TRIM(COALESCE(obs.observed_domain, ''))) = LOWER(TRIM(COALESCE(sdm.domain_pattern, '')))
-                  OR LOWER(TRIM(COALESCE(obs.observed_domain, ''))) LIKE CONCAT('%.', LOWER(TRIM(COALESCE(sdm.domain_pattern, ''))))
+                  OR LOWER(TRIM(COALESCE(obs.observed_domain, ''))) LIKE CONCAT('%%.', LOWER(TRIM(COALESCE(sdm.domain_pattern, ''))))
                 )
               )
          )
@@ -411,7 +511,7 @@ def _interpret_rollup(row: Mapping[str, Any]) -> str:
     baseline_div = _safe_float(row.get("baseline_median_unique_ja4_count")) or 0.0
     interactive_div = _safe_float(row.get("interactive_median_unique_ja4_count")) or 0.0
     dominant = _safe_float(row.get("median_top_ja4_share")) or 0.0
-    category_text = _norm_text(row.get("service_categories_observed"))
+    category_text = _norm_text(row.get("service_families_observed") or row.get("service_categories_observed"))
     label = _norm_text(row.get("app_label"))
     if "messaging" in category_text and baseline_div <= 2 and dominant >= 0.75:
         return "Low-volume messaging baseline with a small, stable encrypted-service stack."
@@ -577,6 +677,7 @@ def generate_report(
         app_runs = per_app_runs[package_name]
         app_label = _norm_text(app_runs[0].get("app_label")) if app_runs else package_name
         countable_runs = [row for row in app_runs if _safe_int(row.get("valid_dataset_run")) == 1 and _safe_int(row.get("countable")) == 1]
+        analysis_runs = analysis_included_rows(app_runs)
         supplemental_runs = [row for row in app_runs if _norm_text(row.get("quota_state")) == "SUPPLEMENTAL_VALID"]
         baseline_runs = [row for row in app_runs if row.get("mode_bucket") == "baseline" and _safe_int(row.get("valid_dataset_run")) == 1]
         interactive_runs = [row for row in app_runs if row.get("mode_bucket") == "interactive" and _safe_int(row.get("valid_dataset_run")) == 1]
@@ -595,6 +696,7 @@ def generate_report(
             "app_label": app_label,
             "package_name": package_name,
             "countable_runs": len(countable_runs),
+            "analysis_included_runs": len(analysis_runs),
             "supplemental_runs": len(supplemental_runs),
             "median_unique_ja3_count": round(median(all_ja3), 2) if all_ja3 else None,
             "median_unique_ja4_count": round(median(all_ja4), 2) if all_ja4 else None,
@@ -611,13 +713,14 @@ def generate_report(
         rollup["interpretation"] = _interpret_rollup(rollup)
         app_rollup_rows.append(rollup)
 
-        countable_domains = [int(row["domains_count"]) for row in countable_runs if row.get("domains_count") is not None]
+        analysis_domains = [int(row["domains_count"]) for row in analysis_runs if row.get("domains_count") is not None]
         paper_table_rows.append(
             {
                 "app": app_label,
                 "package_name": package_name,
                 "countable_runs": len(countable_runs),
-                "runtime_domains_median": round(median(countable_domains), 2) if countable_domains else None,
+                "analysis_included_runs": len(analysis_runs),
+                "runtime_domains_median": round(median(analysis_domains), 2) if analysis_domains else None,
                 "unique_ja4_median": rollup["median_unique_ja4_count"],
                 "unique_ja3_median": rollup["median_unique_ja3_count"],
                 "top_ja4_share_median": rollup["median_top_ja4_share"],
@@ -645,11 +748,19 @@ def generate_report(
             }
         )
 
-    _write_csv(output_root / "fingerprint_run_rows.csv", run_csv_rows)
-    _write_csv(output_root / "fingerprint_app_rollup.csv", app_rollup_rows)
-    _write_csv(output_root / "fingerprint_paper_table.csv", paper_table_rows)
-    _write_csv(output_root / "fingerprint_baseline_vs_interactive.csv", baseline_vs_interactive_rows)
-    _write_csv(output_root / "fingerprint_recompute_mismatches.csv", recompute_mismatches)
+    _write_csv(output_root / "fingerprint_run_rows.csv", run_csv_rows, fieldnames=FINGERPRINT_RUN_FIELDS)
+    _write_csv(output_root / "fingerprint_app_rollup.csv", app_rollup_rows, fieldnames=FINGERPRINT_APP_ROLLUP_FIELDS)
+    _write_csv(output_root / "fingerprint_paper_table.csv", paper_table_rows, fieldnames=FINGERPRINT_PAPER_TABLE_FIELDS)
+    _write_csv(
+        output_root / "fingerprint_baseline_vs_interactive.csv",
+        baseline_vs_interactive_rows,
+        fieldnames=FINGERPRINT_BASELINE_INTERACTIVE_FIELDS,
+    )
+    _write_csv(
+        output_root / "fingerprint_recompute_mismatches.csv",
+        recompute_mismatches,
+        fieldnames=FINGERPRINT_RECOMPUTE_MISMATCH_FIELDS,
+    )
 
     focus_rollups = [row for row in app_rollup_rows if _norm_text(row.get("package_name")) in FOCUS_PACKAGES]
     focus_runs = [row for row in run_csv_rows if _norm_text(row.get("package_name")) in FOCUS_PACKAGES]

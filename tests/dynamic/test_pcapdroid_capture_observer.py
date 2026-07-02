@@ -5,7 +5,7 @@ from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name
-from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PcapdroidCaptureObserver
+from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PcapdroidCaptureObserver, _effective_min_pcap_bytes
 
 
 def _ctx(tmp_path: Path) -> RunContext:
@@ -23,6 +23,46 @@ def _ctx(tmp_path: Path) -> RunContext:
         run_profile="baseline_idle",
         device_serial="SERIAL123",
     )
+
+
+def test_effective_min_pcap_bytes_uses_connected_floor_for_manual_messaging_text(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="run-1",
+        package_name="com.whatsapp",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_manual",
+        messaging_activity="text_only",
+        device_serial="SERIAL123",
+    )
+
+    assert _effective_min_pcap_bytes(ctx) == 20_000
+
+
+def test_effective_min_pcap_bytes_keeps_strict_floor_for_manual_messaging_call(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="run-1",
+        package_name="com.whatsapp",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_manual",
+        messaging_activity="voice_call",
+        device_serial="SERIAL123",
+    )
+
+    assert _effective_min_pcap_bytes(ctx) == 50_000
 
 
 def test_start_clears_status_error_when_fallback_probe_confirms_capture(monkeypatch, tmp_path: Path) -> None:

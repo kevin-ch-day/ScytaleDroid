@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scytaledroid.DynamicAnalysis.pcap import dataset_tracker as tracker
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     BASELINE_REQUIRED,
     INTERACTION_REQUIRED,
@@ -33,7 +34,7 @@ def test_research_dataset_alpha_quota_defaults_are_explicit() -> None:
     assert cfg.interactive_required == 4
 
 
-def test_interaction_before_baseline_quota_is_supplemental() -> None:
+def test_interaction_before_baseline_quota_still_counts_by_lane() -> None:
     cfg = DatasetTrackerConfig()
     app_entry = {
         "runs": [
@@ -79,12 +80,46 @@ def test_interaction_before_baseline_quota_is_supplemental() -> None:
     by_id = {row["run_id"]: row for row in app_entry["runs"]}
 
     assert by_id["b1"]["counts_toward_quota"] is True
-    assert by_id["i1"]["counts_toward_quota"] is False
-    assert by_id["i1"]["extra_run"] == 1
+    assert by_id["i1"]["counts_toward_quota"] is True
+    assert by_id["i1"]["extra_run"] == 0
     assert by_id["b2"]["counts_toward_quota"] is True
     assert by_id["b3"]["counts_toward_quota"] is True
     assert by_id["i2"]["counts_toward_quota"] is True
     assert app_entry["quota_met"] is False
+
+
+def test_interactions_collected_before_refreshed_baselines_remain_countable() -> None:
+    cfg = DatasetTrackerConfig()
+    app_entry = {
+        "runs": [
+            {
+                "run_id": f"i{idx}",
+                "run_profile": "interaction_manual",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "started_at": f"2026-05-14T0{idx}:00:00+00:00",
+            }
+            for idx in range(1, 5)
+        ]
+        + [
+            {
+                "run_id": f"b{idx}",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "started_at": f"2026-05-15T0{idx}:00:00+00:00",
+            }
+            for idx in range(1, 4)
+        ]
+    }
+
+    _apply_quota_marking(app_entry, cfg)
+    by_id = {row["run_id"]: row for row in app_entry["runs"]}
+
+    assert all(by_id[f"i{idx}"]["counts_toward_quota"] is True for idx in range(1, 5))
+    assert all(by_id[f"b{idx}"]["counts_toward_quota"] is True for idx in range(1, 4))
+    assert app_entry["quota_met"] is True
+    assert app_entry["extra_valid_runs"] == 0
 
 
 def test_quota_marking_scopes_current_build_separately_from_legacy_runs() -> None:
@@ -339,6 +374,76 @@ def test_explicit_countable_interactive_runs_survive_recompute_ordering() -> Non
     assert app_entry["quota_met"] is False
 
 
+def test_explicit_countable_true_cannot_exceed_baseline_quota_cap() -> None:
+    cfg = DatasetTrackerConfig()
+    app_entry = {
+        "runs": [
+            {
+                "run_id": f"b{idx}",
+                "run_profile": "baseline_idle",
+                "valid_dataset_run": True,
+                "paper_eligible": True,
+                "countable": True,
+                "low_signal": False,
+                "started_at": f"2026-06-29T0{idx}:00:00+00:00",
+            }
+            for idx in range(1, 5)
+        ]
+    }
+
+    _apply_quota_marking(app_entry, cfg)
+    by_id = {row["run_id"]: row for row in app_entry["runs"]}
+
+    assert by_id["b1"]["countable"] is True
+    assert by_id["b2"]["countable"] is True
+    assert by_id["b3"]["countable"] is True
+    assert by_id["b4"]["counts_toward_quota"] is False
+    assert by_id["b4"]["countable"] is False
+    assert by_id["b4"]["extra_run"] == 1
+    assert sum(1 for row in app_entry["runs"] if row["countable"]) == cfg.baseline_required
+
+
+def test_explicit_countable_true_cannot_exceed_interactive_quota_cap() -> None:
+    cfg = DatasetTrackerConfig()
+    baseline_rows = [
+        {
+            "run_id": f"b{idx}",
+            "run_profile": "baseline_idle",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "countable": True,
+            "low_signal": False,
+            "started_at": f"2026-06-29T0{idx}:00:00+00:00",
+        }
+        for idx in range(1, 4)
+    ]
+    interactive_rows = [
+        {
+            "run_id": f"i{idx}",
+            "run_profile": "interaction_scripted",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "countable": True,
+            "started_at": f"2026-06-29T{idx + 3:02d}:00:00+00:00",
+        }
+        for idx in range(1, 6)
+    ]
+    app_entry = {"runs": baseline_rows + interactive_rows}
+
+    _apply_quota_marking(app_entry, cfg)
+    by_id = {row["run_id"]: row for row in app_entry["runs"]}
+
+    assert by_id["i1"]["countable"] is True
+    assert by_id["i2"]["countable"] is True
+    assert by_id["i3"]["countable"] is True
+    assert by_id["i4"]["countable"] is True
+    assert by_id["i5"]["counts_toward_quota"] is False
+    assert by_id["i5"]["countable"] is False
+    assert by_id["i5"]["extra_run"] == 1
+    assert sum(1 for row in app_entry["runs"] if row["countable"]) == TOTAL_REQUIRED_PER_APP
+    assert app_entry["quota_met"] is True
+
+
 def test_recompute_dataset_tracker_preserves_manifest_dataset_fields(tmp_path: Path, monkeypatch) -> None:
     run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run-1"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -395,6 +500,76 @@ def test_recompute_dataset_tracker_preserves_manifest_dataset_fields(tmp_path: P
     }
 
 
+def test_normalize_tracker_refreshes_stale_script_template_mismatch(monkeypatch) -> None:
+    def fake_refresh(row: dict[str, object]) -> bool:
+        row["paper_eligible"] = True
+        row["paper_exclusion_primary_reason_code"] = None
+        row["paper_exclusion_all_reason_codes"] = []
+        return True
+
+    monkeypatch.setattr(tracker, "_refresh_paper_eligibility_in_place", fake_refresh)
+    payload = {
+        "apps": {
+            "com.example.app": {
+                "runs": [
+                    {
+                        "run_id": "run-1",
+                        "run_profile": "interaction_scripted",
+                        "valid_dataset_run": True,
+                        "paper_eligible": False,
+                        "paper_exclusion_primary_reason_code": "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH",
+                        "paper_exclusion_all_reason_codes": ["EXCLUDED_SCRIPT_TEMPLATE_MISMATCH"],
+                    }
+                ]
+            }
+        }
+    }
+    dirty = [False]
+
+    normalized = tracker._normalize_tracker_payload(payload, DatasetTrackerConfig(), dirty=dirty)
+    row = normalized["apps"]["com.example.app"]["runs"][0]
+
+    assert dirty == [True]
+    assert row["paper_eligible"] is True
+    assert row["paper_exclusion_primary_reason_code"] is None
+    assert row["paper_exclusion_all_reason_codes"] == []
+
+
+def test_normalize_tracker_refreshes_invalid_run_cached_as_eligible(monkeypatch) -> None:
+    def fake_refresh(row: dict[str, object]) -> bool:
+        row["paper_eligible"] = False
+        row["paper_exclusion_primary_reason_code"] = "EXCLUDED_INCOMPLETE_ARTIFACT_SET"
+        row["paper_exclusion_all_reason_codes"] = ["EXCLUDED_INCOMPLETE_ARTIFACT_SET"]
+        return True
+
+    monkeypatch.setattr(tracker, "_refresh_paper_eligibility_in_place", fake_refresh)
+    payload = {
+        "apps": {
+            "com.example.app": {
+                "runs": [
+                    {
+                        "run_id": "run-1",
+                        "run_profile": "interaction_manual",
+                        "valid_dataset_run": False,
+                        "invalid_reason_code": "PCAP_MISSING",
+                        "paper_eligible": True,
+                        "paper_exclusion_primary_reason_code": None,
+                        "paper_exclusion_all_reason_codes": [],
+                    }
+                ]
+            }
+        }
+    }
+    dirty = [False]
+
+    normalized = tracker._normalize_tracker_payload(payload, DatasetTrackerConfig(), dirty=dirty)
+    row = normalized["apps"]["com.example.app"]["runs"][0]
+
+    assert dirty == [True]
+    assert row["paper_eligible"] is False
+    assert row["paper_exclusion_primary_reason_code"] == "EXCLUDED_INCOMPLETE_ARTIFACT_SET"
+
+
 def test_should_ignore_stale_explicit_noncountable_for_repaired_quota_run() -> None:
     assert _should_ignore_stale_explicit_noncountable(
         {
@@ -410,6 +585,7 @@ def test_should_ignore_stale_explicit_noncountable_for_repaired_quota_run() -> N
             "valid_dataset_run": True,
             "invalid_reason_code": None,
         },
+        {"low_signal": False},
     ) is True
 
     assert _should_ignore_stale_explicit_noncountable(
@@ -419,6 +595,7 @@ def test_should_ignore_stale_explicit_noncountable_for_repaired_quota_run() -> N
         },
         {"counts_toward_completion": True},
         {"valid_dataset_run": True},
+        {"low_signal": False},
     ) is False
 
     assert _should_ignore_stale_explicit_noncountable(
@@ -428,7 +605,22 @@ def test_should_ignore_stale_explicit_noncountable_for_repaired_quota_run() -> N
         },
         {"counts_toward_completion": False},
         {"valid_dataset_run": True},
+        {"low_signal": False},
     ) is False
+
+    assert _should_ignore_stale_explicit_noncountable(
+        {
+            "countable": False,
+            "valid_dataset_run": True,
+            "low_signal": True,
+        },
+        {
+            "counts_toward_completion": True,
+            "run_profile": "baseline_idle",
+        },
+        {"valid_dataset_run": True},
+        {"low_signal": False},
+    ) is True
 
 
 def test_update_dataset_tracker_reclassifies_repaired_quota_baseline_from_extra_to_counted(
@@ -743,6 +935,83 @@ def test_evaluate_dataset_validity_accepts_small_connected_baseline_above_connec
         created_at="2026-06-30T00:00:00Z",
         scenario={"id": "paper3_profile_v3"},
         operator={"run_profile": "baseline_connected", "run_sequence": 3, "interaction_level": "minimal"},
+        observers=[ObserverRecord(observer_id="pcapdroid_capture", status="failed", error="too small")],
+        artifacts=[
+            ArtifactRecord(
+                relative_path="artifacts/pcapdroid_capture/pcapdroid_capture_meta.json",
+                type="pcapdroid_capture_meta",
+                produced_by="pcapdroid_capture",
+            )
+        ],
+    )
+
+    validity = evaluate_dataset_validity(run_dir, manifest, {}, DatasetTrackerConfig())
+
+    assert validity["valid_dataset_run"] is True
+    assert validity["invalid_reason_code"] is None
+    assert validity["min_pcap_bytes"] == 20_000
+    assert validity.get("pcap_size_bytes") == pcap_bytes
+
+
+def test_evaluate_dataset_validity_accepts_small_manual_messaging_text_above_connected_floor(tmp_path: Path) -> None:
+    run_dir = tmp_path / "dynamic" / "run-3"
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    analysis_dir = run_dir / "analysis"
+    capture_dir.mkdir(parents=True, exist_ok=True)
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    pcap_bytes = 37_590
+    (capture_dir / "scytaledroid_run-3.pcap").write_bytes(b"x" * pcap_bytes)
+    (capture_dir / "pcapdroid_capture_meta.json").write_text(
+        json.dumps(
+            {
+                "pcap_name": "scytaledroid_run-3.pcap",
+                "resolved_pcap_name": "scytaledroid_run-3.pcap",
+                "pcap_size_bytes": pcap_bytes,
+                "pcap_valid": False,
+                "min_pcap_bytes": 50_000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis_dir / "summary.json").write_text(
+        json.dumps({"telemetry": {"stats": {"netstats_bytes_in_total": 12_477, "netstats_bytes_out_total": 13_531}}}),
+        encoding="utf-8",
+    )
+    (analysis_dir / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "capinfos": {
+                    "parsed": {
+                        "capture_duration_s": 289.09,
+                        "packet_count": 399,
+                        "data_size_bytes": pcap_bytes,
+                    }
+                },
+                "protocol_hierarchy": [{"protocol": "tcp", "bytes": pcap_bytes}],
+                "top_dns": [{"value": "g.whatsapp.net", "count": 2}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis_dir / "pcap_features.json").write_text(
+        json.dumps({"metrics": {}, "proxies": {}, "quality": {"report_status": "ok", "pcap_enrichment": {"status": "ok"}}}),
+        encoding="utf-8",
+    )
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-3",
+        created_at="2026-07-01T00:00:00Z",
+        scenario={"id": "basic_usage"},
+        target={"package_name": "com.whatsapp"},
+        operator={
+            "run_profile": "interaction_manual",
+            "run_sequence": 6,
+            "interaction_level": "manual",
+            "messaging_activity": "text_only",
+        },
         observers=[ObserverRecord(observer_id="pcapdroid_capture", status="failed", error="too small")],
         artifacts=[
             ArtifactRecord(

@@ -32,6 +32,469 @@ def test_help() -> None:
     out = (proc.stdout or "").lower()
     assert out.startswith("usage:")
     assert "deep audit over dynamic evidence quality" in out
+    assert "--package" in out
+    assert "--overlay-reanalyse-strings" in out
+
+
+def test_write_csv_can_emit_empty_schema(tmp_path: Path) -> None:
+    exports = {
+        "service_mapping_gap_audit.csv": report.SERVICE_MAPPING_GAP_FIELDS,
+        "static_dynamic_bridge_gaps.csv": report.STATIC_DYNAMIC_BRIDGE_GAP_FIELDS,
+        "capture_failure_audit.csv": report.CAPTURE_FAILURE_FIELDS,
+        "static_enrichment_gap_audit.csv": report.STATIC_ENRICHMENT_GAP_FIELDS,
+        "phase_coverage_audit.csv": report.PHASE_COVERAGE_FIELDS,
+    }
+
+    for filename, fieldnames in exports.items():
+        path = tmp_path / filename
+        report._write_csv(path, [], fieldnames=fieldnames)
+
+        assert path.read_text(encoding="utf-8").strip() == ",".join(fieldnames)
+
+
+def test_plan_overlay_bundle_passes_string_reanalysis_flag(monkeypatch) -> None:
+    from scripts.db import report_static_string_dynamic_corroboration as corroboration_report
+
+    calls: list[dict[str, object]] = []
+
+    def fake_overlay(package_name, *, embedded_plan, static_run_id, reanalyse_strings=False):
+        calls.append(
+            {
+                "package_name": package_name,
+                "static_run_id": static_run_id,
+                "reanalyse_strings": reanalyse_strings,
+            }
+        )
+        return (
+            {
+                "network_targets": {
+                    "domains": ["api.example.com"],
+                    "domain_sources": [
+                        {
+                            "domain": "api.example.com",
+                            "postures": ["actionable"],
+                            "pair_groups": ["api"],
+                            "ownership_classes": ["first_party"],
+                            "api_contexts": ["runtime_api"],
+                        }
+                    ],
+                }
+            },
+            "latest/report.json",
+            "overlay_string_reanalysis" if reanalyse_strings else "overlay_latest_static",
+        )
+
+    monkeypatch.setattr(corroboration_report, "_overlay_plan_from_static_report", fake_overlay)
+
+    bundle = report._plan_overlay_bundle(
+        package="com.example.app",
+        embedded_plan={"network_targets": {"domains": []}},
+        static_run_id=123,
+        overlay_latest_static=True,
+        overlay_reanalyse_strings=True,
+    )
+
+    assert calls == [
+        {
+            "package_name": "com.example.app",
+            "static_run_id": 123,
+            "reanalyse_strings": True,
+        }
+    ]
+    assert bundle["plan_source"] == "overlay_string_reanalysis"
+    assert bundle["overlay_applied"] is True
+    assert bundle["overlay_enriched_metadata_present"] is True
+
+
+def test_generate_report_passes_package_filter(tmp_path: Path, monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_collect(_root, *, overlay_latest_static=False, overlay_reanalyse_strings=False, package_filter=None):
+        calls.append(
+            {
+                "overlay_latest_static": overlay_latest_static,
+                "overlay_reanalyse_strings": overlay_reanalyse_strings,
+                "package_filter": package_filter,
+            }
+        )
+        return []
+
+    monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path / "output" / "evidence" / "dynamic")
+    monkeypatch.setattr(report, "_collect_run_records", fake_collect)
+    monkeypatch.setattr(report, "_load_app_profiles", lambda _packages: {})
+    monkeypatch.setattr(report, "_build_static_join_and_candidates", lambda _package_runs: ({}, {}))
+
+    summary = report.generate_report(
+        output_dir=tmp_path / "audit",
+        overlay_reanalyse_strings=True,
+        package_filter=" Com.Example.App ",
+    )
+
+    assert calls == [
+        {
+            "overlay_latest_static": True,
+            "overlay_reanalyse_strings": True,
+            "package_filter": " Com.Example.App ",
+        }
+    ]
+    assert summary["package_filter"] == "com.example.app"
+    assert summary["plan_analysis_mode"] == "overlay_string_reanalysis"
+
+
+def test_static_enrichment_gap_ignores_zero_actionable_static_domains() -> None:
+    runs = [
+        _run(
+            run_id="no-actionable-1",
+            package="com.example.noaction",
+            app_label="No Actionable",
+            run_profile="baseline_idle",
+            interaction_mode="baseline",
+            valid_pack=True,
+            enriched_domains=True,
+            actionable_domains=0,
+            corroborated_actionable_domains=0,
+        )
+    ]
+    rows = report._static_enrichment_gap_rows(
+        {"com.example.noaction": runs},
+        {
+            "com.example.noaction": {
+                "static_run_id": 42,
+                "static_endpoint_inventory_status": "present",
+            }
+        },
+    )
+
+    assert rows == []
+
+
+def test_static_dynamic_corroboration_matches_dynamic_subdomains(tmp_path: Path) -> None:
+    result = report._corroboration_from_plan_and_report(
+        run_id="run-cnn",
+        package="com.example.news",
+        plan={
+            "static_run_id": 42,
+            "network_targets": {
+                "domain_sources": [
+                    {
+                        "domain": "cnn.com",
+                        "postures": ["actionable"],
+                        "ownership_classes": ["first_party"],
+                    }
+                ]
+            },
+        },
+        report={"top_dns": [{"value": "mobile.api.cnn.com"}], "top_sni": []},
+        run_dir=tmp_path,
+    )
+
+    assert result["static_domains_total"] == 1
+    assert result["actionable_static_domain_rows"] == 1
+    assert result["corroborated_domains_total"] == 1
+    assert result["corroborated_actionable_domains"] == 1
+
+
+def test_pcap_artifact_info_recovers_unregistered_local_pcap(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-1"
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    capture_dir.mkdir(parents=True)
+    pcap_path = capture_dir / "scytaledroid_run-1.pcap"
+    pcap_path.write_bytes(b"pcap-bytes")
+    (capture_dir / "pcapdroid_capture_meta.json").write_text(
+        json.dumps({"pcap_name": pcap_path.name}),
+        encoding="utf-8",
+    )
+
+    info = report._pcap_artifact_info(
+        run_dir=run_dir,
+        manifest={"artifacts": [{"type": "pcapdroid_capture_meta", "relative_path": "artifacts/pcapdroid_capture/pcapdroid_capture_meta.json"}]},
+        report={
+            "report_status": "ok",
+            "pcap_size_bytes": pcap_path.stat().st_size,
+            "pcap_path": str(pcap_path.relative_to(run_dir)),
+            "capinfos": {"parsed": True},
+        },
+        summary_payload={},
+        verify_row={
+            "invalid_reason_code": "PCAP_MISSING",
+            "issues": [{"code": "pcap_artifact_missing"}],
+        },
+    )
+
+    assert info["pcap_present"] is True
+    assert info["pcap_manifest_artifact_registered"] is False
+    assert info["pcap_recovered_unregistered"] is True
+    assert info["pcap_recovered_path_mismatch"] is False
+    assert info["pcap_failure_detail"] == "PCAP_ARTIFACT_UNREGISTERED"
+    assert info["pcap_artifact_relative_path"] == str(pcap_path.relative_to(run_dir))
+
+
+def test_pcap_artifact_info_recovers_registered_path_mismatch(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-2"
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    capture_dir.mkdir(parents=True)
+    pcap_path = capture_dir / "actual.pcap"
+    pcap_path.write_bytes(b"actual-pcap-bytes")
+
+    info = report._pcap_artifact_info(
+        run_dir=run_dir,
+        manifest={
+            "artifacts": [
+                {
+                    "type": "pcapdroid_capture",
+                    "relative_path": "artifacts/pcapdroid_capture/missing.pcap",
+                }
+            ]
+        },
+        report={
+            "report_status": "ok",
+            "pcap_size_bytes": pcap_path.stat().st_size,
+            "pcap_path": str(pcap_path.relative_to(run_dir)),
+            "capinfos": {"parsed": True},
+        },
+        summary_payload={},
+        verify_row={
+            "invalid_reason_code": "PCAP_MISSING",
+            "issues": [{"code": "pcap_file_missing"}],
+        },
+    )
+
+    assert info["pcap_present"] is True
+    assert info["pcap_manifest_artifact_registered"] is True
+    assert info["pcap_recovered_unregistered"] is False
+    assert info["pcap_recovered_path_mismatch"] is True
+    assert info["pcap_failure_detail"] == "PCAP_ARTIFACT_PATH_MISMATCH"
+    assert info["pcap_artifact_relative_path"] == str(pcap_path.relative_to(run_dir))
+
+
+def test_pcap_artifact_info_prefers_actual_local_size_over_stale_report(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-empty"
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    capture_dir.mkdir(parents=True)
+    pcap_path = capture_dir / "empty.pcap"
+    pcap_path.write_bytes(b"")
+
+    info = report._pcap_artifact_info(
+        run_dir=run_dir,
+        manifest={
+            "artifacts": [
+                {
+                    "type": "pcapdroid_capture",
+                    "relative_path": str(pcap_path.relative_to(run_dir)),
+                }
+            ]
+        },
+        report={
+            "report_status": "ok",
+            "pcap_size_bytes": 37_590,
+            "pcap_path": str(pcap_path.relative_to(run_dir)),
+            "capinfos": {"parsed": True},
+        },
+        summary_payload={"pcap_size_bytes": 37_590},
+        verify_row={
+            "invalid_reason_code": "PCAP_MISSING",
+            "issues": [{"code": "pcap_file_missing"}],
+        },
+    )
+
+    assert info["pcap_present"] is False
+    assert info["pcap_size_bytes"] == 0
+    assert info["pcap_failure_detail"] == "PCAP_LOCAL_FILE_EMPTY"
+
+
+def test_pcap_artifact_info_rejects_directory_at_manifest_pcap_path(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-directory"
+    pcap_dir = run_dir / "artifacts" / "pcapdroid_capture" / "capture.pcap"
+    pcap_dir.mkdir(parents=True)
+
+    info = report._pcap_artifact_info(
+        run_dir=run_dir,
+        manifest={
+            "artifacts": [
+                {
+                    "type": "pcapdroid_capture",
+                    "relative_path": str(pcap_dir.relative_to(run_dir)),
+                }
+            ]
+        },
+        report={
+            "report_status": "ok",
+            "pcap_size_bytes": 37_590,
+            "pcap_path": str(pcap_dir.relative_to(run_dir)),
+            "capinfos": {"parsed": True},
+        },
+        summary_payload={"pcap_size_bytes": 37_590},
+        verify_row={
+            "invalid_reason_code": "PCAP_MISSING",
+            "issues": [{"code": "pcap_file_missing"}],
+        },
+    )
+
+    assert info["pcap_present"] is False
+    assert info["pcap_local_path"] is None
+    assert info["pcap_failure_detail"] == "PCAP_LOCAL_FILE_MISSING"
+
+
+def test_unregistered_pcap_recommends_artifact_registration_repair() -> None:
+    run = _run(
+        run_id="run-unregistered-pcap",
+        package="com.example.pcap",
+        app_label="PCAP App",
+        run_profile="interaction_manual",
+        interaction_mode="manual",
+        valid_pack=False,
+        pcap_present=True,
+        pcap_size_bytes=37_590,
+        pcap_failure_detail="PCAP_ARTIFACT_UNREGISTERED",
+        netstats_observed_bytes=26_008,
+    )
+    run["pcap_info"]["pcap_manifest_artifact_registered"] = False
+    run["pcap_info"]["pcap_recovered_unregistered"] = True
+
+    capture_rows = report._capture_failure_rows([run])
+    bridge_rows = report._bridge_gaps_for_package(
+        package="com.example.pcap",
+        app_label="PCAP App",
+        join_row={"static_run_id": 42, "static_endpoint_inventory_status": "present"},
+        runs=[run],
+    )
+
+    assert capture_rows[0]["recommended_action"] == "repair_artifact_registration"
+    assert capture_rows[0]["pcap_recovered_unregistered"] == 1
+    assert any(
+        row["gap_key"] == "pcap_artifact_registration_gap"
+        and row["recommended_followup"] == "repair_artifact_registration"
+        for row in bridge_rows
+    )
+    assert not any(row["gap_key"] == "pcap_capture_gap" for row in bridge_rows)
+
+
+def test_registered_pcap_path_mismatch_recommends_artifact_registration_repair() -> None:
+    run = _run(
+        run_id="run-mismatched-pcap",
+        package="com.example.pcap",
+        app_label="PCAP App",
+        run_profile="interaction_manual",
+        interaction_mode="manual",
+        valid_pack=False,
+        pcap_present=True,
+        pcap_size_bytes=37_590,
+        pcap_failure_detail="PCAP_ARTIFACT_PATH_MISMATCH",
+        netstats_observed_bytes=26_008,
+    )
+    run["pcap_info"]["pcap_manifest_artifact_registered"] = True
+    run["pcap_info"]["pcap_recovered_path_mismatch"] = True
+
+    capture_rows = report._capture_failure_rows([run])
+    bridge_rows = report._bridge_gaps_for_package(
+        package="com.example.pcap",
+        app_label="PCAP App",
+        join_row={"static_run_id": 42, "static_endpoint_inventory_status": "present"},
+        runs=[run],
+    )
+
+    assert report._gap_class_for_key("pcap_artifact_registration_gap") == "ledger_bug"
+    assert capture_rows[0]["recommended_action"] == "repair_artifact_registration"
+    assert capture_rows[0]["pcap_recovered_path_mismatch"] == 1
+    assert any(
+        row["gap_key"] == "pcap_artifact_registration_gap"
+        and row["gap_class"] == "ledger_bug"
+        and row["recommended_followup"] == "repair_artifact_registration"
+        for row in bridge_rows
+    )
+    assert not any(row["gap_key"] == "pcap_capture_gap" for row in bridge_rows)
+
+
+def test_registered_invalid_pcap_recommends_validity_review_not_recapture() -> None:
+    run = _run(
+        run_id="run-registered-invalid-pcap",
+        package="com.example.pcap",
+        app_label="PCAP App",
+        run_profile="interaction_manual",
+        interaction_mode="manual",
+        valid_pack=False,
+        pcap_present=True,
+        pcap_size_bytes=37_590,
+        pcap_failure_detail="PCAP_MISSING",
+        netstats_observed_bytes=26_008,
+    )
+    run["pcap_info"]["pcap_manifest_artifact_registered"] = True
+
+    capture_rows = report._capture_failure_rows([run])
+    bridge_rows = report._bridge_gaps_for_package(
+        package="com.example.pcap",
+        app_label="PCAP App",
+        join_row={"static_run_id": 42, "static_endpoint_inventory_status": "present"},
+        runs=[run],
+    )
+
+    assert capture_rows[0]["recommended_action"] == "review_invalid_pcap_state"
+    assert any(
+        row["gap_key"] == "pcap_validity_review_gap"
+        and row["recommended_followup"] == "review_invalid_pcap_state"
+        for row in bridge_rows
+    )
+    assert not any(row["gap_key"] == "pcap_capture_gap" for row in bridge_rows)
+    assert (
+        report._readiness_tier(
+            avg_quality=0.0,
+            baseline_valid_count=0,
+            manual_valid_count=0,
+            static_plan_enriched=True,
+            static_endpoint_inventory_status="present",
+            unresolved_service_total=0,
+            pcap_failure_count=1,
+            pcap_recollect_failure_count=0,
+            valid_run_count=0,
+            scripted_phase_available=False,
+            template_label="none",
+        )
+        == "excluded_or_invalid"
+    )
+    assert (
+        report._top_gap_for_app(
+            baseline_valid_count=0,
+            manual_valid_count=0,
+            pcap_failure_count=1,
+            pcap_recollect_failure_count=0,
+            static_endpoint_inventory_status="present",
+            static_plan_enriched=True,
+            unresolved_service_total=0,
+            provider_authority_status="present",
+            scripted_phase_available=False,
+            template_label="none",
+        )
+        == "excluded_or_invalid"
+    )
+
+
+def test_pattern_matrix_uses_recollect_failures_for_capture_reliability() -> None:
+    rows = report._paper_pattern_rows(
+        readiness_rows=[
+            {
+                "package": "com.example.pcap",
+                "app_label": "PCAP App",
+                "app_profile": "MESSAGING",
+                "avg_evidence_quality_score": 42.0,
+                "research_readiness_tier": "excluded_or_invalid",
+                "next_recommended_action": "review_invalid_pcap_state",
+                "manual_valid_count": 0,
+                "static_endpoint_inventory_status": "present",
+                "static_plan_enriched": 1,
+                "service_resolution_rate": "",
+                "signal_resolution_rate": "",
+                "pcap_failure_count": 2,
+                "pcap_recollect_failure_count": 0,
+                "pcap_validity_review_count": 2,
+            }
+        ],
+        stability_rows=[],
+        recommendation_rows=[],
+    )
+
+    assert rows[0]["capture_reliability_gap_flag"] == 0
+    assert rows[0]["research_priority"] == "low"
+    assert "capture_reliability_gap" not in rows[0]["pattern_notes"]
 
 
 def test_quality_tier_boundaries() -> None:
@@ -53,11 +516,42 @@ def test_quality_tier_boundaries() -> None:
     assert report._quality_tier(0) == "F"
 
 
+def test_endpoint_inventory_status_uses_embedded_plan_when_join_is_stale() -> None:
+    runs = [
+        {
+            "corroboration": {
+                "static_domains_total": 12,
+                "enriched_domain_metadata_present": True,
+                "actionable_static_domain_rows": 0,
+                "corroborated_actionable_domains": 0,
+            },
+            "plan": {"network_targets": {"domain_sources": [{"domain": "example.com"}]}},
+        }
+    ]
+
+    assert (
+        report._static_endpoint_inventory_status(
+            {"static_endpoint_inventory_status": "missing"},
+            runs,
+        )
+        == "present"
+    )
+
+    bridge_rows = report._bridge_gaps_for_package(
+        package="com.example.news",
+        app_label="Example News",
+        join_row={"static_run_id": 42, "static_endpoint_inventory_status": "missing"},
+        runs=runs,
+    )
+    assert not any(row["gap_key"] == "static_endpoint_inventory_missing" for row in bridge_rows)
+
+
 def test_scripted_recommendation_precedes_static_enrichment_gap() -> None:
     top_gap = report._top_gap_for_app(
         baseline_valid_count=3,
         manual_valid_count=2,
         pcap_failure_count=0,
+        pcap_recollect_failure_count=0,
         static_endpoint_inventory_status="missing",
         static_plan_enriched=False,
         unresolved_service_total=0,
@@ -84,8 +578,112 @@ def test_scripted_recommendation_precedes_static_enrichment_gap() -> None:
         },
     )
     assert recommendation["recommended_run_intent"] == "scripted_interaction"
-    assert recommendation["recommended_template"] == "news_reader_basic_v1"
+    assert recommendation["recommended_template"] == "news_reader_behavior_v2"
     assert recommendation["evidence_source"] == "phase_coverage_audit"
+
+
+def test_scripted_recommendation_uses_runnable_template_not_family_label(monkeypatch) -> None:
+    monkeypatch.setattr(report, "_template_label", lambda _package: "acct")
+    monkeypatch.setattr(report, "_requested_template_id", lambda _package: "tiktok_basic_v2")
+
+    recommendation = report._recommend_for_app(
+        package="com.zhiliaoapp.musically",
+        app_label="TikTok",
+        join_row={},
+        metrics={
+            "valid_run_count": 5,
+            "baseline_valid_count": 3,
+            "manual_valid_count": 2,
+            "scripted_valid_count": 0,
+            "pcap_failure_count": 0,
+            "unresolved_service_total": 0,
+            "static_endpoint_inventory_status": "present",
+            "static_plan_enriched": True,
+            "scripted_phase_available": False,
+        },
+    )
+
+    assert recommendation["recommended_run_intent"] == "scripted_interaction"
+    assert recommendation["recommended_template"] == "tiktok_basic_v2"
+    assert recommendation["recommended_template"] != "acct"
+    assert recommendation["recommended_phase"] == "template_guided"
+
+
+def test_paper_ready_top_gap_recommends_review() -> None:
+    recommendation = report._recommend_for_app(
+        package="com.example.ready",
+        app_label="Ready App",
+        join_row={"sdk_tracker_overlap_count": 4, "dynamic_signal_count": 1},
+        metrics={
+            "valid_run_count": 5,
+            "baseline_valid_count": 3,
+            "manual_valid_count": 1,
+            "scripted_valid_count": 1,
+            "pcap_failure_count": 0,
+            "pcap_recollect_failure_count": 0,
+            "pcap_validity_review_count": 0,
+            "unresolved_service_total": 0,
+            "static_endpoint_inventory_status": "present",
+            "static_plan_enriched": True,
+            "scripted_phase_available": False,
+            "top_gap": "paper_ready",
+        },
+    )
+
+    assert recommendation["recommended_run_intent"] == "review"
+    assert recommendation["evidence_source"] == "app_readiness"
+
+
+def test_complete_app_with_recollect_gap_is_not_paper_ready(monkeypatch) -> None:
+    monkeypatch.setattr(report, "_template_label", lambda _package: "none")
+
+    tier = report._readiness_tier(
+        avg_quality=96.0,
+        baseline_valid_count=3,
+        manual_valid_count=2,
+        static_plan_enriched=True,
+        static_endpoint_inventory_status="present",
+        unresolved_service_total=0,
+        pcap_failure_count=1,
+        pcap_recollect_failure_count=1,
+        valid_run_count=5,
+        scripted_phase_available=False,
+        template_label="none",
+    )
+    top_gap = report._top_gap_for_app(
+        baseline_valid_count=3,
+        manual_valid_count=2,
+        pcap_failure_count=1,
+        pcap_recollect_failure_count=1,
+        static_endpoint_inventory_status="present",
+        static_plan_enriched=True,
+        unresolved_service_total=0,
+        provider_authority_status="present",
+        scripted_phase_available=False,
+        template_label="none",
+    )
+    recommendation = report._recommend_for_app(
+        package="com.example.complete",
+        app_label="Complete App",
+        join_row={},
+        metrics={
+            "valid_run_count": 5,
+            "baseline_valid_count": 3,
+            "manual_valid_count": 2,
+            "scripted_valid_count": 0,
+            "pcap_failure_count": 1,
+            "pcap_recollect_failure_count": 1,
+            "pcap_validity_review_count": 0,
+            "unresolved_service_total": 0,
+            "static_endpoint_inventory_status": "present",
+            "static_plan_enriched": True,
+            "scripted_phase_available": False,
+        },
+    )
+
+    assert tier == "capture_problem"
+    assert top_gap == "capture_problem"
+    assert recommendation["recommended_run_intent"] == "recollect_capture"
 
 
 def _run(
@@ -502,7 +1100,11 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
     }
 
     monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path / "output" / "evidence" / "dynamic")
-    monkeypatch.setattr(report, "_collect_run_records", lambda _root, overlay_latest_static=False: runs)
+    monkeypatch.setattr(
+        report,
+        "_collect_run_records",
+        lambda _root, overlay_latest_static=False, overlay_reanalyse_strings=False, package_filter=None: runs,
+    )
     monkeypatch.setattr(report, "_build_static_join_and_candidates", lambda _package_runs: (join_rows, {}))
     monkeypatch.setattr(
         report,
@@ -613,12 +1215,13 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
 
     with (out_dir / "static_guided_dynamic_recommendations.csv").open(encoding="utf-8") as handle:
         recommendation_rows = {row["package"]: row for row in csv.DictReader(handle)}
-    assert recommendation_rows["bbc.mobile.news.ww"]["recommended_template"] == "news_reader_basic_v1"
+    assert recommendation_rows["bbc.mobile.news.ww"]["recommended_template"] == "news_reader_behavior_v2"
     assert recommendation_rows["bbc.mobile.news.ww"]["recommended_phase"] == "open_article"
     assert recommendation_rows["com.example.servicegap"]["recommended_run_intent"] == "repair_service_mapping"
 
     summary_json = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary_json["capture_failure_counts"]["PCAP_LOCAL_FILE_EMPTY"] == 1
+    assert summary_json["capture_failure_action_counts"]["recollect_capture"] == 1
     assert summary_json["tier_definitions"]["dynamic_evidence_quality"]["A+"] == "95-100 excellent / publication-grade"
     assert summary_json["row_counts"]["behavioral_stability_audit"] == 6
     assert summary_json["row_counts"]["paper_pattern_matrix"] == 6

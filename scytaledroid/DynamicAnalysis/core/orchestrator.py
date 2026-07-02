@@ -52,6 +52,7 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
 from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.interaction_phases import (
     write_interaction_timeline_artifact,
+    write_protocol_phase_markers_artifact,
 )
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
@@ -487,6 +488,8 @@ class DynamicRunOrchestrator:
                     "ai_prompt_id": protocol.get("ai_prompt_id"),
                     "interrupted": protocol.get("interrupted"),
                     "interrupted_reason": protocol.get("interrupted_reason"),
+                    "stopped_early": protocol.get("stopped_early"),
+                    "terminal_hold_finalize": protocol.get("terminal_hold_finalize"),
                 }
             )
         else:
@@ -655,6 +658,21 @@ class DynamicRunOrchestrator:
                         # Best-effort; absence is not a correctness failure.
                         pass
 
+                    try:
+                        from scytaledroid.DynamicAnalysis.pcap.baseline_activity import (
+                            compute_baseline_activity_for_run,
+                        )
+
+                        activity = compute_baseline_activity_for_run(
+                            run_dir,
+                            package_name=str((manifest.target or {}).get("package_name") or ""),
+                            run_profile=str((manifest.operator or {}).get("run_profile") or ""),
+                        )
+                        if isinstance(activity, dict):
+                            manifest.dataset.update(activity)
+                    except Exception:
+                        pass
+
                     # Derive paper-eligibility from finalized in-memory state, then
                     # sync tracker from this final state so countability is not stale.
                     eligibility = derive_freeze_eligibility(
@@ -792,6 +810,12 @@ class DynamicRunOrchestrator:
         )
         if interaction_timeline_artifact:
             manifest.add_outputs([interaction_timeline_artifact])
+        protocol_phase_markers_artifact = write_protocol_phase_markers_artifact(
+            writer=writer,
+            manifest=manifest,
+        )
+        if protocol_phase_markers_artifact:
+            manifest.add_outputs([protocol_phase_markers_artifact])
         manifest.add_outputs(outputs)
         manifest.finalize()
         writer.write_manifest(manifest)
@@ -913,6 +937,8 @@ class DynamicRunOrchestrator:
             effective_min_pcap_bytes_for_run_profile(
                 run_profile=str(getattr(run_ctx, "run_profile", None) or ""),
                 scenario_id=str(run_ctx.scenario_id or ""),
+                package_name=str(getattr(run_ctx, "package_name", None) or ""),
+                messaging_activity=str(getattr(run_ctx, "messaging_activity", None) or ""),
             )
         )
         plan_artifact = None
