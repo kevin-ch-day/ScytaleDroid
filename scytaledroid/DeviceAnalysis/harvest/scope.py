@@ -7,7 +7,13 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
+from scytaledroid.Utils.DisplayUtils import (
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    table_utils,
+    terminal,
+)
 
 from . import rules
 from .models import InventoryRow, ScopeSelection
@@ -27,9 +33,19 @@ _LAST_SCOPE: ScopeSelection | None = None
 
 # Menu label for the all-inventory scope after applying the active path policy.
 FULL_INVENTORY_POLICY_FILTERED_LABEL = "All pullable packages (full inventory)"
-FULL_INVENTORY_MENU_LABEL = "All pullable packages"
+FULL_INVENTORY_MENU_LABEL = "Full inventory pullable"
 
 _DASH = "—"
+
+
+@dataclass(frozen=True)
+class _ScopeMenuDisplayRow:
+    key: str
+    label: str
+    inventory_count: int | str | None = None
+    pullable_count: int | str | None = None
+    estimated_apks: int | str | None = None
+    note: str | None = None
 
 
 def _rows_pullable_under_path_policy(rows: Sequence[InventoryRow], *, is_rooted: bool) -> list[InventoryRow]:
@@ -69,11 +85,91 @@ def _load_latest_scoped_inventory_packages(*, device_serial: str, scope_id: str)
 def _append_non_root_note(label: str) -> str:
     return label
 
+
+def _compact_scope_label(label: str) -> str:
+    text = str(label or "").strip()
+    if text == FULL_INVENTORY_POLICY_FILTERED_LABEL:
+        return "All pullable packages"
+    return text
+
 def _maybe_str(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _format_count_cell(value: int | str | None, *, approx: bool = False) -> str:
+    if isinstance(value, int):
+        return f"~{value}" if approx and value else str(value)
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _last_scope_detail(selection: ScopeSelection, *, is_rooted: bool) -> str:
+    metadata = dict(selection.metadata or {})
+    inventory_count = int(metadata.get("candidate_count") or len(selection.packages) or 0)
+    pullable_raw = metadata.get("pullable_count")
+    if isinstance(pullable_raw, int):
+        pullable_count = pullable_raw
+    else:
+        pullable_count = len(
+            _rows_pullable_under_path_policy(selection.packages, is_rooted=is_rooted)
+        )
+    mode_hint = "full inventory" if selection.kind == "everything" else selection.kind.replace("_", " ")
+    return (
+        f"{_compact_scope_label(selection.label)} · {mode_hint} · "
+        f"{inventory_count} inventory / {pullable_count} pullable"
+    )
+
+
+def _scope_table_headers(*, narrow: bool) -> list[str]:
+    if narrow:
+        return ["#", "Scope", "Inv", "Pull", "APKs", "Note"]
+    return ["#", "Scope", "Inventory", "Pullable", "APKs", "Notes"]
+
+
+def _scope_table_min_widths(*, narrow: bool) -> list[int]:
+    if narrow:
+        return [1, 18, 3, 4, 4, 10]
+    return [1, 20, 9, 8, 4, 12]
+
+
+def _render_last_scope_block(selection: ScopeSelection, *, is_rooted: bool) -> None:
+    print()
+    print("Last scope")
+    print("----------")
+    print("R) Re-run last scope")
+    print(f"   {_last_scope_detail(selection, is_rooted=is_rooted)}")
+
+
+def _render_scope_options_table(
+    entries: Sequence[_ScopeMenuDisplayRow],
+    *,
+    narrow: bool,
+) -> None:
+    print()
+    print("Available scopes")
+    print("----------------")
+    table_rows = [
+        [
+            entry.key,
+            entry.label,
+            _format_count_cell(entry.inventory_count),
+            _format_count_cell(entry.pullable_count),
+            _format_count_cell(entry.estimated_apks, approx=True),
+            str(entry.note or "").strip(),
+        ]
+        for entry in entries
+    ]
+    table_utils.render_table(
+        _scope_table_headers(narrow=narrow),
+        table_rows,
+        compact=True,
+        min_widths=_scope_table_min_widths(narrow=narrow),
+    )
+    print("0 Back")
 
 def _merge_rows_prefer_scoped(
     *,
@@ -388,10 +484,8 @@ def select_package_scope(
         updated_rows = readable_updated
 
     while True:
-        _render_scope_table(rows, device_serial, is_rooted, context, default_rows)
-
         option_handlers: dict[str, Callable[[], ScopeSelection | None]] = {}
-        entries: list[dict[str, object]] = []
+        entries: list[_ScopeMenuDisplayRow] = []
 
         def _add_entry(
             key: str,
@@ -402,34 +496,25 @@ def select_package_scope(
             files: int | str | None = None,
             note: str | None = None,
             handler: Callable[[], ScopeSelection | None] | None = None,
-            entries: list[dict[str, object]] = entries,
+            entries: list[_ScopeMenuDisplayRow] = entries,
             option_handlers: dict[str, Callable[[], ScopeSelection | None]] = option_handlers,
         ) -> None:
-            # Keep the menu readable on narrow terminals: truncate long notes (profiles lists,
-            # blocked explanations, etc.).
             note_text = str(note or "").strip()
-            if note_text and len(note_text) > 72:
-                note_text = note_text[:69].rstrip() + "..."
             entries.append(
-                {
-                    "key": key,
-                    "label": label,
-                    "packages": packages,
-                    "pullable": pullable,
-                    "files": files,
-                    "note": note_text,
-                }
+                _ScopeMenuDisplayRow(
+                    key=key,
+                    label=label,
+                    inventory_count=packages,
+                    pullable_count=pullable,
+                    estimated_apks=files,
+                    note=note_text or None,
+                )
             )
             if handler:
                 option_handlers[key] = handler
 
         if _LAST_SCOPE is not None:
-            _add_entry(
-                "R",
-                _format_rerun_label(_LAST_SCOPE),
-                note="re-run last scope",
-                handler=lambda: _LAST_SCOPE,
-            )
+            option_handlers["R"] = lambda: _LAST_SCOPE
 
         profile_scopes = _load_active_profile_scopes(rows, device_serial=device_serial)
         profile_scope_count = len(profile_scopes)
@@ -483,7 +568,7 @@ def select_package_scope(
             handler=lambda: _scope_google_allowlist(rows, allow),
         )
         full_note = (
-            f"{blocked_full} blocked by non-root policy"
+            f"{blocked_full} policy-blocked"
             if (not is_rooted and blocked_full)
             else ("root device · full paths" if is_rooted else None)
         )
@@ -511,35 +596,21 @@ def select_package_scope(
             ),
         )
 
-        headers = ["#", "Scope", "Pkgs", "Ready", "APKs", "Notes"]
-        table_rows = []
-        for entry in entries:
-            key = str(entry["key"])
-            label = entry["label"]
-            packages = entry.get("packages")
-            pullable = entry.get("pullable")
-            files = entry.get("files")
-            note = entry.get("note") or ""
-            pkg_cell = packages if isinstance(packages, int) else ""
-            if isinstance(pullable, int):
-                pull_cell = str(pullable)
-            elif isinstance(pullable, str) and pullable.strip():
-                pull_cell = pullable
-            else:
-                pull_cell = ""
-            if isinstance(files, int) and files:
-                files_cell = f"~{files}"
-            elif isinstance(files, str) and files.strip():
-                files_cell = files
-            else:
-                files_cell = ""
-            table_rows.append([key, label, pkg_cell, pull_cell, files_cell, note])
+        _render_scope_table(
+            rows,
+            device_serial,
+            is_rooted,
+            context,
+            default_rows,
+            entries=entries,
+            last_scope=_LAST_SCOPE,
+        )
 
-        table_utils.render_table(headers, table_rows, compact=True)
-        print("0 back")
-
+        valid_choices = [entry.key for entry in entries] + ["0"]
+        if _LAST_SCOPE is not None:
+            valid_choices.append("R")
         choice = prompt_utils.get_choice(
-            [str(entry["key"]) for entry in entries] + ["0"],
+            valid_choices,
             default="2",
             casefold=True,
             prompt="Select scope #: ",
@@ -628,30 +699,36 @@ def _render_scope_table(
     is_rooted: bool,
     context: dict[str, object],
     default_rows: Sequence[InventoryRow],
+    *,
+    entries: Sequence[_ScopeMenuDisplayRow],
+    last_scope: ScopeSelection | None,
 ) -> None:
     print()
     menu_utils.print_header("Harvest Scope")
-    print("Current inventory snapshot vs pull policy")
-    print("-" * 86)
+    print()
+    print("Inventory snapshot")
+    print("------------------")
     candidates = len(rows)
     pullable_rows = _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)
     eligible = len(pullable_rows)
     blocked = max(candidates - eligible, 0)
     policy = "none (root)" if is_rooted else "non-root paths"
     est_artifacts = estimated_files(pullable_rows)
-    print(f"Inventory snapshot   : {candidates} package(s)")
-    print(f"Pullable on device   : {eligible} package(s)")
-    print(f"Policy-blocked       : {blocked} package(s)")
-    print(f"Policy               : {policy}")
-    print(f"Estimated artifacts  : ~{est_artifacts} APK path(s) (splits count as separate paths)")
+    print(f"Snapshot packages : {candidates}")
+    print(f"Pullable packages : {eligible}")
+    print(f"Policy-blocked    : {blocked}")
+    print(f"Policy            : {policy}")
+    print(f"Estimated APKs    : ~{est_artifacts}")
     if not is_rooted and blocked > 0:
+        print()
         print(
-            status_messages.status(
-                "Non-root: system/product/vendor APK paths stay inventoried but are not pulled.",
-                level="info",
-            )
+            "Note: system/product/vendor APK paths remain inventoried but are not "
+            "pulled on a non-root device."
         )
-    print("-" * 86)
+    if last_scope is not None:
+        _render_last_scope_block(last_scope, is_rooted=is_rooted)
+    narrow = terminal.get_terminal_width(default=100) < 96
+    _render_scope_options_table(entries, narrow=narrow)
 
 
 def _format_rerun_label(selection: ScopeSelection) -> str:

@@ -62,6 +62,8 @@ def _harvest_plan_kv_lines(
 
 def _compact_selection_label(label: str) -> str:
     text = str(label or "").strip()
+    if text == "All pullable packages (full inventory)":
+        return "Full inventory pullable"
     if text.endswith(" (full inventory)"):
         return text.removesuffix(" (full inventory)")
     return text
@@ -438,10 +440,18 @@ def report_delta_scope_applied(delta_count: int) -> None:
     )
 
 
-def report_full_refresh_scope_applied(selected_count: int) -> None:
+def report_full_refresh_scope_applied(
+    selected_count: int,
+    *,
+    pullable_count: int | None = None,
+) -> None:
+    if pullable_count is not None and pullable_count >= 0:
+        detail = f"{selected_count} inventory package(s) selected · {pullable_count} pullable"
+    else:
+        detail = f"{selected_count} package(s) selected"
     print(
         status_messages.status(
-            f"Full-device scope: {selected_count} package(s) scheduled (changed-only mode disabled).",
+            f"Full inventory scope: {detail} (changed-only mode disabled).",
             level="info",
         )
     )
@@ -519,7 +529,7 @@ def report_harvest_started(
     is_rooted: bool = False,
 ) -> None:
     policy_text = _describe_harvest_policy(policy, is_rooted=is_rooted)
-    sel = str(selection_label).strip() or "(unknown scope)"
+    sel = _compact_selection_label(selection_label) or "(unknown scope)"
     print(
         status_messages.status(
             f"Harvest start: {sel}",

@@ -549,7 +549,14 @@ def resolve_harvest_plan(
             ui.report_delta_scope_applied(delta_count)
         elif summary and bool(selection.metadata.get("disable_delta_filter")):
             # Operator clarity: full refresh was selected/forced; do not frame as "delta".
-            ui.report_full_refresh_scope_applied(len(selection.packages))
+            ui.report_full_refresh_scope_applied(
+                len(selection.packages),
+                pullable_count=(
+                    int(selection.metadata.get("pullable_count"))
+                    if selection.metadata.get("pullable_count") is not None
+                    else None
+                ),
+            )
 
         plan = harvest.build_harvest_plan(
             selection.packages,
