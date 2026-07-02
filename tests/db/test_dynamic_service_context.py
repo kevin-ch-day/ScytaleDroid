@@ -635,6 +635,16 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert tiktok_cdn["service_key"] == "tiktok_platform"
     assert tiktok_cdn["role_class"] == "content_delivery"
 
+    giphy_media = service_context.resolve_service_for_domain(
+        "media4.giphy.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert giphy_media["service_key"] == "giphy_media"
+    assert giphy_media["owner_class"] == "third_party"
+    assert giphy_media["role_class"] == "content_delivery"
+
     tiktok_api = service_context.resolve_service_for_domain(
         "api16-normal-useast5.tiktokv.us",
         package_name="com.zhiliaoapp.musically",

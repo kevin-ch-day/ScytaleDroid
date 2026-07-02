@@ -957,6 +957,17 @@ def default_domain_references() -> tuple[DomainReference, ...]:
         DomainReference("", "facebook.net", "SUFFIX", "third_party", "social_graph_api", "medium", "curated_suffix"),
         DomainReference("", "fbcdn.net", "SUFFIX", "third_party", "content_delivery", "low", "curated_suffix"),
         DomainReference(
+            "",
+            "giphy.com",
+            "SUFFIX",
+            "third_party",
+            "content_delivery",
+            "medium",
+            "curated_suffix",
+            source_url="https://developers.giphy.com/docs/api/",
+            notes="GIPHY-hosted GIF and sticker media delivery observed inside social app runtime traffic.",
+        ),
+        DomainReference(
             "com.facebook.katana",
             "cdninstagram.com",
             "SUFFIX",
