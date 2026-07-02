@@ -158,6 +158,9 @@ def _evidence_alignment_tone(
 ) -> str:
     if not latest_harvest:
         return "muted"
+    session_state = str(latest_harvest.get("session_state") or "").strip().lower()
+    if session_state in {"drifted", "partial", "failed", "ineligible"}:
+        return "warning"
     harvest_snapshot_id = latest_harvest.get("snapshot_id")
     if harvest_snapshot_id is None:
         return "warning"
@@ -372,6 +375,8 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
     blocked_scope = 0
     executed = 0
     harvest_snapshot_id: int | None = None
+    capture_status_counts: dict[str, int] = {}
+    research_status_counts: dict[str, int] = {}
     for manifest_path in session_manifests:
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -392,6 +397,14 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
             blocked_scope += 1
         else:
             executed += 1
+        status_block = payload.get("status") if isinstance(payload, dict) else {}
+        if isinstance(status_block, dict):
+            capture_status = str(status_block.get("capture_status") or "").strip().lower()
+            research_status = str(status_block.get("research_status") or "").strip().lower()
+            if capture_status:
+                capture_status_counts[capture_status] = capture_status_counts.get(capture_status, 0) + 1
+            if research_status:
+                research_status_counts[research_status] = research_status_counts.get(research_status, 0) + 1
     receipt_key = ""
     try:
         latest_payload = json.loads(latest_manifest.read_text(encoding="utf-8"))
@@ -404,6 +417,20 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
         receipt_key = session_dir.name
     receipts_root = artifact_store.harvest_receipts_root() / receipt_key
     receipt_count = len(list(receipts_root.glob("*.json"))) if receipts_root.exists() else 0
+    session_state = "current"
+    session_note: str | None = None
+    if capture_status_counts.get("drifted", 0) > 0:
+        session_state = "drifted"
+        session_note = f"{capture_status_counts['drifted']} drifted package(s)"
+    elif capture_status_counts.get("failed", 0) > 0:
+        session_state = "failed"
+        session_note = f"{capture_status_counts['failed']} failed package(s)"
+    elif capture_status_counts.get("partial", 0) > 0:
+        session_state = "partial"
+        session_note = f"{capture_status_counts['partial']} partial package(s)"
+    elif research_status_counts.get("ineligible", 0) > 0:
+        session_state = "ineligible"
+        session_note = f"{research_status_counts['ineligible']} ineligible package(s)"
     return {
         "session_label": receipt_key or session_dir.name,
         "executed": executed,
@@ -412,6 +439,8 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
         "manifest_count": len(session_manifests),
         "receipt_count": receipt_count,
         "snapshot_id": harvest_snapshot_id,
+        "session_state": session_state,
+        "session_note": session_note,
         "artifacts_root": artifact_store.repo_relative_path(session_dir),
         "receipts_root": artifact_store.repo_relative_path(receipts_root) if receipts_root.exists() else None,
     }
@@ -582,9 +611,18 @@ def _evidence_alignment_text(
     if not latest_harvest:
         return "none"
 
+    session_state = str(latest_harvest.get("session_state") or "").strip().lower()
+    session_note = str(latest_harvest.get("session_note") or "").strip()
     harvest_snapshot_id = latest_harvest.get("snapshot_id")
     if harvest_snapshot_id is None:
         return "snapshot ?"
+    if session_state in {"drifted", "partial", "failed", "ineligible"}:
+        suffix = f" ({session_note})" if session_note else ""
+        if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
+            return f"aligned to {harvest_snapshot_id} but latest harvest needs review{suffix}"
+        if inventory_snapshot_id is not None:
+            return f"harvest {harvest_snapshot_id} vs inventory {inventory_snapshot_id}; latest harvest needs review{suffix}"
+        return f"harvest @ {harvest_snapshot_id}; latest harvest needs review{suffix}"
     if inventory_snapshot_id is not None and harvest_snapshot_id == inventory_snapshot_id:
         return f"aligned to {harvest_snapshot_id}"
     if inventory_snapshot_id is not None:
@@ -598,6 +636,7 @@ def _summary_next_step(
     inventory_snapshot_id: object,
     harvest_snapshot_id: object,
     has_harvest: bool,
+    latest_harvest: dict[str, object] | None = None,
 ) -> str:
     if inventory_status == "NONE":
         return "Next: refresh inventory (1)."
@@ -605,6 +644,9 @@ def _summary_next_step(
         return "Next: refresh inventory (1) — snapshot stale."
     if not has_harvest:
         return "Next: run harvest (2)."
+    session_state = str((latest_harvest or {}).get("session_state") or "").strip().lower()
+    if session_state in {"drifted", "partial", "failed", "ineligible"}:
+        return "Next: review latest harvest drift/issues, then refresh inventory or re-harvest as needed."
     if harvest_snapshot_id is not None and inventory_snapshot_id is not None and harvest_snapshot_id != inventory_snapshot_id:
         return "Next: run harvest (2) to match latest inventory."
     return "Next: static analysis (menu 2) or re-harvest as needed."
@@ -679,6 +721,7 @@ def _render_compact_status(
                 inventory_snapshot_id=inventory_snapshot_id,
                 harvest_snapshot_id=harvest_snapshot_id,
                 has_harvest=bool(latest_harvest),
+                latest_harvest=latest_harvest if isinstance(latest_harvest, dict) else None,
             )
         )
     )
@@ -787,7 +830,15 @@ def print_device_details(
         if harvest_snapshot_id is not None:
             if harvest_snapshot_id == inventory_snapshot_id:
                 print(f"{'Snapshot link':<15} : {colors.apply(f'inventory snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}")
-                print(f"{'Alignment':<15} : {colors.apply('current', colors.style('success'), bold=True)}")
+                session_state = str(latest_harvest.get("session_state") or "").strip().lower()
+                session_note = str(latest_harvest.get("session_note") or "").strip()
+                if session_state in {"drifted", "partial", "failed", "ineligible"}:
+                    align_text = "needs review"
+                    if session_note:
+                        align_text += f" ({session_note})"
+                    print(f"{'Alignment':<15} : {colors.apply(align_text, colors.style('warning'), bold=True)}")
+                else:
+                    print(f"{'Alignment':<15} : {colors.apply('current', colors.style('success'), bold=True)}")
             else:
                 print(f"{'Snapshot link':<15} : {colors.apply(f'harvest snapshot {harvest_snapshot_id}', colors.style('text'), bold=True)}")
                 print(f"{'Alignment':<15} : {colors.apply('stale vs latest inventory', colors.style('warning'), bold=True)}")

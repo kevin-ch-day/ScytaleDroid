@@ -225,6 +225,60 @@ def test_dashboard_next_step_explains_inventory_harvest_misalignment(monkeypatch
     assert "Next: run harvest (2) to match latest inventory." in out
 
 
+def test_dashboard_compact_status_marks_aligned_drifted_harvest_for_review(monkeypatch, capsys) -> None:
+    active = {
+        "serial": "ZY22JK89DR",
+        "model": "moto g 5G - 2024",
+        "manufacturer": "Motorola",
+        "android_release": "15",
+        "device_type": "Physical",
+        "wifi_state": "On",
+        "battery_pct": "100",
+        "battery_status": "Charging",
+        "is_rooted": "NO",
+    }
+    inventory = SimpleNamespace(
+        status_label="FRESH",
+        age_display="10 Secs",
+        package_count=546,
+        collection_mode="bulk",
+    )
+
+    monkeypatch.setattr(
+        dashboard,
+        "_compute_pipeline_state",
+        lambda _serial: {
+            "inventoried": 546,
+            "in_scope": 546,
+            "policy_eligible": 120,
+            "scheduled": 120,
+            "harvested": 120,
+            "receipts": 546,
+            "blocked_policy": 426,
+            "blocked_scope": 0,
+            "inventory_snapshot_id": 31,
+            "latest_harvest": {
+                "session_label": "20260427",
+                "snapshot_id": 31,
+                "session_state": "drifted",
+                "session_note": "1 drifted package(s)",
+            },
+        },
+    )
+    dashboard.print_dashboard(
+        summaries=[active],
+        active_details=active,
+        warnings=[],
+        last_refresh_ts=None,
+        serial_map={"ZY22JK89DR": active},
+        inventory_metadata=inventory,
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "aligned to 31 but latest harvest needs review (1 drifted package(s))" in out
+    assert "Next: review latest harvest drift/issues, then refresh inventory or re-harvest as needed." in out
+
+
 def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monkeypatch, capsys) -> None:
     active = {
         "serial": "ZY22JK89DR",
@@ -277,3 +331,59 @@ def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monk
     assert "baseline-full" not in out
     assert "aligned to 60" in out
     assert "1 run" in out
+
+
+def test_print_device_details_marks_aligned_drifted_harvest_for_review(monkeypatch, capsys) -> None:
+    active = {
+        "serial": "ZY22JK89DR",
+        "model": "moto g 5G - 2024",
+        "manufacturer": "Motorola",
+        "android_release": "15",
+        "device_type": "Physical",
+        "wifi_state": "On",
+        "battery_pct": "100",
+        "battery_status": "Charging",
+        "is_rooted": "NO",
+    }
+    inventory = SimpleNamespace(
+        status_label="FRESH",
+        age_display="14 Hrs 39 Mins",
+        package_count=546,
+        collection_mode="bulk",
+        identity_source="pm_list_show_versioncode",
+        identity_quality="strict",
+        path_enriched_packages=117,
+        bulk_identity_only_packages=429,
+        current_state_unavailable_reason="pm list unsupported",
+    )
+
+    monkeypatch.setattr(
+        dashboard,
+        "_compute_pipeline_state",
+        lambda _serial: {
+            "inventoried": 546,
+            "in_scope": 546,
+            "policy_eligible": 117,
+            "scheduled": 117,
+            "harvested": 117,
+            "receipts": 546,
+            "blocked_policy": 411,
+            "blocked_scope": 18,
+            "inventory_snapshot_id": 26,
+            "latest_harvest": {
+                "session_label": "20260416",
+                "snapshot_id": 26,
+                "session_state": "drifted",
+                "session_note": "1 drifted package(s)",
+                "artifacts_root": "data/device_apks/ZY22JK89DR/20260416",
+                "receipts_root": "data/receipts/harvest/20260416",
+            },
+        },
+    )
+
+    dashboard.print_device_details(active, inventory)
+    out = colors.strip(capsys.readouterr().out)
+
+    assert "Snapshot link   : inventory snapshot 26" in out
+    assert "Alignment       : needs review (1 drifted package(s))" in out
+    assert "Alignment       : current" not in out
