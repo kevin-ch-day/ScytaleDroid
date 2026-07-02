@@ -204,6 +204,52 @@ def test_execute_scan_reuses_cached_post_run_string_payload(monkeypatch, tmp_pat
     assert outcome.results[0].base_string_data == cached_payload
 
 
+def test_execute_scan_injects_execution_context_into_artifact_metadata(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    _configure_scan_flow(monkeypatch, calls=calls)
+    group = _make_group(
+        tmp_path,
+        package_name="com.example.context",
+        harvest_manifest={
+            "execution_state": "completed",
+            "status": {
+                "capture_status": "clean",
+                "persistence_status": "mirrored",
+                "research_status": "pending_audit",
+            },
+            "comparison": {
+                "matches_planned_artifacts": True,
+                "observed_hashes_complete": True,
+            },
+        },
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example Scope",
+        session_stamp="sess-visible",
+        session_label="Session Visible",
+        execution_id="exec-visible",
+        paper_grade_requested=False,
+        dry_run=False,
+    )
+
+    outcome = scan_flow.execute_scan(
+        ScopeSelection(scope="app", label="Example", groups=(group,)),
+        params,
+        tmp_path,
+    )
+
+    metadata = outcome.results[0].artifacts[0].report.metadata
+    assert metadata["execution_id"] == "exec-visible"
+    assert metadata["session_stamp"] == "sess-visible"
+    assert metadata["session_label"] == "Session Visible"
+    assert metadata["scope_label"] == "Example Scope"
+
+
 def test_execute_scan_merges_split_artifact_string_payloads(monkeypatch, tmp_path: Path) -> None:
     calls: list[str] = []
 

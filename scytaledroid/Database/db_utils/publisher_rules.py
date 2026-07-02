@@ -19,7 +19,7 @@ class PublisherRule:
     pattern: str
 
 
-_FALLBACK_RULES: Sequence[PublisherRule] = (
+DEFAULT_PUBLISHER_RULES: Sequence[PublisherRule] = (
     PublisherRule("ANDROID_AOSP", "EXACT", "android"),
     PublisherRule("ANDROID_AOSP", "PREFIX", "com.android."),
     PublisherRule("GOOGLE", "PREFIX", "com.google."),
@@ -32,6 +32,7 @@ _FALLBACK_RULES: Sequence[PublisherRule] = (
     PublisherRule("ATT", "PREFIX", "com.att."),
     PublisherRule("VERIZON", "PREFIX", "com.verizon."),
 )
+_FALLBACK_RULES = DEFAULT_PUBLISHER_RULES
 
 
 def _publisher_rules_table_exists() -> bool:
@@ -158,6 +159,7 @@ def apply_publisher_mapping(
 
 __all__ = [
     "PublisherRule",
+    "DEFAULT_PUBLISHER_RULES",
     "load_publisher_rules",
     "resolve_publisher_key",
     "apply_publisher_mapping",

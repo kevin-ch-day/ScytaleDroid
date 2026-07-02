@@ -90,7 +90,9 @@ def build_linkage_plan(
         )
 
     missing_id_packages = tuple(
-        result.package_name for result in outcome.results if not result.static_run_id
+        result.package_name
+        for result in outcome.results
+        if not result.static_run_id and not bool(getattr(result, "exploratory_only", False))
     )
     if missing_id_packages:
         return LinkagePlan(

@@ -66,7 +66,10 @@ def test_collect_report_queries_core_q(monkeypatch: pytest.MonkeyPatch) -> None:
         [(0,)],
     ]
 
+    seen_sql: list[str] = []
+
     def fake_run_sql(sql: str, params=None, **_kw):
+        seen_sql.append(sql)
         if not returns:
             return []
         return returns.pop(0)
@@ -78,6 +81,8 @@ def test_collect_report_queries_core_q(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out["summary_counts"]["linked_rows"] == 5
     assert out["totals_by_run_type_link_state"][0]["count"] == 5
     assert out["host_path_probe"] is None
+    assert all("LIKE 'dangling%'" not in sql for sql in seen_sql)
+    assert any("LIKE 'dangling%%'" in sql for sql in seen_sql)
 
 
 def test_script_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:

@@ -179,13 +179,21 @@ def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split
             IndexedString(value="https://example.com", origin="res/values/strings.xml", origin_type="resource"),
             IndexedString(value="libfoo", origin="lib/arm64-v8a/libfoo.so", origin_type="native"),
             IndexedString(value="config-value", origin="assets/config.json", origin_type="asset"),
-        )
+        ),
+        resource_bounds_warnings=("We are out of bound with this complex entry. Count: 65536",),
     )
     monkeypatch.setattr(pipeline, "build_string_index", lambda *_a, **_k: fake_index)
+
+    string_payload_calls: list[dict[str, object]] = []
+
+    def _fake_analyse_strings_from_index(*_args, **kwargs):
+        string_payload_calls.append(dict(kwargs))
+        return {"counts": {"endpoints": 1}, "samples": {}, "selected_samples": {}}
+
     monkeypatch.setattr(
         pipeline,
         "_analyse_strings_from_index",
-        lambda *_a, **_k: {"counts": {"endpoints": 1}, "samples": {}, "selected_samples": {}},
+        _fake_analyse_strings_from_index,
     )
     monkeypatch.setattr(pipeline, "build_detector_context", lambda **_kwargs: SimpleNamespace())
     monkeypatch.setattr(pipeline, "run_detector_pipeline", lambda _context: ())
@@ -212,9 +220,16 @@ def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split
         assert report.metadata["string_index_resource_strings"] == 1
         assert report.metadata["string_index_native_strings"] == 1
         assert report.metadata["string_index_asset_strings"] == 1
+        assert report.metadata["resource_bounds_warnings"] == [
+            "We are out of bound with this complex entry. Count: 65536"
+        ]
+        assert report.metadata["parser_provenance"]["resource_bounds_warning_count"] == 1
         assert report.metadata["post_run_string_payload"] == {
             "counts": {"endpoints": 1},
             "samples": {},
             "selected_samples": {},
             "aggregation_scope": "single_artifact",
         }
+        assert string_payload_calls[-1]["warnings"] == (
+            "We are out of bound with this complex entry. Count: 65536",
+        )

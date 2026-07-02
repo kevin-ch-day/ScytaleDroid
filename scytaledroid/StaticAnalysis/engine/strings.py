@@ -203,6 +203,32 @@ def _looks_split_native_entropy_noise(
     return lowered_src.startswith("lib/")
 
 
+def _string_warning_log_context(
+    artifact_context: Mapping[str, object] | None,
+) -> dict[str, object]:
+    if not artifact_context:
+        return {}
+    keys = (
+        "execution_id",
+        "session_stamp",
+        "session_label",
+        "run_id",
+        "package_name",
+        "normalized_package_name",
+        "sha256",
+        "base_apk_sha256",
+        "artifact_role",
+        "artifact_index",
+        "artifact_total",
+        "is_split_member",
+    )
+    return {
+        key: artifact_context[key]
+        for key in keys
+        if artifact_context.get(key) is not None
+    }
+
+
 def _should_emit_high_entropy_hit(
     value: str,
     *,
@@ -663,9 +689,15 @@ def analyse_strings(
                     include_resources=include_resources,
                     is_split_member=bool(artifact_context and artifact_context.get("is_split_member")),
                     split_member_policy="lightweight",
+                    log_context=_string_warning_log_context(artifact_context),
                 )
             )
         captured = buffer.getvalue() + fd_output
+        bounds_warnings.extend(
+            str(line)
+            for line in (getattr(index, "resource_bounds_warnings", ()) or ())
+            if str(line).strip()
+        )
         bounds_warnings.extend(_extract_bounds_warnings(captured))
         if bounds_warnings:
             deduped = list(dict.fromkeys(bounds_warnings))
@@ -678,6 +710,7 @@ def analyse_strings(
                         "apk_path": apk_path,
                         "warning_lines": summary["lines"],
                         "count_values": summary["count_values"],
+                        **_string_warning_log_context(artifact_context),
                     }
                 ),
             )

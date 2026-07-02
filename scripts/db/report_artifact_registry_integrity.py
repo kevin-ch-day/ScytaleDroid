@@ -56,7 +56,7 @@ def collect_report(
         """
         SELECT run_type, artifact_type, link_state, COUNT(*) AS c
         FROM v_artifact_registry_integrity
-        WHERE link_state LIKE 'dangling%' OR link_state = 'unknown_run_type'
+        WHERE link_state LIKE 'dangling%%' OR link_state = 'unknown_run_type'
         GROUP BY run_type, artifact_type, link_state
         ORDER BY c DESC, run_type, artifact_type
         """,
@@ -75,7 +75,7 @@ def collect_report(
           END AS age_bucket,
           COUNT(*) AS c
         FROM v_artifact_registry_integrity
-        WHERE link_state LIKE 'dangling%' OR link_state = 'unknown_run_type'
+        WHERE link_state LIKE 'dangling%%' OR link_state = 'unknown_run_type'
         GROUP BY run_type, link_state, age_bucket
         ORDER BY run_type, link_state, age_bucket
         """,
@@ -134,7 +134,7 @@ def collect_report(
             """
             SELECT artifact_id, run_type, link_state, host_path
             FROM v_artifact_registry_integrity
-            WHERE link_state LIKE 'dangling%'
+            WHERE link_state LIKE 'dangling%%'
               AND host_path IS NOT NULL
               AND TRIM(host_path) <> ''
             ORDER BY created_at_utc DESC

@@ -469,6 +469,10 @@ def execute_scan(
         app_start = time.monotonic()
         app_runtime_state: dict[str, object] = {}
         artifact_extra_meta = {
+            "execution_id": params.execution_id,
+            "session_stamp": params.session_stamp,
+            "session_label": params.session_label,
+            "scope_label": params.scope_label or selection.label,
             "artifact_manifest_sha256": manifest_sha256,
             "config_hash": config_hash,
             "pipeline_version": pipeline_version,
@@ -553,6 +557,30 @@ def execute_scan(
             try:
                 rp_resolved = str(Path(artifact.path).resolve())
                 pre_report = parallel_precomputed.get(rp_resolved)
+                artifact_size = None
+                try:
+                    artifact_size = Path(artifact.path).stat().st_size
+                except OSError:
+                    artifact_size = None
+                log.info(
+                    f"Static artifact scan started: {artifact_label}",
+                    category="static_analysis",
+                    extra={
+                        "event": "static.artifact_scan_started",
+                        "execution_id": params.execution_id,
+                        "session_stamp": params.session_stamp,
+                        "session_label": params.session_label,
+                        "scope_label": params.scope_label or selection.label,
+                        "package_name": group.package_name,
+                        "app_label": display_name,
+                        "artifact_index": artifact_index,
+                        "artifact_total": len(artifacts),
+                        "artifact_path": str(artifact.path),
+                        "artifact_display_path": artifact.display_path,
+                        "artifact_size_bytes": artifact_size,
+                        "precomputed_report": isinstance(pre_report, StaticAnalysisReport),
+                    },
+                )
                 report, summary, timings, error_message, skipped = _execute_single_artifact(
                     artifact,
                     params,
