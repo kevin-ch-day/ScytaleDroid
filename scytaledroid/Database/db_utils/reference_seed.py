@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
+from scytaledroid.Database.db_core.schema_introspection import table_exists
+from scytaledroid.Database.db_utils.publisher_rules import DEFAULT_PUBLISHER_RULES
 
 _DEFAULT_PUBLISHERS: dict[str, tuple[str, str, int]] = {
     "UNKNOWN": ("Unknown", "Default placeholder publisher key", 999),
@@ -59,6 +61,46 @@ def ensure_default_publishers() -> None:
         )
 
 
+def ensure_default_publisher_rules() -> None:
+    """Ensure default publisher prefix rules exist (idempotent)."""
+
+    try:
+        if not table_exists(
+            "android_publisher_prefix_rules",
+            query_name="db_utils.reference_seed.publisher_rules_table_exists",
+        ):
+            return
+    except Exception:
+        return
+
+    sql = """
+            INSERT INTO android_publisher_prefix_rules
+                (publisher_key, match_type, pattern, priority, is_active)
+            SELECT %s, %s, %s, %s, 1
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM android_publisher_prefix_rules
+                WHERE publisher_key = %s
+                  AND match_type = %s
+                  AND pattern = %s
+            )
+            """
+    for priority, rule in enumerate(DEFAULT_PUBLISHER_RULES, start=1):
+        run_sql(
+            sql,
+            (
+                rule.publisher_key,
+                rule.match_type,
+                rule.pattern,
+                int(priority * 10),
+                rule.publisher_key,
+                rule.match_type,
+                rule.pattern,
+            ),
+            query_name="db_utils.reference_seed.publisher_rules",
+        )
+
+
 def ensure_default_profiles() -> None:
     """Ensure required profile keys exist (idempotent)."""
 
@@ -103,12 +145,14 @@ def ensure_default_reference_rows() -> None:
     """Ensure all minimal reference dictionaries exist (idempotent)."""
 
     ensure_default_publishers()
+    ensure_default_publisher_rules()
     ensure_default_profiles()
     repair_legacy_profile_labels()
 
 
 __all__ = [
     "ensure_default_publishers",
+    "ensure_default_publisher_rules",
     "ensure_default_profiles",
     "repair_legacy_profile_labels",
     "ensure_default_reference_rows",

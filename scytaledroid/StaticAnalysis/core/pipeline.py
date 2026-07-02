@@ -254,6 +254,48 @@ def _build_parser_provenance(metadata: Mapping[str, object]) -> dict[str, object
     }
 
 
+def _merge_resource_bounds_warnings(
+    metadata: MutableMapping[str, object],
+    warnings: Sequence[object] | None,
+) -> None:
+    """Merge parser warning lines into report metadata without duplicating them."""
+
+    if not warnings:
+        return
+    existing = metadata.get("resource_bounds_warnings")
+    merged: list[str] = []
+    if isinstance(existing, Sequence) and not isinstance(existing, (str, bytes)):
+        merged.extend(str(line) for line in existing if str(line).strip())
+    for line in warnings:
+        text = str(line).strip()
+        if text and text not in merged:
+            merged.append(text)
+    if merged:
+        metadata["resource_bounds_warnings"] = merged
+
+
+def _string_warning_log_context(metadata: Mapping[str, object]) -> dict[str, object]:
+    keys = (
+        "execution_id",
+        "session_stamp",
+        "session_label",
+        "run_id",
+        "package_name",
+        "normalized_package_name",
+        "sha256",
+        "base_apk_sha256",
+        "artifact_role",
+        "artifact_index",
+        "artifact_total",
+        "is_split_member",
+    )
+    return {
+        key: metadata[key]
+        for key in keys
+        if metadata.get(key) is not None
+    }
+
+
 def _normalize_hash(value: object, *, length: int) -> str | None:
     if not isinstance(value, str):
         return None
@@ -545,9 +587,14 @@ def analyze_apk(
                 include_resources=analysis_config.string_index_include_resources,
                 is_split_member=is_split_member,
                 split_member_policy=split_member_policy,
+                log_context=_string_warning_log_context(report_metadata),
             )
             report_metadata["string_index_seconds"] = time.monotonic() - string_index_started
             if string_index is not None:
+                string_index_warnings = tuple(
+                    getattr(string_index, "resource_bounds_warnings", ()) or ()
+                )
+                _merge_resource_bounds_warnings(report_metadata, string_index_warnings)
                 report_metadata.update(_summarize_string_index_metadata(string_index))
                 try:
                     payload = _analyse_strings_from_index(
@@ -558,6 +605,7 @@ def analyze_apk(
                         cleartext_only=analysis_config.post_run_string_cleartext_only,
                         include_https_risk=analysis_config.post_run_string_include_https_risk,
                         artifact_context=report_metadata,
+                        warnings=string_index_warnings,
                     )
                     if isinstance(payload, Mapping):
                         payload = dict(payload)

@@ -258,6 +258,43 @@ def test_launch_scan_flow_emits_persist_end_for_deferred_footer(monkeypatch) -> 
     assert event_order.index(run_dispatch.log_events.PERSIST_END) < event_order.index(run_dispatch.log_events.RUN_END)
 
 
+def test_launch_scan_flow_persist_end_stays_completed_for_session_finalization_issue(monkeypatch) -> None:
+    outcome = make_outcome()
+
+    records: list[dict[str, object]] = []
+
+    class _Logger:
+        def info(self, _message, *, extra=None):
+            records.append(dict(extra or {}))
+
+        def warning(self, _message, *, extra=None):
+            records.append(dict(extra or {}))
+
+    patch_launch_scan_flow_defaults(monkeypatch, outcome=outcome)
+    monkeypatch.setattr(
+        run_dispatch,
+        "run_post_summary_postprocessing",
+        lambda **_k: make_post_summary(linkage_blocked_reason="static_run_id missing for one or more apps"),
+    )
+    monkeypatch.setattr(run_dispatch, "_session_finalization_issues", lambda **_k: ["session_linkage_blocked"])
+    monkeypatch.setattr(run_dispatch.logging_engine, "get_static_logger", lambda: _Logger())
+    monkeypatch.setattr(run_dispatch, "get_run_logger", lambda *_a, **_k: _Logger())
+
+    params = make_params(scope="all", scope_label="All apps", session_stamp="sess-persist-end-linkage")
+    selection = make_selection(scope="all", label="All apps")
+
+    run_dispatch.launch_scan_flow(selection, params, Path("."))
+
+    persist_end = [record for record in records if record.get("event") == run_dispatch.log_events.PERSIST_END]
+    run_end = [record for record in records if record.get("event") == run_dispatch.log_events.RUN_END]
+    assert persist_end
+    assert persist_end[-1]["status"] == "completed"
+    assert persist_end[-1]["persistence_error_count"] == 0
+    assert run_end
+    assert run_end[-1]["status"] == "failed"
+    assert "session_linkage_blocked" in (run_end[-1].get("failure_codes") or [])
+
+
 def test_launch_scan_flow_marks_run_failed_when_session_finalization_is_incomplete(monkeypatch) -> None:
     outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=7)],

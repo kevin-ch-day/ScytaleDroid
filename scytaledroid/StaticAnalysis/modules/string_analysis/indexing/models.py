@@ -87,6 +87,7 @@ class StringIndex:
     """Container with helper lookups for extracted strings."""
 
     strings: tuple[IndexedString, ...] = ()
+    resource_bounds_warnings: tuple[str, ...] = ()
     _hash_lookup: Mapping[str, IndexedString] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

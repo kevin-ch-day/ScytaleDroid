@@ -78,6 +78,59 @@ def test_report_saved_path_rollup_unique_vs_raw_counts_duplicates() -> None:
     assert any(s.get("event_count") == 3 for s in rollup["duplicate_archive_path_samples"])
 
 
+def test_collect_permission_parity_generated_packages_from_jsonl() -> None:
+    mod = _load_run_artifact_map()
+    with tempfile.TemporaryDirectory() as td:
+        log = Path(td) / "static_analysis.jsonl"
+        rows = [
+            {
+                "event": "run.phase",
+                "session_stamp": "sess-1",
+                "phase": "permission_snapshot_parity",
+                "status": "running",
+                "report_source": "saved_report",
+                "package_name": "com.example.reused",
+            },
+            {
+                "event": "run.phase",
+                "session_stamp": "sess-1",
+                "phase": "permission_snapshot_parity",
+                "status": "running",
+                "report_source": "generated",
+                "package_name": "com.example.changed",
+                "app_label": "Changed",
+                "app_index": 2,
+                "app_total": 3,
+                "ts": "2026-07-02T00:00:00+00:00",
+            },
+            {
+                "event": "run.phase",
+                "session_stamp": "other",
+                "phase": "permission_snapshot_parity",
+                "status": "running",
+                "report_source": "generated",
+                "package_name": "com.example.other",
+            },
+        ]
+        log.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+        generated = mod._collect_permission_parity_generated_packages(
+            session="sess-1",
+            jsonl_path=log,
+        )
+
+    assert generated == [
+        {
+            "package_name": "com.example.changed",
+            "app_label": "Changed",
+            "app_index": 2,
+            "app_total": 3,
+            "ts": "2026-07-02T00:00:00+00:00",
+            "report_source": "generated",
+        }
+    ]
+
+
 def test_strict_violations_ignore_raw_vs_unique_when_disk_aligns() -> None:
     mod = _load_run_artifact_map()
     report = {
@@ -103,6 +156,105 @@ def test_strict_violations_ignore_raw_vs_unique_when_disk_aligns() -> None:
     report_dup_strict = dict(report)
     report_dup_strict["audit_options"] = {"strict_log_duplicates": True}
     assert "duplicate_report_saved_events" in mod._strict_violations(report_dup_strict)
+
+
+def test_finalize_report_keeps_evidence_status_ok_for_log_dup_only(tmp_path: Path) -> None:
+    mod = _load_run_artifact_map()
+    report = {
+        "selection_contract": {"artifact_count": 2, "group_count": 2, "present": True},
+        "per_artifact_scanner_evidence": {
+            "archived_json_count": 2,
+            "raw_report_saved_event_count": 5,
+            "unique_archive_path_count": 2,
+            "report_saved_events_missing_archive_path": 0,
+            "duplicate_archive_event_extra_count": 3,
+            "duplicate_archive_path_count": 1,
+            "archive_paths_in_log_missing_on_disk": [],
+            "archive_paths_on_disk_not_in_log_events": [],
+            "bad_json_count": 0,
+        },
+        "latest_mirrors": {"duplicate_html_path_count_from_logs": 2},
+        "per_app_db_projection": {
+            "available": True,
+            "static_analysis_runs_by_status": {"COMPLETED": 2},
+            "matrix_risk_mismatch_run_count": 0,
+        },
+        "post_run_diagnostics": {"persistence_audit": {"present": True}},
+        "audit_options": {},
+        "harvest_linkage": {},
+    }
+
+    mod._finalize_artifact_envelope(
+        report,
+        repo=tmp_path,
+        no_db=False,
+        data_dir=tmp_path / "data",
+        output_dir=tmp_path / "output",
+        logs_dir=tmp_path / "logs",
+        analysis_apk_root=tmp_path / "apk",
+        app_version="test",
+    )
+
+    assert report["artifact_audit_verdict"]["evidence_status"] == "OK"
+    assert report["artifact_audit_verdict"]["session_state"] == "COMPLETE_WITH_LOG_WARNINGS"
+    assert report["artifact_audit_verdict"]["log_stream"]["log_duplication_without_evidence_gap"] is True
+
+
+def test_finalize_report_marks_parity_explained_log_duplicates_complete(tmp_path: Path) -> None:
+    mod = _load_run_artifact_map()
+    report = {
+        "selection_contract": {"artifact_count": 2, "group_count": 2, "present": True},
+        "per_artifact_scanner_evidence": {
+            "archived_json_count": 2,
+            "raw_report_saved_event_count": 3,
+            "unique_archive_path_count": 2,
+            "report_saved_events_missing_archive_path": 0,
+            "duplicate_archive_event_extra_count": 1,
+            "duplicate_archive_path_count": 1,
+            "duplicate_archive_path_samples": [
+                {
+                    "event_count": 2,
+                    "archive_path_repo_relative": "data/static_analysis/reports/archive/sess/a.json",
+                    "package_names": ["com.example.changed"],
+                }
+            ],
+            "archive_paths_in_log_missing_on_disk": [],
+            "archive_paths_on_disk_not_in_log_events": [],
+            "bad_json_count": 0,
+        },
+        "latest_mirrors": {"duplicate_html_path_count_from_logs": 1},
+        "permission_audit_directory": {
+            "changed_parity_packages": [{"package_name": "com.example.changed"}],
+        },
+        "per_app_db_projection": {
+            "available": True,
+            "static_analysis_runs_by_status": {"COMPLETED": 2},
+            "matrix_risk_mismatch_run_count": 0,
+        },
+        "post_run_diagnostics": {"persistence_audit": {"present": True}},
+        "audit_options": {},
+        "harvest_linkage": {},
+    }
+
+    mod._finalize_artifact_envelope(
+        report,
+        repo=tmp_path,
+        no_db=False,
+        data_dir=tmp_path / "data",
+        output_dir=tmp_path / "output",
+        logs_dir=tmp_path / "logs",
+        analysis_apk_root=tmp_path / "apk",
+        app_version="test",
+    )
+
+    verdict = report["artifact_audit_verdict"]
+    explanation = verdict["log_stream"]["duplicate_explanation"]
+    assert verdict["evidence_status"] == "OK"
+    assert verdict["session_state"] == "COMPLETE_WITH_EXPLAINED_LOG_DUPLICATES"
+    assert verdict["action_needed"] == "none"
+    assert explanation["status"] == "explained"
+    assert explanation["reason"] == "permission_snapshot_parity_regenerated_reports"
+    assert report["warnings"] == []
 
 
 def test_strict_violations_does_not_raise_on_non_numeric_counts() -> None:

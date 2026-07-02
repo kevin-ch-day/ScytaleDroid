@@ -188,7 +188,7 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
 
     assert result is None
     out = capsys.readouterr().out
-    assert "App Queue" in out
+    assert "Cohort status" in out
     assert "quota-satisfied" in out
     assert "8/5 valid" in out
     assert "retained extra" in out

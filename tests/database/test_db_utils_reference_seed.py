@@ -8,10 +8,12 @@ def test_reference_seed_executes_inserts(monkeypatch):
         return None
 
     monkeypatch.setattr(reference_seed, "run_sql", fake_run_sql)
+    monkeypatch.setattr(reference_seed, "table_exists", lambda *_a, **_k: True)
 
     reference_seed.ensure_default_reference_rows()
 
     # We expect at least the publishers + profiles inserts to run.
     assert any("android_app_publishers" in sql for sql, _p, _q in calls)
+    assert any("android_publisher_prefix_rules" in sql for sql, _p, _q in calls)
     assert any("android_app_profiles" in sql for sql, _p, _q in calls)
     assert any("SET display_name" in sql for sql, _p, _q in calls)

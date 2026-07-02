@@ -51,16 +51,18 @@ def queue_compact_legend(*, has_next_marker: bool) -> str:
 
 
 def queue_selection_shortcut_hint() -> str:
-    return (
-        "Select an app by number or name · "
-        "S summary · V grouped · Y history · H help · D diagnostics · B back"
-    )
+    return "Select an app by number or name"
+
+
+def queue_selection_shortcuts_hint() -> str:
+    return "S summary · V grouped · Y history · H help · D diagnostics · B back"
 
 
 __all__ = [
     "operator_next_action_label",
     "queue_compact_legend",
     "queue_selection_shortcut_hint",
+    "queue_selection_shortcuts_hint",
     "queue_table_ml_pool_label",
     "workbench_ml_pool_phrase",
 ]

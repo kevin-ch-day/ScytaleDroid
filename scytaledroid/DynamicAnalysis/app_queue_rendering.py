@@ -10,7 +10,6 @@ from scytaledroid.DynamicAnalysis.queue_operator_ui import (
     queue_compact_legend,
     queue_table_ml_pool_label,
 )
-from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.DynamicAnalysis.run_qualification import cohort_baseline_ml_pool_total
 from scytaledroid.Utils.DisplayUtils import text_blocks as _text_blocks
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
@@ -278,9 +277,8 @@ def render_queue_summary_block(
             footer_parts.append(f"Capture plan: {capture_plan}")
 
     print_summary_card(
-        "App Queue",
+        "Cohort status",
         items,
-        subtitle=active_research_cohort_label(),
         footer=" · ".join(footer_parts) if footer_parts else None,
     )
     print()

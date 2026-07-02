@@ -86,6 +86,29 @@ class _FakeApk:
         return _FakeResources()
 
 
+class _WarningResources:
+    def get_resolved_strings(self):
+        print("We are out of bound with this complex entry. Count: 65536")
+        return {
+            "com.example.app": {
+                "DEFAULT": {
+                    1: "warning resource string",
+                }
+            }
+        }
+
+
+class _WarningApk(_FakeApk):
+    filename = "warning.apk"
+
+    def get_android_resources(self):
+        return _WarningResources()
+
+
+class _WarningContextApk(_WarningApk):
+    filename = "warning-context.apk"
+
+
 def test_build_string_index_enriches_resolved_resource_strings() -> None:
     index = build_string_index(_FakeApk(), include_resources=True)
 
@@ -94,6 +117,38 @@ def test_build_string_index_enriches_resolved_resource_strings() -> None:
     assert "https://api.example.test/v1" in values
     assert all(entry.origin_type == "resource" for entry in index.strings)
     assert all(entry.apk_offset_kind == "resource_table" for entry in index.strings)
+
+
+def test_build_string_index_preserves_resource_bounds_warnings() -> None:
+    index = build_string_index(_WarningApk(), include_resources=True)
+
+    assert index.resource_bounds_warnings == (
+        "We are out of bound with this complex entry. Count: 65536",
+    )
+
+
+def test_build_string_index_logs_resource_bounds_warning_context() -> None:
+    with patch(
+        "scytaledroid.StaticAnalysis.modules.string_analysis.indexing.builder.log.warning"
+    ) as warning:
+        build_string_index(
+            _WarningContextApk(),
+            include_resources=True,
+            log_context={
+                "execution_id": "exec-1",
+                "session_stamp": "session-1",
+                "package_name": "com.example.app",
+                "sha256": "a" * 64,
+            },
+        )
+
+    warning.assert_called_once()
+    extra = warning.call_args.kwargs["extra"]
+    assert extra["event"] == "strings.resource_bounds_warning"
+    assert extra["execution_id"] == "exec-1"
+    assert extra["session_stamp"] == "session-1"
+    assert extra["package_name"] == "com.example.app"
+    assert extra["sha256"] == "a" * 64
 
 
 def test_build_string_index_respects_include_resources_false() -> None:

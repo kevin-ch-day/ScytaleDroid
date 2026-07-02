@@ -10,7 +10,10 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
 from scytaledroid.DynamicAnalysis import app_queue_state as _app_queue_state
-from scytaledroid.DynamicAnalysis.queue_operator_ui import queue_selection_shortcut_hint
+from scytaledroid.DynamicAnalysis.queue_operator_ui import (
+    queue_selection_shortcut_hint,
+    queue_selection_shortcuts_hint,
+)
 from scytaledroid.DynamicAnalysis.menus.queue_data_sources import (
     resolve_db_dynamic_lineage_context_map as _resolve_db_dynamic_lineage_context_map_impl,
     resolve_live_build_drift_map as _resolve_live_build_drift_map_impl,
@@ -272,7 +275,6 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
 
     while True:
         if prepared.dataset_apps_total > 0:
-            menu_utils.print_header("App Queue", "Select an app for capture or review")
             evidence_summary = evidence_summary or summarize_evidence_quota_fn(prepared.dataset_pkgs, prepared.cfg)
             quota = int(evidence_summary.get("quota_runs_counted", 0)) if evidence_summary else 0
             apps_ok = int(evidence_summary.get("apps_satisfied", 0)) if evidence_summary else 0
@@ -309,8 +311,8 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             if notes_line:
                 print(status_messages.status(notes_line, level="info"))
             print()
-        print()
-        menu_utils.print_hint(queue_selection_shortcut_hint())
+            menu_utils.print_hint(queue_selection_shortcut_hint())
+            menu_utils.print_hint(queue_selection_shortcuts_hint())
         choice = prompt_utils.prompt_text("Choose app # / name", required=False).strip()
 
         if not choice:

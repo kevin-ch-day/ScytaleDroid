@@ -179,6 +179,52 @@ def _permission_audit_directory_audit(
     return out
 
 
+def _collect_permission_parity_generated_packages(
+    *,
+    session: str,
+    jsonl_path: Path,
+) -> list[dict[str, Any]]:
+    """Return packages regenerated during permission snapshot parity."""
+
+    if not jsonl_path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    with jsonl_path.open("r", encoding="utf-8", errors="replace") as handle:
+        for raw in handle:
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if str(event.get("session_stamp") or "") != session:
+                continue
+            if event.get("event") != "run.phase":
+                continue
+            if event.get("phase") != "permission_snapshot_parity":
+                continue
+            if event.get("status") != "running":
+                continue
+            if event.get("report_source") != "generated":
+                continue
+            package = str(event.get("package_name") or "").strip()
+            if not package or package in seen:
+                continue
+            seen.add(package)
+            rows.append(
+                {
+                    "package_name": package,
+                    "app_label": event.get("app_label"),
+                    "app_index": event.get("app_index"),
+                    "app_total": event.get("app_total"),
+                    "ts": event.get("ts"),
+                    "report_source": event.get("report_source"),
+                }
+            )
+    return rows
+
+
 def _iter_harvest_receipt_session_dirs(
     receipts_root: Path, selection: dict[str, Any]
 ) -> tuple[list[Path], str]:
@@ -573,6 +619,7 @@ def _rollup_report_saved_archive_paths(
     """
 
     path_counts: Counter[str] = Counter()
+    path_packages: dict[str, set[str]] = {}
     missing_archive_path_events = 0
     for ev in log_events:
         raw = ev.get("archive_path")
@@ -583,6 +630,9 @@ def _rollup_report_saved_archive_paths(
         ap = _event_archive_path(ev, repo=repo)
         key = str(ap.resolve()) if ap is not None else f"unresolved:{raw_s}"
         path_counts[key] += 1
+        pkg = _event_package(ev)
+        if pkg:
+            path_packages.setdefault(key, set()).add(pkg)
 
     raw_n = len(log_events)
     unique_n = len(path_counts)
@@ -604,6 +654,9 @@ def _rollup_report_saved_archive_paths(
                 sample["archive_path_repo_relative"] = _rel_display(Path(pth), repo)
             except ValueError:
                 pass
+        pkgs = sorted(path_packages.get(pth) or [])
+        if pkgs:
+            sample["package_names"] = pkgs
         dup_samples.append(sample)
         if len(dup_samples) >= 12:
             break
@@ -1163,6 +1216,70 @@ def _build_evidence_invariant_summary(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _explain_report_saved_duplicates(
+    report: Mapping[str, Any],
+    *,
+    evidence_invariant: bool,
+) -> dict[str, Any]:
+    """Classify duplicate ``report.saved`` rows when evidence files still align."""
+
+    ev = report.get("per_artifact_scanner_evidence") or {}
+    dup_ev = _as_int(ev.get("duplicate_archive_event_extra_count")) or 0
+    samples = ev.get("duplicate_archive_path_samples") or []
+    sample_rows = [row for row in samples if isinstance(row, Mapping)]
+
+    parity = (report.get("permission_audit_directory") or {}).get("changed_parity_packages") or []
+    parity_packages = {
+        str(row.get("package_name") or "").strip().lower()
+        for row in parity
+        if isinstance(row, Mapping)
+    }
+    parity_packages.discard("")
+
+    duplicate_packages: set[str] = set()
+    samples_without_package = 0
+    for row in sample_rows:
+        names = row.get("package_names")
+        if isinstance(names, list):
+            row_pkgs = {str(name).strip().lower() for name in names if str(name).strip()}
+            duplicate_packages.update(row_pkgs)
+            if not row_pkgs:
+                samples_without_package += 1
+        else:
+            samples_without_package += 1
+
+    unexplained = sorted(duplicate_packages - parity_packages)
+    explained = bool(
+        evidence_invariant
+        and dup_ev > 0
+        and duplicate_packages
+        and not samples_without_package
+        and not unexplained
+        and parity_packages
+    )
+    status = "none"
+    reason = "no_duplicate_report_saved_events"
+    if dup_ev > 0:
+        if explained:
+            status = "explained"
+            reason = "permission_snapshot_parity_regenerated_reports"
+        else:
+            status = "needs_review"
+            reason = "unmatched_or_unattributed_duplicate_report_saved_events"
+
+    return {
+        "status": status,
+        "reason": reason,
+        "duplicate_archive_event_extra_count": dup_ev,
+        "duplicate_archive_path_sample_count": len(sample_rows),
+        "duplicate_packages": sorted(duplicate_packages),
+        "parity_regenerated_packages": sorted(parity_packages),
+        "unexplained_duplicate_packages": unexplained,
+        "samples_without_package": samples_without_package,
+        "evidence_invariant_holds": evidence_invariant,
+    }
+
+
 def _harvest_receipt_linkage_incomplete_audit(
     audit_opts: Mapping[str, Any],
     harvest_linkage: Mapping[str, Any],
@@ -1230,6 +1347,10 @@ def _finalize_artifact_envelope(
         and archived == sel_art == unique_n
         and unique_n > 0
     )
+    duplicate_explanation = _explain_report_saved_duplicates(
+        report,
+        evidence_invariant=evidence_invariant,
+    )
     bad_json = int(ev.get("bad_json_count") or 0)
     miss_disk = len(ev.get("archive_paths_in_log_missing_on_disk") or [])
     miss_log = len(ev.get("archive_paths_on_disk_not_in_log_events") or [])
@@ -1263,7 +1384,9 @@ def _finalize_artifact_envelope(
     if sel_art is not None and archived == sel_art == unique_n and unique_n > 0 and not pr.get("present"):
         warnings.append("Per-artifact counts match selection but persistence audit not present yet — post-run finalization may still be running.")
     if dup_ev > 0:
-        if evidence_invariant:
+        if duplicate_explanation.get("status") == "explained":
+            pass
+        elif evidence_invariant:
             warnings.append(
                 "Raw report.saved log events include duplicate archive_path entries; "
                 "on-disk session archive count still matches selection (unique paths aligned)."
@@ -1287,7 +1410,10 @@ def _finalize_artifact_envelope(
         warnings.append(f"{miss_log} on-disk archive JSON file(s) have no matching report.saved path in the log stream (stale or alternate logger).")
     if bad_json:
         warnings.append(f"{bad_json} archive JSON file(s) failed parse — evidence integrity issue.")
-    if dup_html:
+    if dup_html and not (
+        duplicate_explanation.get("status") == "explained"
+        and dup_html == dup_ev
+    ):
         warnings.append(f"Log stream lists duplicate html_path values ({dup_html}) — expected for some workflows but worth spot-checking.")
     if db_available and gc is not None and runs_total > 0 and runs_total != gc:
         warnings.append(f"DB static_analysis_runs row count ({runs_total}) != selection group_count ({gc}).")
@@ -1310,13 +1436,13 @@ def _finalize_artifact_envelope(
             "across receipt rows — last indexed row wins; investigate duplicate harvest sessions or retagged pulls."
         )
 
-    # Evidence / DB severity (dup report.saved lines → WARN, not ERROR, when disk matches unique paths)
+    # Evidence / DB severity. Raw duplicate report.saved lines are log-stream
+    # telemetry; when disk, selection, and unique archive paths align they should
+    # not downgrade evidence integrity.
     if bad_json > 0 or miss_disk > 0:
         evidence_status = "ERROR"
     elif (
         miss_log > 0
-        or dup_html > 0
-        or dup_ev > 0
         or miss_path_ev > 0
         or (unique_n > 0 and archived != unique_n)
         or harvest_receipt_linkage_incomplete
@@ -1368,8 +1494,12 @@ def _finalize_artifact_envelope(
         action = "wait_for_post_run_persistence"
     elif pr.get("present") and sel_present and sel_art is not None and archived == sel_art == unique_n and unique_n > 0:
         has_log_dup = dup_ev > 0 or (raw_log > unique_n and unique_n > 0)
+        log_dup_explained = has_log_dup and duplicate_explanation.get("status") == "explained"
         if no_db:
-            if has_log_dup:
+            if log_dup_explained:
+                session_state = "COMPLETE_WITH_EXPLAINED_LOG_DUPLICATES"
+                action = "none"
+            elif has_log_dup:
                 session_state = "COMPLETE_WITH_LOG_WARNINGS"
                 action = "review_log_duplication"
             else:
@@ -1379,6 +1509,9 @@ def _finalize_artifact_envelope(
             if skew > 0:
                 session_state = "COMPLETE_WITH_WARNINGS"
                 action = "review_matrix_risk_skew"
+            elif log_dup_explained:
+                session_state = "COMPLETE_WITH_EXPLAINED_LOG_DUPLICATES"
+                action = "none"
             elif has_log_dup:
                 session_state = "COMPLETE_WITH_LOG_WARNINGS"
                 action = "review_log_duplication"
@@ -1409,6 +1542,7 @@ def _finalize_artifact_envelope(
             "duplicate_archive_event_extra_count": dup_ev,
             "evidence_invariant_selection_archive_unique": evidence_invariant,
             "log_duplication_without_evidence_gap": bool(evidence_invariant and dup_ev > 0),
+            "duplicate_explanation": duplicate_explanation,
         },
         "harvest_receipt_linkage_incomplete": harvest_receipt_linkage_incomplete,
     }
@@ -1574,6 +1708,17 @@ def build_artifact_map_report(
         repo=repo,
         db_permission_audit_apps_rows=db_perm_rows,
     )
+    permission_audit_directory["changed_parity_packages"] = (
+        _collect_permission_parity_generated_packages(
+            session=session,
+            jsonl_path=static_jsonl,
+        )
+    )
+    if permission_audit_directory["changed_parity_packages"]:
+        permission_audit_directory["changed_parity_note"] = (
+            "Packages listed here were regenerated during permission snapshot parity; "
+            "matching duplicate report.saved paths are expected secondary saves."
+        )
 
     harvest_linkage: dict[str, Any]
     if include_harvest_linkage or include_harvest_receipt_linkage:

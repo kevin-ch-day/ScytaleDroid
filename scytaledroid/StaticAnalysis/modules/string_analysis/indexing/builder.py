@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Mapping
 from contextlib import redirect_stderr, redirect_stdout
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -73,6 +74,7 @@ def build_string_index(
     include_resources: bool = True,
     is_split_member: bool = False,
     split_member_policy: str = "full",
+    log_context: Mapping[str, object] | None = None,
 ) -> StringIndex:
     """Extract strings from *apk* and return a searchable index."""
 
@@ -89,22 +91,31 @@ def build_string_index(
     with redirect_stdout(buffer), redirect_stderr(buffer):
         collected, fd_output = _run_with_fd_capture(_collect)
     captured = buffer.getvalue() + fd_output
-    warnings = _extract_bounds_warnings(captured)
+    warnings = tuple(dict.fromkeys(_extract_bounds_warnings(captured)))
     if warnings:
         apk_path = getattr(apk, "filename", None)
         dedupe_key = apk_path or f"apk:{id(apk)}"
         if dedupe_key not in _BOUNDS_WARNING_SEEN:
             _BOUNDS_WARNING_SEEN.add(dedupe_key)
-            counts = _parse_bounds_counts(warnings)
+            counts = _parse_bounds_counts(list(warnings))
+            event_extra: dict[str, object] = {
+                "event": "strings.resource_bounds_warning",
+                "apk_path": apk_path,
+                "warning_lines": list(warnings),
+                "count_values": counts,
+            }
+            if log_context:
+                event_extra.update(
+                    {
+                        str(key): value
+                        for key, value in log_context.items()
+                        if value is not None
+                    }
+                )
             log.warning(
                 "Resource table parsing emitted bounds warnings",
                 category="static_analysis",
-                extra={
-                    "event": "strings.resource_bounds_warning",
-                    "apk_path": apk_path,
-                    "warning_lines": warnings,
-                    "count_values": counts,
-                },
+                extra=event_extra,
             )
 
     if not include_resource_table:
@@ -114,7 +125,7 @@ def build_string_index(
     else:
         filtered = collected
 
-    return StringIndex(strings=filtered)
+    return StringIndex(strings=filtered, resource_bounds_warnings=warnings)
 
 
 __all__ = ["build_string_index"]

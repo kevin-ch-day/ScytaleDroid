@@ -462,12 +462,32 @@ def launch_scan_flow_resolved(
             and str(note.get("code") or "").strip().lower() == "canonical_error"
             and str(note.get("message") or "").strip()
         ]
+        persistence_failures = [
+            str(note.get("message") or "")
+            for note in getattr(outcome, "audit_notes", []) or []
+            if isinstance(note, dict)
+            and str(note.get("code") or "").strip().lower() == "persistence_error"
+            and str(note.get("message") or "").strip()
+        ]
+        compat_export_failures = [
+            str(note.get("message") or "")
+            for note in getattr(outcome, "audit_notes", []) or []
+            if isinstance(note, dict)
+            and str(note.get("code") or "").strip().lower() == "compat_export_error"
+            and str(note.get("message") or "").strip()
+        ]
+        persistence_error_count = len(list(dict.fromkeys(persistence_failures)))
+        compat_export_error_count = len(list(dict.fromkeys(compat_export_failures)))
+        if persistence_error_count == 0 and bool(getattr(outcome, "persistence_failed", False)):
+            persistence_error_count = 1
+        if compat_export_error_count == 0 and bool(getattr(outcome, "compat_export_failed", False)):
+            compat_export_error_count = 1
         if not outcome.aborted:
             _dispatch._render_persistence_footer(
                 params.session_stamp,
                 had_errors=bool(
-                    getattr(outcome, "persistence_failed", False)
-                    or getattr(outcome, "compat_export_failed", False)
+                    persistence_error_count
+                    or compat_export_error_count
                 ),
                 canonical_failures=canonical_failures,
                 run_status=run_status,
@@ -482,10 +502,15 @@ def launch_scan_flow_resolved(
                     "applications": len(outcome.results or []),
                     "findings_persisted_total": None,
                     "string_samples_persisted_total": None,
-                    "persistence_error_count": len(list(dict.fromkeys(getattr(outcome, 'failures', []) or []))),
+                    "persistence_error_count": persistence_error_count,
                     "canonical_failure_count": len(canonical_failures),
+                    "compat_export_error_count": compat_export_error_count,
                     "compat_export_failed": bool(getattr(outcome, "compat_export_failed", False)),
-                    "status": "failed" if (run_status or "").upper() != "COMPLETED" else "completed",
+                    "status": (
+                        "failed"
+                        if persistence_error_count or canonical_failures or compat_export_error_count
+                        else "completed"
+                    ),
                 },
             )
         if outcome.results and not summary_render_failed and not outcome.aborted:

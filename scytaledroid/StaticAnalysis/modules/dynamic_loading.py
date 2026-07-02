@@ -52,6 +52,38 @@ _SENSITIVE_REFLECTION_TARGETS: tuple[str, ...] = (
 )
 
 
+def _string_warning_context(context: AppModuleContext) -> dict[str, object]:
+    keys = (
+        "execution_id",
+        "session_label",
+        "run_id",
+        "normalized_package_name",
+        "base_apk_sha256",
+        "artifact_role",
+        "artifact_index",
+        "artifact_total",
+        "is_split_member",
+    )
+    payload: dict[str, object] = {
+        "package_name": context.package_name,
+        "apk_path": str(context.apk_path),
+    }
+    if context.session_stamp:
+        payload["session_stamp"] = context.session_stamp
+    if context.scope_label:
+        payload["scope_label"] = context.scope_label
+    if context.sha256:
+        payload["sha256"] = context.sha256
+    payload.update(
+        {
+            key: context.metadata[key]
+            for key in keys
+            if context.metadata.get(key) is not None
+        }
+    )
+    return payload
+
+
 @dataclass(frozen=True)
 class _ReflectionCall:
     target_class: str
@@ -79,17 +111,17 @@ class DynamicLoadModule(StaticModule):
         apk, warnings = open_apk_safely(str(context.apk_path))
         if warnings:
             merge_bounds_warnings(context.metadata, warnings)
+            warning_context = _string_warning_context(context)
             log.warning(
                 "Resource table parsing emitted bounds warnings",
                 category="static_analysis",
                 extra={
                     "event": "dynload.resource_bounds_warning",
-                    "apk_path": str(context.apk_path),
-                    "package_name": context.package_name,
                     "warning_lines": warnings,
+                    **warning_context,
                 },
             )
-        index = build_string_index(apk)
+        index = build_string_index(apk, log_context=_string_warning_context(context))
 
         classloader_hits = [
             entry
