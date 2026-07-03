@@ -550,8 +550,11 @@ def _render_cohort_evidence_qualification_section(
         + int(getattr(row, "baseline_low_signal_supplemental", 0) or 0)
         for row in row_models
     )
+    baseline_non_idle = sum(int(getattr(row, "baseline_not_idle_supplemental", 0) or 0) for row in row_models)
     if baseline_pool > 0 or apps_satisfied >= int(dataset_apps_total):
         print(f"  ML training pool        : {baseline_pool} supplemental baseline(s) (tracker-scoped)")
+    if baseline_non_idle > 0:
+        print(f"  Non-idle baselines      : {baseline_non_idle} retained outside quota")
     print()
     print("  Per app")
     table_rows = [
@@ -682,19 +685,21 @@ def render_cohort_status_help() -> None:
     menu_utils.print_section("Columns")
     for line in (
         "Status = workflow state: complete, review, interactive, baseline, restore, refresh, or blocked.",
-        "Baseline = quota-counted runs over the minimum (e.g. 3/3), with supplemental detail inline (+1 extra, +2 low).",
+        "Baseline = quota-counted runs over the minimum (e.g. 3/3), with retained detail inline (+1 extra, +2 low, +3 non-idle).",
         "Interactive = quota-counted runs over the minimum; locked until baseline minimum is met.",
         "Gap = quota shortfall still required for archive math (3B, 2I, or 3B 2I); — when satisfied.",
         "Next = recommended operator move (interactive, review, baseline, ML pool, refresh, restore).",
         "QA = latest current-build run QA badge (invalid, valid+id, valid+L); explains Status=review.",
         "Build = static/evidence prep state (current, stale, mixed, db-only); wide terminals only.",
         "ML pool = quota-complete app with optional supplemental baseline runs for training/pattern averages.",
+        "Non-idle baseline = valid retained evidence outside quota because traffic exceeded idle-baseline limits; app-driven feed/media refresh can trigger it even when the operator is trying to stay idle.",
     ):
         print(status_messages.status(line, level="info", show_prefix=False))
     print()
     menu_utils.print_section("States and gaps")
     for line in (
         "locked = interactive phase unavailable until baseline minimum is met.",
+        "non-idle retained baselines do not unlock interactive; rerun baseline with the app mostly idle because the classifier treated the traffic as too active for idle-baseline quota.",
         "mixed = current-build and legacy-build evidence both exist.",
         "refresh = installed app build differs from the newest static plan (Status=refresh). Harvest/static refresh is required before dynamic continuation.",
         "identity mismatch = latest valid run does not match the active build identity; review historical vs current evidence carefully.",

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Callable
 
+from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.services.dynamic_target_state import derive_dynamic_target_state
+from scytaledroid.DynamicAnalysis.tracker_scope import default_resolve_tracker_run_identity, scope_tracker_runs_to_active_identity
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 
@@ -15,7 +20,7 @@ def _dataset_impact_label(latest_recent: Any) -> str:
         if supplemental_reason == "LOW_SIGNAL_IDLE":
             return "ML training pool (LOW_SIGNAL_IDLE)"
         if supplemental_reason == "BASELINE_NOT_IDLE":
-            return "ML training pool (BASELINE_NOT_IDLE)"
+            return "retained non-idle baseline"
         if supplemental_reason == "MANUAL_EXTRA_RUN":
             return "retained extra (manual extra)"
         if supplemental_reason == "SCRIPTED_EXTRA_RUN":
@@ -77,6 +82,152 @@ def _qa_value_style(valid: bool | None) -> str:
     if valid is False:
         return "warning"
     return "muted"
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _format_bytes(size: object) -> str:
+    try:
+        value = int(size)
+    except (TypeError, ValueError):
+        return "—"
+    if value <= 0:
+        return "0B"
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024:
+            return f"{value:.0f}{unit}"
+        value /= 1024
+    return f"{value:.1f}TB"
+
+
+def _format_rate(value: object) -> str:
+    try:
+        return f"{float(value):,.0f} B/s"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _format_ratio(value: object) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _format_duration(value: object) -> str:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if seconds <= 0:
+        return "0s"
+    if seconds >= 60:
+        minutes = int(seconds // 60)
+        remain = int(seconds % 60)
+        return f"{minutes}m {remain}s"
+    return f"{int(seconds)}s"
+
+
+def _non_idle_reason_labels(row: dict[str, object]) -> str:
+    mapping = {
+        "BASELINE_BYTES_HIGH": "bytes high",
+        "BASELINE_SUSTAINED_DOWNLINK": "avg high",
+        "BASELINE_P95_BURSTY": "p95 high",
+        "BASELINE_QUIC_MEDIA_HEAVY": "QUIC-heavy",
+    }
+    raw = row.get("baseline_not_idle_reasons")
+    if not isinstance(raw, list):
+        return "—"
+    labels: list[str] = []
+    for item in raw:
+        code = str(item or "").strip().upper()
+        if not code:
+            continue
+        label = mapping.get(code, code)
+        if label not in labels:
+            labels.append(label)
+    return ", ".join(labels) if labels else "—"
+
+
+def _active_non_idle_baseline_rows(package_name: str, state: Any) -> list[dict[str, object]]:
+    tracker = load_dataset_tracker()
+    apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+    entry = apps.get(package_name) if isinstance(apps, dict) else None
+    runs = entry.get("runs") if isinstance(entry, dict) and isinstance(entry.get("runs"), list) else []
+    if not runs:
+        return []
+
+    active_version = str(getattr(state, "active_version_code", "") or "").strip() or None
+    active_sha = str(getattr(state, "active_base_sha", "") or "").strip().lower() or None
+    scoped = scope_tracker_runs_to_active_identity(
+        package_name,
+        runs,
+        resolve_tracker_run_identity_fn=default_resolve_tracker_run_identity,
+        active_identity_fn=lambda _pkg: (active_version, active_sha),
+    )
+    active_runs = [row for row in scoped.get("active_runs", []) if isinstance(row, dict)]
+    filtered = [
+        row
+        for row in active_runs
+        if row.get("valid_dataset_run") is True
+        and row.get("countable") is False
+        and str(row.get("run_profile") or "").strip().lower() == "baseline_idle"
+        and row.get("baseline_not_idle") is True
+    ]
+    filtered.sort(key=lambda row: str(row.get("ended_at") or row.get("started_at") or ""), reverse=True)
+    return filtered
+
+
+def _non_idle_baseline_detail_rows(package_name: str, state: Any) -> list[list[str]]:
+    detail_rows: list[list[str]] = []
+    for row in _active_non_idle_baseline_rows(package_name, state):
+        run_id = str(row.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+        report = _load_json(run_dir / "analysis" / "pcap_report.json")
+        features = _load_json(run_dir / "analysis" / "pcap_features.json")
+        cap = (report.get("capinfos") or {}).get("parsed") if isinstance(report.get("capinfos"), dict) else {}
+        cap = cap if isinstance(cap, dict) else {}
+        metrics = features.get("metrics") if isinstance(features.get("metrics"), dict) else {}
+        proxies = features.get("proxies") if isinstance(features.get("proxies"), dict) else {}
+        detail_rows.append(
+            [
+                run_id,
+                _format_duration(cap.get("capture_duration_s")),
+                _format_bytes(cap.get("data_size_bytes")),
+                _format_rate(metrics.get("bytes_per_second_avg") if metrics.get("bytes_per_second_avg") is not None else cap.get("data_byte_rate_bps")),
+                _format_rate(metrics.get("bytes_per_second_p95")),
+                _format_ratio(proxies.get("quic_ratio")),
+                _non_idle_reason_labels(row),
+                "no",
+                "no",
+            ]
+        )
+    return detail_rows
+
+
+def _render_non_idle_baseline_detail(
+    *,
+    package_name: str,
+    state: Any,
+    menu_utils: Any,
+) -> None:
+    rows = _non_idle_baseline_detail_rows(package_name, state)
+    if not rows:
+        return
+    print()
+    menu_utils.print_section("Retained Non-Idle Baselines")
+    menu_utils.print_table(
+        ["Run ID", "Dur", "Bytes", "Avg B/s", "P95 B/s", "QUIC", "Reasons", "ML", "Quota"],
+        rows,
+    )
 
 
 def render_selected_app_review(
@@ -183,6 +334,11 @@ def render_selected_app_recent_runs(
             ]
         )
     menu_utils.print_table(["#", "Ended", "Profile", "QA", "Dataset", "Run ID"], rows)
+    _render_non_idle_baseline_detail(
+        package_name=str(getattr(state, "package_name", "") or ""),
+        state=state,
+        menu_utils=menu_utils,
+    )
     if int(getattr(state, "baseline_idle_pcap_missing_streak", 0) or 0) > 0:
         print(
             status_messages.status(
@@ -239,6 +395,7 @@ def render_selected_app_diagnostics(
     ml_pool_total = int(getattr(state.counts, "baseline_extra_valid", 0) or 0) + int(
         getattr(state.counts, "baseline_low_signal_valid", 0) or 0
     )
+    non_idle_baselines = int(getattr(state.counts, "baseline_not_idle_valid", 0) or 0)
     print_summary_card(
         display_label,
         [
@@ -259,6 +416,11 @@ def render_selected_app_diagnostics(
                 value_style="muted",
             ),
             summary_item("ML pool", str(ml_pool_total), value_style="accent" if ml_pool_total > 0 else "muted"),
+            summary_item(
+                "Non-idle baseline",
+                str(non_idle_baselines),
+                value_style="warning" if non_idle_baselines > 0 else "muted",
+            ),
         ],
         subtitle="Diagnostics",
     )
@@ -291,6 +453,13 @@ def render_selected_app_diagnostics(
             ),
         ],
         [
+            "Retained non-idle baseline",
+            (
+                f"non-idle={int(getattr(state.counts, 'baseline_not_idle_valid', 0) or 0)}"
+                " | quota=no | ml_pool=no"
+            ),
+        ],
+        [
             "Retained extra interactive",
             (
                 f"extra={int(getattr(state.counts, 'interactive_extra_valid', 0) or 0)}"
@@ -308,6 +477,11 @@ def render_selected_app_diagnostics(
         rows.append(["Latest PCAP detail", target_state.latest_pcap_failure_detail])
     menu_utils.print_section("Detail")
     menu_utils.print_table(["Field", "Value"], rows)
+    _render_non_idle_baseline_detail(
+        package_name=package_name,
+        state=state,
+        menu_utils=menu_utils,
+    )
     top = tuple(getattr(state, "exclusion_reason_top", ()) or ())
     if top:
         print()

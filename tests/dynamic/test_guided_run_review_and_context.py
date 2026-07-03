@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from scytaledroid.DynamicAnalysis.controllers import guided_run
 from scytaledroid.DynamicAnalysis.controllers import selected_app_review
+from scytaledroid.Utils.DisplayUtils import menu_utils
 
 from tests.dynamic._guided_run_state_support import (
     make_dataset_state,
@@ -319,7 +321,7 @@ def test_dataset_impact_label_distinguishes_manual_and_scripted_extra_runs() -> 
     extra_baseline_row = SimpleNamespace(valid=True, supplemental_reason="EXTRA_RUN", countable=False)
     assert (
         selected_app_review._dataset_impact_label(baseline_not_idle_row)
-        == "ML training pool (BASELINE_NOT_IDLE)"
+        == "retained non-idle baseline"
     )
     assert (
         selected_app_review._dataset_impact_label(extra_baseline_row)
@@ -475,6 +477,155 @@ def test_guided_run_diagnostics_show_retained_extra_breakdown(monkeypatch, capsy
     assert "extra=1 | low-signal=0" in out
 
 
+def test_selected_app_diagnostics_show_non_idle_reason_codes_and_ml_pool_no(monkeypatch, tmp_path, capsys) -> None:
+    package = "com.twitter.android"
+    run_id = "x-non-idle-1"
+    run_dir = tmp_path / "evidence" / "dynamic" / run_id / "analysis"
+    run_dir.mkdir(parents=True)
+    (run_dir / "pcap_report.json").write_text(
+        json.dumps({"capinfos": {"parsed": {"capture_duration_s": 480.0, "data_size_bytes": 7_800_000}}}),
+        encoding="utf-8",
+    )
+    (run_dir / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"bytes_per_second_avg": 28_500.0, "bytes_per_second_p95": 305_000.0},
+                "proxies": {"quic_ratio": 0.68},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(selected_app_review.app_config, "OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        selected_app_review,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                package: {
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "ended_at": "2026-07-03T00:00:00Z",
+                            "run_profile": "baseline_idle",
+                            "valid_dataset_run": True,
+                            "countable": False,
+                            "baseline_not_idle": True,
+                            "baseline_not_idle_reasons": [
+                                "BASELINE_BYTES_HIGH",
+                                "BASELINE_QUIC_MEDIA_HEAVY",
+                            ],
+                            "version_code": "312031000",
+                            "base_apk_sha256": "sha-active",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    state = make_dataset_state(
+        package,
+        baseline_valid_runs=2,
+        interactive_valid_runs=0,
+        active_version_code="312031000",
+        active_base_sha="sha-active",
+    )
+
+    selected_app_review.render_selected_app_diagnostics(
+        package_name=package,
+        display_label="X (Twitter)",
+        state=state,
+        queue_action="baseline",
+        db_active_sessions=2,
+        db_historical_sessions=5,
+        menu_utils=menu_utils,
+    )
+
+    out = capsys.readouterr().out
+    assert "Retained Non-Idle Baselines" in out
+    assert "bytes high" in out
+    assert "QUIC" in out
+    assert "ML" in out
+    assert "Quota" in out
+    assert "no" in out
+
+
+def test_selected_app_recent_runs_show_non_idle_reason_codes_and_ml_pool_no(monkeypatch, tmp_path, capsys) -> None:
+    package = "com.twitter.android"
+    run_id = "x-non-idle-1"
+    run_dir = tmp_path / "evidence" / "dynamic" / run_id / "analysis"
+    run_dir.mkdir(parents=True)
+    (run_dir / "pcap_report.json").write_text(
+        json.dumps({"capinfos": {"parsed": {"capture_duration_s": 480.0, "data_size_bytes": 7_800_000}}}),
+        encoding="utf-8",
+    )
+    (run_dir / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"bytes_per_second_avg": 28_500.0, "bytes_per_second_p95": 305_000.0},
+                "proxies": {"quic_ratio": 0.68},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(selected_app_review.app_config, "OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        selected_app_review,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                package: {
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "ended_at": "2026-07-03T00:00:00Z",
+                            "run_profile": "baseline_idle",
+                            "valid_dataset_run": True,
+                            "countable": False,
+                            "baseline_not_idle": True,
+                            "baseline_not_idle_reasons": [
+                                "BASELINE_BYTES_HIGH",
+                                "BASELINE_QUIC_MEDIA_HEAVY",
+                            ],
+                            "version_code": "312031000",
+                            "base_apk_sha256": "sha-active",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    state = make_dataset_state(
+        package,
+        active_version_code="312031000",
+        active_base_sha="sha-active",
+        recent_runs=(
+            make_recent_summary(
+                ended_at="2026-07-03T00:00:00Z",
+                run_profile="baseline_idle",
+                interaction_level="minimal",
+                valid=True,
+                countable=False,
+                supplemental_reason="BASELINE_NOT_IDLE",
+                run_id=run_id,
+                status_label="VALID (BASELINE_NOT_IDLE)",
+            ),
+        ),
+    )
+
+    selected_app_review.render_selected_app_recent_runs(
+        state,
+        menu_utils=menu_utils,
+        status_messages=guided_run.status_messages,
+        run_profile_label_fn=lambda profile: str(profile or "—"),
+    )
+
+    out = capsys.readouterr().out
+    assert "Recent Tracker Runs" in out
+    assert "Retained Non-Idle Baselines" in out
+    assert "bytes high" in out
+    assert "QUIC" in out
+
+
 def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> None:
     package = "com.facebook.orca"
     select_package_calls, select_package = one_shot_package_selector(package)
@@ -563,7 +714,6 @@ def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) ->
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Unknown build" in out
     assert "no current-build evidence" in out
     assert "No dynamic evidence exists yet for com.guardian." in out
     assert "1) Baseline run" in out
