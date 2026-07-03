@@ -120,7 +120,7 @@ def print_run_summary(result, duration_label: str) -> None:
                 lines.append(
                     (
                         "Exploratory class",
-                        "BASELINE_NOT_IDLE (ML training pool, not quota-counted)",
+                        "BASELINE_NOT_IDLE (retained non-idle baseline, not quota-counted)",
                     )
                 )
             min_bytes = validity.get("min_pcap_bytes")
@@ -143,6 +143,45 @@ def print_run_summary(result, duration_label: str) -> None:
                 detail = _countability_detail(str(pkg) if pkg else None, result.dynamic_run_id)
                 if detail:
                     lines.append(("Quota detail", detail))
+                if _is_baseline_not_idle_extra(validity, run_profile):
+                    non_idle_reasons = _baseline_not_idle_reasons(result.dynamic_run_id, validity)
+                    metric_snapshot = _non_idle_metric_snapshot(run_dir)
+                    threshold_crossed = _non_idle_threshold_crossed(result.dynamic_run_id, validity)
+                    lines.append(
+                        (
+                            "Quota explanation",
+                            "This run was valid and retained, but excluded from idle-baseline quota because runtime traffic exceeded idle-baseline limits.",
+                        )
+                    )
+                    if non_idle_reasons:
+                        lines.append(("Reasons", "; ".join(non_idle_reasons)))
+                    lines.append(("Retained as", "non-idle baseline evidence"))
+                    lines.append(("Included in idle ML pool", "no"))
+                    duration_line = (
+                        format_seconds(metric_snapshot.get("duration_s"))
+                        if metric_snapshot.get("duration_s") is not None
+                        else None
+                    )
+                    if duration_line:
+                        lines.append(("Duration", duration_line))
+                    try:
+                        total_bytes = int(metric_snapshot.get("total_bytes"))
+                    except (TypeError, ValueError):
+                        total_bytes = None
+                    if total_bytes is not None:
+                        lines.append(("Total bytes", _format_bytes(total_bytes)))
+                    avg_rate = _fmt_rate(metric_snapshot.get("avg_bytes_per_sec"))
+                    if avg_rate:
+                        lines.append(("Avg bytes/sec", avg_rate))
+                    p95_rate = _fmt_rate(metric_snapshot.get("p95_bytes_per_sec"))
+                    if p95_rate:
+                        lines.append(("P95 bytes/sec", p95_rate))
+                    quic_ratio = _fmt_ratio(metric_snapshot.get("quic_ratio"))
+                    if quic_ratio:
+                        lines.append(("QUIC ratio", quic_ratio))
+                    if threshold_crossed:
+                        lines.append(("Threshold crossed", threshold_crossed))
+                    lines.append(("Next baseline", "Repeat with stricter idle behavior if quota progress is needed."))
                 verdict_line = _three_verdict_label(result.dynamic_run_id)
             elif run_profile:
                 # Fallback when tracker isn't available.
@@ -606,17 +645,30 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
     source = "tracker_quota_marking"
     countable = bool(run.get("countable"))
     reason = str(run.get("paper_exclusion_primary_reason_code") or "").strip()
-    # Quota-countability and paper eligibility are separate layers. For baseline
-    # low-signal policy exclusions, prefer authoritative manifest dataset flags
-    # (not tracker cache) when available.
-    low_signal = bool(run.get("low_signal"))
+    # Prefer tracker/finalization truth; only fall back to manifest fields when
+    # the tracker row does not carry an explicit value.
+    low_signal = (
+        True if run.get("low_signal") is True else False if run.get("low_signal") is False else None
+    )
+    baseline_not_idle = (
+        True
+        if run.get("baseline_not_idle") is True
+        else False
+        if run.get("baseline_not_idle") is False
+        else None
+    )
     run_manifest = _load_manifest(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / str(dynamic_run_id))
     if isinstance(run_manifest, dict):
         ds = run_manifest.get("dataset") if isinstance(run_manifest.get("dataset"), dict) else {}
-        if isinstance(ds, dict) and ds.get("low_signal") is not None:
+        if isinstance(ds, dict) and low_signal is None and ds.get("low_signal") is not None:
             low_signal = bool(ds.get("low_signal"))
+        if isinstance(ds, dict) and baseline_not_idle is None and ds.get("baseline_not_idle") is not None:
+            baseline_not_idle = bool(ds.get("baseline_not_idle"))
     run_profile = str(run.get("run_profile") or "").strip().lower()
-    if run.get("valid_dataset_run") is True and run_profile == "baseline_idle" and low_signal:
+    if run.get("valid_dataset_run") is True and run_profile == "baseline_idle" and baseline_not_idle:
+        source = "baseline_activity_policy"
+        reason = "BASELINE_NOT_IDLE"
+    elif run.get("valid_dataset_run") is True and run_profile == "baseline_idle" and low_signal:
         source = "low_signal_policy"
         reason = "LOW_SIGNAL_IDLE"
     elif run.get("valid_dataset_run") is True and not countable and bool(run.get("extra_run")):
@@ -627,6 +679,107 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
     if reason:
         parts.append(f"reason={reason}")
     return ", ".join(parts)
+
+
+def _is_baseline_not_idle_extra(validity: dict[str, object], run_profile: str | None) -> bool:
+    return (
+        validity.get("valid_dataset_run") is True
+        and validity.get("countable") is False
+        and validity.get("baseline_not_idle") is True
+        and str(run_profile or "").strip().lower() == "baseline_idle"
+    )
+
+
+def _baseline_not_idle_reason_text(code: str) -> str:
+    mapping = {
+        "BASELINE_BYTES_HIGH": "total bytes crossed the idle-baseline limit",
+        "BASELINE_SUSTAINED_DOWNLINK": "sustained average throughput crossed the idle-baseline limit",
+        "BASELINE_P95_BURSTY": "burst throughput crossed the idle-baseline limit",
+        "BASELINE_QUIC_MEDIA_HEAVY": "QUIC-heavy transport crossed the idle-baseline limit",
+    }
+    return mapping.get(str(code or "").strip().upper(), str(code or "").strip().upper())
+
+
+def _baseline_not_idle_reasons(dynamic_run_id: str | None, validity: dict[str, object] | None) -> list[str]:
+    reasons: list[str] = []
+    row = _tracker_run_row(dynamic_run_id)
+    if isinstance(row, dict):
+        raw = row.get("baseline_not_idle_reasons")
+        if isinstance(raw, list):
+            reasons.extend(str(item).strip() for item in raw if str(item).strip())
+    if not reasons and isinstance(validity, dict):
+        raw = validity.get("baseline_not_idle_reasons")
+        if isinstance(raw, list):
+            reasons.extend(str(item).strip() for item in raw if str(item).strip())
+    out: list[str] = []
+    for reason in reasons:
+        label = _baseline_not_idle_reason_text(reason)
+        if label and label not in out:
+            out.append(label)
+    return out
+
+
+def _non_idle_threshold_crossed(dynamic_run_id: str | None, validity: dict[str, object] | None) -> str | None:
+    reasons: list[str] = []
+    row = _tracker_run_row(dynamic_run_id)
+    if isinstance(row, dict):
+        raw = row.get("baseline_not_idle_reasons")
+        if isinstance(raw, list):
+            reasons.extend(str(item).strip().upper() for item in raw if str(item).strip())
+    if not reasons and isinstance(validity, dict):
+        raw = validity.get("baseline_not_idle_reasons")
+        if isinstance(raw, list):
+            reasons.extend(str(item).strip().upper() for item in raw if str(item).strip())
+    labels: list[str] = []
+    for code in reasons:
+        label = {
+            "BASELINE_BYTES_HIGH": "total bytes",
+            "BASELINE_SUSTAINED_DOWNLINK": "avg bytes/sec",
+            "BASELINE_P95_BURSTY": "p95 bytes/sec",
+            "BASELINE_QUIC_MEDIA_HEAVY": "QUIC ratio",
+        }.get(code)
+        if label and label not in labels:
+            labels.append(label)
+    if not labels:
+        return None
+    return ", ".join(labels)
+
+
+def _non_idle_metric_snapshot(run_dir: Path | None) -> dict[str, object]:
+    if not run_dir:
+        return {}
+    report = _load_json(run_dir / "analysis" / "pcap_report.json") or {}
+    features = _load_json(run_dir / "analysis" / "pcap_features.json") or {}
+    cap = (report.get("capinfos") or {}).get("parsed") or {}
+    metrics = features.get("metrics") if isinstance(features.get("metrics"), dict) else {}
+    proxies = features.get("proxies") if isinstance(features.get("proxies"), dict) else {}
+    return {
+        "duration_s": cap.get("capture_duration_s") if isinstance(cap, dict) else None,
+        "total_bytes": cap.get("data_size_bytes") if isinstance(cap, dict) else None,
+        "avg_bytes_per_sec": (
+            metrics.get("bytes_per_second_avg")
+            if isinstance(metrics, dict) and metrics.get("bytes_per_second_avg") is not None
+            else cap.get("data_byte_rate_bps")
+            if isinstance(cap, dict)
+            else None
+        ),
+        "p95_bytes_per_sec": metrics.get("bytes_per_second_p95") if isinstance(metrics, dict) else None,
+        "quic_ratio": proxies.get("quic_ratio") if isinstance(proxies, dict) else None,
+    }
+
+
+def _fmt_rate(value: object) -> str | None:
+    try:
+        return f"{float(value):,.0f} B/s"
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_ratio(value: object) -> str | None:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return None
 
 
 def _dataset_validity_reasons(dynamic_run_id: str | None) -> list[str] | None:

@@ -80,6 +80,7 @@ def test_render_cohort_status_help_mentions_retained_extra_and_historical(monkey
     assert "+L" in out
     assert "3/3" in out
     assert "+1 extra" in out
+    assert "+3 non-idle" in out
     assert "Next" in out
     assert "Build" in out
     assert "db-only" in out
@@ -89,6 +90,11 @@ def test_render_cohort_status_help_mentions_retained_extra_and_historical(monkey
     assert "identity mismatch" in out
     assert "baseline gap" in out
     assert "interactive gap" in out
+    assert "Non-idle baseline" in out
+    assert "valid retained evidence outside quota" in out
+    assert "feed/media refresh can trigger it" in out
+    assert "non-idle retained baselines do not unlock interactive" in out
+    assert "classifier treated the traffic as too active for idle-baseline quota" in out
     out_lc = out.lower()
     assert "evidence-authoritative quota" in out_lc
     assert "tracker-scoped latest-run state" in out_lc

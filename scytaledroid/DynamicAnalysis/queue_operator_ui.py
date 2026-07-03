@@ -44,6 +44,7 @@ def queue_compact_legend(*, has_next_marker: bool) -> str:
         "QA: valid / invalid / valid+id / valid+L",
         "Gap: quota shortfall (3B 2I)",
         "ML: supplemental baseline count for training",
+        "Baseline suffixes: extra / low / non-idle; non-idle = valid baseline retained outside quota because traffic exceeded idle-baseline limits, often from app-driven feed/media refresh",
     ]
     if has_next_marker:
         parts.insert(0, "> marks recommended next app")
