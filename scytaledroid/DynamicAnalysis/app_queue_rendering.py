@@ -202,6 +202,7 @@ def render_queue_summary_block(
     extra_runs: int,
     freeze_ok: bool,
     next_row: Any | None,
+    capture_device_selected: bool = True,
 ) -> None:
     ml_pool_total = cohort_baseline_ml_pool_total(list(getattr(prepared, "row_models", None) or []))
     row_models = list(prepared.row_models or [])
@@ -233,11 +234,11 @@ def render_queue_summary_block(
     items = [
         summary_item("Apps", f"{apps_ok}/{prepared.dataset_apps_total} quota-satisfied"),
         summary_item(
-            "Quota",
+            "Quota" if capture_device_selected else "Tracked-build queue",
             quota_value,
             value_style="warning" if remaining > 0 else "success",
         ),
-        summary_item("Current build", " · ".join(current_parts)),
+        summary_item("Current build" if capture_device_selected else "Tracked build", " · ".join(current_parts)),
         summary_item("History", " · ".join(history_parts) if history_parts else "—"),
         summary_item(
             "Archive",
@@ -271,7 +272,9 @@ def render_queue_summary_block(
         footer_parts.append(
             f"Next: {next_row.display_name} — {operator_next_action_label(next_row)}"
         )
-    if remaining > 0:
+    if not capture_device_selected:
+        footer_parts.append("Select a device to verify live build drift and enable capture guidance.")
+    elif remaining > 0:
         capture_plan = app_queue_state.format_capture_plan_line(row_models, limit=3)
         if capture_plan:
             footer_parts.append(f"Capture plan: {capture_plan}")

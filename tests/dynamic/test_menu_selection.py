@@ -220,6 +220,71 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(monke
     assert captured["rows"][2] == [">3", "ESPN", "review", "3B 2I", "review", "invalid", "ready", "0/3", "locked", "—"]
 
 
+def test_queue_summary_without_selected_device_uses_tracked_build_wording(capsys) -> None:
+    row = menu_selection.PreparedPackageSelectionRow(
+        full_row=[],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=3,
+        package_name="com.pinterest",
+        display_name="Pinterest",
+        baseline_countable=3,
+        baseline_extra=0,
+        interactive_countable=0,
+        interactive_extra=0,
+        need_baseline=0,
+        need_interactive=4,
+        prep_label="current",
+        qa_label="valid",
+        next_label="manual interaction",
+        lineage_state="current_build_observed",
+    )
+    prepared = menu_selection.PreparedPackageSelectionView(
+        packages=[("com.pinterest", None, None, "Pinterest")],
+        dataset_pkgs={"com.pinterest"},
+        cfg=_Cfg(),
+        rows=[],
+        op_rows=[],
+        build_rows=[],
+        dataset_apps_total=1,
+        dataset_apps_complete=0,
+        dataset_valid_runs_total=3,
+        current_build_ready_count=0,
+        current_build_in_progress_count=1,
+        current_build_review_count=0,
+        stale_app_count=0,
+        row_models=[row],
+        expected_runs=5,
+        evidence_summary={
+            "evidence_root_exists": True,
+            "quota_runs_counted": 3,
+            "apps_satisfied": 0,
+            "extra_eligible_runs": 0,
+        },
+        capture_device_selected=False,
+    )
+
+    menu_selection._render_queue_summary_block(
+        prepared=prepared,
+        quota=3,
+        apps_ok=0,
+        remaining=2,
+        extra_runs=0,
+        freeze_ok=False,
+        next_row=row,
+        capture_device_selected=False,
+    )
+
+    out = capsys.readouterr().out
+    assert "Tracked-build queue" in out
+    assert "Tracked build" in out
+    assert "Select a device to verify live build drift and enable capture guidance." in out
+    assert "Capture plan:" not in out
+    assert "Plan priority:" not in out
+
+
 def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeypatch) -> None:
     captured = {}
 
