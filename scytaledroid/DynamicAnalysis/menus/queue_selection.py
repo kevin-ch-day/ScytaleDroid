@@ -56,6 +56,7 @@ class PreparedPackageSelectionView:
     expected_runs: int = 0
     evidence_summary: dict[str, int | bool] | None = None
     row_models: list["PreparedPackageSelectionRow"] | None = None
+    capture_device_selected: bool = True
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,7 @@ def prepare_package_selection_view(
         expected_runs=expected_runs,
         evidence_summary=evidence_summary,
         row_models=row_models,
+        capture_device_selected=bool(str(device_serial or "").strip()),
     )
 
 
@@ -295,6 +297,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
                 extra_runs=extra_runs,
                 freeze_ok=freeze_ok,
                 next_row=next_row,
+                capture_device_selected=bool(getattr(prepared, "capture_device_selected", True)),
             )
 
             _render_compact_queue_table(
@@ -445,6 +448,7 @@ def _render_queue_summary_block(
     extra_runs: int,
     freeze_ok: bool,
     next_row: PreparedPackageSelectionRow | None,
+    capture_device_selected: bool = True,
 ) -> None:
     _app_queue_rendering.render_queue_summary_block(
         prepared=prepared,
@@ -454,6 +458,7 @@ def _render_queue_summary_block(
         extra_runs=extra_runs,
         freeze_ok=freeze_ok,
         next_row=next_row,
+        capture_device_selected=capture_device_selected,
     )
 
 
