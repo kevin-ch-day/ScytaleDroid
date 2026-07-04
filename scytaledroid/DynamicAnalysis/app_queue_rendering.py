@@ -310,27 +310,18 @@ def render_queue_footer_block(
     warnings_line: str = "",
     notes_line: str = "",
 ) -> None:
-    items = [
-        summary_item("Select", queue_selection_shortcut_hint(), value_style="accent"),
-        summary_item("Shortcuts", queue_selection_shortcuts_hint(), value_style="muted"),
-    ]
-    footer_parts: list[str] = []
+    notes_parts: list[str] = []
     if warnings_line:
-        items.insert(
-            0,
-            summary_item("Attention", _clean_footer_line(warnings_line), value_style="warning"),
-        )
-        footer_parts.append("Press D for deeper diagnostics.")
+        notes_parts.append(_clean_footer_line(warnings_line))
     if notes_line:
-        items.append(summary_item("Notes", _clean_footer_line(notes_line), value_style="muted"))
-        if not footer_parts:
-            footer_parts.append("Press D for evidence lineage detail.")
+        notes_parts.append(_clean_footer_line(notes_line))
     print()
-    print_summary_card(
-        "Queue actions",
-        items,
-        footer=" ".join(footer_parts) if footer_parts else None,
-    )
+    if notes_parts:
+        print(f"{_apply_style('ℹ [INFO]', 'accent', bold=True)} {' | '.join(notes_parts)}")
+    print(f"→ {queue_selection_shortcut_hint()}")
+    print(f"→ Shortcuts: {queue_selection_shortcuts_hint()}")
+    if warnings_line or notes_line:
+        print("Press D for evidence lineage detail.")
 
 
 def render_queue_summary_block(

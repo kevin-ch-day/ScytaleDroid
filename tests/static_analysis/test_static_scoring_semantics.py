@@ -53,6 +53,9 @@ def test_html_report_labels_risk_as_heuristic_indicator_surface() -> None:
                     "manifest_source": "androguard",
                     "manifest_semantics_source": "androguard",
                     "resource_open_source": "aapt2_metadata_fallback",
+                    "resource_bounds_warning_count": 1,
+                    "resource_bounds_warning_severity": "minor",
+                    "resource_parse_state": "minor",
                     "label_source": "aapt2",
                     "string_index_source": "androguard",
                 },
@@ -67,6 +70,8 @@ def test_html_report_labels_risk_as_heuristic_indicator_surface() -> None:
     assert "Permission band" in html
     assert "Parser provenance" in html
     assert "resources=aapt2_metadata_fallback" in html
+    assert "bounds=1/minor" in html
+    assert "resource-parse=minor" in html
     assert "<th>Risk</th>" not in html
     assert "<h2>Risk</h2>" not in html
 

@@ -209,6 +209,17 @@ def test_build_run_health_document_preserves_legacy_partial_but_exposes_complete
             "skipped_detectors": [],
         },
     )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.run_health.document.rollup_parse_fallback_signals",
+        lambda _app: {
+            "resource_fallback_used_artifacts": 0,
+            "resource_bounds_warning_artifacts": 1,
+            "resource_parse_partial_artifacts": 1,
+            "resource_reparse_candidate_artifacts": 1,
+            "label_parse_signal_artifacts": 0,
+            "parse_fallback_events_est": 3,
+        },
+    )
 
     outcome = RunOutcome(
         [app],
@@ -236,6 +247,12 @@ def test_build_run_health_document_preserves_legacy_partial_but_exposes_complete
     assert app_doc["db_persistence_status"] == "ok"
     assert app_doc["detector_posture"] == "policy_or_finding_gates"
     assert app_doc["finding_fidelity_status"] == "complete"
+    assert app_doc["parse_fallback_signals"]["resource_parse_partial_artifacts"] == 1
+    assert app_doc["parse_fallback_signals"]["resource_reparse_candidate_artifacts"] == 1
+    assert doc["status_reasons"]["resource_parse_partial_artifacts"] == 1
+    assert doc["status_reasons"]["resource_reparse_candidate_artifacts"] == 1
+    assert doc["run_rollups"]["resource_parse_partial_artifacts_total"] == 1
+    assert doc["run_rollups"]["resource_reparse_candidate_artifacts_total"] == 1
 
 
 def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
@@ -272,6 +289,8 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
             "detector_failures": 1,
             "detector_errors": 0,
             "parse_fallbacks": 0,
+            "resource_parse_partial_artifacts": 2,
+            "resource_reparse_candidate_artifacts": 1,
             "string_status": "ok",
             "db_persistence_status": "ok",
             "detector_pipeline_status": "warnings_and_policy_failures",
@@ -296,6 +315,8 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "Run completion   : COMPLETE" in body
     assert "Workflow status  : COMPLETE" in body
     assert "Detector posture : POLICY / FINDING GATES" in body
+    assert "resource_parse_partial=2" in body
+    assert "reparse_candidates=1" in body
     assert "pipeline_token=warnings_and_policy_failures" in body
     assert "String summary   : artifact_merged | max_artifacts_per_app=3" in body
     assert "Operator note    :" in body

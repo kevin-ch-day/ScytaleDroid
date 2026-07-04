@@ -209,14 +209,21 @@ def render_app_start(
     )
 
 
-def render_resource_warnings(lines: Sequence[str], *, run_ctx: StaticRunContext) -> None:
+def render_resource_warnings(lines: Sequence[object], *, run_ctx: StaticRunContext) -> None:
     if not lines:
         return
     if run_ctx.quiet and run_ctx.batch:
         return
     print()
     for line in lines:
-        print(status_messages.status(line, level="warn"))
+        level = "warn"
+        text = line
+        if isinstance(line, tuple) and len(line) == 2:
+            maybe_level, maybe_text = line
+            if isinstance(maybe_level, str) and maybe_level.strip():
+                level = maybe_level.strip()
+            text = maybe_text
+        print(status_messages.status(str(text), level=level))
     print()
 
 

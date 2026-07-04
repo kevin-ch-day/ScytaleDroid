@@ -254,11 +254,27 @@ def _artifact_parse_signal_flags(metadata_map: Mapping[str, Any]) -> dict[str, i
     bounds_used = 1 if isinstance(bounds, list) and bool(bounds) else 0
     label_fallback = _norm_text(metadata_map.get("label_fallback")).lower()
     label_signal = 1 if label_fallback in {"aapt2", "aapt2-localized"} or bool(metadata_map.get("parse_error_resources")) else 0
+    parser = metadata_map.get("parser_provenance")
+    parser_map = parser if isinstance(parser, Mapping) else {}
+    resource_parse_partial = 1 if bool(
+        parser_map.get("resource_parse_partial", metadata_map.get("resource_parse_partial"))
+    ) else 0
+    resource_reparse_candidate = 1 if bool(
+        parser_map.get("resource_reparse_candidate", metadata_map.get("resource_reparse_candidate"))
+    ) else 0
     return {
         "resource_fallback_used": fallback_used,
         "resource_bounds_warning": bounds_used,
+        "resource_parse_partial": resource_parse_partial,
+        "resource_reparse_candidate": resource_reparse_candidate,
         "label_parse_signal": label_signal,
-        "parse_signal_events_est": fallback_used + bounds_used + label_signal,
+        "parse_signal_events_est": (
+            fallback_used
+            + bounds_used
+            + resource_parse_partial
+            + resource_reparse_candidate
+            + label_signal
+        ),
     }
 
 
@@ -882,6 +898,8 @@ def _aggregate_package_rows(
                 "parse_signal_events_est": 0,
                 "resource_fallback_used_artifacts": 0,
                 "resource_bounds_warning_artifacts": 0,
+                "resource_parse_partial_artifacts": 0,
+                "resource_reparse_candidate_artifacts": 0,
                 "label_parse_signal_artifacts": 0,
                 "timed_artifacts": 0,
                 "wall_timed_artifacts": 0,
@@ -945,6 +963,8 @@ def _aggregate_package_rows(
         bucket["parse_signal_events_est"] += int(row.get("parse_signal_events_est") or 0)
         bucket["resource_fallback_used_artifacts"] += int(row.get("resource_fallback_used") or 0)
         bucket["resource_bounds_warning_artifacts"] += int(row.get("resource_bounds_warning") or 0)
+        bucket["resource_parse_partial_artifacts"] += int(row.get("resource_parse_partial") or 0)
+        bucket["resource_reparse_candidate_artifacts"] += int(row.get("resource_reparse_candidate") or 0)
         bucket["label_parse_signal_artifacts"] += int(row.get("label_parse_signal") or 0)
         bucket["correlation_cache_hits"] += int(row.get("correlation_cache_hits") or 0)
         bucket["correlation_cache_misses"] += int(row.get("correlation_cache_misses") or 0)
@@ -1064,6 +1084,8 @@ def _aggregate_package_rows(
                 "archive_artifacts": bucket["archive_artifacts"],
                 "resource_fallback_used_artifacts": bucket["resource_fallback_used_artifacts"],
                 "resource_bounds_warning_artifacts": bucket["resource_bounds_warning_artifacts"],
+                "resource_parse_partial_artifacts": bucket["resource_parse_partial_artifacts"],
+                "resource_reparse_candidate_artifacts": bucket["resource_reparse_candidate_artifacts"],
                 "label_parse_signal_artifacts": bucket["label_parse_signal_artifacts"],
                 "parse_signal_events_est": bucket["parse_signal_events_est"],
                 "split_artifacts": bucket["split_artifacts"],
@@ -1260,6 +1282,8 @@ def main(argv: list[str] | None = None) -> int:
             "package_name": row["package_name"],
             "display_name": row.get("display_name"),
             "parse_signal_events_est": row["parse_signal_events_est"],
+            "resource_parse_partial_artifacts": row.get("resource_parse_partial_artifacts"),
+            "resource_reparse_candidate_artifacts": row.get("resource_reparse_candidate_artifacts"),
         }
         for row in parse_rows[:10]
         if int(row.get("parse_signal_events_est") or 0) > 0
@@ -1342,6 +1366,12 @@ def main(argv: list[str] | None = None) -> int:
         "artifact_finding_failure_events": artifact_finding_failures,
         "artifact_execution_error_events": artifact_execution_errors,
         "parse_signal_events_est": sum(int(row.get("parse_signal_events_est") or 0) for row in parse_rows),
+        "resource_parse_partial_artifacts": sum(
+            int(row.get("resource_parse_partial_artifacts") or 0) for row in parse_rows
+        ),
+        "resource_reparse_candidate_artifacts": sum(
+            int(row.get("resource_reparse_candidate_artifacts") or 0) for row in parse_rows
+        ),
         "top_parse_signal_packages": top_parse_packages,
         "top_split_heavy_packages": top_split_heavy,
         "top_detector_stages_by_duration": [

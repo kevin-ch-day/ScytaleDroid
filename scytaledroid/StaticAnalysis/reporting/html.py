@@ -104,6 +104,16 @@ def render_html_report(view: Mapping[str, Any]) -> str:
             f"strings={escape(str(parser_provenance.get('string_index_source', '—')))}",
         )
     )
+    bounds_count = int(parser_provenance.get("resource_bounds_warning_count", 0) or 0)
+    if bounds_count > 0:
+        bounds_severity = escape(str(parser_provenance.get("resource_bounds_warning_severity", "warn")))
+        parser_text += f" · bounds={bounds_count}/{bounds_severity}"
+        if parser_provenance.get("resource_parse_partial"):
+            parser_text += " · resource-parse=partial"
+        elif str(parser_provenance.get("resource_parse_state", "none")) == "minor":
+            parser_text += " · resource-parse=minor"
+        if parser_provenance.get("resource_reparse_candidate"):
+            parser_text += " · retry=recommended"
 
     permissions_table = "\n".join(permission_rows) or _empty_table_row(3)
     secrets_table = "\n".join(secret_rows) or _empty_table_row(4)

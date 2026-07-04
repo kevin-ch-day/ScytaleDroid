@@ -387,15 +387,13 @@ def test_queue_footer_block_surfaces_attention_notes_and_shortcuts(capsys) -> No
     )
 
     out = capsys.readouterr().out
-    assert "Queue actions" in out
-    assert "Attention" in out
     assert "Pinterest drifted build" in out
-    assert "Notes" in out
     assert "7 history-only apps" in out
     assert "Select an app by number or name" in out
+    assert "Shortcuts:" in out
     assert "S summary" in out
     assert "D diagnostics" in out
-    assert "Press D for deeper diagnostics." in out
+    assert "Press D for evidence lineage detail." in out
 
 
 def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeypatch) -> None:

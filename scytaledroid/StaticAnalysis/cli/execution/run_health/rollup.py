@@ -34,12 +34,16 @@ def merge_skipped_detectors(skip_rows: Iterable[Mapping[str, object]]) -> list[d
 def rollup_parse_fallback_signals(app_result: AppRunResult) -> dict[str, int]:
     resource_fallback_art = 0
     bounds_warn_art = 0
+    resource_parse_partial_art = 0
+    resource_reparse_candidate_art = 0
     label_or_resource_parse_signals = 0
     for artifact in getattr(app_result, "artifacts", []) or []:
         report = getattr(artifact, "report", None)
         meta = getattr(report, "metadata", None)
         if not isinstance(meta, Mapping):
             continue
+        parser = meta.get("parser_provenance")
+        parser_map = parser if isinstance(parser, Mapping) else {}
         lf = str(meta.get("label_fallback") or "").strip().lower()
         lbl_signal = lf in {"aapt2", "aapt2-localized"} or bool(meta.get("parse_error_resources"))
 
@@ -49,14 +53,30 @@ def rollup_parse_fallback_signals(app_result: AppRunResult) -> dict[str, int]:
         rbw = meta.get("resource_bounds_warnings")
         if isinstance(rbw, list) and rbw:
             bounds_warn_art += 1
+        if bool(parser_map.get("resource_parse_partial")) or bool(
+            meta.get("resource_parse_partial")
+        ):
+            resource_parse_partial_art += 1
+        if bool(parser_map.get("resource_reparse_candidate")) or bool(
+            meta.get("resource_reparse_candidate")
+        ):
+            resource_reparse_candidate_art += 1
 
         if lbl_signal:
             label_or_resource_parse_signals += 1
 
-    parse_fallback_events = resource_fallback_art + bounds_warn_art + label_or_resource_parse_signals
+    parse_fallback_events = (
+        resource_fallback_art
+        + bounds_warn_art
+        + resource_parse_partial_art
+        + resource_reparse_candidate_art
+        + label_or_resource_parse_signals
+    )
     return {
         "resource_fallback_used_artifacts": resource_fallback_art,
         "resource_bounds_warning_artifacts": bounds_warn_art,
+        "resource_parse_partial_artifacts": resource_parse_partial_art,
+        "resource_reparse_candidate_artifacts": resource_reparse_candidate_art,
         "label_parse_signal_artifacts": label_or_resource_parse_signals,
         "parse_fallback_events_est": parse_fallback_events,
     }

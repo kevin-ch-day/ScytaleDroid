@@ -448,6 +448,8 @@ def _aggregate_artifact_rows(
                 "string_index_total_sec": 0.0,
                 "hash_total_sec": 0.0,
                 "parse_signal_events": 0,
+                "resource_parse_partial_events": 0,
+                "resource_reparse_candidate_events": 0,
                 "finding_failure_events": 0,
                 "policy_failure_events": 0,
                 "execution_error_events": 0,
@@ -472,8 +474,12 @@ def _aggregate_artifact_rows(
         bucket["parse_signal_events"] += (
             _safe_int(row.get("resource_fallback_used"))
             + _safe_int(row.get("resource_bounds_warning"))
+            + _safe_int(row.get("resource_parse_partial"))
+            + _safe_int(row.get("resource_reparse_candidate"))
             + _safe_int(row.get("label_parse_signal"))
         )
+        bucket["resource_parse_partial_events"] += _safe_int(row.get("resource_parse_partial"))
+        bucket["resource_reparse_candidate_events"] += _safe_int(row.get("resource_reparse_candidate"))
         bucket["finding_failure_events"] += _safe_int(row.get("finding_failure_count"))
         bucket["policy_failure_events"] += _safe_int(row.get("policy_failure_count"))
         bucket["execution_error_events"] += _safe_int(row.get("execution_error_count"))
@@ -557,6 +563,8 @@ def _quality_components(row: Mapping[str, Any]) -> dict[str, Any]:
     penalty += 4.0 if final_status == "partial" else 0.0
     penalty += 3.0 if string_sample_rows == 0 else 0.0
     penalty += 2.5 if _safe_int(row.get("parse_signal_events")) > 0 else 0.0
+    penalty += 2.5 if _safe_int(row.get("resource_parse_partial_events")) > 0 else 0.0
+    penalty += 1.5 if _safe_int(row.get("resource_reparse_candidate_events")) > 0 else 0.0
     penalty += 3.0 if _performance_hotspot(row) else 0.0
 
     penalty_reasons: list[str] = []
@@ -570,6 +578,10 @@ def _quality_components(row: Mapping[str, Any]) -> dict[str, Any]:
         penalty_reasons.append("string_sample_gap")
     if _safe_int(row.get("parse_signal_events")) > 0:
         penalty_reasons.append("parse_signal_noise")
+    if _safe_int(row.get("resource_parse_partial_events")) > 0:
+        penalty_reasons.append("resource_parse_partial")
+    if _safe_int(row.get("resource_reparse_candidate_events")) > 0:
+        penalty_reasons.append("resource_reparse_candidate")
     if _performance_hotspot(row):
         penalty_reasons.append("performance_hotspot")
 
@@ -626,6 +638,10 @@ def _top_gap(row: Mapping[str, Any]) -> str:
         return "expand_static_dynamic_corroboration"
     if _performance_hotspot(row) and _split_heavy(row):
         return "reduce_split_cost"
+    if _safe_int(row.get("resource_parse_partial_events")) > 0:
+        return "review_partial_resource_parse"
+    if _safe_int(row.get("resource_reparse_candidate_events")) > 0:
+        return "review_partial_resource_parse"
     if _safe_int(row.get("parse_signal_events")) > 0:
         return "review_parse_signals"
     if _norm_text(row.get("detector_posture")).lower() not in {"", "clean"} or _norm_text(row.get("final_status")).lower() == "partial":
@@ -645,6 +661,7 @@ def _recommended_action(row: Mapping[str, Any]) -> str:
         "collect_dynamic_baselines": "collect_dynamic_baselines",
         "expand_static_dynamic_corroboration": "expand_dynamic_collection_for_corroboration",
         "reduce_split_cost": "review_base_only_or_split_fast_path",
+        "review_partial_resource_parse": "review_partial_resource_parse",
         "review_parse_signals": "review_resource_parse_fallbacks",
         "review_detector_posture": "review_detector_gates_and_warnings",
         "healthy": "ready_for_paper_use",
@@ -664,7 +681,7 @@ def _readiness_tier(row: Mapping[str, Any]) -> str:
         return "ready_for_dynamic_collection"
     if gap == "expand_static_dynamic_corroboration":
         return "needs_dynamic_corroboration"
-    if gap in {"reduce_split_cost", "review_parse_signals"}:
+    if gap in {"reduce_split_cost", "review_parse_signals", "review_partial_resource_parse"}:
         return "optimization_review"
     if gap == "review_detector_posture":
         return "review_detector_posture"
@@ -680,6 +697,8 @@ def _pattern_flags(row: Mapping[str, Any]) -> dict[str, int]:
         ),
         "capped_findings_flag": int(_safe_int(row.get("capped_not_persisted")) > 0),
         "parse_signal_flag": int(_safe_int(row.get("parse_signal_events")) > 0),
+        "resource_parse_partial_flag": int(_safe_int(row.get("resource_parse_partial_events")) > 0),
+        "resource_reparse_candidate_flag": int(_safe_int(row.get("resource_reparse_candidate_events")) > 0),
         "handoff_gap_flag": int(not bool(row.get("handoff_ready"))),
         "dynamic_bridge_gap_flag": int(_safe_int(row.get("linked_dynamic_run_count")) == 0),
         "dynamic_validity_gap_flag": int(
@@ -843,6 +862,8 @@ def generate_static_deep_audit(
                     "slowest_detector_id",
                     "slowest_detector_duration_sec",
                     "parse_signal_events",
+                    "resource_parse_partial_events",
+                    "resource_reparse_candidate_events",
                     "handoff_ready",
                     "linked_dynamic_run_count",
                     "linked_dynamic_valid_run_count",
@@ -1105,6 +1126,12 @@ def generate_static_deep_audit(
         ),
         "packages_with_capped_findings": sum(int(_safe_int(row.get("capped_not_persisted")) > 0) for row in run_rows),
         "packages_with_parse_signals": sum(int(_safe_int(row.get("parse_signal_events")) > 0) for row in run_rows),
+        "packages_with_partial_resource_parse": sum(
+            int(_safe_int(row.get("resource_parse_partial_events")) > 0) for row in run_rows
+        ),
+        "packages_with_resource_reparse_candidates": sum(
+            int(_safe_int(row.get("resource_reparse_candidate_events")) > 0) for row in run_rows
+        ),
         "packages_split_heavy": sum(int(_split_heavy(row)) for row in run_rows),
         "quality_tier_counts": dict(sorted(quality_tier_counts.items())),
         "readiness_tier_counts": dict(sorted(readiness_tier_counts.items())),

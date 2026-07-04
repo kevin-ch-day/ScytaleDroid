@@ -264,7 +264,13 @@ def test_main_generates_expected_output_bundle_for_incomplete_session(
             "previous_network_snapshot_cache_hits": 2,
         },
         findings=[{"finding_id": "split_only_2", "title": "Split finding 2"}],
-        parse_flags={"resource_bounds_warnings": ["Count: 2"]},
+        parse_flags={
+            "resource_bounds_warnings": ["Count: 65536"],
+            "parser_provenance": {
+                "resource_parse_partial": True,
+                "resource_reparse_candidate": True,
+            },
+        },
         detector_metrics={"dfir_hints": {"path_hint_count": 2}},
     )
     detector_rows = [
@@ -385,6 +391,8 @@ def test_main_generates_expected_output_bundle_for_incomplete_session(
     assert summary["artifact_finding_failure_events"] == 1
     assert summary["artifact_execution_error_events"] == 0
     assert summary["artifact_wall_clock_available_count"] == 4
+    assert summary["resource_parse_partial_artifacts"] == 1
+    assert summary["resource_reparse_candidate_artifacts"] == 1
     assert summary["timing_contract"]["artifact_wall_clock_available"] is True
     assert summary["timing_breakdown"]["artifact_wall_clock_total_sec"] == 21.95
     assert summary["timing_breakdown"]["hash_total_sec"] == 1.04
@@ -419,6 +427,12 @@ def test_main_generates_expected_output_bundle_for_incomplete_session(
     assert heavy_pkg["artifact_total_wall_s_sum"] == "19.55"
     assert heavy_pkg["hash_seconds_sum"] == "0.89"
     assert heavy_pkg["correlation_cache_hits"] == "9"
+
+    parse_rows = list(csv.DictReader((out_dir / "parse_signal_summary.csv").open()))
+    heavy_parse = next(row for row in parse_rows if row["package_name"] == "com.example.heavy")
+    assert heavy_parse["resource_bounds_warning_artifacts"] == "1"
+    assert heavy_parse["resource_parse_partial_artifacts"] == "1"
+    assert heavy_parse["resource_reparse_candidate_artifacts"] == "1"
 
     detector_rows_csv = list(csv.DictReader((out_dir / "detector_stage_summary.csv").open()))
     assert any(row["detector_id"] == "correlation_engine" for row in detector_rows_csv)

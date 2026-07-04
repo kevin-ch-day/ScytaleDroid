@@ -140,6 +140,8 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
             "hash_seconds": 0.1,
             "resource_fallback_used": 0,
             "resource_bounds_warning": 0,
+            "resource_parse_partial": 0,
+            "resource_reparse_candidate": 0,
             "label_parse_signal": 0,
             "finding_failure_count": 0,
             "policy_failure_count": 0,
@@ -155,6 +157,8 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
             "hash_seconds": 0.1,
             "resource_fallback_used": 0,
             "resource_bounds_warning": 0,
+            "resource_parse_partial": 0,
+            "resource_reparse_candidate": 0,
             "label_parse_signal": 0,
             "finding_failure_count": 0,
             "policy_failure_count": 0,
@@ -170,6 +174,8 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
             "hash_seconds": 0.2,
             "resource_fallback_used": 0,
             "resource_bounds_warning": 0,
+            "resource_parse_partial": 0,
+            "resource_reparse_candidate": 0,
             "label_parse_signal": 0,
             "finding_failure_count": 1,
             "policy_failure_count": 1,
@@ -185,7 +191,9 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
             "string_index_seconds": 1.5,
             "hash_seconds": 0.1,
             "resource_fallback_used": 0,
-            "resource_bounds_warning": 0,
+            "resource_bounds_warning": 1,
+            "resource_parse_partial": 1,
+            "resource_reparse_candidate": 1,
             "label_parse_signal": 0,
             "finding_failure_count": 0,
             "policy_failure_count": 0,
@@ -259,12 +267,17 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
     assert summary["packages_with_handoff_ready"] == 1
     assert summary["packages_with_dynamic_bridge"] == 1
     assert summary["packages_with_capped_findings"] == 1
+    assert summary["packages_with_parse_signals"] == 1
+    assert summary["packages_with_partial_resource_parse"] == 1
+    assert summary["packages_with_resource_reparse_candidates"] == 1
     assert summary["readiness_tier_counts"]["paper_ready"] == 1
     assert summary["readiness_tier_counts"]["incomplete_or_contract_gap"] == 1
     assert summary["top_recommended_actions"]["ready_for_paper_use"] == 1
     assert summary["top_recommended_actions"]["repair_static_handoff_contract"] == 1
     assert summary["pattern_flag_counts"]["split_heavy"] == 1
     assert summary["pattern_flag_counts"]["handoff_gap"] == 1
+    assert summary["pattern_flag_counts"]["resource_parse_partial"] == 1
+    assert summary["pattern_flag_counts"]["resource_reparse_candidate"] == 1
     assert "static_hidden_pattern_candidates.csv" in summary["output_files"]
 
     run_rows = list(
@@ -280,6 +293,8 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
     assert by_package["com.example.healthy"]["linked_dynamic_run_count"] == "2"
     assert by_package["com.example.healthy"]["dynamic_bridge_state"] == "corroborated"
     assert by_package["com.example.problem"]["dynamic_bridge_state"] == "no_dynamic_runs"
+    assert by_package["com.example.problem"]["resource_parse_partial_events"] == "6"
+    assert by_package["com.example.problem"]["resource_reparse_candidate_events"] == "6"
     assert by_package["com.example.problem"]["penalty_reasons"]
 
     hotspot_rows = list(
@@ -296,6 +311,8 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
     )
     assert problem_pattern["split_heavy_flag"] == "1"
     assert problem_pattern["handoff_gap_flag"] == "1"
+    assert problem_pattern["resource_parse_partial_flag"] == "1"
+    assert problem_pattern["resource_reparse_candidate_flag"] == "1"
 
     hidden_pattern_rows = list(
         csv.DictReader((output_dir / "static_hidden_pattern_candidates.csv").open(encoding="utf-8"))

@@ -10,6 +10,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping
 
+from scytaledroid.StaticAnalysis.engine.strings_capture import (
+    _classify_resource_parse_state,
+    _summarize_bounds_warnings,
+)
+
 _SHA_RE = re.compile(r"([0-9a-fA-F]{64})\.apk$")
 
 
@@ -141,9 +146,32 @@ def _patch_payload(payload: dict[str, Any], repair_lines: list[str]) -> bool:
     metadata["resource_bounds_warnings"] = merged
 
     parser = metadata.setdefault("parser_provenance", {})
-    if isinstance(parser, dict) and parser.get("resource_bounds_warning_count") != len(merged):
-        parser["resource_bounds_warning_count"] = len(merged)
-        changed = True
+    if isinstance(parser, dict):
+        summary = _summarize_bounds_warnings(merged)
+        parse_state = _classify_resource_parse_state(
+            merged,
+            resource_string_count=int(metadata.get("string_index_resource_strings") or 0),
+            parse_error_resources=bool(metadata.get("parse_error_resources")),
+            resource_fallback_used=bool(metadata.get("resource_fallback_used")),
+        )
+        if parser.get("resource_bounds_warning_count") != len(merged):
+            parser["resource_bounds_warning_count"] = len(merged)
+            changed = True
+        if parser.get("resource_bounds_warning_severity") != summary.get("severity"):
+            parser["resource_bounds_warning_severity"] = summary.get("severity")
+            changed = True
+        if parser.get("resource_bounds_warning_kind") != summary.get("warning_kind"):
+            parser["resource_bounds_warning_kind"] = summary.get("warning_kind")
+            changed = True
+        if parser.get("resource_parse_state") != parse_state.get("parse_state"):
+            parser["resource_parse_state"] = parse_state.get("parse_state")
+            changed = True
+        if bool(parser.get("resource_parse_partial")) != bool(parse_state.get("parse_partial")):
+            parser["resource_parse_partial"] = bool(parse_state.get("parse_partial"))
+            changed = True
+        if bool(parser.get("resource_reparse_candidate")) != bool(parse_state.get("reparse_candidate")):
+            parser["resource_reparse_candidate"] = bool(parse_state.get("reparse_candidate"))
+            changed = True
 
     payload_obj = metadata.get("post_run_string_payload")
     if isinstance(payload_obj, dict):
