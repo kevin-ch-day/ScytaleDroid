@@ -15,6 +15,32 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.capture.console import CbreakTerminal, LiveCaptureConsole, SelectInputReader
+from scytaledroid.DynamicAnalysis.capture.state import CaptureAction, CaptureState, ObserverStatus
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    build_capture_state as _build_capture_state,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    ensure_target_foreground_before_capture as _guided_ensure_target_foreground_before_capture,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    launch_package_to_foreground as _guided_launch_package_to_foreground,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    make_runtime_foreground_provider as _guided_make_runtime_foreground_provider,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    make_runtime_observer_status_provider as _guided_make_runtime_observer_status_provider,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    make_runtime_relaunch_callback as _guided_make_runtime_relaunch_callback,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    read_device_foreground_package as _guided_read_device_foreground_package,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
+    target_foreground_label as _guided_target_foreground_label,
+)
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
@@ -613,12 +639,15 @@ class ManualScenarioRunner:
                 print(status_messages.status(baseline_warning, level="warn"))
             if run_ctx.scenario_hint:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
-            _maybe_show_raw_high_value_permissions(run_ctx)
-
-            prompt_utils.press_enter_to_continue("Press Enter to begin (timer starts)...")
-            started_at = datetime.now(UTC)
+            start_immediately = _maybe_show_raw_high_value_permissions(run_ctx)
             if on_start:
+                print(status_messages.status("Starting observers...", level="info"))
                 on_start()
+            _ensure_target_foreground_before_capture(run_ctx, on_protocol_event=on_protocol_event)
+            if _requires_explicit_begin_press(run_ctx=run_ctx, start_immediately=start_immediately):
+                print(status_messages.status("Ready. Target app is in foreground.", level="info"))
+                prompt_utils.press_enter_to_continue(_begin_capture_prompt_label(run_ctx))
+            started_at = datetime.now(UTC)
             if profile == "interaction_scripted":
                 target_s = duration_seconds or rec_s
                 protocol = _run_scripted_protocol(
@@ -640,7 +669,7 @@ class ManualScenarioRunner:
                 elif duration_seconds:
                     print(
                         status_messages.status(
-                            "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
+                            _capture_controls_status_message(),
                             level="info",
                         )
                     )
@@ -648,6 +677,10 @@ class ManualScenarioRunner:
                     ended_at = _run_countdown(
                         duration_seconds,
                         continue_after_target=True,
+                        app_name=_target_foreground_label(run_ctx),
+                        version_code=_resolve_capture_version_code(run_ctx),
+                        phase=_capture_phase_label(run_profile=profile, timer_detail="baseline idle"),
+                        minimum_duration_s=min_s,
                         timer_detail="baseline idle",
                         device_serial=getattr(run_ctx, "device_serial", None),
                         foreground_package=pkg,
@@ -659,11 +692,20 @@ class ManualScenarioRunner:
             elif duration_seconds:
                 print(
                     status_messages.status(
-                        "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
+                        _capture_controls_status_message(),
                         level="info",
                     )
                 )
-                ended_at = _run_countdown(duration_seconds, continue_after_target=True)
+                ended_at = _run_countdown(
+                    duration_seconds,
+                    continue_after_target=True,
+                    app_name=_target_foreground_label(run_ctx),
+                    version_code=_resolve_capture_version_code(run_ctx),
+                    phase=_capture_phase_label(run_profile=profile),
+                    minimum_duration_s=min_s,
+                    device_serial=getattr(run_ctx, "device_serial", None),
+                    foreground_package=str(getattr(run_ctx, "package_name", "") or "").strip(),
+                )
             else:
                 ended_at = _run_stopwatch()
             if on_end:
@@ -747,29 +789,41 @@ def _prompt_interaction_level(profile: str | None) -> str:
     return mapping.get(selection, mapping[default_key])
 
 
-_FOREGROUND_DRIFT_CHECK_INTERVAL_S = 30
+def _capture_controls_status_message() -> str:
+    return "Enter = stop & finalize | A = abort & discard | R = relaunch target | Ctrl+C = emergency abort"
 
 
 def _read_device_foreground_package(device_serial: str | None) -> str | None:
-    serial = str(device_serial or "").strip()
-    if not serial:
-        return None
-    try:
-        from scytaledroid.DeviceAnalysis.adb import client as adb_client
+    return _guided_read_device_foreground_package(device_serial)
 
-        if not adb_client.is_available():
-            return None
-        completed = adb_client.run_shell_command(serial, ["dumpsys", "window"], timeout=10)
-        text = str(getattr(completed, "stdout", "") or "")
-    except Exception:
-        return None
-    for line in text.splitlines():
-        if "mCurrentFocus" not in line and "mFocusedApp" not in line:
-            continue
-        match = re.search(r"u0\s+([a-zA-Z0-9_.]+)/", line)
-        if match:
-            return str(match.group(1))
-    return None
+
+def _target_foreground_label(run_ctx: RunContext) -> str:
+    return _guided_target_foreground_label(
+        package_name=str(getattr(run_ctx, "package_name", "") or ""),
+        static_plan=run_ctx.static_plan if isinstance(run_ctx.static_plan, dict) else None,
+    )
+
+
+def _launch_package_to_foreground(device_serial: str | None, package_name: str | None) -> None:
+    _guided_launch_package_to_foreground(device_serial, package_name)
+
+
+def _ensure_target_foreground_before_capture(
+    run_ctx: RunContext,
+    *,
+    on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
+) -> None:
+    _guided_ensure_target_foreground_before_capture(
+        device_serial=str(getattr(run_ctx, "device_serial", "") or ""),
+        package_name=str(getattr(run_ctx, "package_name", "") or ""),
+        app_name=_target_foreground_label(run_ctx),
+        static_plan=run_ctx.static_plan if isinstance(run_ctx.static_plan, dict) else None,
+        on_protocol_event=on_protocol_event,
+        prompt_continue_fn=prompt_utils.press_enter_to_continue,
+        status_printer=lambda message, level="info": print(status_messages.status(message, level=level)),
+        read_foreground_fn=_read_device_foreground_package,
+        launch_callback=_launch_package_to_foreground,
+    )
 
 
 def _social_feed_baseline_target_label() -> str:
@@ -804,11 +858,115 @@ def _extra_hold_timer_message(
     return f"Target reached: {target} | extra hold: +{hold_elapsed} | press Enter to finalize{detail}{suffix}"
 
 
+def _capture_phase_label(*, run_profile: str | None, timer_detail: str = "") -> str:
+    profile = str(run_profile or "").strip().lower()
+    detail = str(timer_detail or "").strip().lower()
+    if profile == "baseline_connected":
+        return "Baseline connected-idle"
+    if profile.startswith("baseline"):
+        return "Baseline idle"
+    if profile == "interaction_scripted":
+        return "Scripted interactive"
+    if detail == "connected baseline":
+        return "Baseline connected-idle"
+    if detail == "baseline idle":
+        return "Baseline idle"
+    return "Manual interactive"
+
+
+def _resolve_capture_version_code(run_ctx: RunContext) -> str | None:
+    plan = run_ctx.static_plan if isinstance(run_ctx.static_plan, dict) else {}
+    identity = plan.get("identity") if isinstance(plan.get("identity"), dict) else {}
+    for source in (identity, plan):
+        version_code = str(source.get("version_code") or source.get("expected_version_code") or "").strip()
+        if version_code:
+            return version_code
+    return None
+
+
+def _finalize_active_capture_request(
+    console: LiveCaptureConsole,
+    state: CaptureState,
+    *,
+    target_duration_s: int,
+) -> bool:
+    with console.suspend_terminal_mode():
+        return not _should_continue_collecting(
+            elapsed_s=int(state.valid_elapsed_s),
+            target_s=int(target_duration_s),
+        )
+
+
+def _abort_active_capture_request(console: LiveCaptureConsole) -> bool:
+    with console.suspend_terminal_mode():
+        return _confirm_script_exit("abort")
+
+
+def _tick_active_capture_console(
+    state: CaptureState,
+    emit_status: Callable[[str, str], None],
+    *,
+    checkpoint_messages: dict[int, str] | None,
+    checkpoint_emitted: set[int],
+    continue_after_target: bool,
+    target_duration_s: int,
+    target_reached_announced_ref: dict[str, bool],
+    last_status_ref: dict[str, object],
+    on_elapsed: Callable[[int, Callable[[str, str], None]], None] | None,
+    on_protocol_event: Callable[[str, dict[str, object]], None] | None,
+) -> None:
+    elapsed_i = int(state.valid_elapsed_s)
+    if on_elapsed is not None:
+        on_elapsed(elapsed_i, lambda message, level="info": emit_status(message, level))
+    previous_status = last_status_ref.get("value")
+    if previous_status != state.status:
+        if state.status.name == "PAUSED_FOREGROUND_DRIFT" and on_protocol_event:
+            on_protocol_event(
+                "BASELINE_FOREGROUND_DRIFT_ACTIVE",
+                {
+                    "expected_package": state.expected_package,
+                    "actual_package": state.foreground_package,
+                },
+            )
+        elif (
+            previous_status is not None
+            and getattr(previous_status, "name", "") == "PAUSED_FOREGROUND_DRIFT"
+            and getattr(state.status, "name", "") == "RUNNING_VALID"
+            and on_protocol_event
+        ):
+            on_protocol_event(
+                "BASELINE_FOREGROUND_DRIFT_CLEAR",
+                {"expected_package": state.expected_package},
+            )
+        last_status_ref["value"] = state.status
+    for checkpoint_s, checkpoint_msg in sorted((checkpoint_messages or {}).items()):
+        if checkpoint_s in checkpoint_emitted or elapsed_i < int(checkpoint_s):
+            continue
+        checkpoint_emitted.add(int(checkpoint_s))
+        emit_status(checkpoint_msg, "info")
+        if on_protocol_event:
+            on_protocol_event(
+                f"BASELINE_IDLE_CHECKPOINT_{int(checkpoint_s)}",
+                {"elapsed_s": int(elapsed_i), "checkpoint_s": int(checkpoint_s)},
+            )
+    if elapsed_i >= int(target_duration_s) and not target_reached_announced_ref.get("value", False):
+        target_reached_announced_ref["value"] = True
+        if continue_after_target:
+            emit_status("Target reached. Keep collecting if needed; press Enter when finished.", "info")
+        else:
+            emit_status("Target reached; finalizing capture.", "info")
+            state.finalize_requested = True
+
+
 def _run_baseline_interactive_loop(
     target_duration_s: int,
     *,
     continue_after_target: bool = True,
     timer_detail: str = "",
+    app_name: str | None = None,
+    version_code: str | None = None,
+    phase: str | None = None,
+    minimum_duration_s: int | None = None,
     device_serial: str | None = None,
     foreground_package: str | None = None,
     checkpoint_messages: dict[int, str] | None = None,
@@ -818,153 +976,59 @@ def _run_baseline_interactive_loop(
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         time.sleep(max(int(target_duration_s), 0))
         return datetime.now(UTC)
-
-    start = time.monotonic()
-    line_width = 72
-    prompt_line = _timing_countdown_action_prompt_line()
-    prompt_width = max(len(prompt_line), 64)
-    last_rendered: str | None = None
-    last_render_bucket: int | None = None
-    target_reached_announced = False
+    target_package = str(foreground_package or "").strip()
+    state = _build_capture_state(
+        app_name=str(app_name or target_package or "target app").strip() or "target app",
+        package_name=target_package,
+        expected_package=target_package,
+        version_code=version_code,
+        phase=str(phase or "Manual capture").strip() or "Manual capture",
+        target_duration_s=int(target_duration_s),
+        minimum_duration_s=int(minimum_duration_s or _effective_min_sampling_seconds()),
+        observer_status=ObserverStatus(),
+    )
+    target_reached_announced_ref = {"value": False}
     checkpoint_emitted: set[int] = set()
-    last_foreground_warn_s = -999
+    last_status: dict[str, object] = {"value": None}
 
-    def _render_timer_line(message: str) -> None:
-        nonlocal last_rendered
-        if last_rendered is None:
-            sys.stdout.write(message.ljust(line_width) + "\n")
-            sys.stdout.write(prompt_line)
-            sys.stdout.flush()
-            last_rendered = message
-            return
-        _timing_rewrite_previous_line_preserving_prompt(message, line_width=line_width)
-        last_rendered = message
-
-    def _clear_timer_lines() -> None:
-        _timing_clear_prompt_and_previous_line(line_width=line_width, prompt_width=prompt_width)
-
-    def _emit_status_and_restore_timer(message: str, *, level: str = "info") -> None:
-        nonlocal last_rendered, last_render_bucket
-        _clear_timer_lines()
-        print(status_messages.status(message, level=level))
-        last_rendered = None
-        last_render_bucket = None
-
-    _drain_stdin_nonblocking()
-
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: _read_device_foreground_package(device_serial),
+        clock=time.monotonic,
+        input_reader=SelectInputReader(sys.stdin),
+        observer_status_provider=_guided_make_runtime_observer_status_provider(),
+        relaunch_callback=lambda _state: (
+            _launch_package_to_foreground(device_serial, target_package)
+            or f"Returning {state.app_name} to foreground..."
+        ),
+        finalize_callback=lambda live_state: _finalize_active_capture_request(
+            console,
+            live_state,
+            target_duration_s=int(target_duration_s),
+        ),
+        abort_callback=lambda _live_state: _abort_active_capture_request(console),
+        cleanup_callback=lambda _live_state, _reason: None,
+        tick_callback=lambda live_state, emit_status: _tick_active_capture_console(
+            live_state,
+            emit_status,
+            checkpoint_messages=checkpoint_messages,
+            checkpoint_emitted=checkpoint_emitted,
+            continue_after_target=continue_after_target,
+            target_duration_s=int(target_duration_s),
+            target_reached_announced_ref=target_reached_announced_ref,
+            last_status_ref=last_status,
+            on_elapsed=on_elapsed,
+            on_protocol_event=on_protocol_event,
+        ),
+        stdout=sys.stdout,
+        terminal=CbreakTerminal(stream=sys.stdin),
+    )
     try:
-        while True:
-            elapsed_i = int(time.monotonic() - start)
-            remaining = max(int(target_duration_s) - elapsed_i, 0)
-            total = _format_duration(int(target_duration_s))
-            elapsed_fmt = _format_duration(elapsed_i)
-            suffix = _pulse_marker(elapsed_i)
-            detail = f" | {timer_detail}" if str(timer_detail or "").strip() else ""
-            if remaining > 0:
-                timer_msg = f"Elapsed: {elapsed_fmt} / {total}{detail}{suffix}"
-            else:
-                timer_msg = _extra_hold_timer_message(
-                    target_duration_s=int(target_duration_s),
-                    elapsed_s=elapsed_i,
-                    timer_detail=timer_detail,
-                    suffix=suffix,
-                )
-
-            if on_elapsed is not None:
-                on_elapsed(elapsed_i, lambda message, level="info": _emit_status_and_restore_timer(message, level=level))
-
-            for checkpoint_s, checkpoint_msg in sorted((checkpoint_messages or {}).items()):
-                if checkpoint_s in checkpoint_emitted or elapsed_i < int(checkpoint_s):
-                    continue
-                checkpoint_emitted.add(int(checkpoint_s))
-                _emit_status_and_restore_timer(checkpoint_msg, level="info")
-                if on_protocol_event:
-                    on_protocol_event(
-                        f"BASELINE_IDLE_CHECKPOINT_{int(checkpoint_s)}",
-                        {"elapsed_s": int(elapsed_i), "checkpoint_s": int(checkpoint_s)},
-                    )
-
-            expected_pkg = str(foreground_package or "").strip()
-            if (
-                expected_pkg
-                and device_serial
-                and elapsed_i > 0
-                and elapsed_i % _FOREGROUND_DRIFT_CHECK_INTERVAL_S == 0
-                and elapsed_i != last_foreground_warn_s
-            ):
-                last_foreground_warn_s = elapsed_i
-                actual_pkg = _read_device_foreground_package(device_serial)
-                if actual_pkg and actual_pkg != expected_pkg:
-                    _emit_status_and_restore_timer(
-                        (
-                            f"Foreground drift: expected {expected_pkg}, saw {actual_pkg}. "
-                            "Return to the target app to keep baseline valid."
-                        ),
-                        level="warn",
-                    )
-                    if on_protocol_event:
-                        on_protocol_event(
-                            "BASELINE_FOREGROUND_DRIFT",
-                            {
-                                "elapsed_s": int(elapsed_i),
-                                "expected_package": expected_pkg,
-                                "actual_package": actual_pkg,
-                            },
-                        )
-
-            render_bucket = elapsed_i // 10
-            if timer_msg != last_rendered and (last_render_bucket is None or render_bucket != last_render_bucket):
-                _render_timer_line(timer_msg)
-                last_render_bucket = render_bucket
-
-            if remaining <= 0 and not target_reached_announced:
-                target_message = (
-                    "Target reached; finalizing capture."
-                    if not continue_after_target
-                    else "Target reached. Keep collecting if needed; press Enter when finished."
-                )
-                _emit_status_and_restore_timer(
-                    target_message,
-                    level="info",
-                )
-                target_reached_announced = True
-                if not continue_after_target:
-                    _clear_timer_lines()
-                    print()
-                    break
-
-            readable, _, _ = select.select([sys.stdin], [], [], 1.0)
-            if not readable:
-                continue
-            raw_line = sys.stdin.readline()
-            if str(raw_line or "").strip() == "":
-                continue
-            action = _parse_timing_action(raw_line)
-            if action == "abort":
-                if not _confirm_script_exit("abort"):
-                    _render_timer_line(timer_msg)
-                    continue
-                _clear_timer_lines()
-                print()
-                raise ScenarioAbortRequested("ABORT_DISCARD")
-            if action == "stop":
-                if not _confirm_script_exit("stop"):
-                    _render_timer_line(timer_msg)
-                    continue
-                _clear_timer_lines()
-                print()
-                break
-            if action == "enter":
-                if _should_continue_collecting(elapsed_s=elapsed_i, target_s=int(target_duration_s)):
-                    _render_timer_line(timer_msg)
-                    continue
-                _clear_timer_lines()
-                print()
-                break
+        result = console.run(state)
     except KeyboardInterrupt:
-        _clear_timer_lines()
-        print()
         raise ScenarioAbortRequested("ABORT_DISCARD") from None
+    print()
+    if result.action == CaptureAction.ABORT:
+        raise ScenarioAbortRequested("ABORT_DISCARD")
     return datetime.now(UTC)
 
 
@@ -974,6 +1038,10 @@ def _run_countdown(
     continue_after_target: bool = False,
     allow_early_stop: bool = True,
     ignore_stop_inputs: bool = False,
+    app_name: str | None = None,
+    version_code: str | None = None,
+    phase: str | None = None,
+    minimum_duration_s: int | None = None,
     timer_detail: str = "",
     device_serial: str | None = None,
     foreground_package: str | None = None,
@@ -984,6 +1052,10 @@ def _run_countdown(
         return _run_baseline_interactive_loop(
             int(duration_seconds),
             continue_after_target=continue_after_target,
+            app_name=app_name,
+            version_code=version_code,
+            phase=phase,
+            minimum_duration_s=minimum_duration_s,
             timer_detail=timer_detail,
             device_serial=device_serial,
             foreground_package=foreground_package,
@@ -1077,7 +1149,7 @@ def _run_stopwatch() -> datetime:
         return datetime.now(UTC)
     start = time.monotonic()
     line_width = 56
-    print(status_messages.status("Press Enter when finished. S+Enter=Stop&Finalize, A+Enter=Abort&Discard.", level="info"))
+    print(status_messages.status(_capture_controls_status_message(), level="info"))
     last_rendered = None
     while True:
         elapsed = int(time.monotonic() - start)
@@ -1840,7 +1912,7 @@ def _run_messaging_connected_baseline(
 ) -> datetime:
     print(
         status_messages.status(
-            "Press Enter to stop early (optional). S+Enter=Stop&Finalize, A+Enter=Abort&Discard.",
+            _capture_controls_status_message(),
             level="info",
         )
     )
@@ -1928,6 +2000,10 @@ def _run_messaging_connected_baseline(
     ended_at = _run_baseline_interactive_loop(
         int(target_duration_s),
         continue_after_target=True,
+        app_name=_target_foreground_label(run_ctx),
+        version_code=_resolve_capture_version_code(run_ctx),
+        phase=_capture_phase_label(run_profile=getattr(run_ctx, "run_profile", None), timer_detail="connected baseline"),
+        minimum_duration_s=_effective_min_sampling_seconds(),
         timer_detail="connected baseline",
         device_serial=getattr(run_ctx, "device_serial", None),
         foreground_package=pkg,
@@ -2127,21 +2203,34 @@ def json_dumps_sorted(payload: dict[str, object]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def _maybe_show_raw_high_value_permissions(run_ctx: RunContext) -> None:
+def _maybe_show_raw_high_value_permissions(run_ctx: RunContext) -> bool:
     plan = run_ctx.static_plan if isinstance(run_ctx.static_plan, dict) else {}
     perms = plan.get("permissions") if isinstance(plan.get("permissions"), dict) else {}
     high_value = perms.get("high_value") if isinstance(perms.get("high_value"), list) else []
     raw = [str(p).strip() for p in high_value if str(p).strip()]
     if not raw:
-        return
+        return False
     choice = prompt_utils.prompt_text(
-        "Press P to view raw high-value permissions, or Enter to continue",
+        "Press Enter to begin, or P to view raw high-value permissions",
         required=False,
     ).strip().lower()
     if choice != "p":
-        return
+        return True
     sample = ", ".join(sorted(raw)[:10])
     print(status_messages.status(f"High-value permissions (sample): {sample}", level="info"))
+    return False
+
+
+def _requires_explicit_begin_press(*, run_ctx: RunContext, start_immediately: bool) -> bool:
+    if _is_messaging_connected_baseline_context(run_ctx):
+        return True
+    return not start_immediately
+
+
+def _begin_capture_prompt_label(run_ctx: RunContext) -> str:
+    if _is_messaging_connected_baseline_context(run_ctx):
+        return "Press Enter to begin connected-idle baseline (timer starts)..."
+    return "Press Enter to begin (timer starts)..."
 
 
 def _format_duration(seconds: int) -> str:

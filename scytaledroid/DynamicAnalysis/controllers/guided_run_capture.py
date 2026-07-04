@@ -1,17 +1,22 @@
-"""Capture setup and drift rendering helpers for guided dynamic runs."""
+"""Capture setup, drift rendering, and live-capture wiring helpers."""
 
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.capture.state import CaptureState, ObserverStatus
 from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_evidence_text,
     selected_app_qa_text,
 )
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
+
+_FOREGROUND_READY_TIMEOUT_S = 12.0
+_FOREGROUND_READY_POLL_S = 1.0
 
 
 def _drift_evidence_text(build: str, evidence: str) -> str:
@@ -68,6 +73,186 @@ def _drift_harvest_context(package_name: str, plan_drift: dict[str, Any]) -> lis
         f"Newest harvested APK in workspace: {harvested_vc}",
         f"No harvested APK for installed build {observed_vc} is present in this workspace yet.",
     ]
+
+
+def read_device_foreground_package(device_serial: str | None) -> str | None:
+    serial = str(device_serial or "").strip()
+    if not serial:
+        return None
+    try:
+        from scytaledroid.DeviceAnalysis.adb import client as adb_client
+
+        if not adb_client.is_available():
+            return None
+        completed = adb_client.run_shell_command(serial, ["dumpsys", "window"], timeout=10)
+        text = str(getattr(completed, "stdout", "") or "")
+    except Exception:
+        return None
+    for line in text.splitlines():
+        if "mCurrentFocus" not in line and "mFocusedApp" not in line:
+            continue
+        match = re.search(r"u0\s+([a-zA-Z0-9_.]+)/", line)
+        if match:
+            return str(match.group(1))
+    return None
+
+
+def launch_package_to_foreground(device_serial: str | None, package_name: str | None) -> None:
+    serial = str(device_serial or "").strip()
+    package = str(package_name or "").strip()
+    if not serial or not package:
+        return
+    try:
+        from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+
+        adb_shell.run_shell(
+            serial,
+            [
+                "monkey",
+                "-p",
+                package,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            ],
+            timeout=10,
+        )
+    except Exception:
+        return
+
+
+def target_foreground_label(*, package_name: str, static_plan: dict[str, object] | None) -> str:
+    plan = static_plan if isinstance(static_plan, dict) else {}
+    for key in ("app_label", "display_label", "label"):
+        value = str(plan.get(key) or "").strip()
+        if value:
+            return value
+    return str(package_name or "target app").strip() or "target app"
+
+
+def build_capture_state(
+    *,
+    app_name: str,
+    package_name: str,
+    expected_package: str,
+    version_code: str | None,
+    phase: str,
+    target_duration_s: int | None,
+    minimum_duration_s: int | None,
+    observer_status: ObserverStatus | None = None,
+) -> CaptureState:
+    return CaptureState(
+        app_name=str(app_name or package_name or "target app").strip() or "target app",
+        package_name=str(package_name or "").strip(),
+        expected_package=str(expected_package or package_name or "").strip(),
+        version_code=str(version_code).strip() if version_code is not None else None,
+        phase=str(phase or "Manual capture").strip() or "Manual capture",
+        target_duration_s=int(target_duration_s) if target_duration_s is not None else None,
+        minimum_duration_s=int(minimum_duration_s) if minimum_duration_s is not None else None,
+        observer_status=observer_status or ObserverStatus(),
+    )
+
+
+def make_runtime_foreground_provider(device_serial: str | None) -> Callable[[], str | None]:
+    return lambda: read_device_foreground_package(device_serial)
+
+
+def make_runtime_relaunch_callback(
+    *,
+    device_serial: str | None,
+    package_name: str,
+    app_name: str,
+) -> Callable[[CaptureState], str | None]:
+    def _callback(_state: CaptureState) -> str | None:
+        launch_package_to_foreground(device_serial, package_name)
+        return f"Returning {app_name} to foreground..."
+
+    return _callback
+
+
+def make_runtime_observer_status_provider(
+    *,
+    pcapdroid_status: str = "running",
+    logcat_status: str = "running",
+    pcap_bytes_provider: Callable[[], int | None] | None = None,
+) -> Callable[[CaptureState], ObserverStatus]:
+    def _provider(_state: CaptureState) -> ObserverStatus:
+        pcap_bytes = pcap_bytes_provider() if pcap_bytes_provider is not None else None
+        return ObserverStatus(
+            pcapdroid=pcapdroid_status,
+            logcat=logcat_status,
+            pcap_bytes=pcap_bytes,
+        )
+
+    return _provider
+
+
+def ensure_target_foreground_before_capture(
+    *,
+    device_serial: str | None,
+    package_name: str,
+    app_name: str,
+    static_plan: dict[str, object] | None,
+    on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
+    prompt_continue_fn: Callable[[str], None],
+    status_printer: Callable[[str, str], None],
+    read_foreground_fn: Callable[[str | None], str | None] = read_device_foreground_package,
+    launch_callback: Callable[[str | None, str | None], None] = launch_package_to_foreground,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    serial = str(device_serial or "").strip()
+    package = str(package_name or "").strip()
+    if not serial or not package:
+        return
+    target_label = target_foreground_label(package_name=package, static_plan=static_plan)
+    from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PCAPDROID_PACKAGE
+
+    while True:
+        waited = False
+        attempted_return = False
+        actual_pkg: str | None = None
+        deadline = float(clock()) + _FOREGROUND_READY_TIMEOUT_S
+        while float(clock()) < deadline:
+            actual_pkg = read_foreground_fn(serial)
+            if actual_pkg is None:
+                status_printer(
+                    "Foreground verification unavailable; continuing without a live foreground gate.",
+                    "warn",
+                )
+                return
+            if actual_pkg == package:
+                if on_protocol_event:
+                    on_protocol_event(
+                        "TARGET_FOREGROUND_READY",
+                        {
+                            "expected_package": package,
+                            "actual_package": actual_pkg,
+                        },
+                    )
+                return
+            if actual_pkg == PCAPDROID_PACKAGE and not attempted_return:
+                status_printer(f"Returning {target_label} to foreground...", "info")
+                launch_callback(serial, package)
+                attempted_return = True
+                if on_protocol_event:
+                    on_protocol_event(
+                        "TARGET_FOREGROUND_RETURN_ATTEMPT",
+                        {
+                            "expected_package": package,
+                            "actual_package": actual_pkg,
+                        },
+                    )
+            elif not waited:
+                status_printer(f"Waiting for {target_label} foreground...", "info")
+                waited = True
+            sleep(_FOREGROUND_READY_POLL_S)
+        actual_display = str(actual_pkg or "unknown").strip() or "unknown"
+        status_printer(
+            f"Foreground still shows {actual_display}. Return {target_label} to the foreground before capture starts.",
+            "warn",
+        )
+        prompt_continue_fn(f"Return {target_label} to foreground, then press Enter to re-check")
 
 
 def plan_drift_rows(plan_drift: dict[str, Any], *, detailed_installed_build: bool) -> list[list[str]]:
@@ -453,12 +638,20 @@ def prepare_selected_app_capture(
 
 
 __all__ = [
+    "build_capture_state",
     "choose_capture_device",
+    "ensure_target_foreground_before_capture",
+    "launch_package_to_foreground",
+    "make_runtime_foreground_provider",
+    "make_runtime_observer_status_provider",
+    "make_runtime_relaunch_callback",
     "plan_drift_rows",
     "prepare_selected_app_capture",
     "print_capture_device_choice",
     "print_plan_drift_blocked_message",
     "print_plan_drift_warning",
+    "read_device_foreground_package",
     "render_selected_app_drift_workbench",
     "render_static_plan_build_drift_block",
+    "target_foreground_label",
 ]

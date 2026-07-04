@@ -62,7 +62,7 @@ def clear_prompt_and_previous_line(*, line_width: int, prompt_width: int) -> Non
 
 
 def countdown_action_prompt_line() -> str:
-    return "Action [Enter=stop | S=finalize | A=abort] \u203a "
+    return "Enter = stop & finalize | A + Enter = abort & discard | Ctrl+C = emergency abort \u203a "
 
 
 def parse_timing_action(raw: str | None) -> str:
