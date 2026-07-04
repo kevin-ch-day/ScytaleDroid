@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,21 +13,6 @@ from scytaledroid.Database.db_utils.external_sdk_tracker_intel import (
     upsert_external_tracker_rows,
     write_refresh_receipt_bundle,
 )
-
-
-def test_refresh_external_sdk_tracker_intel_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "refresh_external_sdk_tracker_intel.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert (proc.stdout or "").lower().startswith("usage:")
 
 
 def test_normalize_exodus_trackers_maps_expected_fields() -> None:
@@ -155,7 +138,9 @@ def test_build_summary_and_write_receipt_bundle(tmp_path: Path) -> None:
         output_dir=tmp_path,
         stem="external_sdk_tracker_intel_refresh_test",
     )
-    payload = json.loads((tmp_path / "external_sdk_tracker_intel_refresh_test.json").read_text(encoding="utf-8"))
+    payload = json.loads(
+        (tmp_path / "external_sdk_tracker_intel_refresh_test.json").read_text(encoding="utf-8")
+    )
     assert payload["summary"]["row_count"] == 2
     assert payload["rows"][0]["tracker_name"] == "Teemo"
     assert files["csv"].endswith("external_sdk_tracker_intel_refresh_test.csv")

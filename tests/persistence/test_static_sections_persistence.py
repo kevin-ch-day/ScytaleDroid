@@ -58,7 +58,9 @@ def test_persist_static_sections_persists_baseline_and_strings():
         },
         string_payload={
             "counts": {"endpoints": 1},
-            "samples": {"endpoints": [{"value_masked": "http://example.com", "src": "AndroidManifest.xml"}]},
+            "samples": {
+                "endpoints": [{"value_masked": "http://example.com", "src": "AndroidManifest.xml"}]
+            },
         },
         manifest=DummyManifest("Example App"),
         app_metadata={},

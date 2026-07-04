@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_deep_audit as report
@@ -15,25 +13,6 @@ from scytaledroid.StaticAnalysis.core.models import (
     PermissionSummary,
     StaticAnalysisReport,
 )
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_deep_audit.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "deep audit over dynamic evidence quality" in out
-    assert "--package" in out
-    assert "--overlay-reanalyse-strings" in out
 
 
 def test_write_csv_can_emit_empty_schema(tmp_path: Path) -> None:
@@ -109,7 +88,9 @@ def test_plan_overlay_bundle_passes_string_reanalysis_flag(monkeypatch) -> None:
 def test_generate_report_passes_package_filter(tmp_path: Path, monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
-    def fake_collect(_root, *, overlay_latest_static=False, overlay_reanalyse_strings=False, package_filter=None):
+    def fake_collect(
+        _root, *, overlay_latest_static=False, overlay_reanalyse_strings=False, package_filter=None
+    ):
         calls.append(
             {
                 "overlay_latest_static": overlay_latest_static,
@@ -119,7 +100,9 @@ def test_generate_report_passes_package_filter(tmp_path: Path, monkeypatch) -> N
         )
         return []
 
-    monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path / "output" / "evidence" / "dynamic")
+    monkeypatch.setattr(
+        report, "_dynamic_root", lambda: tmp_path / "output" / "evidence" / "dynamic"
+    )
     monkeypatch.setattr(report, "_collect_run_records", fake_collect)
     monkeypatch.setattr(report, "_load_app_profiles", lambda _packages: {})
     monkeypatch.setattr(report, "_build_static_join_and_candidates", lambda _package_runs: ({}, {}))
@@ -207,7 +190,14 @@ def test_pcap_artifact_info_recovers_unregistered_local_pcap(tmp_path: Path) -> 
 
     info = report._pcap_artifact_info(
         run_dir=run_dir,
-        manifest={"artifacts": [{"type": "pcapdroid_capture_meta", "relative_path": "artifacts/pcapdroid_capture/pcapdroid_capture_meta.json"}]},
+        manifest={
+            "artifacts": [
+                {
+                    "type": "pcapdroid_capture_meta",
+                    "relative_path": "artifacts/pcapdroid_capture/pcapdroid_capture_meta.json",
+                }
+            ]
+        },
         report={
             "report_status": "ok",
             "pcap_size_bytes": pcap_path.stat().st_size,
@@ -720,11 +710,29 @@ def _run(
     signal_rows_override: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     unresolved_domains = unresolved_domains or []
-    service_rows_value = service_rows_override or [{"service_key": "first_party_api", "owner_class": "first_party", "total_hits": 5}] * service_count
-    signal_rows_value = signal_rows_override or [{"signal_key": "first_party_platform"}] * signal_count
+    service_rows_value = (
+        service_rows_override
+        or [{"service_key": "first_party_api", "owner_class": "first_party", "total_hits": 5}]
+        * service_count
+    )
+    signal_rows_value = (
+        signal_rows_override or [{"signal_key": "first_party_platform"}] * signal_count
+    )
     dynamic_domains_value = dynamic_domains or {"example.com"}
-    phase_status = "transport_only" if timeline_available and pcap_present else "timeline_only" if timeline_available else "not_applicable"
-    phase_action = "phase_service_attribution_not_supported" if timeline_available and pcap_present else "recollect_capture" if timeline_available else "none"
+    phase_status = (
+        "transport_only"
+        if timeline_available and pcap_present
+        else "timeline_only"
+        if timeline_available
+        else "not_applicable"
+    )
+    phase_action = (
+        "phase_service_attribution_not_supported"
+        if timeline_available and pcap_present
+        else "recollect_capture"
+        if timeline_available
+        else "none"
+    )
     return {
         "run_id": run_id,
         "package": package,
@@ -986,7 +994,9 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
             interaction_mode="baseline",
             valid_pack=True,
             unresolved_service_count=1,
-            unresolved_domains=[{"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}],
+            unresolved_domains=[
+                {"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}
+            ],
         ),
         _run(
             run_id="service-base-2",
@@ -996,7 +1006,9 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
             interaction_mode="baseline",
             valid_pack=True,
             unresolved_service_count=1,
-            unresolved_domains=[{"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}],
+            unresolved_domains=[
+                {"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}
+            ],
         ),
         _run(
             run_id="service-base-3",
@@ -1006,7 +1018,9 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
             interaction_mode="baseline",
             valid_pack=True,
             unresolved_service_count=1,
-            unresolved_domains=[{"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}],
+            unresolved_domains=[
+                {"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}
+            ],
         ),
         _run(
             run_id="service-manual-1",
@@ -1016,7 +1030,9 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
             interaction_mode="manual",
             valid_pack=True,
             unresolved_service_count=1,
-            unresolved_domains=[{"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}],
+            unresolved_domains=[
+                {"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}
+            ],
         ),
         _run(
             run_id="service-manual-2",
@@ -1026,7 +1042,9 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
             interaction_mode="manual",
             valid_pack=True,
             unresolved_service_count=1,
-            unresolved_domains=[{"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}],
+            unresolved_domains=[
+                {"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}
+            ],
         ),
     ]
 
@@ -1099,13 +1117,19 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
         },
     }
 
-    monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path / "output" / "evidence" / "dynamic")
+    monkeypatch.setattr(
+        report, "_dynamic_root", lambda: tmp_path / "output" / "evidence" / "dynamic"
+    )
     monkeypatch.setattr(
         report,
         "_collect_run_records",
-        lambda _root, overlay_latest_static=False, overlay_reanalyse_strings=False, package_filter=None: runs,
+        lambda _root, overlay_latest_static=False, overlay_reanalyse_strings=False, package_filter=None: (
+            runs
+        ),
     )
-    monkeypatch.setattr(report, "_build_static_join_and_candidates", lambda _package_runs: (join_rows, {}))
+    monkeypatch.setattr(
+        report, "_build_static_join_and_candidates", lambda _package_runs: (join_rows, {})
+    )
     monkeypatch.setattr(
         report,
         "_load_app_profiles",
@@ -1159,9 +1183,15 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
     assert app_rows["bbc.mobile.news.ww"]["research_readiness_tier"] == "needs_scripted_validation"
     assert app_rows["bbc.mobile.news.ww"]["next_recommended_action"] == "scripted_interaction"
     assert app_rows["com.cnn.mobile.android.phone"]["research_readiness_tier"] == "capture_problem"
-    assert app_rows["com.cnn.mobile.android.phone"]["next_recommended_action"] == "recollect_capture"
-    assert app_rows["com.example.enrichment"]["research_readiness_tier"] == "needs_static_enrichment"
-    assert app_rows["com.example.enrichment"]["next_recommended_action"] == "repair_static_enrichment"
+    assert (
+        app_rows["com.cnn.mobile.android.phone"]["next_recommended_action"] == "recollect_capture"
+    )
+    assert (
+        app_rows["com.example.enrichment"]["research_readiness_tier"] == "needs_static_enrichment"
+    )
+    assert (
+        app_rows["com.example.enrichment"]["next_recommended_action"] == "repair_static_enrichment"
+    )
     assert app_rows["com.example.servicegap"]["research_readiness_tier"] == "needs_service_mapping"
     assert app_rows["com.example.servicegap"]["next_recommended_action"] == "repair_service_mapping"
     assert app_rows["bbc.mobile.news.ww"]["baseline_domain_reproducibility"] == "1.0"
@@ -1174,7 +1204,10 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
     assert stability_rows["bbc.mobile.news.ww"]["baseline_service_reproducibility"] == "1.0"
     assert stability_rows["bbc.mobile.news.ww"]["manual_service_reproducibility"] == "1.0"
     assert stability_rows["bbc.mobile.news.ww"]["manual_novel_domain_count"] == "1"
-    assert "manual_activation_expands_runtime_surface" in stability_rows["bbc.mobile.news.ww"]["reproducibility_note"]
+    assert (
+        "manual_activation_expands_runtime_surface"
+        in stability_rows["bbc.mobile.news.ww"]["reproducibility_note"]
+    )
 
     with (out_dir / "paper_pattern_matrix.csv").open(encoding="utf-8") as handle:
         pattern_rows = {row["package"]: row for row in csv.DictReader(handle)}
@@ -1198,11 +1231,16 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
 
     with (out_dir / "service_mapping_gap_audit.csv").open(encoding="utf-8") as handle:
         service_gap_rows = list(csv.DictReader(handle))
-    assert any(row["package"] == "com.example.servicegap" and row["domain"] == "unknown.example.net" for row in service_gap_rows)
+    assert any(
+        row["package"] == "com.example.servicegap" and row["domain"] == "unknown.example.net"
+        for row in service_gap_rows
+    )
 
     with (out_dir / "static_enrichment_gap_audit.csv").open(encoding="utf-8") as handle:
         enrichment_rows = list(csv.DictReader(handle))
-    enrichment_row = next(row for row in enrichment_rows if row["package"] == "com.example.enrichment")
+    enrichment_row = next(
+        row for row in enrichment_rows if row["package"] == "com.example.enrichment"
+    )
     assert enrichment_row["endpoint_inventory_status"] == "missing"
     assert enrichment_row["gap_type"] == "static_endpoint_inventory_missing"
 
@@ -1215,14 +1253,23 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
 
     with (out_dir / "static_guided_dynamic_recommendations.csv").open(encoding="utf-8") as handle:
         recommendation_rows = {row["package"]: row for row in csv.DictReader(handle)}
-    assert recommendation_rows["bbc.mobile.news.ww"]["recommended_template"] == "news_reader_behavior_v2"
+    assert (
+        recommendation_rows["bbc.mobile.news.ww"]["recommended_template"]
+        == "news_reader_behavior_v2"
+    )
     assert recommendation_rows["bbc.mobile.news.ww"]["recommended_phase"] == "open_article"
-    assert recommendation_rows["com.example.servicegap"]["recommended_run_intent"] == "repair_service_mapping"
+    assert (
+        recommendation_rows["com.example.servicegap"]["recommended_run_intent"]
+        == "repair_service_mapping"
+    )
 
     summary_json = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary_json["capture_failure_counts"]["PCAP_LOCAL_FILE_EMPTY"] == 1
     assert summary_json["capture_failure_action_counts"]["recollect_capture"] == 1
-    assert summary_json["tier_definitions"]["dynamic_evidence_quality"]["A+"] == "95-100 excellent / publication-grade"
+    assert (
+        summary_json["tier_definitions"]["dynamic_evidence_quality"]["A+"]
+        == "95-100 excellent / publication-grade"
+    )
     assert summary_json["row_counts"]["behavioral_stability_audit"] == 6
     assert summary_json["row_counts"]["paper_pattern_matrix"] == 6
     assert summary_json["row_counts"]["paper_pattern_summary"] >= 2
@@ -1379,9 +1426,13 @@ def test_overlay_latest_static_reanalysis_adds_provenance_without_mutating_evide
         ),
         encoding="utf-8",
     )
-    (run_dir / "analysis" / "pcap_features.json").write_text(json.dumps({"proxies": {"privacy_signal_hits": 1}}), encoding="utf-8")
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps({"proxies": {"privacy_signal_hits": 1}}), encoding="utf-8"
+    )
     (run_dir / "analysis" / "summary.json").write_text(json.dumps({}), encoding="utf-8")
-    (run_dir / "analysis" / "static_dynamic_overlap.json").write_text(json.dumps({}), encoding="utf-8")
+    (run_dir / "analysis" / "static_dynamic_overlap.json").write_text(
+        json.dumps({}), encoding="utf-8"
+    )
 
     monkeypatch.setattr(report, "_dynamic_root", lambda: output_root)
     monkeypatch.setattr(

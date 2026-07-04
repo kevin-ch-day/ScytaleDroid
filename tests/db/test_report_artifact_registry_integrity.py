@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from scripts.db.report_artifact_registry_integrity import collect_report, format_text_report
 
 

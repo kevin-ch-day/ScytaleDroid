@@ -48,6 +48,11 @@ RUN_FIELDS = (
     "sanitized_http_path_count",
     "payload_visibility_class",
     "payload_risk_flags",
+    "static_uses_cleartext_traffic",
+    "cleartext_mismatch_class",
+    "plaintext_protocols_observed",
+    "decoded_protocols_observed",
+    "decoded_stream_count",
 )
 
 HTTP_FIELDS = (
@@ -106,6 +111,9 @@ APP_ROLLUP_FIELDS = (
     "plaintext_protocols_observed",
     "decoded_cleartext_streams",
     "top_protocols",
+    "static_cleartext_allowed_runs",
+    "cleartext_mismatch_denied_observed_runs",
+    "cleartext_mismatch_allowed_not_observed_runs",
 )
 
 PLAINTEXT_PROTOCOLS = {
@@ -177,6 +185,24 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _cleartext_posture_run_fields(run_dir: Path, report: dict[str, Any] | None) -> dict[str, Any]:
+    overlap = _read_json(run_dir / "analysis" / "static_dynamic_overlap.json")
+    posture: dict[str, Any] = {}
+    if isinstance(overlap, dict) and isinstance(overlap.get("cleartext_posture"), dict):
+        posture = overlap["cleartext_posture"]
+    else:
+        plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json")
+        if isinstance(plan, dict):
+            from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
+
+            posture = compute_static_dynamic_cleartext_posture(plan, report or {})
+    static_allowed = posture.get("static_cleartext_allowed")
+    return {
+        "static_uses_cleartext_traffic": int(bool(static_allowed)) if static_allowed is not None else "",
+        "cleartext_mismatch_class": str(posture.get("mismatch_class") or ""),
+    }
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]], *, fieldnames: Sequence[str]) -> None:
@@ -537,6 +563,26 @@ def _run_payload_audit(
     timeout: int,
     max_http_rows: int,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    run_dir = run.get("run_dir")
+    if isinstance(run_dir, Path):
+        surface = _read_json(run_dir / "analysis" / "security_surface.json")
+        report = _read_json(run_dir / "analysis" / "pcap_report.json")
+        if isinstance(surface, dict) and surface.get("status") == "ok":
+            from scytaledroid.DynamicAnalysis.pcap.security_surface import export_payload_audit_rows
+
+            run_row, http_rows, protocol_rows, decoded_rows = export_payload_audit_rows(
+                run_id=str(run["run_id"]),
+                package=str(run["package"]),
+                app_label=str(run["app_label"]),
+                run_profile=str(run["run_profile"]),
+                valid_dataset_run=int(run["valid_dataset_run"]),
+                pcap_path=Path(run["pcap_path"]),
+                surface=surface,
+                report=report if isinstance(report, dict) else None,
+            )
+            run_row.update(_cleartext_posture_run_fields(run_dir, report if isinstance(report, dict) else {}))
+            return run_row, http_rows, protocol_rows, decoded_rows
+
     pcap_path = Path(run["pcap_path"])
     cap = _capinfos(pcap_path, timeout=timeout)
     tshark_status, protocol_rows_raw = _protocol_hierarchy(pcap_path, timeout=timeout)
@@ -602,6 +648,8 @@ def _run_payload_audit(
         "payload_visibility_class": visibility,
         "payload_risk_flags": ";".join(risk_flags),
     }
+    if isinstance(run_dir, Path):
+        run_row.update(_cleartext_posture_run_fields(run_dir, None))
     return run_row, http_rows, protocol_rows, decoded_rows
 
 
@@ -661,6 +709,17 @@ def _app_rollup_rows(
                 "plaintext_protocols_observed": ";".join(sorted(plaintext_protocols.get(package, set()))),
                 "decoded_cleartext_streams": len(decoded_streams.get(package, set())),
                 "top_protocols": top_protocols,
+                "static_cleartext_allowed_runs": sum(
+                    1 for row in rows if _safe_int(row.get("static_uses_cleartext_traffic")) == 1
+                ),
+                "cleartext_mismatch_denied_observed_runs": sum(
+                    1 for row in rows if row.get("cleartext_mismatch_class") == "denied_but_observed"
+                ),
+                "cleartext_mismatch_allowed_not_observed_runs": sum(
+                    1
+                    for row in rows
+                    if str(row.get("cleartext_mismatch_class") or "").startswith("allowed_not_observed")
+                ),
             }
         )
     return out

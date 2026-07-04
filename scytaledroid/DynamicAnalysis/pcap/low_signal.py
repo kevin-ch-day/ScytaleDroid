@@ -23,6 +23,13 @@ _CHAT_LIKE_BASELINE_PACKAGES = {
 _RELAXED_IDLE_MIN_BYTES = 500_000  # 500KB
 _CONNECTED_BASELINE_MIN_PACKETS = 150
 _CONNECTED_BASELINE_MIN_DOMAINS = 1
+_RICH_IDLE_CATEGORY_NAMES = {"social_feed", "news_reader"}
+_RICH_IDLE_MIN_DURATION_S = 180.0
+_RICH_IDLE_MIN_PACKETS = 250
+_RICH_IDLE_MIN_DOMAINS = 3
+_RICH_IDLE_MIN_SERVICES = 2
+_RICH_IDLE_MIN_JA4 = 2
+_RICH_IDLE_MIN_TLS_HELLOS = 4
 
 
 @dataclass(frozen=True)
@@ -153,6 +160,16 @@ def compute_low_signal_for_run(
         reasons = []
         decision["low_signal_reasons"] = reasons
         decision["low_signal"] = False
+    elif _should_suppress_low_signal_for_rich_idle_baseline(
+        run_dir,
+        package_name=package_name,
+        run_profile=run_profile,
+        reasons=reasons,
+        cfg=effective,
+    ):
+        reasons = []
+        decision["low_signal_reasons"] = reasons
+        decision["low_signal"] = False
     elif _should_suppress_bytes_low_for_idle_baseline(
         run_dir,
         run_profile=run_profile,
@@ -261,6 +278,54 @@ def _should_suppress_bytes_low_for_idle_baseline(
         and metrics["domain_count"] >= int(cfg.min_unique_domains_topn)
         and metrics["has_evidence"]
     )
+
+
+def _should_suppress_low_signal_for_rich_idle_baseline(
+    run_dir: Path,
+    *,
+    package_name: str | None,
+    run_profile: str | None,
+    reasons: list[str],
+    cfg: LowSignalConfig,
+) -> bool:
+    """Allow long, structurally rich feed/news idle baselines to count.
+
+    Some social/news apps keep background-refresh, analytics, and handshake-heavy
+    traffic low in byte volume while still providing reproducible runtime
+    evidence. For these categories, sustained duration plus corroborating
+    domain/service/TLS evidence is stronger than raw byte volume alone.
+    """
+    profile = str(run_profile or "").strip().lower()
+    if profile != "baseline_idle":
+        return False
+    if not _is_rich_idle_category_package(package_name):
+        return False
+    if not reasons:
+        return False
+    allowed_quiet_reasons = {"PCAP_BYTES_LOW", "PCAP_PACKETS_LOW", "DOMAINS_LOW"}
+    if any(reason not in allowed_quiet_reasons for reason in reasons):
+        return False
+
+    metrics = _baseline_evidence_metrics(run_dir)
+    if not metrics["pcap_quality_ok"]:
+        return False
+    if metrics["duration_s"] < max(float(cfg.min_capture_duration_s), _RICH_IDLE_MIN_DURATION_S):
+        return False
+    if metrics["packet_count"] < _RICH_IDLE_MIN_PACKETS:
+        return False
+    if not metrics["has_evidence"]:
+        return False
+
+    corroboration_hits = 0
+    if metrics["domain_count"] >= _RICH_IDLE_MIN_DOMAINS:
+        corroboration_hits += 1
+    if metrics["service_count"] >= _RICH_IDLE_MIN_SERVICES:
+        corroboration_hits += 1
+    if metrics["ja4_count"] >= _RICH_IDLE_MIN_JA4:
+        corroboration_hits += 1
+    if metrics["tls_hello_count"] >= _RICH_IDLE_MIN_TLS_HELLOS:
+        corroboration_hits += 1
+    return corroboration_hits >= 2
 
 
 def _baseline_evidence_metrics(run_dir: Path) -> dict[str, Any]:
@@ -464,6 +529,13 @@ def _is_chat_like_package(package_name: str | None) -> bool:
     messaging_pkgs = {p.lower() for p in MESSAGING_PACKAGES}
     category = category_for_package(pkg)
     return pkg in _CHAT_LIKE_BASELINE_PACKAGES or pkg in messaging_pkgs or category == "messaging"
+
+
+def _is_rich_idle_category_package(package_name: str | None) -> bool:
+    pkg = str(package_name or "").strip().lower()
+    if not pkg:
+        return False
+    return category_for_package(pkg) in _RICH_IDLE_CATEGORY_NAMES
 
 
 __all__ = [

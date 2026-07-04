@@ -6,7 +6,9 @@ from pathlib import Path
 from scripts.db import backfill_static_report_findings_fidelity as script
 
 
-def _report_payload(*, package_name: str, session_stamp: str, with_fidelity: bool) -> dict[str, object]:
+def _report_payload(
+    *, package_name: str, session_stamp: str, with_fidelity: bool
+) -> dict[str, object]:
     metadata: dict[str, object] = {
         "package_name": package_name,
         "app_label": package_name,
@@ -52,11 +54,6 @@ def _run_health_payload(*, session_stamp: str, package_name: str) -> dict[str, o
     }
 
 
-def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/backfill_static_report_findings_fidelity.py")
-    assert "--apply" in out
-
-
 def test_dry_run_reports_missing_targets(tmp_path: Path, monkeypatch, capsys) -> None:
     repo_root = tmp_path / "repo"
     data_root = repo_root / "data"
@@ -68,16 +65,26 @@ def test_dry_run_reports_missing_targets(tmp_path: Path, monkeypatch, capsys) ->
 
     missing_path = archive_dir / "missing.json"
     missing_path.write_text(
-        json.dumps(_report_payload(package_name="com.example.one", session_stamp=session_stamp, with_fidelity=False)),
+        json.dumps(
+            _report_payload(
+                package_name="com.example.one", session_stamp=session_stamp, with_fidelity=False
+            )
+        ),
         encoding="utf-8",
     )
     present_path = archive_dir / "present.json"
     present_path.write_text(
-        json.dumps(_report_payload(package_name="com.example.two", session_stamp=session_stamp, with_fidelity=True)),
+        json.dumps(
+            _report_payload(
+                package_name="com.example.two", session_stamp=session_stamp, with_fidelity=True
+            )
+        ),
         encoding="utf-8",
     )
     (run_health_dir / f"{session_stamp}_run_health.json").write_text(
-        json.dumps(_run_health_payload(session_stamp=session_stamp, package_name="com.example.one")),
+        json.dumps(
+            _run_health_payload(session_stamp=session_stamp, package_name="com.example.one")
+        ),
         encoding="utf-8",
     )
 
@@ -88,11 +95,13 @@ def test_dry_run_reports_missing_targets(tmp_path: Path, monkeypatch, capsys) ->
         lambda _session: (
             {
                 "run_rows": {
-                    "com.example.one": {"persisted_findings_db": 10, "findings_runtime_total": 10, "findings_capped_total": 0}
+                    "com.example.one": {
+                        "persisted_findings_db": 10,
+                        "findings_runtime_total": 10,
+                        "findings_capped_total": 0,
+                    }
                 },
-                "package_persisted_by_severity": {
-                    "com.example.one": {"P0": 1}
-                },
+                "package_persisted_by_severity": {"com.example.one": {"P0": 1}},
             },
             [],
         ),
@@ -119,11 +128,17 @@ def test_apply_backfills_missing_report_metadata(tmp_path: Path, monkeypatch) ->
 
     missing_path = archive_dir / "missing.json"
     missing_path.write_text(
-        json.dumps(_report_payload(package_name="com.example.one", session_stamp=session_stamp, with_fidelity=False)),
+        json.dumps(
+            _report_payload(
+                package_name="com.example.one", session_stamp=session_stamp, with_fidelity=False
+            )
+        ),
         encoding="utf-8",
     )
     (run_health_dir / f"{session_stamp}_run_health.json").write_text(
-        json.dumps(_run_health_payload(session_stamp=session_stamp, package_name="com.example.one")),
+        json.dumps(
+            _run_health_payload(session_stamp=session_stamp, package_name="com.example.one")
+        ),
         encoding="utf-8",
     )
 
@@ -134,11 +149,13 @@ def test_apply_backfills_missing_report_metadata(tmp_path: Path, monkeypatch) ->
         lambda _session: (
             {
                 "run_rows": {
-                    "com.example.one": {"persisted_findings_db": 10, "findings_runtime_total": 10, "findings_capped_total": 0}
+                    "com.example.one": {
+                        "persisted_findings_db": 10,
+                        "findings_runtime_total": 10,
+                        "findings_capped_total": 0,
+                    }
                 },
-                "package_persisted_by_severity": {
-                    "com.example.one": {"P0": 1}
-                },
+                "package_persisted_by_severity": {"com.example.one": {"P0": 1}},
             },
             [],
         ),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
 from scytaledroid.StaticAnalysis.cli.persistence import evidence_manifest_verify as emv
 
 

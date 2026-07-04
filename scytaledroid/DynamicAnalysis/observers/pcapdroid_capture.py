@@ -12,7 +12,6 @@ from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.observers.base import Observer, ObserverHandle, ObserverResult
 from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name, package_slug
 from scytaledroid.DynamicAnalysis.utils.pcap_minima import effective_min_pcap_bytes_for_run_profile

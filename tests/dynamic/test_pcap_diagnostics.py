@@ -11,6 +11,7 @@ from scytaledroid.DynamicAnalysis.pcap.diagnostics import (
     export_pcap_failure_detail,
     extract_verify_issue_codes,
     raw_pcap_failure_detail_from_canonical,
+    security_surface_issue_codes,
     verify_issue_codes_csv,
 )
 
@@ -23,7 +24,10 @@ def test_extract_verify_issue_codes_dedupes_and_preserves_order() -> None:
             {"code": "protocol_empty_no_reason"},
         ]
     }
-    assert extract_verify_issue_codes(verify_row) == ("pcap_artifact_missing", "protocol_empty_no_reason")
+    assert extract_verify_issue_codes(verify_row) == (
+        "pcap_artifact_missing",
+        "protocol_empty_no_reason",
+    )
     assert verify_issue_codes_csv(verify_row) == "pcap_artifact_missing;protocol_empty_no_reason"
 
 
@@ -121,4 +125,29 @@ def test_raw_pcap_failure_detail_from_canonical_handles_artifact_missing() -> No
 
 
 def test_canonical_pcap_failure_code_from_raw_detail_handles_local_missing() -> None:
-    assert canonical_pcap_failure_code_from_raw_detail("PCAP_LOCAL_FILE_MISSING") == "local_file_missing"
+    assert (
+        canonical_pcap_failure_code_from_raw_detail("PCAP_LOCAL_FILE_MISSING")
+        == "local_file_missing"
+    )
+
+
+def test_security_surface_issue_codes_reports_cleartext_and_flags() -> None:
+    codes = security_surface_issue_codes(
+        {
+            "report_status": "ok",
+            "security_surface": {
+                "status": "ok",
+                "risk_flags": ["http_metadata_observed", "elevated_dns_txt_queries"],
+                "cleartext": {
+                    "http_observed": True,
+                    "decoded_stream_count": 0,
+                },
+            },
+        }
+    )
+    assert "cleartext_http_observed" in codes
+    assert "http_metadata_observed" in codes
+
+
+def test_security_surface_issue_codes_missing_on_ok_report() -> None:
+    assert security_surface_issue_codes({"report_status": "ok"}) == ("security_surface_missing",)

@@ -17,7 +17,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scytaledroid.DynamicAnalysis.run_qualification import analysis_included_rows, row_analysis_included
+from scytaledroid.DynamicAnalysis.run_qualification import analysis_included_rows
 
 FOCUS_PACKAGES: dict[str, str] = {
     "bbc.mobile.news.ww": "BBC News",

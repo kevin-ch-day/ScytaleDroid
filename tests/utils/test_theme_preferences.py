@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from scytaledroid.Utils.DisplayUtils import colors, ui_prefs
+from scytaledroid.Utils.DisplayUtils.colors import environment
 from scytaledroid.Utils.DisplayUtils.theme_preview import format_theme_preview
 
 
@@ -30,3 +31,16 @@ def test_theme_preview_includes_name_and_severity_scale() -> None:
         assert "Severity scale:" in rendered
     finally:
         colors.set_palette_by_name(original)
+
+
+def test_detect_palette_name_prefers_fedora_dark_on_fedora_host(monkeypatch) -> None:
+    monkeypatch.delenv("SCYTALEDROID_UI_THEME", raising=False)
+    monkeypatch.delenv("SCYTALE_UI_THEME", raising=False)
+    monkeypatch.delenv("SCYTALE_UI_HIGH_CONTRAST", raising=False)
+    monkeypatch.delenv("GTK_THEME", raising=False)
+    monkeypatch.delenv("COLORFGBG", raising=False)
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "Fedora")
+
+    selected = environment.detect_palette_name(lambda value: value)
+
+    assert selected == "fedora-dark"

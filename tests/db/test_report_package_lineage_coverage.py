@@ -493,24 +493,30 @@ def test_workbench_action_mapping_keeps_states_distinct() -> None:
 def test_workbench_actionable_filter_keeps_lifecycle_gap() -> None:
     from scripts.db import report_package_lineage_workbench as workbench
 
-    assert workbench._is_actionable(
-        {
-            "recommended_action": "already_covered",
-            "bytes_available": True,
-            "unpaired_dynamic_sessions": 0,
-            "exact_static_dynamic_gap": False,
-            "review_flags": [],
-        }
-    ) is False
-    assert workbench._is_actionable(
-        {
-            "recommended_action": "already_covered",
-            "bytes_available": False,
-            "unpaired_dynamic_sessions": 0,
-            "exact_static_dynamic_gap": False,
-            "review_flags": [],
-        }
-    ) is True
+    assert (
+        workbench._is_actionable(
+            {
+                "recommended_action": "already_covered",
+                "bytes_available": True,
+                "unpaired_dynamic_sessions": 0,
+                "exact_static_dynamic_gap": False,
+                "review_flags": [],
+            }
+        )
+        is False
+    )
+    assert (
+        workbench._is_actionable(
+            {
+                "recommended_action": "already_covered",
+                "bytes_available": False,
+                "unpaired_dynamic_sessions": 0,
+                "exact_static_dynamic_gap": False,
+                "review_flags": [],
+            }
+        )
+        is True
+    )
 
 
 def test_workbench_summary_counts_actions_and_availability() -> None:

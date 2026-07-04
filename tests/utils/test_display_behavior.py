@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.inventory import progress as inventory_progress
-from scytaledroid.Utils.DisplayUtils import colors, error_panels, menu_utils, severity, summary_cards, table_utils
-
+from scytaledroid.Utils.DisplayUtils import (
+    colors,
+    error_panels,
+    menu_utils,
+    severity,
+    summary_cards,
+    table_utils,
+)
 
 _ALLOWED_RAW_ANSI_FILES = {
     Path("scytaledroid/Utils/DisplayUtils/colors/ansi.py"),

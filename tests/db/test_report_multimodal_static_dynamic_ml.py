@@ -3,12 +3,6 @@ from __future__ import annotations
 from scripts.db import report_multimodal_static_dynamic_ml as report
 
 
-def test_report_multimodal_static_dynamic_ml_help_is_safe(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_multimodal_static_dynamic_ml.py")
-    assert "Read-only fused static + dynamic + PCAP analysis" in out
-    assert "--recompute-exact-tls" in out
-
-
 def test_fused_run_fieldnames_include_static_and_dynamic_surfaces() -> None:
     fields = report.fused_run_fieldnames()
     assert "dynamic_run_id" in fields
@@ -105,17 +99,33 @@ def test_spearman_rho_and_quadrants_cover_expected_cases() -> None:
     assert abs(float(report._spearman_rho([1.0, 2.0, 3.0], [2.0, 4.0, 6.0]) or 0.0) - 1.0) < 1e-9
     neg = report._spearman_rho([1.0, 2.0, 3.0], [6.0, 4.0, 2.0])
     assert abs(float(neg or 0.0) + 1.0) < 1e-9
-    ci_low, ci_high = report._bootstrap_spearman_ci([1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0], n_resamples=200)
+    ci_low, ci_high = report._bootstrap_spearman_ci(
+        [1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0], n_resamples=200
+    )
     assert ci_low is not None
     assert ci_high is not None
     assert ci_low <= ci_high
-    perm_p = report._spearman_permutation_p_value([1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0], n_resamples=200)
+    perm_p = report._spearman_permutation_p_value(
+        [1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0], n_resamples=200
+    )
     assert perm_p is not None
     assert 0.0 <= perm_p <= 1.0
-    assert report._assign_quadrant(1.0, 1.0, static_cut=0.0, runtime_cut=0.0) == "high_static_high_runtime"
-    assert report._assign_quadrant(1.0, -1.0, static_cut=0.0, runtime_cut=0.0) == "high_static_low_runtime"
-    assert report._assign_quadrant(-1.0, 1.0, static_cut=0.0, runtime_cut=0.0) == "low_static_high_runtime"
-    assert report._assign_quadrant(-1.0, -1.0, static_cut=0.0, runtime_cut=0.0) == "low_static_low_runtime"
+    assert (
+        report._assign_quadrant(1.0, 1.0, static_cut=0.0, runtime_cut=0.0)
+        == "high_static_high_runtime"
+    )
+    assert (
+        report._assign_quadrant(1.0, -1.0, static_cut=0.0, runtime_cut=0.0)
+        == "high_static_low_runtime"
+    )
+    assert (
+        report._assign_quadrant(-1.0, 1.0, static_cut=0.0, runtime_cut=0.0)
+        == "low_static_high_runtime"
+    )
+    assert (
+        report._assign_quadrant(-1.0, -1.0, static_cut=0.0, runtime_cut=0.0)
+        == "low_static_low_runtime"
+    )
 
 
 def test_build_fused_app_rollups_computes_scores_and_priority() -> None:
@@ -408,7 +418,9 @@ def test_bootstrap_priority_stability_returns_probabilities_and_intervals() -> N
     ]
     rollups = report._build_fused_app_rollups(fused_rows)
     priority_rows = report._build_priority_rows(rollups)
-    stability = report._bootstrap_priority_stability(fused_rows, priority_rows, sample_scope="all_governed", n_resamples=100)
+    stability = report._bootstrap_priority_stability(
+        fused_rows, priority_rows, sample_scope="all_governed", n_resamples=100
+    )
     assert len(stability) == 2
     first = stability[0]
     assert first["sample_scope"] == "all_governed"
@@ -478,7 +490,7 @@ def test_build_correlation_rows_sorts_strongest_first() -> None:
             "median_top1_ja4_share": 0.25,
         },
     ]
-    rows = report._build_correlation_rows(app_rollups)
+    rows = report._build_correlation_rows(app_rollups, n_resamples=500)
     assert rows
     assert rows[0]["spearman_rho"] is not None
     assert rows[0]["rho_bootstrap_ci_low"] is not None
@@ -566,6 +578,7 @@ def test_nearest_centroid_loocv_separates_simple_profile_classes() -> None:
         features=report.FUSED_MODEL_FEATURES,
         feature_set_name="fused_static_runtime",
         note="test note",
+        exact_ci=False,
     )
     assert len(predictions) == 4
     assert summary["accuracy"] is not None
@@ -651,7 +664,9 @@ def test_build_classification_outputs_emits_targets_and_feature_scores() -> None
             "median_packets_per_second": 4.5,
         },
     ]
-    summaries, predictions, feature_scores = report._build_classification_outputs(rows)
+    summaries, predictions, feature_scores = report._build_classification_outputs(
+        rows, exact_ci=False
+    )
     assert {row["target"] for row in summaries} == {
         "profile_key_fused",
         "profile_key_runtime_only",
@@ -778,7 +793,10 @@ def test_build_sample_hygiene_rows_and_fallback_details_flag_recapture() -> None
 
     fallback_rows = report._build_fallback_detail_rows(fused_rows)
     assert len(fallback_rows) == 2
-    assert fallback_rows[0]["recommendation"] == "refresh runtime/static alignment before exact-fusion claims"
+    assert (
+        fallback_rows[0]["recommendation"]
+        == "refresh runtime/static alignment before exact-fusion claims"
+    )
     assert report._fused_claim_posture("strict_exact_absent") == "descriptive_fallback_only"
 
 

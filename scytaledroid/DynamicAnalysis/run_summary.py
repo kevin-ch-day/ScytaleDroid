@@ -8,6 +8,9 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
+    baseline_not_idle_next_step as _guidance_baseline_not_idle_next_step,
+)
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.time_utils import format_seconds
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
@@ -181,7 +184,7 @@ def print_run_summary(result, duration_label: str) -> None:
                         lines.append(("QUIC ratio", quic_ratio))
                     if threshold_crossed:
                         lines.append(("Threshold crossed", threshold_crossed))
-                    lines.append(("Next baseline", "Repeat with stricter idle behavior if quota progress is needed."))
+                    lines.append(("Next baseline", _baseline_not_idle_next_step(pkg)))
                 verdict_line = _three_verdict_label(result.dynamic_run_id)
             elif run_profile:
                 # Fallback when tracker isn't available.
@@ -909,6 +912,10 @@ def _clock_delta_line(
     else:
         reason = "overhead outside sampling window: setup/teardown, observer start/stop"
     return f"Overhead outside sampling window: {delta:.0f}s ({reason})"
+
+
+def _baseline_not_idle_next_step(package_name: str | None) -> str:
+    return _guidance_baseline_not_idle_next_step(package_name)
 
 
 def _countability_label(validity: dict[str, object], run_profile: str | None) -> str:

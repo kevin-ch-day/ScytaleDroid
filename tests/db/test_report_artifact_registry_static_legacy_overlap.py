@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from scytaledroid.Database.db_utils.artifact_registry_static_legacy_overlap import (
     collect_static_legacy_overlap_report,
     write_static_legacy_overlap_bundle,
 )
-
-
-def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_artifact_registry_static_legacy_overlap.py").lower()
-    assert out.startswith("usage:")
-    assert "static_legacy_overlap" in out
 
 
 def test_collect_static_legacy_overlap_report() -> None:

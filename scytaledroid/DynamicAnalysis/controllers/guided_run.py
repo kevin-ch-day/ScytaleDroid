@@ -16,23 +16,33 @@ from types import SimpleNamespace
 from typing import Any
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis import device_manager
-from scytaledroid.DynamicAnalysis.controllers.device_select import (
-    get_device_selection_details,
-    select_device,
-)
+from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.controllers import guided_run_capture as _guided_run_capture
 from scytaledroid.DynamicAnalysis.controllers import guided_run_messaging as _guided_run_messaging
 from scytaledroid.DynamicAnalysis.controllers import selected_app_actions as _selected_app_actions
 from scytaledroid.DynamicAnalysis.controllers import selected_app_review as _selected_app_review
 from scytaledroid.DynamicAnalysis.controllers import selected_app_state as _selected_app_state
+from scytaledroid.DynamicAnalysis.controllers.device_select import (
+    get_device_selection_details,
+    select_device,
+)
 from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     device_preflight_checks as _device_preflight_checks_impl,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     extract_version_code_details_from_dump as _extract_version_code_details_from_dump_impl,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     post_run_integrity_check as _post_run_integrity_check_impl,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     pre_run_scientific_checks as _pre_run_scientific_checks_impl,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     read_observed_signer_set_hash as _read_observed_signer_set_hash_impl,
+)
+from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     read_observed_version_code_details as _read_observed_version_code_details_impl,
 )
 from scytaledroid.DynamicAnalysis.core.run_specs import build_dynamic_run_spec
@@ -61,6 +71,8 @@ from scytaledroid.DynamicAnalysis.templates.category_map import (
 )
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     build_scoped_dataset_counts as _build_scoped_dataset_counts_shared,
+)
+from scytaledroid.DynamicAnalysis.tracker_scope import (
     default_resolve_tracker_run_identity as _resolve_tracker_run_identity_shared,
 )
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
@@ -72,6 +84,7 @@ from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
 )
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts, load_display_name_map
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 _BATTERY_WARN_PCT = 30
 _BATTERY_BLOCK_PCT = 20
@@ -165,7 +178,9 @@ def _queue_action_key(action: str | None) -> str:
     return text.replace(" ", "_")
 
 
-def _with_selected_app_display(app: _SelectedAppContext, *, package_name: str, display_label: str) -> _SelectedAppContext:
+def _with_selected_app_display(
+    app: _SelectedAppContext, *, package_name: str, display_label: str
+) -> _SelectedAppContext:
     return replace(
         app,
         display_label=display_label,
@@ -228,7 +243,9 @@ def _load_db_dynamic_lineage_context(package_name: str) -> dict[str, int]:
         if dynamic_sessions <= 0:
             continue
         version_code = str(row.get("version_code") or "").strip()
-        is_active = sha == active_sha if active_sha else (version_code == active_vc if active_vc else False)
+        is_active = (
+            sha == active_sha if active_sha else (version_code == active_vc if active_vc else False)
+        )
         out["db_total_sessions"] += dynamic_sessions
         if is_active:
             out["db_active_sessions"] += dynamic_sessions
@@ -273,9 +290,7 @@ def _print_selected_app_evidence_context(
     )
     if int(legacy_valid_runs) > 0:
         build_text = (
-            f" across {historical_build_count} older build(s)"
-            if historical_build_count > 0
-            else ""
+            f" across {historical_build_count} older build(s)" if historical_build_count > 0 else ""
         )
         print(
             status_messages.status(
@@ -288,19 +303,32 @@ def _print_selected_app_evidence_context(
     if state == "current_build_db_only":
         print()
         print("Why:")
-        print("Current-build evidence exists in the DB, but the local evidence pack is missing in this workspace.")
+        print(
+            "Current-build evidence exists in the DB, but the local evidence pack is missing in this workspace."
+        )
         print("Restore the local evidence pack if available, or recollect the current build.")
         return
     if state == "historical_local_only":
         print()
+        print("Current target")
+        print("--------------")
+        print("Installed build : installed/current")
+        print("Current evidence: none yet")
+        print(f"Historical      : {legacy_valid_runs} legacy valid run(s) retained for comparison")
+        print("Current QA      : unknown until current-build evidence exists")
+        print()
         print("Why:")
-        print("Historical evidence exists locally, but current-build evidence is still missing for this app.")
+        print(
+            "Historical evidence exists locally, but current-build evidence is still missing for this app."
+        )
         print("Baseline collection should target the installed build.")
         return
     if state == "historical_db_only":
         print()
         print("Why:")
-        print("Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace.")
+        print(
+            "Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace."
+        )
         print("Collect baseline evidence for the installed build.")
         return
     if state == "no_evidence_anywhere":
@@ -337,6 +365,7 @@ def _selected_app_queue_action(
         db_active_sessions=db_active_sessions,
         active_valid_runs=active_valid_runs,
     )
+
 
 def _render_selected_app_review(
     *,
@@ -504,6 +533,7 @@ def _selected_app_state_snapshot(
     )
     return _SelectedAppStateSnapshot(**snapshot.__dict__)
 
+
 def _select_guided_dataset_package(
     *,
     scoped_groups: tuple[Any, ...],
@@ -555,10 +585,14 @@ def _resolve_package_display_label(groups: list[Any], package_name: str) -> str:
     display_label = str(db_map.get(pkg_lc) or "").strip()
     if display_label:
         return _normalize_dynamic_app_display_label(display_label, package_name)
-    return _normalize_dynamic_app_display_label(str(package_name or "").strip() or package_name, package_name)
+    return _normalize_dynamic_app_display_label(
+        str(package_name or "").strip() or package_name, package_name
+    )
 
 
-def _plan_drift_rows(plan_drift: dict[str, Any], *, detailed_installed_build: bool) -> list[list[str]]:
+def _plan_drift_rows(
+    plan_drift: dict[str, Any], *, detailed_installed_build: bool
+) -> list[list[str]]:
     return _guided_run_capture.plan_drift_rows(
         plan_drift,
         detailed_installed_build=detailed_installed_build,
@@ -579,7 +613,9 @@ def _print_plan_drift_blocked_message(plan_drift: dict[str, Any]) -> None:
     )
 
 
-def _render_static_plan_build_drift_block(*, display_label: str, plan_drift: dict[str, Any]) -> None:
+def _render_static_plan_build_drift_block(
+    *, display_label: str, plan_drift: dict[str, Any]
+) -> None:
     _guided_run_capture.render_static_plan_build_drift_block(
         display_label=display_label,
         plan_drift=plan_drift,
@@ -623,7 +659,6 @@ def _load_selected_app_context(
         state.effective_suggested_profile
         or str(getattr(cfg, "interactive_profile", "") or "interaction_manual")
     ).strip()
-    suggested_slot = state.suggested_slot
     extra_valid_local = int(counts.extra_valid_runs)
     historical_valid_local = int(state.historical_valid_runs)
     historical_build_count = int(state.historical_build_count)
@@ -632,9 +667,6 @@ def _load_selected_app_context(
     db_historical_sessions = int(db_lineage_context.get("db_historical_sessions") or 0)
     if int(counts.baseline_valid_runs) < int(cfg.baseline_required):
         suggested_profile = _canonical_baseline_profile_for_package(package_name)
-        suggested_slot = max(1, min(int(counts.baseline_valid_runs) + 1, int(cfg.baseline_required)))
-    if counts.quota_met:
-        suggested_slot = None
 
     suggested_is_interactive = _is_interactive_profile(suggested_profile)
     suggested_default_key = _suggested_menu_key(suggested_profile)
@@ -720,7 +752,9 @@ def _selected_app_latest_recent_summary(*, package_name: str, state: Any) -> Any
                     interaction_level=getattr(fallback, "interaction_level", None),
                     messaging_activity=getattr(fallback, "messaging_activity", None),
                     valid=getattr(fallback, "valid", None),
-                    countable=getattr(fallback, "countable", getattr(tracker_summary, "countable", None)),
+                    countable=getattr(
+                        fallback, "countable", getattr(tracker_summary, "countable", None)
+                    ),
                     cohort_eligibility=getattr(
                         fallback,
                         "cohort_eligibility",
@@ -738,7 +772,11 @@ def _selected_app_latest_recent_summary(*, package_name: str, state: Any) -> Any
                         getattr(tracker_summary, "supplemental_reason", None),
                     ),
                     run_id=fallback_run_id,
-                    status_label=getattr(fallback, "status_label", getattr(tracker_summary, "status_label", "UNKNOWN")),
+                    status_label=getattr(
+                        fallback,
+                        "status_label",
+                        getattr(tracker_summary, "status_label", "UNKNOWN"),
+                    ),
                 )
         if fallback is not None:
             return fallback
@@ -760,7 +798,9 @@ def _selected_app_has_identity_mismatch(
 
         tracker = load_dataset_tracker()
         apps = tracker.get("apps") if isinstance(tracker, dict) else {}
-        entry = apps.get(str(package_name or "").strip().lower()) if isinstance(apps, dict) else None
+        entry = (
+            apps.get(str(package_name or "").strip().lower()) if isinstance(apps, dict) else None
+        )
         runs = entry.get("runs") if isinstance(entry, dict) else None
         if not isinstance(runs, list):
             return False
@@ -769,7 +809,8 @@ def _selected_app_has_identity_mismatch(
                 row
                 for row in runs
                 if isinstance(row, dict)
-                and str(row.get("run_id") or "").strip() == str(getattr(latest_recent, "run_id", "") or "").strip()
+                and str(row.get("run_id") or "").strip()
+                == str(getattr(latest_recent, "run_id", "") or "").strip()
             ),
             None,
         )
@@ -845,10 +886,9 @@ def _intent_counts_toward_quota(
     if profile.startswith("baseline"):
         return int(baseline_valid_runs) < int(cfg.baseline_required)
     if profile.startswith("interaction_") or "interactive" in profile:
-        return (
-            int(baseline_valid_runs) >= int(cfg.baseline_required)
-            and int(interactive_valid_runs) < int(cfg.interactive_required)
-        )
+        return int(baseline_valid_runs) >= int(cfg.baseline_required) and int(
+            interactive_valid_runs
+        ) < int(cfg.interactive_required)
     return False
 
 
@@ -916,7 +956,10 @@ def _print_paper_mode_constants() -> None:
         ("Window size", f"{int(profile_config.WINDOW_SIZE_S)}s"),
         ("Stride", f"{int(profile_config.WINDOW_STRIDE_S)}s"),
         ("Min sampling time", f"{int(getattr(profile_config, 'MIN_SAMPLING_SECONDS', 180))}s"),
-        ("Recommended time", f"{int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s"),
+        (
+            "Recommended time",
+            f"{int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s",
+        ),
         ("Percentile threshold", f"{int(profile_config.THRESHOLD_PERCENTILE)}"),
         ("Percentile method", str(getattr(profile_config, "NP_PERCENTILE_METHOD", "linear"))),
         (
@@ -929,19 +972,33 @@ def _print_paper_mode_constants() -> None:
         ("NumPy version", numpy_version),
         ("scikit-learn version", sklearn_version),
     ]
-    compact = (
-        str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() not in {"debug", "details"}
-    )
+    compact = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower() not in {
+        "debug",
+        "details",
+    }
     if compact:
-        line = (
-            f"Window={int(profile_config.WINDOW_SIZE_S)}s/{int(profile_config.WINDOW_STRIDE_S)}s | "
-            f"Min={int(getattr(profile_config, 'MIN_SAMPLING_SECONDS', 180))}s | "
-            f"Rec={int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s | "
-            f"MinPCAP={int(profile_config.MIN_PCAP_BYTES)} "
-            f"(connected {int(getattr(profile_config, 'MIN_PCAP_BYTES_BASELINE_CONNECTED', profile_config.MIN_PCAP_BYTES))}) | "
-            f"Models=IF+OCSVM | Training=baseline-only"
+        print_summary_card(
+            "ML Parameters (Locked)",
+            [
+                summary_item(
+                    "Window",
+                    f"{int(profile_config.WINDOW_SIZE_S)}s / {int(profile_config.WINDOW_STRIDE_S)}s",
+                    value_style="accent",
+                ),
+                summary_item(
+                    "Timing",
+                    f"min {int(getattr(profile_config, 'MIN_SAMPLING_SECONDS', 180))}s · recommended {int(getattr(profile_config, 'RECOMMENDED_SAMPLING_SECONDS', 240))}s",
+                    value_style="muted",
+                ),
+                summary_item(
+                    "Min PCAP",
+                    f"{int(profile_config.MIN_PCAP_BYTES)} bytes (connected {int(getattr(profile_config, 'MIN_PCAP_BYTES_BASELINE_CONNECTED', profile_config.MIN_PCAP_BYTES))})",
+                    value_style="warning",
+                ),
+                summary_item("Models", "Isolation Forest + OC-SVM", value_style="success"),
+                summary_item("Training", "baseline-only", value_style="accent"),
+            ],
         )
-        print(status_messages.status(line, level="info"))
         # Keep guided collection fast: no extra prompt here. Operators can switch to
         # SCYTALEDROID_UI_LEVEL=details/debug for full tables.
         return
@@ -1014,30 +1071,33 @@ def _choose_interactive_mode(
     default_scripted: bool = False,
 ) -> str | None:
     menu_utils.print_header("Interactive Mode")
-    scripted_desc = "scripted template run"
+    scripted_label = "Scripted interactive run"
     scripted_disabled = False
     if scripted_template_ready:
         template_name = str(resolved_template_for_package(package_name) or "").strip()
         if template_name:
-            scripted_desc = f"template: {template_name}"
+            scripted_label = f"Scripted interactive run: {template_name}"
     else:
-        scripted_desc = "unavailable — no template for this package"
+        scripted_label = "Scripted interactive run (unavailable — no template)"
         scripted_disabled = True
     menu_utils.print_menu(
         [
-            menu_utils.MenuOption("1", "Manual interactive run", description="operator-driven session"),
+            menu_utils.MenuOption(
+                "1", "Manual interactive run", description="operator-driven session"
+            ),
             menu_utils.MenuOption(
                 "2",
-                "Scripted interactive run",
-                description=scripted_desc,
+                scripted_label,
+                description="scripted template run",
                 disabled=scripted_disabled,
             ),
         ],
         default="2" if default_scripted and scripted_template_ready else "1",
-        show_descriptions=True,
+        show_descriptions=False,
+        show_exit=False,
         compact=True,
     )
-    menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
+    print("0) Back")
     choice = prompt_utils.get_choice(
         ["1", "2", "0", "B"],
         default="2" if default_scripted and scripted_template_ready else "1",
@@ -1061,15 +1121,23 @@ def _choose_messaging_activity(
     menu_utils.print_header("Messaging Activity (Tag)")
     if scripted:
         messaging_options = [
-            menu_utils.MenuOption("1", "Idle", description="browse thread/list surfaces; no sending/calls/media"),
+            menu_utils.MenuOption(
+                "1", "Idle", description="browse thread/list surfaces; no sending/calls/media"
+            ),
             menu_utils.MenuOption(
                 "2",
                 "Text",
                 description="send 2 fixed text messages (no media). Use Meta AI/Saved/Note-to-self if needed.",
             ),
-            menu_utils.MenuOption("3", "Voice Call", description="start call; if connected hold ~90s; end call"),
-            menu_utils.MenuOption("4", "Video Call", description="start video call; if connected hold ~90s; end call"),
-            menu_utils.MenuOption("5", "Mixed", description="text + call (exploratory-only; non-cohort)"),
+            menu_utils.MenuOption(
+                "3", "Voice Call", description="start call; if connected hold ~90s; end call"
+            ),
+            menu_utils.MenuOption(
+                "4", "Video Call", description="start video call; if connected hold ~90s; end call"
+            ),
+            menu_utils.MenuOption(
+                "5", "Mixed", description="text + call (exploratory-only; non-cohort)"
+            ),
         ]
         default = "2"
         mapping = {
@@ -1079,6 +1147,7 @@ def _choose_messaging_activity(
             "4": "video_call",
             "5": "mixed",
         }
+        print("Choose the scripted activity focus for this run.")
     else:
         messaging_options = [
             menu_utils.MenuOption(
@@ -1088,8 +1157,14 @@ def _choose_messaging_activity(
             ),
             menu_utils.MenuOption("2", "Text", description="manual text/chat-focused interaction"),
             menu_utils.MenuOption("3", "Voice Call", description="manual call-focused interaction"),
-            menu_utils.MenuOption("4", "Video Call", description="manual video-call-focused interaction"),
-            menu_utils.MenuOption("5", "Mixed", description="several actions may occur; this is only a manual activity tag"),
+            menu_utils.MenuOption(
+                "4", "Video Call", description="manual video-call-focused interaction"
+            ),
+            menu_utils.MenuOption(
+                "5",
+                "Mixed",
+                description="several actions may occur; this is only a manual activity tag",
+            ),
         ]
         default = "1"
         mapping = {
@@ -1099,13 +1174,16 @@ def _choose_messaging_activity(
             "4": "video_call",
             "5": "manual_mixed",
         }
+        print(
+            "Choose the closest manual activity tag. This labels the run; it does not force a script."
+        )
     menu_utils.render_menu(
         menu_utils.MenuSpec(
             items=messaging_options,
             default=default,
             exit_label=None,
             show_exit=False,
-            show_descriptions=True,
+            show_descriptions=False,
             compact=True,
         )
     )
@@ -1186,7 +1264,9 @@ def _load_plan_identity(plan_path: str) -> dict[str, str]:
     return {
         "package_name_lc": str(
             run_identity.get("package_name_lc") or payload.get("package_name") or ""
-        ).strip().lower(),
+        )
+        .strip()
+        .lower(),
         "version_code": str(
             run_identity.get("version_code") or payload.get("version_code") or ""
         ).strip(),
@@ -1194,7 +1274,14 @@ def _load_plan_identity(plan_path: str) -> dict[str, str]:
         "artifact_set_hash": str(run_identity.get("artifact_set_hash") or "").strip().lower(),
         "signer_set_hash": str(
             run_identity.get("signer_set_hash") or run_identity.get("signer_digest") or ""
-        ).strip().lower(),
+        )
+        .strip()
+        .lower(),
+        "run_signature": str(
+            run_identity.get("run_signature") or payload.get("run_signature") or ""
+        )
+        .strip()
+        .lower(),
     }
 
 
@@ -1222,7 +1309,9 @@ def _detect_static_plan_build_drift(
         plan_identity = _load_plan_identity(str(plan_selection.get("plan_path") or ""))
     except Exception:
         return None
-    expected_vc = str(plan_identity.get("version_code") or plan_selection.get("version_code") or "").strip()
+    expected_vc = str(
+        plan_identity.get("version_code") or plan_selection.get("version_code") or ""
+    ).strip()
     if not expected_vc:
         return None
     observed_details = _read_observed_version_code_details(device_serial, package_name)
@@ -1270,6 +1359,112 @@ def _is_manual_preparation_run(
         and str(run_profile or "").strip().lower() == "interaction_manual"
         and _is_messaging_package_or_category(package_name)
         and int(counts.baseline_valid_runs) < int(cfg.baseline_required)
+    )
+
+
+def _render_baseline_requirement_block(
+    *,
+    counts: Any,
+    cfg: Any,
+    manual_preparation_run: bool,
+) -> None:
+    progress = f"{int(counts.baseline_valid_runs)}/{int(cfg.baseline_required)} valid baseline runs"
+    items = [
+        summary_item("Baseline progress", progress, value_style="warning"),
+    ]
+    if manual_preparation_run:
+        items.extend(
+            [
+                summary_item("Path", "manual preparation run", value_style="accent"),
+                summary_item("Counts toward quota", "no", value_style="muted"),
+                summary_item("Retained as", "extra evidence", value_style="muted"),
+            ]
+        )
+        footer = (
+            "Use this when login, account recovery, or thread setup would contaminate "
+            "a clean connected-idle baseline."
+        )
+        print_summary_card("Messaging preparation run", items, footer=footer)
+        print(
+            status_messages.status(
+                "Manual preparation run is allowed for setup-sensitive messaging apps.",
+                level="info",
+            )
+        )
+        print(
+            status_messages.status(
+                "This run will be retained as extra evidence; return afterward for a clean baseline capture.",
+                level="info",
+            )
+        )
+        return
+
+    items.extend(
+        [
+            summary_item("Recommended next run", "baseline", value_style="warning"),
+            summary_item(
+                "Counts toward quota", "not until baseline is complete", value_style="muted"
+            ),
+        ]
+    )
+    print_summary_card("Baseline requirement", items)
+    print(status_messages.status("Recommended next run is baseline.", level="warn"))
+
+
+def _render_supplemental_baseline_block(*, counts: Any) -> None:
+    pool = baseline_ml_training_pool_count(
+        extra_valid=int(getattr(counts, "baseline_extra_valid", 0) or 0),
+        low_signal_retained=int(getattr(counts, "baseline_low_signal_valid", 0) or 0),
+    )
+    print_summary_card(
+        "Supplemental baseline",
+        [
+            summary_item(
+                "Quota-counted baselines",
+                str(int(counts.baseline_valid_runs)),
+                value_style="success",
+            ),
+            summary_item("ML pool", str(pool), value_style="accent"),
+            summary_item("Counts toward quota", "no", value_style="muted"),
+        ],
+        footer="Retained for ML training and pattern averaging; run as many as needed.",
+    )
+    print(
+        status_messages.status(
+            "Supplemental baseline: joins the ML training pool for pattern averaging "
+            f"({pool} supplemental on file; {int(counts.baseline_valid_runs)} quota-counted). "
+            "Run as many as needed.",
+            level="info",
+        )
+    )
+
+
+def _print_paper_quota_impact(
+    *,
+    counts_toward_completion: bool,
+    supplemental_baseline: bool,
+) -> None:
+    if counts_toward_completion:
+        print(
+            status_messages.status(
+                "Quota candidate: yes, subject to validity and quota eligibility.",
+                level="success",
+            )
+        )
+        return
+    if supplemental_baseline:
+        print(
+            status_messages.status(
+                "Cohort quota: NO · supplemental baseline (ML training pool)",
+                level="info",
+            )
+        )
+        return
+    print(
+        status_messages.status(
+            "Cohort quota impact: NO (retained extra evidence / policy)",
+            level="warn",
+        )
     )
 
 
@@ -1352,8 +1547,8 @@ def _read_vpn_state(device_serial: str) -> str:
 
 
 def _extract_route_interface(route_output: str) -> str | None:
-    for line in route_output.splitlines():
-        line = line.strip()
+    for raw_line in route_output.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         # Common forms:
@@ -1570,9 +1765,15 @@ def _auto_run_static_for_package(package_name: str) -> bool:
     from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 
     groups = group_artifacts()
-    group = next((g for g in groups if (g.package_name or "").lower() == package_name.lower()), None)
+    group = next(
+        (g for g in groups if (g.package_name or "").lower() == package_name.lower()), None
+    )
     if not group:
-        print(status_messages.status("No APK artifacts found locally for this package.", level="error"))
+        print(
+            status_messages.status(
+                "No APK artifacts found locally for this package.", level="error"
+            )
+        )
         return False
 
     session_stamp = normalize_session_stamp(f"{make_session_stamp()}-{group.package_name}")
@@ -1653,8 +1854,7 @@ def _run_guided_dataset_iteration(
     scoped_groups = tuple(
         group
         for group in groups
-        if group.package_name
-        and group.package_name.lower() in available.intersection(dataset_pkgs)
+        if group.package_name and group.package_name.lower() in available.intersection(dataset_pkgs)
     )
     if not scoped_groups:
         print(
@@ -1678,8 +1878,6 @@ def _run_guided_dataset_iteration(
     app = selection.app
     selected_protocol = selection.selected_protocol
     package_name = app.package_name
-    display_label = app.display_label
-    state = app.state
     cfg = app.cfg
     counts = app.counts
     if selected_protocol == "0":
@@ -1740,7 +1938,9 @@ def _run_guided_dataset_iteration(
             run_static_callback=_auto_run_static_for_package,
         )
         if plan_selection:
-            print(status_messages.status(f"Plan OK: {plan_selection['plan_path']}", level="success"))
+            print(
+                status_messages.status(f"Plan OK: {plan_selection['plan_path']}", level="success")
+            )
         mapped = resolved_template_for_package(package_name)
         if mapped:
             try:
@@ -1748,9 +1948,16 @@ def _run_guided_dataset_iteration(
                 print()
                 menu_utils.print_section("Dry Run Script Preview")
                 print(status_messages.status(f"Template: {template_id}", level="info"))
-                rows = [[str(i), sid, str(sexp)] for i, (sid, _sdesc, sexp) in enumerate(steps, start=1)]
+                rows = [
+                    [str(i), sid, str(sexp)] for i, (sid, _sdesc, sexp) in enumerate(steps, start=1)
+                ]
                 menu_utils.print_table(["#", "Step ID", "Expected (s)"], rows)
-                print(status_messages.status("Dry run validates plan/tools only; no capture or saving is performed.", level="info"))
+                print(
+                    status_messages.status(
+                        "Dry run validates plan/tools only; no capture or saving is performed.",
+                        level="info",
+                    )
+                )
             except Exception as exc:
                 print(status_messages.status(f"Template preview unavailable: {exc}", level="warn"))
         prompt_utils.press_enter_to_continue()
@@ -1800,47 +2007,18 @@ def _run_guided_dataset_iteration(
         counts=counts,
         cfg=cfg,
     )
-    if (
-        selected_protocol in {"2", "3"}
-        and int(counts.baseline_valid_runs) < int(cfg.baseline_required)
+    if selected_protocol in {"2", "3"} and int(counts.baseline_valid_runs) < int(
+        cfg.baseline_required
     ):
+        _render_baseline_requirement_block(
+            counts=counts,
+            cfg=cfg,
+            manual_preparation_run=manual_preparation_run,
+        )
         if manual_preparation_run:
-            print(
-                status_messages.status(
-                    "Baseline requirement is not complete: "
-                    f"{counts.baseline_valid_runs}/{cfg.baseline_required} valid baseline runs.",
-                    level="warn",
-                )
-            )
-            print(
-                status_messages.status(
-                    "Manual preparation run is allowed for setup-sensitive messaging apps.",
-                    level="info",
-                )
-            )
-            print(
-                status_messages.status(
-                    "Use this when login, account recovery, or thread setup would contaminate a clean connected-idle baseline.",
-                    level="info",
-                )
-            )
-            print(
-                status_messages.status(
-                    "This run will be retained as extra evidence; return afterward for a clean baseline capture.",
-                    level="info",
-                )
-            )
             if not prompt_utils.prompt_yes_no("Start manual preparation run?", default=True):
                 return True
         else:
-            print(
-                status_messages.status(
-                    "Baseline requirement is not complete: "
-                    f"{counts.baseline_valid_runs}/{cfg.baseline_required} valid baseline runs.",
-                    level="warn",
-                )
-            )
-            print(status_messages.status("Recommended next run is baseline.", level="warn"))
             if not prompt_utils.prompt_yes_no("Proceed with interaction anyway?", default=False):
                 return True
     counts_toward_completion = _intent_counts_toward_quota(
@@ -1857,18 +2035,7 @@ def _run_guided_dataset_iteration(
         cfg=cfg,
     )
     if supplemental_baseline:
-        pool = baseline_ml_training_pool_count(
-            extra_valid=int(getattr(counts, "baseline_extra_valid", 0) or 0),
-            low_signal_retained=int(getattr(counts, "baseline_low_signal_valid", 0) or 0),
-        )
-        print(
-            status_messages.status(
-                "Supplemental baseline: joins the ML training pool for pattern averaging "
-                f"({pool} supplemental on file; {int(counts.baseline_valid_runs)} quota-counted). "
-                "Run as many as needed.",
-                level="info",
-            )
-        )
+        _render_supplemental_baseline_block(counts=counts)
     elif (
         selected_protocol in {"1", "2", "3"}
         and selected_protocol != suggested_key
@@ -1881,9 +2048,15 @@ def _run_guided_dataset_iteration(
                 level="warn",
             )
         )
-        proceed = prompt_utils.prompt_yes_no("Proceed with retained extra run anyway?", default=False)
+        proceed = prompt_utils.prompt_yes_no(
+            "Proceed with retained extra run anyway?", default=False
+        )
         if not proceed:
-            print(status_messages.status("Run canceled. Choose the suggested intent to fill quota.", level="info"))
+            print(
+                status_messages.status(
+                    "Run canceled. Choose the suggested intent to fill quota.", level="info"
+                )
+            )
             return True
 
     # Manual runs can be quota-counted (by policy), so do not gate behind an
@@ -1925,7 +2098,11 @@ def _run_guided_dataset_iteration(
                 interactive_valid_runs=int(counts.interactive_valid_runs),
                 cfg=cfg,
             )
-            print(status_messages.status("Using messaging connected-idle baseline behavior.", level="info"))
+            print(
+                status_messages.status(
+                    "Using messaging connected-idle baseline behavior.", level="info"
+                )
+            )
         elif baseline_setup == "2":
             run_profile = "interaction_manual"
             interaction_level = "manual"
@@ -1947,7 +2124,10 @@ def _run_guided_dataset_iteration(
             return True
 
     # Template policy determines scripted countability (messaging activity is only a tag).
-    if _is_messaging_package_or_category(package_name) and str(run_profile or "").strip().lower() == "interaction_scripted":
+    if (
+        _is_messaging_package_or_category(package_name)
+        and str(run_profile or "").strip().lower() == "interaction_scripted"
+    ):
         try:
             tmpl_id, _steps = preview_script_template_for_package(
                 package_name=str(package_name or "").strip().lower(),
@@ -1968,16 +2148,9 @@ def _run_guided_dataset_iteration(
             pass
 
     # Operator-facing paper quota impact label (avoid generic "countable" wording).
-    prof_lc = str(run_profile or "").strip().lower()
-    if counts_toward_completion:
-        paper_impact_label = "Cohort quota impact: YES (if VALID)"
-    elif supplemental_baseline:
-        paper_impact_label = "Cohort quota: NO · supplemental baseline (ML training pool)"
-    else:
-        paper_impact_label = "Cohort quota impact: NO (retained extra evidence / policy)"
-
-    print(
-        paper_impact_label
+    _print_paper_quota_impact(
+        counts_toward_completion=counts_toward_completion,
+        supplemental_baseline=supplemental_baseline,
     )
 
     print()
@@ -2009,7 +2182,11 @@ def _run_guided_dataset_iteration(
     ):
         prompt_utils.press_enter_to_continue()
         return True
-    print(status_messages.status(f"Stabilizing environment ({_STABILIZATION_WAIT_S}s)...", level="info"))
+    print(
+        status_messages.status(
+            f"Stabilizing environment ({_STABILIZATION_WAIT_S}s)...", level="info"
+        )
+    )
     time.sleep(_STABILIZATION_WAIT_S)
     clear_logcat = prompt_utils.prompt_yes_no("Clear logcat at run start?", default=True)
     if run_profile == "interaction_scripted":
@@ -2065,7 +2242,9 @@ def _run_guided_dataset_iteration(
     _post_run_integrity_check(result)
     if result.dynamic_run_id and print_tier1_qa_result:
         print_tier1_qa_result(result.dynamic_run_id)
-    _capture_protocol_fit_feedback(result=result, run_profile=run_profile, package_name=package_name)
+    _capture_protocol_fit_feedback(
+        result=result, run_profile=run_profile, package_name=package_name
+    )
     return True
 
 
@@ -2093,7 +2272,9 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
             compact=True,
         )
     )
-    fit_choice = prompt_utils.get_choice(["1", "2", "3"], default="2", invalid_message="Choose 1-3.")
+    fit_choice = prompt_utils.get_choice(
+        ["1", "2", "3"], default="2", invalid_message="Choose 1-3."
+    )
     fit_label = {"1": "great", "2": "okay", "3": "poor"}.get(fit_choice, "okay")
 
     step_ref = ""
@@ -2128,7 +2309,11 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
         "replacement_note": replacement_note or None,
         "script_protocol_send": bool(send_detected),
     }
-    run_dir = resolve_evidence_path(getattr(result, "evidence_path", None)) if getattr(result, "evidence_path", None) else None
+    run_dir = (
+        resolve_evidence_path(getattr(result, "evidence_path", None))
+        if getattr(result, "evidence_path", None)
+        else None
+    )
     if not run_dir:
         return
     manifest_path = Path(run_dir) / "run_manifest.json"
@@ -2142,14 +2327,23 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
-            operator_existing = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
-            observed_template = str(operator_existing.get("template_id_actual") or operator_existing.get("template_id") or "").strip()
+            operator_existing = (
+                payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
+            )
+            observed_template = str(
+                operator_existing.get("template_id_actual")
+                or operator_existing.get("template_id")
+                or ""
+            ).strip()
             is_text_template = observed_template.endswith("_text_v1") or observed_template in {
                 "messaging_text_v1",
                 "whatsapp_text_v1",
                 "whatsapp_text_behavior_v2",
             }
-            if _is_messaging_package_or_category(str(package_name or "").strip().lower()) and not is_text_template:
+            if (
+                _is_messaging_package_or_category(str(package_name or "").strip().lower())
+                and not is_text_template
+            ):
                 send_detected = prompt_utils.prompt_yes_no(
                     "Did this scripted run send messages outside of the template steps? (protocol violation)",
                     default=False,
@@ -2160,7 +2354,9 @@ def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: st
             operator["protocol_fit_replacement_note"] = replacement_note or None
             operator["script_protocol_send"] = bool(send_detected)
             payload["operator"] = operator
-            manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            manifest_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+            )
     except Exception:
         pass
     print(status_messages.status("Protocol fit feedback saved.", level="info"))

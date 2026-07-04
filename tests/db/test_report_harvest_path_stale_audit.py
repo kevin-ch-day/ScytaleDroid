@@ -128,7 +128,9 @@ def test_path_stale_outcome_parses_new_execution_block() -> None:
         payload=payload,
         source_kind="receipt",
         source_path=Path("/repo/data/receipts/harvest/RUN1/com.example.new.json"),
-        inventory_index={("SER123", 10): "data/state/SER123/inventory/inventory_20260613-100000.json"},
+        inventory_index={
+            ("SER123", 10): "data/state/SER123/inventory/inventory_20260613-100000.json"
+        },
     )
     assert row is not None
     assert row["path_set_changed"] == 1
@@ -275,15 +277,29 @@ def test_main_generates_expected_output_files_and_counts(tmp_path: Path, monkeyp
         "legacy_or_unknown_path_stale",
     }
 
-    package_rows = list(csv.DictReader((out_dir / "path_stale_by_package.csv").open(encoding="utf-8")))
+    package_rows = list(
+        csv.DictReader((out_dir / "path_stale_by_package.csv").open(encoding="utf-8"))
+    )
     assert {row["package_name"] for row in package_rows} == {"com.example.one", "com.example.two"}
 
-    session_rows = list(csv.DictReader((out_dir / "path_stale_by_session.csv").open(encoding="utf-8")))
+    session_rows = list(
+        csv.DictReader((out_dir / "path_stale_by_session.csv").open(encoding="utf-8"))
+    )
     assert len(session_rows) == 2
-    bucket_rows = list(csv.DictReader((out_dir / "snapshot_age_summary.csv").open(encoding="utf-8")))
+    bucket_rows = list(
+        csv.DictReader((out_dir / "snapshot_age_summary.csv").open(encoding="utf-8"))
+    )
     assert {row["snapshot_age_bucket"] for row in bucket_rows} >= {"0-15m", "24h+", "unknown"}
-    split_rows = list(csv.DictReader((out_dir / "split_apk_path_stale_summary.csv").open(encoding="utf-8")))
-    assert {row["package_shape"] for row in split_rows} == {"base_only", "base_plus_splits", "unknown"}
+    split_rows = list(
+        csv.DictReader((out_dir / "split_apk_path_stale_summary.csv").open(encoding="utf-8"))
+    )
+    assert {row["package_shape"] for row in split_rows} == {
+        "base_only",
+        "base_plus_splits",
+        "unknown",
+    }
 
-    recommendation = json.loads((out_dir / "recommended_next_action.json").read_text(encoding="utf-8"))
+    recommendation = json.loads(
+        (out_dir / "recommended_next_action.json").read_text(encoding="utf-8")
+    )
     assert recommendation["recommended_action"] == "collect_more_live_harvest_evidence"

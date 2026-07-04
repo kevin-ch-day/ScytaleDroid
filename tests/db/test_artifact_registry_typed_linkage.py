@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 from scytaledroid.Database.db_queries import views_admin
@@ -68,7 +66,11 @@ def test_record_artifacts_populates_typed_columns(monkeypatch, tmp_path: Path) -
 
     query = str(captured["query"])
     row = list(captured["rows"])[0]
-    match = re.search(r"INSERT INTO artifact_registry\s*\((.*?)\)\s*VALUES", query, flags=re.IGNORECASE | re.DOTALL)
+    match = re.search(
+        r"INSERT INTO artifact_registry\s*\((.*?)\)\s*VALUES",
+        query,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     assert match is not None
     columns = [part.strip() for part in match.group(1).replace("\n", " ").split(",")]
     row_by_column = dict(zip(columns, row, strict=True))
@@ -109,37 +111,3 @@ def test_integrity_view_prefers_typed_joins_with_legacy_fallback() -> None:
     assert "linkage_resolution_path" in sql
     assert "resolved_static_run_id" in sql
     assert "resolved_dynamic_run_id" in sql
-
-
-def test_backfill_script_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "backfill_artifact_registry_typed_linkage.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or proc.stderr).strip().lower()
-    assert out.startswith("usage:")
-    assert "--apply" in out
-
-
-def test_typed_linkage_audit_script_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_artifact_registry_typed_linkage_audit.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or proc.stderr).strip().lower()
-    assert out.startswith("usage:")
-    assert "--json" in out

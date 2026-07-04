@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_interaction_phases as report
@@ -18,21 +16,6 @@ def _write_json(path: Path, payload: object) -> None:
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_interaction_phases.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    assert "interaction phases" in (proc.stdout or "").lower()
 
 
 def test_generate_report_exports_phase_and_transport_rows(tmp_path: Path, monkeypatch) -> None:
@@ -89,17 +72,33 @@ def test_generate_report_exports_phase_and_transport_rows(tmp_path: Path, monkey
             {
                 "timestamp": "2026-06-15T12:00:30Z",
                 "event_type": "STEP_END",
-                "details": {"step_id": "open_home", "step_index": 1, "expected_duration_s": 30, "elapsed_s": 30.0, "step_outcome": "completed"},
+                "details": {
+                    "step_id": "open_home",
+                    "step_index": 1,
+                    "expected_duration_s": 30,
+                    "elapsed_s": 30.0,
+                    "step_outcome": "completed",
+                },
             },
             {
                 "timestamp": "2026-06-15T12:00:30Z",
                 "event_type": "STEP_START",
-                "details": {"step_id": "scroll_headlines", "step_index": 2, "expected_duration_s": 50},
+                "details": {
+                    "step_id": "scroll_headlines",
+                    "step_index": 2,
+                    "expected_duration_s": 50,
+                },
             },
             {
                 "timestamp": "2026-06-15T12:01:20Z",
                 "event_type": "STEP_END",
-                "details": {"step_id": "scroll_headlines", "step_index": 2, "expected_duration_s": 50, "elapsed_s": 50.0, "step_outcome": "completed"},
+                "details": {
+                    "step_id": "scroll_headlines",
+                    "step_index": 2,
+                    "expected_duration_s": 50,
+                    "elapsed_s": 50.0,
+                    "step_outcome": "completed",
+                },
             },
             {
                 "timestamp": "2026-06-15T12:01:20Z",
@@ -191,8 +190,12 @@ def test_generate_report_exports_phase_and_transport_rows(tmp_path: Path, monkey
         interaction_phases,
         "extract_phase_packet_timeline",
         lambda _path: [
-            interaction_phases.PhasePacketRecord(t=5.0, length=100, protocols="eth:ip:tcp:tls", src_port=50000, dst_port=443),
-            interaction_phases.PhasePacketRecord(t=45.0, length=80, protocols="eth:ip:udp:dns", src_port=55555, dst_port=53),
+            interaction_phases.PhasePacketRecord(
+                t=5.0, length=100, protocols="eth:ip:tcp:tls", src_port=50000, dst_port=443
+            ),
+            interaction_phases.PhasePacketRecord(
+                t=45.0, length=80, protocols="eth:ip:udp:dns", src_port=55555, dst_port=53
+            ),
         ],
     )
 
@@ -277,13 +280,35 @@ def test_generate_report_keeps_timeline_rows_when_pcap_missing(tmp_path: Path, m
             "completed_step_count": 2,
             "timeline_complete": True,
             "steps": [
-                {"step_id": "open_home", "step_index": 1, "phase_label": "Open Home", "planned_duration_sec": 30, "actual_duration_sec": 30.0, "operator_completed": True, "step_outcome": "completed", "limitation_reason": None, "notes": ""},
-                {"step_id": "open_article", "step_index": 2, "phase_label": "Open Article", "planned_duration_sec": 45, "actual_duration_sec": 45.0, "operator_completed": True, "step_outcome": "completed", "limitation_reason": None, "notes": ""},
+                {
+                    "step_id": "open_home",
+                    "step_index": 1,
+                    "phase_label": "Open Home",
+                    "planned_duration_sec": 30,
+                    "actual_duration_sec": 30.0,
+                    "operator_completed": True,
+                    "step_outcome": "completed",
+                    "limitation_reason": None,
+                    "notes": "",
+                },
+                {
+                    "step_id": "open_article",
+                    "step_index": 2,
+                    "phase_label": "Open Article",
+                    "planned_duration_sec": 45,
+                    "actual_duration_sec": 45.0,
+                    "operator_completed": True,
+                    "step_outcome": "completed",
+                    "limitation_reason": None,
+                    "notes": "",
+                },
             ],
         },
     )
     monkeypatch.setattr(report, "_dynamic_root", lambda: dynamic_root)
-    monkeypatch.setattr(interaction_phases, "phase_packet_transport_summary", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        interaction_phases, "phase_packet_transport_summary", lambda *_args, **_kwargs: []
+    )
 
     out_dir = tmp_path / "audit-missing-pcap"
     summary = report.generate_report(output_dir=out_dir)

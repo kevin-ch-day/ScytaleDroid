@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from scytaledroid.Database.db_utils import artifact_registry_static_blocked_file_presence as blocked
 
 
 def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_artifact_registry_static_blocked_file_presence.py").lower()
+    out = assert_safe_script_help(
+        "scripts/db/report_artifact_registry_static_blocked_file_presence.py"
+    ).lower()
     assert out.startswith("usage:")
     assert "blocked_file_presence" in out
 
@@ -75,7 +78,9 @@ def test_collect_static_blocked_file_presence_report(monkeypatch, tmp_path: Path
         },
     )
 
-    report = blocked.collect_static_blocked_file_presence_report(lambda *args, **kwargs: None, repo_root=tmp_path)
+    report = blocked.collect_static_blocked_file_presence_report(
+        lambda *args, **kwargs: None, repo_root=tmp_path
+    )
     summary = report["summary"]
     assert summary["blocked_session_count"] == 1
     assert summary["blocked_file_present_row_count"] == 2

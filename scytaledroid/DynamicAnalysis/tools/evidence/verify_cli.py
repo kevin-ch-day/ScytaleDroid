@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.pcap.diagnostics import security_surface_issue_codes
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
 
 REQUIRED_FILES = [
@@ -27,6 +28,8 @@ REQUIRED_FILES = [
 
 OPTIONAL_FILES = [
     "analysis/static_dynamic_overlap.json",
+    "analysis/security_surface.json",
+    "analysis/security_review.md",
 ]
 
 PLAN_IDENTITY_KEYS = {
@@ -226,7 +229,7 @@ def _top_list_stats(items: object) -> dict[str, Any]:
         except Exception:
             ci = 0
         total += max(ci, 0)
-        max_c = max(max_c, max(ci, 0))
+        max_c = max(max_c, ci, 0)
     n = len([x for x in items if isinstance(x, dict) and isinstance(x.get("value"), str) and x.get("value").strip()])
     top1 = (float(max_c) / float(total)) if total > 0 else None
     junk_n = len(junk)
@@ -538,6 +541,10 @@ def run_dynamic_evidence_verify(
 
             features = _read_json(run_dir / "analysis/pcap_features.json")
             notes.extend(_ratio_issues(features))
+            report = _read_json(run_dir / "analysis/pcap_report.json")
+            if isinstance(report, dict) and str(report.get("report_status") or "").lower() == "ok":
+                if not (run_dir / "analysis/security_surface.json").exists():
+                    notes.append("missing_optional:analysis/security_surface.json")
 
             tls_ratio = None
             quic_ratio = None
@@ -822,7 +829,7 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
 
     # Compact run table (more useful than a raw list). Includes transport-mix ratios when present.
     if root.exists():
-        headers = ["Run", "App", "Profile", "Valid", "Samp(s)", "PCAP", "TLS", "QUIC"]
+        headers = ["Run", "App", "Profile", "Valid", "Samp(s)", "PCAP", "TLS", "QUIC", "ClrHTTP", "ClrSurf", "ClrMis", "SecFind"]
         rows = []
         sizes: list[int] = []
         samp_list: list[float] = []
@@ -851,6 +858,10 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
 
             tls_ratio = "—"
             quic_ratio = "—"
+            clr_http = "—"
+            clr_surf = "—"
+            clr_mis = "—"
+            sec_find = "—"
             feats = _read_json(run_dir / "analysis/pcap_features.json")
             if isinstance(feats, dict):
                 proxies = feats.get("proxies") or {}
@@ -861,6 +872,34 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
                         tls_ratio = f"{tr:.2f}"
                     if qr is not None:
                         quic_ratio = f"{qr:.2f}"
+                    cleartext_obs = proxies.get("cleartext_http_observed")
+                    if cleartext_obs == 1:
+                        clr_http = "Y"
+                    elif cleartext_obs == 0:
+                        clr_http = "N"
+                    finding_count = proxies.get("security_finding_count")
+                    if finding_count is not None:
+                        sec_find = str(int(finding_count))
+                    visibility = (
+                        (feats.get("security_surface") or {}).get("summary", {}).get("cleartext_visibility_class")
+                        if isinstance(feats.get("security_surface"), dict)
+                        else None
+                    )
+                    if visibility == "cleartext_surface_present":
+                        clr_surf = "Y"
+                    elif visibility == "encrypted_or_opaque_dominant":
+                        clr_surf = "N"
+            overlap = _read_json(run_dir / "analysis/static_dynamic_overlap.json")
+            if isinstance(overlap, dict):
+                posture = overlap.get("cleartext_posture")
+                if isinstance(posture, dict):
+                    mismatch = posture.get("mismatch_class")
+                    if mismatch == "denied_but_observed":
+                        clr_mis = "DENY+OBS"
+                    elif isinstance(mismatch, str) and mismatch.startswith("allowed_not_observed"):
+                        clr_mis = "ALLOW-"
+                    elif mismatch == "aligned_encrypted":
+                        clr_mis = "OK"
 
             valid_label = "VALID" if valid is True else ("INVALID" if valid is False else "—")
             if valid is False and isinstance(reason, str) and reason:
@@ -875,9 +914,13 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
                     _fmt_bytes(size),
                     tls_ratio,
                     quic_ratio,
+                    clr_http,
+                    clr_surf,
+                    clr_mis,
+                    sec_find,
                 ]
             )
-        _render_shared_table(headers, rows, max_widths={1: 18, 2: 16}, right_align={4, 5, 6, 7})
+        _render_shared_table(headers, rows, max_widths={1: 18, 2: 16}, right_align={4, 5, 6, 7, 10})
 
         if sizes:
             sizes_sorted = sorted(sizes)
@@ -954,6 +997,7 @@ def run_dynamic_evidence_deep_checks(
     db_notes: list[dict[str, Any]] = []
     ratio_mismatch: list[dict[str, Any]] = []
     indicator_warnings: list[dict[str, Any]] = []
+    security_surface_warnings: list[dict[str, Any]] = []
     ml_audit_rows = _load_ml_audit_rows()
     ml_audit_summary: dict[str, Any] = {}
 
@@ -1009,6 +1053,43 @@ def run_dynamic_evidence_deep_checks(
 
         report = _read_json(run_dir / "analysis/pcap_report.json") or {}
         feats = _read_json(run_dir / "analysis/pcap_features.json") or {}
+        if isinstance(report, dict):
+            surface_codes = security_surface_issue_codes(report)
+            structural = [code for code in surface_codes if code.startswith("security_surface_")]
+            if structural:
+                security_surface_warnings.append(
+                    {
+                        "run_id": rid[:8],
+                        "app": app,
+                        "issue": structural[0],
+                        "codes": list(surface_codes),
+                    }
+                )
+            overlap = _read_json(run_dir / "analysis/static_dynamic_overlap.json")
+            posture = (
+                overlap.get("cleartext_posture")
+                if isinstance(overlap, dict) and isinstance(overlap.get("cleartext_posture"), dict)
+                else {}
+            )
+            if posture.get("mismatch_class") == "denied_but_observed":
+                security_surface_warnings.append(
+                    {
+                        "run_id": rid[:8],
+                        "app": app,
+                        "issue": "cleartext_policy_denied_but_observed",
+                        "codes": list(surface_codes),
+                        "mismatch_summary": posture.get("mismatch_summary"),
+                    }
+                )
+            elif surface_codes and not structural:
+                security_surface_warnings.append(
+                    {
+                        "run_id": rid[:8],
+                        "app": app,
+                        "issue": "security_surface_signals",
+                        "codes": list(surface_codes),
+                    }
+                )
         proxies = feats.get("proxies") if isinstance(feats, dict) else None
         if isinstance(report, dict) and isinstance(proxies, dict):
             expected = _compute_transport_mix_from_report(report)
@@ -1060,6 +1141,7 @@ def run_dynamic_evidence_deep_checks(
     print(f"db_notes        : {len(db_notes)}")
     print(f"ratio_mismatches: {len(ratio_mismatch)} (tolerance={_RATIO_TOLERANCE})")
     print(f"indicator_warns : {len(indicator_warnings)}")
+    print(f"security_warns  : {len(security_surface_warnings)}")
     if db_mismatch:
         print()
         print("DB mismatches (sample)")
@@ -1084,6 +1166,13 @@ def run_dynamic_evidence_deep_checks(
                 f"dns_top1={x['dns_top1']} sni_top1={x['sni_top1']} "
                 f"dns_junk_rate={x['dns_junk_rate']} sni_junk_rate={x['sni_junk_rate']}"
             )
+    if security_surface_warnings:
+        print()
+        print("Security surface warnings (sample)")
+        for x in security_surface_warnings[:10]:
+            codes = ",".join(x.get("codes") or [])
+            extra = f" summary={x['mismatch_summary']}" if x.get("mismatch_summary") else ""
+            print(f"- {x['run_id']} {x['app']}: {x['issue']} [{codes}]{extra}")
     if ml_audit_rows:
         print()
         print("ML audit summary")
@@ -1105,6 +1194,7 @@ def run_dynamic_evidence_deep_checks(
         "db_notes": db_notes,
         "ratio_mismatches": ratio_mismatch,
         "indicator_warnings": indicator_warnings,
+        "security_surface_warnings": security_surface_warnings,
         "ml_audit_summary": ml_audit_summary,
     }
     if write_outputs:

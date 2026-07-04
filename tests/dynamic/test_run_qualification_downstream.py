@@ -141,6 +141,33 @@ def test_x_style_downstream_retains_low_signal_without_quota_complete() -> None:
     assert all(run_included_in_default_analysis(valid_dataset_run=True) for _ in included)
 
 
+def test_non_idle_baseline_is_retained_for_analysis_without_polluting_extra_bucket() -> None:
+    runs = [
+        _baseline_row("b1", countable=True),
+        _baseline_row("b2", countable=True),
+        _baseline_row("b3", countable=False),
+    ]
+    runs[2]["baseline_not_idle"] = 1
+    runs[2]["extra_run"] = 1
+    for row in runs:
+        row["package_name"] = "com.twitter.android"
+        row["app_label"] = "X (Twitter)"
+
+    summary = summarize_tracker_runs_qualification(
+        runs,
+        baseline_required=3,
+        interactive_required=4,
+    )
+    included = analysis_included_rows(runs)
+
+    assert summary.baseline.quota_satisfied is False
+    assert summary.baseline.quota_counted_valid == 2
+    assert summary.baseline.extra_valid == 0
+    assert summary.baseline.non_idle_retained == 1
+    assert summary.baseline.total_valid_retained == 3
+    assert len(included) == 3
+
+
 def test_whatsapp_style_interactive_includes_extra_and_preserves_low_signal() -> None:
     runs = [
         _interactive_row("i1", countable=True),
@@ -160,7 +187,9 @@ def test_whatsapp_style_interactive_includes_extra_and_preserves_low_signal() ->
     included = analysis_included_rows(runs)
     roles = {
         row["dynamic_run_id"]: (
-            "low_signal" if row.get("low_signal") else ("extra" if row.get("extra_run") else "quota")
+            "low_signal"
+            if row.get("low_signal")
+            else ("extra" if row.get("extra_run") else "quota")
         )
         for row in runs
     }

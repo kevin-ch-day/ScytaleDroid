@@ -9,11 +9,12 @@ docstring). ``static_permission_risk_vnext`` stores lowercase — pairing is via
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.persistence.permission_matrix import persist_permission_matrix
 
 
-def test_permission_matrix_logs_when_table_missing_but_profiles_present(monkeypatch, caplog) -> None:
+def test_permission_matrix_logs_when_table_missing_but_profiles_present(
+    monkeypatch, caplog
+) -> None:
     import logging
 
     monkeypatch.setattr(
@@ -123,7 +124,9 @@ def test_permission_matrix_skips_empty_keys(monkeypatch) -> None:
     assert captured[0]["permission_name"] == "android.permission.INTERNET"
 
 
-def test_permission_matrix_split_like_merged_profiles_same_perm_different_casing(monkeypatch) -> None:
+def test_permission_matrix_split_like_merged_profiles_same_perm_different_casing(
+    monkeypatch,
+) -> None:
     """Merged base+split profile maps often repeat the same perm with different casing."""
     captured: list[dict[str, object]] = []
     monkeypatch.setattr(

@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.Database.db_utils import static_finding_evidence_payload_schema as schema_mod
 
 
@@ -136,9 +135,14 @@ def test_build_required_schema_statements_is_bounded() -> None:
         "ALTER TABLE static_finding_evidence_payloads DEFAULT CHARACTER SET utf8mb4 "
         "COLLATE utf8mb4_unicode_ci"
     )
-    assert "MODIFY COLUMN evidence_json LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL" in statements[1]
+    assert (
+        "MODIFY COLUMN evidence_json LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL"
+        in statements[1]
+    )
     assert "MODIFY COLUMN evidence_chars INT UNSIGNED NOT NULL" in statements[1]
-    assert "MODIFY COLUMN first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" in statements[1]
+    assert (
+        "MODIFY COLUMN first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" in statements[1]
+    )
 
 
 def test_apply_schema_normalization_executes_only_required_ddl(monkeypatch, tmp_path: Path) -> None:
@@ -179,7 +183,11 @@ def test_apply_schema_normalization_executes_only_required_ddl(monkeypatch, tmp_
             return None
         raise AssertionError(query_name)
 
-    monkeypatch.setattr(schema_mod, "latest_schema_version", lambda _run_sql: "0.3.13-static-session-run-links-schema")
+    monkeypatch.setattr(
+        schema_mod,
+        "latest_schema_version",
+        lambda _run_sql: "0.3.13-static-session-run-links-schema",
+    )
     monkeypatch.setattr(
         schema_mod,
         "write_static_finding_evidence_payload_schema_receipt",
@@ -207,13 +215,20 @@ def test_apply_schema_normalization_executes_only_required_ddl(monkeypatch, tmp_
     assert result.evidence_chars_updated is True
     assert result.first_seen_at_updated is True
     assert result.receipt_path == str(receipt_path)
-    assert any("DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" in sql for sql in executions)
+    assert any(
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" in sql for sql in executions
+    )
     assert any("MODIFY COLUMN evidence_json" in sql for sql in executions)
     assert any(kind == "record_schema_migration" for kind, _, _ in recorded)
-    assert any(kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER for kind, value, _ in recorded)
+    assert any(
+        kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER
+        for kind, value, _ in recorded
+    )
 
 
-def test_apply_schema_normalization_records_converged_live_state(monkeypatch, tmp_path: Path) -> None:
+def test_apply_schema_normalization_records_converged_live_state(
+    monkeypatch, tmp_path: Path
+) -> None:
     recorded: list[tuple[str, str | None, str | None]] = []
     receipt_path = tmp_path / "receipt.json"
 
@@ -232,7 +247,11 @@ def test_apply_schema_normalization_records_converged_live_state(monkeypatch, tm
             }
         raise AssertionError(query_name)
 
-    monkeypatch.setattr(schema_mod, "latest_schema_version", lambda _run_sql: "0.3.13-static-session-run-links-schema")
+    monkeypatch.setattr(
+        schema_mod,
+        "latest_schema_version",
+        lambda _run_sql: "0.3.13-static-session-run-links-schema",
+    )
     monkeypatch.setattr(
         schema_mod,
         "latest_rows_by_migration",
@@ -262,7 +281,10 @@ def test_apply_schema_normalization_records_converged_live_state(monkeypatch, tm
     assert result.statement_count == 0
     assert result.receipt_path == str(receipt_path)
     assert any(kind == "record_schema_migration" for kind, _, _ in recorded)
-    assert any(kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER for kind, value, _ in recorded)
+    assert any(
+        kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER
+        for kind, value, _ in recorded
+    )
 
 
 def test_apply_schema_normalization_refuses_when_preflight_is_dirty() -> None:
@@ -298,4 +320,3 @@ def test_normalize_script_help_is_safe() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert (proc.stdout or "").lower().startswith("usage:")
-

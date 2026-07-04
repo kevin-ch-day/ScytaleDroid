@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.pcap.transport_health import _EVENT_FIELDS
-from scytaledroid.DynamicAnalysis.pcap.transport_health import summarize_transport_health
+from scytaledroid.DynamicAnalysis.pcap.transport_health import (
+    _EVENT_FIELDS,
+    summarize_transport_health,
+)
 
 
-def test_summarize_transport_health_counts_events_and_top_streams(monkeypatch, tmp_path: Path) -> None:
+def test_summarize_transport_health_counts_events_and_top_streams(
+    monkeypatch, tmp_path: Path
+) -> None:
     pcap_path = tmp_path / "sample.pcap"
     pcap_path.write_bytes(b"pcap")
     row_len = 1 + len(_EVENT_FIELDS) + 1 + 3

@@ -79,26 +79,48 @@ def _report_payload(
                 "status_counts": {k: v for k, v in status_counts.items() if v},
                 "total_findings": len(findings),
                 "total_duration_sec": total_duration_sec,
-                "finding_fail_count": 1 if any(row.get("status") == "FAIL" and not (row.get("metrics") or {}).get("policy_gate") for row in detector_rows) else 0,
+                "finding_fail_count": 1
+                if any(
+                    row.get("status") == "FAIL"
+                    and not (row.get("metrics") or {}).get("policy_gate")
+                    for row in detector_rows
+                )
+                else 0,
                 "finding_fail_detectors": [
                     {"detector": row.get("detector_id"), "section": row.get("section_key")}
                     for row in detector_rows
-                    if row.get("status") == "FAIL" and not (row.get("metrics") or {}).get("policy_gate")
+                    if row.get("status") == "FAIL"
+                    and not (row.get("metrics") or {}).get("policy_gate")
                 ],
-                "policy_fail_count": 1 if any(row.get("status") == "FAIL" and (row.get("metrics") or {}).get("policy_gate") for row in detector_rows) else 0,
+                "policy_fail_count": 1
+                if any(
+                    row.get("status") == "FAIL" and (row.get("metrics") or {}).get("policy_gate")
+                    for row in detector_rows
+                )
+                else 0,
                 "policy_fail_detectors": [
                     {"detector": row.get("detector_id"), "section": row.get("section_key")}
                     for row in detector_rows
                     if row.get("status") == "FAIL" and (row.get("metrics") or {}).get("policy_gate")
                 ],
-                "error_count": 1 if any(row.get("status") == "ERROR" for row in detector_rows) else 0,
+                "error_count": 1
+                if any(row.get("status") == "ERROR" for row in detector_rows)
+                else 0,
                 "error_detectors": [
-                    {"detector": row.get("detector_id"), "section": row.get("section_key"), "reason": "boom"}
+                    {
+                        "detector": row.get("detector_id"),
+                        "section": row.get("section_key"),
+                        "reason": "boom",
+                    }
                     for row in detector_rows
                     if row.get("status") == "ERROR"
                 ],
                 "slowest_detectors": [
-                    {"detector": "correlation_engine", "section": "correlation_findings", "duration_sec": 3.5}
+                    {
+                        "detector": "correlation_engine",
+                        "section": "correlation_findings",
+                        "duration_sec": 3.5,
+                    }
                 ],
             },
             **(parse_flags or {}),
@@ -107,7 +129,14 @@ def _report_payload(
     return payload
 
 
-def _receipt_payload(*, package_name: str, session_label: str, app_label: str, apk_paths: list[str], capture_status: str = "clean") -> dict[str, object]:
+def _receipt_payload(
+    *,
+    package_name: str,
+    session_label: str,
+    app_label: str,
+    apk_paths: list[str],
+    capture_status: str = "clean",
+) -> dict[str, object]:
     return {
         "package": {
             "package_name": package_name,
@@ -397,7 +426,9 @@ def test_main_generates_expected_output_bundle_for_incomplete_session(
     failure_rows = list(csv.DictReader((out_dir / "finding_failure_summary.csv").open()))
     assert any(row["detector_id"] == "crypto_hygiene" for row in failure_rows)
 
-    recommendation = json.loads((out_dir / "static_performance_recommendations.json").read_text(encoding="utf-8"))
+    recommendation = json.loads(
+        (out_dir / "static_performance_recommendations.json").read_text(encoding="utf-8")
+    )
     assert recommendation["recommended_action"] in {
         "optimize_detector_stage_timing_first",
         "add_selective_split_scan_profile",

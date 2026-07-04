@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
 from scytaledroid.Database.tools import db_schema_snapshot
@@ -48,4 +47,3 @@ def test_sqlite_db_url_rejected_outside_pytest(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError):
         db_config._load_from_env()  # noqa: SLF001 - unit-test posture contract
-

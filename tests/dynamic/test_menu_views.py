@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from scytaledroid.DynamicAnalysis import menu_views
+from scytaledroid.DynamicAnalysis.menus import menu_overview as menu_views
 
 
 def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypatch) -> None:
@@ -28,7 +28,9 @@ def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypat
     assert sections.maintenance[4].label == "Legacy structural tools"
 
 
-def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus(monkeypatch, capsys) -> None:
+def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus(
+    monkeypatch, capsys
+) -> None:
     monkeypatch.setattr(menu_views, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(
         menu_views.device_manager,
@@ -67,7 +69,7 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
     out = capsys.readouterr().out
     assert "Research Dataset Beta" in out
     assert "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical" in out
-    assert "Quota" in out
+    assert "Archive quota" in out
     assert "1 / 60 valid (59 remaining)" in out
     assert "Archive" in out
     assert "Why blocked" in out
@@ -77,7 +79,9 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
     assert "Next: open App queue / next action to continue collection." in out
 
 
-def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(monkeypatch, capsys) -> None:
+def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(
+    monkeypatch, capsys
+) -> None:
     monkeypatch.setattr(menu_views, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(menu_views.device_manager, "describe_active_device", lambda: "None")
     monkeypatch.setattr(
@@ -113,7 +117,7 @@ def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(monkeyp
     assert "Evidence" in out
     assert "none selected" in out
     assert "19 packs (18 valid)" in out
-    assert "Quota" in out
+    assert "Archive quota" in out
     assert "15 / 80 valid (65 remaining)" in out
     assert "Retained extra" in out
     assert "3 outside quota" in out

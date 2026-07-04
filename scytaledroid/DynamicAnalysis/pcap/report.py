@@ -16,6 +16,10 @@ from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManife
 from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
 from scytaledroid.DynamicAnalysis.pcap.fingerprints import summarize_tls_fingerprints
 from scytaledroid.DynamicAnalysis.pcap.identity import ensure_report_capture_identity
+from scytaledroid.DynamicAnalysis.pcap.security_surface import (
+    render_security_review_md,
+    summarize_security_surface,
+)
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
 from scytaledroid.DynamicAnalysis.pcap.transport_health import summarize_transport_health
 
@@ -131,6 +135,7 @@ def write_pcap_report(
         "transport_health": {},
         "service_context": {},
         "service_signals": {},
+        "security_surface": {},
     }
 
     # capinfos-derived "no traffic" flag for interpretability and deterministic QA gating.
@@ -211,6 +216,34 @@ def write_pcap_report(
     else:
         report["service_context"] = context_bundle.get("service_context") or {}
         report["service_signals"] = context_bundle.get("service_signals") or {}
+
+    if report_status != "skip" and tshark_path and pcap_path:
+        try:
+            report["security_surface"] = summarize_security_surface(
+                pcap_path,
+                tshark_path=tshark_path,
+                protocol_hierarchy=report.get("protocol_hierarchy") or [],
+                flow_summary=report.get("flow_summary") or {},
+                burst_summary=report.get("burst_summary") or {},
+            )
+            surface_path = run_dir / "analysis" / "security_surface.json"
+            surface_path.write_text(
+                json.dumps(report["security_surface"], indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            if report["security_surface"].get("status") == "ok":
+                review_path = run_dir / "analysis" / "security_review.md"
+                review_path.write_text(
+                    render_security_review_md(
+                        report["security_surface"],
+                        package_name=package_name_raw or None,
+                        dynamic_run_id=manifest.dynamic_run_id,
+                    ),
+                    encoding="utf-8",
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log(event_logger, "pcap_report_security_surface_failed", {"error": str(exc)})
+            report["security_surface"] = {"status": "failed", "error": str(exc)}
 
     ensure_report_capture_identity(
         report,
@@ -415,8 +448,8 @@ def _run_top_fields(
     if not result.get("stdout"):
         return []
     counts: dict[str, int] = {}
-    for value in result["stdout"].splitlines():
-        value = value.strip()
+    for raw_value in result["stdout"].splitlines():
+        value = raw_value.strip()
         if not value:
             continue
         counts[value] = counts.get(value, 0) + 1
@@ -440,8 +473,8 @@ def _run_top_fields_with_stats(
     if not result.get("stdout"):
         return {"items": [], "total_count": 0, "unique_count": 0, "top1_share": None}
     counts: dict[str, int] = {}
-    for value in result["stdout"].splitlines():
-        value = value.strip()
+    for raw_value in result["stdout"].splitlines():
+        value = raw_value.strip()
         if not value:
             continue
         counts[value] = counts.get(value, 0) + 1

@@ -38,11 +38,17 @@ class BucketQualification:
     quota_counted_valid: int
     extra_valid: int
     low_signal_retained: int
+    non_idle_retained: int
     required: int
 
     @property
     def total_valid_retained(self) -> int:
-        return int(self.quota_counted_valid) + int(self.extra_valid) + int(self.low_signal_retained)
+        return (
+            int(self.quota_counted_valid)
+            + int(self.extra_valid)
+            + int(self.low_signal_retained)
+            + int(self.non_idle_retained)
+        )
 
     @property
     def analysis_included_valid(self) -> int:
@@ -131,12 +137,14 @@ def summarize_bucket_qualification(
     countable: int,
     extra: int,
     low_signal: int,
+    non_idle: int = 0,
     required: int,
 ) -> BucketQualification:
     return BucketQualification(
         quota_counted_valid=max(0, int(countable)),
         extra_valid=max(0, int(extra)),
         low_signal_retained=max(0, int(low_signal)),
+        non_idle_retained=max(0, int(non_idle)),
         required=max(0, int(required)),
     )
 
@@ -152,6 +160,7 @@ def summarize_evidence_qualification(
             countable=int(scoped_counts.get("baseline_countable") or 0),
             extra=int(scoped_counts.get("baseline_extra") or 0),
             low_signal=int(scoped_counts.get("baseline_low_signal_supplemental") or 0),
+            non_idle=int(scoped_counts.get("baseline_not_idle_supplemental") or 0),
             required=int(baseline_required),
         ),
         interactive=summarize_bucket_qualification(
@@ -163,14 +172,17 @@ def summarize_evidence_qualification(
     )
 
 
-def format_supplemental_suffix(*, extra: int = 0, low_signal: int = 0) -> str:
+def format_supplemental_suffix(*, extra: int = 0, low_signal: int = 0, non_idle: int = 0) -> str:
     """Display suffix for queue quota labels, e.g. `` (+1 extra, +1 low)``."""
     parts: list[str] = []
     extra_i = max(0, int(extra))
     low_i = max(0, int(low_signal))
+    non_idle_i = max(0, int(non_idle))
     if extra_i > 0:
         word = "extra" if extra_i == 1 else "extras"
         parts.append(f"+{extra_i} {word}")
+    if non_idle_i > 0:
+        parts.append(f"+{non_idle_i} non-idle")
     if low_i > 0:
         word = "low" if low_i == 1 else "low"
         parts.append(f"+{low_i} {word}")
@@ -184,6 +196,7 @@ def format_bucket_queue_label(
     countable: int,
     extra: int = 0,
     low_signal: int = 0,
+    non_idle: int = 0,
     required: int,
     need: int = 0,
 ) -> str:
@@ -192,6 +205,7 @@ def format_bucket_queue_label(
         countable=countable,
         extra=extra,
         low_signal=low_signal,
+        non_idle=non_idle,
         required=required,
     )
     need_i = max(0, int(need))
@@ -206,17 +220,21 @@ def format_quota_progress_label(
     required: int,
     extra: int = 0,
     low_signal: int = 0,
+    non_idle: int = 0,
 ) -> str:
-    return f"{max(0, int(countable))}/{max(0, int(required))}{format_supplemental_suffix(extra=extra, low_signal=low_signal)}"
+    return f"{max(0, int(countable))}/{max(0, int(required))}{format_supplemental_suffix(extra=extra, low_signal=low_signal, non_idle=non_idle)}"
 
 
-def format_supplemental_inline(*, extra: int = 0, low_signal: int = 0) -> str:
+def format_supplemental_inline(*, extra: int = 0, low_signal: int = 0, non_idle: int = 0) -> str:
     """Compact supplemental tag for narrow queue columns, e.g. ``+1`` or ``+2L``."""
     parts: list[str] = []
     extra_i = max(0, int(extra))
     low_i = max(0, int(low_signal))
+    non_idle_i = max(0, int(non_idle))
     if extra_i > 0:
         parts.append(f"+{extra_i}")
+    if non_idle_i > 0:
+        parts.append(f"+{non_idle_i}N")
     if low_i > 0:
         parts.append(f"+{low_i}L")
     return "".join(parts)
@@ -228,8 +246,9 @@ def format_quota_progress_compact(
     required: int,
     extra: int = 0,
     low_signal: int = 0,
+    non_idle: int = 0,
 ) -> str:
-    return f"{max(0, int(countable))}/{max(0, int(required))}{format_supplemental_inline(extra=extra, low_signal=low_signal)}"
+    return f"{max(0, int(countable))}/{max(0, int(required))}{format_supplemental_inline(extra=extra, low_signal=low_signal, non_idle=non_idle)}"
 
 
 def classify_run_qualification_role(
@@ -238,6 +257,7 @@ def classify_run_qualification_role(
     countable: object = None,
     extra_run: object = None,
     low_signal: object = None,
+    baseline_not_idle: object = None,
 ) -> str:
     if _falsey_flag(valid_dataset_run):
         return "invalid"
@@ -247,6 +267,8 @@ def classify_run_qualification_role(
         return "quota_counted"
     if _truthy_flag(low_signal):
         return "low_signal_retained"
+    if _truthy_flag(baseline_not_idle):
+        return "non_idle_retained"
     if _truthy_flag(extra_run) or _falsey_flag(countable):
         return "extra_valid"
     return "valid_retained"
@@ -263,6 +285,7 @@ def qualification_fields_from_dataset(dataset: Mapping[str, Any]) -> dict[str, A
         countable=dataset.get("countable"),
         extra_run=dataset.get("extra_run"),
         low_signal=dataset.get("low_signal"),
+        baseline_not_idle=dataset.get("baseline_not_idle"),
     )
     return {
         "low_signal": dataset.get("low_signal"),
@@ -271,6 +294,7 @@ def qualification_fields_from_dataset(dataset: Mapping[str, Any]) -> dict[str, A
         "quota_counted_valid": _truthy_flag(dataset.get("countable")),
         "extra_valid": role == "extra_valid",
         "low_signal_retained": role == "low_signal_retained",
+        "non_idle_retained": role == "non_idle_retained",
     }
 
 
@@ -315,6 +339,7 @@ def summarize_tracker_runs_qualification(
             countable=run.get("countable"),
             extra_run=run.get("extra_run"),
             low_signal=run.get("low_signal"),
+            baseline_not_idle=run.get("baseline_not_idle"),
         )
         if role == "quota_counted":
             if is_baseline:
@@ -331,6 +356,9 @@ def summarize_tracker_runs_qualification(
                 scoped["baseline_low_signal_supplemental"] += 1
             elif is_interactive:
                 scoped["interactive_low_signal_supplemental"] += 1
+        elif role == "non_idle_retained":
+            if is_baseline:
+                scoped["baseline_not_idle_supplemental"] = int(scoped.get("baseline_not_idle_supplemental") or 0) + 1
     return summarize_evidence_qualification(
         scoped,
         baseline_required=baseline_required,
@@ -343,6 +371,7 @@ def summarize_evidence_qualification_from_counts(
     baseline_countable: int,
     baseline_extra: int,
     baseline_low_signal: int,
+    baseline_non_idle: int = 0,
     interactive_countable: int,
     interactive_extra: int,
     interactive_low_signal: int,
@@ -354,6 +383,7 @@ def summarize_evidence_qualification_from_counts(
             "baseline_countable": baseline_countable,
             "baseline_extra": baseline_extra,
             "baseline_low_signal_supplemental": baseline_low_signal,
+            "baseline_not_idle_supplemental": baseline_non_idle,
             "interactive_countable": interactive_countable,
             "interactive_extra": interactive_extra,
             "interactive_low_signal_supplemental": interactive_low_signal,
@@ -373,6 +403,7 @@ def qualification_summary_from_row(
         baseline_countable=int(getattr(row, "baseline_countable", 0) or 0),
         baseline_extra=int(getattr(row, "baseline_extra", 0) or 0),
         baseline_low_signal=int(getattr(row, "baseline_low_signal_supplemental", 0) or 0),
+        baseline_non_idle=int(getattr(row, "baseline_not_idle_supplemental", 0) or 0),
         interactive_countable=int(getattr(row, "interactive_countable", 0) or 0),
         interactive_extra=int(getattr(row, "interactive_extra", 0) or 0),
         interactive_low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
@@ -388,6 +419,7 @@ def qualification_summary_from_app_counts(app: Any) -> EvidenceQualificationSumm
         baseline_countable=int(counts.baseline_valid_runs),
         baseline_extra=int(getattr(counts, "baseline_extra_valid", 0) or 0),
         baseline_low_signal=int(getattr(counts, "baseline_low_signal_valid", 0) or 0),
+        baseline_non_idle=int(getattr(counts, "baseline_not_idle_valid", 0) or 0),
         interactive_countable=int(counts.interactive_valid_runs),
         interactive_extra=int(getattr(counts, "interactive_extra_valid", 0) or 0),
         interactive_low_signal=int(getattr(counts, "interactive_low_signal_valid", 0) or 0),
@@ -403,12 +435,14 @@ def sum_qualification_summaries(
         quota_counted_valid=sum(item.baseline.quota_counted_valid for item in summaries),
         extra_valid=sum(item.baseline.extra_valid for item in summaries),
         low_signal_retained=sum(item.baseline.low_signal_retained for item in summaries),
+        non_idle_retained=sum(item.baseline.non_idle_retained for item in summaries),
         required=0,
     )
     interactive = BucketQualification(
         quota_counted_valid=sum(item.interactive.quota_counted_valid for item in summaries),
         extra_valid=sum(item.interactive.extra_valid for item in summaries),
         low_signal_retained=sum(item.interactive.low_signal_retained for item in summaries),
+        non_idle_retained=sum(item.interactive.non_idle_retained for item in summaries),
         required=0,
     )
     return EvidenceQualificationSummary(baseline=baseline, interactive=interactive)
@@ -419,10 +453,11 @@ def bucket_evidence_label(
     countable: int,
     extra: int = 0,
     low_signal: int = 0,
+    non_idle: int = 0,
     required: int,
 ) -> str:
     """Total valid retained runs over the minimum required (queue/S summary display)."""
-    total = max(0, int(countable)) + max(0, int(extra)) + max(0, int(low_signal))
+    total = max(0, int(countable)) + max(0, int(extra)) + max(0, int(low_signal)) + max(0, int(non_idle))
     return f"{total}/{max(0, int(required))}"
 
 
@@ -436,6 +471,7 @@ def bucket_detail_column_label(
     countable: int,
     extra: int = 0,
     low_signal: int = 0,
+    non_idle: int = 0,
     required: int,
 ) -> str:
     """Queue + column: quota gap and/or supplemental retained evidence."""
@@ -444,7 +480,7 @@ def bucket_detail_column_label(
     req = max(0, int(required))
     if quota < req:
         parts.append(f"q{quota}/{req}")
-    supplemental = format_supplemental_column_label(extra=extra, low_signal=low_signal)
+    supplemental = format_supplemental_column_label(extra=extra, low_signal=low_signal, non_idle=non_idle)
     if supplemental != "—":
         parts.append(supplemental)
     return " · ".join(parts) if parts else "—"
@@ -464,8 +500,8 @@ def format_bucket_evidence_line(
     return f"{label:<13}{progress}"
 
 
-def format_supplemental_column_label(*, extra: int = 0, low_signal: int = 0) -> str:
-    suffix = format_supplemental_suffix(extra=extra, low_signal=low_signal).strip()
+def format_supplemental_column_label(*, extra: int = 0, low_signal: int = 0, non_idle: int = 0) -> str:
+    suffix = format_supplemental_suffix(extra=extra, low_signal=low_signal, non_idle=non_idle).strip()
     if suffix.startswith("(") and suffix.endswith(")"):
         suffix = suffix[1:-1].strip()
     return suffix or "—"

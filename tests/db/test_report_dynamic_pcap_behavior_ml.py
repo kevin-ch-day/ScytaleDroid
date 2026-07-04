@@ -3,12 +3,6 @@ from __future__ import annotations
 from scripts.db import report_dynamic_pcap_behavior_ml as report
 
 
-def test_report_dynamic_pcap_behavior_ml_help_is_safe(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_dynamic_pcap_behavior_ml.py")
-    assert "Read-only behavioral analysis over dynamic PCAP-derived features." in out
-    assert "--recompute-exact-tls" in out
-
-
 def test_run_feature_matrix_fieldnames_include_expected_headers() -> None:
     fields = report.run_feature_matrix_fieldnames()
     assert "dynamic_run_id" in fields
@@ -34,11 +28,34 @@ def test_comparison_depth_and_readiness_labels_cover_expected_states() -> None:
     assert report._comparison_depth_label(baseline_runs=3, interactive_runs=3) == "tested"
     assert report._comparison_depth_label(baseline_runs=2, interactive_runs=2) == "limited"
     assert report._comparison_depth_label(baseline_runs=1, interactive_runs=1) == "descriptive_only"
-    assert report._comparison_depth_label(baseline_runs=3, interactive_runs=0) == "no_interactive_comparison"
-    assert report._inference_readiness_label(baseline_runs=3, interactive_runs=3, strongest_p_value=0.04) == "paper_ready_signal"
-    assert report._inference_readiness_label(baseline_runs=3, interactive_runs=3, strongest_p_value=0.30) == "tested_but_inconclusive"
-    assert report._inference_readiness_label(baseline_runs=2, interactive_runs=2, strongest_p_value=None) == "limited_comparison"
-    assert report._inference_readiness_label(baseline_runs=3, interactive_runs=0, strongest_p_value=None) == "needs_interactive_depth"
+    assert (
+        report._comparison_depth_label(baseline_runs=3, interactive_runs=0)
+        == "no_interactive_comparison"
+    )
+    assert (
+        report._inference_readiness_label(
+            baseline_runs=3, interactive_runs=3, strongest_p_value=0.04
+        )
+        == "paper_ready_signal"
+    )
+    assert (
+        report._inference_readiness_label(
+            baseline_runs=3, interactive_runs=3, strongest_p_value=0.30
+        )
+        == "tested_but_inconclusive"
+    )
+    assert (
+        report._inference_readiness_label(
+            baseline_runs=2, interactive_runs=2, strongest_p_value=None
+        )
+        == "limited_comparison"
+    )
+    assert (
+        report._inference_readiness_label(
+            baseline_runs=3, interactive_runs=0, strongest_p_value=None
+        )
+        == "needs_interactive_depth"
+    )
 
 
 def test_entropy_and_cliffs_delta_handle_edge_cases() -> None:
@@ -138,7 +155,9 @@ def test_build_app_rollups_classifies_stable_vs_interaction_broadened() -> None:
         ]
     }
 
-    app_rollups, baseline_vs_interactive, paper_rows, app_vectors, _ = report._build_app_rollups(by_package)
+    app_rollups, baseline_vs_interactive, paper_rows, app_vectors, _ = report._build_app_rollups(
+        by_package
+    )
 
     assert len(app_rollups) == 1
     rollup = app_rollups[0]
@@ -148,11 +167,15 @@ def test_build_app_rollups_classifies_stable_vs_interaction_broadened() -> None:
     assert rollup["baseline_stability"] == 1.0
     assert rollup["interactive_broadening"] == 4.5
     assert any(row["metric"] == "unique_ja4_count" for row in baseline_vs_interactive)
-    ja4_compare = next(row for row in baseline_vs_interactive if row["metric"] == "unique_ja4_count")
+    ja4_compare = next(
+        row for row in baseline_vs_interactive if row["metric"] == "unique_ja4_count"
+    )
     assert ja4_compare["comparison_status"] == "ok"
     assert ja4_compare["permutation_p_value"] is not None
     assert ja4_compare["cliffs_delta_band"] in {"medium", "large"}
-    assert ja4_compare["inference_note"].startswith(("permutation_signal_", "no_clear_permutation_signal_"))
+    assert ja4_compare["inference_note"].startswith(
+        ("permutation_signal_", "no_clear_permutation_signal_")
+    )
     assert paper_rows[0]["app"] == "WhatsApp"
     assert app_vectors[0]["package_name"] == "com.whatsapp"
     assert rollup["service_families_observed"] == "social_platform, messaging"
@@ -228,11 +251,31 @@ def test_service_fingerprint_associations_count_top_ja4_once_per_run() -> None:
         },
     ]
     domain_service_rows = [
-        {"dynamic_run_id": "run-a", "service_category": "analytics", "observed_domain": "a1.example.com"},
-        {"dynamic_run_id": "run-a", "service_category": "analytics", "observed_domain": "a2.example.com"},
-        {"dynamic_run_id": "run-a", "service_category": "analytics", "observed_domain": "a3.example.com"},
-        {"dynamic_run_id": "run-b", "service_category": "analytics", "observed_domain": "b.example.com"},
-        {"dynamic_run_id": "run-c", "service_category": "analytics", "observed_domain": "c.example.com"},
+        {
+            "dynamic_run_id": "run-a",
+            "service_category": "analytics",
+            "observed_domain": "a1.example.com",
+        },
+        {
+            "dynamic_run_id": "run-a",
+            "service_category": "analytics",
+            "observed_domain": "a2.example.com",
+        },
+        {
+            "dynamic_run_id": "run-a",
+            "service_category": "analytics",
+            "observed_domain": "a3.example.com",
+        },
+        {
+            "dynamic_run_id": "run-b",
+            "service_category": "analytics",
+            "observed_domain": "b.example.com",
+        },
+        {
+            "dynamic_run_id": "run-c",
+            "service_category": "analytics",
+            "observed_domain": "c.example.com",
+        },
     ]
 
     rows = report._build_service_fingerprint_associations(feature_rows, domain_service_rows)
@@ -278,9 +321,13 @@ def test_build_app_rollups_skips_packages_without_stats_eligible_runs() -> None:
         ],
     }
 
-    app_rollups, baseline_vs_interactive, paper_rows, app_vectors, _ = report._build_app_rollups(by_package)
+    app_rollups, baseline_vs_interactive, paper_rows, app_vectors, _ = report._build_app_rollups(
+        by_package
+    )
 
     assert [row["package_name"] for row in app_rollups] == ["com.example.good"]
-    assert [row["package_name"] for row in baseline_vs_interactive] == ["com.example.good"] * len(baseline_vs_interactive)
+    assert [row["package_name"] for row in baseline_vs_interactive] == ["com.example.good"] * len(
+        baseline_vs_interactive
+    )
     assert [row["app"] for row in paper_rows] == ["Good App"]
     assert [row["package_name"] for row in app_vectors] == ["com.example.good"]

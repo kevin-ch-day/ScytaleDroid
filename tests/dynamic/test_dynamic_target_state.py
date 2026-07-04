@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from scytaledroid.DynamicAnalysis.services.dynamic_target_state import derive_dynamic_target_state
-
 from tests.dynamic._guided_run_state_support import make_dataset_state, make_recent_summary
 
 

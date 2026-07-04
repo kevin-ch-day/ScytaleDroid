@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.Database.db_utils.artifact_registry_cleanup_report import (
     CATEGORY_ACTIONS,
     collect_cleanup_candidate_report,
@@ -88,7 +87,10 @@ def test_format_text_report_includes_sections() -> None:
     assert "detached runs: 4 (recovered packages=3)" in text
     assert "recovered manifest context: 3 run(s)" in text
     assert "core bundle status: complete=2 partial=2 duplicates=1" in text
-    assert "cleanup categories: static_file_present_detached_review=8, static_legacy_overlap_file_present_review=2" in text
+    assert (
+        "cleanup categories: static_file_present_detached_review=8, static_legacy_overlap_file_present_review=2"
+        in text
+    )
     assert "blocked session stamps: 20260430-all-full" in text
     assert "artifact_registry.session_stamp is now the preferred static session marker" in text
     assert "prune_artifact_registry_dangling.py" in text
@@ -192,7 +194,13 @@ def test_collect_cleanup_candidate_report_path_probe(monkeypatch: pytest.MonkeyP
     )
     monkeypatch.setattr(
         "scytaledroid.Database.db_utils.artifact_registry_cleanup_report._collect_static_session_retirement_summary",
-        lambda *_a, **_k: {"summary": {"blocked_session_count": 1, "blocked_registry_rows": 1, "blocked_sessions": ["sess-a"]}},
+        lambda *_a, **_k: {
+            "summary": {
+                "blocked_session_count": 1,
+                "blocked_registry_rows": 1,
+                "blocked_sessions": ["sess-a"],
+            }
+        },
     )
 
     out = collect_cleanup_candidate_report(fake_run_sql, path_sample_limit=5)
@@ -295,15 +303,33 @@ def test_collect_cleanup_candidate_report_reclassifies_static_dangling_rows(
                 },
             ],
             "static_dangling_runs": [
-                {"resolved_static_run_id": "1000", "row_count": 1, "dominant_primary_reason": "file_present_db_detached"},
-                {"resolved_static_run_id": "1001", "row_count": 1, "dominant_primary_reason": "legacy_mirror_only_file_missing"},
-                {"resolved_static_run_id": "1002", "row_count": 1, "dominant_primary_reason": "truly_detached"},
+                {
+                    "resolved_static_run_id": "1000",
+                    "row_count": 1,
+                    "dominant_primary_reason": "file_present_db_detached",
+                },
+                {
+                    "resolved_static_run_id": "1001",
+                    "row_count": 1,
+                    "dominant_primary_reason": "legacy_mirror_only_file_missing",
+                },
+                {
+                    "resolved_static_run_id": "1002",
+                    "row_count": 1,
+                    "dominant_primary_reason": "truly_detached",
+                },
             ],
         },
     )
     monkeypatch.setattr(
         "scytaledroid.Database.db_utils.artifact_registry_cleanup_report._collect_static_session_retirement_summary",
-        lambda *_a, **_k: {"summary": {"blocked_session_count": 1, "blocked_registry_rows": 1, "blocked_sessions": ["sess-a"]}},
+        lambda *_a, **_k: {
+            "summary": {
+                "blocked_session_count": 1,
+                "blocked_registry_rows": 1,
+                "blocked_sessions": ["sess-a"],
+            }
+        },
     )
 
     out = collect_cleanup_candidate_report(fake_run_sql, path_sample_limit=0)
@@ -313,10 +339,17 @@ def test_collect_cleanup_candidate_report_reclassifies_static_dangling_rows(
     assert "static_truly_detached_candidate" in categories
     assert "dangling_file_present_review" not in categories
     assert out["top_run_ids_by_category"]["static_truly_detached_candidate"][0]["run_id"] == "1002"
-    assert out["static_diagnostics_summary"]["cleanup_category_counts"]["static_truly_detached_candidate"] == 1
+    assert (
+        out["static_diagnostics_summary"]["cleanup_category_counts"][
+            "static_truly_detached_candidate"
+        ]
+        == 1
+    )
 
 
-def test_collect_cleanup_candidate_report_skips_static_diagnostics_for_dynamic_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collect_cleanup_candidate_report_skips_static_diagnostics_for_dynamic_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     returns: list[list[dict[str, object]]] = [
         [],
         [],
@@ -328,7 +361,9 @@ def test_collect_cleanup_candidate_report_skips_static_diagnostics_for_dynamic_f
             return []
         return returns.pop(0)
 
-    out = collect_cleanup_candidate_report(fake_run_sql, run_type_filter="dynamic", path_sample_limit=0)
+    out = collect_cleanup_candidate_report(
+        fake_run_sql, run_type_filter="dynamic", path_sample_limit=0
+    )
     assert out["static_diagnostics_summary"] is None
 
 

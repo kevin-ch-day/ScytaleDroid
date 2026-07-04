@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from types import SimpleNamespace
 
-from scytaledroid.DynamicAnalysis import menu_reports
+from scytaledroid.DynamicAnalysis.menus import status_reports as menu_reports
 
 
 def test_render_cohort_status_details_includes_historical_context(monkeypatch, capsys) -> None:
@@ -69,7 +69,9 @@ def test_render_cohort_status_details_includes_historical_context(monkeypatch, c
     assert "Historical DB-only means older dynamic lineage exists in the DB" in out
 
 
-def test_render_cohort_status_help_mentions_retained_extra_and_historical(monkeypatch, capsys) -> None:
+def test_render_cohort_status_help_mentions_retained_extra_and_historical(
+    monkeypatch, capsys
+) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
 
     menu_reports.render_cohort_status_help()
@@ -78,10 +80,13 @@ def test_render_cohort_status_help_mentions_retained_extra_and_historical(monkey
     assert "locked" in out
     assert "mixed" in out
     assert "+L" in out
+    assert "identity mismatch" in out
+    assert "db-hist" in out
+    assert "drift" in out
     assert "3/3" in out
-    assert "+1 extra" in out
-    assert "+3 non-idle" in out
-    assert "Next" in out
+    assert "Idle Base" in out
+    assert "Non-idle" in out
+    assert "Interactive" in out
     assert "Build" in out
     assert "db-only" in out
     assert "Status=restore + DB-only evidence" in out
@@ -102,7 +107,11 @@ def test_render_cohort_status_help_mentions_retained_extra_and_historical(monkey
 
 def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
-    monkeypatch.setattr(menu_reports.shutil, "get_terminal_size", lambda fallback=(120, 40): os.terminal_size((120, 40)))
+    monkeypatch.setattr(
+        menu_reports.shutil,
+        "get_terminal_size",
+        lambda fallback=(120, 40): os.terminal_size((120, 40)),
+    )
 
     menu_reports.render_cohort_build_history(
         [
@@ -144,7 +153,11 @@ def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, caps
 
 def test_render_cohort_build_history_wraps_multiple_notes(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
-    monkeypatch.setattr(menu_reports.shutil, "get_terminal_size", lambda fallback=(120, 40): os.terminal_size((78, 40)))
+    monkeypatch.setattr(
+        menu_reports.shutil,
+        "get_terminal_size",
+        lambda fallback=(120, 40): os.terminal_size((78, 40)),
+    )
 
     menu_reports.render_cohort_build_history(
         [
@@ -184,7 +197,11 @@ def test_render_cohort_build_history_wraps_multiple_notes(monkeypatch, capsys) -
 
 def test_render_cohort_build_history_explains_stale_and_review_rows(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
-    monkeypatch.setattr(menu_reports.shutil, "get_terminal_size", lambda fallback=(120, 40): os.terminal_size((120, 40)))
+    monkeypatch.setattr(
+        menu_reports.shutil,
+        "get_terminal_size",
+        lambda fallback=(120, 40): os.terminal_size((120, 40)),
+    )
 
     menu_reports.render_cohort_build_history(
         [
@@ -224,11 +241,19 @@ def test_render_cohort_build_history_explains_stale_and_review_rows(monkeypatch,
     assert "installed build drifted" in out
     assert "newest static" in out
     assert "plan" in out
-    assert "latest current-build QA invalid" in out or ("latest current-build QA" in out and "invalid" in out)
+    assert "latest current-build QA invalid" in out or (
+        "latest current-build QA" in out and "invalid" in out
+    )
 
 
 def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
+    captured_tables = []
+    monkeypatch.setattr(
+        menu_reports.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured_tables.append((headers, rows)),
+    )
 
     menu_reports.render_cohort_status_debug(
         [
@@ -260,14 +285,39 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
     assert "Full table including legacy and QA fields" not in out
     assert "tracker-scoped latest-run state" in out
     assert "Operator summary" in out
-    assert "only historical DB lineage exists" in out
-    assert "hist=11" in out
     assert "Raw state extract" in out
-    assert "3/3" in out
-    assert "4I" in out
+    summary_headers, summary_rows = captured_tables[1]
+    assert summary_headers == ["App", "Status", "Reason", "DB lineage", "Latest QA"]
+    assert summary_rows[0] == [
+        "Facebook",
+        "baseline",
+        "only historical DB lineage exists",
+        "hist=11",
+        "valid (L)",
+    ]
+    raw_headers, raw_rows = captured_tables[-1]
+    assert raw_headers == [
+        "App",
+        "Base ct",
+        "Base ex",
+        "Base low",
+        "Inter ct",
+        "Inter ex",
+        "Inter low",
+        "Legacy",
+        "L builds",
+        "Need B",
+        "Need I",
+        "Lineage",
+        "DB active",
+        "DB hist",
+    ]
+    assert raw_rows[0][10] == "4"
 
 
-def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeypatch, capsys) -> None:
+def test_render_cohort_status_debug_summarizes_review_and_refresh_states(
+    monkeypatch, capsys
+) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
     captured_tables = []
     monkeypatch.setattr(
@@ -336,5 +386,17 @@ def test_render_cohort_status_debug_summarizes_review_and_refresh_states(monkeyp
     assert "Operator summary" in out
     summary_headers, summary_rows = captured_tables[1]
     assert summary_headers == ["App", "Status", "Reason", "DB lineage", "Latest QA"]
-    assert summary_rows[0] == ["CNN", "review", "latest current-build QA invalid", "active=6", "invalid"]
-    assert summary_rows[1] == ["Facebook", "refresh", "installed build drifted from newest static plan", "active=4 hist=20", "valid (L)"]
+    assert summary_rows[0] == [
+        "CNN",
+        "review",
+        "latest current-build QA invalid",
+        "active=6",
+        "invalid",
+    ]
+    assert summary_rows[1] == [
+        "Facebook",
+        "refresh",
+        "installed build drifted from newest static plan",
+        "active=4 hist=20",
+        "valid (L)",
+    ]

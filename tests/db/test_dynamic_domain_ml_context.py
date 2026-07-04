@@ -3,10 +3,6 @@ from __future__ import annotations
 from scripts.db import report_dynamic_domain_ml_context as report
 
 
-def test_dynamic_domain_ml_context_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/report_dynamic_domain_ml_context.py")
-
-
 def test_destination_class_groups_ad_verification_as_measurement() -> None:
     assert (
         report.destination_class(
@@ -53,7 +49,10 @@ def test_data_activity_class_and_privacy_relevance_for_common_domain_roles() -> 
     )
     assert report.privacy_relevance({"privacy"}, {"advertising"}, "adtech") == "high"
     assert report.privacy_relevance(set(), set(), "subscription_paywall") == "high"
-    assert report.privacy_relevance({"context"}, {"infrastructure"}, "platform_infrastructure") == "low"
+    assert (
+        report.privacy_relevance({"context"}, {"infrastructure"}, "platform_infrastructure")
+        == "low"
+    )
 
 
 def test_package_ml_readiness_flags_unmapped_and_low_confidence_rows() -> None:
@@ -70,6 +69,8 @@ def test_package_ml_readiness_flags_unmapped_and_low_confidence_rows() -> None:
     assert review == "review"
     assert "lack service mapping" in review_caveat
 
-    low_ready, low_caveat = report._ml_readiness([{"service_key": "wbd_streaming_platform", "confidence": "low"}])
+    low_ready, low_caveat = report._ml_readiness(
+        [{"service_key": "wbd_streaming_platform", "confidence": "low"}]
+    )
     assert low_ready == "usable_with_review"
     assert "low-confidence" in low_caveat

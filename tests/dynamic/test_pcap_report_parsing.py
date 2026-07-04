@@ -1,8 +1,37 @@
 import json
 from pathlib import Path
 
+import pytest
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.pcap.report import _parse_protocol_hierarchy_output
+
+
+@pytest.fixture(autouse=True)
+def _stub_expensive_pcap_report_helpers(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.summarize_tls_fingerprints",
+        lambda *args, **kwargs: {},
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.summarize_security_surface",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "finding_count": 0,
+            "risk_flags": [],
+            "cleartext": {},
+        },
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.summarize_pcap_service_context",
+        lambda *args, **kwargs: {
+            "service_context": {"status": "no_observations"},
+            "service_signals": {"status": "no_observations"},
+        },
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.render_security_review_md",
+        lambda *args, **kwargs: "# Security review\n",
+    )
 
 
 def test_parse_protocol_hierarchy_output_extracts_rows() -> None:
@@ -51,12 +80,21 @@ def test_write_pcap_report_appends_advanced_sections(monkeypatch, tmp_path: Path
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report._run_top_fields_with_stats",
-        lambda *args, **kwargs: {"items": [], "total_count": 0, "unique_count": 0, "top1_share": None},
+        lambda *args, **kwargs: {
+            "items": [],
+            "total_count": 0,
+            "unique_count": 0,
+            "top1_share": None,
+        },
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report.scan_pcap_timeseries_and_destinations",
         lambda *args, **kwargs: {
-            "direction_summary": {"outbound_packets": 6, "inbound_packets": 4, "unknown_packets": 0},
+            "direction_summary": {
+                "outbound_packets": 6,
+                "inbound_packets": 4,
+                "unknown_packets": 0,
+            },
             "flow_summary": {"flow_count": 2, "top_flows": []},
             "burst_summary": {"burst_count": 1},
             "tls_quic_visibility": {"tls_handshake_packets": 2, "quic_candidate_packets": 0},
@@ -83,6 +121,19 @@ def test_write_pcap_report_appends_advanced_sections(monkeypatch, tmp_path: Path
             "unique_ja4_count": 2,
             "unique_ja3s_count": 2,
             "top1_ja3_share": 2.0 / 3.0,
+        },
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.summarize_security_surface",
+        lambda *args, **kwargs: {
+            "schema_version": "v1",
+            "status": "ok",
+            "finding_count": 2,
+            "risk_flags": ["http_metadata_observed"],
+            "cleartext": {"http_observed": True, "visibility_class": "cleartext_surface_present"},
+            "findings": [
+                {"severity": "high", "title": "HTTP metadata observed", "category": "cleartext"}
+            ],
         },
     )
 
@@ -113,6 +164,9 @@ def test_write_pcap_report_appends_advanced_sections(monkeypatch, tmp_path: Path
     assert payload["transport_health"]["issue_packet_count"] == 2
     assert payload["service_context"]["status"] == "no_observations"
     assert payload["service_signals"]["status"] == "no_observations"
+    assert payload["security_surface"]["status"] == "ok"
+    assert payload["security_surface"]["finding_count"] == 2
+    assert (run_dir / "analysis" / "security_surface.json").exists()
 
 
 def test_write_pcap_report_includes_target_metadata(monkeypatch, tmp_path: Path) -> None:
@@ -138,7 +192,12 @@ def test_write_pcap_report_includes_target_metadata(monkeypatch, tmp_path: Path)
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report._run_top_fields_with_stats",
-        lambda *args, **kwargs: {"items": [], "total_count": 0, "unique_count": 0, "top1_share": None},
+        lambda *args, **kwargs: {
+            "items": [],
+            "total_count": 0,
+            "unique_count": 0,
+            "top1_share": None,
+        },
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report.scan_pcap_timeseries_and_destinations",
@@ -175,7 +234,9 @@ def test_write_pcap_report_includes_target_metadata(monkeypatch, tmp_path: Path)
     assert payload["app_label"] == "CNN"
 
 
-def test_write_pcap_report_prefers_db_display_name_when_manifest_label_missing(monkeypatch, tmp_path: Path) -> None:
+def test_write_pcap_report_prefers_db_display_name_when_manifest_label_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
     from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 
     run_dir = tmp_path / "run-1"
@@ -202,7 +263,12 @@ def test_write_pcap_report_prefers_db_display_name_when_manifest_label_missing(m
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report._run_top_fields_with_stats",
-        lambda *args, **kwargs: {"items": [], "total_count": 0, "unique_count": 0, "top1_share": None},
+        lambda *args, **kwargs: {
+            "items": [],
+            "total_count": 0,
+            "unique_count": 0,
+            "top1_share": None,
+        },
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report.scan_pcap_timeseries_and_destinations",
@@ -265,7 +331,11 @@ def test_write_pcap_report_recovers_small_pcap_from_meta_when_capture_artifact_m
     monkeypatch.setattr("shutil.which", lambda tool: tool)
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report._run_capinfos",
-        lambda *args, **kwargs: {"raw": "", "parsed": {"packet_count": 1, "data_size_bytes": 14, "capture_duration_s": 1.0}, "error": None},
+        lambda *args, **kwargs: {
+            "raw": "",
+            "parsed": {"packet_count": 1, "data_size_bytes": 14, "capture_duration_s": 1.0},
+            "error": None,
+        },
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report._run_protocol_hierarchy",
@@ -273,7 +343,12 @@ def test_write_pcap_report_recovers_small_pcap_from_meta_when_capture_artifact_m
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report._run_top_fields_with_stats",
-        lambda *args, **kwargs: {"items": [], "total_count": 0, "unique_count": 0, "top1_share": None},
+        lambda *args, **kwargs: {
+            "items": [],
+            "total_count": 0,
+            "unique_count": 0,
+            "top1_share": None,
+        },
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report.scan_pcap_timeseries_and_destinations",

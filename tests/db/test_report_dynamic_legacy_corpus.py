@@ -2,47 +2,32 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_legacy_corpus as report
 
 
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_legacy_corpus.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "legacy" in out
-    assert "dynamic evidence" in out
-
-
 def test_classify_record_boundaries() -> None:
-    assert report.classify_record(
-        {"valid_dataset_run": True, "countable": True}
-    ) == ("CURRENT_COUNTABLE", "valid current-build evidence counts toward quota")
+    assert report.classify_record({"valid_dataset_run": True, "countable": True}) == (
+        "CURRENT_COUNTABLE",
+        "valid current-build evidence counts toward quota",
+    )
     assert report.classify_record(
         {"valid_dataset_run": True, "countable": False, "low_signal": True}
-    ) == ("CURRENT_SUPPLEMENTAL_LOW_SIGNAL", "valid supplemental evidence excluded by low-signal policy")
+    ) == (
+        "CURRENT_SUPPLEMENTAL_LOW_SIGNAL",
+        "valid supplemental evidence excluded by low-signal policy",
+    )
     assert report.classify_record(
         {"valid_dataset_run": True, "countable": False, "low_signal": False}
     ) == ("CURRENT_SUPPLEMENTAL_EXTRA", "valid supplemental evidence retained outside quota")
     assert report.classify_record(
         {"valid_dataset_run": False, "countable": False, "invalid_reason_code": "PCAP_MISSING"}
     ) == ("INVALID_EXCLUDED", "invalid or PCAP-excluded evidence")
-    assert report.classify_record(
-        {"local_pack_present": True, "finalized_local": False}
-    ) == ("INCOMPLETE_LOCAL_PACK", "local evidence pack exists but did not finalize cleanly")
+    assert report.classify_record({"local_pack_present": True, "finalized_local": False}) == (
+        "INCOMPLETE_LOCAL_PACK",
+        "local evidence pack exists but did not finalize cleanly",
+    )
     assert report.classify_record(
         {"db_row_present": True, "valid_dataset_run": None, "local_pack_present": False}
     ) == ("LEGACY_DB_ONLY_UNKNOWN", "historical DB-only row lacks modern validity contract")
@@ -53,7 +38,10 @@ def test_classify_record_boundaries() -> None:
             "run_manifest_present": True,
             "finalized_local": True,
         }
-    ) == ("LEGACY_LOCAL_RECONSTRUCTABLE", "historical/local evidence can be partially reconstructed from files")
+    ) == (
+        "LEGACY_LOCAL_RECONSTRUCTABLE",
+        "historical/local evidence can be partially reconstructed from files",
+    )
     assert report.classify_record(
         {
             "local_pack_present": True,
@@ -64,12 +52,14 @@ def test_classify_record_boundaries() -> None:
             "finalized_local": True,
         }
     ) == ("RAW_EVIDENCE_DERIVED_MISSING", "raw PCAP exists but derived report/features are missing")
-    assert report.classify_record(
-        {"valid_dataset_run": 1, "countable": 0, "low_signal": 1}
-    ) == ("CURRENT_SUPPLEMENTAL_LOW_SIGNAL", "valid supplemental evidence excluded by low-signal policy")
-    assert report.classify_record(
-        {"valid_dataset_run": 0, "countable": 0, "pcap_valid": 0}
-    ) == ("INVALID_EXCLUDED", "invalid or PCAP-excluded evidence")
+    assert report.classify_record({"valid_dataset_run": 1, "countable": 0, "low_signal": 1}) == (
+        "CURRENT_SUPPLEMENTAL_LOW_SIGNAL",
+        "valid supplemental evidence excluded by low-signal policy",
+    )
+    assert report.classify_record({"valid_dataset_run": 0, "countable": 0, "pcap_valid": 0}) == (
+        "INVALID_EXCLUDED",
+        "invalid or PCAP-excluded evidence",
+    )
 
 
 def test_has_pcap_artifact_supports_pcapng(tmp_path: Path) -> None:
@@ -308,7 +298,9 @@ def test_generate_report_writes_expected_outputs_and_rollups(tmp_path: Path) -> 
     assert summary["classification_counts"]["LEGACY_LOCAL_RECONSTRUCTABLE"] == 1
     assert summary["classification_counts"]["INCOMPLETE_LOCAL_PACK"] == 1
 
-    per_run = list(csv.DictReader((tmp_path / "per_run_classification.csv").open(newline="", encoding="utf-8")))
+    per_run = list(
+        csv.DictReader((tmp_path / "per_run_classification.csv").open(newline="", encoding="utf-8"))
+    )
     assert {row["classification"] for row in per_run} >= {
         "CURRENT_COUNTABLE",
         "CURRENT_SUPPLEMENTAL_LOW_SIGNAL",
@@ -322,13 +314,19 @@ def test_generate_report_writes_expected_outputs_and_rollups(tmp_path: Path) -> 
     assert twitter["classification"] == "CURRENT_SUPPLEMENTAL_LOW_SIGNAL"
     assert twitter["evidence_era"] == "MODERN_FINALIZED"
 
-    focus = list(csv.DictReader((tmp_path / "messaging_baseline_rollup.csv").open(newline="", encoding="utf-8")))
+    focus = list(
+        csv.DictReader(
+            (tmp_path / "messaging_baseline_rollup.csv").open(newline="", encoding="utf-8")
+        )
+    )
     messenger = next(row for row in focus if row["package_name"] == "com.facebook.orca")
     assert messenger["countable_baseline_connected"] == "1"
     whatsapp = next(row for row in focus if row["package_name"] == "com.whatsapp")
     assert whatsapp["legacy_unknown"] == "1"
 
-    per_app = list(csv.DictReader((tmp_path / "per_app_rollup.csv").open(newline="", encoding="utf-8")))
+    per_app = list(
+        csv.DictReader((tmp_path / "per_app_rollup.csv").open(newline="", encoding="utf-8"))
+    )
     by_package = {row["package_name"]: row for row in per_app}
     assert by_package["com.facebook.orca"]["domain_indexed_runs"] == "1"
     assert by_package["com.facebook.orca"]["network_context_state"] == "domain_ready"

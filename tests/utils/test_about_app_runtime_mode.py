@@ -9,7 +9,9 @@ def test_about_app_hides_runtime_mode_when_identity_disabled(monkeypatch) -> Non
     monkeypatch.setattr(about_app.app_config, "SHOW_RUNTIME_IDENTITY", False)
     monkeypatch.setattr(about_app.menu_utils, "print_header", lambda *_a, **_k: None)
     monkeypatch.setattr(about_app.menu_utils, "print_hint", lambda *_a, **_k: None)
-    monkeypatch.setattr(about_app.menu_utils, "print_section", lambda title, *_a, **_k: sections.append(title))
+    monkeypatch.setattr(
+        about_app.menu_utils, "print_section", lambda title, *_a, **_k: sections.append(title)
+    )
     monkeypatch.setattr(about_app.menu_utils, "print_metrics", lambda *_a, **_k: None)
     monkeypatch.setattr(about_app.status_messages, "status", lambda message, **_k: message)
     monkeypatch.setattr(about_app.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
@@ -31,8 +33,14 @@ def test_about_app_shows_runtime_mode_when_identity_enabled(monkeypatch) -> None
     monkeypatch.setattr(about_app.app_config, "SYS_TEST", False)
     monkeypatch.setattr(about_app.menu_utils, "print_header", lambda *_a, **_k: None)
     monkeypatch.setattr(about_app.menu_utils, "print_hint", lambda *_a, **_k: None)
-    monkeypatch.setattr(about_app.menu_utils, "print_section", lambda title, *_a, **_k: sections.append(title))
-    monkeypatch.setattr(about_app.menu_utils, "print_metrics", lambda metrics, *_a, **_k: metrics_calls.append(list(metrics)))
+    monkeypatch.setattr(
+        about_app.menu_utils, "print_section", lambda title, *_a, **_k: sections.append(title)
+    )
+    monkeypatch.setattr(
+        about_app.menu_utils,
+        "print_metrics",
+        lambda metrics, *_a, **_k: metrics_calls.append(list(metrics)),
+    )
     monkeypatch.setattr(about_app.status_messages, "status", lambda message, **_k: message)
     monkeypatch.setattr(about_app.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
 
@@ -40,7 +48,8 @@ def test_about_app_shows_runtime_mode_when_identity_enabled(monkeypatch) -> None
 
     assert "Runtime Mode" in sections
     assert any(
-        metrics == [
+        metrics
+        == [
             ("Runtime preset", "VALIDATION"),
             ("Execution mode", "DEV"),
             ("System environment", "VIRTUAL"),

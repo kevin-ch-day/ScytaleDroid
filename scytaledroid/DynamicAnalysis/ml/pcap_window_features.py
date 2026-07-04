@@ -64,8 +64,8 @@ def extract_packet_timeline(pcap_path: Path) -> Iterable[PacketRecord]:
     rc: int | None = None
     err_tail: str = ""
     try:
-        for line in proc.stdout:
-            line = line.strip()
+        for raw_line in proc.stdout:
+            line = raw_line.strip()
             if not line:
                 continue
             parts = line.split(",")

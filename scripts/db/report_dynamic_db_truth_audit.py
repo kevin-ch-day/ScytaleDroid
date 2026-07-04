@@ -278,10 +278,10 @@ def build_truth_audit(*, cohort_key: str | None = None) -> dict[str, Any]:
                 pkg,
                 list(entry.get("runs") or []),
                 cfg=DatasetTrackerConfig(),
-                resolve_tracker_run_identity_fn=lambda package_name, run: resolve_tracker_run_identity(
+                resolve_tracker_run_identity_fn=lambda package_name, run, _cache=cache: resolve_tracker_run_identity(
                     package_name,
                     run,
-                    run_identity_cache=cache,
+                    run_identity_cache=_cache,
                     output_dir=str(cfg.OUTPUT_DIR),
                 ),
             )

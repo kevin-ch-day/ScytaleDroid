@@ -609,8 +609,8 @@ def _build_package_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         destination_classes = Counter(str(row.get("destination_class") or "") for row in items if row.get("destination_class"))
         signal_families = Counter()
         for row in items:
-            for family in str(row.get("signal_families") or "").split("|"):
-                family = family.strip()
+            for raw_family in str(row.get("signal_families") or "").split("|"):
+                family = raw_family.strip()
                 if family:
                     signal_families[family] += 1
         summaries.append(

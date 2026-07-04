@@ -4,15 +4,18 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.DynamicAnalysis import app_queue_state, tracker_scope
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
-from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, evaluate_dataset_validity
+from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+    DatasetTrackerConfig,
+    evaluate_dataset_validity,
+)
 from scytaledroid.DynamicAnalysis.pcap.low_signal import compute_low_signal_for_run
 from scytaledroid.DynamicAnalysis.run_qualification import (
     format_quota_progress_label,
     run_included_in_default_analysis,
     summarize_evidence_qualification,
+    summarize_tracker_runs_qualification,
 )
 
 
@@ -35,6 +38,7 @@ def _baseline_run(
     countable: bool | None = None,
     low_signal: bool = False,
     extra_run: bool = False,
+    baseline_not_idle: bool = False,
 ) -> dict:
     row = {
         "run_id": run_id,
@@ -49,6 +53,10 @@ def _baseline_run(
         row["countable"] = countable
     if low_signal:
         row["low_signal"] = True
+        row["extra_run"] = 1
+        row["countable"] = False
+    elif baseline_not_idle:
+        row["baseline_not_idle"] = True
         row["extra_run"] = 1
         row["countable"] = False
     elif extra_run:
@@ -146,6 +154,33 @@ def test_x_baseline_two_countable_plus_one_low_signal() -> None:
     assert summary.baseline.low_signal_retained == 1
 
 
+def test_non_idle_baseline_uses_dedicated_retained_lane_not_generic_extra() -> None:
+    runs = [
+        _baseline_run("b1", ended_at="2026-01-01T10:00:00+00:00", countable=True),
+        _baseline_run("b2", ended_at="2026-01-01T11:00:00+00:00", countable=True),
+        _baseline_run("b3", ended_at="2026-01-01T12:00:00+00:00", baseline_not_idle=True),
+    ]
+
+    summary = summarize_tracker_runs_qualification(
+        runs,
+        baseline_required=3,
+        interactive_required=4,
+    )
+    label = format_quota_progress_label(
+        countable=summary.baseline.quota_counted_valid,
+        required=3,
+        extra=summary.baseline.extra_valid,
+        low_signal=summary.baseline.low_signal_retained,
+        non_idle=summary.baseline.non_idle_retained,
+    )
+
+    assert label == "2/3 (+1 non-idle)"
+    assert summary.baseline.quota_counted_valid == 2
+    assert summary.baseline.extra_valid == 0
+    assert summary.baseline.non_idle_retained == 1
+    assert summary.baseline.total_valid_retained == 3
+
+
 def test_whatsapp_interactive_two_countable_plus_extra_and_low() -> None:
     runs = [
         _baseline_run("b1", ended_at="2026-01-01T08:00:00+00:00", countable=True),
@@ -213,6 +248,7 @@ def test_bucket_detail_column_label_shows_quota_gap_and_supplemental() -> None:
         bucket_detail_column_label(countable=2, extra=1, low_signal=1, required=4)
         == "q2/4 · +1 extra, +1 low"
     )
+    assert bucket_detail_column_label(countable=0, non_idle=3, required=3) == "q0/3 · +3 non-idle"
 
 
 def test_queue_quota_gap_label_formats_baseline_and_interactive_shortfalls() -> None:
@@ -221,18 +257,25 @@ def test_queue_quota_gap_label_formats_baseline_and_interactive_shortfalls() -> 
         need_interactive = 2
 
     assert app_queue_state.queue_quota_gap_label(_Row()) == "3B 2I"
-    assert app_queue_state.queue_quota_gap_label(
-        type("_R", (), {"need_baseline": 0, "need_interactive": 2})()
-    ) == "2I"
-    assert app_queue_state.queue_quota_gap_label(
-        type("_R", (), {"need_baseline": 0, "need_interactive": 0})()
-    ) == "—"
+    assert (
+        app_queue_state.queue_quota_gap_label(
+            type("_R", (), {"need_baseline": 0, "need_interactive": 2})()
+        )
+        == "2I"
+    )
+    assert (
+        app_queue_state.queue_quota_gap_label(
+            type("_R", (), {"need_baseline": 0, "need_interactive": 0})()
+        )
+        == "—"
+    )
 
 
 def test_queue_labels_use_evidence_and_detail_columns() -> None:
     class _Row:
         baseline_countable = 3
         baseline_extra = 1
+        baseline_not_idle_supplemental = 0
         baseline_low_signal_supplemental = 0
         interactive_countable = 2
         interactive_extra = 1
@@ -251,6 +294,21 @@ def test_queue_labels_use_evidence_and_detail_columns() -> None:
         == "q2/4 · +1 extra, +1 low"
     )
 
+    non_idle_row = type(
+        "_R",
+        (),
+        {
+            "baseline_countable": 0,
+            "baseline_extra": 0,
+            "baseline_not_idle_supplemental": 3,
+            "baseline_low_signal_supplemental": 0,
+        },
+    )()
+    assert (
+        app_queue_state.queue_baseline_progress_label(non_idle_row, baseline_required=3)
+        == "0/3 (+3 non-idle)"
+    )
+
 
 @pytest.mark.parametrize(
     ("package_name",),
@@ -260,7 +318,9 @@ def test_queue_labels_use_evidence_and_detail_columns() -> None:
         ("org.telegram.messenger",),
     ],
 )
-def test_messaging_interaction_low_traffic_stays_valid_not_auto_low_signal(tmp_path: Path, package_name: str) -> None:
+def test_messaging_interaction_low_traffic_stays_valid_not_auto_low_signal(
+    tmp_path: Path, package_name: str
+) -> None:
     run_dir = tmp_path / "run"
     _write_json(
         run_dir / "analysis" / "pcap_features.json",

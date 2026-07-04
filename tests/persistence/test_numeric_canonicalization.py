@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.persistence.utils import canonical_decimal_text
 
 

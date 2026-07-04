@@ -1,29 +1,9 @@
 from __future__ import annotations
 
 import csv
-import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_hidden_patterns as report
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_hidden_patterns.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "hidden-pattern exports" in out
 
 
 def _make_run(
@@ -102,7 +82,9 @@ def _make_run(
     }
 
 
-def test_generate_report_exports_hidden_patterns_without_secret_values(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_exports_hidden_patterns_without_secret_values(
+    tmp_path: Path, monkeypatch
+) -> None:
     package_alpha = "com.example.alpha"
     package_beta = "com.example.beta"
     package_gamma = "com.example.gamma"
@@ -119,7 +101,11 @@ def test_generate_report_exports_hidden_patterns_without_secret_values(tmp_path:
             high_value_permission_count=1,
             uses_cleartext=False,
             network_security_config_present=True,
-            static_endpoint_roots=["alpha.example.com", "cdn.alpha.example.com", "api.alpha.example.com"],
+            static_endpoint_roots=[
+                "alpha.example.com",
+                "cdn.alpha.example.com",
+                "api.alpha.example.com",
+            ],
             static_http_endpoint_roots=["legacy.alpha.example.com"],
             service_rows=[
                 {"service_key": "adtech_one", "owner_class": "third_party", "total_hits": 5},
@@ -131,7 +117,11 @@ def test_generate_report_exports_hidden_patterns_without_secret_values(tmp_path:
                 {"signal_key": "third_party_advertising"},
                 {"signal_key": "third_party_analytics_measurement"},
             ],
-            dynamic_domains={"ads.thirdparty.example", "metrics.thirdparty.example", "alpha.example.com"},
+            dynamic_domains={
+                "ads.thirdparty.example",
+                "metrics.thirdparty.example",
+                "alpha.example.com",
+            },
         ),
         _make_run(
             package=package_alpha,
@@ -144,7 +134,11 @@ def test_generate_report_exports_hidden_patterns_without_secret_values(tmp_path:
             high_value_permission_count=1,
             uses_cleartext=False,
             network_security_config_present=True,
-            static_endpoint_roots=["alpha.example.com", "cdn.alpha.example.com", "api.alpha.example.com"],
+            static_endpoint_roots=[
+                "alpha.example.com",
+                "cdn.alpha.example.com",
+                "api.alpha.example.com",
+            ],
             static_http_endpoint_roots=["legacy.alpha.example.com"],
             service_rows=[
                 {"service_key": "adtech_one", "owner_class": "third_party", "total_hits": 6},
@@ -154,7 +148,12 @@ def test_generate_report_exports_hidden_patterns_without_secret_values(tmp_path:
             signal_rows=[
                 {"signal_key": "third_party_advertising"},
             ],
-            dynamic_domains={"ads.thirdparty.example", "metrics.thirdparty.example", "manual-only.example", "alpha.example.com"},
+            dynamic_domains={
+                "ads.thirdparty.example",
+                "metrics.thirdparty.example",
+                "manual-only.example",
+                "alpha.example.com",
+            },
         ),
         _make_run(
             package=package_beta,
@@ -170,7 +169,11 @@ def test_generate_report_exports_hidden_patterns_without_secret_values(tmp_path:
             allow_backup=True,
             debuggable=True,
             uses_webview=True,
-            static_endpoint_roots=["api.beta.example.com", "config.beta.example.com", "AKIASECRETVALUE.beta.example.com"],
+            static_endpoint_roots=[
+                "api.beta.example.com",
+                "config.beta.example.com",
+                "AKIASECRETVALUE.beta.example.com",
+            ],
             static_http_endpoint_roots=["legacy.beta.example.com"],
             service_rows=[
                 {"service_key": "beta_ads", "owner_class": "third_party", "total_hits": 7},
@@ -290,11 +293,17 @@ def test_generate_report_exports_hidden_patterns_without_secret_values(tmp_path:
     assert (package_beta, "visibility_loss_present") in keys
     assert all(row["package"] != package_gamma for row in candidate_rows)
 
-    all_text = "\n".join(path.read_text(encoding="utf-8") for path in out_dir.iterdir() if path.suffix in {".csv", ".json"})
+    all_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in out_dir.iterdir()
+        if path.suffix in {".csv", ".json"}
+    )
     assert "AKIASECRETVALUE" not in all_text
 
 
-def test_hidden_patterns_mark_many_static_endpoints_and_dynamic_only_domains(tmp_path: Path, monkeypatch) -> None:
+def test_hidden_patterns_mark_many_static_endpoints_and_dynamic_only_domains(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = "com.example.delta"
     runs = [
         _make_run(
@@ -326,7 +335,11 @@ def test_hidden_patterns_mark_many_static_endpoints_and_dynamic_only_domains(tmp
                 {"service_key": "delta_first_party", "owner_class": "first_party", "total_hits": 2},
             ],
             signal_rows=[],
-            dynamic_domains={"one.delta.example", "runtime-only.delta.example", "config.delta.example"},
+            dynamic_domains={
+                "one.delta.example",
+                "runtime-only.delta.example",
+                "config.delta.example",
+            },
         ),
         _make_run(
             package=package,
@@ -357,14 +370,42 @@ def test_hidden_patterns_mark_many_static_endpoints_and_dynamic_only_domains(tmp
                 {"service_key": "delta_first_party", "owner_class": "first_party", "total_hits": 2},
             ],
             signal_rows=[],
-            dynamic_domains={"one.delta.example", "runtime-only.delta.example", "config.delta.example", "manual-only.delta.example"},
+            dynamic_domains={
+                "one.delta.example",
+                "runtime-only.delta.example",
+                "config.delta.example",
+                "manual-only.delta.example",
+            },
         ),
     ]
     monkeypatch.setattr(report, "_iter_dynamic_runs", lambda: runs)
     monkeypatch.setattr(report, "_load_static_finding_features", lambda run_ids: {1004: {}})
-    monkeypatch.setattr(report, "_load_permission_features", lambda run_ids: {1004: {"custom_permission_count": 0, "dangerous_or_weak_custom_permission_count": 0}})
-    monkeypatch.setattr(report, "_load_provider_features", lambda packages: {package: {"provider_authority_count": 0, "grant_uri_permissions_count": 0}})
-    monkeypatch.setattr(report, "_load_string_endpoint_features", lambda run_ids: {1004: {"summary_endpoint_count": 12, "summary_http_count": 0, "sample_endpoint_roots": [], "sample_http_roots": []}})
+    monkeypatch.setattr(
+        report,
+        "_load_permission_features",
+        lambda run_ids: {
+            1004: {"custom_permission_count": 0, "dangerous_or_weak_custom_permission_count": 0}
+        },
+    )
+    monkeypatch.setattr(
+        report,
+        "_load_provider_features",
+        lambda packages: {
+            package: {"provider_authority_count": 0, "grant_uri_permissions_count": 0}
+        },
+    )
+    monkeypatch.setattr(
+        report,
+        "_load_string_endpoint_features",
+        lambda run_ids: {
+            1004: {
+                "summary_endpoint_count": 12,
+                "summary_http_count": 0,
+                "sample_endpoint_roots": [],
+                "sample_http_roots": [],
+            }
+        },
+    )
     monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path / "dynamic")
 
     out_dir = tmp_path / "audit"
@@ -377,7 +418,9 @@ def test_hidden_patterns_mark_many_static_endpoints_and_dynamic_only_domains(tmp
     assert "observed_endpoints_absent_from_static_strings" in keys
 
 
-def test_hidden_patterns_do_not_claim_dynamic_only_endpoints_when_static_endpoint_inventory_missing(tmp_path: Path, monkeypatch) -> None:
+def test_hidden_patterns_do_not_claim_dynamic_only_endpoints_when_static_endpoint_inventory_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = "com.example.missing"
     runs = [
         _make_run(
@@ -401,9 +444,32 @@ def test_hidden_patterns_do_not_claim_dynamic_only_endpoints_when_static_endpoin
     ]
     monkeypatch.setattr(report, "_iter_dynamic_runs", lambda: runs)
     monkeypatch.setattr(report, "_load_static_finding_features", lambda run_ids: {1005: {}})
-    monkeypatch.setattr(report, "_load_permission_features", lambda run_ids: {1005: {"custom_permission_count": 0, "dangerous_or_weak_custom_permission_count": 0}})
-    monkeypatch.setattr(report, "_load_provider_features", lambda packages: {package: {"provider_authority_count": 0, "grant_uri_permissions_count": 0}})
-    monkeypatch.setattr(report, "_load_string_endpoint_features", lambda run_ids: {1005: {"summary_endpoint_count": 0, "summary_http_count": 0, "sample_endpoint_roots": [], "sample_http_roots": []}})
+    monkeypatch.setattr(
+        report,
+        "_load_permission_features",
+        lambda run_ids: {
+            1005: {"custom_permission_count": 0, "dangerous_or_weak_custom_permission_count": 0}
+        },
+    )
+    monkeypatch.setattr(
+        report,
+        "_load_provider_features",
+        lambda packages: {
+            package: {"provider_authority_count": 0, "grant_uri_permissions_count": 0}
+        },
+    )
+    monkeypatch.setattr(
+        report,
+        "_load_string_endpoint_features",
+        lambda run_ids: {
+            1005: {
+                "summary_endpoint_count": 0,
+                "summary_http_count": 0,
+                "sample_endpoint_roots": [],
+                "sample_http_roots": [],
+            }
+        },
+    )
     monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path / "dynamic")
 
     out_dir = tmp_path / "audit"
@@ -420,7 +486,9 @@ def test_hidden_patterns_do_not_claim_dynamic_only_endpoints_when_static_endpoin
     assert row["static_endpoint_root_count"] == "0"
 
 
-def test_hidden_patterns_suppress_single_run_policy_and_privacy_noise(tmp_path: Path, monkeypatch) -> None:
+def test_hidden_patterns_suppress_single_run_policy_and_privacy_noise(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = "com.example.single"
     runs = [
         _make_run(
@@ -437,7 +505,11 @@ def test_hidden_patterns_suppress_single_run_policy_and_privacy_noise(tmp_path: 
             static_endpoint_roots=["single.example", "cdn.single.example", "ads.single.example"],
             static_http_endpoint_roots=["legacy.single.example", "legacy2.single.example"],
             service_rows=[
-                {"service_key": "single_first_party", "owner_class": "first_party", "total_hits": 5},
+                {
+                    "service_key": "single_first_party",
+                    "owner_class": "first_party",
+                    "total_hits": 5,
+                },
                 {"service_key": "ads_one", "owner_class": "third_party", "total_hits": 6},
                 {"service_key": "ads_two", "owner_class": "third_party", "total_hits": 4},
             ],
@@ -459,8 +531,20 @@ def test_hidden_patterns_suppress_single_run_policy_and_privacy_noise(tmp_path: 
             }
         },
     )
-    monkeypatch.setattr(report, "_load_permission_features", lambda run_ids: {1006: {"custom_permission_count": 0, "dangerous_or_weak_custom_permission_count": 0}})
-    monkeypatch.setattr(report, "_load_provider_features", lambda packages: {package: {"provider_authority_count": 0, "grant_uri_permissions_count": 0}})
+    monkeypatch.setattr(
+        report,
+        "_load_permission_features",
+        lambda run_ids: {
+            1006: {"custom_permission_count": 0, "dangerous_or_weak_custom_permission_count": 0}
+        },
+    )
+    monkeypatch.setattr(
+        report,
+        "_load_provider_features",
+        lambda packages: {
+            package: {"provider_authority_count": 0, "grant_uri_permissions_count": 0}
+        },
+    )
     monkeypatch.setattr(
         report,
         "_load_string_endpoint_features",

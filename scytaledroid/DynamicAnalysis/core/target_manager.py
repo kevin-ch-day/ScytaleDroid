@@ -171,8 +171,8 @@ class TargetManager:
                 ["pm", "path", run_ctx.package_name],
             )
         paths: list[str] = []
-        for line in output.splitlines():
-            line = line.strip()
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
             if not line.startswith("package:"):
                 continue
             paths.append(line.replace("package:", "", 1))

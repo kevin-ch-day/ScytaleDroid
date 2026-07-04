@@ -407,7 +407,9 @@ def test_vnext_permission_risk_keeps_cross_run_rows(monkeypatch):
     )
     report = DummyReport({"apk_id": 701, "sha256": "66" * 32})
     bundle = _bundle(1, 0, 0, 1.500, "B")
-    profiles = {"android.permission.camera": {"is_runtime_dangerous": True, "guard_strength": "weak"}}
+    profiles = {
+        "android.permission.camera": {"is_runtime_dangerous": True, "guard_strength": "weak"}
+    }
 
     persist_permission_risk(
         run_id=19,
@@ -533,8 +535,14 @@ def test_biometric_duplicate_canonicalization_one_row_and_warnings(monkeypatch):
     )
 
     profiles = {
-        "android.permission.USE_BIOMETRIC": {"is_runtime_dangerous": True, "guard_strength": "weak"},
-        "android.permission.use_biometric": {"is_runtime_dangerous": False, "guard_strength": "strong"},
+        "android.permission.USE_BIOMETRIC": {
+            "is_runtime_dangerous": True,
+            "guard_strength": "weak",
+        },
+        "android.permission.use_biometric": {
+            "is_runtime_dangerous": False,
+            "guard_strength": "strong",
+        },
         "  Android.Permission.Use_Biometric  ": {"is_runtime_dangerous": False},
     }
 

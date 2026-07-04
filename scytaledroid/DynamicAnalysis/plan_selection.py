@@ -316,7 +316,7 @@ def _parse_generated_at(value: object) -> str | None:
     if isinstance(value, str) and value:
         return value
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value)).isoformat()
+        return datetime.fromtimestamp(float(value), UTC).isoformat()
     return None
 
 

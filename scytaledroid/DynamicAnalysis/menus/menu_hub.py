@@ -12,7 +12,13 @@ from scytaledroid.DynamicAnalysis.menus.menu_overview import (
     build_dynamic_menu_sections,
     render_dynamic_menu_overview,
 )
-from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, text_blocks
+from scytaledroid.Utils.DisplayUtils import (
+    colors,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    text_blocks,
+)
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 
 
@@ -30,6 +36,7 @@ class DynamicAnalysisMenuCallbacks:
     repair_reindex_tracker: Callable[[], None]
     prune_incomplete_dynamic_evidence_dirs: Callable[[], None]
     open_legacy_structural_archive: Callable[[Callable[[], None]], None]
+    run_cohort_security_audit_export: Callable[[], None]
 
 
 def _pause_if_verbose() -> None:
@@ -62,12 +69,20 @@ def run_dynamic_analysis_menu(callbacks: DynamicAnalysisMenuCallbacks) -> None:
         render_dynamic_menu_overview()
         print()
         menu_utils.print_section("Run")
-        menu_utils.print_menu(sections.primary_actions, show_exit=False, show_descriptions=True, compact=True)
+        menu_utils.print_menu(
+            sections.primary_actions, show_exit=False, show_descriptions=False, compact=True
+        )
         print()
         menu_utils.print_section("Tools")
-        menu_utils.print_menu(sections.validation, show_exit=False, show_descriptions=True, compact=True)
-        menu_utils.print_menu(sections.maintenance, show_exit=False, show_descriptions=True, compact=True)
-        menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
+        menu_utils.print_menu(
+            sections.validation, show_exit=False, show_descriptions=False, compact=True
+        )
+        menu_utils.print_menu(
+            sections.maintenance, show_exit=False, show_descriptions=False, compact=True
+        )
+        menu_utils.print_menu(
+            [], show_exit=True, exit_label="Back", show_descriptions=False, compact=True
+        )
         choice = prompt_utils.get_choice(
             menu_utils.selectable_keys(options, include_exit=True),
             disabled=[option.key for option in options if option.disabled],
@@ -114,3 +129,8 @@ def run_dynamic_analysis_menu(callbacks: DynamicAnalysisMenuCallbacks) -> None:
         if choice == "9":
             callbacks.open_legacy_structural_archive(_pause_if_verbose)
             _pause_if_verbose()
+            continue
+        if choice == "10":
+            callbacks.run_cohort_security_audit_export()
+            _pause_if_verbose()
+            continue

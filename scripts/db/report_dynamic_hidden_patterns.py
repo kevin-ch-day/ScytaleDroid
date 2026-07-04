@@ -166,14 +166,9 @@ def _static_endpoint_features(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _protocol_http_observed(report: dict[str, Any]) -> bool:
-    rows = report.get("protocol_hierarchy") if isinstance(report.get("protocol_hierarchy"), list) else []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        protocol = _norm_text(row.get("protocol")).lower()
-        if protocol.startswith("http"):
-            return True
-    return False
+    from scytaledroid.DynamicAnalysis.pcap.security_surface import http_observed_from_report
+
+    return http_observed_from_report(report)
 
 
 def _visibility_loss_flag(report: dict[str, Any], *, domain_count: int) -> bool:
@@ -747,6 +742,7 @@ def _build_hidden_pattern_candidates(join_rows: list[dict[str, Any]]) -> list[di
             "third_party_service_hits": row["third_party_service_hits"],
             "visibility_loss_flag": row["visibility_loss_flag"],
             "observed_domain_count": row["_observed_domain_count"],
+            "http_observed": row["_http_observed"],
         }
         if row["_permissions_total"] <= 12 and row["_third_party_service_count"] >= 3:
             out.append(
@@ -859,6 +855,24 @@ def _build_hidden_pattern_candidates(join_rows: list[dict[str, Any]]) -> list[di
                     "network_policy_mismatch",
                     "medium",
                     "Static HTTP-like endpoints exist while the manifest/network posture denies cleartext traffic; review whether these are dead paths, documentation references, or policy mismatches.",
+                    static_features=static_features,
+                    dynamic_features=dynamic_features,
+                )
+            )
+        if (
+            not row["uses_cleartext_traffic"]
+            and row["_http_observed"]
+            and row["dynamic_valid_run_count"] >= 2
+            and not row["visibility_loss_flag"]
+        ):
+            out.append(
+                _candidate_row(
+                    package,
+                    app_label,
+                    "cleartext_observed_when_denied",
+                    "network_policy_mismatch",
+                    "high",
+                    "Static posture denies cleartext traffic, but HTTP/cleartext metadata was observed in dynamic captures; treat as a policy mismatch for manual review.",
                     static_features=static_features,
                     dynamic_features=dynamic_features,
                 )

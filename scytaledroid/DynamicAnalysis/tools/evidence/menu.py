@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.pcap.security_surface import security_operator_labels_from_run_dir
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
 )
@@ -406,20 +407,26 @@ def _render_app_runs(root: Path, display_name: str, package_name: str, runs: lis
         print(status_messages.status("No runs found.", level="info"))
         return
     # Compact table with reasons (this is the drilldown view).
-    headers = ["#", "Run", "Ended", "Profile", "Interact", "Msg", "Valid", "Reason"]
+    headers = ["#", "Run", "Ended", "Profile", "Interact", "ClrHTTP", "SecFind", "Valid", "Reason"]
     rows = []
     for idx, r in enumerate(runs, start=1):
         valid = r.get("valid")
         valid_label = "valid" if valid is True else ("invalid" if valid is False else "—")
         reason = r.get("reason") or "—"
+        run_id = str(r.get("run_id") or "")
+        sec = security_operator_labels_from_run_dir(root / run_id) if run_id else {}
+        clr_http = str(sec.get("cleartext_http_label") or "—")
+        finding_count = sec.get("finding_count")
+        sec_find = str(finding_count) if finding_count is not None else "—"
         rows.append(
             [
                 str(idx),
-                str(r.get("run_id") or "")[:8],
+                run_id[:8],
                 str(r.get("ended_at") or "")[:19] or "—",
                 str(r.get("run_profile") or "") or "—",
                 str(r.get("interaction_level") or "") or "—",
-                str(r.get("messaging_activity") or "") or "—",
+                clr_http,
+                sec_find,
                 valid_label,
                 reason,
             ]

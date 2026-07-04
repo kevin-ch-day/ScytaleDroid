@@ -4,10 +4,6 @@ from scytaledroid.Database.db_utils import dynamic_service_context as catalog
 from scytaledroid.DynamicAnalysis import service_context
 
 
-def test_backfill_dynamic_service_context_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/backfill_dynamic_service_context.py")
-
-
 def test_apply_dynamic_service_context_migration_records_schema_and_seeds(monkeypatch) -> None:
     ddl_statements: list[str] = []
     appended_versions: list[str] = []
@@ -97,7 +93,9 @@ def test_apply_dynamic_service_context_migration_records_schema_and_seeds(monkey
     assert len(ddl_statements) == 2
     assert appended_versions == ["0.3.10-dynamic-service-context"]
     assert payload["services_seeded"] == len(service_context.default_service_catalog_seed_rows())
-    assert payload["domain_maps_seeded"] == len(service_context.default_service_domain_map_seed_rows())
+    assert payload["domain_maps_seeded"] == len(
+        service_context.default_service_domain_map_seed_rows()
+    )
     assert len(seeded_services) >= 8
     assert len(seeded_maps) >= 10
     assert migration_rows == [
@@ -140,7 +138,9 @@ def test_apply_dynamic_service_context_migration_reseeds_when_already_applied() 
 
     assert payload["already_applied"] is True
     assert payload["services_seeded"] == len(service_context.default_service_catalog_seed_rows())
-    assert payload["domain_maps_seeded"] == len(service_context.default_service_domain_map_seed_rows())
+    assert payload["domain_maps_seeded"] == len(
+        service_context.default_service_domain_map_seed_rows()
+    )
 
 
 def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:

@@ -27,14 +27,19 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import (
     resolve_script_template as _resolve_script_template_for_package,
 )
+from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
+    baseline_idle_behavior_lines as _guidance_baseline_idle_behavior_lines,
+    baseline_idle_checkpoint_messages as _guidance_baseline_idle_checkpoint_messages,
+    baseline_idle_quota_warning as _guidance_baseline_idle_quota_warning,
+)
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
-    countdown_action_prompt_line as _timing_countdown_action_prompt_line,
+    clear_prompt_and_previous_line as _timing_clear_prompt_and_previous_line,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     clear_status_line as _timing_clear_status_line,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
-    clear_prompt_and_previous_line as _timing_clear_prompt_and_previous_line,
+    countdown_action_prompt_line as _timing_countdown_action_prompt_line,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     format_duration as _timing_format_duration,
@@ -600,6 +605,12 @@ class ManualScenarioRunner:
                 block.append("  - Keep the app in the foreground")
                 block.append("  - Use the app normally")
             print(status_messages.status("\n".join(block).rstrip(), level="info"))
+            baseline_warning = _baseline_idle_quota_warning(
+                getattr(run_ctx, "package_name", "") or "",
+                profile=profile,
+            )
+            if baseline_warning:
+                print(status_messages.status(baseline_warning, level="warn"))
             if run_ctx.scenario_hint:
                 print(status_messages.status(run_ctx.scenario_hint, level="info"))
             _maybe_show_raw_high_value_permissions(run_ctx)
@@ -761,46 +772,36 @@ def _read_device_foreground_package(device_serial: str | None) -> str | None:
     return None
 
 
+def _social_feed_baseline_target_label() -> str:
+    return _format_duration_precise(_effective_recommended_sampling_seconds())
+
+
 def _baseline_idle_behavior_lines(package_name: str) -> list[str]:
-    pkg = str(package_name or "").strip()
-    category = str(category_for_package(pkg) or "").strip().lower()
-    if category == "news_reader":
-        return [
-            "  - Get the app into a calm foreground surface before the timer starts",
-            "  - Prefer a stable article or section over a live home/feed surface when possible",
-            "  - Avoid autoplay video, podcasts/audio, search, sign-in, and support/paywall flows",
-            "  - Best-effort idle after setup; interact only if needed (e.g., prevent screen lock)",
-        ]
-    return [
-        "  - Get the app running, then leave it in the foreground",
-        "  - Best-effort idle; interact only if needed (e.g., prevent screen lock)",
-    ]
+    return _guidance_baseline_idle_behavior_lines(
+        package_name,
+        target_label=_social_feed_baseline_target_label(),
+    )
+
+
+def _baseline_idle_quota_warning(package_name: str, *, profile: str | None) -> str | None:
+    return _guidance_baseline_idle_quota_warning(package_name, profile=profile)
 
 
 def _baseline_idle_checkpoint_messages(package_name: str) -> dict[int, str]:
-    pkg = str(package_name or "").strip() or "the target app"
-    category = str(category_for_package(pkg) or "").strip().lower()
-    if category == "news_reader":
-        return {
-            60: (
-                f"60s checkpoint: if {pkg} is still on a live home/feed surface, "
-                "move once to a calm article or section, then go idle again."
-            ),
-            120: (
-                f"120s checkpoint: keep {pkg} in the foreground; avoid autoplay video, "
-                "podcasts/audio, search, sign-in, and support/paywall flows."
-            ),
-        }
-    return {
-        60: (
-            f"60s checkpoint: keep {pkg} in the foreground; "
-            "nudge only if needed to prevent screen lock."
-        ),
-        120: (
-            f"120s checkpoint: keep {pkg} in the foreground; "
-            "nudge only if needed to prevent screen lock."
-        ),
-    }
+    return _guidance_baseline_idle_checkpoint_messages(package_name)
+
+
+def _extra_hold_timer_message(
+    *,
+    target_duration_s: int,
+    elapsed_s: int,
+    timer_detail: str = "",
+    suffix: str = "",
+) -> str:
+    target = _format_duration(int(target_duration_s))
+    hold_elapsed = _format_duration(max(int(elapsed_s) - int(target_duration_s), 0))
+    detail = f" | {timer_detail}" if str(timer_detail or "").strip() else ""
+    return f"Target reached: {target} | extra hold: +{hold_elapsed} | press Enter to finalize{detail}{suffix}"
 
 
 def _run_baseline_interactive_loop(
@@ -862,8 +863,12 @@ def _run_baseline_interactive_loop(
             if remaining > 0:
                 timer_msg = f"Elapsed: {elapsed_fmt} / {total}{detail}{suffix}"
             else:
-                hold_elapsed_fmt = _format_duration(max(elapsed_i - int(target_duration_s), 0))
-                timer_msg = f"Hold after target: {hold_elapsed_fmt} / {total}{detail}{suffix}"
+                timer_msg = _extra_hold_timer_message(
+                    target_duration_s=int(target_duration_s),
+                    elapsed_s=elapsed_i,
+                    timer_detail=timer_detail,
+                    suffix=suffix,
+                )
 
             if on_elapsed is not None:
                 on_elapsed(elapsed_i, lambda message, level="info": _emit_status_and_restore_timer(message, level=level))
@@ -913,8 +918,13 @@ def _run_baseline_interactive_loop(
                 last_render_bucket = render_bucket
 
             if remaining <= 0 and not target_reached_announced:
+                target_message = (
+                    "Target reached; finalizing capture."
+                    if not continue_after_target
+                    else "Target reached. Keep collecting if needed; press Enter when finished."
+                )
                 _emit_status_and_restore_timer(
-                    "Target reached. Keep collecting if needed; press Enter when finished.",
+                    target_message,
                     level="info",
                 )
                 target_reached_announced = True
@@ -998,8 +1008,11 @@ def _run_countdown(
             if remaining > 0:
                 message = f"\rElapsed time: {elapsed_fmt} (target {total}){suffix}".ljust(line_width)
             else:
-                hold_elapsed_fmt = _format_duration(max(elapsed_i - int(duration_seconds), 0))
-                message = f"\rHold after target: {hold_elapsed_fmt} (target {total} reached){suffix}".ljust(line_width)
+                message = ("\r" + _extra_hold_timer_message(
+                    target_duration_s=int(duration_seconds),
+                    elapsed_s=elapsed_i,
+                    suffix=suffix,
+                )).ljust(line_width)
             if message != last_rendered:
                 sys.stdout.write(message)
                 sys.stdout.flush()
@@ -1587,7 +1600,11 @@ def _run_scripted_protocol(
                     guided_remaining_s=guided_remaining_s,
                     on_phase_marker=(
                         (
-                            lambda marker, _idx=idx, _step_id=step_id: on_protocol_event(
+                            lambda marker,
+                            _idx=idx,
+                            _step_id=step_id,
+                            _article_branch=article_branch,
+                            _subscription_choice=subscription_choice: on_protocol_event(
                                 "PHASE_MARKER",
                                 {
                                     "step_id": _step_id,
@@ -1598,8 +1615,8 @@ def _run_scripted_protocol(
                                         facebook_mode=facebook_mode,
                                         step_outcome="completed",
                                         repeat_plan=facebook_repeat_plan,
-                                        article_branch=article_branch,
-                                        subscription_choice=subscription_choice,
+                                        article_branch=_article_branch,
+                                        subscription_choice=_subscription_choice,
                                     ),
                                     **marker,
                                 },

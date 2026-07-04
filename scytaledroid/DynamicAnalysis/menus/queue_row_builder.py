@@ -8,6 +8,33 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
 
 
+def _call_progress_label(
+    label_fn,
+    count: int,
+    required: int,
+    *,
+    extra_count: int,
+    low_signal: int,
+    non_idle: int,
+    need: int | None = None,
+) -> str:
+    kwargs = {
+        "extra_count": int(extra_count),
+        "low_signal": int(low_signal),
+        "non_idle": int(non_idle),
+    }
+    if need is not None:
+        kwargs["need"] = int(need)
+    try:
+        return label_fn(count, required, **kwargs)
+    except TypeError as exc:
+        if "non_idle" not in str(exc):
+            raise
+        kwargs.pop("non_idle", None)
+        kwargs["extra_count"] = int(extra_count) + int(non_idle)
+        return label_fn(count, required, **kwargs)
+
+
 def build_package_selection_row(
     *,
     prepared_row_cls,
@@ -52,6 +79,7 @@ def build_package_selection_row(
     build_state = "—"
     baseline_countable = 0
     baseline_extra = 0
+    baseline_not_idle_supplemental = 0
     baseline_low_signal_supplemental = 0
     interactive_countable = 0
     interactive_extra = 0
@@ -79,12 +107,14 @@ def build_package_selection_row(
         scoped = build_scoped_dataset_counts_fn(package, runs if isinstance(runs, list) else [], cfg=cfg)
         base_countable = int(scoped["baseline_countable"])
         base_extra = int(scoped["baseline_extra"])
+        base_not_idle = int(scoped.get("baseline_not_idle_supplemental") or 0)
         base_low_signal = int(scoped.get("baseline_low_signal_supplemental") or 0)
         inter_countable = int(scoped["interactive_countable"])
         inter_extra = int(scoped["interactive_extra"])
         inter_low_signal = int(scoped.get("interactive_low_signal_supplemental") or 0)
         baseline_countable = base_countable
         baseline_extra = base_extra
+        baseline_not_idle_supplemental = base_not_idle
         baseline_low_signal_supplemental = base_low_signal
         interactive_countable = inter_countable
         interactive_extra = inter_extra
@@ -106,19 +136,23 @@ def build_package_selection_row(
         need_interactive = need_inter
         baseline_complete = base_countable >= int(cfg.baseline_required)
 
-        base_label = bucket_progress_label_fn(
+        base_label = _call_progress_label(
+            bucket_progress_label_fn,
             base_countable,
             int(cfg.baseline_required),
             extra_count=base_extra,
             low_signal=base_low_signal,
+            non_idle=base_not_idle,
             need=need_base,
         )
         inter_label = (
-            bucket_progress_label_fn(
+            _call_progress_label(
+                bucket_progress_label_fn,
                 inter_countable,
                 int(cfg.interactive_required),
                 extra_count=inter_extra,
                 low_signal=inter_low_signal,
+                non_idle=0,
                 need=need_inter,
             )
             if baseline_complete
@@ -137,11 +171,14 @@ def build_package_selection_row(
         else:
             need_label = "0"
         total_required = int(cfg.baseline_required) + int(cfg.interactive_required)
-        total_label = quota_progress_label_fn(
+        total_label = _call_progress_label(
+            quota_progress_label_fn,
             base_countable + inter_countable,
             total_required,
             extra_count=base_extra + inter_extra,
             low_signal=base_low_signal + inter_low_signal,
+            non_idle=base_not_idle,
+            need=None,
         )
         legacy_label = str(legacy_valid) if legacy_valid > 0 else "0"
         build_label = static_build_label_fn(active_runs, legacy_valid)
@@ -264,6 +301,7 @@ def build_package_selection_row(
         display_name=display,
         baseline_countable=baseline_countable,
         baseline_extra=baseline_extra,
+        baseline_not_idle_supplemental=baseline_not_idle_supplemental,
         baseline_low_signal_supplemental=baseline_low_signal_supplemental,
         interactive_countable=interactive_countable,
         interactive_extra=interactive_extra,

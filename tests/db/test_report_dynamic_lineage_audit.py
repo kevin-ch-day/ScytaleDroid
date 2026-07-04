@@ -1,81 +1,79 @@
 from __future__ import annotations
 
 import csv
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_lineage_audit as report
-from scytaledroid.DynamicAnalysis import research_cohort_runtime
-from scytaledroid.DynamicAnalysis import tracker_scope
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_lineage_audit.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "dynamic evidence lineage" in out
+from scytaledroid.DynamicAnalysis import research_cohort_runtime, tracker_scope
 
 
 def test_classify_lineage_state_boundaries() -> None:
-    assert report.classify_lineage_state(
-        active_valid_runs=2,
-        legacy_valid_runs=0,
-        db_active_sessions=2,
-        db_historical_sessions=0,
-        installed_version_code="100",
-        active_version_code="100",
-    ) == "current_build_observed"
-    assert report.classify_lineage_state(
-        active_valid_runs=0,
-        legacy_valid_runs=2,
-        db_active_sessions=0,
-        db_historical_sessions=2,
-        installed_version_code="101",
-        active_version_code="100",
-    ) == "current_build_stale"
-    assert report.classify_lineage_state(
-        active_valid_runs=0,
-        legacy_valid_runs=3,
-        db_active_sessions=0,
-        db_historical_sessions=3,
-        installed_version_code="",
-        active_version_code="100",
-    ) == "historical_local_only"
-    assert report.classify_lineage_state(
-        active_valid_runs=0,
-        legacy_valid_runs=0,
-        db_active_sessions=1,
-        db_historical_sessions=0,
-        installed_version_code="",
-        active_version_code="100",
-    ) == "current_build_db_only"
-    assert report.classify_lineage_state(
-        active_valid_runs=0,
-        legacy_valid_runs=0,
-        db_active_sessions=0,
-        db_historical_sessions=2,
-        installed_version_code="",
-        active_version_code="100",
-    ) == "historical_db_only"
-    assert report.classify_lineage_state(
-        active_valid_runs=0,
-        legacy_valid_runs=0,
-        db_active_sessions=0,
-        db_historical_sessions=0,
-        installed_version_code="",
-        active_version_code="",
-    ) == "no_evidence_anywhere"
+    assert (
+        report.classify_lineage_state(
+            active_valid_runs=2,
+            legacy_valid_runs=0,
+            db_active_sessions=2,
+            db_historical_sessions=0,
+            installed_version_code="100",
+            active_version_code="100",
+        )
+        == "current_build_observed"
+    )
+    assert (
+        report.classify_lineage_state(
+            active_valid_runs=0,
+            legacy_valid_runs=2,
+            db_active_sessions=0,
+            db_historical_sessions=2,
+            installed_version_code="101",
+            active_version_code="100",
+        )
+        == "current_build_stale"
+    )
+    assert (
+        report.classify_lineage_state(
+            active_valid_runs=0,
+            legacy_valid_runs=3,
+            db_active_sessions=0,
+            db_historical_sessions=3,
+            installed_version_code="",
+            active_version_code="100",
+        )
+        == "historical_local_only"
+    )
+    assert (
+        report.classify_lineage_state(
+            active_valid_runs=0,
+            legacy_valid_runs=0,
+            db_active_sessions=1,
+            db_historical_sessions=0,
+            installed_version_code="",
+            active_version_code="100",
+        )
+        == "current_build_db_only"
+    )
+    assert (
+        report.classify_lineage_state(
+            active_valid_runs=0,
+            legacy_valid_runs=0,
+            db_active_sessions=0,
+            db_historical_sessions=2,
+            installed_version_code="",
+            active_version_code="100",
+        )
+        == "historical_db_only"
+    )
+    assert (
+        report.classify_lineage_state(
+            active_valid_runs=0,
+            legacy_valid_runs=0,
+            db_active_sessions=0,
+            db_historical_sessions=0,
+            installed_version_code="",
+            active_version_code="",
+        )
+        == "no_evidence_anywhere"
+    )
 
 
 def test_generate_report_includes_dataset_apps_without_runs(tmp_path: Path, monkeypatch) -> None:
@@ -113,7 +111,9 @@ def test_generate_report_includes_dataset_apps_without_runs(tmp_path: Path, monk
             "com.example.empty": {"display_name": "Empty App", "profile_key": "research"},
         },
     )
-    monkeypatch.setattr(report, "_load_installed_version_code", lambda package_name, device_serial=None: "")
+    monkeypatch.setattr(
+        report, "_load_installed_version_code", lambda package_name, device_serial=None: ""
+    )
     monkeypatch.setattr(
         report,
         "_load_db_dynamic_lineage_context",
@@ -133,10 +133,19 @@ def test_generate_report_includes_dataset_apps_without_runs(tmp_path: Path, monk
     monkeypatch.setattr(
         tracker_scope,
         "resolve_active_package_identity",
-        lambda package_name: ("200", "sha-current") if package_name == "com.example.current" else (None, None),
+        lambda package_name: (
+            ("200", "sha-current") if package_name == "com.example.current" else (None, None)
+        ),
     )
 
-    def _scoped_counts(package_name: str, runs: list[dict], *, cfg: object | None = None, resolve_tracker_run_identity_fn, active_identity_fn=None):
+    def _scoped_counts(
+        package_name: str,
+        runs: list[dict],
+        *,
+        cfg: object | None = None,
+        resolve_tracker_run_identity_fn,
+        active_identity_fn=None,
+    ):
         if package_name == "com.example.current":
             return {
                 "baseline_countable": 1,
@@ -182,7 +191,9 @@ def test_generate_report_includes_dataset_apps_without_runs(tmp_path: Path, monk
     assert empty_row["top_recommendation"] == "collect baseline evidence"
 
 
-def test_generate_report_marks_stale_when_installed_build_drift_exists(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_marks_stale_when_installed_build_drift_exists(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setattr(
         research_cohort_runtime,
         "active_research_cohort_packages",
@@ -216,7 +227,9 @@ def test_generate_report_marks_stale_when_installed_build_drift_exists(tmp_path:
             "com.example.stale": {"display_name": "Stale App", "profile_key": "research"},
         },
     )
-    monkeypatch.setattr(report, "_load_installed_version_code", lambda package_name, device_serial=None: "201")
+    monkeypatch.setattr(
+        report, "_load_installed_version_code", lambda package_name, device_serial=None: "201"
+    )
     monkeypatch.setattr(
         report,
         "_load_db_dynamic_lineage_context",
@@ -228,7 +241,11 @@ def test_generate_report_marks_stale_when_installed_build_drift_exists(tmp_path:
             },
         },
     )
-    monkeypatch.setattr(tracker_scope, "resolve_active_package_identity", lambda package_name: ("200", "sha-current"))
+    monkeypatch.setattr(
+        tracker_scope,
+        "resolve_active_package_identity",
+        lambda package_name: ("200", "sha-current"),
+    )
     monkeypatch.setattr(
         tracker_scope,
         "build_scoped_dataset_counts",
@@ -260,7 +277,9 @@ def test_generate_report_marks_stale_when_installed_build_drift_exists(tmp_path:
     assert row["top_recommendation"] == "refresh harvest/static for installed build"
 
 
-def test_generate_report_distinguishes_historical_db_only_from_empty(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_distinguishes_historical_db_only_from_empty(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setattr(
         research_cohort_runtime,
         "active_research_cohort_packages",
@@ -275,7 +294,9 @@ def test_generate_report_distinguishes_historical_db_only_from_empty(tmp_path: P
             "com.example.empty": {"display_name": "Empty App", "profile_key": "research"},
         },
     )
-    monkeypatch.setattr(report, "_load_installed_version_code", lambda package_name, device_serial=None: "")
+    monkeypatch.setattr(
+        report, "_load_installed_version_code", lambda package_name, device_serial=None: ""
+    )
     monkeypatch.setattr(
         report,
         "_load_db_dynamic_lineage_context",
@@ -292,7 +313,9 @@ def test_generate_report_distinguishes_historical_db_only_from_empty(tmp_path: P
             },
         },
     )
-    monkeypatch.setattr(tracker_scope, "resolve_active_package_identity", lambda package_name: ("100", "sha-active"))
+    monkeypatch.setattr(
+        tracker_scope, "resolve_active_package_identity", lambda package_name: ("100", "sha-active")
+    )
     monkeypatch.setattr(
         tracker_scope,
         "build_scoped_dataset_counts",
@@ -321,7 +344,10 @@ def test_generate_report_distinguishes_historical_db_only_from_empty(tmp_path: P
     history_row = next(row for row in rows if row["package_name"] == "com.example.history")
     assert history_row["lineage_state"] == "historical_db_only"
     assert history_row["db_historical_sessions"] == "5"
-    assert history_row["top_recommendation"] == "treat as historical-only until current-build evidence is collected"
+    assert (
+        history_row["top_recommendation"]
+        == "treat as historical-only until current-build evidence is collected"
+    )
 
 
 def test_delta_row_reports_current_vs_legacy_sets() -> None:

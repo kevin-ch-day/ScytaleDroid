@@ -776,7 +776,6 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
         operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
         report = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
-        features = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
 
         package_name = _norm_text(target.get("package_name")).lower()
         session_row = sessions_by_run.get(run_id, {})

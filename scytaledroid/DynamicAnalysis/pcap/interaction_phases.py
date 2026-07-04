@@ -28,6 +28,7 @@ class PhasePacketRecord:
     protocols: str
     src_port: int | None = None
     dst_port: int | None = None
+    http_host: str | None = None
 
 
 def build_interaction_timeline_from_run_dir(
@@ -487,6 +488,8 @@ def phase_packet_transport_summary(
         tls_packet_count = 0
         quic_packet_count = 0
         dns_packet_count = 0
+        http_packet_count = 0
+        http_hosts: set[str] = set()
         uplink_packet_count = 0
         downlink_packet_count = 0
         unknown_direction_packet_count = 0
@@ -502,6 +505,11 @@ def phase_packet_transport_summary(
                 quic_packet_count += 1
             if "dns" in proto:
                 dns_packet_count += 1
+            if "http" in proto and "http2" not in proto:
+                http_packet_count += 1
+                host = str(pkt.http_host or "").strip().lower().rstrip(".")
+                if host:
+                    http_hosts.add(host)
             direction, _, _ = infer_direction_from_ports(src_port=pkt.src_port, dst_port=pkt.dst_port)
             if direction == "outbound":
                 uplink_packet_count += 1
@@ -528,6 +536,10 @@ def phase_packet_transport_summary(
                 "tls_packet_count": tls_packet_count,
                 "quic_packet_count": quic_packet_count,
                 "dns_packet_count": dns_packet_count,
+                "http_packet_count": http_packet_count,
+                "cleartext_surface_flag": int(http_packet_count > 0),
+                "http_host_count": len(http_hosts),
+                "http_hosts_sample": ";".join(sorted(http_hosts)[:3]),
                 "uplink_packet_count": uplink_packet_count,
                 "downlink_packet_count": downlink_packet_count,
                 "unknown_direction_packet_count": unknown_direction_packet_count,
@@ -561,6 +573,8 @@ def extract_phase_packet_timeline(pcap_path: Path) -> list[PhasePacketRecord]:
         "udp.srcport",
         "-e",
         "udp.dstport",
+        "-e",
+        "http.host",
     ]
     err = tempfile.TemporaryFile(mode="w+b")
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True)
@@ -569,8 +583,8 @@ def extract_phase_packet_timeline(pcap_path: Path) -> list[PhasePacketRecord]:
     rc: int | None = None
     err_tail: str = ""
     try:
-        for line in proc.stdout:
-            line = line.strip()
+        for raw_line in proc.stdout:
+            line = raw_line.strip()
             if not line:
                 continue
             parts = line.split(",")
@@ -587,6 +601,7 @@ def extract_phase_packet_timeline(pcap_path: Path) -> list[PhasePacketRecord]:
             tcp_dst = safe_port(parts[4] if len(parts) >= 5 else "")
             udp_src = safe_port(parts[5] if len(parts) >= 6 else "")
             udp_dst = safe_port(parts[6] if len(parts) >= 7 else "")
+            http_host = str(parts[7]).strip() if len(parts) >= 8 and str(parts[7]).strip() else None
             src_port = tcp_src if tcp_src is not None or tcp_dst is not None else udp_src
             dst_port = tcp_dst if tcp_src is not None or tcp_dst is not None else udp_dst
             rows.append(
@@ -596,6 +611,7 @@ def extract_phase_packet_timeline(pcap_path: Path) -> list[PhasePacketRecord]:
                     protocols=str(parts[2] or ""),
                     src_port=src_port,
                     dst_port=dst_port,
+                    http_host=http_host,
                 )
             )
     finally:

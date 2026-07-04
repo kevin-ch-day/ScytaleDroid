@@ -34,11 +34,31 @@ def test_collect_dynamic_dangling_report_classifies_rows(tmp_path: Path) -> None
         del sql, params, fetch, dictionary
         if query_name == "artifact_registry_dynamic_dangling.schema_inventory":
             return [
-                {"table_name": "dynamic_sessions", "column_name": "dynamic_run_id", "column_type": "char(36)"},
-                {"table_name": "dynamic_sessions", "column_name": "evidence_path", "column_type": "text"},
-                {"table_name": "analysis_cohort_runs", "column_name": "dynamic_run_id", "column_type": "char(36)"},
-                {"table_name": "analysis_cohort_runs", "column_name": "static_run_id", "column_type": "bigint(20)"},
-                {"table_name": "ml_feature_windows", "column_name": "run_id", "column_type": "varchar(64)"},
+                {
+                    "table_name": "dynamic_sessions",
+                    "column_name": "dynamic_run_id",
+                    "column_type": "char(36)",
+                },
+                {
+                    "table_name": "dynamic_sessions",
+                    "column_name": "evidence_path",
+                    "column_type": "text",
+                },
+                {
+                    "table_name": "analysis_cohort_runs",
+                    "column_name": "dynamic_run_id",
+                    "column_type": "char(36)",
+                },
+                {
+                    "table_name": "analysis_cohort_runs",
+                    "column_name": "static_run_id",
+                    "column_type": "bigint(20)",
+                },
+                {
+                    "table_name": "ml_feature_windows",
+                    "column_name": "run_id",
+                    "column_type": "varchar(64)",
+                },
             ]
         if query_name == "artifact_registry_dynamic_dangling.dynamic_totals":
             return {"linked_dynamic_registry_rows": 10, "dangling_dynamic_registry_rows": 3}

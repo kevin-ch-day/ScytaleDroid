@@ -44,7 +44,9 @@ def test_write_csv_writes_header_for_empty_rows(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8").strip() == ",".join(report.HTTP_FIELDS)
 
 
-def test_iter_runs_uses_display_name_map_when_manifest_label_missing(tmp_path: Path, monkeypatch) -> None:
+def test_iter_runs_uses_display_name_map_when_manifest_label_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
     run_dir = tmp_path / "run-1"
     capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
     capture_dir.mkdir(parents=True)
@@ -68,14 +70,18 @@ def test_iter_runs_uses_display_name_map_when_manifest_label_missing(tmp_path: P
         encoding="utf-8",
     )
     monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path)
-    monkeypatch.setattr(report, "_display_name_map", lambda _packages: {"com.example.app": "Example App"})
+    monkeypatch.setattr(
+        report, "_display_name_map", lambda _packages: {"com.example.app": "Example App"}
+    )
 
     rows = list(report._iter_runs([], []))
 
     assert rows[0]["app_label"] == "Example App"
 
 
-def test_iter_runs_prefers_manifest_label_over_display_name_map(tmp_path: Path, monkeypatch) -> None:
+def test_iter_runs_prefers_manifest_label_over_display_name_map(
+    tmp_path: Path, monkeypatch
+) -> None:
     run_dir = tmp_path / "run-1"
     capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
     capture_dir.mkdir(parents=True)
@@ -99,7 +105,9 @@ def test_iter_runs_prefers_manifest_label_over_display_name_map(tmp_path: Path, 
         encoding="utf-8",
     )
     monkeypatch.setattr(report, "_dynamic_root", lambda: tmp_path)
-    monkeypatch.setattr(report, "_display_name_map", lambda _packages: {"com.example.app": "DB App"})
+    monkeypatch.setattr(
+        report, "_display_name_map", lambda _packages: {"com.example.app": "DB App"}
+    )
 
     rows = list(report._iter_runs([], []))
 
@@ -140,9 +148,27 @@ def test_app_rollup_summarizes_payload_visibility() -> None:
         },
     ]
     protocol_rows = [
-        {"run_id": "run-1", "package": "com.example", "protocol": "tls", "frames": 5, "visibility": "encrypted_or_opaque"},
-        {"run_id": "run-1", "package": "com.example", "protocol": "tls", "frames": 2, "visibility": "encrypted_or_opaque"},
-        {"run_id": "run-2", "package": "com.example", "protocol": "http", "frames": 1, "visibility": "cleartext_protocol_decoded"},
+        {
+            "run_id": "run-1",
+            "package": "com.example",
+            "protocol": "tls",
+            "frames": 5,
+            "visibility": "encrypted_or_opaque",
+        },
+        {
+            "run_id": "run-1",
+            "package": "com.example",
+            "protocol": "tls",
+            "frames": 2,
+            "visibility": "encrypted_or_opaque",
+        },
+        {
+            "run_id": "run-2",
+            "package": "com.example",
+            "protocol": "http",
+            "frames": 1,
+            "visibility": "cleartext_protocol_decoded",
+        },
     ]
 
     rows = report._app_rollup_rows(run_rows, protocol_rows)
@@ -167,6 +193,9 @@ def test_app_rollup_summarizes_payload_visibility() -> None:
             "plaintext_protocols_observed": "http",
             "decoded_cleartext_streams": 0,
             "top_protocols": "tls:5;http:1",
+            "static_cleartext_allowed_runs": 0,
+            "cleartext_mismatch_denied_observed_runs": 0,
+            "cleartext_mismatch_allowed_not_observed_runs": 0,
         }
     ]
 
@@ -231,8 +260,7 @@ def test_decoded_cleartext_rows_aggregates_transport_context(tmp_path: Path, mon
     def fake_run_cmd_timeout(_cmd, *, timeout):
         return (
             0,
-            "raw:ip:tcp:xmpp\t147\t38672\t5222\t\t\t0\n"
-            "raw:ip:tcp:xmpp\t81\t5222\t47004\t\t\t1\n",
+            "raw:ip:tcp:xmpp\t147\t38672\t5222\t\t\t0\nraw:ip:tcp:xmpp\t81\t5222\t47004\t\t\t1\n",
             "",
         )
 
@@ -275,3 +303,122 @@ def test_decoded_cleartext_rows_aggregates_transport_context(tmp_path: Path, mon
             "bytes_max": 81,
         },
     ]
+
+
+def test_run_payload_audit_prefers_cached_security_surface(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "run-1"
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    capture_dir.mkdir(parents=True)
+    pcap = capture_dir / "capture.pcap"
+    pcap.write_bytes(b"pcap")
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-1",
+                "target": {"package_name": "com.example.app", "display_name": "Example App"},
+                "operator": {"run_profile": "baseline_idle"},
+                "dataset": {"valid_dataset_run": True},
+                "artifacts": [
+                    {
+                        "type": "pcapdroid_capture",
+                        "relative_path": "artifacts/pcapdroid_capture/capture.pcap",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    analysis = run_dir / "analysis"
+    analysis.mkdir(parents=True)
+    (analysis / "security_surface.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "risk_flags": ["http_metadata_observed"],
+                "cleartext": {
+                    "visibility_class": "cleartext_surface_present",
+                    "http_status": "ok",
+                    "plaintext_protocol_frames": 2,
+                    "http_request_rows": 1,
+                    "http_response_rows": 0,
+                    "http_host_count": 1,
+                    "protocol_visibility": [
+                        {
+                            "protocol": "http",
+                            "frames": 2,
+                            "bytes": 100,
+                            "visibility": "cleartext_protocol_decoded",
+                        }
+                    ],
+                    "sanitized_http_samples": [
+                        {
+                            "host": "tracker.example",
+                            "method": "GET",
+                            "response_code": "",
+                            "sanitized_path": "/health",
+                            "path_class": "literal_path",
+                            "rows": 1,
+                        }
+                    ],
+                    "decoded_streams": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis / "pcap_report.json").write_text(
+        json.dumps({"capinfos": {"parsed": {"packet_count": 2, "capture_duration_s": 1.0}}}),
+        encoding="utf-8",
+    )
+    (run_dir / "inputs").mkdir(parents=True)
+    (run_dir / "inputs" / "static_dynamic_plan.json").write_text(
+        json.dumps(
+            {
+                "static_features": {"uses_cleartext_traffic": False},
+                "network_targets": {"cleartext_domains": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis / "static_dynamic_overlap.json").write_text(
+        json.dumps(
+            {
+                "cleartext_posture": {
+                    "mismatch_class": "denied_but_observed",
+                    "static_cleartext_allowed": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError(
+            "legacy tshark audit path should not run when security_surface.json is present"
+        )
+
+    monkeypatch.setattr(report, "_protocol_hierarchy", _fail_if_called)
+    monkeypatch.setattr(report, "_http_rows", _fail_if_called)
+
+    run = {
+        "run_id": "run-1",
+        "run_dir": run_dir,
+        "package": "com.example.app",
+        "app_label": "Example App",
+        "run_profile": "baseline_idle",
+        "valid_dataset_run": 1,
+        "pcap_path": pcap,
+    }
+    run_row, http_rows, protocol_rows, decoded_rows = report._run_payload_audit(
+        run,
+        timeout=5,
+        max_http_rows=100,
+    )
+
+    assert run_row["payload_visibility_class"] == "cleartext_surface_present"
+    assert run_row["http_host_count"] == 1
+    assert run_row["static_uses_cleartext_traffic"] == 0
+    assert run_row["cleartext_mismatch_class"] == "denied_but_observed"
+    assert http_rows[0]["host"] == "tracker.example"
+    assert protocol_rows[0]["protocol"] == "http"
+    assert decoded_rows == []

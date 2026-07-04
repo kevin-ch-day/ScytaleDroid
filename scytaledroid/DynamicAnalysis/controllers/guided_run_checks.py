@@ -9,7 +9,12 @@ import tempfile
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.adb import package_manager as adb_package_manager
+from scytaledroid.DynamicAnalysis.pcap.security_surface import (
+    compute_static_dynamic_cleartext_posture,
+    security_surface_summary_from_report,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages
+from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 
 def _read_json(path: Path) -> dict | None:
@@ -20,6 +25,109 @@ def _read_json(path: Path) -> dict | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _validation_status_style(status: str) -> str:
+    key = str(status or "").strip().upper()
+    if key == "OK":
+        return "success"
+    if key == "FAIL":
+        return "error"
+    if key == "WARN":
+        return "warning"
+    return "muted"
+
+
+def _render_validation_report(
+    *,
+    title: str,
+    rows: list[list[str]],
+    warnings: list[str],
+    hard_failures: list[str],
+    success_message: str,
+    failure_message: str,
+    verbose: bool,
+    compact_omit: set[str] | None = None,
+) -> bool:
+    print()
+    menu_utils.print_header(title)
+
+    compact_omit = compact_omit or set()
+    if verbose or warnings or hard_failures:
+        menu_utils.print_table(["Check", "Status", "Details"], rows)
+    else:
+        compact_items = []
+        for check, status, detail in rows:
+            if check in compact_omit:
+                continue
+            display_detail = detail
+            if check == "VPN state" and str(detail).strip().lower() == "not_vpn":
+                display_detail = "not_vpn (No VPN)"
+            compact_items.append(
+                summary_item(
+                    check,
+                    display_detail,
+                    value_style=_validation_status_style(status),
+                )
+            )
+        print_summary_card("Check Status", compact_items)
+
+    for msg in warnings:
+        print(status_messages.status(msg, level="warn"))
+    if hard_failures:
+        for msg in hard_failures:
+            print(status_messages.status(msg, level="error"))
+        print(status_messages.status(failure_message, level="error"))
+        return False
+    print(status_messages.status(success_message, level="success"))
+    return True
+
+
+def _render_post_run_valid_summary(
+    *,
+    pcap_size_int: int,
+    window_count: int | None,
+    capture_duration_s: object,
+    security_status: str,
+    security_detail: str,
+    posture: dict,
+    security: dict,
+) -> None:
+    duration_value = f"{capture_duration_s}s" if capture_duration_s not in (None, "", "n/a") else "n/a"
+    items = [
+        summary_item("Verdict", "VALID", value_style="success"),
+        summary_item("PCAP", f"{pcap_size_int} bytes", value_style="accent"),
+        summary_item(
+            "Windows",
+            str(window_count) if window_count is not None else "unavailable",
+            value_style="success" if window_count is not None else "warning",
+        ),
+        summary_item("Duration", duration_value, value_style="muted"),
+        summary_item("Security surface", security_status, value_style="accent" if security_status == "ok" else "muted"),
+    ]
+    print_summary_card("Run Outcome", items)
+    if security_status == "ok" and (
+        int(security.get("finding_count") or 0) > 0
+        or security.get("http_observed")
+        or (security.get("risk_flags") or [])
+    ):
+        print(status_messages.status(f"Security surface: {security_detail}", level="info"))
+    if posture.get("mismatch_class") == "denied_but_observed":
+        print(status_messages.status(f"Cleartext policy mismatch: {posture.get('mismatch_summary')}", level="warn"))
+    elif posture.get("mismatch_class") == "allowed_not_observed" and security.get("http_observed") is False:
+        print(status_messages.status(f"Cleartext coverage note: {posture.get('mismatch_summary')}", level="info"))
+
+
+def _cleartext_posture_from_run_dir(run_dir: Path, report: dict) -> dict:
+    overlap = _read_json(run_dir / "analysis" / "static_dynamic_overlap.json")
+    if isinstance(overlap, dict):
+        posture = overlap.get("cleartext_posture")
+        if isinstance(posture, dict):
+            return posture
+    plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json")
+    if isinstance(plan, dict):
+        return compute_static_dynamic_cleartext_posture(plan, report)
+    return {}
 
 
 def _infer_pcap_failure_detail(run_dir: Path, *, pcap_size_int: int) -> str | None:
@@ -333,7 +441,11 @@ def pre_run_scientific_checks(
         else:
             rows.append(["Signer identity", "OK", expected_signer[:12]])
     elif observed_signer:
-        rows.append(["Signer identity", "INFO", f"observed={observed_signer[:12]} (plan unavailable; drift check skipped)"])
+        if str(plan_identity.get("run_signature") or "").strip():
+            detail = "plan signer unavailable in comparable format; drift check skipped"
+        else:
+            detail = "plan signer unavailable; drift check skipped"
+        rows.append(["Signer identity", "INFO", f"observed={observed_signer[:12]} ({detail})"])
     else:
         rows.append(["Signer identity", "INFO", "plan and device signer unavailable"])
 
@@ -343,18 +455,15 @@ def pre_run_scientific_checks(
     else:
         rows.append(["Capture observer", "OK", "pcapdroid_capture"])
 
-    print()
-    menu_utils.print_header("Dynamic Environment Validation")
-    menu_utils.print_table(["Check", "Status", "Details"], rows)
-    for msg in warnings:
-        print(status_messages.status(msg, level="warn"))
-    if hard_failures:
-        for msg in hard_failures:
-            print(status_messages.status(msg, level="error"))
-        print(status_messages.status("Pre-run scientific checks failed. Run blocked in freeze/profile mode.", level="error"))
-        return False
-    print(status_messages.status("Status: READY", level="success"))
-    return True
+    return _render_validation_report(
+        title="Dynamic Environment Validation",
+        rows=rows,
+        warnings=warnings,
+        hard_failures=hard_failures,
+        success_message="Status: READY",
+        failure_message="Pre-run scientific checks failed. Run blocked in freeze/profile mode.",
+        verbose=True,
+    )
 
 
 def device_preflight_checks(
@@ -448,27 +557,16 @@ def device_preflight_checks(
         rows.append(["Clock drift", "OK", f"{clock_drift:.1f}s"])
 
     verbose = ui_level == "debug"
-    print()
-    menu_utils.print_header("Dynamic Environment Validation")
-    if verbose or warnings or hard_failures:
-        menu_utils.print_table(["Check", "Status", "Details"], rows)
-    else:
-        omit = {"Battery", "Free storage"}
-        for check, _status, detail in rows:
-            if check in omit:
-                continue
-            if check == "VPN state" and str(detail).strip().lower() == "not_vpn":
-                detail = "not_vpn (No VPN)"
-            print(f"{check}={detail}")
-    for msg in warnings:
-        print(status_messages.status(msg, level="warn"))
-    if hard_failures:
-        for msg in hard_failures:
-            print(status_messages.status(msg, level="error"))
-        print(status_messages.status("Environment checks failed. Resolve issues before selecting an app.", level="error"))
-        return False
-    print(status_messages.status("Status: READY", level="success"))
-    return True
+    return _render_validation_report(
+        title="Dynamic Environment Validation",
+        rows=rows,
+        warnings=warnings,
+        hard_failures=hard_failures,
+        success_message="Status: READY",
+        failure_message="Environment checks failed. Resolve issues before selecting an app.",
+        verbose=verbose,
+        compact_omit={"Battery", "Free storage"},
+    )
 
 
 def post_run_integrity_check(
@@ -573,6 +671,20 @@ def post_run_integrity_check(
         pcap_size_int = 0
     pcap_size_ok = pcap_size_int >= int(min_pcap_bytes)
     window_count_ok = window_count is not None and int(window_count) >= int(min_windows)
+    security = security_surface_summary_from_report(report if isinstance(report, dict) else {})
+    security_status = str(security.get("status") or "missing")
+    if security_status == "ok":
+        security_row_status = "OK"
+    elif security_status in {"failed", "skipped"}:
+        security_row_status = "WARN"
+    else:
+        security_row_status = "INFO"
+    security_flags = security.get("risk_flags") or []
+    security_detail = (
+        f"status={security_status}, findings={security.get('finding_count')}, "
+        f"visibility={security.get('visibility_class') or 'unknown'}, "
+        f"flags={', '.join(security_flags[:3]) if security_flags else 'none'}"
+    )
     verdict = (
         "VALID"
         if (dataset_valid is True and pcap_size_ok and capinfos_ok and tshark_ok and features_ok and window_count_ok)
@@ -584,13 +696,23 @@ def post_run_integrity_check(
         ["tshark parse", "OK" if tshark_ok else "FAIL", f"report_status={report.get('report_status') if isinstance(report, dict) else 'missing'}"],
         ["Feature extraction", "OK" if features_ok else "FAIL", features_detail],
         ["Window count", "OK" if window_count_ok else "FAIL", (f"{window_count} (min {min_windows})" if window_count is not None else f"unavailable (min {min_windows})")],
+        ["Security surface", security_row_status, security_detail],
         ["Run verdict", "OK" if verdict == "VALID" else "FAIL", verdict],
     ]
     print()
     menu_utils.print_header("Post-Run Integrity")
     verbose = ui_level == "debug"
     if verdict == "VALID" and not verbose:
-        print(status_messages.status(f"VALID (pcap={pcap_size_int}B, windows={window_count}, dur={parsed.get('capture_duration_s') if isinstance(parsed, dict) else 'n/a'}s)", level="success"))
+        posture = _cleartext_posture_from_run_dir(run_dir, report if isinstance(report, dict) else {})
+        _render_post_run_valid_summary(
+            pcap_size_int=pcap_size_int,
+            window_count=window_count,
+            capture_duration_s=(parsed.get("capture_duration_s") if isinstance(parsed, dict) else "n/a"),
+            security_status=security_status,
+            security_detail=security_detail,
+            posture=posture,
+            security=security,
+        )
     else:
         menu_utils.print_table(["Check", "Status", "Details"], rows)
     if verdict != "VALID":

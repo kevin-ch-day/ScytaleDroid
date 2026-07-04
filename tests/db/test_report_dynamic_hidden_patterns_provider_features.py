@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from scripts.db import report_dynamic_hidden_patterns as report
 from scytaledroid.Database.db_core import db_queries as core_q
 
-from scripts.db import report_dynamic_hidden_patterns as report
 
-
-def test_load_provider_features_uses_fileprovider_authorities_when_acl_rows_absent(monkeypatch) -> None:
+def test_load_provider_features_uses_fileprovider_authorities_when_acl_rows_absent(
+    monkeypatch,
+) -> None:
     package = "com.example.alpha"
 
     def _fake_run_sql(sql, params=None, **kwargs):

@@ -39,16 +39,20 @@ def workbench_ml_pool_phrase(*, extra_valid: int, low_signal_retained: int) -> s
     return f"ML training pool: {total} supplemental baseline(s) on file"
 
 
-def queue_compact_legend(*, has_next_marker: bool) -> str:
-    parts = [
-        "QA: valid / invalid / valid+id / valid+L",
-        "Gap: quota shortfall (3B 2I)",
-        "ML: supplemental baseline count for training",
-        "Baseline suffixes: extra / low / non-idle; non-idle = valid baseline retained outside quota because traffic exceeded idle-baseline limits, often from app-driven feed/media refresh",
+def queue_compact_legend_lines(*, has_next_marker: bool) -> list[str]:
+    lines = [
+        "QA: valid / invalid / valid+id (identity mismatch) / valid+L (legacy also exists)",
+        "Build: current / mixed / legacy / drift / db-hist",
+        "Idle Base: quota-counted idle baselines (3 target) · Non-idle: valid retained baselines outside quota, often from app-driven feed/media refresh",
+        "Interactive: valid interactive runs shown against target; 'held' means baseline is not complete yet, and retained extras still stay visible in the total · ML: supplemental baseline count for training",
     ]
     if has_next_marker:
-        parts.insert(0, "> marks recommended next app")
-    return " · ".join(parts)
+        lines.insert(0, "> marks recommended next app")
+    return lines
+
+
+def queue_compact_legend(*, has_next_marker: bool) -> str:
+    return " · ".join(queue_compact_legend_lines(has_next_marker=has_next_marker))
 
 
 def queue_selection_shortcut_hint() -> str:
@@ -62,6 +66,7 @@ def queue_selection_shortcuts_hint() -> str:
 __all__ = [
     "operator_next_action_label",
     "queue_compact_legend",
+    "queue_compact_legend_lines",
     "queue_selection_shortcut_hint",
     "queue_selection_shortcuts_hint",
     "queue_table_ml_pool_label",

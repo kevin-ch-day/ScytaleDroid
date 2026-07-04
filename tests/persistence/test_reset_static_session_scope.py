@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 
 from scytaledroid.Database.db_utils import reset_static as reset_mod
@@ -9,16 +8,18 @@ from scytaledroid.Database.db_utils.reset_static import (
     classify_static_session_type,
     list_failed_static_session_candidates,
     list_static_session_candidates,
-    purge_static_session_artifacts,
     prune_completed_static_sessions,
     prune_failed_static_sessions,
     prune_static_sessions,
+    purge_static_session_artifacts,
     reset_static_analysis_data,
 )
 
 
 def test_reset_static_session_scoped_requires_session_label():
-    outcome = reset_static_analysis_data(include_harvest=False, truncate_all=False, session_label=None)
+    outcome = reset_static_analysis_data(
+        include_harvest=False, truncate_all=False, session_label=None
+    )
     assert outcome.failed
     assert "session_label required" in outcome.failed[0][1]
 
@@ -77,7 +78,9 @@ def test_reset_static_session_scoped_unlinks_dynamic_sessions_before_static_dele
             return None
 
         def execute(self, sql, params=None, *_args, **_kwargs):
-            executed.append((" ".join(str(sql).split()), tuple(params) if params is not None else None))
+            executed.append(
+                (" ".join(str(sql).split()), tuple(params) if params is not None else None)
+            )
             return None
 
     @contextmanager
@@ -109,7 +112,9 @@ def test_reset_static_session_scoped_unlinks_dynamic_sessions_before_static_dele
     ) in executed
 
 
-def test_purge_static_session_artifacts_removes_session_archive_and_audits(monkeypatch, tmp_path: Path):
+def test_purge_static_session_artifacts_removes_session_archive_and_audits(
+    monkeypatch, tmp_path: Path
+):
     monkeypatch.setattr(reset_mod.app_config, "DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(reset_mod.app_config, "OUTPUT_DIR", str(tmp_path / "output"))
 
@@ -153,7 +158,9 @@ def test_purge_static_session_artifacts_removes_session_archive_and_audits(monke
     assert any("sess-1_reconcile_audit.json" in path for path in outcome.removed)
 
 
-def test_purge_static_session_artifacts_uses_provided_static_run_ids_after_db_delete(monkeypatch, tmp_path: Path):
+def test_purge_static_session_artifacts_uses_provided_static_run_ids_after_db_delete(
+    monkeypatch, tmp_path: Path
+):
     monkeypatch.setattr(reset_mod.app_config, "DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(reset_mod.app_config, "OUTPUT_DIR", str(tmp_path / "output"))
 
@@ -221,7 +228,10 @@ def test_prune_static_sessions_passes_deleted_static_ids_to_artifact_purge(monke
 def test_classify_static_session_type_marks_hidden_defaults():
     assert classify_static_session_type("qa-risk-facebook-rerun-2") == ("qa", True)
     assert classify_static_session_type("interrupt-smoke-4") == ("qa", True)
-    assert classify_static_session_type("static-batch-v3-20260228T062654Z-com.facebook.katana") == ("qa", True)
+    assert classify_static_session_type("static-batch-v3-20260228T062654Z-com.facebook.katana") == (
+        "qa",
+        True,
+    )
     assert classify_static_session_type("masvs-facebook-fast-20260428") == ("fast", False)
     assert classify_static_session_type("20260429-all-full") == ("full", False)
 
@@ -262,7 +272,8 @@ def test_prune_static_sessions_calls_reset_and_artifact_purge(monkeypatch):
         reset_mod,
         "reset_static_analysis_data",
         lambda **kwargs: (
-            seen_reset.append(str(kwargs["session_label"])) or reset_mod.ResetOutcome([], ["static_analysis_runs"], [], [], [])
+            seen_reset.append(str(kwargs["session_label"]))
+            or reset_mod.ResetOutcome([], ["static_analysis_runs"], [], [], [])
         ),
     )
     monkeypatch.setattr(
@@ -316,12 +327,14 @@ def test_prune_failed_static_sessions(monkeypatch):
     monkeypatch.setattr(
         reset_mod,
         "prune_static_sessions",
-        lambda session_labels, purge_artifacts=True, include_harvest=False: reset_mod.SessionPruneOutcome(
-            removed_sessions=list(session_labels),
-            skipped_sessions=[],
-            failed_sessions=[],
-            removed_artifacts=[],
-            missing_artifacts=[],
+        lambda session_labels, purge_artifacts=True, include_harvest=False: (
+            reset_mod.SessionPruneOutcome(
+                removed_sessions=list(session_labels),
+                skipped_sessions=[],
+                failed_sessions=[],
+                removed_artifacts=[],
+                missing_artifacts=[],
+            )
         ),
     )
 
@@ -334,11 +347,21 @@ def test_prune_completed_static_sessions_keeps_latest_and_protected(monkeypatch)
         reset_mod,
         "list_static_session_candidates",
         lambda include_hidden_only=False, older_than=None: [
-            reset_mod.StaticSessionCandidate("20260429-all-full", "2026-04-29 08:28:44", 120, 120, "full", False),
-            reset_mod.StaticSessionCandidate("20260428-all-full", "2026-04-28 07:28:44", 120, 120, "full", False),
-            reset_mod.StaticSessionCandidate("20260427-all-full", "2026-04-27 06:28:44", 120, 120, "full", False),
-            reset_mod.StaticSessionCandidate("phase4a-closeout-smoke", "2026-04-26 05:28:44", 1, 1, "smoke", True),
-            reset_mod.StaticSessionCandidate("20260426-rda-full", "2026-04-26 04:28:44", 12, 12, "full", False),
+            reset_mod.StaticSessionCandidate(
+                "20260429-all-full", "2026-04-29 08:28:44", 120, 120, "full", False
+            ),
+            reset_mod.StaticSessionCandidate(
+                "20260428-all-full", "2026-04-28 07:28:44", 120, 120, "full", False
+            ),
+            reset_mod.StaticSessionCandidate(
+                "20260427-all-full", "2026-04-27 06:28:44", 120, 120, "full", False
+            ),
+            reset_mod.StaticSessionCandidate(
+                "phase4a-closeout-smoke", "2026-04-26 05:28:44", 1, 1, "smoke", True
+            ),
+            reset_mod.StaticSessionCandidate(
+                "20260426-rda-full", "2026-04-26 04:28:44", 12, 12, "full", False
+            ),
         ],
     )
     captured: dict[str, object] = {}

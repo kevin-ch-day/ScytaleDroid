@@ -17,9 +17,19 @@ def test_interaction_label_classifies_run_type() -> None:
 
 
 def test_window_scores_expected_only_for_profile_v3_scenarios() -> None:
-    assert subject._window_scores_expected_for_manifest({"scenario": {"id": "basic_usage"}}) is False
-    assert subject._window_scores_expected_for_manifest({"scenario": {"id": "paper3_profile_v3"}}) is True
-    assert subject._window_scores_expected_for_manifest({"scenario": {"id": "profile_v3_phase2_capture"}}) is True
+    assert (
+        subject._window_scores_expected_for_manifest({"scenario": {"id": "basic_usage"}}) is False
+    )
+    assert (
+        subject._window_scores_expected_for_manifest({"scenario": {"id": "paper3_profile_v3"}})
+        is True
+    )
+    assert (
+        subject._window_scores_expected_for_manifest(
+            {"scenario": {"id": "profile_v3_phase2_capture"}}
+        )
+        is True
+    )
 
 
 def test_evidence_governance_class_separates_countable_and_supplemental_modes() -> None:
@@ -118,13 +128,24 @@ def test_build_identity_key_prefers_version_code_then_sha_and_name() -> None:
     assert subject._build_identity_key(
         {"version_code": "312031000", "base_apk_sha256": "abc", "version_name": "12.3.1"}
     ) == (312031000, "abc", "12.3.1")
-    assert subject._build_identity_key({"version_code": None, "base_apk_sha256": "", "version_name": ""}) == (-1, "", "")
+    assert subject._build_identity_key(
+        {"version_code": None, "base_apk_sha256": "", "version_name": ""}
+    ) == (-1, "", "")
 
 
 def test_current_build_phase_status_uses_baseline_then_interactive_targets() -> None:
-    assert subject._current_build_phase_status(baseline_countable=0, interactive_countable=0) == ("BASELINE_NEEDED", "baseline")
-    assert subject._current_build_phase_status(baseline_countable=3, interactive_countable=0) == ("INTERACTIVE_NEEDED", "interactive")
-    assert subject._current_build_phase_status(baseline_countable=3, interactive_countable=4) == ("COMPLETE", "—")
+    assert subject._current_build_phase_status(baseline_countable=0, interactive_countable=0) == (
+        "BASELINE_NEEDED",
+        "baseline",
+    )
+    assert subject._current_build_phase_status(baseline_countable=3, interactive_countable=0) == (
+        "INTERACTIVE_NEEDED",
+        "interactive",
+    )
+    assert subject._current_build_phase_status(baseline_countable=3, interactive_countable=4) == (
+        "COMPLETE",
+        "—",
+    )
 
 
 def test_normalize_boolish_accepts_db_int_flags() -> None:
@@ -185,7 +206,10 @@ def test_draft_bullets_mentions_missing_rdi_when_unavailable() -> None:
     assert "possible DB index lag: 5" in bullets
     assert "PCAP_DEVICE_FILE_MISSING=1" in bullets
     assert "current evidence-backed runs still appear consistent with domain-index lag" in bullets
-    assert "Some runs that were expected to materialize per-run ML window scores are still missing those artifacts." in bullets
+    assert (
+        "Some runs that were expected to materialize per-run ML window scores are still missing those artifacts."
+        in bullets
+    )
     assert "Valid supplemental runs retained outside quota: 4." in bullets
     assert "Supplemental low-signal runs retained: 1." in bullets
     assert "Current-build valid runs in the local corpus: 18." in bullets
@@ -238,8 +262,14 @@ def test_draft_bullets_call_out_zero_index_lag_when_remaining_rows_are_invalid_p
         [{"mode": "idle", "valid_dataset_run": 1, "domain_observations_in_db": 1}],
         {"current_rdi_available": False},
     )
-    assert "No current evidence-backed runs are still classified as DB domain-index lag candidates." in bullets
-    assert "Remaining missing `dynamic_domain_observations` rows are invalid-PCAP exclusions, not indexing debt." in bullets
+    assert (
+        "No current evidence-backed runs are still classified as DB domain-index lag candidates."
+        in bullets
+    )
+    assert (
+        "Remaining missing `dynamic_domain_observations` rows are invalid-PCAP exclusions, not indexing debt."
+        in bullets
+    )
     assert "aligned for current valid evidence" in bullets
     assert "Current corpus is composed of `basic_usage` runs" in bullets
 
@@ -289,13 +319,25 @@ def test_draft_paragraphs_highlight_zero_index_lag_and_invalid_pcap_exclusions()
         ],
         {"current_rdi_available": False},
     )
-    assert "no remaining runs are currently classified as evidence-backed index-lag candidates" in paragraphs
+    assert (
+        "no remaining runs are currently classified as evidence-backed index-lag candidates"
+        in paragraphs
+    )
     assert "invalid-PCAP exclusions rather than indexing debt" in paragraphs
-    assert "prior paper anchor remains the only directly reportable X/Twitter RDI reference tonight" in paragraphs
-    assert "composed of `basic_usage` scenario runs rather than profile-v3 strict captures" in paragraphs
+    assert (
+        "prior paper anchor remains the only directly reportable X/Twitter RDI reference tonight"
+        in paragraphs
+    )
+    assert (
+        "composed of `basic_usage` scenario runs rather than profile-v3 strict captures"
+        in paragraphs
+    )
     assert "retains 5 valid supplemental runs" in paragraphs
     assert "20 valid runs align to the latest observed build per app" in paragraphs
-    assert "1 apps are complete, 3 still need baseline coverage, and 2 still need interactive coverage" in paragraphs
+    assert (
+        "1 apps are complete, 3 still need baseline coverage, and 2 still need interactive coverage"
+        in paragraphs
+    )
     assert "currently classified as quota-valid under the cohort protocol" in paragraphs
     assert "3-baseline / 4-interactive target" in paragraphs
     assert "9 of 15 cohort apps currently have local evidence" in paragraphs
@@ -366,4 +408,7 @@ def test_normalize_issues_csv_dedupes_codes() -> None:
             {"code": "protocol_empty_no_reason"},
         ]
     }
-    assert subject._normalize_issues_csv(verify_row) == "pcap_artifact_missing;protocol_empty_no_reason"
+    assert (
+        subject._normalize_issues_csv(verify_row)
+        == "pcap_artifact_missing;protocol_empty_no_reason"
+    )

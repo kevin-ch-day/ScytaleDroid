@@ -239,7 +239,7 @@ def _cli_scoped_counts(packages: tuple[str, ...]) -> dict[str, dict[str, int | s
             pkg,
             runs,
             cfg=cfg,
-            resolve_tracker_run_identity_fn=lambda package_name, run: _resolve(package_name, run),
+            resolve_tracker_run_identity_fn=_resolve,
         )
         out[pkg] = scoped
     return out

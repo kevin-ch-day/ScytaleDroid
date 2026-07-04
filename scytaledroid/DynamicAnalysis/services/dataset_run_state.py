@@ -142,6 +142,15 @@ def _counts_from_entry(entry: dict[str, object] | None) -> PackageRunCounts:
         )
     runs = entry.get("runs")
     total = len(runs) if isinstance(runs, list) else 0
+    baseline_not_idle = sum(
+        1
+        for row in runs
+        if isinstance(row, dict)
+        and row.get("valid_dataset_run") is True
+        and row.get("countable") is False
+        and str(row.get("run_profile") or "").strip().lower() == "baseline_idle"
+        and row.get("baseline_not_idle") is True
+    )
     return PackageRunCounts(
         total_runs=total,
         valid_runs=int(entry.get("valid_runs") or 0),
@@ -149,6 +158,7 @@ def _counts_from_entry(entry: dict[str, object] | None) -> PackageRunCounts:
         interactive_valid_runs=int(entry.get("interactive_valid_runs") or 0),
         quota_met=bool(entry.get("quota_met")),
         extra_valid_runs=int(entry.get("extra_valid_runs") or 0),
+        baseline_not_idle_valid=baseline_not_idle,
     )
 
 
@@ -437,11 +447,13 @@ def load_dataset_run_state(
         extra_valid_runs=(
             int(scoped_counts["baseline_extra"])
             + int(scoped_counts.get("baseline_low_signal_supplemental") or 0)
+            + int(scoped_counts.get("baseline_not_idle_supplemental") or 0)
             + int(scoped_counts["interactive_extra"])
             + int(scoped_counts.get("interactive_low_signal_supplemental") or 0)
         ),
         baseline_extra_valid=int(scoped_counts["baseline_extra"]),
         baseline_low_signal_valid=int(scoped_counts.get("baseline_low_signal_supplemental") or 0),
+        baseline_not_idle_valid=int(scoped_counts.get("baseline_not_idle_supplemental") or 0),
         interactive_extra_valid=int(scoped_counts["interactive_extra"]),
         interactive_low_signal_valid=int(scoped_counts.get("interactive_low_signal_supplemental") or 0),
     )
