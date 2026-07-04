@@ -20,6 +20,7 @@ from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party
 from .._androguard import APK
 from ..engine import aapt2_fallback
 from ..engine.strings import _analyse_strings_from_index
+from ..engine.strings_capture import _classify_resource_parse_state, _summarize_bounds_warnings
 from ..detectors.correlation.runtime_state import snapshot_runtime_stats
 from ..modules import build_string_index
 from ..modules.string_analysis.origins import is_code_origin, is_resource_origin
@@ -231,11 +232,32 @@ def _build_parser_provenance(metadata: Mapping[str, object]) -> dict[str, object
         label_source = "package_name_fallback"
 
     warning_count = 0
+    warning_summary: dict[str, object] = {}
     warnings = metadata.get("resource_bounds_warnings")
     if isinstance(warnings, Sequence) and not isinstance(warnings, (str, bytes)):
-        warning_count = sum(1 for line in warnings if str(line).strip())
+        warning_lines = [str(line).strip() for line in warnings if str(line).strip()]
+        warning_count = len(warning_lines)
+        if warning_lines:
+            warning_summary = _summarize_bounds_warnings(warning_lines)
+            parse_state = _classify_resource_parse_state(
+                warning_lines,
+                resource_string_count=_coerce_int(metadata.get("string_index_resource_strings")),
+                parse_error_resources=_coerce_bool(metadata.get("parse_error_resources")),
+                resource_fallback_used=fallback_used,
+            )
+        else:
+            parse_state = {
+                "parse_state": "none",
+                "parse_partial": False,
+                "reparse_candidate": False,
+            }
     else:
         warning_count = _coerce_int(fallback_payload.get("warning_count")) or 0
+        parse_state = {
+            "parse_state": "none",
+            "parse_partial": False,
+            "reparse_candidate": False,
+        }
 
     return {
         "manifest_source": str(metadata.get("manifest_source") or "androguard"),
@@ -246,6 +268,11 @@ def _build_parser_provenance(metadata: Mapping[str, object]) -> dict[str, object
         "resource_fallback_used": fallback_used,
         "resource_fallback_reason": fallback_reason,
         "resource_bounds_warning_count": warning_count,
+        "resource_bounds_warning_severity": str(warning_summary.get("severity") or "none"),
+        "resource_bounds_warning_kind": str(warning_summary.get("warning_kind") or "none"),
+        "resource_parse_state": str(parse_state.get("parse_state") or "none"),
+        "resource_parse_partial": bool(parse_state.get("parse_partial")),
+        "resource_reparse_candidate": bool(parse_state.get("reparse_candidate")),
         "label_source": label_source,
         "string_index_source": "androguard"
         if not str(metadata.get("string_index_error") or "").strip()

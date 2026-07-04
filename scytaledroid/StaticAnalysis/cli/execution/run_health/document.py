@@ -176,6 +176,8 @@ def build_run_health_document(
     detector_warnings_total = 0
     detector_failures_total = 0
     parse_fallback_total = 0
+    resource_parse_partial_total = 0
+    resource_reparse_candidate_total = 0
     findings_runtime_total = 0
     findings_persisted_total = 0
     findings_capped_total_sum = 0
@@ -199,6 +201,8 @@ def build_run_health_document(
 
         pf_est = int(rollup.get("parse_fallback_events_est", 0) or 0)
         parse_fallback_total += pf_est
+        resource_parse_partial_total += int(rollup.get("resource_parse_partial_artifacts", 0) or 0)
+        resource_reparse_candidate_total += int(rollup.get("resource_reparse_candidate_artifacts", 0) or 0)
 
         str_sig = string_summary_signals(
             getattr(app, "base_string_data", None),
@@ -423,6 +427,8 @@ def build_run_health_document(
             "detector_execution_errors": detector_errors_total,
             "detector_finding_failures": detector_failures_total,
             "parse_fallbacks": parse_fallback_total,
+            "resource_parse_partial_artifacts": resource_parse_partial_total,
+            "resource_reparse_candidate_artifacts": resource_reparse_candidate_total,
             "string_status": string_session_status,
             "db_persistence_status": db_persistence_status,
             "workflow_completion_status": workflow_completion_status,
@@ -448,6 +454,8 @@ def build_run_health_document(
             "detector_warnings_total_estimate": detector_warnings_total,
             "detector_failures_total_estimate": detector_failures_total,
             "parse_fallback_events_total_estimate": parse_fallback_total,
+            "resource_parse_partial_artifacts_total": resource_parse_partial_total,
+            "resource_reparse_candidate_artifacts_total": resource_reparse_candidate_total,
             "string_summary_warning_apps_estimate": string_warn_apps,
             "persist_attempted_this_run": persist_attempted,
             "findings_runtime_total": findings_runtime_total,

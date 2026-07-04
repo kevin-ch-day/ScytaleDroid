@@ -230,6 +230,8 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             (
                 "Counts           : "
                 f"parse_fallbacks={sr.get('parse_fallbacks')} "
+                f"resource_parse_partial={sr.get('resource_parse_partial_artifacts')} "
+                f"reparse_candidates={sr.get('resource_reparse_candidate_artifacts')} "
                 f"(pipeline_token={pipe})"
             ),
         ]

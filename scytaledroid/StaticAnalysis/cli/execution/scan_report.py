@@ -19,11 +19,14 @@ from ...core import (
     analyze_apk,
 )
 from ...core.findings import Badge, DetectorResult, SeverityLevel
+from ...engine.strings_capture import _summarize_bounds_warnings
 from ...modules import resolve_category
 from ...persistence import ReportStorageError, save_report
 from ..core.models import AppRunResult, ArtifactOutcome, RunParameters, ScopeSelection
 from .heartbeat_state import set_stage as _hb_set_stage
 from .run_health import merge_skipped_detectors, rollup_parse_fallback_signals
+
+type ResourceWarningLine = tuple[str, str]
 
 
 def _append_resource_warning(
@@ -31,7 +34,7 @@ def _append_resource_warning(
     report: StaticAnalysisReport,
     package_name: str,
     artifact_label: str,
-) -> list[str]:
+) -> list[ResourceWarningLine]:
     """Append resource-parser warnings and return user-facing inline warning lines."""
     metadata = report.metadata
 
@@ -64,27 +67,57 @@ def _append_resource_warning(
                 continue
 
     count_hint = f" counts={sorted(set(counts))}" if counts else ""
-    warnings.append(
-        "Resource table parser emitted bounds warnings "
-        f"(package={package_name}, artifact={artifact_label}{count_hint}). "
-        "String/resource results may be partial; re-run this APK if needed."
-    )
+    summary = _summarize_bounds_warnings(list(lines))
+    level = str(summary.get("render_level") or "warn")
+    resource_string_count = metadata.get("string_index_resource_strings")
+    parse_error_resources = bool(metadata.get("parse_error_resources"))
+    resource_fallback_used = bool(metadata.get("resource_fallback_used"))
+    if level == "info":
+        warnings.append(
+            "Resource table parser emitted a minor complex-entry bounds note "
+            f"(package={package_name}, artifact={artifact_label}{count_hint}). "
+            "String/resource coverage may be slightly incomplete; a re-run is usually unnecessary."
+        )
+        headline = "Resource table parser note (minor complex-entry warning)."
+        guidance = (
+            "String/resource coverage may be slightly incomplete; re-run only if this APK needs deep string/resource review."
+        )
+    else:
+        likely_partial = parse_error_resources or not resource_fallback_used or resource_string_count in (None, 0)
+        if likely_partial:
+            warnings.append(
+                "Resource table parser emitted bounds warnings that likely indicate a partial resource parse "
+                f"(package={package_name}, artifact={artifact_label}{count_hint}). "
+                "String/resource results may be materially incomplete; re-run this APK if deep resource review matters."
+            )
+            headline = "Resource table parse appears partial (string/resource parsing)."
+            guidance = (
+                "String/resource results may be materially incomplete; re-run this APK if deep resource/resource-string review matters."
+            )
+        else:
+            warnings.append(
+                "Resource table parser emitted bounds warnings "
+                f"(package={package_name}, artifact={artifact_label}{count_hint}). "
+                "String/resource results may be partial; re-run this APK if needed."
+            )
+            headline = "Resource table bounds warning (string/resource parsing)."
+            guidance = "String/resource results may be partial; re-run this APK if needed."
 
-    inline_lines = [
-        "Resource table bounds warning (string/resource parsing).",
-        f"Package: {package_name}",
+    inline_lines: list[ResourceWarningLine] = [
+        (level, headline),
+        (level, f"Package: {package_name}"),
     ]
 
     app_label = metadata.get("app_label")
     if isinstance(app_label, str) and app_label.strip() and app_label.strip() != package_name:
-        inline_lines.append(f"App: {app_label.strip()}")
+        inline_lines.append((level, f"App: {app_label.strip()}"))
 
-    inline_lines.append(f"Artifact: {artifact_label}")
+    inline_lines.append((level, f"Artifact: {artifact_label}"))
 
     if counts:
-        inline_lines.append(f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}")
+        inline_lines.append((level, f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}"))
 
-    inline_lines.append("String/resource results may be partial; re-run this APK if needed.")
+    inline_lines.append((level, guidance))
 
     return inline_lines
 

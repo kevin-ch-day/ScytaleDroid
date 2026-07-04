@@ -38,6 +38,26 @@ def test_build_parser_provenance_tracks_fallback_sources() -> None:
     assert provenance["resource_fallback_used"] is True
     assert provenance["resource_fallback_reason"] == "androguard_open_failed"
     assert provenance["resource_bounds_warning_count"] == 2
+    assert provenance["resource_bounds_warning_severity"] == "warn"
+    assert provenance["resource_bounds_warning_kind"] == "mixed_or_large"
+    assert provenance["resource_parse_state"] == "partial"
+    assert provenance["resource_parse_partial"] is True
+    assert provenance["resource_reparse_candidate"] is True
     assert provenance["label_source"] == "aapt2"
     assert provenance["string_index_source"] == "string_index_unavailable"
     assert provenance["aapt2_available"] is True
+
+
+def test_build_parser_provenance_marks_minor_complex_entry_bounds_note() -> None:
+    provenance = _build_parser_provenance(  # noqa: SLF001 - targeted contract test
+        {
+            "resource_bounds_warnings": ["We are out of bound with this complex entry. Count: 262"],
+        }
+    )
+
+    assert provenance["resource_bounds_warning_count"] == 1
+    assert provenance["resource_bounds_warning_severity"] == "minor"
+    assert provenance["resource_bounds_warning_kind"] == "complex_entry_minor"
+    assert provenance["resource_parse_state"] == "minor"
+    assert provenance["resource_parse_partial"] is False
+    assert provenance["resource_reparse_candidate"] is False
