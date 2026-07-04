@@ -1,0 +1,232 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
+from contextlib import contextmanager
+
+import pytest
+
+from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.scenarios import manual
+from scytaledroid.DynamicAnalysis.scenarios.manual import (
+    ManualScenarioRunner,
+    ScenarioAbortRequested,
+)
+from tests.dynamic._manual_protocol_support import _ctx
+
+
+class _FakeIn:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = iter(lines)
+
+    def isatty(self) -> bool:
+        return True
+
+    def readline(self) -> str:
+        return next(self._lines)
+
+    def read(self, _count: int = 1) -> str:
+        value = self.readline()
+        return value[:1] if value else ""
+
+    def fileno(self) -> int:
+        return 0
+
+
+class _FakeOut:
+    def __init__(self) -> None:
+        self.buf: list[str] = []
+
+    def isatty(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        self.buf.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        return None
+
+
+def _tick_factory(step: float = 1.0):
+    state = {"value": -step}
+
+    def _tick() -> float:
+        state["value"] += step
+        return float(state["value"])
+
+    return _tick
+
+
+def _patch_terminal_mode(monkeypatch) -> None:
+    @contextmanager
+    def _activate(_self):
+        yield True
+
+    @contextmanager
+    def _suspend(_self):
+        yield
+
+    monkeypatch.setattr(manual.CbreakTerminal, "activate", _activate)
+    monkeypatch.setattr(manual.CbreakTerminal, "suspend", _suspend)
+
+
+def test_active_capture_bare_enter_triggers_stop_finalize(monkeypatch) -> None:
+    fake_in = _FakeIn(["\n"])
+    fake_out = _FakeOut()
+    _patch_terminal_mode(monkeypatch)
+
+    monkeypatch.setattr(manual.sys, "stdin", fake_in)
+    monkeypatch.setattr(manual.sys, "stdout", fake_out)
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual, "_should_continue_collecting", lambda **_kwargs: False)
+
+    ended_at = manual._run_baseline_interactive_loop(240, continue_after_target=True)
+
+    assert isinstance(ended_at, datetime)
+
+
+def test_active_capture_a_enter_aborts_and_discards(monkeypatch) -> None:
+    fake_in = _FakeIn(["a\n"])
+    fake_out = _FakeOut()
+    _patch_terminal_mode(monkeypatch)
+
+    monkeypatch.setattr(manual.sys, "stdin", fake_in)
+    monkeypatch.setattr(manual.sys, "stdout", fake_out)
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual, "_confirm_script_exit", lambda action: action == "abort")
+
+    with pytest.raises(ScenarioAbortRequested):
+        manual._run_baseline_interactive_loop(240, continue_after_target=True)
+
+
+def test_active_capture_ctrl_c_is_graceful_abort(monkeypatch) -> None:
+    fake_in = _FakeIn([])
+    fake_out = _FakeOut()
+    _patch_terminal_mode(monkeypatch)
+
+    monkeypatch.setattr(manual.sys, "stdin", fake_in)
+    monkeypatch.setattr(manual.sys, "stdout", fake_out)
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.capture.console.SelectInputReader.poll",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(ScenarioAbortRequested):
+        manual._run_baseline_interactive_loop(240, continue_after_target=True)
+
+
+def test_target_foreground_is_restored_before_capture_starts(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    ctx = RunContext(
+        dynamic_run_id="r-whatsapp",
+        package_name="com.whatsapp",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="baseline_connected",
+        interaction_level="minimal",
+        messaging_activity="connected_idle",
+        device_serial="SERIAL",
+        static_plan={"display_label": "WhatsApp"},
+    )
+    foregrounds = iter(
+        [
+            "com.emanuelef.remote_capture",
+            "com.emanuelef.remote_capture",
+            "com.whatsapp",
+        ]
+    )
+    launches: list[tuple[str | None, str | None]] = []
+
+    monkeypatch.setattr(manual, "_read_device_foreground_package", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(
+        manual,
+        "_launch_package_to_foreground",
+        lambda serial, package: launches.append((serial, package)),
+    )
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual.time, "sleep", lambda _seconds: None)
+
+    manual._ensure_target_foreground_before_capture(ctx)
+
+    out = capsys.readouterr().out
+    assert launches == [("SERIAL", "com.whatsapp")]
+    assert "Returning WhatsApp to foreground..." in out
+
+
+def test_messaging_connected_baseline_waits_until_foreground_ready_before_begin_prompt(
+    monkeypatch, tmp_path: Path
+) -> None:
+    runner = ManualScenarioRunner()
+    ctx = replace(
+        _ctx(tmp_path),
+        package_name="com.whatsapp",
+        run_profile="baseline_connected",
+        interaction_level="minimal",
+        messaging_activity="connected_idle",
+        static_plan={"display_label": "WhatsApp"},
+    )
+    order: list[str] = []
+
+    monkeypatch.setattr(
+        manual,
+        "_maybe_show_raw_high_value_permissions",
+        lambda _run_ctx: True,
+    )
+    monkeypatch.setattr(
+        manual,
+        "_ensure_target_foreground_before_capture",
+        lambda *_args, **_kwargs: order.append("foreground_ready"),
+    )
+    monkeypatch.setattr(
+        manual.prompt_utils,
+        "press_enter_to_continue",
+        lambda *_args, **_kwargs: order.append("begin_prompt"),
+    )
+    monkeypatch.setattr(
+        manual,
+        "_run_messaging_connected_baseline",
+        lambda **_kwargs: datetime.now(UTC),
+    )
+
+    runner.run(ctx, on_start=lambda: order.append("on_start"))
+
+    assert order == ["on_start", "foreground_ready", "begin_prompt"]
+
+
+def test_foreground_drift_pauses_timer_and_reports_resume(monkeypatch) -> None:
+    fake_in = _FakeIn(["", "", "\n"])
+    fake_out = _FakeOut()
+    _patch_terminal_mode(monkeypatch)
+    foregrounds = iter(
+        [
+            "com.whatsapp",
+            "com.emanuelef.remote_capture",
+            "com.whatsapp",
+        ]
+    )
+
+    monkeypatch.setattr(manual.sys, "stdin", fake_in)
+    monkeypatch.setattr(manual.sys, "stdout", fake_out)
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual, "_read_device_foreground_package", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual, "_should_continue_collecting", lambda **_kwargs: False)
+
+    manual._run_baseline_interactive_loop(
+        240,
+        continue_after_target=True,
+        device_serial="SERIAL",
+        foreground_package="com.whatsapp",
+    )
+
+    output = "".join(fake_out.buf)
+    assert "Foreground drift active; valid timing paused." in output
+    assert "Target app restored to foreground; valid timing resumed." in output
