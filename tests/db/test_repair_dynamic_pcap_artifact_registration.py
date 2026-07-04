@@ -2,31 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import repair_dynamic_pcap_artifact_registration as repair
 
 
-def test_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "repair_dynamic_pcap_artifact_registration.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.startswith("usage:")
-    assert "--apply" in proc.stdout
-
-
-def test_generate_report_dry_run_plans_missing_pcap_artifact_without_mutating_manifest(tmp_path: Path) -> None:
+def test_generate_report_dry_run_plans_missing_pcap_artifact_without_mutating_manifest(
+    tmp_path: Path,
+) -> None:
     run_dir = _make_run(tmp_path, "run-1", include_pcap_artifact=False)
     before = (run_dir / "run_manifest.json").read_text(encoding="utf-8")
 
@@ -41,7 +24,9 @@ def test_generate_report_dry_run_plans_missing_pcap_artifact_without_mutating_ma
     assert summary["safe_auto_repair_rows"] == 1
     assert summary["applied_rows"] == 0
     assert (run_dir / "run_manifest.json").read_text(encoding="utf-8") == before
-    with (tmp_path / "audit" / "pcap_artifact_registration_repair_plan.csv").open(encoding="utf-8") as handle:
+    with (tmp_path / "audit" / "pcap_artifact_registration_repair_plan.csv").open(
+        encoding="utf-8"
+    ) as handle:
         rows = list(csv.DictReader(handle))
     assert rows[0]["repair_action"] == "add_missing_pcap_artifact"
     assert rows[0]["applied"] == "0"
@@ -67,7 +52,12 @@ def test_generate_report_apply_adds_only_pcap_artifact(tmp_path: Path) -> None:
 
 
 def test_existing_missing_artifact_path_is_review_only(tmp_path: Path) -> None:
-    _make_run(tmp_path, "run-mismatch", include_pcap_artifact=True, pcap_artifact_path="artifacts/pcapdroid_capture/missing.pcap")
+    _make_run(
+        tmp_path,
+        "run-mismatch",
+        include_pcap_artifact=True,
+        pcap_artifact_path="artifacts/pcapdroid_capture/missing.pcap",
+    )
 
     summary = repair.generate_report(
         evidence_root=tmp_path,

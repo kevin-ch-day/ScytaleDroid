@@ -4,8 +4,11 @@ import json
 from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import (
+    PcapdroidCaptureObserver,
+    _effective_min_pcap_bytes,
+)
 from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name
-from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import PcapdroidCaptureObserver, _effective_min_pcap_bytes
 
 
 def _ctx(tmp_path: Path) -> RunContext:
@@ -25,7 +28,9 @@ def _ctx(tmp_path: Path) -> RunContext:
     )
 
 
-def test_effective_min_pcap_bytes_uses_connected_floor_for_manual_messaging_text(tmp_path: Path) -> None:
+def test_effective_min_pcap_bytes_uses_connected_floor_for_manual_messaging_text(
+    tmp_path: Path,
+) -> None:
     run_dir = tmp_path / "run"
     ctx = RunContext(
         dynamic_run_id="run-1",
@@ -45,7 +50,9 @@ def test_effective_min_pcap_bytes_uses_connected_floor_for_manual_messaging_text
     assert _effective_min_pcap_bytes(ctx) == 20_000
 
 
-def test_effective_min_pcap_bytes_keeps_strict_floor_for_manual_messaging_call(tmp_path: Path) -> None:
+def test_effective_min_pcap_bytes_keeps_strict_floor_for_manual_messaging_call(
+    tmp_path: Path,
+) -> None:
     run_dir = tmp_path / "run"
     ctx = RunContext(
         dynamic_run_id="run-1",
@@ -65,7 +72,9 @@ def test_effective_min_pcap_bytes_keeps_strict_floor_for_manual_messaging_call(t
     assert _effective_min_pcap_bytes(ctx) == 50_000
 
 
-def test_start_clears_status_error_when_fallback_probe_confirms_capture(monkeypatch, tmp_path: Path) -> None:
+def test_start_clears_status_error_when_fallback_probe_confirms_capture(
+    monkeypatch, tmp_path: Path
+) -> None:
     ctx = _ctx(tmp_path)
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.observers.pcapdroid_capture.adb_client.is_available",

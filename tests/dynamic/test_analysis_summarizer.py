@@ -135,6 +135,130 @@ def test_summarizer_falls_back_to_pcap_report_destinations(tmp_path: Path) -> No
     assert summary["flags"]["cleartext_http_detected"] == "unknown"
 
 
+def test_summarizer_uses_security_surface_for_cleartext_detection(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    report_path = tmp_path / "analysis" / "pcap_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "top_dns": [{"value": "api.example.com", "count": 3}],
+                "top_sni": [{"value": "api.example.com", "count": 3}],
+                "security_surface": {
+                    "status": "ok",
+                    "finding_count": 1,
+                    "risk_flags": ["http_metadata_observed"],
+                    "findings": [
+                        {
+                            "severity": "high",
+                            "category": "cleartext",
+                            "title": "HTTP metadata observed",
+                            "detail": "Sanitized HTTP host/method/path metadata was extracted.",
+                        }
+                    ],
+                    "cleartext": {
+                        "http_observed": True,
+                        "visibility_class": "cleartext_surface_present",
+                        "plaintext_protocol_frames": 4,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = _manifest(artifacts=[])
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["flags"]["cleartext_http_detected"] == "true"
+    assert summary["flags"]["security_finding_count"] == 1
+    assert summary["indicators"]["security_surface"]["finding_count"] == 1
+    assert "Cleartext HTTP detected: yes." in rendered
+    assert "## Security (metadata)" in rendered
+    assert "HTTP metadata observed [high]" in rendered
+
+
+def test_summarizer_includes_cleartext_posture_mismatch(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    report_path = tmp_path / "analysis" / "pcap_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "top_dns": [],
+                "top_sni": [],
+                "security_surface": {
+                    "status": "ok",
+                    "finding_count": 1,
+                    "risk_flags": ["http_metadata_observed"],
+                    "findings": [],
+                    "cleartext": {
+                        "http_observed": True,
+                        "visibility_class": "cleartext_surface_present",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    plan_path = tmp_path / "inputs" / "static_dynamic_plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(
+        json.dumps(
+            {
+                "static_features": {"uses_cleartext_traffic": False},
+                "network_targets": {"cleartext_domains": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = _manifest(artifacts=[])
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["indicators"]["cleartext_posture"]["mismatch_class"] == "denied_but_observed"
+    assert summary["flags"]["cleartext_mismatch_class"] == "denied_but_observed"
+    assert "Static↔dynamic cleartext:" in rendered
+    assert "denies cleartext" in rendered
+
+
+def test_summarizer_security_surface_marks_encrypted_dominant_as_no_cleartext(
+    tmp_path: Path,
+) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    report_path = tmp_path / "analysis" / "pcap_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "top_dns": [{"value": "secure.example.com", "count": 2}],
+                "security_surface": {
+                    "status": "ok",
+                    "finding_count": 0,
+                    "risk_flags": [],
+                    "findings": [],
+                    "cleartext": {
+                        "http_observed": False,
+                        "plaintext_protocol_frames": 0,
+                        "visibility_class": "encrypted_or_opaque_dominant",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = _manifest(artifacts=[])
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+
+    assert summary["flags"]["cleartext_http_detected"] == "false"
+
+
 def test_summarizer_includes_dataset_quota_and_indicator_fields(tmp_path: Path) -> None:
     writer = EvidencePackWriter(tmp_path)
     writer.ensure_layout()

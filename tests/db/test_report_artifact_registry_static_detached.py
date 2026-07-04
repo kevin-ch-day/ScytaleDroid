@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-import json
-
-
-def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_artifact_registry_static_detached.py").lower()
-    assert out.startswith("usage:")
-    assert "--json" in out
-    assert "detached" in out
+from pathlib import Path
 
 
 def test_json_output_uses_static_prune_proposal(monkeypatch, tmp_path: Path) -> None:

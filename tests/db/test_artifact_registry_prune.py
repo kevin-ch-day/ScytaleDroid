@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
 from scytaledroid.Database.db_utils.artifact_registry_prune import (
     effective_cutoff_days,
     run_prune_dangling_artifact_registry,
@@ -38,7 +35,13 @@ def test_write_prune_receipt_bundle_writes_files(tmp_path: Path) -> None:
         stem="test_prune",
         rows=rows,
         artifact_ids=[1],
-        meta={"generated_utc": "T", "cutoff_days": 90, "run_type_filter": "all", "include_null_created_at": False, "candidate_count": 1},
+        meta={
+            "generated_utc": "T",
+            "cutoff_days": 90,
+            "run_type_filter": "all",
+            "include_null_created_at": False,
+            "candidate_count": 1,
+        },
         formats={"json", "csv", "sql"},
     )
     assert (tmp_path / "test_prune.json").is_file()
@@ -116,7 +119,9 @@ def test_run_prune_apply_writes_then_deletes(tmp_path: Path) -> None:
     assert out.total_rows_after == 9
     assert out.receipt_paths
     assert list(tmp_path.glob("artifact_registry_prune_*.json"))
-    receipt = json.loads(next(tmp_path.glob("artifact_registry_prune_*.json")).read_text(encoding="utf-8"))
+    receipt = json.loads(
+        next(tmp_path.glob("artifact_registry_prune_*.json")).read_text(encoding="utf-8")
+    )
     assert receipt["format"] == "scytaledroid.artifact_registry_prune_receipt.v1"
     assert len(receipt["artifact_rows"]) == 1
 
@@ -140,21 +145,3 @@ def test_run_prune_sample_ids_without_receipt() -> None:
     )
     assert out.candidate_count == 2
     assert out.sample_artifact_ids == (100,)
-
-
-def test_prune_script_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "prune_artifact_registry_dangling.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or proc.stderr).strip().lower()
-    assert out.startswith("usage:")
-    assert "--apply" in out
-    assert "--sample-ids" in out

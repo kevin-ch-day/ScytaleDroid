@@ -120,7 +120,9 @@ def _run_health_payload(*, session_stamp: str) -> dict[str, object]:
                 "package_name": "com.example.two",
                 "app_label": "Example Two",
                 "discovered_artifacts": 1,
-                "report_paths_short": [f"data/static_analysis/reports/archive/{session_stamp}/bb.json"],
+                "report_paths_short": [
+                    f"data/static_analysis/reports/archive/{session_stamp}/bb.json"
+                ],
                 "finding_persistence": {
                     "runtime_findings": 2,
                     "persisted_findings_db": 2,
@@ -323,7 +325,9 @@ def test_main_generates_expected_audit_bundle(tmp_path: Path, monkeypatch) -> No
     assert p0["persisted_db_findings"] == "1"
     assert p0["capped_not_persisted"] == "0"
 
-    grain_rows = list(csv.DictReader((output_dir / "finding_fidelity_by_artifact_grain.csv").open()))
+    grain_rows = list(
+        csv.DictReader((output_dir / "finding_fidelity_by_artifact_grain.csv").open())
+    )
     split = next(row for row in grain_rows if row["artifact_grain"] == "split_apk")
     assert split["capped_not_persisted"] == "4"
 

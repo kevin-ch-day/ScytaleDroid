@@ -5,9 +5,7 @@ from dataclasses import fields
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.Database.db_utils.health_checks.analysis_integrity import AnalysisIntegritySummary
-
 
 pytestmark = [pytest.mark.ui_contract]
 
@@ -18,7 +16,9 @@ def test_database_menu_renders_shared_sections(monkeypatch, capsys):
     monkeypatch.setattr(menu_module, "maybe_clear_screen", lambda: None)
     monkeypatch.setattr(menu_module.diagnostics, "get_schema_version", lambda: "0.2.5")
     monkeypatch.setattr(menu_module.diagnostics, "check_connection", lambda: True)
-    monkeypatch.setattr(menu_module.diagnostics, "get_server_info", lambda: {"database": "scytaledroid_test"})
+    monkeypatch.setattr(
+        menu_module.diagnostics, "get_server_info", lambda: {"database": "scytaledroid_test"}
+    )
     rendered_labels: list[str] = []
 
     def capture_render(spec, *_a, **_k):
@@ -45,7 +45,11 @@ def test_query_runner_menu_uses_shared_actions(monkeypatch, capsys):
     from scytaledroid.Database.db_utils.menus import query_runner as menu_module
 
     captured = {}
-    monkeypatch.setattr(menu_module.menu_utils, "render_menu", lambda spec, *_a, **_k: captured.setdefault("spec", spec))
+    monkeypatch.setattr(
+        menu_module.menu_utils,
+        "render_menu",
+        lambda spec, *_a, **_k: captured.setdefault("spec", spec),
+    )
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.run_query_menu()
@@ -95,7 +99,9 @@ def test_query_runner_active_static_session_renders_compact_status(monkeypatch, 
     monkeypatch.setattr(menu_module, "_run_read_only", _run_read_only)
 
     captured: list[list[tuple[str, object]]] = []
-    monkeypatch.setattr(menu_module.menu_utils, "print_metrics", lambda items: captured.append(items))
+    monkeypatch.setattr(
+        menu_module.menu_utils, "print_metrics", lambda items: captured.append(items)
+    )
 
     menu_module.show_active_static_session_status()
 
@@ -139,7 +145,9 @@ def test_session_downstream_counts_skips_legacy_runs_when_table_absent(monkeypat
 def test_query_runner_package_lineage_uses_canonical_run_headers(monkeypatch, capsys):
     from scytaledroid.Database.db_utils.menus import query_runner as menu_module
 
-    monkeypatch.setattr(menu_module.prompt_utils, "prompt_text", lambda *_a, **_k: "org.example.app")
+    monkeypatch.setattr(
+        menu_module.prompt_utils, "prompt_text", lambda *_a, **_k: "org.example.app"
+    )
     monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
     monkeypatch.setattr(
         menu_module,
@@ -241,7 +249,9 @@ def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     )
     monkeypatch.setattr(menu_module, "_column_exists", lambda *_a, **_k: False)
     monkeypatch.setattr(menu_module, "scalar", lambda *_a, **_k: 1)
-    from scytaledroid.Database.db_utils.static_run_governance_checks import StaticRunGovernanceCounts
+    from scytaledroid.Database.db_utils.static_run_governance_checks import (
+        StaticRunGovernanceCounts,
+    )
 
     monkeypatch.setattr(
         menu_module,
@@ -258,7 +268,9 @@ def test_db_health_summary_uses_shared_sections(monkeypatch, capsys):
     monkeypatch.setattr(menu_module.intel_db, "governance_snapshot_count", lambda: 1)
     monkeypatch.setattr(menu_module.intel_db, "governance_row_count", lambda: 1828)
     monkeypatch.setattr(menu_module, "governance_ready", lambda: (True, "ok"))
-    monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        menu_module.prompt_utils, "press_enter_to_continue", lambda *args, **kwargs: None
+    )
 
     menu_module.run_health_summary()
 

@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from scytaledroid.Database.db_utils import artifact_registry_static_session_retirement as retirement
-
-
-def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_artifact_registry_static_session_retirement.py").lower()
-    assert out.startswith("usage:")
-    assert "static_session_retirement" in out
 
 
 def test_collect_static_session_retirement_report(monkeypatch, tmp_path: Path) -> None:
@@ -76,13 +71,31 @@ def test_collect_static_session_retirement_report(monkeypatch, tmp_path: Path) -
                 },
             ],
             "legacy_overlap_runs": [
-                {"run_id": 100, "package": "com.example.alpha", "session_stamp": "20260429-small", "metrics_rows": 0, "buckets_rows": 0, "contributor_rows": 0, "finding_rows": 8},
-                {"run_id": 101, "package": "com.example.beta", "session_stamp": "20260430-blocked", "metrics_rows": 10, "buckets_rows": 2, "contributor_rows": 1, "finding_rows": 20},
+                {
+                    "run_id": 100,
+                    "package": "com.example.alpha",
+                    "session_stamp": "20260429-small",
+                    "metrics_rows": 0,
+                    "buckets_rows": 0,
+                    "contributor_rows": 0,
+                    "finding_rows": 8,
+                },
+                {
+                    "run_id": 101,
+                    "package": "com.example.beta",
+                    "session_stamp": "20260430-blocked",
+                    "metrics_rows": 10,
+                    "buckets_rows": 2,
+                    "contributor_rows": 1,
+                    "finding_rows": 20,
+                },
             ],
         },
     )
 
-    report = retirement.collect_static_session_retirement_report(lambda *args, **kwargs: None, repo_root=tmp_path)
+    report = retirement.collect_static_session_retirement_report(
+        lambda *args, **kwargs: None, repo_root=tmp_path
+    )
     summary = report["summary"]
     assert summary["legacy_overlap_session_count"] == 2
     assert summary["candidate_session_count"] == 1

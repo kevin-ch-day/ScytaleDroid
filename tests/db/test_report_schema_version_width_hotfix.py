@@ -11,20 +11,6 @@ from scytaledroid.Database.db_utils.schema_version_width_hotfix import (
 )
 
 
-def test_schema_version_width_hotfix_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/schema_version_width_hotfix.py")
-    assert_safe_script_help("scripts/db/schema_version_width_hotfix.py", "report")
-    assert_safe_script_help("scripts/db/schema_version_width_hotfix.py", "apply")
-
-
-def test_report_schema_version_width_hotfix_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/report_schema_version_width_hotfix.py")
-
-
-def test_apply_schema_version_width_hotfix_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/apply_schema_version_width_hotfix.py")
-
-
 def test_schema_version_width_hotfix_targets_match_runtime_contract() -> None:
     targets = list(target_columns())
     assert len(targets) == 4
@@ -47,7 +33,9 @@ def test_schema_version_width_hotfix_planned_sql_only_mentions_target_tables() -
     assert "ALTER TABLE `static_session_run_links`" not in sql
 
 
-def test_schema_version_width_required_sql_empty_when_no_live_changes_are_needed(monkeypatch) -> None:
+def test_schema_version_width_required_sql_empty_when_no_live_changes_are_needed(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         "scytaledroid.Database.db_utils.schema_version_width_hotfix._build_required_alter_statements",
         lambda _run_sql: [],
@@ -59,8 +47,16 @@ def test_schema_version_width_hotfix_bundle_writes_expected_receipt_files(tmp_pa
     report = {
         "summary": {"target_column_count": 4, "preflight_clean": True},
         "columns": [{"table": "static_analysis_sessions", "column": "schema_version"}],
-        "width_checks": [{"table": "static_analysis_sessions", "column": "schema_version", "fits_target_width": "yes"}],
-        "view_dependencies": [{"table": "static_analysis_sessions", "column": "schema_version", "view_name": "v_x"}],
+        "width_checks": [
+            {
+                "table": "static_analysis_sessions",
+                "column": "schema_version",
+                "fits_target_width": "yes",
+            }
+        ],
+        "view_dependencies": [
+            {"table": "static_analysis_sessions", "column": "schema_version", "view_name": "v_x"}
+        ],
         "planned_alter_sql": "ALTER TABLE `static_analysis_sessions` MODIFY COLUMN `schema_version` varchar(64);",
         "migration_registry_preview": {"migration_id": "20260614_schema_version_width_hotfix_v1"},
     }

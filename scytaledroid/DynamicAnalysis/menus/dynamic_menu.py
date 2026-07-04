@@ -11,80 +11,118 @@ from scytaledroid.DynamicAnalysis import plan_selection as _plan_selection
 from scytaledroid.DynamicAnalysis.controllers.guided_run import run_guided_dataset_run
 from scytaledroid.DynamicAnalysis.controllers.sandbox_run import run_sandbox_dynamic_run
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
+from scytaledroid.DynamicAnalysis.menus import maintenance_adapter as _maintenance_adapter
+from scytaledroid.DynamicAnalysis.menus import (
+    package_selection_adapter as _package_selection_adapter,
+)
+from scytaledroid.DynamicAnalysis.menus import run_target_adapter as _run_target_adapter
+from scytaledroid.DynamicAnalysis.menus.archived_structural_menu import (
+    print_profile_v3_capture_runbook as _print_profile_v3_capture_runbook_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.archived_structural_menu import (
+    run_profile_v3_capture_status_dashboard as _run_profile_v3_capture_status_dashboard_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.archived_structural_menu import (
+    run_profile_v3_guided_phase2_capture as _run_profile_v3_guided_phase2_capture_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.archived_structural_menu import (
+    run_profile_v3_manifest_build as _run_profile_v3_manifest_build_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.archived_structural_menu import (
+    run_profile_v3_recapture_plan_view as _run_profile_v3_recapture_plan_view_impl,
+)
 from scytaledroid.DynamicAnalysis.menus.capture_runtime_support import (
     print_device_badge as _print_device_badge_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.capture_runtime_support import (
     print_network_status as _print_network_status_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.capture_runtime_support import (
     print_root_status as _print_root_status_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.capture_runtime_support import (
     print_tier1_qa_result as _print_tier1_qa_result_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.capture_runtime_support import (
     select_observers as _select_observers_impl,
 )
 from scytaledroid.DynamicAnalysis.menus.export_actions import (
-    export_dynamic_run_summary_csv as _export_dynamic_run_summary_csv_impl,
-    export_pcap_features_csv as _export_pcap_features_csv_impl,
-    export_protocol_ledger_csv as _export_protocol_ledger_csv_impl,
+    run_cohort_security_audit_export as _run_cohort_security_audit_export_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.maintenance_actions import (
+    choose_active_research_cohort_action as _choose_active_research_cohort_action,
 )
 from scytaledroid.DynamicAnalysis.menus.menu_hub import (
     DynamicAnalysisMenuCallbacks,
+)
+from scytaledroid.DynamicAnalysis.menus.menu_hub import (
     run_dynamic_analysis_menu as _run_dynamic_analysis_menu_hub,
 )
 from scytaledroid.DynamicAnalysis.menus.process_guard import (
     build_dynamic_menu_code_signature as _build_dynamic_menu_code_signature_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.process_guard import (
     warn_if_dynamic_menu_code_changed as _warn_if_dynamic_menu_code_changed_impl,
 )
 from scytaledroid.DynamicAnalysis.menus.queue_metrics import (
     summarize_evidence_quota as _summarize_evidence_quota_impl,
 )
-from scytaledroid.DynamicAnalysis.menus.maintenance_actions import (
-    DynamicMaintenanceCallbacks,
-    LegacyStructuralCallbacks,
-    choose_active_research_cohort_action as _choose_active_research_cohort_action,
-    legacy_structural_archive_menu as _legacy_structural_archive_menu_impl,
-    prune_incomplete_dynamic_evidence_dirs as _prune_incomplete_dynamic_evidence_dirs_impl,
-    repair_reindex_tracker as _repair_reindex_tracker_impl,
-    run_freeze_readiness_audit_action as _run_freeze_readiness_audit_action,
-    run_state_summary_action as _run_state_summary_action,
-    verify_host_pcap_tools_action as _verify_host_pcap_tools_action,
+from scytaledroid.DynamicAnalysis.menus.queue_selection import (
+    PreparedPackageSelectionRow as _PreparedPackageSelectionRow,
 )
-from scytaledroid.DynamicAnalysis.menus.archived_structural_menu import (
-    print_profile_v3_capture_runbook as _print_profile_v3_capture_runbook_impl,
-    run_profile_v3_capture_status_dashboard as _run_profile_v3_capture_status_dashboard_impl,
-    run_profile_v3_guided_phase2_capture as _run_profile_v3_guided_phase2_capture_impl,
-    run_profile_v3_manifest_build as _run_profile_v3_manifest_build_impl,
-    run_profile_v3_recapture_plan_view as _run_profile_v3_recapture_plan_view_impl,
+from scytaledroid.DynamicAnalysis.menus.queue_selection import (
+    PreparedPackageSelectionView as _PreparedPackageSelectionView,
 )
-from scytaledroid.DynamicAnalysis.menus.summary_support import (
-    build_collection_priorities as _build_collection_priorities_impl,
-    compute_tracker_vs_evidence_deltas as _compute_tracker_vs_evidence_deltas_impl,
-    min_windows_per_run as _min_windows_per_run_impl,
-    next_action_from_need as _next_action_from_need_impl,
-    run_profile_bucket as _run_profile_bucket_impl,
+from scytaledroid.DynamicAnalysis.menus.queue_selection import (
+    build_package_selection_row as _build_package_selection_row_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_selection import (
+    build_scoped_dataset_counts as _build_scoped_dataset_counts_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_selection import (
+    prepare_package_selection_view as _prepare_package_selection_view_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_selection import (
+    resolve_tracker_run_identity as _resolve_tracker_run_identity_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_selection import (
+    run_package_selection_menu as _run_package_selection_menu_impl,
 )
 from scytaledroid.DynamicAnalysis.menus.run_target_selection import (
     choose_index as _choose_index_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.run_target_selection import (
     prompt_custom_package as _prompt_custom_package_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.run_target_selection import (
     resolve_custom_tier as _resolve_custom_tier_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.run_target_selection import (
     resolve_plan_selection as _resolve_plan_selection_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.run_target_selection import (
     select_dynamic_target as _select_dynamic_target_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.run_target_selection import (
     select_package_from_groups as _select_package_from_groups_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.run_target_selection import (
     select_profile_package as _select_profile_package_impl,
 )
-from scytaledroid.DynamicAnalysis.menus.queue_selection import (
-    PreparedPackageSelectionRow as _PreparedPackageSelectionRow,
-    PreparedPackageSelectionView as _PreparedPackageSelectionView,
-    build_package_selection_row as _build_package_selection_row_impl,
-    build_scoped_dataset_counts as _build_scoped_dataset_counts_impl,
-    choose_package_selection as _choose_package_selection_impl,
-    prepare_package_selection_view as _prepare_package_selection_view_impl,
-    render_package_table as _render_package_table_impl,
-    resolve_tracker_run_identity as _resolve_tracker_run_identity_impl,
-    run_package_selection_menu as _run_package_selection_menu_impl,
+from scytaledroid.DynamicAnalysis.menus.summary_support import (
+    min_windows_per_run as _min_windows_per_run_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.summary_support import (
+    next_action_from_need as _next_action_from_need_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.summary_support import (
+    run_profile_bucket as _run_profile_bucket_impl,
 )
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.run_qualification import (
-    format_bucket_queue_label,
-    format_quota_progress_label,
+from scytaledroid.DynamicAnalysis.profile_loader import (
+    load_operational_profiles,
+    load_profile_packages,
 )
-from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
     active_research_cohort_key,
     active_research_cohort_label,
@@ -92,14 +130,21 @@ from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
     chooseable_active_research_cohorts,
     persist_active_research_cohort_key,  # re-exported for test monkeypatch compatibility
 )
+from scytaledroid.DynamicAnalysis.run_qualification import (
+    format_bucket_queue_label,
+    format_quota_progress_label,
+)
 from scytaledroid.StaticAnalysis.core.repository import (
     group_artifacts,
     list_categories,
     list_packages,
-    load_profile_map,
 )
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils, text_blocks
-from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, MenuSpec
+from scytaledroid.Utils.DisplayUtils import (  # noqa: F401
+    prompt_utils,
+    status_messages,
+    table_utils,
+    text_blocks,
+)
 
 _DEVICE_STATUS_CACHE: dict[str, dict[str, str]] = {}
 _RUN_IDENTITY_CACHE: dict[str, tuple[str | None, str | None]] = {}
@@ -111,6 +156,7 @@ def _warn_if_code_changed() -> None:
         menu_file=Path(__file__).resolve(),
         start_signature=_MENU_CODE_SIGNATURE_AT_START,
     )
+
 
 def _min_windows_per_run() -> int:
     return _min_windows_per_run_impl()
@@ -131,6 +177,7 @@ def _summarize_evidence_quota(dataset_pkgs: set[str], cfg) -> dict[str, int | bo
         run_profile_bucket_fn=_run_profile_bucket,
     )
 
+
 @dataclass(frozen=True)
 class _DynamicUiDefaults:
     observer_prompts_enabled: bool
@@ -145,12 +192,15 @@ def _load_dynamic_ui_defaults() -> _DynamicUiDefaults:
         pcapdroid_api_key=os.environ.get("SCYTALEDROID_PCAPDROID_API_KEY"),
     )
 
+
 def _print_profile_v3_capture_runbook() -> None:
     _print_profile_v3_capture_runbook_impl()
 
 
 def _run_profile_v3_guided_phase2_capture() -> None:
-    _run_profile_v3_guided_phase2_capture_impl(load_dynamic_ui_defaults_fn=_load_dynamic_ui_defaults)
+    _run_profile_v3_guided_phase2_capture_impl(
+        load_dynamic_ui_defaults_fn=_load_dynamic_ui_defaults
+    )
 
 
 def _run_profile_v3_manifest_build() -> None:
@@ -172,18 +222,20 @@ def _legacy_structural_archive_menu(*, pause_if_verbose) -> None:
 
             handle_profile_v3_integrity_gates()
         except Exception:
-            print(status_messages.status("Failed to open structural archive integrity gates (Reporting).", level="error"))
+            print(
+                status_messages.status(
+                    "Failed to open structural archive integrity gates (Reporting).", level="error"
+                )
+            )
             prompt_utils.press_enter_to_continue()
 
-    _legacy_structural_archive_menu_impl(
-        callbacks=LegacyStructuralCallbacks(
-            run_guided_capture=_run_profile_v3_guided_phase2_capture,
-            show_runbook=_print_profile_v3_capture_runbook,
-            show_recapture_plan=_run_profile_v3_recapture_plan_view,
-            show_status_dashboard=_run_profile_v3_capture_status_dashboard,
-            show_integrity_gates=_show_integrity_gates,
-            build_manifest=_run_profile_v3_manifest_build,
-        ),
+    _maintenance_adapter.legacy_structural_archive_menu(
+        run_guided_capture=_run_profile_v3_guided_phase2_capture,
+        show_runbook=_print_profile_v3_capture_runbook,
+        show_recapture_plan=_run_profile_v3_recapture_plan_view,
+        show_status_dashboard=_run_profile_v3_capture_status_dashboard,
+        show_integrity_gates=_show_integrity_gates,
+        build_manifest=_run_profile_v3_manifest_build,
         pause_if_verbose=pause_if_verbose,
     )
 
@@ -203,42 +255,32 @@ def dynamic_analysis_menu() -> None:
             repair_reindex_tracker=_repair_reindex_tracker,
             prune_incomplete_dynamic_evidence_dirs=_prune_incomplete_dynamic_evidence_dirs,
             open_legacy_structural_archive=_legacy_structural_archive_menu,
+            run_cohort_security_audit_export=_run_cohort_security_audit_export,
         )
     )
 
 
 def _prune_incomplete_dynamic_evidence_dirs() -> None:
-    _prune_incomplete_dynamic_evidence_dirs_impl(run_state_summary=_run_state_summary)
+    _maintenance_adapter.prune_incomplete_dynamic_evidence_dirs(
+        run_state_summary=_run_state_summary
+    )
 
 
 def _repair_reindex_tracker() -> None:
-    _repair_reindex_tracker_impl(
-        callbacks=DynamicMaintenanceCallbacks(
-            run_state_summary=_run_state_summary,
-            read_json=_read_json,
-            min_windows_per_run=_min_windows_per_run,
-            summarize_evidence_quota=_summarize_evidence_quota,
-        )
+    _maintenance_adapter.repair_reindex_tracker(
+        run_state_summary=_run_state_summary,
+        min_windows_per_run=_min_windows_per_run,
+        summarize_evidence_quota=_summarize_evidence_quota,
+        read_json_fn=_maintenance_adapter.read_json,
     )
 
 
 def _run_freeze_readiness_audit() -> None:
-    _run_freeze_readiness_audit_action()
+    _maintenance_adapter.run_freeze_readiness_audit()
 
 
 def _run_state_summary() -> None:
-    _run_state_summary_action()
-
-
-def _compute_tracker_vs_evidence_deltas() -> list[dict[str, object]]:
-    return _compute_tracker_vs_evidence_deltas_impl(
-        read_json=_read_json,
-        min_windows_per_run=_min_windows_per_run,
-    )
-
-
-def _build_collection_priorities(delta_rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    return _build_collection_priorities_impl(delta_rows)
+    _maintenance_adapter.run_state_summary()
 
 
 def _next_action_from_need(need_baseline: int, need_interactive: int) -> str:
@@ -251,12 +293,14 @@ def _quota_progress_label(
     *,
     extra_count: int = 0,
     low_signal: int = 0,
+    non_idle: int = 0,
 ) -> str:
     return format_quota_progress_label(
         countable=int(count),
         required=int(required),
         extra=int(extra_count),
         low_signal=int(low_signal),
+        non_idle=int(non_idle),
     )
 
 
@@ -266,12 +310,14 @@ def _bucket_progress_label(
     *,
     extra_count: int = 0,
     low_signal: int = 0,
+    non_idle: int = 0,
     need: int = 0,
 ) -> str:
     return format_bucket_queue_label(
         countable=int(count),
         extra=int(extra_count),
         low_signal=int(low_signal),
+        non_idle=int(non_idle),
         required=int(required),
         need=int(need),
     )
@@ -287,29 +333,20 @@ def _static_build_label(active_runs: int, legacy_valid: int) -> str:
     return "ready"
 
 
-def _render_dataset_status() -> None:
-    from scytaledroid.DynamicAnalysis.menus.status_reports import render_dataset_status
+def _run_cohort_security_audit_export() -> None:
+    _maintenance_adapter.run_cohort_security_audit_export(
+        run_export_impl=_run_cohort_security_audit_export_impl,
+    )
 
-    render_dataset_status()
-
-
-def _export_pcap_features_csv() -> None:
-    _export_pcap_features_csv_impl(resolve_dataset_freeze_read_path_fn=resolve_dataset_freeze_read_path)
-
-def _export_dynamic_run_summary_csv() -> None:
-    _export_dynamic_run_summary_csv_impl(resolve_dataset_freeze_read_path_fn=resolve_dataset_freeze_read_path)
-
-
-def _export_protocol_ledger_csv() -> None:
-    _export_protocol_ledger_csv_impl(resolve_dataset_freeze_read_path_fn=resolve_dataset_freeze_read_path)
 
 def _verify_host_pcap_tools() -> None:
     """Verify host toolchain required for dataset-tier PCAP post-analysis."""
-    _verify_host_pcap_tools_action()
+    _maintenance_adapter.verify_host_pcap_tools()
 
 
 def _select_dynamic_target() -> tuple[str, str] | None:
-    return _select_dynamic_target_impl(
+    return _run_target_adapter.select_dynamic_target(
+        select_dynamic_target_fn=_select_dynamic_target_impl,
         group_artifacts_fn=group_artifacts,
         active_research_cohort_packages_fn=active_research_cohort_packages,
         active_research_cohort_label_fn=active_research_cohort_label,
@@ -321,8 +358,9 @@ def _select_dynamic_target() -> tuple[str, str] | None:
 
 
 def _resolve_plan_selection(package_name: str) -> dict[str, object] | None:
-    return _resolve_plan_selection_impl(
+    return _run_target_adapter.resolve_plan_selection(
         package_name,
+        resolve_plan_selection_fn=_resolve_plan_selection_impl,
         load_plan_candidates_fn=_plan_selection._load_plan_candidates,
         prompt_missing_baseline_fn=_prompt_missing_baseline,
         pick_newest_candidate_fn=_plan_selection._pick_newest_candidate,
@@ -332,39 +370,37 @@ def _resolve_plan_selection(package_name: str) -> dict[str, object] | None:
 
 
 def _run_guided_dataset_run(ui_defaults: _DynamicUiDefaults) -> None:
-    run_guided_dataset_run(
-        select_package_from_groups=_select_package_from_groups,
-        select_observers=lambda device_serial, mode: _select_observers_impl(device_serial, mode=mode),
-        print_device_badge=_print_device_badge,
-        print_tier1_qa_result=_print_tier1_qa_result,
-        observer_prompts_enabled=bool(ui_defaults.observer_prompts_enabled),
-        pcapdroid_api_key=ui_defaults.pcapdroid_api_key,
+    _run_target_adapter.run_guided_dataset_run(
+        ui_defaults,
+        run_guided_dataset_run_fn=run_guided_dataset_run,
+        select_package_from_groups_fn=_select_package_from_groups,
+        select_observers_fn=lambda device_serial, mode: _select_observers_impl(
+            device_serial, mode=mode
+        ),
+        print_device_badge_fn=_print_device_badge,
+        print_tier1_qa_result_fn=_print_tier1_qa_result,
     )
 
 
 def _resolve_active_cohort_for_run() -> dict[str, object] | None:
-    active_key = str(active_research_cohort_key() or "").strip().lower()
-    rows = chooseable_active_research_cohorts()
-    if not rows:
-        print(status_messages.status("No active app cohorts are defined in the DB.", level="warn"))
-        return None
-    if active_key:
-        for row in rows:
-            cohort_key = str(row.get("cohort_key") or "").strip().lower()
-            if cohort_key == active_key:
-                return dict(row)
-    selected = _choose_active_research_cohort()
-    return dict(selected) if isinstance(selected, dict) else None
+    return _run_target_adapter.resolve_active_cohort_for_run(
+        active_research_cohort_key_fn=active_research_cohort_key,
+        chooseable_active_research_cohorts_fn=chooseable_active_research_cohorts,
+        choose_active_research_cohort_fn=_choose_active_research_cohort,
+        status_messages_mod=status_messages,
+    )
 
 
 def _run_focused_app_run(ui_defaults: _DynamicUiDefaults) -> None:
-    run_sandbox_dynamic_run(
-        select_dynamic_target=_select_dynamic_target,
-        select_observers=lambda device_serial, mode: _select_observers_impl(device_serial, mode=mode),
-        print_root_status=_print_root_status,
-        print_network_status=_print_network_status,
-        observer_prompts_enabled=bool(ui_defaults.observer_prompts_enabled),
-        pcapdroid_api_key=ui_defaults.pcapdroid_api_key,
+    _run_target_adapter.run_focused_app_run(
+        ui_defaults,
+        run_sandbox_dynamic_run_fn=run_sandbox_dynamic_run,
+        select_dynamic_target_fn=_select_dynamic_target,
+        select_observers_fn=lambda device_serial, mode: _select_observers_impl(
+            device_serial, mode=mode
+        ),
+        print_root_status_fn=_print_root_status,
+        print_network_status_fn=_print_network_status,
     )
 
 
@@ -377,20 +413,25 @@ def _choose_active_research_cohort() -> None:
 
 
 def _print_tier1_qa_result(dynamic_run_id: str) -> None:
-    _print_tier1_qa_result_impl(dynamic_run_id)
+    _run_target_adapter.print_tier1_qa_result(
+        dynamic_run_id,
+        print_tier1_qa_result_fn=_print_tier1_qa_result_impl,
+    )
 
 
 def _resolve_custom_tier(package_name: str, dataset_pkgs: set[str]) -> tuple[str, str]:
-    return _resolve_custom_tier_impl(
+    return _run_target_adapter.resolve_custom_tier(
         package_name,
         dataset_pkgs,
+        resolve_custom_tier_fn=_resolve_custom_tier_impl,
         active_research_cohort_label_fn=active_research_cohort_label,
     )
 
 
 def _select_profile_package(groups) -> tuple[str, str | None] | None:
-    return _select_profile_package_impl(
+    return _run_target_adapter.select_profile_package(
         groups,
+        select_profile_package_fn=_select_profile_package_impl,
         list_categories_fn=list_categories,
         load_operational_profiles_fn=load_operational_profiles,
         load_profile_packages_fn=load_profile_packages,
@@ -406,19 +447,23 @@ def _select_package_from_groups(
     subtitle: str | None = None,
     device_serial: str | None = None,
 ) -> str | None:
-    return _select_package_from_groups_impl(
+    return _package_selection_adapter.select_package_from_groups(
         groups,
+        select_package_from_groups_fn=_select_package_from_groups_impl,
+        prepare_package_selection_view_fn=_prepare_package_selection_view,
+        run_package_selection_menu_fn=_run_package_selection_menu,
         title=title,
         subtitle=subtitle,
         device_serial=device_serial,
-        prepare_package_selection_view_fn=_prepare_package_selection_view,
-        run_package_selection_menu_fn=_run_package_selection_menu,
     )
 
 
-def _prepare_package_selection_view(groups, device_serial: str | None = None) -> _PreparedPackageSelectionView | None:
-    return _prepare_package_selection_view_impl(
+def _prepare_package_selection_view(
+    groups, device_serial: str | None = None
+) -> _PreparedPackageSelectionView | None:
+    return _package_selection_adapter.prepare_package_selection_view(
         groups,
+        prepare_package_selection_view_fn=_prepare_package_selection_view_impl,
         load_dataset_packages=active_research_cohort_packages,
         list_packages_fn=list_packages,
         summarize_evidence_quota_fn=_summarize_evidence_quota,
@@ -440,7 +485,8 @@ def _build_package_selection_row(
     live_build_drift=None,
     db_lineage_context=None,
 ) -> _PreparedPackageSelectionRow:
-    return _build_package_selection_row_impl(
+    return _package_selection_adapter.build_package_selection_row(
+        build_package_selection_row_fn=_build_package_selection_row_impl,
         idx=idx,
         package=package,
         app_label=app_label,
@@ -462,29 +508,30 @@ def _build_package_selection_row(
 
 
 def _run_package_selection_menu(prepared: _PreparedPackageSelectionView) -> str | None:
-    return _run_package_selection_menu_impl(
+    return _package_selection_adapter.run_package_selection_menu(
         prepared,
+        run_package_selection_menu_fn=_run_package_selection_menu_impl,
         summarize_evidence_quota_fn=_summarize_evidence_quota,
     )
 
 
-def _render_package_table(rows, *, headers: list[str] | None = None, max_preview: int = 15) -> None:
-    _render_package_table_impl(rows, headers=headers, max_preview=max_preview)
-
-
-def _build_scoped_dataset_counts(package_name: str, runs: list[dict], *, cfg: object | None = None) -> dict[str, int | str]:
-    return _build_scoped_dataset_counts_impl(
+def _build_scoped_dataset_counts(
+    package_name: str, runs: list[dict], *, cfg: object | None = None
+) -> dict[str, int | str]:
+    return _package_selection_adapter.build_scoped_dataset_counts(
         package_name,
         runs,
+        build_scoped_dataset_counts_fn=_build_scoped_dataset_counts_impl,
         cfg=cfg,
         resolve_tracker_run_identity_fn=_resolve_tracker_run_identity,
     )
 
 
 def _resolve_tracker_run_identity(package_name: str, run: dict) -> tuple[str | None, str | None]:
-    return _resolve_tracker_run_identity_impl(
+    return _package_selection_adapter.resolve_tracker_run_identity(
         package_name,
         run,
+        resolve_tracker_run_identity_fn=_resolve_tracker_run_identity_impl,
         run_identity_cache=_RUN_IDENTITY_CACHE,
         output_dir=app_config.OUTPUT_DIR,
     )
@@ -492,10 +539,6 @@ def _resolve_tracker_run_identity(package_name: str, run: dict) -> tuple[str | N
 
 def _choose_index(prompt: str, total: int) -> int | None:
     return _choose_index_impl(prompt, total, get_choice_fn=prompt_utils.get_choice)
-
-
-def _choose_package_selection(prepared: _PreparedPackageSelectionView) -> int | None:
-    return _choose_package_selection_impl(prepared)
 
 
 def _prompt_custom_package() -> str:
@@ -512,29 +555,37 @@ def _prompt_baseline_selection(
 def _prompt_missing_baseline(package_name: str, note: str | None) -> dict[str, object] | None:
     return _plan_selection._prompt_missing_baseline(package_name, note)
 
+
 def _select_observers(device_serial: str, *, mode: str) -> list[str]:
-    return _select_observers_impl(device_serial, mode=mode)
+    return _run_target_adapter.select_observers(
+        device_serial,
+        mode=mode,
+        select_observers_fn=_select_observers_impl,
+    )
 
 
 def _print_device_badge(device_serial: str, device_label: str) -> None:
-    _print_device_badge_impl(
+    _run_target_adapter.print_device_badge(
         device_serial,
         device_label,
+        print_device_badge_fn=_print_device_badge_impl,
         device_status_cache=_DEVICE_STATUS_CACHE,
     )
 
 
 def _print_root_status(device_serial: str, *, force: bool = False) -> bool:
-    return _print_root_status_impl(
+    return _run_target_adapter.print_root_status(
         device_serial,
+        print_root_status_fn=_print_root_status_impl,
         force=force,
         device_status_cache=_DEVICE_STATUS_CACHE,
     )
 
 
 def _print_network_status(device_serial: str, *, force: bool = False) -> None:
-    _print_network_status_impl(
+    _run_target_adapter.print_network_status(
         device_serial,
+        print_network_status_fn=_print_network_status_impl,
         force=force,
         device_status_cache=_DEVICE_STATUS_CACHE,
     )

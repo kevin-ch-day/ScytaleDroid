@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 
-from scytaledroid.Database.db_func.static_analysis import static_findings
-from scytaledroid.Database.db_func.static_analysis import string_analysis
+from scytaledroid.Database.db_func.static_analysis import static_findings, string_analysis
 
 
 class _NoopSession:
@@ -61,11 +60,7 @@ def test_static_findings_redacts_secret_like_detail(monkeypatch):
 
     monkeypatch.setattr(static_findings, "run_sql", _run_sql)
 
-    jwt = (
-        "eyJhbGciOiJSU0EtU0hBMjU2IiwidmVyIjoiMSJ9."
-        "eyJhIjoiYiIsImMiOiJkIn0."
-        "c2lnbmF0dXJlLXBhcnQ"
-    )
+    jwt = "eyJhbGciOiJSU0EtU0hBMjU2IiwidmVyIjoiMSJ9.eyJhIjoiYiIsImMiOiJkIn0.c2lnbmF0dXJlLXBhcnQ"
     static_findings.replace_findings(
         summary_id=1,
         findings=(

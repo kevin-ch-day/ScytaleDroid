@@ -4,20 +4,23 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = [pytest.mark.ui_contract]
 
 
-def test_dynamic_prepare_package_selection_view_uses_menu_adapter_without_extra_text_blocks_arg(monkeypatch):
-    from scytaledroid.DynamicAnalysis import menu as menu_module
-    from scytaledroid.DynamicAnalysis import menu_selection as menu_selection_module
+def test_dynamic_prepare_package_selection_view_uses_menu_adapter_without_extra_text_blocks_arg(
+    monkeypatch,
+):
+    from scytaledroid.DynamicAnalysis.menus import dynamic_menu as menu_module
+    from scytaledroid.DynamicAnalysis.menus import queue_selection as menu_selection_module
 
     monkeypatch.setattr(
         menu_module,
         "list_packages",
         lambda _groups: [("com.example.app", None, None, "Example App")],
     )
-    monkeypatch.setattr(menu_module, "active_research_cohort_packages", lambda: ("com.example.app",))
+    monkeypatch.setattr(
+        menu_module, "active_research_cohort_packages", lambda: ("com.example.app",)
+    )
     monkeypatch.setattr(menu_module, "_summarize_evidence_quota", lambda _pkgs, _cfg: None)
     monkeypatch.setattr(
         menu_module,
@@ -48,7 +51,9 @@ def test_dynamic_prepare_package_selection_view_uses_menu_adapter_without_extra_
         lambda *_args, **_kwargs: {},
     )
 
-    prepared = menu_module._prepare_package_selection_view([SimpleNamespace(package_name="com.example.app")])
+    prepared = menu_module._prepare_package_selection_view(
+        [SimpleNamespace(package_name="com.example.app")]
+    )
 
     assert prepared is not None
     assert prepared.rows == [["1", "Example App"]]
@@ -56,7 +61,7 @@ def test_dynamic_prepare_package_selection_view_uses_menu_adapter_without_extra_
 
 
 def test_dynamic_choose_active_research_cohort_uses_simplified_wording(monkeypatch, capsys):
-    from scytaledroid.DynamicAnalysis import menu as menu_module
+    from scytaledroid.DynamicAnalysis.menus import dynamic_menu as menu_module
 
     monkeypatch.setattr(
         menu_module,
@@ -75,7 +80,9 @@ def test_dynamic_choose_active_research_cohort_uses_simplified_wording(monkeypat
         ],
     )
     monkeypatch.setattr(menu_module, "active_research_cohort_key", lambda: "research_dataset_beta")
-    monkeypatch.setattr(menu_module, "persist_active_research_cohort_key", lambda *_a, **_k: "receipt.json")
+    monkeypatch.setattr(
+        menu_module, "persist_active_research_cohort_key", lambda *_a, **_k: "receipt.json"
+    )
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "2")
 
     selected = menu_module._choose_active_research_cohort()
@@ -90,7 +97,7 @@ def test_dynamic_choose_active_research_cohort_uses_simplified_wording(monkeypat
 
 
 def test_dynamic_state_summary_uses_shared_hint(monkeypatch, capsys):
-    from scytaledroid.DynamicAnalysis import menu_reports as menu_module
+    from scytaledroid.DynamicAnalysis.menus import status_reports as menu_module
 
     monkeypatch.setenv("SCYTALEDROID_UI_LEVEL", "")
     summary = SimpleNamespace(
@@ -115,7 +122,7 @@ def test_dynamic_state_summary_uses_shared_hint(monkeypatch, capsys):
 
 
 def test_dynamic_state_summary_surfaces_repeatability_section(monkeypatch, capsys):
-    from scytaledroid.DynamicAnalysis import menu_reports as menu_module
+    from scytaledroid.DynamicAnalysis.menus import status_reports as menu_module
 
     monkeypatch.setenv("SCYTALEDROID_UI_LEVEL", "")
     summary = SimpleNamespace(
@@ -153,10 +160,12 @@ def test_dynamic_state_summary_surfaces_repeatability_section(monkeypatch, capsy
 
 
 def test_dynamic_state_summary_surfaces_active_research_cohort(monkeypatch, capsys):
-    from scytaledroid.DynamicAnalysis import menu_reports as menu_module
+    from scytaledroid.DynamicAnalysis.menus import status_reports as menu_module
 
     monkeypatch.setenv("SCYTALEDROID_UI_LEVEL", "")
-    monkeypatch.setattr(menu_module, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(
+        menu_module, "active_research_cohort_label", lambda: "Research Dataset Beta"
+    )
     summary = SimpleNamespace(
         can_freeze=False,
         total_runs=1,

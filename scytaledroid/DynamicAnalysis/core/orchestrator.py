@@ -364,7 +364,7 @@ class DynamicRunOrchestrator:
                     run_ctx,
                     on_start=sampler.start if sampler else None,
                     on_end=None,
-                    on_protocol_event=(lambda event_type, details: event_logger.log(event_type, details)),
+                    on_protocol_event=event_logger.log,
                 )
             except ScenarioAbortRequested:
                 scenario_interrupted_reason = "ABORTED_DISCARD"

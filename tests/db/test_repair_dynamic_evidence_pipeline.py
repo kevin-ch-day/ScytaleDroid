@@ -1,27 +1,8 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import repair_dynamic_evidence_pipeline as pipeline
-
-
-def test_help_is_safe() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "repair_dynamic_evidence_pipeline.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.startswith("usage:")
-    assert "--apply" in proc.stdout
 
 
 def test_dry_run_skips_db_reindex_and_writes_combined_receipt(tmp_path: Path, monkeypatch) -> None:

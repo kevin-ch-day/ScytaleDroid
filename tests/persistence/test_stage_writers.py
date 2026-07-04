@@ -19,7 +19,9 @@ def test_persist_permission_and_storage_stage_handles_missing_metadata_map() -> 
         metrics_bundle=SimpleNamespace(contributors=[]),
         baseline_payload={},
     )
-    findings_context = SimpleNamespace(control_summary=None, total_findings=0, control_entry_count=0)
+    findings_context = SimpleNamespace(
+        control_summary=None, total_findings=0, control_entry_count=0
+    )
 
     def _fake_risk(**kwargs):
         calls.setdefault("risk", kwargs)
@@ -30,7 +32,9 @@ def test_persist_permission_and_storage_stage_handles_missing_metadata_map() -> 
         static_run_id=None,
         stage_context=stage_context,
         findings_context=findings_context,
-        raise_db_error=lambda stage, message: (_ for _ in ()).throw(AssertionError(f"{stage}:{message}")),
+        raise_db_error=lambda stage, message: (_ for _ in ()).throw(
+            AssertionError(f"{stage}:{message}")
+        ),
         persist_masvs_controls=lambda *_a, **_k: None,
         persist_storage_surface_data=lambda *_a, **_k: None,
         persist_permission_matrix=lambda **kwargs: calls.setdefault("matrix", kwargs),
@@ -54,14 +58,18 @@ def test_persist_permission_and_storage_stage_passes_apk_id_from_metadata() -> N
         metrics_bundle=SimpleNamespace(contributors=[]),
         baseline_payload={},
     )
-    findings_context = SimpleNamespace(control_summary=None, total_findings=0, control_entry_count=0)
+    findings_context = SimpleNamespace(
+        control_summary=None, total_findings=0, control_entry_count=0
+    )
 
     persist_permission_and_storage_stage(
         run_id=99,
         static_run_id=100,
         stage_context=stage_context,
         findings_context=findings_context,
-        raise_db_error=lambda stage, message: (_ for _ in ()).throw(AssertionError(f"{stage}:{message}")),
+        raise_db_error=lambda stage, message: (_ for _ in ()).throw(
+            AssertionError(f"{stage}:{message}")
+        ),
         persist_masvs_controls=lambda *_a, **_k: None,
         persist_storage_surface_data=lambda *_a, **_k: None,
         persist_permission_matrix=lambda **kwargs: calls.setdefault("matrix", kwargs),
@@ -93,11 +101,11 @@ def test_persist_metrics_and_sections_stage_writes_static_sections_only() -> Non
         findings_context=findings_context,
         outcome=outcome,
         note_db_error=noted.append,
-        raise_db_error=lambda stage, message: (_ for _ in ()).throw(RuntimeError(f"{stage}:{message}")),
+        raise_db_error=lambda stage, message: (_ for _ in ()).throw(
+            RuntimeError(f"{stage}:{message}")
+        ),
         persist_static_sections_wrapper=lambda **_kwargs: ([], True, 3),
     )
     assert outcome.baseline_written is True
     assert outcome.string_samples_persisted == 3
     assert not noted
-
-

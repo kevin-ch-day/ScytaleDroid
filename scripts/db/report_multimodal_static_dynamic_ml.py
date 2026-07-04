@@ -417,7 +417,6 @@ def _build_fused_run_rows(
     for row in feature_rows:
         static_row, match_mode = _choose_static_surface(row, by_package, by_package_static_run)
         static_risk_load = _static_risk_load(static_row or {})
-        domain_count = dynamic_ml._safe_int(row.get("domain_count"))
         first_party_domain_count = dynamic_ml._safe_int(row.get("first_party_domain_count"))
         third_party_domain_count = dynamic_ml._safe_int(row.get("third_party_domain_count"))
         unresolved_domain_count = dynamic_ml._safe_int(row.get("unresolved_domain_count"))
@@ -938,7 +937,11 @@ def _correlation_stability_note(
     return "exploratory effect"
 
 
-def _build_correlation_rows(app_rollups: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _build_correlation_rows(
+    app_rollups: Sequence[Mapping[str, Any]],
+    *,
+    n_resamples: int = 4000,
+) -> list[dict[str, Any]]:
     static_metrics = (
         "permission_audit_score_capped",
         "permission_run_score",
@@ -969,8 +972,8 @@ def _build_correlation_rows(app_rollups: Sequence[Mapping[str, Any]]) -> list[di
             x_values = [pair[0] for pair in paired]
             y_values = [pair[1] for pair in paired]
             rho = _spearman_rho(x_values, y_values)
-            ci_low, ci_high = _bootstrap_spearman_ci(x_values, y_values)
-            permutation_p = _spearman_permutation_p_value(x_values, y_values)
+            ci_low, ci_high = _bootstrap_spearman_ci(x_values, y_values, n_resamples=n_resamples)
+            permutation_p = _spearman_permutation_p_value(x_values, y_values, n_resamples=n_resamples)
             direction = "positive" if rho and rho > 0 else "negative" if rho and rho < 0 else "neutral"
             out.append(
                 {
@@ -1248,9 +1251,8 @@ def _nearest_centroid_loocv(
     features: Sequence[str],
     feature_set_name: str,
     note: str,
+    exact_ci: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    from scipy.stats import binomtest
-
     usable = [row for row in rows if dynamic_ml._norm_text(row.get(label_field))]
     label_set = sorted({dynamic_ml._norm_text(row.get(label_field)) for row in usable if dynamic_ml._norm_text(row.get(label_field))})
     if len(usable) < 3 or len(label_set) < 2:
@@ -1312,9 +1314,14 @@ def _nearest_centroid_loocv(
     ci_low = None
     ci_high = None
     if predictions:
-        ci = binomtest(correct, len(predictions)).proportion_ci(confidence_level=0.95, method="exact")
-        ci_low = float(ci.low)
-        ci_high = float(ci.high)
+        if exact_ci:
+            from scipy.stats import binomtest
+
+            ci = binomtest(correct, len(predictions)).proportion_ci(confidence_level=0.95, method="exact")
+            ci_low = float(ci.low)
+            ci_high = float(ci.high)
+        else:
+            ci_low, ci_high = _wilson_proportion_ci(correct, len(predictions))
     summary = {
         "target": target_name,
         "feature_set": feature_set_name,
@@ -1327,6 +1334,16 @@ def _nearest_centroid_loocv(
         "notes": note,
     }
     return predictions, summary
+
+
+def _wilson_proportion_ci(successes: int, total: int, *, z: float = 1.96) -> tuple[float | None, float | None]:
+    if total <= 0:
+        return None, None
+    p_hat = float(successes) / float(total)
+    denom = 1.0 + (z * z / float(total))
+    centre = p_hat + (z * z / (2.0 * float(total)))
+    margin = z * math.sqrt((p_hat * (1.0 - p_hat) + (z * z / (4.0 * float(total)))) / float(total))
+    return max(0.0, (centre - margin) / denom), min(1.0, (centre + margin) / denom)
 
 
 def _feature_separation_scores(
@@ -1376,7 +1393,11 @@ def _feature_separation_scores(
     return out
 
 
-def _build_classification_outputs(app_rollups: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+def _build_classification_outputs(
+    app_rollups: Sequence[Mapping[str, Any]],
+    *,
+    exact_ci: bool = True,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     summaries: list[dict[str, Any]] = []
     predictions: list[dict[str, Any]] = []
     feature_scores: list[dict[str, Any]] = []
@@ -1418,6 +1439,7 @@ def _build_classification_outputs(app_rollups: Sequence[Mapping[str, Any]]) -> t
             features=features,
             feature_set_name=feature_set_name,
             note=note,
+            exact_ci=exact_ci,
         )
         predictions.extend(pred_rows)
         summaries.append(summary)

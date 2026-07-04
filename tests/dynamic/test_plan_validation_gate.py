@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.DynamicAnalysis.plans import loader
 
 
@@ -198,7 +197,10 @@ def test_plan_validation_missing_static_handoff_hash_column_degrades_cleanly(mon
     outcome = loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")
 
     assert outcome.status == "FAIL"
-    assert any("static_analysis_runs missing fields: static_handoff_hash" in reason for reason in outcome.reasons)
+    assert any(
+        "static_analysis_runs missing fields: static_handoff_hash" in reason
+        for reason in outcome.reasons
+    )
 
 
 def test_plan_validation_unknown_static_handoff_hash_column_degrades_cleanly(monkeypatch):
@@ -217,7 +219,10 @@ def test_plan_validation_unknown_static_handoff_hash_column_degrades_cleanly(mon
     outcome = loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")
 
     assert outcome.status == "FAIL"
-    assert any("static_analysis_runs missing fields: static_handoff_hash" in reason for reason in outcome.reasons)
+    assert any(
+        "static_analysis_runs missing fields: static_handoff_hash" in reason
+        for reason in outcome.reasons
+    )
 
 
 def test_plan_validation_re_raises_unrelated_db_errors(monkeypatch):

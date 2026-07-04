@@ -29,6 +29,7 @@ class PackageRunCounts:
     extra_valid_runs: int
     baseline_extra_valid: int = 0
     baseline_low_signal_valid: int = 0
+    baseline_not_idle_valid: int = 0
     interactive_extra_valid: int = 0
     interactive_low_signal_valid: int = 0
 
@@ -67,6 +68,15 @@ def dataset_tracker_counts(package_name: str) -> PackageRunCounts:
     interactive_valid = int(entry.get("interactive_valid_runs") or 0) if isinstance(entry, dict) else 0
     quota_met = bool(entry.get("quota_met")) if isinstance(entry, dict) else False
     extra_valid = int(entry.get("extra_valid_runs") or 0) if isinstance(entry, dict) else 0
+    baseline_not_idle = sum(
+        1
+        for row in runs
+        if isinstance(row, dict)
+        and row.get("valid_dataset_run") is True
+        and row.get("countable") is False
+        and str(row.get("run_profile") or "").strip().lower() == "baseline_idle"
+        and row.get("baseline_not_idle") is True
+    )
     return PackageRunCounts(
         total_runs=total,
         valid_runs=valid,
@@ -74,6 +84,7 @@ def dataset_tracker_counts(package_name: str) -> PackageRunCounts:
         interactive_valid_runs=interactive_valid,
         quota_met=quota_met,
         extra_valid_runs=extra_valid,
+        baseline_not_idle_valid=baseline_not_idle,
     )
 
 

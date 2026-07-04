@@ -263,6 +263,7 @@ def prepare_group_training_inputs(
                 "tcp_ratio": tcp,
                 "udp_ratio": udp,
                 "pcap_bytes": _pcap_size_bytes(run),
+                **_security_stratification_from_run(run),
             }
         )
 
@@ -477,6 +478,30 @@ def _transport_ratios_from_inputs(inputs: RunInputs) -> tuple[float | None, floa
     tcp_ratio = float(tcp_b) / total if total > 0 else None
     udp_ratio = float(udp_b) / total if total > 0 else None
     return _clamp01(tls_ratio), _clamp01(quic_ratio), _clamp01(tcp_ratio), _clamp01(udp_ratio)
+
+
+def _security_stratification_from_run(run: RunInputs) -> dict[str, Any]:
+    proxies = run.pcap_features.get("proxies") if isinstance(run.pcap_features, dict) else None
+    if not isinstance(proxies, dict):
+        proxies = {}
+    mismatch_class = None
+    overlap_path = run.run_dir / "analysis" / "static_dynamic_overlap.json"
+    if overlap_path.exists():
+        try:
+            overlap = json.loads(overlap_path.read_text(encoding="utf-8"))
+            if isinstance(overlap, dict) and isinstance(overlap.get("cleartext_posture"), dict):
+                mismatch_class = overlap["cleartext_posture"].get("mismatch_class")
+        except Exception:
+            mismatch_class = None
+    if mismatch_class is None and isinstance(run.plan, dict) and isinstance(run.pcap_report, dict):
+        from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
+
+        mismatch_class = compute_static_dynamic_cleartext_posture(run.plan, run.pcap_report).get("mismatch_class")
+    return {
+        "cleartext_http_observed": proxies.get("cleartext_http_observed"),
+        "security_finding_count": proxies.get("security_finding_count"),
+        "cleartext_mismatch_class": mismatch_class,
+    }
 
 
 def _extract_static_features_snapshot(plan: dict[str, Any] | None) -> dict[str, Any]:

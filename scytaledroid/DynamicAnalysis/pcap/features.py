@@ -218,10 +218,16 @@ def _extract_features(
     owner_hits = service_context.get("owner_class_hit_counts") if isinstance(service_context, dict) else {}
     focus_hits = service_signals.get("focus_area_hit_counts") if isinstance(service_signals, dict) else {}
     severity_hits = service_signals.get("severity_hit_counts") if isinstance(service_signals, dict) else {}
+    surface = report.get("security_surface") if isinstance(report.get("security_surface"), dict) else {}
+    cleartext_surface = surface.get("cleartext") if isinstance(surface.get("cleartext"), dict) else {}
+    dns_surface = surface.get("dns_anomalies") if isinstance(surface.get("dns_anomalies"), dict) else {}
+    tls_surface = surface.get("tls_surface") if isinstance(surface.get("tls_surface"), dict) else {}
+    threat_surface = surface.get("threat_heuristics") if isinstance(surface.get("threat_heuristics"), dict) else {}
+    surface_ok = str(surface.get("status") or "") == "ok"
     return {
         # Backwards-compatible feature schema tag (Paper #2). New keys must only be
         # appended; existing key semantics must not change.
-        "feature_schema_version": "v1.2",
+        "feature_schema_version": "v1.3",
         "metrics": {
             "packet_count": packet_count,
             "data_size_bytes": data_bytes,
@@ -275,6 +281,25 @@ def _extract_features(
             "third_party_service_hits": _safe_int((owner_hits or {}).get("third_party")) if isinstance(owner_hits, dict) else None,
             "privacy_signal_hits": _safe_int((focus_hits or {}).get("privacy")) if isinstance(focus_hits, dict) else None,
             "high_severity_signal_hits": _safe_int((severity_hits or {}).get("high")) if isinstance(severity_hits, dict) else None,
+            "security_finding_count": _safe_int(surface.get("finding_count")) if surface_ok else None,
+            "security_risk_flag_count": len(surface.get("risk_flags") or []) if surface_ok else None,
+            "cleartext_http_observed": 1 if cleartext_surface.get("http_observed") else 0 if surface_ok else None,
+            "cleartext_protocol_observed": (
+                1 if cleartext_surface.get("cleartext_protocol_observed") else 0 if surface_ok else None
+            ),
+            "plaintext_protocols_observed": (
+                ";".join(cleartext_surface.get("plaintext_protocols_observed") or []) if surface_ok else None
+            ),
+            "decoded_protocols_observed": (
+                ";".join(cleartext_surface.get("decoded_protocols_observed") or []) if surface_ok else None
+            ),
+            "plaintext_protocol_frames": _safe_int(cleartext_surface.get("plaintext_protocol_frames")) if surface_ok else None,
+            "dns_nxdomain_responses": _safe_int(dns_surface.get("nxdomain_responses")) if surface_ok else None,
+            "dns_txt_queries": _safe_int(dns_surface.get("txt_queries")) if surface_ok else None,
+            "tls_alert_count": _safe_int(tls_surface.get("tls_alert_count")) if surface_ok else None,
+            "tls_self_signed_count": _safe_int(tls_surface.get("self_signed_count")) if surface_ok else None,
+            "security_heuristic_score": _safe_int(threat_surface.get("heuristic_score")) if surface_ok else None,
+            "decoded_cleartext_stream_count": _safe_int(cleartext_surface.get("decoded_stream_count")) if surface_ok else None,
         },
         "quality": {
             "report_status": report.get("report_status"),
@@ -284,7 +309,7 @@ def _extract_features(
                 "status": "not_attempted",
                 "reason": None,
             },
-            "feature_schema_version": "v1.2",
+            "feature_schema_version": "v1.3",
             "protocol": {
                 "run_profile": (operator or {}).get("run_profile"),
                 "run_sequence": (operator or {}).get("run_sequence"),
@@ -332,6 +357,21 @@ def _extract_features(
         "service_signals": {
             "status": str(service_signals.get("status") or "not_attempted") if isinstance(service_signals, dict) else "not_attempted",
             "summary": service_signals if isinstance(service_signals, dict) else {},
+        },
+        "security_surface": {
+            "status": str(surface.get("status") or "not_attempted") if surface else "not_attempted",
+            "summary": {
+                "finding_count": surface.get("finding_count"),
+                "risk_flags": surface.get("risk_flags") or [],
+                "cleartext_visibility_class": cleartext_surface.get("visibility_class"),
+                "http_observed": cleartext_surface.get("http_observed"),
+                "cleartext_protocol_observed": cleartext_surface.get("cleartext_protocol_observed"),
+                "plaintext_protocols_observed": cleartext_surface.get("plaintext_protocols_observed") or [],
+                "decoded_protocols_observed": cleartext_surface.get("decoded_protocols_observed") or [],
+                "decoded_stream_count": cleartext_surface.get("decoded_stream_count"),
+            }
+            if surface_ok
+            else {},
         },
     }
 

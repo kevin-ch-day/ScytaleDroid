@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis import menu
+from scytaledroid.DynamicAnalysis.menus import dynamic_menu as menu
 
 
 class _Cfg:
@@ -53,15 +53,35 @@ def _write_manifest(
     (run_dir / "inputs" / "static_dynamic_plan.json").write_text(json.dumps(plan), encoding="utf-8")
 
 
-def test_summarize_evidence_quota_counts_manual_after_baselines_by_time(monkeypatch, tmp_path: Path) -> None:
+def test_summarize_evidence_quota_counts_manual_after_baselines_by_time(
+    monkeypatch, tmp_path: Path
+) -> None:
     root = tmp_path / "output" / "evidence" / "dynamic"
     package = "bbc.mobile.news.ww"
 
-    _write_manifest(root, "a-manual-1", package, run_profile="interaction_manual", ended_at="2026-06-15T19:38:04Z")
-    _write_manifest(root, "b-manual-2", package, run_profile="interaction_manual", ended_at="2026-06-15T19:52:42Z")
-    _write_manifest(root, "c-base-1", package, run_profile="baseline_idle", ended_at="2026-06-15T18:31:28Z")
-    _write_manifest(root, "d-base-2", package, run_profile="baseline_idle", ended_at="2026-06-15T18:39:48Z")
-    _write_manifest(root, "e-base-3", package, run_profile="baseline_idle", ended_at="2026-06-15T18:46:09Z")
+    _write_manifest(
+        root,
+        "a-manual-1",
+        package,
+        run_profile="interaction_manual",
+        ended_at="2026-06-15T19:38:04Z",
+    )
+    _write_manifest(
+        root,
+        "b-manual-2",
+        package,
+        run_profile="interaction_manual",
+        ended_at="2026-06-15T19:52:42Z",
+    )
+    _write_manifest(
+        root, "c-base-1", package, run_profile="baseline_idle", ended_at="2026-06-15T18:31:28Z"
+    )
+    _write_manifest(
+        root, "d-base-2", package, run_profile="baseline_idle", ended_at="2026-06-15T18:39:48Z"
+    )
+    _write_manifest(
+        root, "e-base-3", package, run_profile="baseline_idle", ended_at="2026-06-15T18:46:09Z"
+    )
 
     monkeypatch.setattr(menu.app_config, "OUTPUT_DIR", str(tmp_path / "output"))
     monkeypatch.setattr(
@@ -81,12 +101,28 @@ def test_summarize_evidence_quota_counts_manual_after_baselines_by_time(monkeypa
     assert out["extra_eligible_runs"] == 0
 
 
-def test_summarize_evidence_quota_respects_explicit_non_countable_low_signal_run(monkeypatch, tmp_path: Path) -> None:
+def test_summarize_evidence_quota_respects_explicit_non_countable_low_signal_run(
+    monkeypatch, tmp_path: Path
+) -> None:
     root = tmp_path / "output" / "evidence" / "dynamic"
     package = "com.cnn.mobile.android.phone"
 
-    _write_manifest(root, "base-1", package, run_profile="baseline_idle", ended_at="2026-06-28T14:58:38Z", countable=True)
-    _write_manifest(root, "base-2", package, run_profile="baseline_idle", ended_at="2026-06-28T15:03:55Z", countable=True)
+    _write_manifest(
+        root,
+        "base-1",
+        package,
+        run_profile="baseline_idle",
+        ended_at="2026-06-28T14:58:38Z",
+        countable=True,
+    )
+    _write_manifest(
+        root,
+        "base-2",
+        package,
+        run_profile="baseline_idle",
+        ended_at="2026-06-28T15:03:55Z",
+        countable=True,
+    )
     _write_manifest(
         root,
         "base-3-low",

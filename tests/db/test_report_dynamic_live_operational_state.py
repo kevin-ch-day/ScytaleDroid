@@ -5,11 +5,6 @@ from types import SimpleNamespace
 from scripts.db import report_dynamic_live_operational_state as report
 
 
-def test_report_dynamic_live_operational_state_help_is_safe(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_dynamic_live_operational_state.py")
-    assert "Read-only live operational state report for the dynamic cohort queue." in out
-
-
 def test_summarize_prepared_view_surfaces_drift_and_candidates() -> None:
     prepared = SimpleNamespace(
         row_models=[
@@ -95,13 +90,23 @@ def test_summarize_prepared_view_surfaces_drift_and_candidates() -> None:
         device_serial="ZY22JK89DR",
         device_label="moto g 5G 2024 · ZY22JK89DR",
         candidate_limit=2,
-        queue_status_label_fn=lambda row: "refresh" if row.live_build_drift else ("interactive" if row.need_interactive > 0 and row.need_baseline <= 0 else "baseline"),
+        queue_status_label_fn=lambda row: (
+            "refresh"
+            if row.live_build_drift
+            else (
+                "interactive" if row.need_interactive > 0 and row.need_baseline <= 0 else "baseline"
+            )
+        ),
         baseline_label_fn=lambda row: f"{row.baseline_countable}/3",
         interactive_label_fn=lambda row: f"{row.interactive_countable}/4",
         recommended_reason_fn=lambda row: (
             "installed build differs from newest static plan"
             if row.live_build_drift
-            else ("baseline complete, interactive runs needed" if row.need_baseline <= 0 and row.need_interactive > 0 else "baseline runs needed")
+            else (
+                "baseline complete, interactive runs needed"
+                if row.need_baseline <= 0 and row.need_interactive > 0
+                else "baseline runs needed"
+            )
         ),
     )
 

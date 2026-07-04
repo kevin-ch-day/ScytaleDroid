@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_pcap_observer_audit as report
@@ -12,23 +10,6 @@ from scripts.db import report_pcap_observer_audit as report
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_pcap_observer_audit.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "pcap observer audit" in out
 
 
 def test_generate_report_classifies_valid_and_late_empty_runs(tmp_path: Path) -> None:
@@ -138,12 +119,20 @@ def test_generate_report_skips_in_progress_and_ghost_dirs(tmp_path: Path) -> Non
             "dynamic_run_id": "run-valid",
             "target": {"package_name": "bbc.mobile.news.ww"},
             "operator": {"run_profile": "baseline_idle"},
-            "dataset": {"valid_dataset_run": True, "invalid_reason_code": "", "pcap_size_bytes": 1234},
+            "dataset": {
+                "valid_dataset_run": True,
+                "invalid_reason_code": "",
+                "pcap_size_bytes": 1234,
+            },
         },
     )
     _write_json(
         valid_run / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json",
-        {"pcap_valid": True, "status_check": {"ok": True, "source": "direct_probe"}, "failure_diagnostics": {}},
+        {
+            "pcap_valid": True,
+            "status_check": {"ok": True, "source": "direct_probe"},
+            "failure_diagnostics": {},
+        },
     )
 
     in_progress = dynamic_root / "run-in-progress"

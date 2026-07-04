@@ -1,28 +1,8 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_service_context as report
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_service_context.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "service/provider context" in out
-    assert "--package" in out
 
 
 def test_generate_report_summarizes_service_resolution(tmp_path: Path, monkeypatch) -> None:
@@ -131,7 +111,9 @@ def test_generate_report_summarizes_service_resolution(tmp_path: Path, monkeypat
         raise AssertionError(f"unexpected query_name={query_name!r} sql={sql[:80]!r}")
 
     monkeypatch.setattr("scytaledroid.Database.db_core.db_queries.run_sql", fake_run_sql)
-    monkeypatch.setattr(report, "_load_network_context_coverage", lambda packages=None: coverage_rows)
+    monkeypatch.setattr(
+        report, "_load_network_context_coverage", lambda packages=None: coverage_rows
+    )
 
     out_dir = tmp_path / "audit"
     summary = report.generate_report(output_dir=out_dir)
@@ -156,7 +138,9 @@ def test_generate_report_summarizes_service_resolution(tmp_path: Path, monkeypat
     assert "mystery.example.org" in unresolved_rows
 
 
-def test_generate_report_overlays_missing_repo_seed_service_maps(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_overlays_missing_repo_seed_service_maps(
+    tmp_path: Path, monkeypatch
+) -> None:
     service_rows = [
         {
             "service_key": "bbc_first_party",

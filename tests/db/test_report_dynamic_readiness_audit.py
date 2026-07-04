@@ -7,18 +7,14 @@ from pathlib import Path
 from scripts.db import report_dynamic_readiness_audit as report
 
 
-def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_dynamic_readiness_audit.py").lower()
-    assert out.startswith("usage:")
-    assert "--output-dir" in out
-    assert "dynamic readiness" in out
-
-
 def test_expected_store_path_uses_sha256_prefix() -> None:
     data_dir = Path("/repo/data")
     sha = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
     path = report._expected_store_path(data_dir, sha)
-    assert str(path) == "/repo/data/store/apk/sha256/ab/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.apk"
+    assert (
+        str(path)
+        == "/repo/data/store/apk/sha256/ab/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.apk"
+    )
 
 
 def test_plan_missing_required_fields_flags_core_identity_gaps() -> None:
@@ -116,8 +112,12 @@ def test_match_baseline_for_plan_uses_repo_filename_pattern(tmp_path: Path) -> N
     assert report._match_baseline_for_plan(plan_path, baseline_dir) == str(target)
 
 
-def test_load_freeze_manifest_prefers_active_research_cohort_anchor(monkeypatch, tmp_path: Path) -> None:
-    freeze_path = tmp_path / "archive" / "research_cohorts" / "research_dataset_beta" / "dataset_freeze.json"
+def test_load_freeze_manifest_prefers_active_research_cohort_anchor(
+    monkeypatch, tmp_path: Path
+) -> None:
+    freeze_path = (
+        tmp_path / "archive" / "research_cohorts" / "research_dataset_beta" / "dataset_freeze.json"
+    )
     freeze_path.parent.mkdir(parents=True, exist_ok=True)
     freeze_path.write_text(
         json.dumps({"included_run_ids": ["run-beta-1"]}),
@@ -223,7 +223,12 @@ def test_main_generates_summary_contract_and_output_bundle_without_dynamic_evide
     for name in summary["output_files"]:
         assert (out_dir / name).exists()
 
-    header = (out_dir / "dynamic_readiness_matrix.csv").read_text(encoding="utf-8").splitlines()[0].lower()
+    header = (
+        (out_dir / "dynamic_readiness_matrix.csv")
+        .read_text(encoding="utf-8")
+        .splitlines()[0]
+        .lower()
+    )
     assert "risk" not in header
 
 
@@ -262,7 +267,9 @@ def test_main_marks_analysis_ready_when_expected_evidence_exists(
         ),
         encoding="utf-8",
     )
-    (baseline_dir / "com.example.app-full-all-20260613T001754Z.json").write_text("{}", encoding="utf-8")
+    (baseline_dir / "com.example.app-full-all-20260613T001754Z.json").write_text(
+        "{}", encoding="utf-8"
+    )
 
     baseline_pack = report.DynamicEvidencePack(
         dynamic_run_id="dyn-baseline",

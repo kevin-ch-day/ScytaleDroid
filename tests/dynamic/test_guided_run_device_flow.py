@@ -3,15 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.DynamicAnalysis.controllers import guided_run
-
 from tests.dynamic._guided_run_state_support import (
     make_dataset_state,
     one_shot_package_selector,
     patch_guided_run_context,
 )
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.state_contract]
 
@@ -25,7 +22,11 @@ def test_guided_run_selected_app_prefers_display_label(monkeypatch, capsys) -> N
         package_name=package,
         display_name="BBC News",
     )
-    monkeypatch.setattr(guided_run, "load_dataset_run_state", lambda _package_name, config=None: make_dataset_state(package))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(package),
+    )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
 
     guided_run.run_guided_dataset_run(
@@ -49,8 +50,14 @@ def test_guided_run_selected_app_falls_back_to_db_display_label(monkeypatch, cap
         package_name=package,
         display_name=None,
     )
-    monkeypatch.setattr(guided_run, "load_display_name_map", lambda _groups: {package: "The Guardian"})
-    monkeypatch.setattr(guided_run, "load_dataset_run_state", lambda _package_name, config=None: make_dataset_state(package))
+    monkeypatch.setattr(
+        guided_run, "load_display_name_map", lambda _groups: {package: "The Guardian"}
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(package),
+    )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
 
     guided_run.run_guided_dataset_run(
@@ -74,7 +81,11 @@ def test_guided_run_selected_app_normalizes_x_display_label(monkeypatch, capsys)
         package_name=package,
         display_name="X",
     )
-    monkeypatch.setattr(guided_run, "load_dataset_run_state", lambda _package_name, config=None: make_dataset_state(package))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(package),
+    )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
 
     guided_run.run_guided_dataset_run(
@@ -89,7 +100,7 @@ def test_guided_run_selected_app_normalizes_x_display_label(monkeypatch, capsys)
     assert "Package: com.twitter.android" in out
 
 
-def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch) -> None:
+def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch, capsys) -> None:
     package = "bbc.mobile.news.ww"
     select_device_calls = {"count": 0}
     subtitles: list[str | None] = []
@@ -113,7 +124,11 @@ def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch)
         return None
 
     monkeypatch.setattr(guided_run, "select_device", _select_device)
-    monkeypatch.setattr(guided_run, "load_dataset_run_state", lambda _package_name, config=None: make_dataset_state(package))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(package),
+    )
     monkeypatch.setattr(guided_run.prompt_utils, "prompt_yes_no", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
     monkeypatch.setattr(guided_run, "time", SimpleNamespace(sleep=lambda _s: None))
@@ -147,9 +162,12 @@ def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch)
         print_device_badge=lambda *_args: None,
     )
 
+    out = capsys.readouterr().out
     assert select_device_calls["count"] == 1
     assert subtitles[0] == "Device: not selected"
     assert subtitles[1] == "Device: moto"
+    assert "Quota candidate: yes, subject to validity and quota eligibility." in out
+    assert "Cohort quota impact: YES (if VALID)" not in out
 
 
 def test_guided_run_seeds_queue_from_active_selected_device(monkeypatch) -> None:
@@ -162,7 +180,11 @@ def test_guided_run_seeds_queue_from_active_selected_device(monkeypatch) -> None
         display_name="BBC News",
         active_device={"serial": "ZY22JK89DR", "model": "moto"},
     )
-    monkeypatch.setattr(guided_run, "load_dataset_run_state", lambda _package_name, config=None: make_dataset_state(package))
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(package),
+    )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
 
     def _select_package(_groups, title, subtitle=None):
@@ -179,7 +201,9 @@ def test_guided_run_seeds_queue_from_active_selected_device(monkeypatch) -> None
     assert subtitles[0] == "Device: moto · ZY22JK89DR"
 
 
-def test_choose_capture_device_reuses_selected_device_without_reopening_selector(monkeypatch, capsys) -> None:
+def test_choose_capture_device_reuses_selected_device_without_reopening_selector(
+    monkeypatch, capsys
+) -> None:
     selector_calls = {"count": 0}
     prompt_calls = {"count": 0}
 
@@ -198,7 +222,9 @@ def test_choose_capture_device_reuses_selected_device_without_reopening_selector
     monkeypatch.setattr(
         guided_run,
         "select_device",
-        lambda **_kwargs: selector_calls.__setitem__("count", selector_calls["count"] + 1) or ("other", "other"),
+        lambda **_kwargs: (
+            selector_calls.__setitem__("count", selector_calls["count"] + 1) or ("other", "other")
+        ),
     )
     monkeypatch.setattr(
         guided_run.prompt_utils,
@@ -220,7 +246,9 @@ def test_choose_capture_device_reuses_selected_device_without_reopening_selector
     assert "Change device" not in out
 
 
-def test_choose_capture_device_can_open_change_device_selector_when_saved_device_is_not_detected(monkeypatch) -> None:
+def test_choose_capture_device_can_open_change_device_selector_when_saved_device_is_not_detected(
+    monkeypatch,
+) -> None:
     selector_kwargs = {}
 
     monkeypatch.setattr(
@@ -275,7 +303,9 @@ def test_choose_capture_device_warns_when_saved_device_is_not_detected(monkeypat
     monkeypatch.setattr(
         guided_run,
         "select_device",
-        lambda **_kwargs: selector_calls.__setitem__("count", selector_calls["count"] + 1) or ("other", "other"),
+        lambda **_kwargs: (
+            selector_calls.__setitem__("count", selector_calls["count"] + 1) or ("other", "other")
+        ),
     )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
 
@@ -288,3 +318,7 @@ def test_choose_capture_device_warns_when_saved_device_is_not_detected(monkeypat
     out = capsys.readouterr().out
     assert "Capture device" in out
     assert "Selected device is not currently detected via adb." in out
+    assert "Keep selected device" in out
+    assert "Change device" in out
+    assert "wait for adb reconnect on current serial" not in out
+    assert "pick a different capture device" not in out

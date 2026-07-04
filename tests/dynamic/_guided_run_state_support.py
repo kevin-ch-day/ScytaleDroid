@@ -4,9 +4,11 @@ from types import SimpleNamespace
 from typing import Any
 
 from scytaledroid.DynamicAnalysis.controllers import guided_run
-from scytaledroid.DynamicAnalysis.services.dataset_run_state import DatasetRunRecentSummary, DatasetRunState
+from scytaledroid.DynamicAnalysis.services.dataset_run_state import (
+    DatasetRunRecentSummary,
+    DatasetRunState,
+)
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import PackageRunCounts
-
 
 DEFAULT_SERIAL = "ZY22JK89DR"
 DEFAULT_DEVICE_MODEL = "moto"
@@ -84,10 +86,13 @@ def make_dataset_state(
     **extra: Any,
 ) -> DatasetRunState:
     if total_runs is None:
-        total_runs = max(valid_runs, baseline_valid_runs + interactive_valid_runs + extra_valid_runs)
+        total_runs = max(
+            valid_runs, baseline_valid_runs + interactive_valid_runs + extra_valid_runs
+        )
     if quota_met is None:
         quota_met = (
-            baseline_valid_runs >= baseline_required and interactive_valid_runs >= interactive_required
+            baseline_valid_runs >= baseline_required
+            and interactive_valid_runs >= interactive_required
         )
     if quota_counted_local is None:
         quota_counted_local = max(0, valid_runs - extra_valid_runs)

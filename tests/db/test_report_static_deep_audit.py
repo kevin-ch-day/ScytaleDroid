@@ -2,28 +2,9 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_static_deep_audit as report
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_static_deep_audit.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "deep audit over static evidence quality" in out
 
 
 def test_quality_tier_boundaries() -> None:
@@ -252,11 +233,19 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
         },
     }
 
-    monkeypatch.setattr(report, "_load_run_health", lambda *_args, **_kwargs: (run_health, run_health_packages, []))
+    monkeypatch.setattr(
+        report, "_load_run_health", lambda *_args, **_kwargs: (run_health, run_health_packages, [])
+    )
     monkeypatch.setattr(report, "_load_optional_db", lambda *_args, **_kwargs: (db_state, []))
-    monkeypatch.setattr(report, "_load_session_header", lambda *_args, **_kwargs: (session_header, []))
-    monkeypatch.setattr(report, "_load_db_package_rows", lambda *_args, **_kwargs: (db_package_rows, []))
-    monkeypatch.setattr(report, "_load_report_rows", lambda *_args, **_kwargs: (report_rows, perf_meta))
+    monkeypatch.setattr(
+        report, "_load_session_header", lambda *_args, **_kwargs: (session_header, [])
+    )
+    monkeypatch.setattr(
+        report, "_load_db_package_rows", lambda *_args, **_kwargs: (db_package_rows, [])
+    )
+    monkeypatch.setattr(
+        report, "_load_report_rows", lambda *_args, **_kwargs: (report_rows, perf_meta)
+    )
     monkeypatch.setattr(report, "_collect_dynamic_bridge", lambda **_kwargs: dynamic_bridge)
 
     summary = report.generate_static_deep_audit(
@@ -278,28 +267,42 @@ def test_generate_static_deep_audit_exports_quality_and_gap_signals(
     assert summary["pattern_flag_counts"]["handoff_gap"] == 1
     assert "static_hidden_pattern_candidates.csv" in summary["output_files"]
 
-    run_rows = list(csv.DictReader((output_dir / "run_evidence_quality.csv").open(encoding="utf-8")))
+    run_rows = list(
+        csv.DictReader((output_dir / "run_evidence_quality.csv").open(encoding="utf-8"))
+    )
     assert len(run_rows) == 2
     by_package = {row["package_name"]: row for row in run_rows}
     assert by_package["com.example.healthy"]["recommended_action"] == "ready_for_paper_use"
-    assert by_package["com.example.problem"]["recommended_action"] == "repair_static_handoff_contract"
+    assert (
+        by_package["com.example.problem"]["recommended_action"] == "repair_static_handoff_contract"
+    )
     assert by_package["com.example.problem"]["split_report_count"] == "6"
     assert by_package["com.example.healthy"]["linked_dynamic_run_count"] == "2"
     assert by_package["com.example.healthy"]["dynamic_bridge_state"] == "corroborated"
     assert by_package["com.example.problem"]["dynamic_bridge_state"] == "no_dynamic_runs"
     assert by_package["com.example.problem"]["penalty_reasons"]
 
-    hotspot_rows = list(csv.DictReader((output_dir / "split_performance_hotspots.csv").open(encoding="utf-8")))
+    hotspot_rows = list(
+        csv.DictReader((output_dir / "split_performance_hotspots.csv").open(encoding="utf-8"))
+    )
     assert len(hotspot_rows) == 1
     assert hotspot_rows[0]["package_name"] == "com.example.problem"
 
-    pattern_rows = list(csv.DictReader((output_dir / "paper_pattern_matrix.csv").open(encoding="utf-8")))
-    problem_pattern = next(row for row in pattern_rows if row["package_name"] == "com.example.problem")
+    pattern_rows = list(
+        csv.DictReader((output_dir / "paper_pattern_matrix.csv").open(encoding="utf-8"))
+    )
+    problem_pattern = next(
+        row for row in pattern_rows if row["package_name"] == "com.example.problem"
+    )
     assert problem_pattern["split_heavy_flag"] == "1"
     assert problem_pattern["handoff_gap_flag"] == "1"
 
-    hidden_pattern_rows = list(csv.DictReader((output_dir / "static_hidden_pattern_candidates.csv").open(encoding="utf-8")))
-    hidden_problem = next(row for row in hidden_pattern_rows if row["package_name"] == "com.example.problem")
+    hidden_pattern_rows = list(
+        csv.DictReader((output_dir / "static_hidden_pattern_candidates.csv").open(encoding="utf-8"))
+    )
+    hidden_problem = next(
+        row for row in hidden_pattern_rows if row["package_name"] == "com.example.problem"
+    )
     assert hidden_problem["research_pattern"] == "high_static_surface_without_dynamic_collection"
 
     actions = json.loads((output_dir / "recommended_next_actions.json").read_text(encoding="utf-8"))

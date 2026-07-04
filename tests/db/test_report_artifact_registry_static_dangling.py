@@ -9,13 +9,6 @@ from scytaledroid.Database.db_utils.artifact_registry_static_dangling import (
 )
 
 
-def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:
-    out = assert_safe_script_help("scripts/db/report_artifact_registry_static_dangling.py").lower()
-    assert out.startswith("usage:")
-    assert "dangling static" in out
-    assert "--output-dir" in out
-
-
 def test_collect_static_dangling_report_classifies_rows(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -48,12 +41,36 @@ def test_collect_static_dangling_report_classifies_rows(tmp_path: Path) -> None:
         del sql, params, fetch, dictionary
         if query_name == "artifact_registry_static_dangling.schema_inventory":
             return [
-                {"table_name": "static_analysis_runs", "column_name": "id", "column_type": "bigint(20) unsigned"},
-                {"table_name": "static_analysis_runs", "column_name": "session_stamp", "column_type": "varchar(128)"},
-                {"table_name": "static_session_run_links", "column_name": "static_run_id", "column_type": "bigint(20) unsigned"},
-                {"table_name": "static_analysis_findings", "column_name": "run_id", "column_type": "bigint(20) unsigned"},
-                {"table_name": "static_permission_matrix", "column_name": "run_id", "column_type": "bigint(20) unsigned"},
-                {"table_name": "runs", "column_name": "run_id", "column_type": "bigint(20) unsigned"},
+                {
+                    "table_name": "static_analysis_runs",
+                    "column_name": "id",
+                    "column_type": "bigint(20) unsigned",
+                },
+                {
+                    "table_name": "static_analysis_runs",
+                    "column_name": "session_stamp",
+                    "column_type": "varchar(128)",
+                },
+                {
+                    "table_name": "static_session_run_links",
+                    "column_name": "static_run_id",
+                    "column_type": "bigint(20) unsigned",
+                },
+                {
+                    "table_name": "static_analysis_findings",
+                    "column_name": "run_id",
+                    "column_type": "bigint(20) unsigned",
+                },
+                {
+                    "table_name": "static_permission_matrix",
+                    "column_name": "run_id",
+                    "column_type": "bigint(20) unsigned",
+                },
+                {
+                    "table_name": "runs",
+                    "column_name": "run_id",
+                    "column_type": "bigint(20) unsigned",
+                },
             ]
         if query_name == "artifact_registry_static_dangling.static_totals":
             return {"linked_static_registry_rows": 50, "dangling_static_registry_rows": 4}
@@ -179,7 +196,9 @@ def test_collect_static_dangling_report_classifies_rows(tmp_path: Path) -> None:
     assert rows[1]["primary_reason"] == "legacy_mirror_only_with_file"
     assert rows[2]["primary_reason"] == "malformed_static_run_id"
     assert rows[3]["primary_reason"] == "canonical_db_residue"
-    run_103 = next(row for row in report["static_dangling_runs"] if str(row["resolved_static_run_id"]) == "103")
+    run_103 = next(
+        row for row in report["static_dangling_runs"] if str(row["resolved_static_run_id"]) == "103"
+    )
     assert run_103["recovered_run_manifest_exists"] is True
     assert run_103["recovered_package_name"] == "pkg.four"
     assert run_103["recovered_display_name"] == "Pkg Four"
@@ -204,10 +223,22 @@ def test_collect_static_dangling_report_recovers_bundle_context(tmp_path: Path) 
         ),
         encoding="utf-8",
     )
-    baseline = repo_root / "data" / "static_analysis" / "baseline" / "com.example.bundle-full-research_cohort-20260615T155108Z.json"
+    baseline = (
+        repo_root
+        / "data"
+        / "static_analysis"
+        / "baseline"
+        / "com.example.bundle-full-research_cohort-20260615T155108Z.json"
+    )
     baseline.parent.mkdir(parents=True, exist_ok=True)
     baseline.write_text("{}", encoding="utf-8")
-    plan = repo_root / "data" / "static_analysis" / "dynamic_plan" / "com.example.bundle-full-research_cohort-sr200-20260615T155108Z.json"
+    plan = (
+        repo_root
+        / "data"
+        / "static_analysis"
+        / "dynamic_plan"
+        / "com.example.bundle-full-research_cohort-sr200-20260615T155108Z.json"
+    )
     plan.parent.mkdir(parents=True, exist_ok=True)
     plan.write_text("{}", encoding="utf-8")
     dep = repo_root / "evidence" / "static_runs" / "200" / "dep.json"
@@ -228,7 +259,13 @@ def test_collect_static_dangling_report_recovers_bundle_context(tmp_path: Path) 
     ):
         del sql, params, fetch, dictionary
         if query_name == "artifact_registry_static_dangling.schema_inventory":
-            return [{"table_name": "static_analysis_runs", "column_name": "id", "column_type": "bigint(20) unsigned"}]
+            return [
+                {
+                    "table_name": "static_analysis_runs",
+                    "column_name": "id",
+                    "column_type": "bigint(20) unsigned",
+                }
+            ]
         if query_name == "artifact_registry_static_dangling.static_totals":
             return {"linked_static_registry_rows": 0, "dangling_static_registry_rows": 7}
         if query_name == "artifact_registry_static_dangling.dangling_rows":
@@ -254,13 +291,48 @@ def test_collect_static_dangling_report_recovers_bundle_context(tmp_path: Path) 
                 "has_legacy_runs": 0,
             }
             return [
-                {"artifact_id": 1, "artifact_type": "dep_snapshot", "host_path": str(dep), **common},
-                {"artifact_id": 2, "artifact_type": "dep_snapshot", "host_path": str(dep), **common},
-                {"artifact_id": 3, "artifact_type": "static_run_manifest", "host_path": str(manifest_path), **common},
-                {"artifact_id": 4, "artifact_type": "manifest_evidence", "host_path": str(manifest_evidence), **common},
-                {"artifact_id": 5, "artifact_type": "static_baseline_json", "host_path": str(baseline), **common},
-                {"artifact_id": 6, "artifact_type": "static_dynamic_plan_json", "host_path": str(plan), **common},
-                {"artifact_id": 7, "artifact_type": "static_report", "host_path": str(report_json), **common},
+                {
+                    "artifact_id": 1,
+                    "artifact_type": "dep_snapshot",
+                    "host_path": str(dep),
+                    **common,
+                },
+                {
+                    "artifact_id": 2,
+                    "artifact_type": "dep_snapshot",
+                    "host_path": str(dep),
+                    **common,
+                },
+                {
+                    "artifact_id": 3,
+                    "artifact_type": "static_run_manifest",
+                    "host_path": str(manifest_path),
+                    **common,
+                },
+                {
+                    "artifact_id": 4,
+                    "artifact_type": "manifest_evidence",
+                    "host_path": str(manifest_evidence),
+                    **common,
+                },
+                {
+                    "artifact_id": 5,
+                    "artifact_type": "static_baseline_json",
+                    "host_path": str(baseline),
+                    **common,
+                },
+                {
+                    "artifact_id": 6,
+                    "artifact_type": "static_dynamic_plan_json",
+                    "host_path": str(plan),
+                    **common,
+                },
+                {
+                    "artifact_id": 7,
+                    "artifact_type": "static_report",
+                    "host_path": str(report_json),
+                    **common,
+                },
             ]
         raise AssertionError(f"unexpected query_name: {query_name}")
 

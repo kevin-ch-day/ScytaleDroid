@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.Database.db_core import db_engine
 from scytaledroid.StaticAnalysis.cli.persistence import run_writers
 

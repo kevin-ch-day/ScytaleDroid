@@ -19,8 +19,34 @@ from scytaledroid.Database.db_core import db_queries as core_q
 
 def extract_network_indicators_from_pcap_report(report: Mapping[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
 
-    def _append(kind: str, items: object, *, source: str) -> None:
+    def _append(
+        kind: str,
+        value: str,
+        *,
+        source: str,
+        count: int | None = None,
+        meta_json: dict[str, Any] | None = None,
+    ) -> None:
+        v = str(value or "").strip()
+        if not v:
+            return
+        key = (kind, v.lower(), source)
+        if key in seen:
+            return
+        seen.add(key)
+        rows.append(
+            {
+                "indicator_type": kind,
+                "indicator_value": v,
+                "indicator_count": count,
+                "indicator_source": source,
+                "meta_json": meta_json,
+            }
+        )
+
+    def _append_top(kind: str, items: object, *, source: str) -> None:
         if not isinstance(items, list):
             return
         for item in items:
@@ -29,27 +55,78 @@ def extract_network_indicators_from_pcap_report(report: Mapping[str, Any]) -> li
             value = item.get("value")
             if not isinstance(value, str):
                 continue
-            v = value.strip()
-            if not v:
-                continue
             count = item.get("count")
             try:
                 count_i = int(count) if count is not None else None
             except Exception:
                 count_i = None
-            rows.append(
-                {
-                    "indicator_type": kind,
-                    "indicator_value": v,
-                    "indicator_count": count_i,
-                    "indicator_source": source,
-                    "meta_json": None,
-                }
-            )
+            _append(kind, value, source=source, count=count_i)
 
-    _append("dns", report.get("top_dns"), source="top_dns")
-    _append("sni", report.get("top_sni"), source="top_sni")
+    _append_top("dns", report.get("top_dns"), source="top_dns")
+    _append_top("sni", report.get("top_sni"), source="top_sni")
+
+    surface = report.get("security_surface")
+    if isinstance(surface, dict) and surface.get("status") == "ok":
+        inventory = surface.get("domain_inventory")
+        if isinstance(inventory, dict):
+            for name in inventory.get("dns_names") or []:
+                _append("dns", str(name), source="security_surface.dns_inventory")
+            for name in inventory.get("sni_names") or []:
+                _append("sni", str(name), source="security_surface.sni_inventory")
+            for name in inventory.get("dns_only_samples") or []:
+                _append("dns_only", str(name), source="security_surface.dns_only")
+            for name in inventory.get("sni_only_samples") or []:
+                _append("sni_only", str(name), source="security_surface.sni_only")
+
+        cleartext = surface.get("cleartext")
+        if isinstance(cleartext, dict):
+            for item in cleartext.get("top_http_hosts") or []:
+                if not isinstance(item, dict):
+                    continue
+                host = str(item.get("value") or "").strip()
+                if not host:
+                    continue
+                count = item.get("count")
+                try:
+                    count_i = int(count) if count is not None else None
+                except Exception:
+                    count_i = None
+                _append("http_host", host, source="security_surface.http_host", count=count_i)
+            for sample in cleartext.get("sanitized_http_samples") or []:
+                if not isinstance(sample, dict):
+                    continue
+                host = str(sample.get("host") or "").strip()
+                path = str(sample.get("sanitized_path") or "").strip()
+                if not host:
+                    continue
+                meta = {
+                    "method": sample.get("method"),
+                    "sanitized_path": path or None,
+                    "path_class": sample.get("path_class"),
+                }
+                _append(
+                    "http_host",
+                    host,
+                    source="security_surface.http_sample",
+                    count=_safe_int(sample.get("rows"), default=None) if sample.get("rows") is not None else None,
+                    meta_json=meta,
+                )
+
+        for flag in surface.get("risk_flags") or []:
+            text = str(flag or "").strip()
+            if text:
+                _append("risk_flag", text, source="security_surface.risk_flag")
+
     return rows
+
+
+def _safe_int(value: Any, *, default: int | None = None) -> int | None:
+    try:
+        if value in (None, ""):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def index_network_indicators_for_run(dynamic_run_id: str, run_dir: Path) -> int:
@@ -92,7 +169,7 @@ def index_network_indicators_for_run(dynamic_run_id: str, run_dir: Path) -> int:
     for row in indicators:
         meta = row.get("meta_json")
         if isinstance(meta, (dict, list)):
-            meta = json.dumps(meta)
+            meta = json.dumps(meta, sort_keys=True)
         data.append(
             (
                 dynamic_run_id,
@@ -147,4 +224,3 @@ __all__ = [
     "index_network_indicators_for_run",
     "index_network_indicators_from_evidence_packs",
 ]
-

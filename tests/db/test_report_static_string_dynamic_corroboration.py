@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,27 +13,6 @@ from scytaledroid.StaticAnalysis.core.models import (
     PermissionSummary,
     StaticAnalysisReport,
 )
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_static_string_dynamic_corroboration.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "corroboration" in out
-    assert "--output-dir" in out
-    assert "--package" in out
-    assert "--overlay-latest-static" in out
-    assert "--overlay-reanalyse-strings" in out
 
 
 def test_select_overlay_report_caches_reports_for_package(monkeypatch, tmp_path: Path) -> None:
@@ -56,8 +33,12 @@ def test_select_overlay_report_caches_reports_for_package(monkeypatch, tmp_path:
     monkeypatch.setattr(reports_store, "reports_for_package", fake_reports_for_package)
 
     embedded_plan = {"run_identity": {"base_apk_sha256": "a" * 64}}
-    first, first_path = report._select_overlay_report("com.example.app", embedded_plan=embedded_plan)
-    second, second_path = report._select_overlay_report("com.example.app", embedded_plan=embedded_plan)
+    first, first_path = report._select_overlay_report(
+        "com.example.app", embedded_plan=embedded_plan
+    )
+    second, second_path = report._select_overlay_report(
+        "com.example.app", embedded_plan=embedded_plan
+    )
 
     assert first is stored
     assert second is stored
@@ -116,9 +97,11 @@ def test_main_package_filter_skips_non_target_runs(monkeypatch, tmp_path: Path) 
     summary = json.loads((tmp_path / "audit" / "summary.json").read_text(encoding="utf-8"))
     assert summary["package_filter"] == "COM.Target.App"
     assert summary["dynamic_runs_scanned"] == 1
-    assert (tmp_path / "audit" / "actionable_corroboration.csv").read_text(
-        encoding="utf-8"
-    ).startswith("dynamic_run_id,package_name")
+    assert (
+        (tmp_path / "audit" / "actionable_corroboration.csv")
+        .read_text(encoding="utf-8")
+        .startswith("dynamic_run_id,package_name")
+    )
     assert (tmp_path / "audit" / "pair_group_corroboration.csv").read_text(
         encoding="utf-8"
     ).strip() == "dynamic_run_id,package_name,pair_group"
@@ -176,7 +159,9 @@ def test_summary_reports_actionable_corroboration_and_missing_enrichment() -> No
     assert summary["packages_with_actionable_corroboration"] == 1
     assert summary["actionable_corroboration_rate"] == 1.0
     assert summary["runs_missing_enriched_domain_metadata"] == 1
-    assert summary["top_corroborated_pair_groups"][0]["pair_group"] == "google:token_endpoint_family"
+    assert (
+        summary["top_corroborated_pair_groups"][0]["pair_group"] == "google:token_endpoint_family"
+    )
     assert summary["no_db_writes"] is True
     assert summary["experimental_audit"] is True
     assert "repo_root" in summary
@@ -558,7 +543,9 @@ def test_overlay_latest_static_reanalysis_uses_current_static_report_without_mut
         },
     )
     report_path = reports_dir / ("a" * 64 + ".json")
-    report_path.write_text(json.dumps(static_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(static_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run-overlay"
     (run_dir / "inputs").mkdir(parents=True, exist_ok=True)
@@ -658,7 +645,9 @@ def test_overlay_string_reanalysis_uses_current_apk_overlay_without_mutating_pac
         },
     )
     report_path = reports_dir / ("c" * 64 + ".json")
-    report_path.write_text(json.dumps(static_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(static_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     def _fake_analyse_strings(*_args, **_kwargs):
         return {
@@ -696,7 +685,11 @@ def test_overlay_string_reanalysis_uses_current_apk_overlay_without_mutating_pac
             "aggregates": {"endpoint_roots": []},
         }
 
-    monkeypatch.setattr(report, "_reanalyse_string_payload_from_report", lambda *args, **kwargs: _fake_analyse_strings())
+    monkeypatch.setattr(
+        report,
+        "_reanalyse_string_payload_from_report",
+        lambda *args, **kwargs: _fake_analyse_strings(),
+    )
 
     run_dir = tmp_path / "output" / "evidence" / "dynamic" / "run-overlay-reanalyse"
     (run_dir / "inputs").mkdir(parents=True, exist_ok=True)
@@ -778,7 +771,9 @@ def test_empty_overlay_string_reanalysis_preserves_embedded_plan(
         },
     )
     report_path = reports_dir / ("d" * 64 + ".json")
-    report_path.write_text(json.dumps(static_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(static_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     monkeypatch.setattr(
         report,

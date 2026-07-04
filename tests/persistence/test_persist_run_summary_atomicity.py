@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from collections import Counter
+from contextlib import contextmanager
 from types import SimpleNamespace
 
-from scytaledroid.Database.db_core import db_engine
 from scytaledroid.StaticAnalysis.cli.persistence import run_summary as rs
 
 
@@ -77,7 +76,9 @@ def test_static_run_created_inside_transaction(monkeypatch):
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
 
     def _create_static_run(**_kwargs):
@@ -88,6 +89,7 @@ def test_static_run_created_inside_transaction(monkeypatch):
     monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
     monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "_persist_static_sections_wrapper", lambda **_kwargs: ([], False, 0))
     monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
     monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(rs.core_q, "run_sql", lambda *_args, **_kwargs: [])
@@ -119,13 +121,16 @@ def test_persist_run_summary_canonical_only_no_legacy_run_id(monkeypatch):
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
 
     monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 202)
     monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
     monkeypatch.setattr(rs, "persist_permission_risk", lambda **_kwargs: None)
+    monkeypatch.setattr(rs, "_persist_static_sections_wrapper", lambda **_kwargs: ([], False, 0))
     monkeypatch.setattr(rs, "update_static_run_status", lambda **_kwargs: None)
     monkeypatch.setattr(rs, "export_dep_json", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(rs.core_q, "run_sql", lambda *_args, **_kwargs: [])
@@ -156,7 +161,9 @@ def test_static_run_create_failure_does_not_produce_authoritative_id(monkeypatch
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
     monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: None)
     monkeypatch.setattr(rs, "persist_permission_matrix", lambda **_kwargs: None)
@@ -181,8 +188,6 @@ def test_static_run_create_failure_does_not_produce_authoritative_id(monkeypatch
     assert outcome.persistence_failed is True
     assert outcome.static_run_id is None
     assert outcome.errors
-
-
 
 
 def test_persist_run_summary_rejects_missing_scope_identity(monkeypatch):
@@ -210,9 +215,6 @@ def test_persist_run_summary_rejects_missing_scope_identity(monkeypatch):
     assert any("identity_validation_failed" in err for err in outcome.errors)
 
 
-
-
-
 def test_persist_run_summary_applies_mysql_lock_wait_timeout(monkeypatch):
     state: dict[str, object] = {"in_tx": False, "attempts": 0, "dialect": "mysql"}
     monkeypatch.setattr(rs, "require_canonical_schema", lambda: None)
@@ -223,7 +225,9 @@ def test_persist_run_summary_applies_mysql_lock_wait_timeout(monkeypatch):
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
     monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 505)
     monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
@@ -247,7 +251,10 @@ def test_persist_run_summary_applies_mysql_lock_wait_timeout(monkeypatch):
 
     assert outcome.persistence_failed is False
     executed = list(state.get("executed_sql", []))
-    assert any("SET SESSION innodb_lock_wait_timeout" in sql and params == (17,) for sql, params in executed)
+    assert any(
+        "SET SESSION innodb_lock_wait_timeout" in sql and params == (17,)
+        for sql, params in executed
+    )
 
 
 def test_persist_run_summary_marks_started_row_failed_on_rollback(monkeypatch):
@@ -260,7 +267,9 @@ def test_persist_run_summary_marks_started_row_failed_on_rollback(monkeypatch):
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
     monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 505)
     monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
@@ -308,7 +317,9 @@ def test_canonical_enforcement_scope_resolution_failure_is_fail_safe(monkeypatch
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
     monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 8001)
     monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
@@ -353,7 +364,9 @@ def test_canonical_enforcement_skips_profile_scope_fast_path(monkeypatch):
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(rs, "_ensure_app_version", lambda **_kwargs: 101)
     monkeypatch.setattr(rs, "_create_static_run", lambda **_kwargs: 8002)
     monkeypatch.setattr(rs, "_update_static_run_metadata", lambda *_args, **_kwargs: None)
@@ -400,7 +413,9 @@ def test_correlation_result_failure_is_canonical_not_compat(monkeypatch):
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(
         rs,
         "_prepare_findings_persistence_context",
@@ -448,7 +463,11 @@ def test_correlation_result_failure_is_canonical_not_compat(monkeypatch):
             created_static_run_id=False,
         ),
     )
-    monkeypatch.setattr(rs, "_persist_correlation_results", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        rs,
+        "_persist_correlation_results",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
     monkeypatch.setattr(rs, "_persist_permission_and_storage_stage", lambda **_kwargs: None)
     monkeypatch.setattr(rs, "_persist_metrics_and_sections_stage", lambda **_kwargs: None)
     monkeypatch.setattr(rs, "_finalize_static_handoff_stage", lambda **_kwargs: False)
@@ -484,7 +503,9 @@ def test_persist_run_summary_rolls_up_persisted_findings_total(monkeypatch):
         "prepare_run_envelope",
         lambda **_kwargs: (SimpleNamespace(run_id=None, threat_profile=None, env_profile=None), []),
     )
-    monkeypatch.setattr(rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle())
+    monkeypatch.setattr(
+        rs, "compute_metrics_bundle", lambda *_args, **_kwargs: _stub_metrics_bundle()
+    )
     monkeypatch.setattr(
         rs,
         "_prepare_findings_persistence_context",

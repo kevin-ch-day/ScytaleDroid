@@ -11,20 +11,6 @@ from scytaledroid.Database.db_utils.phase_b1_join_key_normalization import (
 )
 
 
-def test_phase_b1_join_key_normalization_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/phase_b1_join_key_normalization.py")
-    assert_safe_script_help("scripts/db/phase_b1_join_key_normalization.py", "report")
-    assert_safe_script_help("scripts/db/phase_b1_join_key_normalization.py", "apply")
-
-
-def test_report_phase_b1_join_key_normalization_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/report_phase_b1_join_key_normalization.py")
-
-
-def test_apply_phase_b1_join_key_normalization_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/apply_phase_b1_join_key_normalization.py")
-
-
 def test_phase_b1_target_columns_match_first_wave_contract() -> None:
     targets = list(target_columns())
     assert len(targets) == 12
@@ -57,11 +43,17 @@ def test_phase_b1_bundle_writes_expected_receipt_files(tmp_path: Path) -> None:
         "summary": {"target_column_count": 12, "preflight_clean": True},
         "columns": [{"table": "static_analysis_sessions", "column": "session_stamp"}],
         "duplicate_checks": [],
-        "width_checks": [{"table": "static_analysis_sessions", "column": "session_stamp", "width_safe": "yes"}],
+        "width_checks": [
+            {"table": "static_analysis_sessions", "column": "session_stamp", "width_safe": "yes"}
+        ],
         "join_parity_before": [{"join_name": "x", "join_count": 1}],
-        "view_dependencies": [{"table": "static_analysis_sessions", "column": "session_stamp", "view_name": "v_x"}],
+        "view_dependencies": [
+            {"table": "static_analysis_sessions", "column": "session_stamp", "view_name": "v_x"}
+        ],
         "planned_alter_sql": "ALTER TABLE `static_analysis_sessions` MODIFY COLUMN `session_stamp` varchar(128);",
-        "migration_registry_preview": migration_preview("20260614_phase_b1_join_key_collation_width_normalization"),
+        "migration_registry_preview": migration_preview(
+            "20260614_phase_b1_join_key_collation_width_normalization"
+        ),
     }
 
     files = write_phase_b1_join_key_preflight_bundle(

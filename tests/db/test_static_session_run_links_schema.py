@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.Database.db_utils import static_session_run_links_schema as schema_mod
 
 
@@ -95,9 +94,21 @@ def test_collect_schema_audit_flags_live_drift_shape() -> None:
         if query_name == "static_session_run_links_schema.indexes":
             return [
                 {"index_name": "PRIMARY", "column_name": "link_id", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "session_stamp", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "package_name", "seq_in_index": 2},
-                {"index_name": "ix_ssrl_static_run", "column_name": "static_run_id", "seq_in_index": 1},
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "session_stamp",
+                    "seq_in_index": 1,
+                },
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "package_name",
+                    "seq_in_index": 2,
+                },
+                {
+                    "index_name": "ix_ssrl_static_run",
+                    "column_name": "static_run_id",
+                    "seq_in_index": 1,
+                },
             ]
         if query_name == "static_session_run_links_schema.foreign_keys":
             return []
@@ -137,10 +148,15 @@ def test_build_required_schema_statements_is_bounded() -> None:
     statements = schema_mod.build_required_static_session_run_links_schema_statements(audit)
 
     assert len(statements) == 4
-    assert statements[0].startswith("ALTER TABLE static_session_run_links DEFAULT CHARACTER SET utf8mb4")
+    assert statements[0].startswith(
+        "ALTER TABLE static_session_run_links DEFAULT CHARACTER SET utf8mb4"
+    )
     assert "MODIFY COLUMN run_origin" in statements[1]
     assert "MODIFY COLUMN origin_session_stamp" in statements[1]
-    assert statements[2] == "CREATE INDEX IF NOT EXISTS ix_static_session_run_origin ON static_session_run_links (origin_session_stamp)"
+    assert (
+        statements[2]
+        == "CREATE INDEX IF NOT EXISTS ix_static_session_run_origin ON static_session_run_links (origin_session_stamp)"
+    )
     assert "ADD CONSTRAINT fk_static_session_run_static" in statements[3]
 
 
@@ -152,16 +168,44 @@ def test_apply_schema_normalization_executes_only_required_ddl(monkeypatch, tmp_
         (
             [
                 {"index_name": "PRIMARY", "column_name": "link_id", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "session_stamp", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "package_name", "seq_in_index": 2},
-                {"index_name": "ix_ssrl_static_run", "column_name": "static_run_id", "seq_in_index": 1},
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "session_stamp",
+                    "seq_in_index": 1,
+                },
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "package_name",
+                    "seq_in_index": 2,
+                },
+                {
+                    "index_name": "ix_ssrl_static_run",
+                    "column_name": "static_run_id",
+                    "seq_in_index": 1,
+                },
             ],
             [
                 {"index_name": "PRIMARY", "column_name": "link_id", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "session_stamp", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "package_name", "seq_in_index": 2},
-                {"index_name": "ix_ssrl_static_run", "column_name": "static_run_id", "seq_in_index": 1},
-                {"index_name": "ix_static_session_run_origin", "column_name": "origin_session_stamp", "seq_in_index": 1},
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "session_stamp",
+                    "seq_in_index": 1,
+                },
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "package_name",
+                    "seq_in_index": 2,
+                },
+                {
+                    "index_name": "ix_ssrl_static_run",
+                    "column_name": "static_run_id",
+                    "seq_in_index": 1,
+                },
+                {
+                    "index_name": "ix_static_session_run_origin",
+                    "column_name": "origin_session_stamp",
+                    "seq_in_index": 1,
+                },
             ],
         )
     )
@@ -183,7 +227,6 @@ def test_apply_schema_normalization_executes_only_required_ddl(monkeypatch, tmp_
     recorded: list[tuple[str, str | None, str | None]] = []
 
     def fake_run_sql(sql: str, params=(), *, query_name=None, **_kwargs):
-        del params
         if query_name == "static_session_run_links_schema.table_collation":
             return {"table_collation": next(table_collations)}
         if query_name == "static_session_run_links_schema.columns":
@@ -205,14 +248,28 @@ def test_apply_schema_normalization_executes_only_required_ddl(monkeypatch, tmp_
             return None
         raise AssertionError(query_name)
 
-    monkeypatch.setattr(schema_mod, "latest_schema_version", lambda _run_sql: "0.3.12-artifact-registry-session-stamp")
-    monkeypatch.setattr(schema_mod, "write_static_session_run_links_schema_receipt", lambda payload, _out: str(receipt_path))
+    monkeypatch.setattr(
+        schema_mod,
+        "latest_schema_version",
+        lambda _run_sql: "0.3.12-artifact-registry-session-stamp",
+    )
+    monkeypatch.setattr(
+        schema_mod,
+        "write_static_session_run_links_schema_receipt",
+        lambda payload, _out: str(receipt_path),
+    )
     monkeypatch.setattr(
         schema_mod,
         "record_schema_migration",
-        lambda run_sql, **kwargs: recorded.append(("record_schema_migration", kwargs.get("schema_version_after"), kwargs.get("notes"))),
+        lambda run_sql, **kwargs: recorded.append(
+            ("record_schema_migration", kwargs.get("schema_version_after"), kwargs.get("notes"))
+        ),
     )
-    monkeypatch.setattr(schema_mod, "append_schema_version", lambda run_sql, version: recorded.append(("append_schema_version", version, None)))
+    monkeypatch.setattr(
+        schema_mod,
+        "append_schema_version",
+        lambda run_sql, version: recorded.append(("append_schema_version", version, None)),
+    )
 
     result = schema_mod.apply_static_session_run_links_schema_normalization(fake_run_sql)
 
@@ -223,15 +280,24 @@ def test_apply_schema_normalization_executes_only_required_ddl(monkeypatch, tmp_
     assert result.index_added is True
     assert result.foreign_key_added is True
     assert result.receipt_path == str(receipt_path)
-    assert any("DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" in sql for sql in executions)
+    assert any(
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" in sql for sql in executions
+    )
     assert any("MODIFY COLUMN run_origin" in sql for sql in executions)
-    assert any("CREATE INDEX IF NOT EXISTS ix_static_session_run_origin" in sql for sql in executions)
+    assert any(
+        "CREATE INDEX IF NOT EXISTS ix_static_session_run_origin" in sql for sql in executions
+    )
     assert any("ADD CONSTRAINT fk_static_session_run_static" in sql for sql in executions)
     assert any(kind == "record_schema_migration" for kind, _, _ in recorded)
-    assert any(kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER for kind, value, _ in recorded)
+    assert any(
+        kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER
+        for kind, value, _ in recorded
+    )
 
 
-def test_apply_schema_normalization_records_converged_live_state(monkeypatch, tmp_path: Path) -> None:
+def test_apply_schema_normalization_records_converged_live_state(
+    monkeypatch, tmp_path: Path
+) -> None:
     recorded: list[tuple[str, str | None, str | None]] = []
     receipt_path = tmp_path / "receipt.json"
 
@@ -243,10 +309,26 @@ def test_apply_schema_normalization_records_converged_live_state(monkeypatch, tm
         if query_name == "static_session_run_links_schema.indexes":
             return [
                 {"index_name": "PRIMARY", "column_name": "link_id", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "session_stamp", "seq_in_index": 1},
-                {"index_name": "uniq_session_package", "column_name": "package_name", "seq_in_index": 2},
-                {"index_name": "ix_ssrl_static_run", "column_name": "static_run_id", "seq_in_index": 1},
-                {"index_name": "ix_static_session_run_origin", "column_name": "origin_session_stamp", "seq_in_index": 1},
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "session_stamp",
+                    "seq_in_index": 1,
+                },
+                {
+                    "index_name": "uniq_session_package",
+                    "column_name": "package_name",
+                    "seq_in_index": 2,
+                },
+                {
+                    "index_name": "ix_ssrl_static_run",
+                    "column_name": "static_run_id",
+                    "seq_in_index": 1,
+                },
+                {
+                    "index_name": "ix_static_session_run_origin",
+                    "column_name": "origin_session_stamp",
+                    "seq_in_index": 1,
+                },
             ]
         if query_name == "static_session_run_links_schema.foreign_keys":
             return [
@@ -262,15 +344,29 @@ def test_apply_schema_normalization_records_converged_live_state(monkeypatch, tm
             return {"n": 0}
         raise AssertionError(query_name)
 
-    monkeypatch.setattr(schema_mod, "latest_schema_version", lambda _run_sql: "0.3.12-artifact-registry-session-stamp")
+    monkeypatch.setattr(
+        schema_mod,
+        "latest_schema_version",
+        lambda _run_sql: "0.3.12-artifact-registry-session-stamp",
+    )
     monkeypatch.setattr(schema_mod, "_migration_already_recorded", lambda _run_sql: False)
-    monkeypatch.setattr(schema_mod, "write_static_session_run_links_schema_receipt", lambda payload, _out: str(receipt_path))
+    monkeypatch.setattr(
+        schema_mod,
+        "write_static_session_run_links_schema_receipt",
+        lambda payload, _out: str(receipt_path),
+    )
     monkeypatch.setattr(
         schema_mod,
         "record_schema_migration",
-        lambda run_sql, **kwargs: recorded.append(("record_schema_migration", kwargs.get("schema_version_after"), kwargs.get("notes"))),
+        lambda run_sql, **kwargs: recorded.append(
+            ("record_schema_migration", kwargs.get("schema_version_after"), kwargs.get("notes"))
+        ),
     )
-    monkeypatch.setattr(schema_mod, "append_schema_version", lambda run_sql, version: recorded.append(("append_schema_version", version, None)))
+    monkeypatch.setattr(
+        schema_mod,
+        "append_schema_version",
+        lambda run_sql, version: recorded.append(("append_schema_version", version, None)),
+    )
 
     result = schema_mod.apply_static_session_run_links_schema_normalization(fake_run_sql)
 
@@ -278,7 +374,10 @@ def test_apply_schema_normalization_records_converged_live_state(monkeypatch, tm
     assert result.statement_count == 0
     assert result.receipt_path == str(receipt_path)
     assert any(kind == "record_schema_migration" for kind, _, _ in recorded)
-    assert any(kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER for kind, value, _ in recorded)
+    assert any(
+        kind == "append_schema_version" and value == schema_mod.SCHEMA_VERSION_AFTER
+        for kind, value, _ in recorded
+    )
 
 
 def test_apply_schema_normalization_refuses_unlinked_static_runs() -> None:

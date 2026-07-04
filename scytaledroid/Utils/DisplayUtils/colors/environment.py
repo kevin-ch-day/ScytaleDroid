@@ -4,6 +4,23 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from pathlib import Path
+
+
+def _host_looks_like_fedora() -> bool:
+    os_release = Path("/etc/os-release")
+    try:
+        payload = os_release.read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        payload = ""
+    if "id=fedora" in payload or "id_like=\"fedora\"" in payload or "id_like=fedora" in payload:
+        return True
+
+    for key in ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION"):
+        value = str(os.environ.get(key, "")).strip().lower()
+        if value.startswith("fedora"):
+            return True
+    return False
 
 
 def detect_palette_name(normaliser: Callable[[str], str]) -> str:
@@ -22,7 +39,7 @@ def detect_palette_name(normaliser: Callable[[str], str]) -> str:
     gtk_theme = os.environ.get("GTK_THEME", "").lower()
     if gtk_theme:
         if "dark" in gtk_theme:
-            return normaliser("blackhat-night")
+            return normaliser("fedora-dark" if _host_looks_like_fedora() else "blackhat-night")
         if "light" in gtk_theme:
             return normaliser("fedora-light")
 
@@ -35,6 +52,8 @@ def detect_palette_name(normaliser: Callable[[str], str]) -> str:
         except ValueError:
             pass
 
+    if _host_looks_like_fedora():
+        return normaliser("fedora-dark")
     return normaliser("blackhat-night")
 
 

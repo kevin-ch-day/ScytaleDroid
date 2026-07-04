@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from scytaledroid.DeviceAnalysis.adb import cache as adb_cache
+from scytaledroid.DynamicAnalysis.controllers.guided_run import _extract_version_code_from_dump
 from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     read_observed_version_code_details,
 )
-from scytaledroid.DynamicAnalysis.controllers.guided_run import _extract_version_code_from_dump
 
 
 def test_extract_version_code_prefers_min_sdk_line() -> None:

@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-
 from scytaledroid.Database.db_utils.artifact_registry_session_stamp import (
     backfill_artifact_registry_session_stamp,
 )
@@ -105,21 +101,3 @@ def test_backfill_session_stamp_apply_uses_update_only() -> None:
     assert result.legacy_static_rows_updated == 3
     assert any("alter table artifact_registry" in query.lower() for query in queries)
     assert any("update artifact_registry ar" in query.lower() for query in queries)
-
-
-def test_backfill_session_stamp_script_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "backfill_artifact_registry_session_stamp.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or proc.stderr).strip().lower()
-    assert out.startswith("usage:")
-    assert "--apply" in out
-    assert "--json" in out

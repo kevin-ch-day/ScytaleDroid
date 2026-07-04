@@ -9,6 +9,7 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
 
@@ -39,7 +40,13 @@ class DynamicRunSummarizer:
     def _build_summary(self, manifest: RunManifest) -> dict[str, Any]:
         pcap_report = self._load_pcap_report()
         destinations = self._load_destinations(manifest, pcap_report=pcap_report)
-        cleartext_flag = self._detect_cleartext(destinations)
+        cleartext_flag = self._detect_cleartext(destinations, pcap_report)
+        security_surface = (
+            pcap_report.get("security_surface")
+            if isinstance(pcap_report.get("security_surface"), dict)
+            else {}
+        )
+        cleartext_posture = self._load_cleartext_posture(pcap_report)
         notable_logs = self._scan_log_signals(manifest)
         tls_mitm = "true" if "SSLHandshakeException" in notable_logs else "false"
         pcap_meta = self._load_pcap_meta(manifest)
@@ -144,6 +151,18 @@ class DynamicRunSummarizer:
                     if isinstance(pcap_report.get("service_signals"), dict)
                     else {}
                 ),
+                "security_surface": {
+                    "status": security_surface.get("status"),
+                    "finding_count": security_surface.get("finding_count"),
+                    "risk_flags": security_surface.get("risk_flags") or [],
+                    "findings": (security_surface.get("findings") or [])[:10],
+                    "cleartext": (
+                        security_surface.get("cleartext")
+                        if isinstance(security_surface.get("cleartext"), dict)
+                        else {}
+                    ),
+                },
+                "cleartext_posture": cleartext_posture,
             },
             "telemetry": {
                 "schema_version": telemetry_schema_version,
@@ -167,6 +186,9 @@ class DynamicRunSummarizer:
                 "notable_log_signals": notable_logs,
                 "static_watchlist_used": bool(static_plan),
                 "capture_sources": capture_sources,
+                "security_finding_count": security_surface.get("finding_count"),
+                "security_risk_flags": security_surface.get("risk_flags") or [],
+                "cleartext_mismatch_class": cleartext_posture.get("mismatch_class"),
             },
             "static_watchlist": static_plan,
             "capture": {
@@ -206,7 +228,6 @@ class DynamicRunSummarizer:
         pcap_valid = capture.get("pcap_valid")
         pcap_valid_text = self._bool_text(pcap_valid)
         target = summary.get("target", {}) or {}
-        dataset = summary.get("dataset", {}) or {}
         quota_detail = summary.get("quota_detail", {}) or {}
         indicators = summary.get("indicators", {}) or {}
         cleartext_http_text = self._bool_text(summary.get("flags", {}).get("cleartext_http_detected"))
@@ -217,6 +238,14 @@ class DynamicRunSummarizer:
         top_sni = indicators.get("top_sni") or []
         top_dns_text = self._top_indicator_text(top_dns)
         top_sni_text = self._top_indicator_text(top_sni)
+        security = indicators.get("security_surface") or {}
+        security_findings = security.get("findings") or []
+        security_risk_flags = security.get("risk_flags") or []
+        cleartext_surface = security.get("cleartext") or {}
+        security_findings_text = self._security_findings_text(security_findings)
+        security_risk_flags_text = ", ".join(security_risk_flags) if security_risk_flags else "none"
+        cleartext_posture = indicators.get("cleartext_posture") or {}
+        cleartext_mismatch_text = self._display_text(cleartext_posture.get("mismatch_summary"))
         lines = [
             "# Dynamic Run Summary",
             "",
@@ -245,6 +274,14 @@ class DynamicRunSummarizer:
             f"- TLS MITM suspected: {self._bool_text(summary['flags'].get('tls_mitm_suspected'))}.",
             f"- Top DNS: {top_dns_text}.",
             f"- Top SNI: {top_sni_text}.",
+            "",
+            "## Security (metadata)",
+            f"- Security surface status: {security.get('status') or 'unknown'}.",
+            f"- Cleartext visibility: {cleartext_surface.get('visibility_class') or 'unknown'}.",
+            f"- Security findings: {security.get('finding_count') if security.get('finding_count') is not None else 'unknown'}.",
+            f"- Risk flags: {security_risk_flags_text}.",
+            f"- Notable findings: {security_findings_text}.",
+            f"- Static↔dynamic cleartext: {cleartext_mismatch_text}.",
             "",
             "## Telemetry",
             f"- Schema version: {summary.get('telemetry', {}).get('schema_version')}.",
@@ -334,6 +371,18 @@ class DynamicRunSummarizer:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    def _load_cleartext_posture(self, pcap_report: dict[str, Any]) -> dict[str, Any]:
+        plan_path = self.writer.run_dir / "inputs" / "static_dynamic_plan.json"
+        if not plan_path.exists():
+            return {}
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(plan, dict):
+            return {}
+        return compute_static_dynamic_cleartext_posture(plan, pcap_report)
+
     def _top_indicator_text(self, items: list[dict[str, Any]]) -> str:
         out: list[str] = []
         for item in items[:3]:
@@ -346,7 +395,10 @@ class DynamicRunSummarizer:
             out.append(f"{value} ({count})" if count is not None else value)
         return ", ".join(out) if out else "none"
 
-    def _detect_cleartext(self, destinations: list[str]) -> str:
+    def _detect_cleartext(self, destinations: list[str], pcap_report: dict[str, Any] | None = None) -> str:
+        from_surface = self._cleartext_from_security_surface(pcap_report or {})
+        if from_surface is not None:
+            return from_surface
         if not destinations:
             return "unknown"
         has_port_hint = False
@@ -356,6 +408,36 @@ class DynamicRunSummarizer:
             if entry.endswith(".80") or entry.endswith(":80"):
                 return "true"
         return "false" if has_port_hint else "unknown"
+
+    @staticmethod
+    def _cleartext_from_security_surface(report: dict[str, Any]) -> str | None:
+        surface = report.get("security_surface")
+        if not isinstance(surface, dict) or surface.get("status") != "ok":
+            return None
+        cleartext = surface.get("cleartext")
+        if not isinstance(cleartext, dict):
+            return None
+        if cleartext.get("http_observed"):
+            return "true"
+        if _safe_int(cleartext.get("plaintext_protocol_frames")):
+            return "true"
+        visibility = str(cleartext.get("visibility_class") or "").strip()
+        if visibility == "encrypted_or_opaque_dominant":
+            return "false"
+        return None
+
+    @staticmethod
+    def _security_findings_text(findings: list[dict[str, Any]]) -> str:
+        out: list[str] = []
+        for item in findings[:5]:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            severity = str(item.get("severity") or "").strip()
+            if not title:
+                continue
+            out.append(f"{title} [{severity}]" if severity else title)
+        return "; ".join(out) if out else "none"
 
     def _destinations_from_pcap_report(self, report: dict[str, Any]) -> list[str]:
         seen: set[str] = set()

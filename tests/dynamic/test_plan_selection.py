@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis import menu
+from scytaledroid.DynamicAnalysis import plan_selection
+from scytaledroid.DynamicAnalysis.menus import dynamic_menu as menu
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
 
@@ -53,8 +54,12 @@ def test_resolve_plan_selection_requires_choice(monkeypatch, tmp_path: Path) -> 
     package = "com.example.app"
     plan_path_1 = _setup_plan_dir(tmp_path, package)
     plan_path_2 = plan_path_1.with_name(plan_path_1.name.replace("test", "alt"))
-    _write_plan(plan_path_1, package=package, run_id=1, signature="sig-1", artifact_set_hash="a" * 64)
-    _write_plan(plan_path_2, package=package, run_id=2, signature="sig-2", artifact_set_hash="c" * 64)
+    _write_plan(
+        plan_path_1, package=package, run_id=1, signature="sig-1", artifact_set_hash="a" * 64
+    )
+    _write_plan(
+        plan_path_2, package=package, run_id=2, signature="sig-2", artifact_set_hash="c" * 64
+    )
 
     monkeypatch.setattr(menu.app_config, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(menu, "_prompt_baseline_selection", lambda *_args, **_kwargs: None)
@@ -72,3 +77,7 @@ def test_resolve_plan_selection_filters_invalid_version(monkeypatch, tmp_path: P
     monkeypatch.setattr(menu, "_prompt_missing_baseline", lambda *_args, **_kwargs: None)
     selection = menu._resolve_plan_selection(package)
     assert selection is None
+
+
+def test_parse_generated_at_numeric_uses_utc() -> None:
+    assert plan_selection._parse_generated_at(0) == "1970-01-01T00:00:00+00:00"

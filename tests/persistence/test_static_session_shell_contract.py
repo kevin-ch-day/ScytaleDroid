@@ -5,9 +5,9 @@ import pathlib
 
 def _summary_source() -> str:
     repo = pathlib.Path(__file__).resolve().parents[2]
-    return (repo / "scytaledroid/StaticAnalysis/cli/persistence/static_session_summary.py").read_text(
-        encoding="utf-8"
-    )
+    return (
+        repo / "scytaledroid/StaticAnalysis/cli/persistence/static_session_summary.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_refresh_summary_update_omits_operator_owned_columns():

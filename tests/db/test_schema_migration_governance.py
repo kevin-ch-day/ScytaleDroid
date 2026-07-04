@@ -6,17 +6,19 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from scytaledroid.Database.db_utils.phase_a_typed_replacements import backfill_typed_replacement_columns
 from scytaledroid.Database.db_queries import canonical as canonical_queries
 from scytaledroid.Database.db_queries import dynamic as dynamic_queries
+from scytaledroid.Database.db_utils.phase_a_typed_replacements import (
+    backfill_typed_replacement_columns,
+)
 from scytaledroid.Database.db_utils.schema_migration_registry import (
-    build_schema_migration_report,
     attach_receipt_path_to_latest_migration,
+    build_schema_migration_report,
     duplicate_registry_ids,
     latest_registered_schema_version,
     latest_schema_version,
-    registry_version_chain_issues,
     registered_migrations,
+    registry_version_chain_issues,
     schema_version_gte,
     write_schema_migration_report_bundle,
 )
@@ -47,9 +49,20 @@ def test_runtime_schema_version_ddl_matches_live_hotfix_contract() -> None:
 
 
 def test_schema_version_gte_handles_semantic_and_branch_like_versions() -> None:
-    assert schema_version_gte("0.3.5-b1-session-stamp-backlog-normalization", "0.3.5-b1-session-stamp-backlog-normalization") is True
+    assert (
+        schema_version_gte(
+            "0.3.5-b1-session-stamp-backlog-normalization",
+            "0.3.5-b1-session-stamp-backlog-normalization",
+        )
+        is True
+    )
     assert schema_version_gte("0.3.5-b1-session-stamp-backlog-normalization", "0.2.6") is True
-    assert schema_version_gte("0.3.4-b1-join-key-normalization", "0.3.5-b1-session-stamp-backlog-normalization") is False
+    assert (
+        schema_version_gte(
+            "0.3.4-b1-join-key-normalization", "0.3.5-b1-session-stamp-backlog-normalization"
+        )
+        is False
+    )
 
 
 def test_report_schema_migrations_help_is_safe() -> None:
@@ -111,7 +124,9 @@ def test_collect_type_normalization_preflight_and_write_bundle(tmp_path: Path) -
             "dynamic_sessions_static_run_id_orphan_rows": 0,
         },
         "type_preflight.dynamic_static_type": [{"column_type": "bigint(20)", "is_nullable": "YES"}],
-        "type_preflight.static_run_pk_type": [{"column_type": "bigint(20) unsigned", "is_nullable": "NO"}],
+        "type_preflight.static_run_pk_type": [
+            {"column_type": "bigint(20) unsigned", "is_nullable": "NO"}
+        ],
         "type_preflight.run_started": {
             "total_static_runs": 4,
             "blank_run_started_rows": 0,
@@ -119,11 +134,23 @@ def test_collect_type_normalization_preflight_and_write_bundle(tmp_path: Path) -
             "unparseable_run_started_rows": 0,
         },
         "type_preflight.status_domains": [
-            {"domain_name": "artifact_registry.run_type", "domain_value": "dynamic", "row_count": 10}
+            {
+                "domain_name": "artifact_registry.run_type",
+                "domain_value": "dynamic",
+                "row_count": 10,
+            }
         ],
         "type_preflight.collation_rows": [
-            {"table_name": "apps", "column_name": "package_name", "collation_name": "utf8mb4_unicode_ci"},
-            {"table_name": "apk_sets", "column_name": "package_name", "collation_name": "utf8mb4_general_ci"},
+            {
+                "table_name": "apps",
+                "column_name": "package_name",
+                "collation_name": "utf8mb4_unicode_ci",
+            },
+            {
+                "table_name": "apk_sets",
+                "column_name": "package_name",
+                "collation_name": "utf8mb4_general_ci",
+            },
         ],
     }
 
@@ -133,8 +160,12 @@ def test_collect_type_normalization_preflight_and_write_bundle(tmp_path: Path) -
     report = collect_type_normalization_preflight(fake_run_sql)
     assert report["summary"]["preflight_clean"] is True
     assert report["summary"]["collation_drift_count"] == 1
-    files = write_type_normalization_preflight_bundle(report, tmp_path, stem="phase_a_type_normalization_preflight_test")
-    payload = json.loads((tmp_path / "phase_a_type_normalization_preflight_test.json").read_text(encoding="utf-8"))
+    files = write_type_normalization_preflight_bundle(
+        report, tmp_path, stem="phase_a_type_normalization_preflight_test"
+    )
+    payload = json.loads(
+        (tmp_path / "phase_a_type_normalization_preflight_test.json").read_text(encoding="utf-8")
+    )
     assert payload["summary"]["preflight_clean"] is True
     assert files["json"].endswith("phase_a_type_normalization_preflight_test.json")
 
@@ -143,7 +174,9 @@ def test_latest_schema_version_prefers_schema_migration_registry() -> None:
     def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
         if query_name == "schema_migrations.latest_schema_version_from_registry":
             return {"schema_version_after": "0.3.3-typed-backfill"}
-        raise AssertionError("schema_version fallback should not be queried when registry is present")
+        raise AssertionError(
+            "schema_version fallback should not be queried when registry is present"
+        )
 
     assert latest_schema_version(fake_run_sql) == "0.3.3-typed-backfill"
 
@@ -266,11 +299,17 @@ def test_build_schema_migration_report_and_bundle(tmp_path: Path) -> None:
             "latest_applied_at_utc": "2026-06-14 00:03:00",
         }
     ]
-    assert report["failed_rows"][0]["migration_id"] == "20260614_phase_a_typed_replacement_columns_v1"
+    assert (
+        report["failed_rows"][0]["migration_id"] == "20260614_phase_a_typed_replacement_columns_v1"
+    )
     assert report["checksum_mismatch_details"] == []
 
-    files = write_schema_migration_report_bundle(report, tmp_path, stem="schema_migration_report_test")
-    payload = json.loads((tmp_path / "schema_migration_report_test.json").read_text(encoding="utf-8"))
+    files = write_schema_migration_report_bundle(
+        report, tmp_path, stem="schema_migration_report_test"
+    )
+    payload = json.loads(
+        (tmp_path / "schema_migration_report_test.json").read_text(encoding="utf-8")
+    )
     assert payload["summary"]["unregistered_applied_row_count"] == 1
     assert payload["summary"]["failed_row_count"] == 1
     assert files["json"].endswith("schema_migration_report_test.json")
@@ -356,7 +395,9 @@ def test_backfill_typed_replacement_columns_records_counts() -> None:
             "dynamic_sessions_static_run_id_orphan_rows": 0,
         },
         "type_preflight.dynamic_static_type": [{"column_type": "bigint(20)", "is_nullable": "YES"}],
-        "type_preflight.static_run_pk_type": [{"column_type": "bigint(20) unsigned", "is_nullable": "NO"}],
+        "type_preflight.static_run_pk_type": [
+            {"column_type": "bigint(20) unsigned", "is_nullable": "NO"}
+        ],
         "type_preflight.run_started": {
             "total_static_runs": 4,
             "blank_run_started_rows": 0,

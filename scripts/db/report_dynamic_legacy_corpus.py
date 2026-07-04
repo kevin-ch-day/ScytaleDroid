@@ -640,8 +640,8 @@ def _build_per_app_rollup(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, A
             network_context_state = "none"
             ingest_guidance = "no reusable network context available"
 
-        def _median(field: str) -> str:
-            values = [_safe_int(row.get(field), default=-1) for row in usable if _safe_int(row.get(field), default=-1) >= 0]
+        def _median(field: str, rows: list[dict[str, Any]] = usable) -> str:
+            values = [_safe_int(row.get(field), default=-1) for row in rows if _safe_int(row.get(field), default=-1) >= 0]
             return str(int(median(values))) if values else ""
         rollups.append(
             {
@@ -688,8 +688,8 @@ def _build_focus_rollup(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
         if not items:
             continue
         usable = [row for row in items if _safe_int(row.get("pcap_bytes")) > 0]
-        def _median(field: str) -> str:
-            values = [_safe_int(row.get(field), default=-1) for row in usable if _safe_int(row.get(field), default=-1) >= 0]
+        def _median(field: str, rows: list[dict[str, Any]] = usable) -> str:
+            values = [_safe_int(row.get(field), default=-1) for row in rows if _safe_int(row.get(field), default=-1) >= 0]
             return str(int(median(values))) if values else ""
         out.append(
             {

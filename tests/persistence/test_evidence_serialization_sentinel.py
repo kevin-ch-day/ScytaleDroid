@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 
 def test_serialise_evidence_returns_sentinel_and_warns(monkeypatch) -> None:
     from scytaledroid.Database.db_func import evidence_json

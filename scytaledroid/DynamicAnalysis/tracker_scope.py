@@ -139,6 +139,7 @@ def build_scoped_dataset_counts(
     out = {
         "baseline_countable": 0,
         "baseline_extra": 0,
+        "baseline_not_idle_supplemental": 0,
         "baseline_low_signal_supplemental": 0,
         "interactive_countable": 0,
         "interactive_extra": 0,
@@ -183,6 +184,8 @@ def build_scoped_dataset_counts(
             if countable_raw is False
             else None
         )
+        if explicit_countable is False and _is_repairable_stale_baseline_noncountable(r, prof):
+            explicit_countable = None
 
         # Prefer the tracker/finalization truth when present. This avoids
         # recomputing quota progress from profile order alone for runs that were
@@ -193,6 +196,8 @@ def build_scoped_dataset_counts(
                     if is_baseline:
                         if prof == "baseline_idle" and bool(r.get("low_signal")):
                             out["baseline_low_signal_supplemental"] += 1
+                        elif prof == "baseline_idle" and bool(r.get("baseline_not_idle")):
+                            out["baseline_not_idle_supplemental"] += 1
                         else:
                             out["baseline_extra"] += 1
                     elif is_interactive:
@@ -244,6 +249,21 @@ def build_scoped_dataset_counts(
                 out[f"interactive_{kind}_extra"] += 1
             continue
     return out
+
+
+def _is_repairable_stale_baseline_noncountable(run: dict, profile_lc: str) -> bool:
+    """Return whether a stale baseline ``countable=false`` can re-enter quota marking."""
+    if not (profile_lc.startswith("baseline") or ("baseline" in profile_lc) or ("idle" in profile_lc)):
+        return False
+    if run.get("valid_dataset_run") is False or run.get("paper_eligible") is False:
+        return False
+    if bool(run.get("extra_run")):
+        return False
+    if profile_lc == "baseline_idle" and bool(run.get("low_signal")):
+        return False
+    if profile_lc == "baseline_idle" and bool(run.get("baseline_not_idle")):
+        return False
+    return True
 
 
 def default_resolve_tracker_run_identity(package_name: str, run: dict) -> tuple[str | None, str | None]:

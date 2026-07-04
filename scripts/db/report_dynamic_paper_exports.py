@@ -237,7 +237,6 @@ def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
         run_id = str(manifest.get("dynamic_run_id") or run_dir.name)
         verify_row = verify_by_run.get(run_id, {})
         report = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
-        features = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
 
         target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
         operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}

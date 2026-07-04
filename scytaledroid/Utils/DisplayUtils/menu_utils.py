@@ -78,7 +78,7 @@ def _normalise_options(
         | MenuOption
         | MenuItemSpec
         | tuple[str, str, str, str]
-    ]
+    ],
 ) -> list[MenuOption]:
     if isinstance(options, Mapping):
         return [_coerce_option(key, value, None) for key, value in options.items()]
@@ -104,9 +104,7 @@ def _normalise_options(
             elif len(entry) == 3:
                 normalised.append(_coerce_option(entry[0], entry[1], entry[2]))
             elif len(entry) == 4:
-                normalised.append(
-                    _coerce_option(entry[0], entry[1], entry[2], badge=entry[3])
-                )
+                normalised.append(_coerce_option(entry[0], entry[1], entry[2], badge=entry[3]))
             else:  # pragma: no cover - defensive path
                 raise ValueError("Menu tuples must contain 2 to 4 items")
         else:  # pragma: no cover - defensive path
@@ -278,8 +276,9 @@ def print_hint(message: str, *, icon: str | None = None) -> None:
     prefix_text = colors.apply(prefix, palette.hint, bold=True)
     body_width = max(20, min(get_terminal_width(), 100) - 4)
     wrapped = _wrap_text(text, body_width)
+    continuation = " " * (text_blocks.visible_width(prefix) + 1)
     for index, line in enumerate(wrapped):
-        leader = f"{prefix_text} " if index == 0 else "  "
+        leader = f"{prefix_text} " if index == 0 else continuation
         print(f"{leader}{colors.apply(line, palette.hint)}")
 
 
@@ -291,18 +290,20 @@ def print_metrics(metrics: Sequence[tuple[str, object]]) -> None:
     if not valid_metrics:
         return
     max_label = max((len(label) for label, _ in valid_metrics), default=0)
+    marker = (
+        colors.apply("•", palette.accent, bold=True)
+        if not use_ascii_ui()
+        else colors.apply("*", palette.accent, bold=True)
+    )
     for label, value in valid_metrics:
         label_text = colors.apply(label.ljust(max_label), palette.muted, bold=True)
-        value_text = colors.apply(str(value), palette.accent, bold=True)
-        print(f"{label_text} : {value_text}")
+        value_text = colors.apply(str(value), palette.emphasis or palette.accent, bold=True)
+        print(f"{marker} {label_text} : {value_text}")
 
 
 def print_menu(
     options: Mapping[str, str]
-    | Sequence[tuple[str, str]
-              | tuple[str, str, str]
-              | MenuOption
-              | MenuItemSpec],
+    | Sequence[tuple[str, str] | tuple[str, str, str] | MenuOption | MenuItemSpec],
     *,
     is_main: bool = False,
     default: str | None = None,
@@ -377,7 +378,9 @@ def print_menu(
     if show_exit:
         exit_text = exit_label or ("Exit" if is_main else "Back")
         exit_item = MenuOption("0", exit_text)
-        exit_key = colors.apply(str(exit_item.key).rjust(key_width), colors.style("option_key"), bold=True)
+        exit_key = colors.apply(
+            str(exit_item.key).rjust(key_width), colors.style("option_key"), bold=True
+        )
         exit_label = colors.apply(exit_item.label, colors.style("option_text"))
         exit_label_line = f"{exit_key}) {exit_label}"
         if default == "0":
@@ -415,10 +418,7 @@ def print_menu(
 def format_menu_panel(
     title: str,
     options: Mapping[str, str]
-    | Sequence[tuple[str, str]
-              | tuple[str, str, str]
-              | MenuOption
-              | MenuItemSpec],
+    | Sequence[tuple[str, str] | tuple[str, str, str] | MenuOption | MenuItemSpec],
     *,
     width: int | None = None,
     default_keys: Sequence[str] = (),
@@ -449,11 +449,13 @@ def format_menu_panel(
 
         key_token = colors.apply(f"{option.key})", key_style, bold=True)
         label_token = colors.apply(option.label, label_style, bold=True)
-        badge_token = ""
+        inline_notes: list[str] = []
         if option.badge:
-            badge_token = f" {colors.apply('[' + option.badge + ']', palette.badge)}"
+            inline_notes.append(colors.apply("[" + option.badge + "]", palette.badge))
+        if option.disabled and compact:
+            inline_notes.append(colors.apply("(unavailable)", palette.disabled))
         header_line = text_blocks.truncate_visible(
-            f"{key_token} {label_token}{badge_token}",
+            f"{key_token} {label_token}" + (f" {' '.join(inline_notes)}" if inline_notes else ""),
             body_width,
         )
         lines.append(header_line)
@@ -465,9 +467,10 @@ def format_menu_panel(
                 styled = colors.apply(entry, style)
                 lines.append(styled)
 
-        _append_wrapped(option.description, palette.muted)
-        _append_wrapped(option.hint, palette.hint)
-        if option.disabled:
+        if not compact:
+            _append_wrapped(option.description, palette.muted)
+            _append_wrapped(option.hint, palette.hint)
+        if option.disabled and not compact:
             lines.append(colors.apply("Temporarily unavailable", palette.disabled))
         lines.append("")
 
@@ -481,8 +484,7 @@ def print_menu_panels(
     sections: Sequence[
         tuple[
             str,
-            Mapping[str, str]
-            | Sequence[tuple[str, str] | tuple[str, str, str] | MenuOption],
+            Mapping[str, str] | Sequence[tuple[str, str] | tuple[str, str, str] | MenuOption],
         ]
     ],
     *,
@@ -571,7 +573,18 @@ def print_section(title: str) -> None:
         return
 
     palette = colors.get_palette()
-    leader = colors.apply("» ", palette.accent, bold=True) if colors.colors_enabled() and not use_ascii_ui() else ""
+    if colors.colors_enabled() and not use_ascii_ui():
+        leader = colors.apply("▸ ", palette.accent, bold=True)
+        title_text = colors.apply(heading, palette.banner_primary, bold=True)
+        accent_width = min(8, max(4, len(heading) // 2))
+        divider_text = colors.apply(
+            "━" * accent_width, palette.accent, bold=True
+        ) + text_blocks.divider(width=max(0, len(heading) - accent_width), style="divider")
+        print(f"{leader}{title_text}")
+        print(divider_text)
+        return
+
+    leader = colors.apply(">> ", palette.accent, bold=True) if colors.colors_enabled() else ""
     print(f"{leader}{colors.apply(heading, palette.banner_primary, bold=True)}")
     print(text_blocks.divider(width=max(4, len(heading)), style="divider"))
 

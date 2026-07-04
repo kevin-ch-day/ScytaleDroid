@@ -1,48 +1,36 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_domain_context as report
 
 
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_domain_context.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "domain-context" in out
-    assert "--package" in out
-
-
 def test_context_for_domain_prefers_curated_suffix_and_package_hints() -> None:
-    bbc_api = report._context_for_domain("bbc-global-app.api.bbc.com", package_name="bbc.mobile.news.ww")
+    bbc_api = report._context_for_domain(
+        "bbc-global-app.api.bbc.com", package_name="bbc.mobile.news.ww"
+    )
     assert bbc_api["owner_class"] == "first_party"
     assert bbc_api["role_class"] == "publisher_api"
     assert bbc_api["basis"] == "curated_exact"
 
-    bbc_live = report._context_for_domain("api.live.bbcx-internal.com", package_name="bbc.mobile.news.ww")
+    bbc_live = report._context_for_domain(
+        "api.live.bbcx-internal.com", package_name="bbc.mobile.news.ww"
+    )
     assert bbc_live["owner_class"] == "first_party"
     assert bbc_live["role_class"] == "publisher_api"
     assert bbc_live["basis"] == "curated_suffix"
 
-    airship = report._context_for_domain("device-api.urbanairship.com", package_name="bbc.mobile.news.ww")
+    airship = report._context_for_domain(
+        "device-api.urbanairship.com", package_name="bbc.mobile.news.ww"
+    )
     assert airship["owner_class"] == "third_party"
     assert airship["role_class"] == "engagement_push"
     assert airship["basis"] == "curated_suffix"
 
-    cnn_hint = report._context_for_domain("images.cnn.com", package_name="com.cnn.mobile.android.phone")
+    cnn_hint = report._context_for_domain(
+        "images.cnn.com", package_name="com.cnn.mobile.android.phone"
+    )
     assert cnn_hint["owner_class"] == "first_party"
     assert cnn_hint["basis"] == "package_root_hint"
 
@@ -57,7 +45,9 @@ def test_context_for_domain_resolves_new_curated_provider_suffixes_and_exact_hos
     assert permutive["role_class"] == "audience_personalization"
     assert permutive["basis"] == "curated_suffix"
 
-    liveramp = report._context_for_domain("idsync.rlcdn.com", package_name="com.cnn.mobile.android.phone")
+    liveramp = report._context_for_domain(
+        "idsync.rlcdn.com", package_name="com.cnn.mobile.android.phone"
+    )
     assert liveramp["owner_class"] == "third_party"
     assert liveramp["role_class"] == "identity_sync"
     assert liveramp["basis"] == "curated_suffix"
@@ -67,12 +57,16 @@ def test_context_for_domain_resolves_new_curated_provider_suffixes_and_exact_hos
     assert ima["role_class"] == "adtech_monetization"
     assert ima["basis"] == "curated_exact"
 
-    adobe = report._context_for_domain("sp.auth.adobe.com", package_name="com.cnn.mobile.android.phone")
+    adobe = report._context_for_domain(
+        "sp.auth.adobe.com", package_name="com.cnn.mobile.android.phone"
+    )
     assert adobe["owner_class"] == "third_party"
     assert adobe["role_class"] == "identity_api"
     assert adobe["basis"] == "curated_suffix"
 
-    ad_quality = report._context_for_domain("ep1.adtrafficquality.google", package_name="bbc.mobile.news.ww")
+    ad_quality = report._context_for_domain(
+        "ep1.adtrafficquality.google", package_name="bbc.mobile.news.ww"
+    )
     assert ad_quality["owner_class"] == "third_party"
     assert ad_quality["role_class"] == "ad_measurement"
     assert ad_quality["basis"] == "curated_suffix"

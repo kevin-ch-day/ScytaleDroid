@@ -22,7 +22,10 @@ def test_dynamic_run_context_view_normalizes_effective_runtime_fields() -> None:
     assert "quota_state" in sql
     assert "cohort_eligibility_state" in sql
     assert "effective_run_profile" in sql
-    assert "COALESCE(ds.operator_run_profile, nf.run_profile, ds.profile_key, 'unknown') AS effective_run_profile" in sql
+    assert (
+        "COALESCE(ds.operator_run_profile, nf.run_profile, ds.profile_key, 'unknown') AS effective_run_profile"
+        in sql
+    )
     assert (
         "COALESCE(ds.operator_interaction_level, nf.interaction_level, 'unknown') AS effective_interaction_level"
         in sql

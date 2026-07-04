@@ -15,4 +15,3 @@ def test_persistence_uow_doc_matches_contract_constant():
 
     # Every scientific contract table must be documented.
     assert SCIENTIFIC_UOW_TABLES.issubset(listed_scientific)
-

@@ -32,7 +32,9 @@ def test_sql_typed_read_helpers_reference_replacement_columns() -> None:
 
 def test_collect_phase_a_read_parity_and_write_bundle(tmp_path: Path) -> None:
     query_rows = {
-        "schema_migrations.latest_schema_version_from_registry": {"schema_version_after": "0.3.3-typed-backfill"},
+        "schema_migrations.latest_schema_version_from_registry": {
+            "schema_version_after": "0.3.3-typed-backfill"
+        },
         "phase_a_read_parity.dynamic_summary": {
             "dynamic_sessions_total": 10,
             "legacy_static_run_id_present_rows": 3,
@@ -67,8 +69,12 @@ def test_collect_phase_a_read_parity_and_write_bundle(tmp_path: Path) -> None:
     assert report["summary"]["parity_clean"] is True
     assert report["summary"]["live_schema_version"] == "0.3.3-typed-backfill"
 
-    files = write_phase_a_read_parity_bundle(report, tmp_path, stem="phase_a_typed_read_parity_test")
-    payload = json.loads((tmp_path / "phase_a_typed_read_parity_test.json").read_text(encoding="utf-8"))
+    files = write_phase_a_read_parity_bundle(
+        report, tmp_path, stem="phase_a_typed_read_parity_test"
+    )
+    payload = json.loads(
+        (tmp_path / "phase_a_typed_read_parity_test.json").read_text(encoding="utf-8")
+    )
     assert payload["summary"]["parity_clean"] is True
     assert files["json"].endswith("phase_a_typed_read_parity_test.json")
 

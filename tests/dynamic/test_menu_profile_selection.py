@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from scytaledroid.DynamicAnalysis import menu
+from scytaledroid.DynamicAnalysis.menus import dynamic_menu as menu
 
 
 def test_select_profile_package_uses_operational_profiles_only(monkeypatch) -> None:

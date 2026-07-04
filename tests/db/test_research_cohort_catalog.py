@@ -73,7 +73,9 @@ def test_apply_research_cohort_tables_migration_seeds_and_preserves_existing_sta
             return None
         raise AssertionError(f"unexpected query_name={query_name!r} sql={sql[:80]!r}")
 
-    def fake_upsert(*, cohort_key: str, display_name: str, description: str | None, **_kwargs) -> int:
+    def fake_upsert(
+        *, cohort_key: str, display_name: str, description: str | None, **_kwargs
+    ) -> int:
         cohort_ids[cohort_key] = len(cohort_ids) + 1
         assert display_name
         assert description is not None

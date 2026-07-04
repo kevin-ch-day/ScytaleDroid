@@ -9,6 +9,7 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
+from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,8 @@ def write_static_dynamic_overlap(
         else None
     )
     corroborated_pair_groups = _corroborated_pair_groups(domain_metadata, dynamic_domains)
+    embedded_plan = _load_static_plan(manifest, run_dir=run_dir)
+    cleartext_posture = compute_static_dynamic_cleartext_posture(embedded_plan, report)
     # Stable top-level aliases for reporting/CSV exports.
     overlap_ratio_total = overlap_ratio
     overlap_ratio_nsc = (overlap_sources.get("nsc") or {}).get("overlap_ratio") if overlap_sources else None
@@ -95,6 +98,7 @@ def write_static_dynamic_overlap(
         "actionable_overlap_ratio": actionable_overlap_ratio,
         "corroborated_pair_groups": corroborated_pair_groups,
         "corroborated_pair_group_count": len(corroborated_pair_groups),
+        "cleartext_posture": cleartext_posture,
         "string_dynamic_correlation_note": (
             "Actionable overlap highlights runtime observation of domains tied to higher-context "
             "static string signals such as token/endpoint families; exploratory overlap is weaker evidence."
@@ -250,6 +254,18 @@ def _dynamic_domains(report: dict[str, Any]) -> set[str]:
         value = item.get("value")
         if value:
             domains.add(str(value).strip())
+    surface = report.get("security_surface")
+    if isinstance(surface, dict):
+        inventory = surface.get("domain_inventory")
+        if isinstance(inventory, dict):
+            for name in inventory.get("dns_names") or []:
+                text = str(name or "").strip()
+                if text:
+                    domains.add(text)
+            for name in inventory.get("sni_names") or []:
+                text = str(name or "").strip()
+                if text:
+                    domains.add(text)
     return {item for item in domains if item}
 
 

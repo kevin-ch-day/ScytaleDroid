@@ -93,8 +93,8 @@ def summarize_evidence_quota(
             }
         )
 
-    for package, rows in per_pkg_rows.items():
-        rows = sorted(rows, key=lambda row: str(row.get("sort_key") or ""))
+    for package, package_rows in per_pkg_rows.items():
+        rows = sorted(package_rows, key=lambda row: str(row.get("sort_key") or ""))
         counts = {
             "baseline": 0,
             "interactive_manual": 0,

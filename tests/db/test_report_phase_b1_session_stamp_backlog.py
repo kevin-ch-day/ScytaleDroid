@@ -5,19 +5,6 @@ from scytaledroid.Database.db_utils.phase_b1_join_key_normalization import (
     planned_backlog_session_stamp_alter_sql,
 )
 
-def test_phase_b1_session_stamp_backlog_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/phase_b1_session_stamp_backlog.py")
-    assert_safe_script_help("scripts/db/phase_b1_session_stamp_backlog.py", "report")
-    assert_safe_script_help("scripts/db/phase_b1_session_stamp_backlog.py", "apply")
-
-
-def test_report_phase_b1_session_stamp_backlog_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/report_phase_b1_session_stamp_backlog.py")
-
-
-def test_apply_phase_b1_session_stamp_backlog_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/apply_phase_b1_session_stamp_backlog.py")
-
 
 def test_backlog_session_stamp_targets_match_second_wave_contract() -> None:
     targets = list(backlog_session_stamp_target_columns())

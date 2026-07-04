@@ -195,6 +195,40 @@ def dataset_pcap_failure_detail(run_dir: Path, *, pcap_size_int: int = 0) -> str
     return "PCAP_LOCAL_FILE_MISSING"
 
 
+def security_surface_issue_codes(report: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """Return conservative issue codes for security_surface health on one pcap_report."""
+    if not isinstance(report, Mapping):
+        return ("security_surface_missing",)
+    if str(report.get("report_status") or "").lower() not in {"ok", "success"}:
+        return ()
+    surface = report.get("security_surface")
+    if not isinstance(surface, dict):
+        return ("security_surface_missing",)
+    status = str(surface.get("status") or "").strip().lower()
+    if status == "ok":
+        codes: list[str] = []
+        cleartext = surface.get("cleartext") if isinstance(surface.get("cleartext"), dict) else {}
+        if cleartext.get("http_observed"):
+            codes.append("cleartext_http_observed")
+        if _safe_int_surface(cleartext.get("decoded_stream_count")) > 0:
+            codes.append("decoded_cleartext_streams_observed")
+        for flag in surface.get("risk_flags") or []:
+            text = str(flag or "").strip()
+            if text:
+                codes.append(text)
+        return tuple(dict.fromkeys(codes))
+    if status in {"failed", "skipped"}:
+        return (f"security_surface_{status}",)
+    return ("security_surface_missing",)
+
+
+def _safe_int_surface(value: object) -> int:
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 __all__ = [
     "canonical_pcap_failure_code",
     "canonical_pcap_failure_code_from_raw_detail",
@@ -203,5 +237,6 @@ __all__ = [
     "export_pcap_failure_detail",
     "raw_pcap_failure_detail_from_canonical",
     "extract_verify_issue_codes",
+    "security_surface_issue_codes",
     "verify_issue_codes_csv",
 ]

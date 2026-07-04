@@ -2,97 +2,45 @@
 
 from __future__ import annotations
 
-import json
-import re
-from dataclasses import dataclass
-from pathlib import Path
-
-from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
 from scytaledroid.DynamicAnalysis import app_queue_state as _app_queue_state
-from scytaledroid.DynamicAnalysis.queue_operator_ui import (
-    queue_selection_shortcut_hint,
-    queue_selection_shortcuts_hint,
-)
+from scytaledroid.DynamicAnalysis.menus import status_reports as _status_reports
 from scytaledroid.DynamicAnalysis.menus.queue_data_sources import (
     resolve_db_dynamic_lineage_context_map as _resolve_db_dynamic_lineage_context_map_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_data_sources import (
     resolve_live_build_drift_map as _resolve_live_build_drift_map_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_prepared_view import (
+    PreparedPackageSelectionRow,
+    PreparedPackageSelectionView,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_prepared_view import (
+    prepare_package_selection_view as _prepare_package_selection_view_impl,
 )
 from scytaledroid.DynamicAnalysis.menus.queue_row_builder import (
     build_package_selection_row as _build_package_selection_row_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_row_builder import (
     prep_label_for_lineage_state as _prep_label_for_lineage_state_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.queue_row_builder import (
     row_lineage_state as _row_lineage_state_impl,
 )
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     build_scoped_dataset_counts as _build_scoped_dataset_counts_shared,
+)
+from scytaledroid.DynamicAnalysis.tracker_scope import (
     resolve_tracker_run_identity as _resolve_tracker_run_identity_shared,
 )
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils, terminal, text_blocks
-
-
-@dataclass(frozen=True)
-class PreparedPackageSelectionView:
-    packages: list[tuple[str, str | None, int | None, str | None]]
-    dataset_pkgs: set[str]
-    cfg: object
-    rows: list[list[str]]
-    op_rows: list[list[str]]
-    build_rows: list[list[str]]
-    dataset_apps_total: int
-    dataset_apps_complete: int
-    dataset_valid_runs_total: int
-    current_build_ready_count: int = 0
-    current_build_in_progress_count: int = 0
-    current_build_review_count: int = 0
-    stale_app_count: int = 0
-    current_build_db_only_count: int = 0
-    historical_valid_runs_total: int = 0
-    historical_build_count_total: int = 0
-    mixed_identity_app_count: int = 0
-    legacy_only_app_count: int = 0
-    historical_local_only_app_count: int = 0
-    historical_db_only_app_count: int = 0
-    no_evidence_anywhere_count: int = 0
-    expected_runs: int = 0
-    evidence_summary: dict[str, int | bool] | None = None
-    row_models: list["PreparedPackageSelectionRow"] | None = None
-    capture_device_selected: bool = True
-
-
-@dataclass(frozen=True)
-class PreparedPackageSelectionRow:
-    full_row: list[str]
-    op_row: list[str]
-    build_row: list[str] | None
-    dataset_app_count: int
-    dataset_complete_count: int
-    dataset_valid_runs_count: int
-    historical_valid_runs_count: int = 0
-    historical_build_count: int = 0
-    build_state: str = "—"
-    package_name: str = ""
-    display_name: str = ""
-    baseline_countable: int = 0
-    baseline_extra: int = 0
-    baseline_low_signal_supplemental: int = 0
-    interactive_countable: int = 0
-    interactive_extra: int = 0
-    interactive_low_signal_supplemental: int = 0
-    need_baseline: int = 0
-    need_interactive: int = 0
-    prep_label: str = "—"
-    qa_label: str = "—"
-    next_label: str = "—"
-    technical_valid_active: int = 0
-    live_build_drift: bool = False
-    live_expected_version_code: str = ""
-    live_expected_version_name: str = ""
-    live_observed_version_code: str = ""
-    live_static_run_id: str = ""
-    lineage_state: str = ""
-    db_active_sessions: int = 0
-    db_historical_sessions: int = 0
-    db_total_sessions: int = 0
+from scytaledroid.Utils.DisplayUtils import (
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    table_utils,
+    terminal,
+    text_blocks,
+)
 
 
 def prepare_package_selection_view(
@@ -104,130 +52,15 @@ def prepare_package_selection_view(
     build_package_selection_row_fn,
     device_serial: str | None = None,
 ) -> PreparedPackageSelectionView | None:
-    packages = list_packages_fn(groups)
-    if not packages:
-        return None
-    dataset_pkgs: set[str] = set()
-    try:
-        dataset_pkgs = {pkg.lower() for pkg in load_dataset_packages()}
-    except Exception:
-        dataset_pkgs = set()
-    live_build_drift_map = _resolve_live_build_drift_map(
-        [package for package, _v, _c, _label in packages],
+    return _prepare_package_selection_view_impl(
+        groups,
+        load_dataset_packages=load_dataset_packages,
+        list_packages_fn=list_packages_fn,
+        summarize_evidence_quota_fn=summarize_evidence_quota_fn,
+        build_package_selection_row_fn=build_package_selection_row_fn,
+        resolve_live_build_drift_map_fn=_resolve_live_build_drift_map,
+        resolve_db_dynamic_lineage_context_map_fn=_resolve_db_dynamic_lineage_context_map,
         device_serial=device_serial,
-    )
-    db_lineage_map = _resolve_db_dynamic_lineage_context_map(
-        [package for package, _v, _c, _label in packages]
-    )
-
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
-        DatasetTrackerConfig,
-        load_dataset_tracker,
-    )
-    from scytaledroid.DynamicAnalysis.utils.run_cleanup import recent_tracker_runs
-
-    cfg = DatasetTrackerConfig()
-    tracker = load_dataset_tracker()
-    tracker_apps = tracker.get("apps") if isinstance(tracker, dict) else {}
-    labels = [((app_label or package).strip() or package) for package, _v, _c, app_label in packages]
-    collisions = {label for label in labels if labels.count(label) > 1}
-
-    rows = []
-    op_rows = []
-    build_rows = []
-    row_models: list[PreparedPackageSelectionRow] = []
-    dataset_apps_total = 0
-    dataset_apps_complete = 0
-    dataset_valid_runs_total = 0
-    current_build_ready_count = 0
-    current_build_in_progress_count = 0
-    current_build_review_count = 0
-    stale_app_count = 0
-    current_build_db_only_count = 0
-    historical_valid_runs_total = 0
-    historical_build_count_total = 0
-    mixed_identity_app_count = 0
-    legacy_only_app_count = 0
-    historical_local_only_app_count = 0
-    historical_db_only_app_count = 0
-    no_evidence_anywhere_count = 0
-    evidence_summary: dict[str, int | bool] | None = None
-    for idx, (package, _version, _count, app_label) in enumerate(packages, start=1):
-        prepared_row = build_package_selection_row_fn(
-            idx=idx,
-            package=package,
-            app_label=app_label,
-            collisions=collisions,
-            dataset_pkgs=dataset_pkgs,
-            tracker_apps=tracker_apps,
-            cfg=cfg,
-            recent_tracker_runs=recent_tracker_runs,
-            live_build_drift=live_build_drift_map.get(str(package or "").strip().lower()),
-            db_lineage_context=db_lineage_map.get(str(package or "").strip().lower()),
-        )
-        dataset_apps_total += prepared_row.dataset_app_count
-        dataset_apps_complete += prepared_row.dataset_complete_count
-        dataset_valid_runs_total += prepared_row.dataset_valid_runs_count
-        if prepared_row.live_build_drift:
-            stale_app_count += 1
-        elif prepared_row.lineage_state == "current_build_db_only":
-            current_build_db_only_count += 1
-        elif prepared_row.lineage_state == "current_build_observed":
-            if str(prepared_row.qa_label or "").startswith("invalid"):
-                current_build_review_count += 1
-            elif prepared_row.dataset_complete_count > 0:
-                current_build_ready_count += 1
-            else:
-                current_build_in_progress_count += 1
-        historical_valid_runs_total += prepared_row.historical_valid_runs_count
-        historical_build_count_total += prepared_row.historical_build_count
-        if prepared_row.build_state == "mixed":
-            mixed_identity_app_count += 1
-        elif prepared_row.build_state == "legacy":
-            legacy_only_app_count += 1
-        if prepared_row.lineage_state == "historical_local_only":
-            historical_local_only_app_count += 1
-        elif prepared_row.lineage_state == "historical_db_only":
-            historical_db_only_app_count += 1
-        elif prepared_row.lineage_state == "no_evidence_anywhere":
-            no_evidence_anywhere_count += 1
-        rows.append(prepared_row.full_row)
-        op_rows.append(prepared_row.op_row)
-        row_models.append(prepared_row)
-        if prepared_row.build_row is not None:
-            build_rows.append(prepared_row.build_row)
-
-    expected_runs = 0
-    if dataset_apps_total > 0:
-        evidence_summary = summarize_evidence_quota_fn(dataset_pkgs, cfg)
-        expected_runs = dataset_apps_total * (int(cfg.baseline_required) + int(cfg.interactive_required))
-
-    return PreparedPackageSelectionView(
-        packages=packages,
-        dataset_pkgs=dataset_pkgs,
-        cfg=cfg,
-        rows=rows,
-        op_rows=op_rows,
-        build_rows=build_rows,
-        dataset_apps_total=dataset_apps_total,
-        dataset_apps_complete=dataset_apps_complete,
-        dataset_valid_runs_total=dataset_valid_runs_total,
-        current_build_ready_count=current_build_ready_count,
-        current_build_in_progress_count=current_build_in_progress_count,
-        current_build_review_count=current_build_review_count,
-        stale_app_count=stale_app_count,
-        current_build_db_only_count=current_build_db_only_count,
-        historical_valid_runs_total=historical_valid_runs_total,
-        historical_build_count_total=historical_build_count_total,
-        mixed_identity_app_count=mixed_identity_app_count,
-        legacy_only_app_count=legacy_only_app_count,
-        historical_local_only_app_count=historical_local_only_app_count,
-        historical_db_only_app_count=historical_db_only_app_count,
-        no_evidence_anywhere_count=no_evidence_anywhere_count,
-        expected_runs=expected_runs,
-        evidence_summary=evidence_summary,
-        row_models=row_models,
-        capture_device_selected=bool(str(device_serial or "").strip()),
     )
 
 
@@ -272,22 +105,32 @@ def build_package_selection_row(
     )
 
 
-def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summarize_evidence_quota_fn) -> str | None:
+def run_package_selection_menu(
+    prepared: PreparedPackageSelectionView, *, summarize_evidence_quota_fn
+) -> str | None:
     evidence_summary = prepared.evidence_summary
 
     while True:
         if prepared.dataset_apps_total > 0:
-            evidence_summary = evidence_summary or summarize_evidence_quota_fn(prepared.dataset_pkgs, prepared.cfg)
+            evidence_summary = evidence_summary or summarize_evidence_quota_fn(
+                prepared.dataset_pkgs, prepared.cfg
+            )
             quota = int(evidence_summary.get("quota_runs_counted", 0)) if evidence_summary else 0
             apps_ok = int(evidence_summary.get("apps_satisfied", 0)) if evidence_summary else 0
             freeze_ok = (
-                bool(evidence_summary.get("evidence_root_exists"))
-                and quota >= int(prepared.expected_runs)
-                and apps_ok >= int(prepared.dataset_apps_total)
-            ) if evidence_summary else False
+                (
+                    bool(evidence_summary.get("evidence_root_exists"))
+                    and quota >= int(prepared.expected_runs)
+                    and apps_ok >= int(prepared.dataset_apps_total)
+                )
+                if evidence_summary
+                else False
+            )
             remaining = max(0, int(prepared.expected_runs) - int(quota))
             row_models = list(prepared.row_models or [])
-            extra_runs = int(evidence_summary.get("extra_eligible_runs", 0)) if evidence_summary else 0
+            extra_runs = (
+                int(evidence_summary.get("extra_eligible_runs", 0)) if evidence_summary else 0
+            )
             next_row = _next_recommended_row(row_models)
             _render_queue_summary_block(
                 prepared=prepared,
@@ -307,15 +150,11 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
                 next_row=next_row,
             )
             warnings_line = _compact_warning_line(row_models)
-            if warnings_line:
-                print()
-                print(status_messages.status(warnings_line, level="warn"))
             notes_line = _compact_note_line(row_models)
-            if notes_line:
-                print(status_messages.status(notes_line, level="info"))
-            print()
-            menu_utils.print_hint(queue_selection_shortcut_hint())
-            menu_utils.print_hint(queue_selection_shortcuts_hint())
+            _render_queue_footer_block(
+                warnings_line=warnings_line,
+                notes_line=notes_line,
+            )
         choice = prompt_utils.prompt_text("Choose app # / name", required=False).strip()
 
         if not choice:
@@ -326,9 +165,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             return package_name
         choice_lc = choice.lower()
         if choice_lc in {"s", "summary"}:
-            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_details
-
-            render_cohort_status_details(
+            _status_reports.render_cohort_status_details(
                 dataset_apps_total=prepared.dataset_apps_total,
                 dataset_apps_complete=prepared.dataset_apps_complete,
                 dataset_valid_runs_total=prepared.dataset_valid_runs_total,
@@ -352,9 +189,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             )
             continue
         if choice_lc in {"y", "history"}:
-            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_build_history
-
-            render_cohort_build_history(
+            _status_reports.render_cohort_build_history(
                 list(prepared.row_models or []),
                 prepared.build_rows,
                 baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
@@ -362,9 +197,7 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             )
             continue
         if choice_lc in {"v", "grouped", "view"}:
-            from scytaledroid.DynamicAnalysis import app_queue_rendering
-
-            app_queue_rendering.render_queue_grouped_sections(
+            _app_queue_rendering.render_queue_grouped_sections(
                 row_models,
                 baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
                 interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
@@ -375,14 +208,10 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
             prompt_utils.press_enter_to_continue()
             continue
         if choice_lc in {"h", "help"}:
-            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_help
-
-            render_cohort_status_help()
+            _status_reports.render_cohort_status_help()
             continue
         if choice_lc in {"d", "debug", "diagnostics"}:
-            from scytaledroid.DynamicAnalysis.menus.status_reports import render_cohort_status_debug
-
-            render_cohort_status_debug(
+            _status_reports.render_cohort_status_debug(
                 list(prepared.row_models or []),
                 baseline_required=int(getattr(prepared.cfg, "baseline_required", 3)),
                 interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
@@ -394,11 +223,11 @@ def run_package_selection_menu(prepared: PreparedPackageSelectionView, *, summar
         if index is not None:
             package_name, _, _, _ = prepared.packages[index]
             return package_name
-        print(status_messages.status("Invalid choice. Enter an app number/name or use S, V, Y, H, D, or B.", level="warn"))
-
-
-def _recommended_reason(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.recommended_reason(row)
+        print(
+            status_messages.status(
+                "Invalid choice. Enter an app number/name or use S, V, Y, H, D, or B.", level="warn"
+            )
+        )
 
 
 def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
@@ -407,10 +236,6 @@ def _compact_warning_line(row_models: list[PreparedPackageSelectionRow]) -> str:
 
 def _compact_note_line(row_models: list[PreparedPackageSelectionRow]) -> str:
     return _app_queue_state.compact_note_line(row_models)
-
-
-def _attention_items(row_models: list[PreparedPackageSelectionRow]) -> list[str]:
-    return _app_queue_state.attention_items(row_models)
 
 
 def _render_compact_queue_table(
@@ -429,14 +254,6 @@ def _render_compact_queue_table(
         text_blocks_mod=text_blocks,
         next_row=next_row,
     )
-
-
-def _queue_app_width() -> int:
-    return _app_queue_rendering.queue_app_width(terminal_mod=terminal)
-
-
-def _queue_compact_layout_mode() -> str:
-    return _app_queue_rendering.queue_compact_layout_mode(terminal_mod=terminal)
 
 
 def _render_queue_summary_block(
@@ -462,78 +279,19 @@ def _render_queue_summary_block(
     )
 
 
+def _render_queue_footer_block(
+    *,
+    warnings_line: str = "",
+    notes_line: str = "",
+) -> None:
+    _app_queue_rendering.render_queue_footer_block(
+        warnings_line=warnings_line,
+        notes_line=notes_line,
+    )
+
+
 def _archive_blocker_summary(row_models: list[PreparedPackageSelectionRow]) -> str:
     return _app_queue_state.archive_blocker_summary(row_models)
-
-
-def _queue_state_label(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.queue_state_label(row)
-
-
-def _queue_need_label(
-    row: PreparedPackageSelectionRow,
-    *,
-    baseline_required: int,
-    interactive_required: int,
-) -> str:
-    return _app_queue_state.queue_need_label(
-        row,
-        baseline_required=baseline_required,
-        interactive_required=interactive_required,
-    )
-
-
-def _queue_runs_label(row: PreparedPackageSelectionRow, *, total_required: int) -> str:
-    return _app_queue_state.queue_runs_label(row, total_required=total_required)
-
-
-def _queue_build_label(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.queue_build_label(row)
-
-
-def _queue_evidence_label(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.queue_evidence_label(row)
-
-
-def _queue_qa_badge(value: str) -> str:
-    return _app_queue_state.queue_qa_badge(value)
-
-
-def _queue_template_label(package_name: str) -> str:
-    return _app_queue_state.queue_template_label(package_name)
-
-
-def _queue_action_label(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.queue_action_label(row)
-
-
-def _queue_state_summary_label(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.queue_state_summary_label(row)
-
-
-def _queue_status_narrow_label(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.queue_status_narrow_label(row)
-
-
-def _queue_need_narrow_label(
-    row: PreparedPackageSelectionRow,
-    *,
-    baseline_required: int,
-    interactive_required: int,
-) -> str:
-    return _app_queue_state.queue_need_narrow_label(
-        row,
-        baseline_required=baseline_required,
-        interactive_required=interactive_required,
-    )
-
-
-def _queue_runs_narrow_label(row: PreparedPackageSelectionRow, *, total_required: int) -> str:
-    return _app_queue_state.queue_runs_narrow_label(row, total_required=total_required)
-
-
-def _queue_action_narrow_label(row: PreparedPackageSelectionRow) -> str:
-    return _app_queue_state.queue_action_narrow_label(row)
 
 
 def _display_action_label(row: PreparedPackageSelectionRow) -> str:
@@ -544,20 +302,10 @@ def _display_next_line_action_label(row: PreparedPackageSelectionRow) -> str:
     return _app_queue_state.display_next_line_action_label(row)
 
 
-def _next_recommendation_priority(row: PreparedPackageSelectionRow) -> tuple[int, str]:
-    return _app_queue_state.next_recommendation_priority(row)
-
-
 def _next_recommended_row(
     rows: list[PreparedPackageSelectionRow],
 ) -> PreparedPackageSelectionRow | None:
     return _app_queue_state.next_recommended_row(rows)
-
-
-def _group_queue_sections(
-    row_models: list[PreparedPackageSelectionRow],
-) -> list[tuple[str, list[PreparedPackageSelectionRow]]]:
-    return _app_queue_state.group_queue_sections(row_models)
 
 
 def _render_queue_section_table(
@@ -750,5 +498,9 @@ def resolve_package_selection(raw: str, prepared: PreparedPackageSelectionView) 
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        print(status_messages.status(f"Multiple apps matched \"{raw}\". Please enter the app number.", level="warn"))
+        print(
+            status_messages.status(
+                f'Multiple apps matched "{raw}". Please enter the app number.', level="warn"
+            )
+        )
     return None

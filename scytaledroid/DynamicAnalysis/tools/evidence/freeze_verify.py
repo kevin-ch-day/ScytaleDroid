@@ -65,10 +65,10 @@ def verify_dataset_freeze_immutability(
     missing = 0
     mismatches = 0
 
-    for rid in included:
-        if not isinstance(rid, str) or not rid.strip():
+    for raw_rid in included:
+        if not isinstance(raw_rid, str) or not raw_rid.strip():
             continue
-        rid = rid.strip()
+        rid = raw_rid.strip()
         scanned += 1
         run_dir = evidence_root / rid
         expected = checksums.get(rid)
@@ -142,4 +142,3 @@ def verify_dataset_freeze_immutability(
 
 
 __all__ = ["FreezeVerifyResult", "verify_dataset_freeze_immutability"]
-

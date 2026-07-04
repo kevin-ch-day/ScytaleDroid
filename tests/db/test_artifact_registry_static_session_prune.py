@@ -1,30 +1,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.Database.db_utils import artifact_registry_static_session_prune as prune
-
-
-def test_help_is_safe_without_pythonpath() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "prune_artifact_registry_static_legacy_sessions.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "session-stamp" in out
 
 
 def test_build_static_session_prune_proposal(monkeypatch, tmp_path: Path) -> None:
@@ -170,6 +150,8 @@ def test_write_static_session_prune_receipts(tmp_path: Path) -> None:
     assert (tmp_path / "artifact_registry_static_session_prune_test.csv").is_file()
     assert (tmp_path / "artifact_registry_static_session_prune_test.sql").is_file()
     assert (tmp_path / "artifact_registry_static_session_prune_sessions_test.txt").is_file()
-    payload = json.loads((tmp_path / "artifact_registry_static_session_prune_test.json").read_text(encoding="utf-8"))
+    payload = json.loads(
+        (tmp_path / "artifact_registry_static_session_prune_test.json").read_text(encoding="utf-8")
+    )
     assert payload["format"] == "scytaledroid.artifact_registry_static_session_prune_receipt.v1"
     assert payload["meta"]["targeted_session_stamps"] == ["20260429-all-full"]

@@ -174,6 +174,10 @@ class RunAudit:
     burstiness_packets_p95_over_p50: float | None
     top_sni: list[str]
     top_dns: list[str]
+    cleartext_http_observed: int | None
+    security_finding_count: int | None
+    cleartext_visibility_class: str | None
+    security_heuristic_score: int | None
     notes: list[str]
 
 
@@ -211,6 +215,17 @@ def _load_run_audit(run_dir: Path, *, display_name: str, package_name: str) -> R
     missing_tools = report.get("missing_tools")
     if isinstance(missing_tools, list) and missing_tools:
         notes.append("missing_tools:" + ",".join(str(x) for x in missing_tools))
+    surface_summary = (
+        (features.get("security_surface") or {}).get("summary")
+        if isinstance(features.get("security_surface"), dict)
+        else {}
+    )
+    if not isinstance(surface_summary, dict):
+        surface_summary = {}
+    if str((report.get("security_surface") or {}).get("status") or "").lower() == "ok":
+        pass
+    elif str(report.get("report_status") or "").lower() == "ok":
+        notes.append("missing_security_surface")
 
     return RunAudit(
         run_id=str(mf.get("dynamic_run_id") or run_dir.name),
@@ -242,6 +257,10 @@ def _load_run_audit(run_dir: Path, *, display_name: str, package_name: str) -> R
         burstiness_packets_p95_over_p50=_coerce_float(metrics.get("burstiness_packets_p95_over_p50")),
         top_sni=_top_values(report, "top_sni", limit=10),
         top_dns=_top_values(report, "top_dns", limit=10),
+        cleartext_http_observed=_coerce_int(proxies.get("cleartext_http_observed")),
+        security_finding_count=_coerce_int(proxies.get("security_finding_count")),
+        cleartext_visibility_class=str(surface_summary.get("cleartext_visibility_class") or "").strip() or None,
+        security_heuristic_score=_coerce_int(proxies.get("security_heuristic_score")),
         notes=notes,
     )
 
@@ -336,6 +355,9 @@ def run_dynamic_evidence_network_audit(
         interactive_bps_med = _safe_median(interactive_bps)
         baseline_pps_med = _safe_median(baseline_pps)
         interactive_pps_med = _safe_median(interactive_pps)
+        valid_runs = [r for r in runs if r.valid_dataset_run is True]
+        cleartext_runs = sum(1 for r in valid_runs if r.cleartext_http_observed == 1)
+        finding_counts = [float(r.security_finding_count) for r in valid_runs if r.security_finding_count is not None]
 
         apps_out.append(
             {
@@ -376,6 +398,20 @@ def run_dynamic_evidence_network_audit(
                         1 for r in runs if r.bucket == "interactive" and r.valid_dataset_run is False
                     ),
                 },
+                "security": {
+                    "valid_runs_with_cleartext_http": cleartext_runs,
+                    "valid_runs_with_cleartext_http_pct": (
+                        float(cleartext_runs) / float(len(valid_runs)) if valid_runs else None
+                    ),
+                    "median_security_finding_count": _safe_median(finding_counts),
+                    "cleartext_visibility_classes": sorted(
+                        {
+                            str(r.cleartext_visibility_class)
+                            for r in valid_runs
+                            if r.cleartext_visibility_class
+                        }
+                    ),
+                },
                 "runs": [
                     {
                         "run_id": r.run_id,
@@ -406,6 +442,10 @@ def run_dynamic_evidence_network_audit(
                         "burstiness_packets_p95_over_p50": r.burstiness_packets_p95_over_p50,
                         "top_sni": r.top_sni,
                         "top_dns": r.top_dns,
+                        "cleartext_http_observed": r.cleartext_http_observed,
+                        "security_finding_count": r.security_finding_count,
+                        "cleartext_visibility_class": r.cleartext_visibility_class,
+                        "security_heuristic_score": r.security_heuristic_score,
                         "notes": r.notes,
                     }
                     for r in runs

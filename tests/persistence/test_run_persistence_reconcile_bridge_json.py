@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.flows.run_persistence_audit import (
     _empty_audit_summary,
@@ -185,7 +185,10 @@ def test_refresh_existing_persistence_audit_payload_direct_mode_updates_rollups_
             return [("COMPLETED", 2)]
         if "COUNT(*) FROM static_analysis_runs WHERE session_label=%s AND is_canonical=1" in sql:
             return [(2,)]
-        if "COUNT(*) FROM static_analysis_runs WHERE session_label=%s AND static_handoff_json_path IS NOT NULL" in sql:
+        if (
+            "COUNT(*) FROM static_analysis_runs WHERE session_label=%s AND static_handoff_json_path IS NOT NULL"
+            in sql
+        ):
             return [(2,)]
         if "COUNT(*) FROM static_analysis_findings" in sql:
             return [(10,)]
@@ -356,7 +359,9 @@ def test_refresh_persistence_audit_artifact_for_session_resolves_existing_artifa
     assert captured["prefer_reconcile"] is False
 
 
-def test_refresh_existing_persistence_audit_payload_survives_reconcile_failure(tmp_path, monkeypatch) -> None:
+def test_refresh_existing_persistence_audit_payload_survives_reconcile_failure(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     archive_dir = tmp_path / "data" / "static_analysis" / "reports" / "archive" / "sess-offline"
     archive_dir.mkdir(parents=True, exist_ok=True)
@@ -392,7 +397,9 @@ def test_refresh_existing_persistence_audit_payload_survives_reconcile_failure(t
     assert refreshed["summary"]["reconciliation_error"] == "db offline"
 
 
-def test_refresh_existing_persistence_audit_payload_empty_rows_keeps_status_unknown(monkeypatch) -> None:
+def test_refresh_existing_persistence_audit_payload_empty_rows_keeps_status_unknown(
+    monkeypatch,
+) -> None:
     payload = {
         "session_stamp": "sess-empty",
         "outcome": {

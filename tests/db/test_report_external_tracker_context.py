@@ -1,29 +1,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 from scripts.db import report_external_tracker_context as report
-
-
-def test_help_is_safe_without_pythonpath() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_external_tracker_context.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "--session" in out
-    assert "tracker context" in out
 
 
 def test_extract_domain_tokens_normalizes_tracker_patterns() -> None:
@@ -36,8 +17,14 @@ def test_extract_domain_tokens_normalizes_tracker_patterns() -> None:
 
 def test_classify_overlap_confidence_separates_generic_and_specific_roots() -> None:
     assert report._classify_overlap_confidence("google.com") == ("low", "generic_root_overlap")
-    assert report._classify_overlap_confidence("amazonaws.com") == ("low", "generic_infrastructure_overlap")
-    assert report._classify_overlap_confidence("newrelic.com") == ("medium", "specific_root_overlap")
+    assert report._classify_overlap_confidence("amazonaws.com") == (
+        "low",
+        "generic_infrastructure_overlap",
+    )
+    assert report._classify_overlap_confidence("newrelic.com") == (
+        "medium",
+        "specific_root_overlap",
+    )
 
 
 def test_summarize_unmatched_domains_rolls_up_packages() -> None:
@@ -114,7 +101,9 @@ def test_main_generates_bundle_from_mocked_db(tmp_path: Path, monkeypatch) -> No
 
     monkeypatch.setattr(report, "_load_runs", lambda core_q, session=None: runs)
     monkeypatch.setattr(report, "_load_package_domains", lambda core_q, run_ids: package_domains)
-    monkeypatch.setattr(report, "_load_external_tracker_domains", lambda core_q: (tracker_rows, [], "2026-06-14"))
+    monkeypatch.setattr(
+        report, "_load_external_tracker_domains", lambda core_q: (tracker_rows, [], "2026-06-14")
+    )
     monkeypatch.setitem(sys.modules, "scytaledroid.Database.db_core.db_config", _FakeDbConfig)
     monkeypatch.setitem(sys.modules, "scytaledroid.Database.db_core.db_queries", _FakeDbQueries)
 

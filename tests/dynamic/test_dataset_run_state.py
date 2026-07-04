@@ -29,7 +29,9 @@ def test_protocol_from_runs_prefers_manual_when_script_template_missing(monkeypa
     assert suggested_slot == int(cfg.baseline_required) + 1
 
 
-def test_protocol_from_runs_prefers_manual_under_paper3_policy_even_when_template_exists(monkeypatch) -> None:
+def test_protocol_from_runs_prefers_manual_under_paper3_policy_even_when_template_exists(
+    monkeypatch,
+) -> None:
     cfg = DatasetTrackerConfig()
     monkeypatch.setattr(
         dataset_run_state,
@@ -116,3 +118,66 @@ def test_load_dataset_run_state_ignores_legacy_identity_runs(monkeypatch) -> Non
     assert state.paper_eligible_local == 0
     assert state.historical_valid_runs == 1
     assert state.historical_build_count == 1
+
+
+def test_load_dataset_run_state_keeps_non_idle_baseline_out_of_ml_pool(monkeypatch) -> None:
+    cfg = DatasetTrackerConfig()
+    payload = {
+        "apps": {
+            "com.facebook.katana": {
+                "runs": [
+                    {
+                        "run_id": "facebook-non-idle",
+                        "valid_dataset_run": True,
+                        "paper_eligible": True,
+                        "countable": False,
+                        "extra_run": 1,
+                        "run_profile": "baseline_idle",
+                        "baseline_not_idle": True,
+                        "version_code": "472143276",
+                        "base_apk_sha256": "newsha",
+                        "ended_at": "2026-06-28T20:54:11+00:00",
+                    }
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(
+        dataset_run_state,
+        "_load_tracker_payload",
+        lambda _cfg: ("ok", payload, payload),
+    )
+    monkeypatch.setattr(
+        dataset_run_state,
+        "scope_tracker_runs_to_active_identity",
+        lambda _pkg, runs, resolve_tracker_run_identity_fn: {
+            "active_identity": ("472143276", "newsha"),
+            "active_runs": list(runs),
+            "valid_runs": list(runs),
+            "legacy_runs": [],
+            "legacy_valid": 0,
+            "legacy_builds": 0,
+        },
+    )
+    monkeypatch.setattr(
+        dataset_run_state,
+        "build_scoped_dataset_counts",
+        lambda _pkg, runs, cfg, resolve_tracker_run_identity_fn: {
+            "technical_valid_active": 1,
+            "baseline_countable": 0,
+            "interactive_countable": 0,
+            "baseline_extra": 0,
+            "baseline_low_signal_supplemental": 0,
+            "baseline_not_idle_supplemental": 1,
+            "interactive_extra": 0,
+            "interactive_low_signal_supplemental": 0,
+        },
+    )
+    monkeypatch.setattr(dataset_run_state, "_evidence_state", lambda _pkg: ("ok", 1))
+
+    state = dataset_run_state.load_dataset_run_state("com.facebook.katana", config=cfg)
+
+    assert state.counts.extra_valid_runs == 1
+    assert state.counts.baseline_extra_valid == 0
+    assert state.counts.baseline_low_signal_valid == 0
+    assert state.counts.baseline_not_idle_valid == 1

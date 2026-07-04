@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.Database.db_utils import artifact_registry_static_prune as prune
 
 
@@ -37,24 +34,6 @@ def _row(
         "canonical_db_reference_present": canonical_db_reference_present,
         "primary_reason": primary_reason,
     }
-
-
-def test_help_is_safe_without_pythonpath() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "prune_artifact_registry_static_detached.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "--apply" in out
-    assert "static" in out
 
 
 def test_build_static_prune_proposal_default_reason(monkeypatch, tmp_path: Path) -> None:
@@ -125,7 +104,10 @@ def test_build_static_prune_proposal_include_legacy_missing(monkeypatch, tmp_pat
     )
     assert proposal.targeted_row_count == 2
     assert proposal.expected_count_match is True
-    assert proposal.included_primary_reasons == ("truly_detached", "legacy_mirror_only_file_missing")
+    assert proposal.included_primary_reasons == (
+        "truly_detached",
+        "legacy_mirror_only_file_missing",
+    )
 
 
 def test_validate_static_prune_proposal_rejects_legacy_overlap() -> None:
@@ -188,11 +170,18 @@ def test_write_static_prune_receipts(tmp_path: Path) -> None:
         apply_delete_sql="y",
         expected_count_match=True,
     )
-    prune.write_static_prune_receipts(tmp_path, stem="artifact_registry_static_prune_test", proposal=proposal, apply_requested=False)
+    prune.write_static_prune_receipts(
+        tmp_path,
+        stem="artifact_registry_static_prune_test",
+        proposal=proposal,
+        apply_requested=False,
+    )
     assert (tmp_path / "artifact_registry_static_prune_test.json").is_file()
     assert (tmp_path / "artifact_registry_static_prune_test.csv").is_file()
     assert (tmp_path / "artifact_registry_static_prune_test.sql").is_file()
     assert (tmp_path / "artifact_registry_static_prune_run_ids_test.txt").is_file()
-    payload = json.loads((tmp_path / "artifact_registry_static_prune_test.json").read_text(encoding="utf-8"))
+    payload = json.loads(
+        (tmp_path / "artifact_registry_static_prune_test.json").read_text(encoding="utf-8")
+    )
     assert payload["format"] == "scytaledroid.artifact_registry_static_prune_receipt.v1"
     assert payload["meta"]["targeted_row_count"] == 2

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = [pytest.mark.ui_contract]
 
 
@@ -50,7 +49,9 @@ def test_governance_menu_renders_shared_sections(monkeypatch, capsys, tmp_path):
     from scytaledroid.Utils.System import governance_inputs as menu_module
 
     monkeypatch.setattr(menu_module, "_ensure_workspace", lambda: tmp_path)
-    monkeypatch.setattr(menu_module, "_latest_governance_status", lambda: ("missing", None, None, 0, None))
+    monkeypatch.setattr(
+        menu_module, "_latest_governance_status", lambda: ("missing", None, None, 0, None)
+    )
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.render_governance_inputs()
@@ -67,7 +68,9 @@ def test_api_menu_renders_runtime_state(monkeypatch, capsys):
     monkeypatch.setattr(
         menu_module,
         "api_status",
-        lambda: SimpleNamespace(status="stopped", host="127.0.0.1", port=8000, detail="idle", running=False),
+        lambda: SimpleNamespace(
+            status="stopped", host="127.0.0.1", port=8000, detail="idle", running=False
+        ),
     )
     monkeypatch.setattr(menu_module.menu_utils, "render_menu", lambda *_a, **_k: None)
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
@@ -86,7 +89,9 @@ def test_apk_library_menu_renders_summary_sections(monkeypatch, capsys):
     rendered = []
     monkeypatch.setattr(menu_module.apk_library_service, "list_groups", lambda *args, **kwargs: [])
     monkeypatch.setattr(menu_module.static_scope_service, "count", lambda: 0)
-    monkeypatch.setattr(menu_module.menu_utils, "render_menu", lambda spec, *_a, **_k: rendered.append(spec))
+    monkeypatch.setattr(
+        menu_module.menu_utils, "render_menu", lambda spec, *_a, **_k: rendered.append(spec)
+    )
     monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     menu_module.apk_library_menu()

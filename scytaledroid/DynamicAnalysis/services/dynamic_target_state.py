@@ -129,7 +129,7 @@ def derive_dynamic_target_state(
     artifact_set_hash: str | None = None,
     static_run_id: str | None = None,
 ) -> DynamicTargetState:
-    counts = getattr(state, "counts")
+    counts = state.counts
     baseline_countable = int(getattr(counts, "baseline_valid_runs", 0) or 0)
     interactive_countable = int(getattr(counts, "interactive_valid_runs", 0) or 0)
     baseline_required = int(getattr(state, "baseline_required", 0) or 0)

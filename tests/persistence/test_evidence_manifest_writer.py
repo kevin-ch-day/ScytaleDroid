@@ -8,7 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import (
     AppRunResult,
@@ -19,7 +18,9 @@ from scytaledroid.StaticAnalysis.cli.core.models import (
 from scytaledroid.StaticAnalysis.cli.persistence import evidence_manifest_writer as emw
 
 
-def _outcome_with_report(tmp_path: Path, *, pkg: str = "com.example.app", sid: int = 42) -> RunOutcome:
+def _outcome_with_report(
+    tmp_path: Path, *, pkg: str = "com.example.app", sid: int = 42
+) -> RunOutcome:
     now = datetime.now(UTC)
     report = SimpleNamespace(
         manifest=SimpleNamespace(app_label="Ex", package_name=pkg),
@@ -63,7 +64,9 @@ def test_build_session_evidence_manifest_payload_core_fields(
     stamp = "sess-evidence-1"
     session_dir = tmp_path / "sessions" / stamp
     session_dir.mkdir(parents=True)
-    (session_dir / "run_map.json").write_text('{"session_stamp":"sess-evidence-1"}', encoding="utf-8")
+    (session_dir / "run_map.json").write_text(
+        '{"session_stamp":"sess-evidence-1"}', encoding="utf-8"
+    )
 
     monkeypatch.setattr(emw, "_fetch_handoff_by_run_id", lambda _ids: {})
     monkeypatch.setattr(emw.db_diagnostics, "get_schema_version", lambda: "schema-test")
@@ -102,7 +105,9 @@ def test_build_session_evidence_manifest_payload_core_fields(
     assert det_runs[0].get("sha256")
 
 
-def test_write_session_evidence_manifest_respects_disable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_write_session_evidence_manifest_respects_disable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("SCYTALEDROID_EVIDENCE_MANIFEST", "0")
     monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path))
     out = emw.write_session_evidence_manifest_phase1(
@@ -127,13 +132,18 @@ def test_build_id_picked_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     payload = emw.build_session_evidence_manifest_payload(
         session_stamp=stamp,
         session_label=None,
-        run_map={"session_stamp": stamp, "apps": [{"package": "com.example.app", "static_run_id": 1}]},
+        run_map={
+            "session_stamp": stamp,
+            "apps": [{"package": "com.example.app", "static_run_id": 1}],
+        },
         outcome=_outcome_with_report(tmp_path, sid=1),
     )
     assert payload.get("build_id") == "deadbeefcafe"
 
 
-def test_write_session_evidence_manifest_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_write_session_evidence_manifest_writes_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.delenv("SCYTALEDROID_EVIDENCE_MANIFEST", raising=False)
     monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path))
     stamp = "sess-write-1"
@@ -148,7 +158,10 @@ def test_write_session_evidence_manifest_writes_file(monkeypatch: pytest.MonkeyP
     path = emw.write_session_evidence_manifest_phase1(
         session_stamp=stamp,
         session_label=None,
-        run_map={"session_stamp": stamp, "apps": [{"package": "com.example.app", "static_run_id": 1}]},
+        run_map={
+            "session_stamp": stamp,
+            "apps": [{"package": "com.example.app", "static_run_id": 1}],
+        },
         outcome=_outcome_with_report(tmp_path, sid=1),
     )
     assert path is not None

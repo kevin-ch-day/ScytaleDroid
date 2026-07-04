@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-
 pytestmark = [pytest.mark.ui_contract]
 
 
 def test_static_diagnostics_menu_uses_shared_actions(monkeypatch, capsys):
-    from scytaledroid.StaticAnalysis.cli.persistence.reports import session_diagnostics as menu_module
+    from scytaledroid.StaticAnalysis.cli.persistence.reports import (
+        session_diagnostics as menu_module,
+    )
 
     captured: dict[str, object] = {}
 
@@ -29,7 +30,9 @@ def test_static_diagnostics_menu_uses_shared_actions(monkeypatch, capsys):
 
 
 def test_static_diagnostics_can_render_latest_coverage(monkeypatch, capsys):
-    from scytaledroid.StaticAnalysis.cli.persistence.reports import session_diagnostics as menu_module
+    from scytaledroid.StaticAnalysis.cli.persistence.reports import (
+        session_diagnostics as menu_module,
+    )
 
     def _run_sql(sql, params=(), fetch=None, **_kwargs):
         normalized = " ".join(str(sql).split()).lower()
@@ -45,17 +48,35 @@ def test_static_diagnostics_can_render_latest_coverage(monkeypatch, capsys):
             return (88,)
         if "from static_permission_risk_vnext where run_id in" in normalized:
             return (88,)
-        if "from static_correlation_results where static_run_id in" in normalized and "distinct package_name" not in normalized:
+        if (
+            "from static_correlation_results where static_run_id in" in normalized
+            and "distinct package_name" not in normalized
+        ):
             return (9,)
-        if "from static_correlation_results where static_run_id in" in normalized and "distinct package_name" in normalized:
+        if (
+            "from static_correlation_results where static_run_id in" in normalized
+            and "distinct package_name" in normalized
+        ):
             return (8,)
-        if "from static_provider_acl where session_stamp=%s" in normalized and "distinct package_name" not in normalized:
+        if (
+            "from static_provider_acl where session_stamp=%s" in normalized
+            and "distinct package_name" not in normalized
+        ):
             return (5,)
-        if "from static_provider_acl where session_stamp=%s" in normalized and "distinct package_name" in normalized:
+        if (
+            "from static_provider_acl where session_stamp=%s" in normalized
+            and "distinct package_name" in normalized
+        ):
             return (3,)
-        if "from static_fileproviders where run_id in" in normalized and "distinct package_name" not in normalized:
+        if (
+            "from static_fileproviders where run_id in" in normalized
+            and "distinct package_name" not in normalized
+        ):
             return (44,)
-        if "from static_fileproviders where run_id in" in normalized and "distinct package_name" in normalized:
+        if (
+            "from static_fileproviders where run_id in" in normalized
+            and "distinct package_name" in normalized
+        ):
             return (12,)
         if "from permission_audit_snapshots where static_run_id in" in normalized:
             return (0,)
@@ -63,7 +84,10 @@ def test_static_diagnostics_can_render_latest_coverage(monkeypatch, capsys):
             return (0,)
         if "from static_session_run_links where session_stamp=%s" in normalized:
             return (10,)
-        if "from web_static_dynamic_app_summary_cache where latest_static_session_stamp=%s" in normalized:
+        if (
+            "from web_static_dynamic_app_summary_cache where latest_static_session_stamp=%s"
+            in normalized
+        ):
             return (10,)
         raise AssertionError(sql)
 

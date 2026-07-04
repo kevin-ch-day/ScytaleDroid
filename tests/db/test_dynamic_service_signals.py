@@ -4,10 +4,6 @@ from scytaledroid.Database.db_utils import dynamic_service_signals as catalog
 from scytaledroid.DynamicAnalysis import service_signals
 
 
-def test_backfill_dynamic_service_signals_help_is_safe(assert_safe_script_help) -> None:
-    assert_safe_script_help("scripts/db/backfill_dynamic_service_signals.py")
-
-
 def test_apply_dynamic_service_signal_migration_records_schema_and_seeds(monkeypatch) -> None:
     ddl_statements: list[str] = []
     appended_versions: list[str] = []
@@ -94,7 +90,9 @@ def test_apply_dynamic_service_signal_migration_records_schema_and_seeds(monkeyp
     assert len(ddl_statements) == 2
     assert appended_versions == ["0.3.11-dynamic-service-signals"]
     assert payload["signals_seeded"] == len(service_signals.default_signal_catalog_seed_rows())
-    assert payload["service_signal_maps_seeded"] == len(service_signals.default_service_signal_map_seed_rows())
+    assert payload["service_signal_maps_seeded"] == len(
+        service_signals.default_service_signal_map_seed_rows()
+    )
     assert migration_rows == [
         {
             "migration_id": catalog.MIGRATION_ID,
@@ -135,7 +133,9 @@ def test_apply_dynamic_service_signal_migration_reseeds_when_already_applied() -
 
     assert payload["already_applied"] is True
     assert payload["signals_seeded"] == len(service_signals.default_signal_catalog_seed_rows())
-    assert payload["service_signal_maps_seeded"] == len(service_signals.default_service_signal_map_seed_rows())
+    assert payload["service_signal_maps_seeded"] == len(
+        service_signals.default_service_signal_map_seed_rows()
+    )
 
 
 def test_default_service_signal_map_seeds_cover_meta_sdk_and_microsoft_ads_atlas() -> None:

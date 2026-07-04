@@ -78,3 +78,87 @@ def export_protocol_ledger_csv(*, resolve_dataset_freeze_read_path_fn) -> None:
         msg += f" ({count} row(s))"
     print(status_messages.status(msg, level="success"))
 
+
+def run_cohort_security_audit_export(*, include_hidden_patterns: bool = False) -> None:
+    """Export cohort PCAP security-surface audit CSVs from live evidence packs."""
+    from scytaledroid.Config import app_config
+
+    print()
+    menu_utils.print_header("Cohort Security Audit Export")
+    try:
+        from scripts.db import report_dynamic_pcap_payload_audit as payload_audit
+    except Exception as exc:  # noqa: BLE001
+        print(status_messages.status(f"Payload audit export unavailable: {exc}", level="error"))
+        return
+    try:
+        summary = payload_audit.generate_report()
+    except Exception as exc:  # noqa: BLE001
+        print(status_messages.status(f"Security audit export failed: {exc}", level="error"))
+        return
+    output_files = summary.get("output_files") if isinstance(summary.get("output_files"), dict) else {}
+    runs_scanned = summary.get("runs_scanned")
+    print(
+        status_messages.status(
+            f"Scanned {runs_scanned} evidence pack(s) under {app_config.OUTPUT_DIR}/evidence/dynamic",
+            level="info",
+        )
+    )
+    for label, path in sorted(output_files.items()):
+        count = count_csv_rows(Path(str(path))) if path else None
+        suffix = f" ({count} rows)" if count is not None else ""
+        print(status_messages.status(f"{label}: {path}{suffix}", level="success"))
+    rollup_path = output_files.get("app_payload_rollup_csv")
+    if rollup_path:
+        try:
+            import csv
+
+            denied = 0
+            surface = 0
+            with Path(str(rollup_path)).open(encoding="utf-8") as handle:
+                for row in csv.DictReader(handle):
+                    denied += int(row.get("cleartext_mismatch_denied_observed_runs") or 0)
+                    surface += int(row.get("cleartext_surface_runs") or 0)
+            print(
+                status_messages.status(
+                    f"Cohort cleartext surface runs: {surface}; static-denied-but-observed: {denied}",
+                    level="info",
+                )
+            )
+        except Exception:
+            pass
+    print(
+        status_messages.status(
+            "Tip: backfill security_surface on older packs with "
+            "PYTHONPATH=. python scripts/db/backfill_dynamic_security_surface.py --apply",
+            level="info",
+        )
+    )
+    if include_hidden_patterns:
+        try:
+            from scripts.db import report_dynamic_hidden_patterns as hidden
+
+            hidden_summary = hidden.generate_report()
+            print(
+                status_messages.status(
+                    f"Hidden patterns: {hidden_summary.get('candidate_count')} candidates",
+                    level="success",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(status_messages.status(f"Hidden patterns export failed: {exc}", level="warn"))
+    try:
+        from scytaledroid.DynamicAnalysis.pcap.security_cohort import generate_cohort_security_report
+
+        cohort_payload = generate_cohort_security_report()
+        review = (cohort_payload.get("output_files") or {}).get("cohort_security_review_md")
+        print(
+            status_messages.status(
+                f"Cohort security: {cohort_payload.get('cleartext_surface_runs')} cleartext-surface, "
+                f"{cohort_payload.get('xmpp_cleartext_runs')} XMPP, "
+                f"{cohort_payload.get('mismatch_denied_observed')} denied-but-observed"
+                + (f" · review={review}" if review else ""),
+                level="info",
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(status_messages.status(f"Cohort security analysis failed: {exc}", level="warn"))

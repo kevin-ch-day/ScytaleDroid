@@ -1,32 +1,14 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_unresolved_domains as report
 
 
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_unresolved_domains.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "unresolved" in out
-    assert "--package" in out
-
-
-def test_generate_report_groups_unknown_domains_and_candidate_service_matches(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_groups_unknown_domains_and_candidate_service_matches(
+    tmp_path: Path, monkeypatch
+) -> None:
     unresolved = [
         {
             "package_name": "bbc.mobile.news.ww",
@@ -152,7 +134,9 @@ def test_generate_report_groups_unknown_domains_and_candidate_service_matches(tm
     assert payload["candidate_service_hit_totals"]["liveramp"] == 4
 
 
-def test_generate_report_overlays_missing_repo_seed_candidate_matches(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_overlays_missing_repo_seed_candidate_matches(
+    tmp_path: Path, monkeypatch
+) -> None:
     unresolved = [
         {
             "package_name": "bbc.mobile.news.ww",

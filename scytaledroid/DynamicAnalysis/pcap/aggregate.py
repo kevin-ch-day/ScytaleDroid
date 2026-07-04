@@ -269,6 +269,13 @@ def _build_run_summary_row(
     capture = summary.get("capture") or {}
     metrics = (features.get("metrics") or {}) if isinstance(features.get("metrics"), dict) else {}
     proxies = (features.get("proxies") or {}) if isinstance(features.get("proxies"), dict) else {}
+    surface_summary = (
+        (features.get("security_surface") or {}).get("summary")
+        if isinstance(features.get("security_surface"), dict)
+        else {}
+    )
+    if not isinstance(surface_summary, dict):
+        surface_summary = {}
     overlap_sources = (overlap or {}).get("overlap_by_source") or {}
     overlap_nsc = _overlap_ratio_for_source(overlap_sources, "nsc")
     overlap_strings = _overlap_ratio_for_source(overlap_sources, "strings")
@@ -310,6 +317,19 @@ def _build_run_summary_row(
         "tcp_ratio": proxies.get("tcp_ratio"),
         "udp_ratio": proxies.get("udp_ratio"),
         "unique_domains": unique_domains,
+        "cleartext_http_observed": proxies.get("cleartext_http_observed"),
+        "security_finding_count": proxies.get("security_finding_count"),
+        "security_heuristic_score": proxies.get("security_heuristic_score"),
+        "cleartext_visibility_class": surface_summary.get("cleartext_visibility_class"),
+        "decoded_cleartext_stream_count": proxies.get("decoded_cleartext_stream_count"),
+        "cleartext_mismatch_class": (
+            (overlap or {}).get("cleartext_posture", {}).get("mismatch_class")
+            if isinstance((overlap or {}).get("cleartext_posture"), dict)
+            else None
+        ),
+        "cleartext_protocol_observed": proxies.get("cleartext_protocol_observed"),
+        "plaintext_protocols_observed": proxies.get("plaintext_protocols_observed"),
+        "decoded_protocols_observed": proxies.get("decoded_protocols_observed"),
     }
     row.update(_qualification_export_fields(dataset))
     row.update(static_cols)

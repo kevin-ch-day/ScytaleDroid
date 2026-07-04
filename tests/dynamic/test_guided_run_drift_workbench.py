@@ -3,16 +3,19 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.DynamicAnalysis.controllers import guided_run
-
-from tests.dynamic._guided_run_state_support import make_dataset_state, one_shot_package_selector, patch_guided_run_context
-
+from tests.dynamic._guided_run_state_support import (
+    make_dataset_state,
+    one_shot_package_selector,
+    patch_guided_run_context,
+)
 
 pytestmark = [pytest.mark.contract, pytest.mark.state_contract]
 
 
-def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypatch, capsys) -> None:
+def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(
+    monkeypatch, capsys
+) -> None:
     package = "com.facebook.katana"
     select_package_calls, select_package = one_shot_package_selector(package)
 
@@ -55,7 +58,9 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
             "version_code": "472143276",
         },
     )
-    monkeypatch.setattr(guided_run, "_load_plan_identity", lambda _path: {"version_code": "472143276"})
+    monkeypatch.setattr(
+        guided_run, "_load_plan_identity", lambda _path: {"version_code": "472143276"}
+    )
     monkeypatch.setattr(
         guided_run,
         "_read_observed_version_code_details",
@@ -66,10 +71,16 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
             "matched_line": "versionCode=472224766 minSdk=30 targetSdk=36",
         },
     )
-    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "472143276")
+    monkeypatch.setattr(
+        guided_run._guided_run_capture,
+        "_latest_harvested_version_code",
+        lambda _package: "472143276",
+    )
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda: None)
     choices = iter(["1", "0"])
-    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
+    monkeypatch.setattr(
+        guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices)
+    )
 
     guided_run.run_guided_dataset_run(
         select_package_from_groups=select_package,
@@ -87,7 +98,7 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     assert "Newest harvested APK in workspace: 472143276" in out
     assert "No harvested APK for installed build 472224766 is present in this workspace yet." in out
     assert "R) Refresh checklist" in out
-    assert "installed build does not match the newest static plan" in out
+    assert "installed build does not match the newest static plan" not in out
     assert "Blocked: installed build 472224766 does not match static-plan build 472143276." in out
     assert "Refresh harvest/static for this app or choose another app." in out
     assert "472224766" in out
@@ -95,9 +106,13 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(monkeypa
     assert "Review / inspect" in out
     assert "H) Run history" in out
     assert "G) Diagnostics" in out
+    assert "recent tracker-scoped runs" not in out
+    assert "study, capture, and quota detail" not in out
 
 
-def test_load_selected_app_context_uses_refresh_action_when_live_build_drift_is_true(monkeypatch) -> None:
+def test_load_selected_app_context_uses_refresh_action_when_live_build_drift_is_true(
+    monkeypatch,
+) -> None:
     package = "com.cnn.mobile.android.phone"
 
     monkeypatch.setattr(
@@ -113,7 +128,11 @@ def test_load_selected_app_context_uses_refresh_action_when_live_build_drift_is_
         ),
     )
     monkeypatch.setattr(guided_run, "_scripted_template_available", lambda _package_name: True)
-    monkeypatch.setattr(guided_run, "_load_db_dynamic_lineage_context", lambda _package_name: {"db_active_sessions": 1, "db_historical_sessions": 0})
+    monkeypatch.setattr(
+        guided_run,
+        "_load_db_dynamic_lineage_context",
+        lambda _package_name: {"db_active_sessions": 1, "db_historical_sessions": 0},
+    )
     monkeypatch.setattr(guided_run, "_selected_app_latest_recent_summary", lambda **_kwargs: None)
     monkeypatch.setattr(guided_run, "_selected_app_has_identity_mismatch", lambda **_kwargs: False)
 
@@ -173,7 +192,11 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
         return original(**kwargs)
 
     monkeypatch.setattr(guided_run, "_selected_app_state_snapshot", _capturing_snapshot)
-    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "312011000")
+    monkeypatch.setattr(
+        guided_run._guided_run_capture,
+        "_latest_harvested_version_code",
+        lambda _package: "312011000",
+    )
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *_a, **_k: "0")
 
     app = SimpleNamespace(
@@ -208,13 +231,16 @@ def test_drift_workbench_passes_refresh_queue_action_internally(monkeypatch, cap
     assert "Newest harvested APK in workspace: 312011000" in out
     assert "No harvested APK for installed build 312021000 is present in this workspace yet." in out
     assert "R) Refresh checklist" in out
+    assert "installed build does not match the newest static plan" not in out
 
 
 def test_drift_workbench_refresh_checklist_includes_menu_path(monkeypatch, capsys) -> None:
     choices = iter(["R", "0"])
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *_a, **_k: next(choices))
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda: None)
-    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "22964")
+    monkeypatch.setattr(
+        guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "22964"
+    )
 
     app = SimpleNamespace(
         package_name="org.theguardian.app",
@@ -254,11 +280,17 @@ def test_drift_workbench_refresh_checklist_includes_menu_path(monkeypatch, capsy
     assert "new current build target" in out
 
 
-def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(monkeypatch, capsys) -> None:
+def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(
+    monkeypatch, capsys
+) -> None:
     choices = iter(["R", "0"])
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *_a, **_k: next(choices))
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda: None)
-    monkeypatch.setattr(guided_run._guided_run_capture, "_latest_harvested_version_code", lambda _package: "312011000")
+    monkeypatch.setattr(
+        guided_run._guided_run_capture,
+        "_latest_harvested_version_code",
+        lambda _package: "312011000",
+    )
 
     app = SimpleNamespace(
         package_name="com.twitter.android",
@@ -287,13 +319,36 @@ def test_drift_workbench_refresh_checklist_includes_identity_mismatch_caution(mo
     assert "identity mismatch context exists" in out.lower()
 
 
-def test_latest_harvested_version_code_detects_highest_workspace_build(tmp_path, monkeypatch) -> None:
+def test_latest_harvested_version_code_detects_highest_workspace_build(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setattr(guided_run._guided_run_capture.app_config, "DATA_DIR", str(tmp_path))
     package = "com.twitter.android"
     paths = [
-        tmp_path / "device_apks" / "SER1" / "runs" / "run1" / package / "X_v312011000_12.1.1-release.0" / "harvest_package_manifest.json",
-        tmp_path / "device_apks" / "SER1" / "runs" / "run2" / package / "X_v312021000_12.2.1-release.0" / "harvest_package_manifest.json",
-        tmp_path / "device_apks" / "SER1" / "runs" / "run3" / package / "X_v312031000_12.3.1-release.0" / "harvest_package_manifest.json",
+        tmp_path
+        / "device_apks"
+        / "SER1"
+        / "runs"
+        / "run1"
+        / package
+        / "X_v312011000_12.1.1-release.0"
+        / "harvest_package_manifest.json",
+        tmp_path
+        / "device_apks"
+        / "SER1"
+        / "runs"
+        / "run2"
+        / package
+        / "X_v312021000_12.2.1-release.0"
+        / "harvest_package_manifest.json",
+        tmp_path
+        / "device_apks"
+        / "SER1"
+        / "runs"
+        / "run3"
+        / package
+        / "X_v312031000_12.3.1-release.0"
+        / "harvest_package_manifest.json",
     ]
     for path in paths:
         path.parent.mkdir(parents=True, exist_ok=True)

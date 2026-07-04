@@ -11,7 +11,9 @@ def test_update_static_run_status_sets_default_abort_for_failed(monkeypatch) -> 
 
     monkeypatch.setattr(rw, "run_sql_write", _capture)
 
-    rw.update_static_run_status(static_run_id=42, status="FAILED", abort_reason=None, abort_signal=None)
+    rw.update_static_run_status(
+        static_run_id=42, status="FAILED", abort_reason=None, abort_signal=None
+    )
     assert batches
     canonical, _ended, abort_reason, abort_signal, sid = batches[0]
     assert canonical == "FAILED"

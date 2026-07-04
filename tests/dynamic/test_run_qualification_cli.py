@@ -12,8 +12,8 @@ def _noop_evidence_context(**_kwargs) -> None:
 
 
 def _print_workbench_summary(app) -> str:
-    from io import StringIO
     import sys
+    from io import StringIO
 
     buffer = StringIO()
     stdout = sys.stdout

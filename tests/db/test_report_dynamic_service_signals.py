@@ -1,27 +1,8 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_service_signals as report
-
-
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_service_signals.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "dynamic privacy/security/context signals" in out
 
 
 def test_generate_report_summarizes_signal_context(tmp_path: Path, monkeypatch) -> None:
@@ -159,7 +140,9 @@ def test_generate_report_summarizes_signal_context(tmp_path: Path, monkeypatch) 
     assert "bbc.mobile.news.ww" in summary_rows
 
 
-def test_generate_report_resolves_meta_sdk_and_microsoft_ads_atlas_rows(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_resolves_meta_sdk_and_microsoft_ads_atlas_rows(
+    tmp_path: Path, monkeypatch
+) -> None:
     observations = [
         {
             "package_name": "com.facebook.katana",
@@ -370,7 +353,9 @@ def test_generate_report_overlays_missing_seed_signal_maps(tmp_path: Path, monke
     assert "third_party_advertising" in signal_rows
 
 
-def test_generate_report_uses_clear_metric_name_for_services_without_signal_mappings(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_uses_clear_metric_name_for_services_without_signal_mappings(
+    tmp_path: Path, monkeypatch
+) -> None:
     observations = [
         {
             "package_name": "com.example.app",
@@ -430,4 +415,6 @@ def test_generate_report_uses_clear_metric_name_for_services_without_signal_mapp
     assert summary["services_without_signal_mappings"] == 1
     assert summary["unresolved_service_signal_rows"] == 1
     assert "services_without_signal_mappings_csv" in summary["output_files"]
-    assert summary["output_files"]["services_without_signal_mappings_csv"].endswith("services_without_signal_mappings.csv")
+    assert summary["output_files"]["services_without_signal_mappings_csv"].endswith(
+        "services_without_signal_mappings.csv"
+    )

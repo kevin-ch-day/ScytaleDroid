@@ -223,6 +223,12 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _http_observed_from_report(report: Mapping[str, Any]) -> bool:
+    from scytaledroid.DynamicAnalysis.pcap.security_surface import http_observed_from_report
+
+    return http_observed_from_report(dict(report))
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         if value in (None, ""):
@@ -543,7 +549,6 @@ def _pcap_artifact_info(
     from scytaledroid.DynamicAnalysis.pcap.diagnostics import (
         canonical_pcap_failure_code,
         deep_audit_pcap_failure_detail,
-        extract_verify_issue_codes,
     )
 
     artifact_rel = ""
@@ -625,7 +630,6 @@ def _pcap_artifact_info(
             pcap_size_bytes = _safe_int(local_path.stat().st_size)
         except OSError:
             pcap_size_bytes = 0
-    issue_codes = set(extract_verify_issue_codes(verify_row))
     canonical = canonical_pcap_failure_code(
         artifact_rel=artifact_rel,
         artifact_exists=artifact_exists,
@@ -897,11 +901,7 @@ def _collect_run_records(
                     ((report.get("tls_quic_visibility") or {}).get("quic_candidate_packets") or 0) > 0
                     and not bool((report.get("tls_quic_visibility") or {}).get("tls_visible"))
                 ),
-                "http_observed": any(
-                    str(item.get("protocol") or "").lower().startswith("http")
-                    for item in (report.get("protocol_hierarchy") or [])
-                    if isinstance(item, Mapping)
-                ),
+                "http_observed": _http_observed_from_report(report),
                 "corroboration": corroboration,
                 "embedded_corroboration": embedded_corroboration,
                 "overlay_corroboration": overlay_corroboration,
@@ -1384,6 +1384,44 @@ def _bridge_gaps_for_package(
                 "recommended_followup": "repair_service_mapping",
             }
         )
+    static_allowed = bool((join_row or {}).get("uses_cleartext_traffic")) if isinstance(join_row, Mapping) else False
+    http_observed_any = any(bool(run.get("http_observed")) for run in runs)
+    visibility_loss_any = any(bool(run.get("visibility_loss_flag")) for run in runs)
+    if (
+        static_allowed
+        and not http_observed_any
+        and _safe_int((join_row or {}).get("static_http_endpoint_root_count")) >= 1
+        and not visibility_loss_any
+    ):
+        rows.append(
+            {
+                "package": package,
+                "app_label": app_label,
+                "static_run_id": static_run_id,
+                "gap_key": "cleartext_allowed_not_observed",
+                "gap_class": "policy_review",
+                "severity": "low",
+                "current_value": "static cleartext permitted; no HTTP/cleartext metadata in valid runs",
+                "expected_value": "HTTP/cleartext metadata when static endpoints imply cleartext paths",
+                "source_surface": "static_dynamic_plan + security_surface",
+                "recommended_followup": "review_cleartext_coverage",
+            }
+        )
+    if static_allowed is False and http_observed_any and not visibility_loss_any:
+        rows.append(
+            {
+                "package": package,
+                "app_label": app_label,
+                "static_run_id": static_run_id,
+                "gap_key": "cleartext_observed_when_denied",
+                "gap_class": "policy_mismatch",
+                "severity": "high",
+                "current_value": "HTTP/cleartext metadata observed while static posture denies cleartext",
+                "expected_value": "no cleartext HTTP metadata when cleartext is denied",
+                "source_surface": "static_dynamic_plan + security_surface",
+                "recommended_followup": "review_network_security_config",
+            }
+        )
     artifact_registration_details = {"PCAP_ARTIFACT_UNREGISTERED", "PCAP_ARTIFACT_PATH_MISMATCH"}
     if any(_norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail")) in artifact_registration_details for run in runs):
         rows.append(
@@ -1647,7 +1685,6 @@ def _recommend_for_app(
     requested_template_id = _requested_template_id(package)
     baseline_valid_count = int(metrics["baseline_valid_count"])
     manual_valid_count = int(metrics["manual_valid_count"])
-    scripted_valid_count = int(metrics["scripted_valid_count"])
     pcap_failure_count = int(metrics["pcap_failure_count"])
     pcap_recollect_failure_count = int(metrics.get("pcap_recollect_failure_count", pcap_failure_count))
     pcap_validity_review_count = int(metrics.get("pcap_validity_review_count", 0))

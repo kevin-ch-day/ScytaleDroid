@@ -5,12 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from scytaledroid.DeviceAnalysis import device_manager
+from scytaledroid.DynamicAnalysis.menus.queue_metrics import (
+    resolve_active_cohort_evidence_quota_summary,
+)
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
-from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_static_handoff_plan_summary
-from scytaledroid.DynamicAnalysis.menus.queue_metrics import resolve_active_cohort_evidence_quota_summary
-from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
+from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import (
+    build_static_handoff_plan_summary,
+)
 from scytaledroid.Utils.DisplayUtils import status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
@@ -35,7 +39,11 @@ class DynamicMenuSections:
 def _quota_reason_text(summary, *, quota_valid: int) -> str:
     reason = _humanize_code(summary.first_failing_reason)
     expected = int(getattr(summary, "expected_valid_runs", 0) or 0)
-    if str(getattr(summary, "first_failing_reason", "") or "").strip().upper() == "QUOTA_NOT_SATISFIED" and expected > 0:
+    if (
+        str(getattr(summary, "first_failing_reason", "") or "").strip().upper()
+        == "QUOTA_NOT_SATISFIED"
+        and expected > 0
+    ):
         remaining = max(0, expected - int(quota_valid))
         return f"{reason} — {remaining} quota-valid runs remaining"
     return reason
@@ -44,7 +52,9 @@ def _quota_reason_text(summary, *, quota_valid: int) -> str:
 def build_dynamic_menu_sections() -> DynamicMenuSections:
     return DynamicMenuSections(
         primary_actions=[
-            MenuOption("1", "Focused app run", description="pick one app and run baseline or interactive"),
+            MenuOption(
+                "1", "Focused app run", description="pick one app and run baseline or interactive"
+            ),
             MenuOption(
                 "2",
                 "App queue / next action",
@@ -54,14 +64,31 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
         ],
         validation=[
             MenuOption("3", "State summary", description="cohort health and collection progress"),
-            MenuOption("4", "Archive readiness", description="freeze gate and publication blockers"),
+            MenuOption(
+                "4", "Archive readiness", description="freeze gate and publication blockers"
+            ),
+            MenuOption(
+                "10",
+                "Cohort security audit export",
+                description="PCAP metadata CSVs for cleartext/DNS/TLS review",
+            ),
         ],
         maintenance=[
-            MenuOption("5", "Verify capture environment", description="host PCAP tools and prerequisites"),
+            MenuOption(
+                "5", "Verify capture environment", description="host PCAP tools and prerequisites"
+            ),
             MenuOption("6", "Change cohort", description="switch active research dataset scope"),
-            MenuOption("7", "Reindex tracker", description="rebuild tracker index from evidence packs"),
-            MenuOption("8", "Prune incomplete evidence", description="remove abandoned partial capture dirs"),
-            MenuOption("9", "Legacy structural tools", description="archived structural cohort utilities"),
+            MenuOption(
+                "7", "Reindex tracker", description="rebuild tracker index from evidence packs"
+            ),
+            MenuOption(
+                "8",
+                "Prune incomplete evidence",
+                description="remove abandoned partial capture dirs",
+            ),
+            MenuOption(
+                "9", "Legacy structural tools", description="archived structural cohort utilities"
+            ),
         ],
         archive_export=[],
     )
@@ -121,7 +148,9 @@ def render_dynamic_menu_overview() -> None:
         selected_device = device_manager.describe_active_device()
     except Exception:
         selected_device = "None"
-    device_text = selected_device if selected_device and selected_device != "None" else "none selected"
+    device_text = (
+        selected_device if selected_device and selected_device != "None" else "none selected"
+    )
     subtitle = f"{cohort_label} · {device_text}"
     quota_text = f"{quota_valid} / {expected_valid} valid"
     if expected_valid > 0 and not summary.can_freeze:
@@ -135,14 +164,26 @@ def render_dynamic_menu_overview() -> None:
     )
     state_items = [
         summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
-        summary_cards.summary_item("Quota", quota_text, value_style="muted"),
+        summary_cards.summary_item(
+            "Archive quota",
+            quota_text,
+            value_style="warning" if not summary.can_freeze else "success",
+        ),
         *(
-            [summary_cards.summary_item("ML pool", f"{baseline_ml_pool} supplemental baselines", value_style="muted")]
+            [
+                summary_cards.summary_item(
+                    "ML pool", f"{baseline_ml_pool} supplemental baselines", value_style="emphasis"
+                )
+            ]
             if baseline_ml_pool > 0
             else []
         ),
         *(
-            [summary_cards.summary_item("Retained extra", f"{extra_retained} outside quota", value_style="muted")]
+            [
+                summary_cards.summary_item(
+                    "Retained extra", f"{extra_retained} outside quota", value_style="accent"
+                )
+            ]
             if extra_retained > 0
             else []
         ),
@@ -151,7 +192,9 @@ def render_dynamic_menu_overview() -> None:
             freeze_text,
             value_style="success" if summary.can_freeze else "warning",
         ),
-        summary_cards.summary_item("Why blocked", reason_text, value_style="muted"),
+        summary_cards.summary_item(
+            "Why blocked", reason_text, value_style="warning" if not summary.can_freeze else "muted"
+        ),
         summary_cards.summary_item(
             "Static prep",
             handoff_status,
@@ -163,7 +206,7 @@ def render_dynamic_menu_overview() -> None:
         footer = "No dynamic evidence packs are present. This is expected after cleanup or before the first run."
     print(
         summary_cards.format_summary_card(
-            "Status",
+            "Dynamic Analysis",
             state_items,
             subtitle=subtitle,
             footer=footer or next_step,

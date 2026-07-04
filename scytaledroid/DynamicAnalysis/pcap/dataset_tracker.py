@@ -345,7 +345,27 @@ def _should_ignore_stale_explicit_noncountable(
         and isinstance(run_entry, dict)
         and run_entry.get("low_signal") is False
     )
-    return bool(stale_low_signal_false)
+    if stale_low_signal_false:
+        return True
+    if isinstance(run_entry, dict) and _explicit_noncountable_is_policy_override(run_entry, profile_lc):
+        return False
+    return True
+
+
+def _explicit_noncountable_is_policy_override(row: dict[str, Any], profile_lc: str | None = None) -> bool:
+    """Return whether explicit ``countable=false`` is a real nonquota policy state."""
+    prof_lc = str(profile_lc if profile_lc is not None else row.get("run_profile") or "").strip().lower()
+    if not _is_baseline_profile(prof_lc, DatasetTrackerConfig()):
+        return True
+    if row.get("valid_dataset_run") is False or row.get("paper_eligible") is False:
+        return True
+    if bool(row.get("extra_run")):
+        return True
+    if prof_lc == "baseline_idle" and bool(row.get("low_signal")):
+        return True
+    if prof_lc == "baseline_idle" and bool(row.get("baseline_not_idle")):
+        return True
+    return False
 
 
 def load_dataset_tracker() -> dict[str, Any]:
@@ -783,7 +803,7 @@ def _apply_quota_marking(
         # non-invalidating tag (and baseline_connected is required for messaging apps).
         prof_lc = str(r.get("run_profile") or "").strip().lower()
         explicit_countable = r.get("countable")
-        explicit_non_countable = explicit_countable is False
+        explicit_non_countable = explicit_countable is False and _explicit_noncountable_is_policy_override(r, prof_lc)
         if is_valid and prof_lc == "baseline_idle" and bool(r.get("low_signal")):
             r["extra_run"] = 1
             is_valid = False

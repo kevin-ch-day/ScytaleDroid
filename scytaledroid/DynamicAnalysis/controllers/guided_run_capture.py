@@ -216,7 +216,8 @@ def render_selected_app_drift_workbench(
                 ),
             ],
             default="R",
-            show_descriptions=True,
+            show_descriptions=False,
+            show_exit=False,
             compact=True,
         )
         print()
@@ -226,10 +227,12 @@ def render_selected_app_drift_workbench(
                 menu_utils.MenuOption("H", "Run history", description="recent tracker-scoped runs"),
                 menu_utils.MenuOption("G", "Diagnostics", description="study, capture, and quota detail"),
             ],
-            show_descriptions=True,
+            show_descriptions=False,
+            show_exit=False,
             compact=True,
         )
-        menu_utils.print_menu([], show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
+        print()
+        print("0) Back")
         choice = prompt_utils.get_choice(
             ["R", "H", "G", "0", "B"],
             default="R",
@@ -382,7 +385,7 @@ def choose_capture_device(
             menu_utils.MenuOption("2", "Change device", description="pick a different capture device"),
         ],
         default="1",
-        show_descriptions=True,
+        show_descriptions=False,
         show_exit=False,
         compact=True,
     )

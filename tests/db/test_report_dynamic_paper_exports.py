@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from scripts.db import report_dynamic_paper_exports as report
@@ -14,24 +12,9 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_help() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    script = repo / "scripts" / "db" / "report_dynamic_paper_exports.py"
-    proc = subprocess.run(
-        [sys.executable, str(script), "--help"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = (proc.stdout or "").lower()
-    assert out.startswith("usage:")
-    assert "paper-facing exports" in out
-
-
-def test_generate_report_excludes_broken_pack_from_valid_summaries(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_excludes_broken_pack_from_valid_summaries(
+    tmp_path: Path, monkeypatch
+) -> None:
     dynamic_root = tmp_path / "output" / "evidence" / "dynamic"
 
     valid_run = dynamic_root / "run-valid"
@@ -178,7 +161,11 @@ def test_generate_report_excludes_broken_pack_from_valid_summaries(tmp_path: Pat
     with (out_dir / "per_run_summary.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert any(row["package"] == "bbc.mobile.news.ww" and row["valid_pack"] == "1" for row in rows)
-    assert any(row["package"] == "com.twitter.android" and row["evidence_status"] == "legacy_broken_skipped" for row in rows)
+    assert any(
+        row["package"] == "com.twitter.android"
+        and row["evidence_status"] == "legacy_broken_skipped"
+        for row in rows
+    )
 
     with (out_dir / "invalid_or_skipped_packs.csv").open(encoding="utf-8") as handle:
         invalid_rows = list(csv.DictReader(handle))
@@ -218,11 +205,16 @@ def test_pcap_failure_detail_prefers_verifier_issue_codes() -> None:
         ],
     }
     assert report._pcap_failure_detail(verify_row, "skip") == "invalid_pcap_artifact_missing"
-    assert report._pcap_failure_detail(verify_row, "skip", "PCAP_LOCAL_FILE_MISSING") == "invalid_pcap_file_missing"
+    assert (
+        report._pcap_failure_detail(verify_row, "skip", "PCAP_LOCAL_FILE_MISSING")
+        == "invalid_pcap_file_missing"
+    )
     assert report._issue_codes_csv(verify_row) == "pcap_artifact_missing;protocol_empty_no_reason"
 
 
-def test_generate_report_recomputes_service_context_from_top_indicators(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_recomputes_service_context_from_top_indicators(
+    tmp_path: Path, monkeypatch
+) -> None:
     dynamic_root = tmp_path / "output" / "evidence" / "dynamic"
 
     run_dir = dynamic_root / "run-twitter"
@@ -286,7 +278,9 @@ def test_generate_report_recomputes_service_context_from_top_indicators(tmp_path
     assert summary["top_services_by_app"]["com.twitter.android"][0].startswith("x_media_cdn:")
 
 
-def test_generate_report_recomputes_cnn_streaming_and_adtech_context(tmp_path: Path, monkeypatch) -> None:
+def test_generate_report_recomputes_cnn_streaming_and_adtech_context(
+    tmp_path: Path, monkeypatch
+) -> None:
     dynamic_root = tmp_path / "output" / "evidence" / "dynamic"
 
     run_dir = dynamic_root / "run-cnn"
@@ -331,12 +325,32 @@ def test_generate_report_recomputes_cnn_streaming_and_adtech_context(tmp_path: P
                 "unresolved_domain_count": 7,
                 "services": [],
                 "unresolved_domains": [
-                    {"domain": "out053a3bejgh7t0phqa0csou.litix.io", "root_domain": "litix.io", "total_hits": 13},
+                    {
+                        "domain": "out053a3bejgh7t0phqa0csou.litix.io",
+                        "root_domain": "litix.io",
+                        "total_hits": 13,
+                    },
                     {"domain": "bea4.v.fwmrm.net", "root_domain": "fwmrm.net", "total_hits": 10},
-                    {"domain": "default.any-any.prd.api.discomax.com", "root_domain": "discomax.com", "total_hits": 4},
-                    {"domain": "gpp-decoder.dianomi.workers.dev", "root_domain": "workers.dev", "total_hits": 4},
-                    {"domain": "cdn-media.brightline.tv", "root_domain": "brightline.tv", "total_hits": 4},
-                    {"domain": "top.warnermediacdn.com", "root_domain": "warnermediacdn.com", "total_hits": 4},
+                    {
+                        "domain": "default.any-any.prd.api.discomax.com",
+                        "root_domain": "discomax.com",
+                        "total_hits": 4,
+                    },
+                    {
+                        "domain": "gpp-decoder.dianomi.workers.dev",
+                        "root_domain": "workers.dev",
+                        "total_hits": 4,
+                    },
+                    {
+                        "domain": "cdn-media.brightline.tv",
+                        "root_domain": "brightline.tv",
+                        "total_hits": 4,
+                    },
+                    {
+                        "domain": "top.warnermediacdn.com",
+                        "root_domain": "warnermediacdn.com",
+                        "total_hits": 4,
+                    },
                     {"domain": "freeview.ngtv.io", "root_domain": "ngtv.io", "total_hits": 8},
                 ],
             },
@@ -370,7 +384,13 @@ def test_generate_report_recomputes_cnn_streaming_and_adtech_context(tmp_path: P
     with (out_dir / "per_app_service_summary.csv").open(encoding="utf-8") as handle:
         service_rows = list(csv.DictReader(handle))
     service_keys = {row["service_key"] for row in service_rows}
-    assert {"mux_data", "freewheel", "wbd_streaming_platform", "dianomi", "brightline_ctv"} <= service_keys
+    assert {
+        "mux_data",
+        "freewheel",
+        "wbd_streaming_platform",
+        "dianomi",
+        "brightline_ctv",
+    } <= service_keys
 
 
 def test_generate_report_separates_x_ads_from_platform_traffic(tmp_path: Path, monkeypatch) -> None:

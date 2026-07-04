@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
-
 
 # Guard that the retired legacy static_permission_risk table does not regrow
 # new product or maintenance dependencies.
