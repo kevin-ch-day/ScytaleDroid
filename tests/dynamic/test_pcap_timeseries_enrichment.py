@@ -67,6 +67,11 @@ def test_scan_pcap_timeseries_includes_direction_flow_burst_and_visibility(monke
     assert stats["direction_summary"]["unknown_packets"] == 1
     assert stats["flow_summary"]["flow_count"] >= 2
     assert stats["burst_summary"]["burst_count"] == 3
+    assert stats["startup_profile"]["startup_total_bytes"] == 360
+    assert stats["startup_profile"]["startup_total_packets"] == 4
+    assert stats["startup_profile"]["startup_byte_share"] == 1.0
+    assert stats["startup_profile"]["startup_dominant"] is True
+    assert stats["startup_profile"]["post_start_total_bytes"] == 0
     assert stats["tls_quic_visibility"]["tls_handshake_packets"] == 2
     assert stats["tls_quic_visibility"]["tls_sni_unique_count"] == 1
     assert stats["tls_quic_visibility"]["tls_alpn_unique_count"] == 1

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import getpass
 import json
+import os
 import platform
 import shutil
+import traceback
 import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -57,10 +59,11 @@ from scytaledroid.DynamicAnalysis.pcap.interaction_phases import (
 from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
-from scytaledroid.DynamicAnalysis.plans.loader import (
+from scytaledroid.DynamicAnalysis.plans import (
     PlanValidationError,
     build_plan_validation_event,
     load_dynamic_plan,
+    plan_validation_pass_message,
     render_plan_validation_block,
     validate_dynamic_plan,
 )
@@ -105,7 +108,11 @@ class DynamicRunOrchestrator:
         try:
             in_progress_marker.write_text(
                 json.dumps(
-                    {"dynamic_run_id": dynamic_run_id, "started_at_utc": datetime.now(UTC).isoformat()},
+                    {
+                        "dynamic_run_id": dynamic_run_id,
+                        "started_at_utc": datetime.now(UTC).isoformat(),
+                        "host_pid": os.getpid(),
+                    },
                     sort_keys=True,
                 )
                 + "\n",
@@ -248,683 +255,719 @@ class DynamicRunOrchestrator:
         manifest = self._build_manifest(run_ctx, plan_payload, writer)
         manifest.started_at = self._now()
         event_logger = RunEventLogger(run_ctx)
-        if self._last_plan_validation:
+        telemetry_payload: dict[str, object] = {}
+        try:
+            if self._last_plan_validation:
+                event_logger.log(
+                    "plan.validation",
+                    build_plan_validation_event(self._last_plan_validation),
+                )
+            elif self.config.plan_validation:
+                event_logger.log(
+                    "plan.validation",
+                    build_plan_validation_event(self.config.plan_validation),
+                )
             event_logger.log(
-                "plan.validation",
-                build_plan_validation_event(self._last_plan_validation),
-            )
-        elif self.config.plan_validation:
-            event_logger.log(
-                "plan.validation",
-                build_plan_validation_event(self.config.plan_validation),
-            )
-        event_logger.log(
-            "run_initialized",
-            {
-                "package_name": run_ctx.package_name,
-                "scenario_id": run_ctx.scenario_id,
-                "duration_seconds": run_ctx.duration_seconds,
-                "device_serial": run_ctx.device_serial,
-            },
-        )
-        env_manager = EnvironmentManager()
-        env_snapshot = env_manager.prepare(run_ctx)
-        manifest.environment.update(env_snapshot.metadata)
-        manifest.add_artifacts(env_snapshot.artifacts)
-        event_logger.log("environment_prepared", {"artifact_count": len(env_snapshot.artifacts)})
-
-        target_manager = TargetManager()
-        target_snapshot = target_manager.prepare(run_ctx)
-        if target_snapshot.metadata:
-            manifest.target.update(target_snapshot.metadata)
-            plan_identity = plan_payload.get("run_identity") if isinstance(plan_payload, dict) and isinstance(plan_payload.get("run_identity"), dict) else {}
-            manifest.target["identity_checked_at_start_utc"] = self._now()
-            manifest.target["identity_start"] = {
-                "package_name_lc": str(plan_identity.get("package_name_lc") or plan_payload.get("package_name") or "").strip().lower() if isinstance(plan_payload, dict) else None,
-                "version_code": str(plan_identity.get("version_code") or plan_payload.get("version_code") or "").strip() if isinstance(plan_payload, dict) else None,
-                "base_apk_sha256": plan_identity.get("base_apk_sha256"),
-                "artifact_set_hash": plan_identity.get("artifact_set_hash"),
-                "signer_set_hash": plan_identity.get("signer_set_hash") or plan_identity.get("signer_digest"),
-                "observed_signer_set_hash": (target_snapshot.metadata or {}).get("signer_set_hash"),
-                "observed_signer_primary_digest": (target_snapshot.metadata or {}).get("signer_primary_digest"),
-                "static_handoff_hash": plan_identity.get("static_handoff_hash"),
-                "observed_package_name_lc": str((target_snapshot.metadata or {}).get("package_name") or "").strip().lower(),
-                "observed_version_code": str((target_snapshot.metadata or {}).get("version_code") or "").strip() or None,
-                "user_id": str((target_snapshot.metadata or {}).get("user_id") or "").strip() or "0",
-                "first_install_time": (target_snapshot.metadata or {}).get("first_install_time"),
-                "last_update_time": (target_snapshot.metadata or {}).get("last_update_time"),
-                "installer_package_name": (target_snapshot.metadata or {}).get("installer_package_name"),
-            }
-        manifest.add_artifacts(target_snapshot.artifacts)
-        event_logger.log("target_prepared", {"artifact_count": len(target_snapshot.artifacts)})
-        self._emit_marker(run_ctx, "RUN_START")
-        event_logger.log("run_started")
-
-        observer_records, observer_handles = self._start_observers(run_ctx)
-        manifest.observers = observer_records
-        for record in observer_records:
-            if record.artifacts:
-                manifest.add_artifacts(record.artifacts)
-        for record in observer_records:
-            event_logger.log(
-                "observer_started",
+                "run_initialized",
                 {
-                    "observer_id": record.observer_id,
-                    "status": record.status,
-                    "error": record.error,
+                    "package_name": run_ctx.package_name,
+                    "scenario_id": run_ctx.scenario_id,
+                    "duration_seconds": run_ctx.duration_seconds,
+                    "device_serial": run_ctx.device_serial,
                 },
             )
+            env_manager = EnvironmentManager()
+            env_snapshot = env_manager.prepare(run_ctx)
+            manifest.environment.update(env_snapshot.metadata)
+            manifest.add_artifacts(env_snapshot.artifacts)
+            event_logger.log("environment_prepared", {"artifact_count": len(env_snapshot.artifacts)})
 
-        scenario_runner = ManualScenarioRunner()
-        telemetry_payload: dict[str, object] = {}
-        sampler = None
-        monitor = None
-        clock_start = None
-        clock_end = None
-        scenario_interrupted_reason: str | None = None
-        abort_discard_requested = False
-        if run_ctx.device_serial:
-            sampler = TelemetrySampler(
-                device_serial=run_ctx.device_serial,
-                package_name=run_ctx.package_name,
-                sample_rate_s=self.config.sampling_rate_s,
-                allow_fallback_iface=self.config.tier != "dataset",
-                netstats_debug_dir=run_ctx.notes_dir,
-            )
-            if self.config.enable_monitor:
-                verbose = bool(getattr(self.config, "monitor_verbose", False))
-                monitor = RunMonitor(
-                    RunMonitorConfig(
-                        device_serial=run_ctx.device_serial,
-                        run_id=run_ctx.dynamic_run_id,
-                        package_name=run_ctx.package_name,
-                        notes_dir=run_ctx.notes_dir,
-                        interactive=run_ctx.interactive,
-                        verbose=verbose,
-                    )
+            target_manager = TargetManager()
+            target_snapshot = target_manager.prepare(run_ctx)
+            if target_snapshot.metadata:
+                manifest.target.update(target_snapshot.metadata)
+                plan_identity = plan_payload.get("run_identity") if isinstance(plan_payload, dict) and isinstance(plan_payload.get("run_identity"), dict) else {}
+                manifest.target["identity_checked_at_start_utc"] = self._now()
+                manifest.target["identity_start"] = {
+                    "package_name_lc": str(plan_identity.get("package_name_lc") or plan_payload.get("package_name") or "").strip().lower() if isinstance(plan_payload, dict) else None,
+                    "version_code": str(plan_identity.get("version_code") or plan_payload.get("version_code") or "").strip() if isinstance(plan_payload, dict) else None,
+                    "base_apk_sha256": plan_identity.get("base_apk_sha256"),
+                    "artifact_set_hash": plan_identity.get("artifact_set_hash"),
+                    "signer_set_hash": plan_identity.get("signer_set_hash") or plan_identity.get("signer_digest"),
+                    "observed_signer_set_hash": (target_snapshot.metadata or {}).get("signer_set_hash"),
+                    "observed_signer_primary_digest": (target_snapshot.metadata or {}).get("signer_primary_digest"),
+                    "static_handoff_hash": plan_identity.get("static_handoff_hash"),
+                    "observed_package_name_lc": str((target_snapshot.metadata or {}).get("package_name") or "").strip().lower(),
+                    "observed_version_code": str((target_snapshot.metadata or {}).get("version_code") or "").strip() or None,
+                    "user_id": str((target_snapshot.metadata or {}).get("user_id") or "").strip() or "0",
+                    "first_install_time": (target_snapshot.metadata or {}).get("first_install_time"),
+                    "last_update_time": (target_snapshot.metadata or {}).get("last_update_time"),
+                    "installer_package_name": (target_snapshot.metadata or {}).get("installer_package_name"),
+                }
+            manifest.add_artifacts(target_snapshot.artifacts)
+            event_logger.log("target_prepared", {"artifact_count": len(target_snapshot.artifacts)})
+            self._emit_marker(run_ctx, "RUN_START")
+            event_logger.log("run_started")
+
+            observer_records, observer_handles = self._start_observers(run_ctx)
+            manifest.observers = observer_records
+            for record in observer_records:
+                if record.artifacts:
+                    manifest.add_artifacts(record.artifacts)
+            for record in observer_records:
+                event_logger.log(
+                    "observer_started",
+                    {
+                        "observer_id": record.observer_id,
+                        "status": record.status,
+                        "error": record.error,
+                    },
                 )
-                if run_ctx.interactive:
-                    print(
-                        status_messages.status(
-                            "Run monitor enabled (writing notes/run_monitor.jsonl).",
-                            level="info",
+
+            scenario_runner = ManualScenarioRunner()
+            sampler = None
+            monitor = None
+            clock_start = None
+            clock_end = None
+            scenario_interrupted_reason: str | None = None
+            abort_discard_requested = False
+            if run_ctx.device_serial:
+                sampler = TelemetrySampler(
+                    device_serial=run_ctx.device_serial,
+                    package_name=run_ctx.package_name,
+                    sample_rate_s=self.config.sampling_rate_s,
+                    allow_fallback_iface=self.config.tier != "dataset",
+                    netstats_debug_dir=run_ctx.notes_dir,
+                )
+                if self.config.enable_monitor:
+                    verbose = bool(getattr(self.config, "monitor_verbose", False))
+                    monitor = RunMonitor(
+                        RunMonitorConfig(
+                            device_serial=run_ctx.device_serial,
+                            run_id=run_ctx.dynamic_run_id,
+                            package_name=run_ctx.package_name,
+                            notes_dir=run_ctx.notes_dir,
+                            interactive=run_ctx.interactive,
+                            verbose=verbose,
                         )
                     )
-            clock_start = self._capture_device_clock(run_ctx.device_serial)
-        host_start = datetime.now(UTC)
-        self._emit_marker(run_ctx, "SCENARIO_START")
-        if run_ctx.scenario_hint:
-            event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
-        event_logger.log("scenario_started", {"scenario_id": run_ctx.scenario_id})
-        try:
-            if monitor:
-                monitor.start()
+                    if run_ctx.interactive:
+                        print(
+                            status_messages.status(
+                                "Run monitor enabled (writing notes/run_monitor.jsonl).",
+                                level="info",
+                            )
+                        )
+                clock_start = self._capture_device_clock(run_ctx.device_serial)
+            host_start = datetime.now(UTC)
+            self._emit_marker(run_ctx, "SCENARIO_START")
+            if run_ctx.scenario_hint:
+                event_logger.log("scenario_hint", {"hint": run_ctx.scenario_hint})
+            event_logger.log("scenario_started", {"scenario_id": run_ctx.scenario_id})
             try:
-                scenario_result = scenario_runner.run(
-                    run_ctx,
-                    on_start=sampler.start if sampler else None,
-                    on_end=None,
-                    on_protocol_event=event_logger.log,
-                )
-            except ScenarioAbortRequested:
-                scenario_interrupted_reason = "ABORTED_DISCARD"
-                abort_discard_requested = True
-                now = datetime.now(UTC)
-                event_logger.log("scenario_aborted_discard", {"reason": scenario_interrupted_reason})
-                scenario_result = ScenarioResult(
-                    started_at=host_start,
-                    ended_at=now,
-                    notes=scenario_interrupted_reason,
-                    interaction_level=getattr(run_ctx, "interaction_level", None),
-                    protocol={
-                        "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
-                        "script_exit_code": 130,
-                        "script_end_marker": False,
-                        "deviation_codes": ["ABORTED_DISCARD"],
-                        "interrupted": True,
-                        "interrupted_reason": scenario_interrupted_reason,
-                    },
-                )
-            except KeyboardInterrupt:
-                scenario_interrupted_reason = "INTERRUPTED"
-                now = datetime.now(UTC)
-                event_logger.log("scenario_interrupted", {"reason": scenario_interrupted_reason})
-                scenario_result = ScenarioResult(
-                    started_at=host_start,
-                    ended_at=now,
-                    notes=scenario_interrupted_reason,
-                    interaction_level=getattr(run_ctx, "interaction_level", None),
-                    protocol={
-                        "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
-                        "script_exit_code": 130,
-                        "script_end_marker": False,
-                        "deviation_codes": ["INTERRUPTED"],
-                        "interrupted": True,
-                        "interrupted_reason": scenario_interrupted_reason,
-                    },
-                )
-        finally:
-            if monitor:
-                monitor.stop()
-        if sampler:
-            capture = sampler.stop()
-            telemetry_payload = {
-                "telemetry_process": capture.process_rows,
-                "telemetry_network": capture.network_rows,
-                "telemetry_stats": capture.stats,
-                "sampling_rate_s": self.config.sampling_rate_s,
-            }
-            manifest.operator["telemetry_stats"] = capture.stats
-            manifest.operator["telemetry_counts"] = {
-                "process": len(capture.process_rows),
-                "network": len(capture.network_rows),
-            }
-            manifest.operator["telemetry_schema_version"] = 1
-            manifest.operator["sampling_rate_s"] = self.config.sampling_rate_s
-            manifest.operator["tier"] = self.config.tier
-        if run_ctx.device_serial:
-            clock_end = self._capture_device_clock(run_ctx.device_serial)
-        host_end = datetime.now(UTC)
-        clock_payload = self._format_clock_payload(host_start, host_end, clock_start, clock_end)
-        if clock_payload:
-            telemetry_payload.update(clock_payload)
-            manifest.environment.setdefault("clock", {}).update(clock_payload)
-        self._emit_marker(run_ctx, "SCENARIO_END")
-        event_logger.log("scenario_ended", {"notes": scenario_result.notes})
-        manifest.scenario.update(
-            {
-                "started_at": scenario_result.started_at.isoformat(),
-                "ended_at": scenario_result.ended_at.isoformat(),
-                "notes": scenario_result.notes,
-                "interaction_level": (
-                    "minimal"
-                    if getattr(scenario_result, "interaction_level", None) == "idle"
-                    else getattr(scenario_result, "interaction_level", None)
-                ),
-            }
-        )
-        actual_duration_s = int((scenario_result.ended_at - scenario_result.started_at).total_seconds())
-        manifest.operator["actual_duration_s"] = actual_duration_s
-        if isinstance(scenario_result.protocol, dict):
-            protocol = scenario_result.protocol
-            manifest.operator.update(
+                if monitor:
+                    monitor.start()
+                try:
+                    scenario_result = scenario_runner.run(
+                        run_ctx,
+                        on_start=sampler.start if sampler else None,
+                        on_end=None,
+                        on_protocol_event=event_logger.log,
+                    )
+                except ScenarioAbortRequested:
+                    scenario_interrupted_reason = "ABORTED_DISCARD"
+                    abort_discard_requested = True
+                    now = datetime.now(UTC)
+                    event_logger.log("scenario_aborted_discard", {"reason": scenario_interrupted_reason})
+                    scenario_result = ScenarioResult(
+                        started_at=host_start,
+                        ended_at=now,
+                        notes=scenario_interrupted_reason,
+                        interaction_level=getattr(run_ctx, "interaction_level", None),
+                        protocol={
+                            "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
+                            "script_exit_code": 130,
+                            "script_end_marker": False,
+                            "deviation_codes": ["ABORTED_DISCARD"],
+                            "interrupted": True,
+                            "interrupted_reason": scenario_interrupted_reason,
+                        },
+                    )
+                except KeyboardInterrupt:
+                    scenario_interrupted_reason = "INTERRUPTED"
+                    now = datetime.now(UTC)
+                    event_logger.log("scenario_interrupted", {"reason": scenario_interrupted_reason})
+                    scenario_result = ScenarioResult(
+                        started_at=host_start,
+                        ended_at=now,
+                        notes=scenario_interrupted_reason,
+                        interaction_level=getattr(run_ctx, "interaction_level", None),
+                        protocol={
+                            "interaction_protocol_version": int(SCRIPT_PROTOCOL_VERSION),
+                            "script_exit_code": 130,
+                            "script_end_marker": False,
+                            "deviation_codes": ["INTERRUPTED"],
+                            "interrupted": True,
+                            "interrupted_reason": scenario_interrupted_reason,
+                        },
+                    )
+            finally:
+                if monitor:
+                    monitor.stop()
+            if sampler:
+                capture = sampler.stop()
+                telemetry_payload = {
+                    "telemetry_process": capture.process_rows,
+                    "telemetry_network": capture.network_rows,
+                    "telemetry_stats": capture.stats,
+                    "sampling_rate_s": self.config.sampling_rate_s,
+                }
+                manifest.operator["telemetry_stats"] = capture.stats
+                manifest.operator["telemetry_counts"] = {
+                    "process": len(capture.process_rows),
+                    "network": len(capture.network_rows),
+                }
+                manifest.operator["telemetry_schema_version"] = 1
+                manifest.operator["sampling_rate_s"] = self.config.sampling_rate_s
+                manifest.operator["tier"] = self.config.tier
+            if run_ctx.device_serial:
+                clock_end = self._capture_device_clock(run_ctx.device_serial)
+            host_end = datetime.now(UTC)
+            clock_payload = self._format_clock_payload(host_start, host_end, clock_start, clock_end)
+            if clock_payload:
+                telemetry_payload.update(clock_payload)
+                manifest.environment.setdefault("clock", {}).update(clock_payload)
+            self._emit_marker(run_ctx, "SCENARIO_END")
+            event_logger.log("scenario_ended", {"notes": scenario_result.notes})
+            manifest.scenario.update(
                 {
-                    "interaction_protocol_version": int(
-                        protocol.get("interaction_protocol_version") or SCRIPT_PROTOCOL_VERSION
+                    "started_at": scenario_result.started_at.isoformat(),
+                    "ended_at": scenario_result.ended_at.isoformat(),
+                    "notes": scenario_result.notes,
+                    "interaction_level": (
+                        "minimal"
+                        if getattr(scenario_result, "interaction_level", None) == "idle"
+                        else getattr(scenario_result, "interaction_level", None)
                     ),
-                    "template_id": protocol.get("template_id"),
-                    "template_id_requested": protocol.get("template_id_requested"),
-                    "template_id_actual": protocol.get("template_id_actual"),
-                    "template_hash": protocol.get("template_hash"),
-                    "template_map_version": protocol.get("template_map_version"),
-                    "template_map_hash": protocol.get("template_map_hash"),
-                    "baseline_protocol_id": protocol.get("baseline_protocol_id"),
-                    "baseline_protocol_version": protocol.get("baseline_protocol_version"),
-                    "baseline_protocol_hash": protocol.get("baseline_protocol_hash"),
-                    "script_name": protocol.get("script_name"),
-                    "scenario_template": protocol.get("scenario_template"),
-                    "script_hash": protocol.get("script_hash"),
-                    "step_count": protocol.get("step_count_completed"),
-                    "step_count_planned": protocol.get("step_count_planned"),
-                    "step_count_completed": protocol.get("step_count_completed"),
-                    "script_exit_code": protocol.get("script_exit_code"),
-                    "script_end_marker": protocol.get("script_end_marker"),
-                    "script_timing_within_tolerance": protocol.get("timing_within_tolerance"),
-                    "script_target_overrun_s": protocol.get("target_overrun_s"),
-                    "script_target_underrun_s": protocol.get("target_underrun_s"),
-                    "script_target_controlled": protocol.get("target_controlled"),
-                    "target_duration_s": protocol.get("target_duration_s") or manifest.operator.get("target_duration_s"),
-                    "call_type": protocol.get("call_type"),
-                    "call_attempted": protocol.get("call_attempted"),
-                    "call_connected": protocol.get("call_connected"),
-                    "call_connect_latency_s": protocol.get("call_connect_latency_s"),
-                    "call_connected_duration_s": protocol.get("call_connected_duration_s"),
-                    "call_end_reason": protocol.get("call_end_reason"),
-                    "call_outcome_reason": protocol.get("call_outcome_reason"),
-                    "call_outcome_flag": protocol.get("call_outcome_flag"),
-                    "script_call_in_non_call_template": protocol.get("script_call_in_non_call_template"),
-                    "ai_used": protocol.get("ai_used"),
-                    "ai_provider": protocol.get("ai_provider"),
-                    "ai_prompt_id": protocol.get("ai_prompt_id"),
-                    "interrupted": protocol.get("interrupted"),
-                    "interrupted_reason": protocol.get("interrupted_reason"),
-                    "stopped_early": protocol.get("stopped_early"),
-                    "terminal_hold_finalize": protocol.get("terminal_hold_finalize"),
                 }
             )
-        else:
-            profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
-            if profile.startswith("baseline"):
-                manifest.operator.setdefault("not_applicable", {"script": profile or "baseline"})
-        interaction_level = (
-            "minimal"
-            if getattr(scenario_result, "interaction_level", None) == "idle"
-            else getattr(scenario_result, "interaction_level", None)
-        )
-        # If the scenario runner didn't provide an interaction level, derive a
-        # deterministic operator label from the dataset protocol (baseline vs interactive).
-        if not interaction_level:
-            tier = self.config.tier
-            run_profile = getattr(run_ctx, "run_profile", None)
-            if tier and str(tier).lower() == "dataset" and run_profile:
-                if str(run_profile).lower().startswith("baseline"):
-                    interaction_level = "minimal"
-                else:
-                    interaction_level = "interactive"
-
-        if interaction_level:
-            manifest.operator["interaction_level"] = interaction_level
-            event_logger.log(
-                "operator_interaction_level",
-                {"interaction_level": interaction_level},
-            )
-
-        observer_artifacts: list[ArtifactRecord] = []
-        run_status = "success"
-        if any(record.status == "failed" for record in observer_records):
-            run_status = "degraded"
-        if scenario_interrupted_reason:
-            run_status = "degraded"
-        for observer in self.observers:
-            observer_record = next(
-                existing for existing in manifest.observers if existing.observer_id == observer.observer_id
-            )
-            if observer_record.status == "skipped":
-                event_logger.log(
-                    "observer_skipped",
+            actual_duration_s = int((scenario_result.ended_at - scenario_result.started_at).total_seconds())
+            manifest.operator["actual_duration_s"] = actual_duration_s
+            if isinstance(scenario_result.protocol, dict):
+                protocol = scenario_result.protocol
+                manifest.operator.update(
                     {
-                        "observer_id": observer_record.observer_id,
-                        "status": observer_record.status,
-                        "error": observer_record.error,
-                    },
+                        "interaction_protocol_version": int(
+                            protocol.get("interaction_protocol_version") or SCRIPT_PROTOCOL_VERSION
+                        ),
+                        "template_id": protocol.get("template_id"),
+                        "template_id_requested": protocol.get("template_id_requested"),
+                        "template_id_actual": protocol.get("template_id_actual"),
+                        "template_hash": protocol.get("template_hash"),
+                        "template_map_version": protocol.get("template_map_version"),
+                        "template_map_hash": protocol.get("template_map_hash"),
+                        "baseline_protocol_id": protocol.get("baseline_protocol_id"),
+                        "baseline_protocol_version": protocol.get("baseline_protocol_version"),
+                        "baseline_protocol_hash": protocol.get("baseline_protocol_hash"),
+                        "script_name": protocol.get("script_name"),
+                        "scenario_template": protocol.get("scenario_template"),
+                        "script_hash": protocol.get("script_hash"),
+                        "step_count": protocol.get("step_count_completed"),
+                        "step_count_planned": protocol.get("step_count_planned"),
+                        "step_count_completed": protocol.get("step_count_completed"),
+                        "script_exit_code": protocol.get("script_exit_code"),
+                        "script_end_marker": protocol.get("script_end_marker"),
+                        "script_timing_within_tolerance": protocol.get("timing_within_tolerance"),
+                        "script_target_overrun_s": protocol.get("target_overrun_s"),
+                        "script_target_underrun_s": protocol.get("target_underrun_s"),
+                        "script_target_controlled": protocol.get("target_controlled"),
+                        "target_duration_s": protocol.get("target_duration_s")
+                        or manifest.operator.get("target_duration_s"),
+                        "call_type": protocol.get("call_type"),
+                        "call_attempted": protocol.get("call_attempted"),
+                        "call_connected": protocol.get("call_connected"),
+                        "call_connect_latency_s": protocol.get("call_connect_latency_s"),
+                        "call_connected_duration_s": protocol.get("call_connected_duration_s"),
+                        "call_end_reason": protocol.get("call_end_reason"),
+                        "call_outcome_reason": protocol.get("call_outcome_reason"),
+                        "call_outcome_flag": protocol.get("call_outcome_flag"),
+                        "script_call_in_non_call_template": protocol.get("script_call_in_non_call_template"),
+                        "ai_used": protocol.get("ai_used"),
+                        "ai_provider": protocol.get("ai_provider"),
+                        "ai_prompt_id": protocol.get("ai_prompt_id"),
+                        "interrupted": protocol.get("interrupted"),
+                        "interrupted_reason": protocol.get("interrupted_reason"),
+                        "stopped_early": protocol.get("stopped_early"),
+                        "terminal_hold_finalize": protocol.get("terminal_hold_finalize"),
+                        "script_manual_override": protocol.get("script_manual_override"),
+                        "script_manual_override_reason": protocol.get("script_manual_override_reason"),
+                    }
                 )
-                continue
-            if observer_record.status != "started":
+                profile_override = str(protocol.get("profile_override") or "").strip()
+                interaction_override = str(protocol.get("interaction_level_override") or "").strip()
+                if profile_override:
+                    manifest.operator["run_profile"] = profile_override
+                    manifest.target["run_intent"] = profile_override
+                if interaction_override:
+                    manifest.operator["interaction_level"] = interaction_override
+            else:
+                profile = str(getattr(run_ctx, "run_profile", "") or "").strip().lower()
+                if profile.startswith("baseline"):
+                    manifest.operator.setdefault("not_applicable", {"script": profile or "baseline"})
+            interaction_level = (
+                "minimal"
+                if getattr(scenario_result, "interaction_level", None) == "idle"
+                else getattr(scenario_result, "interaction_level", None)
+            )
+            if isinstance(scenario_result.protocol, dict):
+                interaction_override = str(scenario_result.protocol.get("interaction_level_override") or "").strip()
+                if interaction_override:
+                    interaction_level = interaction_override
+            # If the scenario runner didn't provide an interaction level, derive a
+            # deterministic operator label from the dataset protocol (baseline vs interactive).
+            if not interaction_level:
+                tier = self.config.tier
+                run_profile = (
+                    manifest.operator.get("run_profile")
+                    if isinstance(manifest.operator, dict)
+                    else getattr(run_ctx, "run_profile", None)
+                )
+                if tier and str(tier).lower() == "dataset" and run_profile:
+                    if str(run_profile).lower().startswith("baseline"):
+                        interaction_level = "minimal"
+                    else:
+                        interaction_level = "interactive"
+
+            if interaction_level:
+                manifest.operator["interaction_level"] = interaction_level
                 event_logger.log(
-                    "observer_skipped",
-                    {
-                        "observer_id": observer_record.observer_id,
-                        "status": observer_record.status,
-                        "error": observer_record.error,
-                    },
+                    "operator_interaction_level",
+                    {"interaction_level": interaction_level},
                 )
+
+            observer_artifacts: list[ArtifactRecord] = []
+            run_status = "success"
+            if any(record.status == "failed" for record in observer_records):
                 run_status = "degraded"
-                continue
-            handle = observer_handles.get(observer.observer_id)
-            record = self._stop_observer(observer, run_ctx, handle)
-            observer_record.status = record.status
-            observer_record.error = record.error
-            observer_record.artifacts.extend(record.artifacts)
-            observer_artifacts.extend(record.artifacts)
-            event_logger.log(
-                "observer_stopped",
-                {
-                    "observer_id": observer.observer_id,
-                    "status": record.status,
-                    "artifact_count": len(record.artifacts),
-                },
-            )
-            if record.status != "success":
-                if record.status != "skipped":
+            if scenario_interrupted_reason:
+                run_status = "degraded"
+            for observer in self.observers:
+                observer_record = next(
+                    existing for existing in manifest.observers if existing.observer_id == observer.observer_id
+                )
+                if observer_record.status == "skipped":
+                    event_logger.log(
+                        "observer_skipped",
+                        {
+                            "observer_id": observer_record.observer_id,
+                            "status": observer_record.status,
+                            "error": observer_record.error,
+                        },
+                    )
+                    continue
+                if observer_record.status != "started":
+                    event_logger.log(
+                        "observer_skipped",
+                        {
+                            "observer_id": observer_record.observer_id,
+                            "status": observer_record.status,
+                            "error": observer_record.error,
+                        },
+                    )
+                    run_status = "degraded"
+                    continue
+                handle = observer_handles.get(observer.observer_id)
+                record = self._stop_observer(observer, run_ctx, handle)
+                observer_record.status = record.status
+                observer_record.error = record.error
+                observer_record.artifacts.extend(record.artifacts)
+                observer_artifacts.extend(record.artifacts)
+                event_logger.log(
+                    "observer_stopped",
+                    {
+                        "observer_id": observer.observer_id,
+                        "status": record.status,
+                        "artifact_count": len(record.artifacts),
+                    },
+                )
+                if record.status != "success" and record.status != "skipped":
                     run_status = "degraded"
 
-        manifest.add_artifacts(observer_artifacts)
-        target_finalize = target_manager.finalize(run_ctx)
-        if target_finalize.metadata:
-            manifest.target.update(target_finalize.metadata)
-        identity_end_pkg = str((target_finalize.metadata or {}).get("package_name_end") or "").strip().lower()
-        identity_end_ver = str((target_finalize.metadata or {}).get("version_code_end") or "").strip() or None
-        if identity_end_pkg or identity_end_ver:
-            manifest.target["identity_checked_at_end_utc"] = self._now()
-            manifest.target["identity_end"] = {
-                "observed_package_name_lc": identity_end_pkg or None,
-                "observed_version_code": identity_end_ver,
-                "observed_signer_set_hash": (target_finalize.metadata or {}).get("signer_set_hash_end"),
-                "observed_signer_primary_digest": (target_finalize.metadata or {}).get("signer_primary_digest_end"),
-                "user_id": str((target_finalize.metadata or {}).get("user_id_end") or "").strip() or "0",
-                "first_install_time": (target_finalize.metadata or {}).get("first_install_time_end"),
-                "last_update_time": (target_finalize.metadata or {}).get("last_update_time_end"),
-                "installer_package_name": (target_finalize.metadata or {}).get("installer_package_name_end"),
-            }
-        manifest.add_artifacts(target_finalize.artifacts)
-        event_logger.log("target_finalized", {"artifact_count": len(target_finalize.artifacts)})
-        env_finalize = env_manager.finalize(run_ctx)
-        manifest.add_artifacts(env_finalize.artifacts)
-        event_logger.log("environment_finalized", {"artifact_count": len(env_finalize.artifacts)})
-        self._emit_marker(run_ctx, "RUN_END")
-        event_logger.log("run_ended")
-        marker_artifact = self._marker_artifact(run_ctx)
-        if marker_artifact:
-            manifest.add_artifacts([marker_artifact])
-        manifest.status = run_status
-        manifest.ended_at = self._now()
-        try:
-            index_pcap_by_app(manifest, run_dir, event_logger=event_logger)
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning(
-                "PCAP archive index failed",
-                extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
-            )
-            event_logger.log("pcap_index_failed", {"error": str(exc)})
-
-        outputs: list[ArtifactRecord] = []
-        report = write_pcap_report(manifest, run_dir, event_logger=event_logger)
-        if report:
-            outputs.append(report)
-        features = write_pcap_features(manifest, run_dir, event_logger=event_logger)
-        if features:
-            outputs.append(features)
-        overlap = write_static_dynamic_overlap(manifest, run_dir, event_logger=event_logger)
-        if overlap:
-            outputs.append(overlap)
-        tier = (manifest.operator or {}).get("tier") if isinstance(manifest.operator, dict) else None
-        if not (tier and str(tier).lower() == "dataset") and not abort_discard_requested:
-            update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
-
-        # Deterministic dataset validity classification (freeze/profile) must be written to the manifest.
-        if tier and str(tier).lower() == "dataset":
-            try:
-                entry = {
-                    "pcap_size_bytes": next(
-                        (a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"),
-                        0,
-                    )
+            manifest.add_artifacts(observer_artifacts)
+            target_finalize = target_manager.finalize(run_ctx)
+            if target_finalize.metadata:
+                manifest.target.update(target_finalize.metadata)
+            identity_end_pkg = str((target_finalize.metadata or {}).get("package_name_end") or "").strip().lower()
+            identity_end_ver = str((target_finalize.metadata or {}).get("version_code_end") or "").strip() or None
+            if identity_end_pkg or identity_end_ver:
+                manifest.target["identity_checked_at_end_utc"] = self._now()
+                manifest.target["identity_end"] = {
+                    "observed_package_name_lc": identity_end_pkg or None,
+                    "observed_version_code": identity_end_ver,
+                    "observed_signer_set_hash": (target_finalize.metadata or {}).get("signer_set_hash_end"),
+                    "observed_signer_primary_digest": (target_finalize.metadata or {}).get("signer_primary_digest_end"),
+                    "user_id": str((target_finalize.metadata or {}).get("user_id_end") or "").strip() or "0",
+                    "first_install_time": (target_finalize.metadata or {}).get("first_install_time_end"),
+                    "last_update_time": (target_finalize.metadata or {}).get("last_update_time_end"),
+                    "installer_package_name": (target_finalize.metadata or {}).get("installer_package_name_end"),
                 }
-                entry.update(_netstats_summary(run_dir))
-                validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
-                # First-class dataset validity (freeze/profile). Written only to manifest.dataset.
-                if isinstance(validity, dict):
-                    current_ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
-                    merged_ds = dict(current_ds)
-                    merged_ds.update(validity)
-                    merged_ds.setdefault("tier", self.config.tier)
-                    manifest.dataset = merged_ds
-
-                    # ML readiness is separate from validity. Tag low-signal runs deterministically
-                    # without changing VALID/INVALID semantics (freeze/profile contract).
-                    try:
-                        from scytaledroid.DynamicAnalysis.pcap.low_signal import (
-                            compute_low_signal_for_run,
-                        )
-
-                        ls = compute_low_signal_for_run(
-                            run_dir,
-                            package_name=str((manifest.target or {}).get("package_name") or ""),
-                            run_profile=str((manifest.operator or {}).get("run_profile") or ""),
-                        )
-                        if isinstance(ls, dict):
-                            manifest.dataset.update(ls)
-                    except Exception:
-                        # Best-effort; absence is not a correctness failure.
-                        pass
-
-                    try:
-                        from scytaledroid.DynamicAnalysis.pcap.baseline_activity import (
-                            compute_baseline_activity_for_run,
-                        )
-
-                        activity = compute_baseline_activity_for_run(
-                            run_dir,
-                            package_name=str((manifest.target or {}).get("package_name") or ""),
-                            run_profile=str((manifest.operator or {}).get("run_profile") or ""),
-                        )
-                        if isinstance(activity, dict):
-                            manifest.dataset.update(activity)
-                    except Exception:
-                        pass
-
-                    # Derive paper-eligibility from finalized in-memory state, then
-                    # sync tracker from this final state so countability is not stale.
-                    eligibility = derive_freeze_eligibility(
-                        manifest={
-                            "dataset": manifest.dataset,
-                            "operator": manifest.operator,
-                            "target": manifest.target,
-                        },
-                        plan=plan_payload if isinstance(plan_payload, dict) else {},
-                        min_windows=int(MIN_WINDOWS_PER_RUN),
-                        required_capture_policy_version=int(
-                            getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)
-                        ),
-                    )
-                    manifest.dataset["paper_eligible"] = bool(eligibility.paper_eligible)
-                    manifest.dataset["paper_exclusion_primary_reason_code"] = eligibility.reason_code
-                    manifest.dataset["paper_exclusion_all_reason_codes"] = list(
-                        eligibility.all_reason_codes
-                    )
-
-                    if not abort_discard_requested:
-                        update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
-
-                    # "countable" is quota-counted by construction. Determine it from the
-                    # derived tracker markings (counts_toward_quota) rather than from
-                    # operator choice or run order.
-                    tracker_row: dict[str, object] | None = None
-                    try:
-                        tracker = load_dataset_tracker()
-                        apps = tracker.get("apps") if isinstance(tracker, dict) else {}
-                        pkg = (manifest.target.get("package_name") or "").strip()
-                        app_entry = apps.get(pkg) if isinstance(apps, dict) and pkg else None
-                        runs = app_entry.get("runs") if isinstance(app_entry, dict) else []
-                        if isinstance(runs, list):
-                            tracker_row = next(
-                                (
-                                    r
-                                    for r in runs
-                                    if isinstance(r, dict) and r.get("run_id") == manifest.dynamic_run_id
-                                ),
-                                None,
-                            )
-                    except Exception:
-                        tracker_row = None
-
-                    countable = None
-                    if isinstance(tracker_row, dict):
-                        countable = tracker_row.get("countable")
-                        if not isinstance(countable, bool):
-                            countable = bool(tracker_row.get("counts_toward_quota"))
-                        manifest.dataset["paper_eligible"] = bool(tracker_row.get("paper_eligible"))
-                        manifest.dataset["paper_exclusion_primary_reason_code"] = (
-                            tracker_row.get("paper_exclusion_primary_reason_code")
-                        )
-                        all_codes = tracker_row.get("paper_exclusion_all_reason_codes")
-                        manifest.dataset["paper_exclusion_all_reason_codes"] = (
-                            list(all_codes) if isinstance(all_codes, list) else []
-                        )
-                    if isinstance(countable, bool):
-                        manifest.dataset["countable"] = countable
-                    else:
-                        manifest.dataset.setdefault("countable", True)
-
-                    verdict_source = tracker_row if isinstance(tracker_row, dict) else {
-                        "valid_dataset_run": manifest.dataset.get("valid_dataset_run"),
-                        "paper_eligible": manifest.dataset.get("paper_eligible"),
-                        "countable": manifest.dataset.get("countable"),
-                        "paper_exclusion_all_reason_codes": manifest.dataset.get(
-                            "paper_exclusion_all_reason_codes"
-                        ),
-                    }
-                    technical_validity, protocol_compliance, cohort_eligibility = (
-                        derive_three_verdicts_for_row(verdict_source)
-                    )
-                    manifest.dataset["technical_validity"] = technical_validity
-                    manifest.dataset["protocol_compliance"] = protocol_compliance
-                    manifest.dataset["cohort_eligibility"] = cohort_eligibility
-                    manifest.operator["technical_validity"] = technical_validity
-                    manifest.operator["protocol_compliance"] = protocol_compliance
-                    manifest.operator["cohort_eligibility"] = cohort_eligibility
-
-                ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
-                if scenario_interrupted_reason:
-                    manifest.dataset["valid_dataset_run"] = False
-                    manifest.dataset["invalid_reason_code"] = (
-                        "ABORTED_DISCARD"
-                        if scenario_interrupted_reason == "ABORTED_DISCARD"
-                        else "INTERRUPTED"
-                    )
-                    manifest.dataset["countable"] = False
-                    ds = manifest.dataset
-                event_logger.log(
-                    "dataset_validity",
-                    {
-                        "valid": bool(ds.get("valid_dataset_run")),
-                        "invalid_reason_code": ds.get("invalid_reason_code"),
-                        "min_pcap_bytes": ds.get("min_pcap_bytes"),
-                        "sampling_duration_seconds": ds.get("sampling_duration_seconds"),
-                        "short_run": ds.get("short_run"),
-                        "no_traffic_observed": ds.get("no_traffic_observed"),
-                        "countable": bool(ds.get("countable")),
-                        "low_signal": bool(ds.get("low_signal")),
-                        "technical_validity": ds.get("technical_validity"),
-                        "protocol_compliance": ds.get("protocol_compliance"),
-                        "cohort_eligibility": ds.get("cohort_eligibility"),
-                    },
-                )
+            manifest.add_artifacts(target_finalize.artifacts)
+            event_logger.log("target_finalized", {"artifact_count": len(target_finalize.artifacts)})
+            env_finalize = env_manager.finalize(run_ctx)
+            manifest.add_artifacts(env_finalize.artifacts)
+            event_logger.log("environment_finalized", {"artifact_count": len(env_finalize.artifacts)})
+            self._emit_marker(run_ctx, "RUN_END")
+            event_logger.log("run_ended")
+            marker_artifact = self._marker_artifact(run_ctx)
+            if marker_artifact:
+                manifest.add_artifacts([marker_artifact])
+            manifest.status = run_status
+            manifest.ended_at = self._now()
+            try:
+                index_pcap_by_app(manifest, run_dir, event_logger=event_logger)
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning(
-                    "Dataset validity computation failed",
+                    "PCAP archive index failed",
                     extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
                 )
-                event_logger.log("dataset_validity_error", {"error": str(exc)})
-            # Fail-closed: dataset-tier runs must never leave validity unset.
-            if isinstance(manifest.dataset, dict) and manifest.dataset.get("valid_dataset_run") is None:
-                manifest.dataset.update(
-                    {
-                        "valid_dataset_run": False,
-                        "invalid_reason_code": "PCAP_PARSE_ERROR",
-                        "countable": bool(manifest.dataset.get("countable", True)),
-                    }
-                )
+                event_logger.log("pcap_index_failed", {"error": str(exc)})
 
-        summarizer = DynamicRunSummarizer(writer)
-        outputs.extend(summarizer.summarize(manifest))
+            outputs: list[ArtifactRecord] = []
+            report = write_pcap_report(manifest, run_dir, event_logger=event_logger)
+            if report:
+                outputs.append(report)
+            features = write_pcap_features(manifest, run_dir, event_logger=event_logger)
+            if features:
+                outputs.append(features)
+            overlap = write_static_dynamic_overlap(manifest, run_dir, event_logger=event_logger)
+            if overlap:
+                outputs.append(overlap)
+            tier = (manifest.operator or {}).get("tier") if isinstance(manifest.operator, dict) else None
+            if not (tier and str(tier).lower() == "dataset") and not abort_discard_requested:
+                update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
 
-        # Finalize structured event log *after* all analysis steps that emit events.
-        # This prevents SHA mismatches for the run_events artifact.
-        event_artifact = event_logger.finalize()
-        if event_artifact:
-            manifest.add_artifacts([event_artifact])
-        interaction_timeline_artifact = write_interaction_timeline_artifact(
-            writer=writer,
-            manifest=manifest,
-        )
-        if interaction_timeline_artifact:
-            manifest.add_outputs([interaction_timeline_artifact])
-        protocol_phase_markers_artifact = write_protocol_phase_markers_artifact(
-            writer=writer,
-            manifest=manifest,
-        )
-        if protocol_phase_markers_artifact:
-            manifest.add_outputs([protocol_phase_markers_artifact])
-        manifest.add_outputs(outputs)
-        manifest.finalize()
-        writer.write_manifest(manifest)
-        try:
-            in_progress_marker.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-        # Phase 2 churn reduction: emit a one-line v3 post-run validator result and
-        # opportunistically derive v3 ML artifacts when needed.
-        try:
-            import os
-            import time
-
-            strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
-            v3_scenario = str(getattr(self.config, "scenario_id", "") or "").strip() == "paper3_profile_v3"
-            want_check = v3_scenario and strict
-            if str(os.environ.get("SCYTALEDROID_V3_POSTRUN_CHECK") or "").strip().lower() in {"1", "true", "yes", "on"}:
-                want_check = True
-
-            if want_check:
-                from scytaledroid.DynamicAnalysis.utils.v3_postrun_check import (
-                    validate_run_dir_for_profile_v3,
-                )
-
-                derive_attempted = False
-                derive_ok = False
-                derive_error = ""
-
-                # In v3 strict mode, derive ML artifacts immediately so the operator sees
-                # a definitive PASS/FAIL at the end of the run (no "later manifest build" surprises).
-                if v3_scenario and strict:
-                    derive_attempted = True
-                    try:
-                        from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import (
-                            derive_profile_v3_ml_for_package,
+            # Deterministic dataset validity classification (freeze/profile) must be written to the manifest.
+            if tier and str(tier).lower() == "dataset":
+                try:
+                    entry = {
+                        "pcap_size_bytes": next(
+                            (a.size_bytes for a in manifest.artifacts if a.type == "pcapdroid_capture"),
+                            0,
                         )
+                    }
+                    entry.update(_netstats_summary(run_dir))
+                    validity = evaluate_dataset_validity(run_dir, manifest, entry, DatasetTrackerConfig())
+                    # First-class dataset validity (freeze/profile). Written only to manifest.dataset.
+                    if isinstance(validity, dict):
+                        current_ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
+                        merged_ds = dict(current_ds)
+                        merged_ds.update(validity)
+                        merged_ds.setdefault("tier", self.config.tier)
+                        manifest.dataset = merged_ds
 
-                        # Best-effort retry: PCAP file finalization can lag by a moment after
-                        # observers stop. Retry avoids spurious "missing_window_scores_csv".
-                        output_root = Path(self.config.output_root or "output/evidence/dynamic")
-                        last_exc: Exception | None = None
-                        derive_result = None
-                        for _i in range(2):
-                            try:
-                                res = derive_profile_v3_ml_for_package(
-                                    package=str(self.config.package_name),
-                                    evidence_root=output_root,
-                                )
-                                derive_result = res
-                                if not res.errors:
-                                    derive_ok = True
-                                    break
-                                derive_error = ";".join(list(res.errors)[:3])
-                                break
-                            except Exception as exc:  # noqa: BLE001
-                                last_exc = exc
-                                time.sleep(1.5)
-                        if (not derive_ok) and (not derive_error) and last_exc is not None:
-                            derive_error = f"{type(last_exc).__name__}:{last_exc}"
-                        # Persist a tiny derive receipt inside the run dir for operator/debugging speed.
-                        # This is independent of the sealed run_manifest.json.
+                        # ML readiness is separate from validity. Tag low-signal runs deterministically
+                        # without changing VALID/INVALID semantics (freeze/profile contract).
                         try:
-                            if derive_result is not None:
-                                writer.write_json("analysis/index/v1/v3_ml_derive.json", derive_result.__dict__)
+                            from scytaledroid.DynamicAnalysis.pcap.low_signal import (
+                                compute_low_signal_for_run,
+                            )
+
+                            ls = compute_low_signal_for_run(
+                                run_dir,
+                                package_name=str((manifest.target or {}).get("package_name") or ""),
+                                run_profile=str((manifest.operator or {}).get("run_profile") or ""),
+                            )
+                            if isinstance(ls, dict):
+                                manifest.dataset.update(ls)
+                        except Exception:
+                            # Best-effort; absence is not a correctness failure.
+                            pass
+
+                        try:
+                            from scytaledroid.DynamicAnalysis.pcap.baseline_activity import (
+                                compute_baseline_activity_for_run,
+                            )
+
+                            activity = compute_baseline_activity_for_run(
+                                run_dir,
+                                package_name=str((manifest.target or {}).get("package_name") or ""),
+                                run_profile=str((manifest.operator or {}).get("run_profile") or ""),
+                            )
+                            if isinstance(activity, dict):
+                                manifest.dataset.update(activity)
                         except Exception:
                             pass
-                    except Exception as exc:  # noqa: BLE001
-                        derive_ok = False
-                        derive_error = f"{type(exc).__name__}:{exc}"
 
-                check = validate_run_dir_for_profile_v3(run_dir)
-                status = "PASS" if check.ok else "FAIL"
-                reason = ",".join(check.reasons) if check.reasons else ""
-                if derive_attempted:
-                    suffix = "derive_ok" if derive_ok else "derive_fail"
-                    reason = f"{reason},{suffix}" if reason else suffix
-                    if (not derive_ok) and derive_error:
-                        # Keep it short; full details are in logs.
-                        safe = derive_error[:160].replace("\n", " ")
-                        reason = f"{reason}:{safe}"
-                print(
-                    (
-                        f"[COPY] v3_run_complete status={status} run_id={check.run_id} package={check.package} "
-                        f"run_profile={check.run_profile} phase={check.phase} version_code={check.version_code or 'na'} "
-                        f"windows={check.windows if check.windows is not None else 'na'} min_windows={check.min_windows_required} "
-                        f"pcap_bytes={check.pcap_bytes if check.pcap_bytes is not None else 'na'} min_pcap_bytes={check.min_pcap_bytes_required} "
-                        f"scores={int(check.has_window_scores)} threshold={int(check.has_baseline_threshold)} reason={reason}"
-                    ),
-                    flush=True,
-                )
-                # Write derived check artifact for audits (does not mutate sealed manifest).
-                try:
-                    writer.write_json("analysis/index/v1/v3_postrun_check.json", check.to_dict())
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                        # Derive paper-eligibility from finalized in-memory state, then
+                        # sync tracker from this final state so countability is not stale.
+                        eligibility = derive_freeze_eligibility(
+                            manifest={
+                                "dataset": manifest.dataset,
+                                "operator": manifest.operator,
+                                "target": manifest.target,
+                            },
+                            plan=plan_payload if isinstance(plan_payload, dict) else {},
+                            min_windows=int(MIN_WINDOWS_PER_RUN),
+                            required_capture_policy_version=int(
+                                getattr(profile_config, "PAPER_CONTRACT_VERSION", 1)
+                            ),
+                        )
+                        manifest.dataset["paper_eligible"] = bool(eligibility.paper_eligible)
+                        manifest.dataset["paper_exclusion_primary_reason_code"] = eligibility.reason_code
+                        manifest.dataset["paper_exclusion_all_reason_codes"] = list(
+                            eligibility.all_reason_codes
+                        )
 
-        self.logger.info(
-            "Dynamic run complete",
-            extra={
-                "dynamic_run_id": dynamic_run_id,
-                "status": manifest.status,
-                "evidence_path": str(run_dir),
-            },
-        )
+                        if not abort_discard_requested:
+                            update_dataset_tracker(manifest, run_dir, event_logger=event_logger)
 
-        return manifest, run_dir, telemetry_payload
+                        # "countable" is quota-counted by construction. Determine it from the
+                        # derived tracker markings (counts_toward_quota) rather than from
+                        # operator choice or run order.
+                        tracker_row: dict[str, object] | None = None
+                        try:
+                            tracker = load_dataset_tracker()
+                            apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+                            pkg = (manifest.target.get("package_name") or "").strip()
+                            app_entry = apps.get(pkg) if isinstance(apps, dict) and pkg else None
+                            runs = app_entry.get("runs") if isinstance(app_entry, dict) else []
+                            if isinstance(runs, list):
+                                tracker_row = next(
+                                    (
+                                        r
+                                        for r in runs
+                                        if isinstance(r, dict) and r.get("run_id") == manifest.dynamic_run_id
+                                    ),
+                                    None,
+                                )
+                        except Exception:
+                            tracker_row = None
+
+                        countable = None
+                        if isinstance(tracker_row, dict):
+                            countable = tracker_row.get("countable")
+                            if not isinstance(countable, bool):
+                                countable = bool(tracker_row.get("counts_toward_quota"))
+                            manifest.dataset["paper_eligible"] = bool(tracker_row.get("paper_eligible"))
+                            manifest.dataset["paper_exclusion_primary_reason_code"] = (
+                                tracker_row.get("paper_exclusion_primary_reason_code")
+                            )
+                            all_codes = tracker_row.get("paper_exclusion_all_reason_codes")
+                            manifest.dataset["paper_exclusion_all_reason_codes"] = (
+                                list(all_codes) if isinstance(all_codes, list) else []
+                            )
+                        if isinstance(countable, bool):
+                            manifest.dataset["countable"] = countable
+                        else:
+                            manifest.dataset.setdefault("countable", True)
+
+                        verdict_source = tracker_row if isinstance(tracker_row, dict) else {
+                            "valid_dataset_run": manifest.dataset.get("valid_dataset_run"),
+                            "paper_eligible": manifest.dataset.get("paper_eligible"),
+                            "countable": manifest.dataset.get("countable"),
+                            "paper_exclusion_all_reason_codes": manifest.dataset.get(
+                                "paper_exclusion_all_reason_codes"
+                            ),
+                        }
+                        technical_validity, protocol_compliance, cohort_eligibility = (
+                            derive_three_verdicts_for_row(verdict_source)
+                        )
+                        manifest.dataset["technical_validity"] = technical_validity
+                        manifest.dataset["protocol_compliance"] = protocol_compliance
+                        manifest.dataset["cohort_eligibility"] = cohort_eligibility
+                        manifest.operator["technical_validity"] = technical_validity
+                        manifest.operator["protocol_compliance"] = protocol_compliance
+                        manifest.operator["cohort_eligibility"] = cohort_eligibility
+
+                    ds = manifest.dataset if isinstance(manifest.dataset, dict) else {}
+                    if scenario_interrupted_reason:
+                        manifest.dataset["valid_dataset_run"] = False
+                        manifest.dataset["invalid_reason_code"] = (
+                            "ABORTED_DISCARD"
+                            if scenario_interrupted_reason == "ABORTED_DISCARD"
+                            else "INTERRUPTED"
+                        )
+                        manifest.dataset["countable"] = False
+                        ds = manifest.dataset
+                    event_logger.log(
+                        "dataset_validity",
+                        {
+                            "valid": bool(ds.get("valid_dataset_run")),
+                            "invalid_reason_code": ds.get("invalid_reason_code"),
+                            "min_pcap_bytes": ds.get("min_pcap_bytes"),
+                            "sampling_duration_seconds": ds.get("sampling_duration_seconds"),
+                            "short_run": ds.get("short_run"),
+                            "no_traffic_observed": ds.get("no_traffic_observed"),
+                            "countable": bool(ds.get("countable")),
+                            "low_signal": bool(ds.get("low_signal")),
+                            "technical_validity": ds.get("technical_validity"),
+                            "protocol_compliance": ds.get("protocol_compliance"),
+                            "cohort_eligibility": ds.get("cohort_eligibility"),
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.warning(
+                        "Dataset validity computation failed",
+                        extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+                    )
+                    event_logger.log("dataset_validity_error", {"error": str(exc)})
+                # Fail-closed: dataset-tier runs must never leave validity unset.
+                if isinstance(manifest.dataset, dict) and manifest.dataset.get("valid_dataset_run") is None:
+                    manifest.dataset.update(
+                        {
+                            "valid_dataset_run": False,
+                            "invalid_reason_code": "PCAP_PARSE_ERROR",
+                            "countable": bool(manifest.dataset.get("countable", True)),
+                        }
+                    )
+
+            summarizer = DynamicRunSummarizer(writer)
+            outputs.extend(summarizer.summarize(manifest))
+
+            # Finalize structured event log *after* all analysis steps that emit events.
+            # This prevents SHA mismatches for the run_events artifact.
+            event_artifact = event_logger.finalize()
+            if event_artifact:
+                manifest.add_artifacts([event_artifact])
+            interaction_timeline_artifact = write_interaction_timeline_artifact(
+                writer=writer,
+                manifest=manifest,
+            )
+            if interaction_timeline_artifact:
+                manifest.add_outputs([interaction_timeline_artifact])
+            protocol_phase_markers_artifact = write_protocol_phase_markers_artifact(
+                writer=writer,
+                manifest=manifest,
+            )
+            if protocol_phase_markers_artifact:
+                manifest.add_outputs([protocol_phase_markers_artifact])
+            manifest.add_outputs(outputs)
+            manifest.finalize()
+            writer.write_manifest(manifest)
+            try:
+                in_progress_marker.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+            # Phase 2 churn reduction: emit a one-line v3 post-run validator result and
+            # opportunistically derive v3 ML artifacts when needed.
+            try:
+                import time
+
+                strict = str(os.environ.get("SCYTALEDROID_PAPER_STRICT") or "").strip().lower() in {"1", "true", "yes", "on"}
+                v3_scenario = str(getattr(self.config, "scenario_id", "") or "").strip() == "paper3_profile_v3"
+                want_check = v3_scenario and strict
+                if str(os.environ.get("SCYTALEDROID_V3_POSTRUN_CHECK") or "").strip().lower() in {"1", "true", "yes", "on"}:
+                    want_check = True
+
+                if want_check:
+                    from scytaledroid.DynamicAnalysis.utils.v3_postrun_check import (
+                        validate_run_dir_for_profile_v3,
+                    )
+
+                    derive_attempted = False
+                    derive_ok = False
+                    derive_error = ""
+
+                    # In v3 strict mode, derive ML artifacts immediately so the operator sees
+                    # a definitive PASS/FAIL at the end of the run (no "later manifest build" surprises).
+                    if v3_scenario and strict:
+                        derive_attempted = True
+                        try:
+                            from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import (
+                                derive_profile_v3_ml_for_package,
+                            )
+
+                            # Best-effort retry: PCAP file finalization can lag by a moment after
+                            # observers stop. Retry avoids spurious "missing_window_scores_csv".
+                            output_root = Path(self.config.output_root or "output/evidence/dynamic")
+                            last_exc: Exception | None = None
+                            derive_result = None
+                            for _i in range(2):
+                                try:
+                                    res = derive_profile_v3_ml_for_package(
+                                        package=str(self.config.package_name),
+                                        evidence_root=output_root,
+                                    )
+                                    derive_result = res
+                                    if not res.errors:
+                                        derive_ok = True
+                                        break
+                                    derive_error = ";".join(list(res.errors)[:3])
+                                    break
+                                except Exception as exc:  # noqa: BLE001
+                                    last_exc = exc
+                                    time.sleep(1.5)
+                            if (not derive_ok) and (not derive_error) and last_exc is not None:
+                                derive_error = f"{type(last_exc).__name__}:{last_exc}"
+                            # Persist a tiny derive receipt inside the run dir for operator/debugging speed.
+                            # This is independent of the sealed run_manifest.json.
+                            try:
+                                if derive_result is not None:
+                                    writer.write_json("analysis/index/v1/v3_ml_derive.json", derive_result.__dict__)
+                            except Exception:
+                                pass
+                        except Exception as exc:  # noqa: BLE001
+                            derive_ok = False
+                            derive_error = f"{type(exc).__name__}:{exc}"
+
+                    check = validate_run_dir_for_profile_v3(run_dir)
+                    status = "PASS" if check.ok else "FAIL"
+                    reason = ",".join(check.reasons) if check.reasons else ""
+                    if derive_attempted:
+                        suffix = "derive_ok" if derive_ok else "derive_fail"
+                        reason = f"{reason},{suffix}" if reason else suffix
+                        if (not derive_ok) and derive_error:
+                            # Keep it short; full details are in logs.
+                            safe = derive_error[:160].replace("\n", " ")
+                            reason = f"{reason}:{safe}"
+                    print(
+                        (
+                            f"[COPY] v3_run_complete status={status} run_id={check.run_id} package={check.package} "
+                            f"run_profile={check.run_profile} phase={check.phase} version_code={check.version_code or 'na'} "
+                            f"windows={check.windows if check.windows is not None else 'na'} min_windows={check.min_windows_required} "
+                            f"pcap_bytes={check.pcap_bytes if check.pcap_bytes is not None else 'na'} min_pcap_bytes={check.min_pcap_bytes_required} "
+                            f"scores={int(check.has_window_scores)} threshold={int(check.has_baseline_threshold)} reason={reason}"
+                        ),
+                        flush=True,
+                    )
+                    # Write derived check artifact for audits (does not mutate sealed manifest).
+                    try:
+                        writer.write_json("analysis/index/v1/v3_postrun_check.json", check.to_dict())
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            self.logger.info(
+                "Dynamic run complete",
+                extra={
+                    "dynamic_run_id": dynamic_run_id,
+                    "status": manifest.status,
+                    "evidence_path": str(run_dir),
+                },
+            )
+
+            return manifest, run_dir, telemetry_payload
+        except Exception as exc:  # noqa: BLE001
+            fallback_manifest = self._seal_failed_manifest(
+                manifest=manifest,
+                writer=writer,
+                run_ctx=run_ctx,
+                event_logger=event_logger,
+                error=exc,
+                in_progress_marker=in_progress_marker,
+            )
+            self.logger.warning(
+                "Dynamic run finalized with failure fallback",
+                extra={
+                    "dynamic_run_id": dynamic_run_id,
+                    "status": fallback_manifest.status,
+                    "evidence_path": str(run_dir),
+                    "error": str(exc),
+                },
+            )
+            return fallback_manifest, run_dir, telemetry_payload
 
     def _build_manifest(
         self,
@@ -1107,6 +1150,88 @@ class DynamicRunOrchestrator:
         if dep_artifact:
             manifest.add_artifacts([dep_artifact])
             manifest.target["dep_snapshot_path"] = dep_artifact.relative_path
+        return manifest
+
+    def _seal_failed_manifest(
+        self,
+        *,
+        manifest: RunManifest,
+        writer: EvidencePackWriter,
+        run_ctx: RunContext,
+        event_logger: RunEventLogger,
+        error: Exception,
+        in_progress_marker: Path,
+    ) -> RunManifest:
+        error_text = f"{type(error).__name__}: {error}"
+        error_trace = traceback.format_exc()
+        self.logger.exception(
+            "Dynamic run finalization failed",
+            extra={
+                "dynamic_run_id": manifest.dynamic_run_id,
+                "package_name": run_ctx.package_name,
+                "error": error_text,
+            },
+        )
+        manifest.status = "failed"
+        manifest.ended_at = self._now()
+        manifest.notes.append(f"Finalization error: {error_text}")
+        manifest.qa.setdefault("orchestrator_failure", {})
+        manifest.qa["orchestrator_failure"].update(
+            {
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "stage": "finalization",
+            }
+        )
+        if str((manifest.operator or {}).get("tier") or self.config.tier or "").lower() == "dataset":
+            manifest.dataset.setdefault("valid_dataset_run", False)
+            manifest.dataset.setdefault("invalid_reason_code", "FINALIZATION_ERROR")
+            manifest.dataset["countable"] = False
+        try:
+            error_path = writer.write_text("notes/finalization_error.txt", error_trace)
+            manifest.add_artifacts(
+                [
+                    ArtifactRecord(
+                        relative_path=str(error_path.relative_to(run_ctx.run_dir)),
+                        type="finalization_error",
+                        sha256=None,
+                        size_bytes=error_path.stat().st_size,
+                        produced_by="orchestrator",
+                        origin="host",
+                        pull_status="n/a",
+                    )
+                ]
+            )
+        except Exception:
+            pass
+        try:
+            event_logger.log(
+                "run_finalize_error",
+                {
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                },
+            )
+        except Exception:
+            pass
+        try:
+            event_artifact = event_logger.finalize()
+            if event_artifact:
+                manifest.add_artifacts([event_artifact])
+        except Exception:
+            pass
+        try:
+            manifest.finalize()
+        except Exception:
+            pass
+        try:
+            writer.write_manifest(manifest, allow_overwrite=True)
+        except Exception:
+            pass
+        try:
+            in_progress_marker.unlink(missing_ok=True)
+        except OSError:
+            pass
         return manifest
 
     def _attach_dep_snapshot(
@@ -1349,7 +1474,12 @@ class DynamicRunOrchestrator:
     def _emit_plan_validation(self, validation) -> None:
         if self.config.interactive:
             if getattr(validation, "is_pass", False):
-                print(status_messages.status("Plan validation: PASS (baseline shown above).", level="success"))
+                print(
+                    status_messages.status(
+                        plan_validation_pass_message(getattr(self.config, "run_profile", None)),
+                        level="success",
+                    )
+                )
             else:
                 print(render_plan_validation_block(validation))
         self._last_plan_validation = validation

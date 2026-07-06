@@ -16,6 +16,9 @@ from scytaledroid.DynamicAnalysis.menus.maintenance_actions import (
     run_state_summary_action as _run_state_summary_action,
     verify_host_pcap_tools_action as _verify_host_pcap_tools_action,
 )
+from scytaledroid.DynamicAnalysis.menus.status_reports import (
+    render_paper_freeze_readiness_brief as _render_paper_freeze_readiness_brief,
+)
 from scytaledroid.Utils.DisplayUtils import prompt_utils
 
 
@@ -73,6 +76,10 @@ def repair_reindex_tracker(
 
 def run_freeze_readiness_audit() -> None:
     _run_freeze_readiness_audit_action()
+
+
+def run_paper_freeze_readiness() -> None:
+    _render_paper_freeze_readiness_brief()
 
 
 def run_state_summary() -> None:

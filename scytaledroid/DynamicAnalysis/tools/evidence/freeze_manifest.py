@@ -37,7 +37,7 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     INTERACTION_REQUIRED,
     MIN_WINDOWS_PER_RUN,
 )
-from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     active_research_cohort_archive_dir,
     active_dataset_freeze_path,

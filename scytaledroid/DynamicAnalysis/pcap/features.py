@@ -215,6 +215,14 @@ def _extract_features(
     context_bundle = summarize_pcap_service_context(report, package_name=package_name)
     service_context = context_bundle.get("service_context") or {}
     service_signals = context_bundle.get("service_signals") or {}
+    media_plane = report.get("media_plane") if isinstance(report.get("media_plane"), dict) else {}
+    media_plane_summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
+    startup_profile = report.get("startup_profile") if isinstance(report.get("startup_profile"), dict) else {}
+    dominant_udp_flow = (
+        media_plane_summary.get("dominant_udp_flow")
+        if isinstance(media_plane_summary.get("dominant_udp_flow"), dict)
+        else {}
+    )
     owner_hits = service_context.get("owner_class_hit_counts") if isinstance(service_context, dict) else {}
     focus_hits = service_signals.get("focus_area_hit_counts") if isinstance(service_signals, dict) else {}
     severity_hits = service_signals.get("severity_hit_counts") if isinstance(service_signals, dict) else {}
@@ -281,6 +289,21 @@ def _extract_features(
             "third_party_service_hits": _safe_int((owner_hits or {}).get("third_party")) if isinstance(owner_hits, dict) else None,
             "privacy_signal_hits": _safe_int((focus_hits or {}).get("privacy")) if isinstance(focus_hits, dict) else None,
             "high_severity_signal_hits": _safe_int((severity_hits or {}).get("high")) if isinstance(severity_hits, dict) else None,
+            "stun_frame_count": _safe_int(media_plane_summary.get("stun_frame_count")),
+            "stun_frame_share_of_udp": _safe_float(media_plane_summary.get("stun_frame_share_of_udp")),
+            "turn_allocate_request_count": _safe_int(media_plane_summary.get("turn_allocate_request_count")),
+            "turn_allocate_success_count": _safe_int(media_plane_summary.get("turn_allocate_success_count")),
+            "relay_endpoint_count": _safe_int(media_plane_summary.get("relay_endpoint_count")),
+            "dominant_udp_flow_bytes": _safe_int(dominant_udp_flow.get("bytes")) if isinstance(dominant_udp_flow, dict) else None,
+            "dominant_udp_flow_share": _safe_float(dominant_udp_flow.get("share_of_udp_bytes")) if isinstance(dominant_udp_flow, dict) else None,
+            "relay_media_detected": 1 if media_plane_summary.get("relay_media_likely") else 0 if media_plane else None,
+            "startup_byte_share": _safe_float(startup_profile.get("startup_byte_share")),
+            "startup_packet_share": _safe_float(startup_profile.get("startup_packet_share")),
+            "post_start_median_bytes_per_min": _safe_float(startup_profile.get("post_start_median_bytes_per_min")),
+            "post_start_mean_bytes_per_min": _safe_float(startup_profile.get("post_start_mean_bytes_per_min")),
+            "post_start_median_packets_per_min": _safe_float(startup_profile.get("post_start_median_packets_per_min")),
+            "post_start_mean_packets_per_min": _safe_float(startup_profile.get("post_start_mean_packets_per_min")),
+            "startup_dominant": 1 if startup_profile.get("startup_dominant") else 0 if startup_profile else None,
             "security_finding_count": _safe_int(surface.get("finding_count")) if surface_ok else None,
             "security_risk_flag_count": len(surface.get("risk_flags") or []) if surface_ok else None,
             "cleartext_http_observed": 1 if cleartext_surface.get("http_observed") else 0 if surface_ok else None,
@@ -338,6 +361,10 @@ def _extract_features(
             "status": "not_attempted",
             "summary": {},
         },
+        "startup_profile": {
+            "status": "ok" if startup_profile else "not_attempted",
+            "summary": startup_profile if isinstance(startup_profile, dict) else {},
+        },
         "traffic_posture": {
             "status": "not_attempted",
             "summary": {},
@@ -357,6 +384,10 @@ def _extract_features(
         "service_signals": {
             "status": str(service_signals.get("status") or "not_attempted") if isinstance(service_signals, dict) else "not_attempted",
             "summary": service_signals if isinstance(service_signals, dict) else {},
+        },
+        "media_plane": {
+            "status": str(media_plane.get("status") or "not_attempted") if isinstance(media_plane, dict) else "not_attempted",
+            "summary": media_plane_summary if isinstance(media_plane_summary, dict) else {},
         },
         "security_surface": {
             "status": str(surface.get("status") or "not_attempted") if surface else "not_attempted",
@@ -449,6 +480,14 @@ def _enrich_features_from_pcap(
     if not isinstance(visibility, dict):
         visibility = {"status": "not_attempted", "summary": {}}
         features["visibility"] = visibility
+    startup = features.get("startup_profile")
+    if not isinstance(startup, dict):
+        startup = {"status": "not_attempted", "summary": {}}
+        features["startup_profile"] = startup
+    window_metrics = features.get("window_metrics")
+    if not isinstance(window_metrics, dict):
+        window_metrics = {}
+        features["window_metrics"] = window_metrics
 
     metrics.update(
         {
@@ -476,6 +515,9 @@ def _enrich_features_from_pcap(
     bursts["summary"] = stats.get("burst_summary") or {}
     visibility["status"] = "ok"
     visibility["summary"] = stats.get("tls_quic_visibility") or {}
+    startup["status"] = "ok"
+    startup["summary"] = stats.get("startup_profile") or {}
+    window_metrics.update(stats.get("window_metrics") or {})
     enrich["status"] = "ok"
     enrich["reason"] = None
 
@@ -491,6 +533,7 @@ def _refresh_traffic_posture(features: dict[str, Any]) -> None:
     flows = features.get("flows") if isinstance(features.get("flows"), dict) else {}
     bursts = features.get("bursts") if isinstance(features.get("bursts"), dict) else {}
     visibility = features.get("visibility") if isinstance(features.get("visibility"), dict) else {}
+    startup = features.get("startup_profile") if isinstance(features.get("startup_profile"), dict) else {}
 
     summary = summarize_traffic_posture(
         metrics=metrics,
@@ -498,6 +541,7 @@ def _refresh_traffic_posture(features: dict[str, Any]) -> None:
         flow_summary=flows.get("summary") if isinstance(flows.get("summary"), dict) else {},
         burst_summary=bursts.get("summary") if isinstance(bursts.get("summary"), dict) else {},
         visibility_summary=visibility.get("summary") if isinstance(visibility.get("summary"), dict) else {},
+        startup_summary=startup.get("summary") if isinstance(startup.get("summary"), dict) else {},
     )
     posture["summary"] = summary
     posture["status"] = "ok" if any(value is not None for value in summary.values()) else "not_attempted"

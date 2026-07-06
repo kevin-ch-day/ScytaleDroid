@@ -23,7 +23,7 @@ from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
 )
 from scytaledroid.DynamicAnalysis.core.event_logger import append_run_event
 from scytaledroid.DynamicAnalysis.storage.network_indicators import index_network_indicators_for_run
-from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
+from scytaledroid.DynamicAnalysis.plans import extract_plan_identity
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality

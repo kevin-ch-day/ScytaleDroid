@@ -25,7 +25,7 @@ from scytaledroid.DynamicAnalysis.pcap.posture import summarize_traffic_posture
 from scytaledroid.DynamicAnalysis.pcap.transport_health import summarize_transport_health
 from scytaledroid.DynamicAnalysis.storage.domain_context_index import index_dynamic_domain_context_for_run
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
-from scytaledroid.DynamicAnalysis.plans.loader import extract_plan_identity
+from scytaledroid.DynamicAnalysis.plans import extract_plan_identity
 from scytaledroid.DynamicAnalysis.storage.network_indicators import index_network_indicators_for_run
 
 

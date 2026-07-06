@@ -76,7 +76,12 @@ def build_package_selection_row(
     dataset_valid_runs_count = 0
     historical_valid_runs_count = 0
     historical_build_count = 0
+    historical_pcap_count = 0
     build_state = "—"
+    strict_idle_count = 0
+    strict_idle_required = 0
+    quiescent_fg_count = 0
+    quiescent_fg_available = False
     baseline_countable = 0
     baseline_extra = 0
     baseline_not_idle_supplemental = 0
@@ -84,6 +89,9 @@ def build_package_selection_row(
     interactive_countable = 0
     interactive_extra = 0
     interactive_low_signal_supplemental = 0
+    interactive_count_raw = 0
+    interactive_display_state = "unlocked"
+    interactive_hold_reason = "none"
     need_baseline = 0
     need_interactive = 0
     prep_label = "—"
@@ -116,9 +124,14 @@ def build_package_selection_row(
         baseline_extra = base_extra
         baseline_not_idle_supplemental = base_not_idle
         baseline_low_signal_supplemental = base_low_signal
+        strict_idle_count = base_countable
+        strict_idle_required = int(cfg.baseline_required)
+        quiescent_fg_count = base_not_idle
+        quiescent_fg_available = base_not_idle > 0
         interactive_countable = inter_countable
         interactive_extra = inter_extra
         interactive_low_signal_supplemental = inter_low_signal
+        interactive_count_raw = inter_countable + inter_extra + inter_low_signal
         legacy_valid = int(scoped["legacy_valid"])
         legacy_builds = int(scoped["legacy_builds"])
         active_version = str(scoped.get("active_version_code") or "—")
@@ -134,6 +147,8 @@ def build_package_selection_row(
         need_inter = max(0, int(cfg.interactive_required) - inter_countable)
         need_baseline = need_base
         need_interactive = need_inter
+        interactive_display_state = "held_by_strict_idle" if need_base > 0 else "unlocked"
+        interactive_hold_reason = "strict_idle_incomplete" if need_base > 0 else "none"
         baseline_complete = base_countable >= int(cfg.baseline_required)
 
         base_label = _call_progress_label(
@@ -185,7 +200,9 @@ def build_package_selection_row(
         build_state = build_label
         prep_label = build_label
         historical_valid_runs_count = legacy_valid
+        retained_prior_build_runs = legacy_valid
         historical_build_count = legacy_builds
+        historical_pcap_count = int(scoped.get("legacy_pcap_available") or 0)
         technical_valid_active = int(scoped.get("technical_valid_active") or 0)
         if isinstance(db_lineage_context, dict):
             db_active_sessions = int(db_lineage_context.get("db_active_sessions") or 0)
@@ -296,9 +313,14 @@ def build_package_selection_row(
         dataset_valid_runs_count=dataset_valid_runs_count,
         historical_valid_runs_count=historical_valid_runs_count,
         historical_build_count=historical_build_count,
+        historical_pcap_count=historical_pcap_count,
         build_state=build_state,
         package_name=package,
         display_name=display,
+        strict_idle_count=strict_idle_count,
+        strict_idle_required=strict_idle_required,
+        quiescent_fg_count=quiescent_fg_count,
+        quiescent_fg_available=quiescent_fg_available,
         baseline_countable=baseline_countable,
         baseline_extra=baseline_extra,
         baseline_not_idle_supplemental=baseline_not_idle_supplemental,
@@ -306,6 +328,9 @@ def build_package_selection_row(
         interactive_countable=interactive_countable,
         interactive_extra=interactive_extra,
         interactive_low_signal_supplemental=interactive_low_signal_supplemental,
+        interactive_count_raw=interactive_count_raw,
+        interactive_display_state=interactive_display_state,
+        interactive_hold_reason=interactive_hold_reason,
         need_baseline=need_baseline,
         need_interactive=need_interactive,
         prep_label=prep_label,
@@ -321,6 +346,7 @@ def build_package_selection_row(
         db_active_sessions=db_active_sessions,
         db_historical_sessions=db_historical_sessions,
         db_total_sessions=db_total_sessions,
+        retained_prior_build_runs=historical_valid_runs_count,
     )
 
 

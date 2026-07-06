@@ -20,20 +20,20 @@ def render_cohort_status_help(
     menu_utils.print_section("Columns")
     for line in (
         "Status = workflow state: complete, review, interactive, baseline, restore, refresh, or blocked.",
-        "Idle Base = quota-counted idle baselines over the minimum (e.g. 3/3).",
-        "Non-idle = valid retained baseline attempts outside quota because traffic exceeded idle-baseline limits.",
-        "Interactive = valid interactive runs against the target; retained extras stay visible in the total and baseline must be complete first.",
+        "Strict Idle = quota-counted network-idle baselines over the minimum (e.g. 3/3).",
+        "Quiescent FG = valid no-touch foreground baseline attempts retained outside strict-idle quota because app/runtime traffic exceeded idle-baseline limits.",
+        "Interactive = valid interactive runs against the target; retained extras stay visible in the total and strict idle must be complete first.",
         "QA = latest current-build run QA badge (invalid, valid+id, valid+L); explains Status=review.",
-        "Build = static/evidence prep state (current, drift, mixed, legacy, db-hist); wide terminals only.",
-        "ML pool = quota-complete app with optional supplemental baseline runs for training/pattern averages.",
-        "Non-idle baseline = valid retained evidence outside quota because traffic exceeded idle-baseline limits; app-driven feed/media refresh can trigger it even when the operator is trying to stay idle.",
+        "Build = current target state (current, drift, prior-only, db-only, none yet); wide terminals only.",
+        "ML pool = quota-complete app with optional supplemental strict-idle baselines for training/pattern averages.",
+        "Quiescent FG baseline = valid retained no-touch foreground evidence outside strict-idle quota; app-driven feed/media refresh can trigger it even when the operator is trying to stay idle.",
     ):
         print(status_messages.status(line, level="info", show_prefix=False))
     print()
     menu_utils.print_section("States and gaps")
     for line in (
-        "held/locked = interactive quota is not open until baseline minimum is met; the queue may still show retained interactive evidence as 0/4 held, 1/4 held, and so on.",
-        "non-idle retained baselines do not unlock interactive; rerun baseline with the app mostly idle because the classifier treated the traffic as too active for idle-baseline quota.",
+        "held/locked = interactive quota is not open until strict-idle baseline minimum is met; the queue may still show retained interactive evidence as 0/4 held, 1/4 held, and so on.",
+        "Quiescent FG retained baselines do not unlock interactive; rerun baseline with the app mostly idle because the classifier treated the traffic as too active for strict-idle quota.",
         "mixed = current-build and legacy-build evidence both exist.",
         "refresh = installed app build differs from the newest static plan (Status=refresh). Harvest/static refresh is required before dynamic continuation.",
         "identity mismatch = latest valid run does not match the active build identity; review historical vs current evidence carefully.",
@@ -41,7 +41,7 @@ def render_cohort_status_help(
         "interactive gap = baseline is complete, but interactive quota is still missing.",
         "db-only = evidence exists in stored history/DB context but no local pack is present in this workspace.",
         "Status=restore + DB-only evidence = current-build run context is stored locally in DB, but the evidence pack is missing here.",
-        "+L = latest QA valid, legacy evidence also exists.",
+        "+L = latest QA valid, historical evidence also exists.",
     ):
         print(status_messages.status(line, level="info", show_prefix=False))
     print()
@@ -51,6 +51,7 @@ def render_cohort_status_help(
         "Detailed local/db/history evidence lineage and QA badges moved to diagnostics (D) and run history (Y).",
         "Evidence-authoritative quota = archive/freeze truth.",
         "Tracker-scoped latest-run state = queue-operating view of the active build.",
+        "Paper-target freeze readiness = best build-backed paper candidate; it may merge repeated static runs for the same APK hash.",
     ):
         print(status_messages.status(line, level="info", show_prefix=False))
     prompt_utils.press_enter_to_continue()
@@ -154,6 +155,7 @@ def render_cohort_status_debug(
                 str(getattr(row, "baseline_countable", 0)),
                 str(getattr(row, "baseline_extra", 0)),
                 str(getattr(row, "baseline_low_signal_supplemental", 0)),
+                str(getattr(row, "baseline_not_idle_supplemental", 0)),
                 str(getattr(row, "interactive_countable", 0)),
                 str(getattr(row, "interactive_extra", 0)),
                 str(getattr(row, "interactive_low_signal_supplemental", 0)),
@@ -173,6 +175,7 @@ def render_cohort_status_debug(
                 "Base ct",
                 "Base ex",
                 "Base low",
+                "Base qfg",
                 "Inter ct",
                 "Inter ex",
                 "Inter low",

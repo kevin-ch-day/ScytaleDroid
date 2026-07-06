@@ -10,6 +10,7 @@ from functools import lru_cache
 from . import ui_prefs
 
 MIN_WIDTH = 40
+DEFAULT_WIDTH = 100
 
 
 def _coerce_int(value: str | None, default: int) -> int:
@@ -38,7 +39,7 @@ def _determine_terminal_width(default: int) -> int:
     return max(MIN_WIDTH, columns)
 
 
-def get_terminal_width(*, default: int = 80, force_refresh: bool = False) -> int:
+def get_terminal_width(*, default: int = DEFAULT_WIDTH, force_refresh: bool = False) -> int:
     """Return the current terminal width with sensible fallbacks."""
 
     if force_refresh:

@@ -40,6 +40,20 @@ _QUEUE_TABLE_APP_LABEL_OVERRIDES: dict[str, str] = {
     "x (twitter)": "X",
     "the guardian": "Guardian",
 }
+_QUEUE_TABLE_QA_DISPLAY_LABELS: dict[str, str] = {
+    "valid+L": "valid",
+    "valid+id+L": "valid+id",
+    "valid+id": "valid+id",
+    "inv": "invalid",
+}
+_QUEUE_TABLE_BUILD_DISPLAY_LABELS: dict[str, str] = {
+    "mixed": "current",
+    "prior-build": "prior-only",
+    "prior-build-db": "prior-only",
+    "db-only": "db-only",
+    "ready": "none yet",
+    "stale": "drift",
+}
 
 
 def queue_table_app_label(display_name: object) -> str:
@@ -200,7 +214,8 @@ def queue_quota_gap_label(row: Any) -> str:
 
 
 def queue_table_qa_label(row: Any) -> str:
-    return compact_qa_label(str(getattr(row, "qa_label", "") or "—"))
+    value = compact_qa_label(str(getattr(row, "qa_label", "") or "—"))
+    return _QUEUE_TABLE_QA_DISPLAY_LABELS.get(value, value)
 
 
 def queue_table_next_label(row: Any, *, narrow: bool = False) -> str:
@@ -215,7 +230,8 @@ def queue_table_next_label(row: Any, *, narrow: bool = False) -> str:
 
 
 def queue_table_build_label(row: Any) -> str:
-    return compact_prep_label(str(getattr(row, "prep_label", "") or "—"))
+    value = compact_prep_label(str(getattr(row, "prep_label", "") or "—"))
+    return _QUEUE_TABLE_BUILD_DISPLAY_LABELS.get(value, value)
 
 
 def queue_idle_baseline_label(row: Any, *, baseline_required: int) -> str:
@@ -229,15 +245,56 @@ def queue_non_idle_baseline_label(row: Any) -> str:
     return str(int(getattr(row, "baseline_not_idle_supplemental", 0) or 0))
 
 
-def queue_interactive_total_label(row: Any, *, interactive_required: int) -> str:
-    total = (
+def queue_retained_prior_build_label(row: Any) -> str:
+    runs = int(getattr(row, "historical_valid_runs_count", 0) or 0)
+    builds = int(getattr(row, "historical_build_count", 0) or 0)
+    if runs <= 0:
+        return "0"
+    if builds > 0:
+        return f"{runs} ({builds}b)"
+    return str(runs)
+
+
+def queue_interactive_count_raw(row: Any) -> int:
+    value = getattr(row, "interactive_count_raw", None)
+    if value is not None:
+        return max(0, int(value))
+    return (
         int(getattr(row, "interactive_countable", 0) or 0)
         + int(getattr(row, "interactive_extra", 0) or 0)
         + int(getattr(row, "interactive_low_signal_supplemental", 0) or 0)
     )
+
+
+def queue_interactive_display_state(row: Any) -> str:
+    explicit = str(getattr(row, "interactive_display_state", "") or "").strip()
+    if explicit:
+        return explicit
     if int(getattr(row, "need_baseline", 0) or 0) > 0:
-        return f"{total}/{int(interactive_required)} held"
-    return f"{total}/{int(interactive_required)}"
+        return "held_by_strict_idle"
+    return "unlocked"
+
+
+def queue_interactive_hold_reason(row: Any) -> str:
+    explicit = str(getattr(row, "interactive_hold_reason", "") or "").strip()
+    if explicit:
+        return explicit
+    if int(getattr(row, "need_baseline", 0) or 0) > 0:
+        return "strict_idle_incomplete"
+    return "none"
+
+
+def _held_by_strict_idle(label: str, row: Any) -> str:
+    text = str(label or "").strip() or "0/0"
+    if queue_interactive_display_state(row) == "held_by_strict_idle":
+        return f"{text} held"
+    return text
+
+
+def queue_interactive_total_label(row: Any, *, interactive_required: int) -> str:
+    total = queue_interactive_count_raw(row)
+    label = f"{total}/{int(interactive_required)}"
+    return _held_by_strict_idle(label, row)
 
 
 def queue_row_is_next_recommended(row: Any, next_row: Any | None) -> bool:
@@ -287,14 +344,15 @@ def queue_baseline_evidence_label(row: Any, *, baseline_required: int) -> str:
 
 
 def queue_interactive_evidence_label(row: Any, *, interactive_required: int) -> str:
-    if int(getattr(row, "need_baseline", 0) or 0) > 0:
-        return "locked"
-    return bucket_evidence_label(
+    if queue_interactive_display_state(row) == "held_by_strict_idle":
+        return f"{queue_interactive_count_raw(row)}/{int(interactive_required)} held"
+    label = bucket_evidence_label(
         countable=int(row.interactive_countable),
         extra=int(row.interactive_extra),
         low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
         required=int(interactive_required),
     )
+    return _held_by_strict_idle(label, row)
 
 
 def queue_baseline_runs_label(row: Any, *, baseline_required: int) -> str:
@@ -336,15 +394,16 @@ def queue_baseline_progress_label(row: Any, *, baseline_required: int, compact: 
 
 
 def queue_interactive_progress_label(row: Any, *, interactive_required: int, compact: bool = False) -> str:
-    if int(getattr(row, "need_baseline", 0) or 0) > 0:
-        return "locked"
+    if queue_interactive_display_state(row) == "held_by_strict_idle":
+        return f"{queue_interactive_count_raw(row)}/{int(interactive_required)} held"
     formatter = format_quota_progress_compact if compact else format_quota_progress_label
-    return formatter(
+    label = formatter(
         countable=int(row.interactive_countable),
         extra=int(row.interactive_extra),
         low_signal=int(getattr(row, "interactive_low_signal_supplemental", 0) or 0),
         required=int(interactive_required),
     )
+    return _held_by_strict_idle(label, row)
 
 
 def queue_interactive_runs_label(row: Any, *, interactive_required: int) -> str:
@@ -528,6 +587,8 @@ def display_next_line_action_label(row: Any) -> str:
         return "interactive"
     if action == "review":
         return "review QA"
+    if action == "restore":
+        return "restore/recollect"
     if action == "ml_pool":
         return "supplemental baseline"
     return action
@@ -597,14 +658,15 @@ def main_progress_label(
 
 
 def manual_progress_label(row: Any, *, interactive_required: int) -> str:
-    if row.need_baseline > 0:
-        return "locked"
-    return main_progress_label(
+    if queue_interactive_display_state(row) == "held_by_strict_idle":
+        return f"{queue_interactive_count_raw(row)}/{int(interactive_required)} held"
+    label = main_progress_label(
         row.interactive_countable,
         row.interactive_extra,
         required=interactive_required,
         missing=row.need_interactive,
     )
+    return _held_by_strict_idle(label, row)
 
 
 def main_action_label(value: str) -> str:
@@ -653,9 +715,9 @@ def compact_prep_label(value: str) -> str:
     mapping = {
         "current": "current",
         "mixed": "mixed",
-        "legacy": "legacy",
+        "legacy": "prior-build",
         "db-only": "db-only",
-        "hist-db": "db-hist",
+        "hist-db": "prior-build-db",
         "ready": "ready",
         "stale": "drift",
     }
@@ -705,6 +767,7 @@ __all__ = [
     "queue_need_narrow_label",
     "queue_qa_badge",
     "queue_remaining_summary",
+    "queue_retained_prior_build_label",
     "queue_runs_label",
     "queue_runs_narrow_label",
     "queue_baseline_detail_label",

@@ -165,6 +165,33 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert bbc_live["service_key"] == "bbc_first_party"
     assert bbc_live["role_class"] == "publisher_api"
 
+    bbc_home = service_context.resolve_service_for_domain(
+        "www.bbc.com",
+        package_name="bbc.mobile.news.ww",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bbc_home["service_key"] == "bbc_first_party"
+    assert bbc_home["role_class"] == "publisher_content"
+
+    bbc_analytics = service_context.resolve_service_for_domain(
+        "mybbc-analytics.files.bbci.co.uk",
+        package_name="bbc.mobile.news.ww",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bbc_analytics["service_key"] == "bbc_first_party"
+    assert bbc_analytics["role_class"] == "publisher_collection"
+
+    bbc_remote_config = service_context.resolve_service_for_domain(
+        "map-remote-config.files.bbci.co.uk",
+        package_name="bbc.mobile.news.ww",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bbc_remote_config["service_key"] == "bbc_first_party"
+    assert bbc_remote_config["role_class"] == "sdk_configuration"
+
     bbc_piano = service_context.resolve_service_for_domain(
         "buy-eu.piano.io",
         package_name="bbc.mobile.news.ww",
@@ -464,6 +491,52 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert linkedin_media["service_key"] == "linkedin_cdn"
     assert linkedin_media["service_category"] == "content_delivery"
+    assert linkedin_media["role_class"] == "media_delivery"
+
+    linkedin_static = service_context.resolve_service_for_domain(
+        "static-akam.licdn.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_static["service_key"] == "linkedin_cdn"
+    assert linkedin_static["role_class"] == "static_asset_delivery"
+
+    linkedin_dms = service_context.resolve_service_for_domain(
+        "dms.licdn.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_dms["service_key"] == "linkedin_cdn"
+    assert linkedin_dms["role_class"] == "document_media_delivery"
+
+    linkedin_dms_akam = service_context.resolve_service_for_domain(
+        "dms-akam.licdn.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_dms_akam["service_key"] == "linkedin_cdn"
+    assert linkedin_dms_akam["role_class"] == "document_media_delivery"
+
+    linkedin_pop_edge = service_context.resolve_service_for_domain(
+        "pop-ltx1-lx.www.linkedin.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_pop_edge["service_key"] == "linkedin_cdn"
+    assert linkedin_pop_edge["role_class"] == "content_delivery"
+
+    linkedin_static_cflr = service_context.resolve_service_for_domain(
+        "static-cflr.licdn.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_static_cflr["service_key"] == "linkedin_cdn"
+    assert linkedin_static_cflr["role_class"] == "static_asset_delivery"
 
     linkedin_bot_defense = service_context.resolve_service_for_domain(
         "collector-pxdojv695v.protechts.net",
@@ -836,6 +909,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert mapbox["service_key"] == "mapbox_platform"
     assert mapbox["role_class"] == "sdk_configuration"
 
+    mapbox_api = service_context.resolve_service_for_domain(
+        "api.mapbox.com",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert mapbox_api["service_key"] == "mapbox_platform"
+    assert mapbox_api["role_class"] == "geospatial_api"
+
     cnn_audience = service_context.resolve_service_for_domain(
         "audience.cnn.com",
         package_name="com.cnn.mobile.android.phone",
@@ -889,3 +971,165 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert guardian_ophan["service_key"] == "guardian_first_party"
     assert guardian_ophan["role_class"] == "publisher_collection"
+
+    guardian_nextgen = service_context.resolve_service_for_domain(
+        "api.nextgen.guardianapps.co.uk",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_nextgen["service_key"] == "guardian_first_party"
+    assert guardian_nextgen["role_class"] == "publisher_api"
+
+    guardian_amazon_media = service_context.resolve_service_for_domain(
+        "m.media-amazon.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_amazon_media["service_key"] == "amazon_ads"
+    assert guardian_amazon_media["role_class"] == "ad_creative_delivery"
+
+    guardian_tungsten = service_context.resolve_service_for_domain(
+        "www.btd-cmh.tq-tungsten.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_tungsten["service_key"] == "amazon_ads"
+    assert guardian_tungsten["role_class"] == "ad_measurement"
+
+    bbc_everest = service_context.resolve_service_for_domain(
+        "creative-assets.everesttech.net",
+        package_name="bbc.mobile.news.ww",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bbc_everest["service_key"] == "adobe_advertising"
+    assert bbc_everest["role_class"] == "ad_creative_delivery"
+
+    cnn_politics_tiles = service_context.resolve_service_for_domain(
+        "politics-explorer-tiles-static.cnn.io",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert cnn_politics_tiles["service_key"] == "cnn_first_party"
+    assert cnn_politics_tiles["role_class"] == "content_delivery"
+
+    cnn_ix = service_context.resolve_service_for_domain(
+        "ix.cnn.io",
+        package_name="com.cnn.mobile.android.phone",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert cnn_ix["service_key"] == "cnn_first_party"
+    assert cnn_ix["role_class"] == "content_delivery"
+
+    facebook_lookaside = service_context.resolve_service_for_domain(
+        "lookaside.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_lookaside["service_key"] == "facebook_platform"
+    assert facebook_lookaside["role_class"] == "content_delivery"
+
+    facebook_bapi = service_context.resolve_service_for_domain(
+        "b-api.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_bapi["service_key"] == "facebook_platform"
+    assert facebook_bapi["role_class"] == "social_graph_api"
+
+    facebook_mqtt = service_context.resolve_service_for_domain(
+        "mqtt-mini.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_mqtt["service_key"] == "facebook_platform"
+    assert facebook_mqtt["role_class"] == "realtime_messaging"
+
+    facebook_edge_mqtt = service_context.resolve_service_for_domain(
+        "edge-mqtt.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_edge_mqtt["service_key"] == "facebook_platform"
+    assert facebook_edge_mqtt["role_class"] == "realtime_messaging"
+
+    facebook_chat_e2ee = service_context.resolve_service_for_domain(
+        "chat-e2ee-mini.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_chat_e2ee["service_key"] == "facebook_platform"
+    assert facebook_chat_e2ee["role_class"] == "messaging_e2ee"
+
+    facebook_payments = service_context.resolve_service_for_domain(
+        "payments-graph.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_payments["service_key"] == "facebook_platform"
+    assert facebook_payments["role_class"] == "payments_api"
+
+    facebook_mobile = service_context.resolve_service_for_domain(
+        "mobile.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_mobile["service_key"] == "facebook_platform"
+    assert facebook_mobile["role_class"] == "social_graph_api"
+
+    facebook_gateway = service_context.resolve_service_for_domain(
+        "z-m-gateway.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_gateway["service_key"] == "facebook_platform"
+    assert facebook_gateway["role_class"] == "social_graph_api"
+
+    facebook_bwww = service_context.resolve_service_for_domain(
+        "b-www.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_bwww["service_key"] == "facebook_platform"
+    assert facebook_bwww["role_class"] == "social_graph_api"
+
+    facebook_genai = service_context.resolve_service_for_domain(
+        "genai-graph.facebook.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_genai["service_key"] == "facebook_platform"
+    assert facebook_genai["role_class"] == "social_graph_api"
+
+    zoom_meeting = service_context.resolve_service_for_domain(
+        "us02web.zoom.us",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert zoom_meeting["service_key"] == "zoom_platform"
+    assert zoom_meeting["role_class"] == "realtime_call_transport"
+
+    whatsapp_acs = service_context.resolve_service_for_domain(
+        "acs.whatsapp.com",
+        package_name="com.whatsapp",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert whatsapp_acs["service_key"] == "whatsapp_platform"
+    assert whatsapp_acs["role_class"] == "messaging_platform_api"

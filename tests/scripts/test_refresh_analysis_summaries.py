@@ -131,6 +131,70 @@ def test_refresh_summaries_apply_rewrites_summary(tmp_path: Path) -> None:
     assert (run_dir / "analysis" / "summary.md").exists()
 
 
+def test_refresh_summaries_apply_restores_top_level_summary_compat_fields(tmp_path: Path) -> None:
+    root = tmp_path / "output" / "evidence" / "dynamic"
+    run_dir = root / "run-compat"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "run_manifest_version": 1,
+            "dynamic_run_id": "run-compat",
+            "created_at": "2026-07-05T00:00:00Z",
+            "status": "success",
+            "dataset": {
+                "valid_dataset_run": True,
+                "countable": True,
+                "cohort_eligibility": "COUNTABLE",
+                "actual_sampling_seconds": 301.5,
+                "pcap_size_bytes": 1144155,
+            },
+            "target": {
+                "package_name": "com.facebook.katana",
+                "version_code": 472527906,
+            },
+            "artifacts": [
+                {
+                    "relative_path": "artifacts/pcapdroid_capture/scytaledroid_run-compat.pcap",
+                    "type": "pcapdroid_capture",
+                    "produced_by": "pcapdroid_capture",
+                    "size_bytes": 1144155,
+                }
+            ],
+            "outputs": [],
+            "operator": {"run_profile": "baseline_idle"},
+        },
+    )
+    _write_json(
+        run_dir / "analysis" / "summary.json",
+        {
+            "dynamic_run_id": "run-compat",
+            "status": "success",
+            "dataset_verdict": "VALID",
+        },
+    )
+    _write_json(
+        run_dir / "analysis" / "pcap_report.json",
+        {
+            "pcap_size_bytes": 1144155,
+            "capture_duration_s": 301.5,
+            "top_dns": [{"value": "graph.facebook.com", "count": 6}],
+            "top_sni": [{"value": "payments-graph.facebook.com", "count": 4}],
+        },
+    )
+
+    summary = refresh.refresh_summaries(root=root, apply=True)
+
+    assert summary["runs_updated"] == 1
+    refreshed = json.loads((run_dir / "analysis" / "summary.json").read_text(encoding="utf-8"))
+    assert refreshed["package_name"] == "com.facebook.katana"
+    assert refreshed["version_code"] == 472527906
+    assert refreshed["pcap_bytes"] == 1144155
+    assert refreshed["capture_duration_s"] == 301.5
+    assert refreshed["cohort_eligibility"] == "COUNTABLE"
+    assert refreshed["top_dns"] == [{"value": "graph.facebook.com", "count": 6}]
+    assert refreshed["top_sni"] == [{"value": "payments-graph.facebook.com", "count": 4}]
+
+
 def test_refresh_summaries_apply_all_derived_invokes_rewriters(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "output" / "evidence" / "dynamic"
     run_dir = root / "run-1"
@@ -285,3 +349,57 @@ def test_refresh_summaries_apply_rewrites_summary_even_when_summary_json_is_unch
     rendered = (run_dir / "analysis" / "summary.md").read_text(encoding="utf-8")
     assert "Counts toward quota: NO (extra run)." in rendered
     assert "Invalid reason: —." in rendered
+
+
+def test_refresh_summaries_apply_uses_repaired_dataset_truth_for_stale_pcap_meta(tmp_path: Path) -> None:
+    root = tmp_path / "output" / "evidence" / "dynamic"
+    run_dir = root / "signal-run"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "run_manifest_version": 1,
+            "dynamic_run_id": "signal-run",
+            "created_at": "2026-07-06T00:00:00Z",
+            "status": "success",
+            "dataset": {
+                "valid_dataset_run": True,
+                "countable": True,
+                "cohort_eligibility": "COUNTABLE",
+                "invalid_reason_code": None,
+                "pcap_failure_detail": None,
+                "pcap_size_bytes": 12893,
+            },
+            "target": {"package_name": "org.thoughtcrime.securesms", "version_code": 171302},
+            "operator": {"run_profile": "baseline_connected", "messaging_activity": "connected_idle"},
+            "artifacts": [
+                {
+                    "relative_path": "artifacts/pcapdroid_capture/pcapdroid_capture_meta.json",
+                    "type": "pcapdroid_capture_meta",
+                    "produced_by": "pcapdroid_capture",
+                }
+            ],
+            "outputs": [],
+        },
+    )
+    _write_json(
+        run_dir / "artifacts" / "pcapdroid_capture" / "pcapdroid_capture_meta.json",
+        {
+            "pcap_name": "scytaledroid_signal-run.pcap",
+            "pcap_size_bytes": 12893,
+            "pcap_valid": False,
+            "capture_mode": "app_only",
+            "min_pcap_bytes": 20000,
+        },
+    )
+    (run_dir / "artifacts" / "pcapdroid_capture" / "scytaledroid_signal-run.pcap").write_bytes(b"x" * 12893)
+    _write_json(run_dir / "analysis" / "summary.json", {"destinations_observed": []})
+
+    summary = refresh.refresh_summaries(root=root, apply=True)
+
+    assert summary["runs_updated"] == 1
+    refreshed = json.loads((run_dir / "analysis" / "summary.json").read_text(encoding="utf-8"))
+    rendered = (run_dir / "analysis" / "summary.md").read_text(encoding="utf-8")
+    assert refreshed["pcap_valid"] is True
+    assert refreshed["quota_detail"]["pcap_failure_detail"] is None
+    assert "PCAP valid: yes." in rendered
+    assert "Counts toward quota: YES (baseline_connected)." in rendered

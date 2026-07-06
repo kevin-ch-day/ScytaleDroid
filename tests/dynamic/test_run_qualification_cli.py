@@ -40,6 +40,7 @@ def _make_app(
     interactive_valid_runs: int,
     baseline_extra_valid: int = 0,
     baseline_low_signal_valid: int = 0,
+    baseline_not_idle_valid: int = 0,
     interactive_extra_valid: int = 0,
     interactive_low_signal_valid: int = 0,
     baseline_required: int = 3,
@@ -48,6 +49,7 @@ def _make_app(
     extra_total = (
         baseline_extra_valid
         + baseline_low_signal_valid
+        + baseline_not_idle_valid
         + interactive_extra_valid
         + interactive_low_signal_valid
     )
@@ -75,6 +77,7 @@ def _make_app(
             extra_valid_runs=extra_total,
             baseline_extra_valid=baseline_extra_valid,
             baseline_low_signal_valid=baseline_low_signal_valid,
+            baseline_not_idle_valid=baseline_not_idle_valid,
             interactive_extra_valid=interactive_extra_valid,
             interactive_low_signal_valid=interactive_low_signal_valid,
         ),
@@ -83,6 +86,20 @@ def _make_app(
 
 def test_cohort_status_summary_includes_evidence_qualification(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
+    monkeypatch.setattr(
+        menu_reports,
+        "_paper_freeze_summary",
+        lambda: {
+            "ready": 4,
+            "ready_current": 2,
+            "ready_prior": 2,
+            "needs_interactive": 8,
+            "needs_baseline": 0,
+            "insufficient": 3,
+            "merged_targets": 5,
+            "refresh_candidates": 8,
+        },
+    )
 
     menu_reports.render_cohort_status_details(
         dataset_apps_total=2,
@@ -134,6 +151,11 @@ def test_cohort_status_summary_includes_evidence_qualification(monkeypatch, caps
 
     out = capsys.readouterr().out
     assert "Evidence qualification (tracker-scoped, current build)" in out
+    assert "Paper-target freeze readiness" in out
+    assert "Ready targets: 4" in out
+    assert "Ready current-build: 2" in out
+    assert "Ready prior-build: 2" in out
+    assert "Merged build-hash targets: 5" in out
     assert "Quota-counted valid     : 8" in out
     assert "Extra valid             : 2" in out
     assert "Low-signal retained     : 1" in out
@@ -158,11 +180,13 @@ def test_workbench_shows_cnn_style_qualification() -> None:
     )
 
     assert "Current build evidence" in out
-    assert "Baseline     3/3 (+1 extra)" in out
+    assert "Strict idle  3/3 (+1 extra)" in out
+    assert "Quiescent FG  0" in out
     assert "Interactive  3/4 (+1 extra)" in out
     assert "Qualification" in out
     assert "Quota-counted valid     : 6" in out
     assert "Extra valid             : 2" in out
+    assert "Quiescent FG retained   : 0" in out
     assert "Total valid retained    : 8" in out
     assert "Analysis-included valid : 8" in out
     assert "Quota satisfied         : no" in out
@@ -178,7 +202,8 @@ def test_workbench_shows_ml_pool_hint_when_quota_met_without_supplementals() -> 
         )
     )
 
-    assert "Baseline     3/3" in out
+    assert "Strict idle  3/3" in out
+    assert "Quiescent FG  0" in out
     assert "Interactive  4/4" in out
     assert "Quota satisfied         : yes" in out
     assert "ML training pool: none yet — supplemental baselines improve pattern averages" in out
@@ -194,13 +219,32 @@ def test_workbench_shows_x_style_qualification() -> None:
         )
     )
 
-    assert "Baseline     2/3 (+1 low)" in out
+    assert "Strict idle  2/3 (+1 low)" in out
+    assert "Quiescent FG  0" in out
     assert "Interactive  0/4" in out
     assert "Quota-counted valid     : 2" in out
     assert "Low-signal retained     : 1" in out
+    assert "Quiescent FG retained   : 0" in out
     assert "Total valid retained    : 3" in out
     assert "Quota satisfied         : no" in out
     assert "ML training pool: 1 (1 low-signal)" in out
+
+
+def test_workbench_shows_quiescent_fg_as_separate_baseline_lane() -> None:
+    out = _print_workbench_summary(
+        _make_app(
+            display_label="TikTok",
+            baseline_valid_runs=0,
+            baseline_not_idle_valid=7,
+            interactive_valid_runs=0,
+        )
+    )
+
+    assert "Strict idle  0/3" in out
+    assert "Quiescent FG  7" in out
+    assert "Quiescent FG retained   : 7" in out
+    assert "valid no-touch foreground baseline evidence" in out
+    assert "does not unlock interactive" in out
 
 
 def test_workbench_shows_whatsapp_style_qualification() -> None:
@@ -214,7 +258,8 @@ def test_workbench_shows_whatsapp_style_qualification() -> None:
         )
     )
 
-    assert "Baseline     3/3" in out
+    assert "Strict idle  3/3" in out
+    assert "Quiescent FG  0" in out
     assert "Interactive  2/4 (+1 extra, +1 low)" in out
     assert "Quota-counted valid     : 5" in out
     assert "Extra valid             : 1" in out

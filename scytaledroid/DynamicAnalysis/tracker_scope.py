@@ -115,6 +115,7 @@ def scope_tracker_runs_to_active_identity(
         "legacy_runs": legacy_runs,
         "legacy_valid": len(legacy_runs),
         "legacy_builds": len(legacy_identity_seen),
+        "legacy_pcap_available": sum(1 for run in legacy_runs if bool(run.get("pcap_available"))),
     }
 
 
@@ -152,6 +153,7 @@ def build_scoped_dataset_counts(
         "interactive_other_extra": 0,
         "legacy_valid": int(scoped["legacy_valid"]),
         "legacy_builds": int(scoped["legacy_builds"]),
+        "legacy_pcap_available": int(scoped.get("legacy_pcap_available") or 0),
         "technical_valid_total": len(valid_runs),
         "technical_valid_active": len(active_runs),
         "active_version_code": active_identity[0] or "",

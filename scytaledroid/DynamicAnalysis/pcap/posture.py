@@ -24,12 +24,14 @@ def summarize_traffic_posture(
     flow_summary: dict[str, Any] | None,
     burst_summary: dict[str, Any] | None,
     visibility_summary: dict[str, Any] | None,
+    startup_summary: dict[str, Any] | None,
 ) -> dict[str, Any]:
     metrics = metrics if isinstance(metrics, dict) else {}
     direction_summary = direction_summary if isinstance(direction_summary, dict) else {}
     flow_summary = flow_summary if isinstance(flow_summary, dict) else {}
     burst_summary = burst_summary if isinstance(burst_summary, dict) else {}
     visibility_summary = visibility_summary if isinstance(visibility_summary, dict) else {}
+    startup_summary = startup_summary if isinstance(startup_summary, dict) else {}
 
     packet_count = _safe_float(metrics.get("packet_count"))
     data_size_bytes = _safe_float(metrics.get("data_size_bytes"))
@@ -59,6 +61,11 @@ def summarize_traffic_posture(
     burst_count = _safe_float(burst_summary.get("burst_count"))
 
     tls_handshake_packets = _safe_float(visibility_summary.get("tls_handshake_packets"))
+    startup_byte_share = _safe_float(startup_summary.get("startup_byte_share"))
+    startup_packet_share = _safe_float(startup_summary.get("startup_packet_share"))
+    post_start_median_bytes_per_min = _safe_float(startup_summary.get("post_start_median_bytes_per_min"))
+    post_start_mean_bytes_per_min = _safe_float(startup_summary.get("post_start_mean_bytes_per_min"))
+    startup_dominant = startup_summary.get("startup_dominant")
 
     top_flows = flow_summary.get("top_flows") if isinstance(flow_summary.get("top_flows"), list) else []
     top_flow = top_flows[0] if top_flows and isinstance(top_flows[0], dict) else {}
@@ -78,6 +85,11 @@ def summarize_traffic_posture(
         "top_flow_packet_share": _ratio(top_flow_packets, packet_count),
         "top_flow_byte_share": _ratio(top_flow_bytes, data_size_bytes),
         "tls_handshakes_per_min": _per_minute(tls_handshake_packets, duration_s),
+        "startup_byte_share": startup_byte_share,
+        "startup_packet_share": startup_packet_share,
+        "post_start_median_bytes_per_min": post_start_median_bytes_per_min,
+        "post_start_mean_bytes_per_min": post_start_mean_bytes_per_min,
+        "startup_dominant": bool(startup_dominant) if startup_dominant is not None else None,
     }
 
 

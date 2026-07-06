@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import sys
 
 import pytest
 
@@ -20,27 +21,56 @@ class _FakeClock:
 
 class _FakeInputReader:
     def __init__(self, values: list[str | BaseException | None]) -> None:
-        self._values = iter(values)
+        self._values = list(values)
+        self._index = 0
         self.poll_calls = 0
 
     def poll(self, _timeout_s: float) -> str | None:
         self.poll_calls += 1
-        value = next(self._values)
+        if self._index >= len(self._values):
+            raise StopIteration
+        value = self._values[self._index]
+        self._index += 1
         if isinstance(value, BaseException):
             raise value
         return value
+
+    def drain_startup_input(self, *, max_reads: int = 8) -> str | None:
+        reads = 0
+        while reads < max_reads and self._index < len(self._values):
+            value = self._values[self._index]
+            if isinstance(value, BaseException):
+                self._index += 1
+                raise value
+            if value is None:
+                return None
+            self._index += 1
+            reads += 1
+            if value in {"\n", "\r"}:
+                continue
+            return value
+        return None
 
 
 class _FakeOut:
     def __init__(self) -> None:
         self.buf: list[str] = []
+        self.encoding = "utf-8"
+        self.flush_count = 0
 
     def write(self, text: str) -> int:
         self.buf.append(text)
         return len(text)
 
     def flush(self) -> None:
+        self.flush_count += 1
         return None
+
+    def writable(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return 1
 
 
 class _FakeTerminal:
@@ -74,7 +104,7 @@ def _state() -> CaptureState:
 def test_console_enter_requests_finalize() -> None:
     clock = _FakeClock()
     terminal = _FakeTerminal()
-    reader = _FakeInputReader(["\n"])
+    reader = _FakeInputReader([None, "\n"])
     state = _state()
 
     console = LiveCaptureConsole(
@@ -91,10 +121,52 @@ def test_console_enter_requests_finalize() -> None:
     assert state.status.value == "FINALIZED"
 
 
+def test_console_drains_stale_startup_newline_before_processing_finalize_enter() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader(["\n", None, "\n"])
+    state = _state()
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=_FakeOut(),
+    )
+
+    result = console.run(state)
+
+    assert result.action == CaptureAction.FINALIZE
+    assert state.status.value == "FINALIZED"
+    assert state.valid_elapsed_s >= 1.0
+    assert state.wall_elapsed_s >= 1.0
+
+
 def test_console_a_requests_abort() -> None:
     clock = _FakeClock()
     terminal = _FakeTerminal()
     reader = _FakeInputReader(["a"])
+    state = _state()
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=_FakeOut(),
+        abort_callback=lambda _state: True,
+    )
+
+    result = console.run(state)
+
+    assert result.action == CaptureAction.ABORT
+
+
+def test_console_preserves_buffered_abort_hotkey_after_startup_drain() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader(["\n", "a"])
     state = _state()
 
     console = LiveCaptureConsole(
@@ -155,6 +227,157 @@ def test_console_ctrl_c_aborts_and_cleans_up() -> None:
     assert cleanup_calls == ["abort"]
 
 
+def test_console_intercepts_stray_stdout_and_updates_latest_event() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader([None, "\n"])
+    state = _state()
+    out = _FakeOut()
+
+    def _tick(_state, _emit_status) -> None:
+        print("Background check finished.")
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=out,
+        tick_callback=_tick,
+    )
+
+    console.run(state)
+
+    rendered = "".join(out.buf)
+    assert "Latest     : Background check finished." in rendered
+    assert "\nBackground check finished.\n" not in rendered
+    assert state.latest_event == "Background check finished."
+
+
+def test_console_progress_carriage_returns_do_not_concatenate_status_text() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader([None, "\n"])
+    state = _state()
+    out = _FakeOut()
+
+    def _tick(_state, _emit_status) -> None:
+        sys.stdout.write("\rElapsed 00:10")
+        sys.stdout.write("\rElapsed 00:11")
+        sys.stdout.write("\rBackground check finished.\n")
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=out,
+        tick_callback=_tick,
+    )
+
+    console.run(state)
+
+    rendered = "".join(out.buf)
+    assert "Latest     : Background check finished." in rendered
+    assert "Elapsed 00:10Background" not in rendered
+    assert "Elapsed 00:11Background" not in rendered
+    assert state.latest_event == "Background check finished."
+
+
+def test_console_suspend_restores_real_stdout_for_prompt_output() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader([None, "\n"])
+    state = _state()
+    out = _FakeOut()
+
+    def _finalize(_state) -> bool:
+        with console.suspend_terminal_mode():
+            print("Confirm finalize prompt")
+        return True
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=out,
+        finalize_callback=_finalize,
+    )
+
+    console.run(state)
+
+    assert "Confirm finalize prompt" in "".join(out.buf)
+
+
+def test_console_uses_alternate_screen_sequences() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader([None, "\n"])
+    state = _state()
+    out = _FakeOut()
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=out,
+    )
+
+    console.run(state)
+
+    rendered = "".join(out.buf)
+    assert "\033[?1049h" in rendered
+    assert "\033[?1049l" in rendered
+
+
+def test_console_flushes_stream_before_entering_live_screen() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader([None, "\n"])
+    state = _state()
+    out = _FakeOut()
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=out,
+    )
+
+    console.run(state)
+
+    assert out.flush_count >= 3
+
+
+def test_console_stream_proxy_exposes_basic_stream_attrs() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader([None, "\n"])
+    state = _state()
+    out = _FakeOut()
+    seen: list[tuple[object, object, object]] = []
+
+    def _tick(_state, _emit_status) -> None:
+        seen.append((sys.stdout.isatty(), sys.stdout.writable(), sys.stdout.fileno()))
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: "com.whatsapp",
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=out,
+        tick_callback=_tick,
+    )
+
+    console.run(state)
+
+    assert seen
+    assert all(item == (False, True, 1) for item in seen)
+
+
 def test_valid_time_does_not_advance_during_pcapdroid_foreground() -> None:
     clock = _FakeClock()
     terminal = _FakeTerminal()
@@ -211,6 +434,39 @@ def test_foreground_recovery_resumes_valid_time() -> None:
     assert state.drift_count == 1
 
 
+def test_valid_time_does_not_advance_on_same_package_call_surface() -> None:
+    clock = _FakeClock()
+    terminal = _FakeTerminal()
+    reader = _FakeInputReader([None, None, "\n"])
+    state = _state()
+    out = _FakeOut()
+    fg = iter(
+        [
+            ("com.whatsapp", "com.whatsapp.calling.ui.VoipActivityV2"),
+            ("com.whatsapp", "com.whatsapp.calling.ui.VoipActivityV2"),
+            ("com.whatsapp", "com.whatsapp.Conversation"),
+        ]
+    )
+
+    console = LiveCaptureConsole(
+        foreground_provider=lambda: next(fg),
+        foreground_surface_validator=lambda live_state: (
+            "calling.ui.VoipActivityV2" not in str(live_state.foreground_component or ""),
+            "call surface",
+        ),
+        clock=clock,
+        input_reader=reader,
+        terminal=terminal,
+        stdout=out,
+    )
+
+    console.run(state)
+
+    assert int(state.valid_elapsed_s) == 1
+    assert state.drift_seen is False
+    assert "stable WhatsApp surface" in "".join(out.buf)
+
+
 def test_terminal_attrs_restored_on_finalize(monkeypatch) -> None:
     calls: list[tuple[str, object]] = []
 
@@ -238,7 +494,7 @@ def test_terminal_attrs_restored_on_finalize(monkeypatch) -> None:
     console = LiveCaptureConsole(
         foreground_provider=lambda: "com.whatsapp",
         clock=_FakeClock(),
-        input_reader=_FakeInputReader(["\n"]),
+        input_reader=_FakeInputReader([None, "\n"]),
         terminal=terminal,
         stdout=_FakeOut(),
     )

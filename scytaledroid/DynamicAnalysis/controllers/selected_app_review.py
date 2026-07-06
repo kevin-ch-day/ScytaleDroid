@@ -92,6 +92,46 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _latest_run_media_plane_rows(run_id: str) -> list[list[str]]:
+    if not run_id:
+        return []
+    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+    report = _load_json(run_dir / "analysis" / "pcap_report.json")
+    media_plane = report.get("media_plane") if isinstance(report.get("media_plane"), dict) else {}
+    summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
+    classification = str(summary.get("classification") or "").strip()
+    if not classification or classification == "not_observed":
+        return []
+    rows: list[list[str]] = [["Classification", classification.replace("_", " ")]]
+    relay_count = summary.get("relay_endpoint_count")
+    if relay_count is not None:
+        rows.append(["Relay endpoints", str(relay_count)])
+    turn_alloc = summary.get("turn_allocate_success_count")
+    if turn_alloc is not None:
+        rows.append(["TURN alloc success", str(turn_alloc)])
+    stun_count = summary.get("stun_frame_count")
+    if stun_count is not None:
+        rows.append(["STUN frames", str(stun_count)])
+    dominant = summary.get("dominant_udp_flow") if isinstance(summary.get("dominant_udp_flow"), dict) else {}
+    if dominant:
+        a = str(dominant.get("endpoint_a") or "").strip()
+        b = str(dominant.get("endpoint_b") or "").strip()
+        if a and b:
+            rows.append(["Dominant UDP flow", f"{a} <-> {b}"])
+        share = dominant.get("share_of_udp_bytes")
+        try:
+            if share is not None:
+                rows.append(["Dominant UDP share", f"{float(share):.2f}"])
+        except (TypeError, ValueError):
+            pass
+    reasons = summary.get("reason_codes")
+    if isinstance(reasons, list) and reasons:
+        labels = [str(item).strip() for item in reasons if str(item).strip()]
+        if labels:
+            rows.append(["Reason codes", ", ".join(labels)])
+    return rows
+
+
 def _format_bytes(size: object) -> str:
     try:
         value = int(size)
@@ -134,6 +174,27 @@ def _format_duration(value: object) -> str:
     return f"{int(seconds)}s"
 
 
+def _safe_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_percent_ratio(value: object) -> str:
+    parsed = _safe_float(value)
+    if parsed is None:
+        return "—"
+    return f"{parsed * 100:.1f}%"
+
+
+def _format_rate_per_min(value: object) -> str:
+    parsed = _safe_float(value)
+    if parsed is None:
+        return "—"
+    return f"{parsed:,.0f} B/min"
+
+
 def _non_idle_reason_labels(row: dict[str, object]) -> str:
     mapping = {
         "BASELINE_BYTES_HIGH": "bytes high",
@@ -153,6 +214,33 @@ def _non_idle_reason_labels(row: dict[str, object]) -> str:
         if label not in labels:
             labels.append(label)
     return ", ".join(labels) if labels else "—"
+
+
+def _startup_profile_snapshot(report: dict[str, object], features: dict[str, object]) -> dict[str, object]:
+    startup = report.get("startup_profile") if isinstance(report.get("startup_profile"), dict) else {}
+    if startup:
+        return startup
+    startup_block = features.get("startup_profile") if isinstance(features.get("startup_profile"), dict) else {}
+    summary_block = startup_block.get("summary") if isinstance(startup_block.get("summary"), dict) else {}
+    return summary_block if summary_block else {}
+
+
+def _traffic_shape_label(startup: dict[str, object]) -> str:
+    if not isinstance(startup, dict) or not startup:
+        return "—"
+    startup_dominant = startup.get("startup_dominant") is True
+    post_start = _safe_float(startup.get("post_start_median_bytes_per_min"))
+    if startup_dominant and post_start is not None and post_start <= 50_000:
+        return "startup-burst then quiet-tail"
+    if startup_dominant and post_start is not None and post_start > 50_000:
+        return "startup-dominant with elevated tail"
+    if post_start is not None and post_start >= 100_000:
+        return "sustained active/downlink"
+    if post_start is not None:
+        return "mixed / periodic refresh"
+    if startup_dominant:
+        return "startup-dominant"
+    return "—"
 
 
 def _active_non_idle_baseline_rows(package_name: str, state: Any) -> list[dict[str, object]]:
@@ -197,6 +285,7 @@ def _non_idle_baseline_detail_rows(package_name: str, state: Any) -> list[list[s
         cap = cap if isinstance(cap, dict) else {}
         metrics = features.get("metrics") if isinstance(features.get("metrics"), dict) else {}
         proxies = features.get("proxies") if isinstance(features.get("proxies"), dict) else {}
+        startup = _startup_profile_snapshot(report, features)
         detail_rows.append(
             [
                 run_id,
@@ -205,6 +294,9 @@ def _non_idle_baseline_detail_rows(package_name: str, state: Any) -> list[list[s
                 _format_rate(metrics.get("bytes_per_second_avg") if metrics.get("bytes_per_second_avg") is not None else cap.get("data_byte_rate_bps")),
                 _format_rate(metrics.get("bytes_per_second_p95")),
                 _format_ratio(proxies.get("quic_ratio")),
+                _traffic_shape_label(startup),
+                _format_percent_ratio(startup.get("startup_byte_share")),
+                _format_rate_per_min(startup.get("post_start_median_bytes_per_min")),
                 _non_idle_reason_labels(row),
                 "no",
                 "no",
@@ -223,9 +315,22 @@ def _render_non_idle_baseline_detail(
     if not rows:
         return
     print()
-    menu_utils.print_section("Retained Non-Idle Baselines")
+    menu_utils.print_section("Quiescent FG Baselines")
     menu_utils.print_table(
-        ["Run ID", "Dur", "Bytes", "Avg B/s", "P95 B/s", "QUIC", "Reasons", "ML", "Quota"],
+        [
+            "Run ID",
+            "Dur",
+            "Bytes",
+            "Avg B/s",
+            "P95 B/s",
+            "QUIC",
+            "Shape",
+            "Start%",
+            "Tail B/m",
+            "Reasons",
+            "ML",
+            "Quota",
+        ],
         rows,
     )
 
@@ -417,7 +522,7 @@ def render_selected_app_diagnostics(
             ),
             summary_item("ML pool", str(ml_pool_total), value_style="accent" if ml_pool_total > 0 else "muted"),
             summary_item(
-                "Non-idle baseline",
+                "Quiescent FG",
                 str(non_idle_baselines),
                 value_style="warning" if non_idle_baselines > 0 else "muted",
             ),
@@ -453,9 +558,9 @@ def render_selected_app_diagnostics(
             ),
         ],
         [
-            "Retained non-idle baseline",
+            "Quiescent FG baseline",
             (
-                f"non-idle={int(getattr(state.counts, 'baseline_not_idle_valid', 0) or 0)}"
+                f"quiescent_fg={int(getattr(state.counts, 'baseline_not_idle_valid', 0) or 0)}"
                 " | quota=no | ml_pool=no"
             ),
         ],
@@ -477,6 +582,12 @@ def render_selected_app_diagnostics(
         rows.append(["Latest PCAP detail", target_state.latest_pcap_failure_detail])
     menu_utils.print_section("Detail")
     menu_utils.print_table(["Field", "Value"], rows)
+    latest_run_id = str(getattr(latest_recent, "run_id", "") or "").strip() if latest_recent is not None else ""
+    media_rows = _latest_run_media_plane_rows(latest_run_id)
+    if media_rows:
+        print()
+        menu_utils.print_section("Latest Run Media Plane")
+        menu_utils.print_table(["Field", "Value"], media_rows)
     _render_non_idle_baseline_detail(
         package_name=package_name,
         state=state,

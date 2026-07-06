@@ -73,7 +73,7 @@ def _patch_terminal_mode(monkeypatch) -> None:
 
 
 def test_active_capture_bare_enter_triggers_stop_finalize(monkeypatch) -> None:
-    fake_in = _FakeIn(["\n"])
+    fake_in = _FakeIn(["", "\n"])
     fake_out = _FakeOut()
     _patch_terminal_mode(monkeypatch)
 
@@ -85,6 +85,8 @@ def test_active_capture_bare_enter_triggers_stop_finalize(monkeypatch) -> None:
     ended_at = manual._run_baseline_interactive_loop(240, continue_after_target=True)
 
     assert isinstance(ended_at, datetime)
+    assert "Opening live capture console. The transcript will resume after capture ends." in "".join(fake_out.buf)
+    assert "Live capture console closed; returning to run transcript." in "".join(fake_out.buf)
 
 
 def test_active_capture_a_enter_aborts_and_discards(monkeypatch) -> None:
@@ -99,6 +101,8 @@ def test_active_capture_a_enter_aborts_and_discards(monkeypatch) -> None:
 
     with pytest.raises(ScenarioAbortRequested):
         manual._run_baseline_interactive_loop(240, continue_after_target=True)
+    assert "Opening live capture console. The transcript will resume after capture ends." in "".join(fake_out.buf)
+    assert "Live capture console aborted; returning to run transcript." in "".join(fake_out.buf)
 
 
 def test_active_capture_ctrl_c_is_graceful_abort(monkeypatch) -> None:
@@ -139,14 +143,14 @@ def test_target_foreground_is_restored_before_capture_starts(
     )
     foregrounds = iter(
         [
-            "com.emanuelef.remote_capture",
-            "com.emanuelef.remote_capture",
-            "com.whatsapp",
+            ("com.emanuelef.remote_capture", "com.emanuelef.remote_capture.activities.MainActivity"),
+            ("com.emanuelef.remote_capture", "com.emanuelef.remote_capture.activities.MainActivity"),
+            ("com.whatsapp", "com.whatsapp.Main"),
         ]
     )
     launches: list[tuple[str | None, str | None]] = []
 
-    monkeypatch.setattr(manual, "_read_device_foreground_package", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual, "_read_device_foreground_target", lambda _serial: next(foregrounds))
     monkeypatch.setattr(
         manual,
         "_launch_package_to_foreground",
@@ -162,7 +166,7 @@ def test_target_foreground_is_restored_before_capture_starts(
     assert "Returning WhatsApp to foreground..." in out
 
 
-def test_messaging_connected_baseline_waits_until_foreground_ready_before_begin_prompt(
+def test_messaging_connected_baseline_starts_immediately_after_foreground_ready_when_prestart_enter_was_already_used(
     monkeypatch, tmp_path: Path
 ) -> None:
     runner = ManualScenarioRunner()
@@ -199,25 +203,65 @@ def test_messaging_connected_baseline_waits_until_foreground_ready_before_begin_
 
     runner.run(ctx, on_start=lambda: order.append("on_start"))
 
+    assert order == ["on_start", "foreground_ready"]
+
+
+def test_messaging_connected_baseline_shows_explicit_begin_prompt_when_prestart_permissions_view_pauses_start(
+    monkeypatch, tmp_path: Path
+) -> None:
+    runner = ManualScenarioRunner()
+    ctx = replace(
+        _ctx(tmp_path),
+        package_name="com.whatsapp",
+        run_profile="baseline_connected",
+        interaction_level="minimal",
+        messaging_activity="connected_idle",
+        static_plan={"display_label": "WhatsApp"},
+    )
+    order: list[str] = []
+
+    monkeypatch.setattr(
+        manual,
+        "_maybe_show_raw_high_value_permissions",
+        lambda _run_ctx: False,
+    )
+    monkeypatch.setattr(
+        manual,
+        "_ensure_target_foreground_before_capture",
+        lambda *_args, **_kwargs: order.append("foreground_ready"),
+    )
+    monkeypatch.setattr(
+        manual.prompt_utils,
+        "press_enter_to_continue",
+        lambda *_args, **_kwargs: order.append("begin_prompt"),
+    )
+    monkeypatch.setattr(
+        manual,
+        "_run_messaging_connected_baseline",
+        lambda **_kwargs: datetime.now(UTC),
+    )
+
+    runner.run(ctx, on_start=lambda: order.append("on_start"))
+
     assert order == ["on_start", "foreground_ready", "begin_prompt"]
 
 
 def test_foreground_drift_pauses_timer_and_reports_resume(monkeypatch) -> None:
-    fake_in = _FakeIn(["", "", "\n"])
+    fake_in = _FakeIn(["", "", "", "\n"])
     fake_out = _FakeOut()
     _patch_terminal_mode(monkeypatch)
     foregrounds = iter(
         [
-            "com.whatsapp",
-            "com.emanuelef.remote_capture",
-            "com.whatsapp",
+            ("com.whatsapp", "com.whatsapp.HomeActivity"),
+            ("com.emanuelef.remote_capture", "com.emanuelef.remote_capture.activities.MainActivity"),
+            ("com.whatsapp", "com.whatsapp.HomeActivity"),
         ]
     )
 
     monkeypatch.setattr(manual.sys, "stdin", fake_in)
     monkeypatch.setattr(manual.sys, "stdout", fake_out)
     monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
-    monkeypatch.setattr(manual, "_read_device_foreground_package", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual, "_read_device_foreground_target", lambda _serial: next(foregrounds))
     monkeypatch.setattr(manual, "_should_continue_collecting", lambda **_kwargs: False)
 
     manual._run_baseline_interactive_loop(
@@ -230,3 +274,228 @@ def test_foreground_drift_pauses_timer_and_reports_resume(monkeypatch) -> None:
     output = "".join(fake_out.buf)
     assert "Foreground drift active; valid timing paused." in output
     assert "Target app restored to foreground; valid timing resumed." in output
+
+
+def test_active_capture_does_not_print_generic_target_reached_status(monkeypatch) -> None:
+    fake_in = _FakeIn(["", "", "\n"])
+    fake_out = _FakeOut()
+    _patch_terminal_mode(monkeypatch)
+
+    monkeypatch.setattr(manual.sys, "stdin", fake_in)
+    monkeypatch.setattr(manual.sys, "stdout", fake_out)
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory(120.0))
+    monkeypatch.setattr(manual, "_should_continue_collecting", lambda **_kwargs: False)
+
+    manual._run_baseline_interactive_loop(240, continue_after_target=True)
+
+    output = "".join(fake_out.buf)
+    assert "Target reached. Keep collecting if needed; press Enter when finished." not in output
+
+
+def test_facebook_baseline_gate_allows_known_loginactivity_false_positive(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    ctx = RunContext(
+        dynamic_run_id="r-facebook",
+        package_name="com.facebook.katana",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        device_serial="SERIAL",
+        static_plan={"display_label": "Facebook"},
+    )
+    foregrounds = iter(
+        [
+            ("com.facebook.katana", "com.facebook.katana.LoginActivity"),
+        ]
+    )
+    prompts: list[str] = []
+
+    monkeypatch.setattr(manual, "_read_device_foreground_target", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        manual.prompt_utils,
+        "press_enter_to_continue",
+        lambda msg="": prompts.append(msg),
+    )
+
+    manual._ensure_target_foreground_before_capture(ctx)
+
+    out = capsys.readouterr().out
+    assert "stable in-app screen" not in out
+    assert prompts == []
+
+
+def test_baseline_gate_still_blocks_generic_login_surface_before_capture_starts(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    ctx = RunContext(
+        dynamic_run_id="r-example-login",
+        package_name="com.example.social",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        device_serial="SERIAL",
+        static_plan={"display_label": "Example Social"},
+    )
+    foregrounds = iter(
+        [
+            ("com.example.social", "com.example.social.LoginActivity"),
+            ("com.example.social", "com.example.social.ProfileActivity"),
+        ]
+    )
+    prompts: list[str] = []
+
+    monkeypatch.setattr(manual, "_read_device_foreground_target", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        manual.prompt_utils,
+        "press_enter_to_continue",
+        lambda msg="": prompts.append(msg),
+    )
+
+    manual._ensure_target_foreground_before_capture(ctx)
+
+    out = capsys.readouterr().out
+    assert "LoginActivity" in out
+    assert "stable in-app screen" in out
+    assert prompts == ["Move Example Social off com.example.social.LoginActivity, then press Enter to re-check"]
+
+
+def test_facebook_baseline_gate_blocks_story_viewer_surface_before_capture_starts(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    ctx = RunContext(
+        dynamic_run_id="r-facebook-story",
+        package_name="com.facebook.katana",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        device_serial="SERIAL",
+        static_plan={"display_label": "Facebook"},
+    )
+    foregrounds = iter(
+        [
+            ("com.facebook.katana", "com.facebook.stories.viewer.activity.StoryViewerActivity"),
+            ("com.facebook.katana", "com.facebook.katana.activity.FbMainTabActivity"),
+        ]
+    )
+    prompts: list[str] = []
+
+    monkeypatch.setattr(manual, "_read_device_foreground_target", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        manual.prompt_utils,
+        "press_enter_to_continue",
+        lambda msg="": prompts.append(msg),
+    )
+
+    manual._ensure_target_foreground_before_capture(ctx)
+
+    out = capsys.readouterr().out
+    assert "media/story surface" in out
+    assert prompts == [
+        "Move Facebook off com.facebook.stories.viewer.activity.StoryViewerActivity, then press Enter to re-check"
+    ]
+
+
+def test_interactive_gate_allows_login_surface(monkeypatch, tmp_path: Path) -> None:
+    ctx = RunContext(
+        dynamic_run_id="r-facebook-int",
+        package_name="com.facebook.katana",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="interaction_manual",
+        interaction_level="normal",
+        device_serial="SERIAL",
+        static_plan={"display_label": "Facebook"},
+    )
+    foregrounds = iter(
+        [
+            ("com.facebook.katana", "com.facebook.katana.LoginActivity"),
+        ]
+    )
+    prompts: list[str] = []
+
+    monkeypatch.setattr(manual, "_read_device_foreground_target", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        manual.prompt_utils,
+        "press_enter_to_continue",
+        lambda msg="": prompts.append(msg),
+    )
+
+    manual._ensure_target_foreground_before_capture(ctx)
+
+    assert prompts == []
+
+
+def test_connected_baseline_gate_blocks_whatsapp_call_surface(monkeypatch, tmp_path: Path, capsys) -> None:
+    ctx = RunContext(
+        dynamic_run_id="r-whatsapp-call",
+        package_name="com.whatsapp",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="baseline_connected",
+        interaction_level="minimal",
+        messaging_activity="connected_idle",
+        device_serial="SERIAL",
+        static_plan={"display_label": "WhatsApp"},
+    )
+    foregrounds = iter(
+        [
+            ("com.whatsapp", "com.whatsapp.calling.ui.VoipActivityV2"),
+            ("com.whatsapp", "com.whatsapp.Conversation"),
+        ]
+    )
+    prompts: list[str] = []
+
+    monkeypatch.setattr(manual, "_read_device_foreground_target", lambda _serial: next(foregrounds))
+    monkeypatch.setattr(manual.time, "monotonic", _tick_factory())
+    monkeypatch.setattr(manual.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        manual.prompt_utils,
+        "press_enter_to_continue",
+        lambda msg="": prompts.append(msg),
+    )
+
+    manual._ensure_target_foreground_before_capture(ctx)
+
+    out = capsys.readouterr().out
+    assert "VoipActivityV2" in out
+    assert "stable in-app screen" in out
+    assert prompts == [
+        "Move WhatsApp off com.whatsapp.calling.ui.VoipActivityV2, then press Enter to re-check"
+    ]

@@ -42,6 +42,7 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
       - direction_summary
       - flow_summary
       - burst_summary
+      - startup_profile
       - tls_quic_visibility
     """
     tp = tshark_path or shutil.which("tshark")
@@ -171,6 +172,7 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
     burst_p = (float(p95) / float(p50)) if p50 and p95 is not None and p50 > 0 else None
     burst_summary = compute_burst_summary(bytes_by_s, pkts_by_s)
     flow_summary = summarize_flows(flow_stats)
+    startup_profile = _startup_profile_summary(bytes_by_s, pkts_by_s, duration_s=float(max_sec + 1))
 
     return {
         "bytes_per_second_p50": b50,
@@ -199,6 +201,7 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
         },
         "flow_summary": flow_summary,
         "burst_summary": burst_summary,
+        "startup_profile": startup_profile,
         "tls_quic_visibility": {
             "tls_handshake_packets": int(tls_handshake_total),
             "tls_client_hello_packets": int(tls_client_hello_count),
@@ -209,6 +212,10 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
             "tls_visible": bool(tls_handshake_total or tls_sni_values or tls_alpn_values),
             "quic_visibility_basis": "udp_service_port_heuristic",
         },
+        "window_metrics": {
+            "180s": _window_metric_summary(bytes_by_s, pkts_by_s, window_s=180),
+            "240s": _window_metric_summary(bytes_by_s, pkts_by_s, window_s=240),
+        },
     }
 
 
@@ -218,6 +225,100 @@ def _resolve_tshark_timeout_s() -> float:
         return max(5.0, float(raw))
     except ValueError:
         return 120.0
+
+
+def _window_metric_summary(
+    bytes_by_s: dict[int, int],
+    pkts_by_s: dict[int, int],
+    *,
+    window_s: int,
+) -> dict[str, Any]:
+    byte_series = [float(bytes_by_s.get(i, 0)) for i in range(window_s)]
+    pkt_series = [float(pkts_by_s.get(i, 0)) for i in range(window_s)]
+    byte_sorted = sorted(byte_series)
+    pkt_sorted = sorted(pkt_series)
+    total_bytes = int(sum(bytes_by_s.get(i, 0) for i in range(window_s)))
+    total_packets = int(sum(pkts_by_s.get(i, 0) for i in range(window_s)))
+    active_second_count = sum(
+        1
+        for i in range(window_s)
+        if bytes_by_s.get(i, 0) > 0 or pkts_by_s.get(i, 0) > 0
+    )
+    return {
+        "window_s": int(window_s),
+        "total_bytes": total_bytes,
+        "total_packets": total_packets,
+        "avg_bytes_per_sec": float(total_bytes) / float(window_s),
+        "avg_packets_per_sec": float(total_packets) / float(window_s),
+        "bytes_per_second_p95": percentile(byte_sorted, 95),
+        "packets_per_second_p95": percentile(pkt_sorted, 95),
+        "active_second_count": int(active_second_count),
+        "active_second_ratio": float(active_second_count) / float(window_s),
+    }
+
+
+def _startup_profile_summary(
+    bytes_by_s: dict[int, int],
+    pkts_by_s: dict[int, int],
+    *,
+    duration_s: float,
+    startup_window_s: int = 60,
+) -> dict[str, Any]:
+    if duration_s <= 0:
+        return {
+            "window_s": int(startup_window_s),
+            "startup_total_bytes": 0,
+            "startup_total_packets": 0,
+            "startup_byte_share": None,
+            "startup_packet_share": None,
+            "post_start_total_bytes": 0,
+            "post_start_total_packets": 0,
+            "post_start_minutes": 0,
+            "post_start_median_bytes_per_min": None,
+            "post_start_mean_bytes_per_min": None,
+            "post_start_median_packets_per_min": None,
+            "post_start_mean_packets_per_min": None,
+            "startup_dominant": False,
+        }
+
+    effective_window = max(1, int(startup_window_s))
+    startup_total_bytes = int(sum(bytes_by_s.get(i, 0) for i in range(effective_window)))
+    startup_total_packets = int(sum(pkts_by_s.get(i, 0) for i in range(effective_window)))
+    total_bytes = int(sum(bytes_by_s.values()))
+    total_packets = int(sum(pkts_by_s.values()))
+
+    post_start_seconds = max(0, int(duration_s) - effective_window)
+    post_start_total_bytes = int(sum(v for sec, v in bytes_by_s.items() if sec >= effective_window))
+    post_start_total_packets = int(sum(v for sec, v in pkts_by_s.items() if sec >= effective_window))
+
+    minute_bytes: list[int] = []
+    minute_packets: list[int] = []
+    if post_start_seconds > 0:
+        max_sec = max(max(bytes_by_s.keys(), default=0), max(pkts_by_s.keys(), default=0))
+        start = effective_window
+        while start <= max_sec:
+            end = start + 60
+            minute_bytes.append(int(sum(v for sec, v in bytes_by_s.items() if start <= sec < end)))
+            minute_packets.append(int(sum(v for sec, v in pkts_by_s.items() if start <= sec < end)))
+            start = end
+
+    return {
+        "window_s": int(effective_window),
+        "startup_total_bytes": startup_total_bytes,
+        "startup_total_packets": startup_total_packets,
+        "startup_byte_share": float(startup_total_bytes) / float(total_bytes) if total_bytes > 0 else None,
+        "startup_packet_share": float(startup_total_packets) / float(total_packets) if total_packets > 0 else None,
+        "startup_avg_bytes_per_sec": float(startup_total_bytes) / float(effective_window),
+        "startup_avg_packets_per_sec": float(startup_total_packets) / float(effective_window),
+        "post_start_total_bytes": post_start_total_bytes,
+        "post_start_total_packets": post_start_total_packets,
+        "post_start_minutes": len(minute_bytes),
+        "post_start_median_bytes_per_min": percentile(sorted(float(v) for v in minute_bytes), 50) if minute_bytes else None,
+        "post_start_mean_bytes_per_min": (float(sum(minute_bytes)) / float(len(minute_bytes))) if minute_bytes else None,
+        "post_start_median_packets_per_min": percentile(sorted(float(v) for v in minute_packets), 50) if minute_packets else None,
+        "post_start_mean_packets_per_min": (float(sum(minute_packets)) / float(len(minute_packets))) if minute_packets else None,
+        "startup_dominant": bool(total_bytes > 0 and (float(startup_total_bytes) / float(total_bytes)) >= 0.8),
+    }
 __all__ = [
     "PacketMetadata",
     "infer_direction_from_ports",

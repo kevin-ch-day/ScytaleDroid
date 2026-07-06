@@ -15,7 +15,7 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
     load_dataset_tracker,
 )
-from scytaledroid.DynamicAnalysis.plans.loader import (
+from scytaledroid.DynamicAnalysis.plans import (
     SUPPORTED_SIGNATURE_VERSIONS,
     extract_plan_identity,
 )

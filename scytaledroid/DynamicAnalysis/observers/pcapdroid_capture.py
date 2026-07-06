@@ -25,6 +25,7 @@ FINALIZE_MIN_WAIT_S = 5.0
 FINALIZE_MAX_WAIT_S = 12.0
 FINALIZE_STABLE_POLLS = 2
 FAILURE_RECHECK_DELAY_S = 2.0
+ADB_PULL_TIMEOUT_S = 30.0
 
 
 def _effective_min_pcap_bytes(run_ctx: RunContext) -> int:
@@ -44,6 +45,21 @@ def _effective_min_pcap_bytes(run_ctx: RunContext) -> int:
             )
         )
     return int(MIN_PCAP_BYTES)
+
+
+def estimate_device_capture_size_bytes(
+    *,
+    device_serial: str | None,
+    package_name: str | None,
+    dynamic_run_id: str | None,
+) -> int | None:
+    serial = str(device_serial or "").strip()
+    package = str(package_name or "").strip()
+    run_id = str(dynamic_run_id or "").strip()
+    if not serial or not package or not run_id:
+        return None
+    device_path = f"{PCAPDROID_DOWNLOAD_DIR}/{make_pcap_capture_name(package, run_id)}"
+    return _device_file_size(serial, device_path)
 
 
 class PcapdroidCaptureObserver(Observer):
@@ -246,6 +262,24 @@ class PcapdroidCaptureObserver(Observer):
             mismatch_warning = None
             if local_path.exists():
                 file_size = local_path.stat().st_size
+                resolved_name = local_path.name
+                if run_ctx.dynamic_run_id not in resolved_name:
+                    mismatch_warning = (
+                        "PCAPdroid capture filename mismatch (fallback file does not match run id)."
+                    )
+                digest = _sha256_stream(local_path)
+                artifacts.append(
+                    ArtifactRecord(
+                        relative_path=str(local_path.relative_to(run_ctx.run_dir)),
+                        type="pcapdroid_capture",
+                        sha256=digest,
+                        size_bytes=file_size,
+                        produced_by=self.observer_id,
+                        origin="device",
+                        device_path=device_path,
+                        pull_status="pulled",
+                    )
+                )
                 if file_size < min_pcap_bytes:
                     error = (
                         f"PCAPdroid capture file empty/too small "
@@ -265,24 +299,6 @@ class PcapdroidCaptureObserver(Observer):
                             encoding="utf-8",
                         )
                 else:
-                    resolved_name = local_path.name
-                    if run_ctx.dynamic_run_id not in resolved_name:
-                        mismatch_warning = (
-                            "PCAPdroid capture filename mismatch (fallback file does not match run id)."
-                        )
-                    digest = _sha256_stream(local_path)
-                    artifacts.append(
-                        ArtifactRecord(
-                            relative_path=str(local_path.relative_to(run_ctx.run_dir)),
-                            type="pcapdroid_capture",
-                            sha256=digest,
-                            size_bytes=local_path.stat().st_size,
-                            produced_by=self.observer_id,
-                            origin="device",
-                            device_path=device_path,
-                            pull_status="pulled",
-                        )
-                    )
                     if meta_path.exists():
                         try:
                             meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -456,15 +472,21 @@ def _pull_with_retries(
     retries: int = 3,
     delay_s: float = 0.5,
     min_bytes: int | None = None,
+    pull_timeout_s: float = ADB_PULL_TIMEOUT_S,
 ) -> bool:
     for _ in range(max(retries, 1)):
         if not _device_file_exists(device_serial, device_path):
             time.sleep(delay_s)
             continue
         device_size = _device_file_size(device_serial, device_path)
-        adb_client.run_adb_command(
-            ["-s", device_serial, "pull", device_path, str(local_path)],
-        )
+        try:
+            adb_client.run_adb_command(
+                ["-s", device_serial, "pull", device_path, str(local_path)],
+                timeout=float(pull_timeout_s),
+            )
+        except Exception:
+            time.sleep(delay_s)
+            continue
         if local_path.exists():
             local_size = local_path.stat().st_size
             if device_size is not None and local_size < device_size:

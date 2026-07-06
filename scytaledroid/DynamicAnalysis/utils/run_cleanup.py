@@ -7,8 +7,10 @@ DB rows are treated as derived indices and are not deleted here.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,8 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_plan_read_path,
     write_dataset_plan_payload,
 )
+
+_LEGACY_IN_PROGRESS_GRACE_S = 60 * 60
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,44 @@ def _load_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _now_epoch_s() -> float:
+    return datetime.now(UTC).timestamp()
+
+
+def _process_is_alive(pid: int) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _marker_started_at_epoch(payload: dict[str, Any]) -> float | None:
+    value = str(payload.get("started_at_utc") or "").strip()
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except ValueError:
+        return None
+
+
+def _active_in_progress_marker(marker_path: Path) -> bool:
+    payload = _load_json(marker_path)
+    host_pid = payload.get("host_pid")
+    if isinstance(host_pid, int) and host_pid > 0:
+        return _process_is_alive(host_pid)
+
+    started_at = _marker_started_at_epoch(payload)
+    if started_at is None:
+        return False
+    return (_now_epoch_s() - started_at) < _LEGACY_IN_PROGRESS_GRACE_S
 
 
 def dataset_tracker_counts(package_name: str) -> PackageRunCounts:
@@ -186,13 +228,15 @@ def find_incomplete_dynamic_run_dirs() -> list[Path]:
         return []
     out: list[Path] = []
     for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
-        # Never treat an active in-progress run as "incomplete".
-        # The orchestrator drops this marker after sealing run_manifest.json.
-        if (run_dir / "notes" / ".scytaledroid_in_progress").exists():
-            continue
         manifest_path = run_dir / "run_manifest.json"
-        if not manifest_path.exists():
-            out.append(run_dir)
+        if manifest_path.exists():
+            continue
+        marker_path = run_dir / "notes" / ".scytaledroid_in_progress"
+        # Never treat an active run as incomplete, but do not let a stale marker
+        # hide a killed/crashed run forever.
+        if marker_path.exists() and _active_in_progress_marker(marker_path):
+            continue
+        out.append(run_dir)
     return out
 
 

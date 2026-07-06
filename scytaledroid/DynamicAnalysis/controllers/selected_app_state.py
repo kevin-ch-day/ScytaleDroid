@@ -68,18 +68,18 @@ def selected_app_build_label(
     if int(active_valid_runs) > 0 or int(db_active_sessions) > 0:
         return "current"
     if int(legacy_valid_runs) > 0 or int(db_historical_sessions) > 0:
-        return "legacy"
+        return "history"
     if state in {"current_build_observed", "current_build_db_only"}:
         return "current"
     if state in {"historical_local_only", "historical_db_only"}:
-        return "legacy"
+        return "history"
     return "unknown"
 
 
 def selected_app_build_text(build: str) -> str:
     return {
         "current": "Current build",
-        "legacy": "Legacy build",
+        "history": "Prior-build evidence",
         "unknown": "Unknown build",
         "drift": "Build drift detected",
     }.get(str(build or "").strip(), "Unknown build")
@@ -88,7 +88,7 @@ def selected_app_build_text(build: str) -> str:
 def selected_app_build_compact_label(build: str) -> str:
     return {
         "current": "cur",
-        "legacy": "leg",
+        "history": "hist",
         "unknown": "unk",
         "drift": "drift",
     }.get(str(build or "").strip(), str(build or "").strip() or "unk")
@@ -122,11 +122,11 @@ def selected_app_evidence_text(build: str, evidence: str) -> str:
     if evidence_key == "local+db":
         return "current-build evidence (local+db)"
     if evidence_key == "db-only":
-        if build_key == "legacy":
-            return "historical evidence (db-only)"
+        if build_key == "history":
+            return "retained prior-build evidence (db-only)"
         return "current-build evidence (db-only)"
     if evidence_key == "local-only":
-        return "historical evidence (local-only)"
+        return "retained prior-build evidence (local-only)"
     if evidence_key in {"empty", "none"}:
         return "no current-build evidence"
     return evidence_key or "no current-build evidence"

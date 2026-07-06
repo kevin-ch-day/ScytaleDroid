@@ -15,6 +15,10 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     _normalize_tracker_payload,
 )
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_plan_read_path
+from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
+    PaperFreezeRecommendation,
+    recommend_paper_freeze_for_runs,
+)
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     build_scoped_dataset_counts,
     default_resolve_tracker_run_identity,
@@ -69,8 +73,10 @@ class DatasetRunState:
     baseline_connected_insufficient_duration_streak: int
     historical_valid_runs: int = 0
     historical_build_count: int = 0
+    historical_pcap_count: int = 0
     active_version_code: str = ""
     active_base_sha: str = ""
+    paper_freeze: PaperFreezeRecommendation | None = None
 
 
 def _is_messaging_package_or_category(package_name: str) -> bool:
@@ -207,14 +213,7 @@ def _status_label(row: DatasetRunRecentSummary) -> str:
             label += " (BASELINE_NOT_IDLE)"
         return label
     if row.valid is False:
-        label = f"INVALID:{row.invalid_reason_code or 'UNKNOWN'}"
-        if (
-            str(row.run_profile or "").strip().lower() == "baseline_idle"
-            and str(row.invalid_reason_code or "").strip().upper() == "PCAP_MISSING"
-            and str(row.messaging_activity or "").strip().lower() in {"none", ""}
-        ):
-            label += " (LOW_SIGNAL_IDLE)"
-        return label
+        return f"INVALID:{row.invalid_reason_code or 'UNKNOWN'}"
     return "UNKNOWN"
 
 
@@ -507,8 +506,18 @@ def load_dataset_run_state(
         baseline_connected_insufficient_duration_streak=baseline_connected_insufficient_duration_streak,
         historical_valid_runs=int(scoped_counts.get("legacy_valid") or scoped_runs.get("legacy_valid") or 0),
         historical_build_count=int(scoped_counts.get("legacy_builds") or scoped_runs.get("legacy_builds") or 0),
+        historical_pcap_count=int(scoped_counts.get("legacy_pcap_available") or 0),
         active_version_code=str(scoped_counts.get("active_version_code") or ""),
         active_base_sha=str(scoped_counts.get("active_base_sha") or ""),
+        paper_freeze=recommend_paper_freeze_for_runs(
+            package,
+            runs if isinstance(runs, list) else [],
+            cfg=cfg,
+            active_identity=(
+                str(scoped_counts.get("active_version_code") or "") or None,
+                str(scoped_counts.get("active_base_sha") or "") or None,
+            ),
+        ),
     )
 
 

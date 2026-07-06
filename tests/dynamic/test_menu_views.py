@@ -9,23 +9,21 @@ def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypat
     sections = menu_views.build_dynamic_menu_sections()
 
     assert sections.primary_actions[0].key == "1"
-    assert sections.primary_actions[0].label == "Focused app run"
+    assert sections.primary_actions[0].label == "Current-build collection queue"
     assert sections.primary_actions[1].key == "2"
-    assert sections.primary_actions[1].label == "App queue / next action"
-    assert sections.validation[0].key == "3"
-    assert sections.validation[0].label == "State summary"
-    assert sections.validation[1].key == "4"
-    assert sections.validation[1].label == "Archive readiness"
-    assert sections.maintenance[0].key == "5"
-    assert sections.maintenance[0].label == "Verify capture environment"
-    assert sections.maintenance[1].key == "6"
-    assert sections.maintenance[1].label == "Change cohort"
-    assert sections.maintenance[2].key == "7"
-    assert sections.maintenance[2].label == "Reindex tracker"
-    assert sections.maintenance[3].key == "8"
-    assert sections.maintenance[3].label == "Prune incomplete evidence"
-    assert sections.maintenance[4].key == "9"
-    assert sections.maintenance[4].label == "Legacy structural tools"
+    assert sections.primary_actions[1].label == "Paper-freeze readiness"
+    assert sections.primary_actions[2].key == "3"
+    assert sections.primary_actions[2].label == "Focused app workbench"
+    assert sections.validation[0].key == "4"
+    assert sections.validation[0].label == "Verify capture environment"
+    assert sections.validation[1].key == "5"
+    assert sections.validation[1].label == "State summary"
+    assert sections.validation[2].key == "6"
+    assert sections.validation[2].label == "Archive readiness"
+    assert sections.validation[3].key == "7"
+    assert sections.validation[3].label == "Change cohort"
+    assert sections.maintenance[0].key == "8"
+    assert sections.maintenance[0].label == "Maintenance / Advanced"
 
 
 def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus(
@@ -69,14 +67,16 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
     out = capsys.readouterr().out
     assert "Research Dataset Beta" in out
     assert "moto g 5G - 2024 · ZY22JK89DR · Android 15 · physical" in out
-    assert "Archive quota" in out
-    assert "1 / 60 valid (59 remaining)" in out
     assert "Archive" in out
-    assert "Why blocked" in out
-    assert "quota not satisfied — 59 quota-valid runs remaining" in out
+    assert "blocked" in out
+    assert "Archive quota" not in out
+    assert "Why blocked" not in out
     assert "Supplemental" not in out
     assert "ready (12/12 plans)" in out
-    assert "Next: open App queue / next action to continue collection." in out
+    assert "Device" in out
+    assert "Evidence" in out
+    assert "1 packs / 1 valid" in out
+    assert "Next:" not in out
 
 
 def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(
@@ -116,10 +116,11 @@ def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(
     out = capsys.readouterr().out
     assert "Evidence" in out
     assert "none selected" in out
-    assert "19 packs (18 valid)" in out
-    assert "Archive quota" in out
-    assert "15 / 80 valid (65 remaining)" in out
-    assert "Retained extra" in out
-    assert "3 outside quota" in out
-    assert "quota not satisfied — 65 quota-valid runs remaining" in out
-    assert "Next: select a capture device, then open App queue / next action." in out
+    assert "19 packs / 18 valid" in out
+    assert "Archive quota" not in out
+    assert "Retained extra" not in out
+    assert "Current Device:" not in out
+    assert "Remaining quota-valid runs" in out
+    assert "65" in out
+    assert "Archive readiness is blocked." not in out
+    assert "Next:" not in out

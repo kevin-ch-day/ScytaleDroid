@@ -47,6 +47,33 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
             "top1_ja4_share": 2.0 / 3.0,
             "top1_ja3s_share": 1.0,
         },
+        "media_plane": {
+            "status": "ok",
+            "summary": {
+                "stun_frame_count": 480,
+                "stun_frame_share_of_udp": 0.01,
+                "turn_allocate_request_count": 1,
+                "turn_allocate_success_count": 1,
+                "relay_endpoint_count": 1,
+                "relay_media_likely": True,
+                "dominant_udp_flow": {"bytes": 900, "share_of_udp_bytes": 0.9},
+            },
+        },
+        "startup_profile": {
+            "window_s": 60,
+            "startup_total_bytes": 960,
+            "startup_total_packets": 96,
+            "startup_byte_share": 0.96,
+            "startup_packet_share": 0.96,
+            "post_start_total_bytes": 40,
+            "post_start_total_packets": 4,
+            "post_start_minutes": 1,
+            "post_start_median_bytes_per_min": 40.0,
+            "post_start_mean_bytes_per_min": 40.0,
+            "post_start_median_packets_per_min": 4.0,
+            "post_start_mean_packets_per_min": 4.0,
+            "startup_dominant": True,
+        },
     }
     out = _extract_features(
         report,
@@ -78,6 +105,13 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
     assert proxies["unique_ja4_count"] == 2
     assert proxies["unique_ja3s_count"] == 1
     assert proxies["top1_ja3_share"] == 2.0 / 3.0
+    assert proxies["stun_frame_count"] == 480
+    assert proxies["turn_allocate_success_count"] == 1
+    assert proxies["dominant_udp_flow_share"] == 0.9
+    assert proxies["relay_media_detected"] == 1
+    assert proxies["startup_byte_share"] == 0.96
+    assert proxies["post_start_median_bytes_per_min"] == 40.0
+    assert proxies["startup_dominant"] == 1
     assert proxies["unique_domains_topn"] == 2
     assert proxies["first_party_service_hits"] == 4
     assert proxies["third_party_service_hits"] == 5
@@ -134,7 +168,46 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
             "direction_summary": {"outbound_packets": 5, "inbound_packets": 4, "unknown_packets": 1},
             "flow_summary": {"flow_count": 2, "top_flows": []},
             "burst_summary": {"burst_count": 2, "active_second_count": 2},
+            "startup_profile": {
+                "window_s": 60,
+                "startup_total_bytes": 1000,
+                "startup_total_packets": 10,
+                "startup_byte_share": 0.83,
+                "startup_packet_share": 0.83,
+                "post_start_total_bytes": 200,
+                "post_start_total_packets": 2,
+                "post_start_minutes": 2,
+                "post_start_median_bytes_per_min": 100.0,
+                "post_start_mean_bytes_per_min": 100.0,
+                "post_start_median_packets_per_min": 1.0,
+                "post_start_mean_packets_per_min": 1.0,
+                "startup_dominant": True,
+            },
             "tls_quic_visibility": {"tls_handshake_packets": 2, "quic_candidate_packets": 1},
+            "window_metrics": {
+                "180s": {
+                    "window_s": 180,
+                    "total_bytes": 1200,
+                    "total_packets": 12,
+                    "avg_bytes_per_sec": 6.6667,
+                    "avg_packets_per_sec": 0.0667,
+                    "bytes_per_second_p95": 25.0,
+                    "packets_per_second_p95": 2.0,
+                    "active_second_count": 8,
+                    "active_second_ratio": 8 / 180.0,
+                },
+                "240s": {
+                    "window_s": 240,
+                    "total_bytes": 1500,
+                    "total_packets": 15,
+                    "avg_bytes_per_sec": 6.25,
+                    "avg_packets_per_sec": 0.0625,
+                    "bytes_per_second_p95": 22.0,
+                    "packets_per_second_p95": 2.0,
+                    "active_second_count": 10,
+                    "active_second_ratio": 10 / 240.0,
+                },
+            },
         },
     )
 
@@ -164,15 +237,21 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
     assert payload["direction"]["summary"]["outbound_packets"] == 5
     assert payload["flows"]["summary"]["flow_count"] == 2
     assert payload["bursts"]["summary"]["burst_count"] == 2
+    assert payload["startup_profile"]["summary"]["startup_byte_share"] == 0.83
     assert payload["visibility"]["summary"]["tls_handshake_packets"] == 2
+    assert payload["window_metrics"]["180s"]["total_bytes"] == 1200
+    assert payload["window_metrics"]["240s"]["bytes_per_second_p95"] == 22.0
     assert payload["traffic_posture"]["status"] == "ok"
     assert payload["traffic_posture"]["summary"]["outbound_packet_ratio"] == 0.5
     assert payload["traffic_posture"]["summary"]["inbound_packet_ratio"] == 0.4
     assert payload["traffic_posture"]["summary"]["active_second_ratio"] == 0.2
     assert payload["traffic_posture"]["summary"]["tls_handshakes_per_min"] == 12.0
+    assert payload["traffic_posture"]["summary"]["startup_byte_share"] == 0.83
+    assert payload["traffic_posture"]["summary"]["startup_dominant"] is True
     assert payload["fingerprints"]["status"] == "not_attempted"
     assert payload["transport_health"]["status"] == "from_report"
     assert payload["transport_health"]["summary"]["issue_packet_count"] == 2
     assert payload["transport_health"]["summary"]["lifecycle_summary"]["reset_stream_ratio"] == 0.5
+    assert payload["media_plane"]["status"] == "not_attempted"
     assert payload["service_context"]["status"] == "no_observations"
     assert payload["service_signals"]["status"] == "no_observations"

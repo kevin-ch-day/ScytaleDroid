@@ -9,7 +9,7 @@ from scytaledroid.DynamicAnalysis.observers import (
     PcapdroidCaptureObserver,
     SystemLogObserver,
 )
-from scytaledroid.DynamicAnalysis.plans.loader import (
+from scytaledroid.DynamicAnalysis.plans import (
     PlanValidationError,
     build_plan_validation_event,
 )

@@ -45,9 +45,14 @@ class PreparedPackageSelectionRow:
     dataset_valid_runs_count: int
     historical_valid_runs_count: int = 0
     historical_build_count: int = 0
+    historical_pcap_count: int = 0
     build_state: str = "—"
     package_name: str = ""
     display_name: str = ""
+    strict_idle_count: int = 0
+    strict_idle_required: int = 0
+    quiescent_fg_count: int = 0
+    quiescent_fg_available: bool = False
     baseline_countable: int = 0
     baseline_extra: int = 0
     baseline_not_idle_supplemental: int = 0
@@ -55,6 +60,9 @@ class PreparedPackageSelectionRow:
     interactive_countable: int = 0
     interactive_extra: int = 0
     interactive_low_signal_supplemental: int = 0
+    interactive_count_raw: int | None = None
+    interactive_display_state: str = ""
+    interactive_hold_reason: str = ""
     need_baseline: int = 0
     need_interactive: int = 0
     prep_label: str = "—"
@@ -70,6 +78,7 @@ class PreparedPackageSelectionRow:
     db_active_sessions: int = 0
     db_historical_sessions: int = 0
     db_total_sessions: int = 0
+    retained_prior_build_runs: int = 0
 
 
 def prepare_package_selection_view(

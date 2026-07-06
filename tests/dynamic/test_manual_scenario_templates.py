@@ -454,12 +454,59 @@ def test_news_reader_uses_subscription_aware_template(tmp_path: Path) -> None:
     )
     template_id, steps = _resolve_script_template(ctx)
 
-    assert template_id == "news_reader_behavior_v2"
+    assert template_id == "bbc_news_behavior_v1"
     assert template_steps_for_id("news_reader_basic_v1") is not None
     assert _build_template_hash(template_id, steps) == _build_template_hash(template_id, steps)
     assert _build_template_hash(
         "news_reader_basic_v1", template_steps_for_id("news_reader_basic_v1") or ()
     ) != _build_template_hash(template_id, steps)
+
+
+def test_guardian_uses_guardian_specific_template(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    ctx = RunContext(
+        dynamic_run_id="guardian",
+        package_name="com.guardian",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=run_dir,
+        artifacts_dir=run_dir / "artifacts",
+        analysis_dir=run_dir / "analysis",
+        notes_dir=run_dir / "notes",
+        interactive=True,
+        run_profile="interaction_scripted",
+        interaction_level="scripted",
+        device_serial="SERIAL",
+    )
+    template_id, steps = _resolve_script_template(ctx)
+
+    assert template_id == "guardian_behavior_v1"
+    assert template_steps_for_id("guardian_behavior_v1") is not None
+    assert _build_template_hash(template_id, steps) == _build_template_hash(template_id, steps)
+    assert _build_template_hash(
+        "news_reader_behavior_v2", template_steps_for_id("news_reader_behavior_v2") or ()
+    ) != _build_template_hash(template_id, steps)
+
+
+def test_bbc_news_behavior_template_mentions_register_wall_and_media_surfaces() -> None:
+    steps = template_steps_for_id("bbc_news_behavior_v1")
+    assert steps is not None
+    text = "\n".join(desc for _step_id, desc, _duration in steps)
+
+    assert "sign-in or register prompt" in text
+    assert "Avoid Video, Live, and Audio playback" in text
+    assert "calm BBC foreground surface" in text
+
+
+def test_guardian_behavior_template_mentions_native_podcast_and_auth_gate_paths() -> None:
+    steps = template_steps_for_id("guardian_behavior_v1")
+    assert steps is not None
+    text = "\n".join(desc for _step_id, desc, _duration in steps)
+
+    assert "native Guardian section/subject surface" in text
+    assert "in-card podcast play control" in text
+    assert "Follow action" in text
+    assert "sign-in, free registration, or account-create wall" in text
 
 
 def test_timing_action_parses_skip_aliases() -> None:
@@ -481,6 +528,19 @@ def test_timing_action_accepts_d_done_but_not_c_alias() -> None:
 def test_timing_action_supports_return_home_marker() -> None:
     assert _parse_timing_action("h\n") == "return_home"
     assert _parse_timing_action("return_home\n") == "return_home"
+
+
+def test_guardian_scripted_article_description_mentions_registration_wall() -> None:
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _scripted_step_description
+
+    text = _scripted_step_description(
+        "open_article",
+        "Open one article.",
+        package_name="com.guardian",
+    )
+
+    assert "interactive evidence" in text
+    assert "free registration" in text
 
 
 def test_read_device_foreground_package_parses_current_focus() -> None:
@@ -512,6 +572,161 @@ def test_read_device_foreground_package_parses_current_focus() -> None:
         adb_client.run_shell_command = original_run
 
 
+def test_read_device_foreground_target_parses_component() -> None:
+    import scytaledroid.DeviceAnalysis.adb.client as adb_client
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _read_device_foreground_target
+
+    activity_stdout = (
+        "topResumedActivity=ActivityRecord{2c684ee u0 com.facebook.katana/"
+        "com.facebook.katana.immersiveactivity.ImmersiveActivity t70}\n"
+    )
+    window_stdout = "  mCurrentFocus=Window{abc u0 com.facebook.katana/com.facebook.katana.LoginActivity}\n"
+
+    class _FakeClient:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def run_shell_command(_serial, command, timeout=10):
+            if command == ["dumpsys", "activity", "activities"]:
+                return SimpleNamespace(stdout=activity_stdout)
+            if command == ["dumpsys", "window"]:
+                return SimpleNamespace(stdout=window_stdout)
+            raise AssertionError(command)
+
+    original = adb_client.is_available
+    original_run = adb_client.run_shell_command
+    try:
+        adb_client.is_available = _FakeClient.is_available
+        adb_client.run_shell_command = _FakeClient.run_shell_command
+        assert _read_device_foreground_target("SERIAL") == (
+            "com.facebook.katana",
+            "com.facebook.katana.immersiveactivity.ImmersiveActivity",
+        )
+    finally:
+        adb_client.is_available = original
+        adb_client.run_shell_command = original_run
+
+
+def test_read_device_foreground_target_prefers_story_viewer_activity_over_stale_window_focus() -> None:
+    import scytaledroid.DeviceAnalysis.adb.client as adb_client
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _read_device_foreground_target
+
+    activity_stdout = (
+        "topResumedActivity=ActivityRecord{e628b23 u0 com.facebook.katana/"
+        "com.facebook.stories.viewer.activity.StoryViewerActivity t104}\n"
+    )
+    window_stdout = (
+        "  mCurrentFocus=Window{abc u0 com.facebook.katana/com.facebook.katana.LoginActivity}\n"
+    )
+
+    class _FakeClient:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def run_shell_command(_serial, command, timeout=10):
+            if command == ["dumpsys", "activity", "activities"]:
+                return SimpleNamespace(stdout=activity_stdout)
+            if command == ["dumpsys", "window"]:
+                return SimpleNamespace(stdout=window_stdout)
+            raise AssertionError(command)
+
+    original = adb_client.is_available
+    original_run = adb_client.run_shell_command
+    try:
+        adb_client.is_available = _FakeClient.is_available
+        adb_client.run_shell_command = _FakeClient.run_shell_command
+        assert _read_device_foreground_target("SERIAL") == (
+            "com.facebook.katana",
+            "com.facebook.stories.viewer.activity.StoryViewerActivity",
+        )
+    finally:
+        adb_client.is_available = original
+        adb_client.run_shell_command = original_run
+
+
+def test_read_device_foreground_target_resolves_launcher_alias_to_real_activity() -> None:
+    import scytaledroid.DeviceAnalysis.adb.client as adb_client
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _read_device_foreground_target
+
+    activity_stdout = """
+  topResumedActivity=ActivityRecord{498d627 u0 com.facebook.katana/com.facebook.katana.LoginActivity t70}
+  * Task{a0d627d #70 type=standard A=10455:com.facebook.katana U=0 visible=true}
+    * Hist  #0: ActivityRecord{498d627 u0 com.facebook.katana/.LoginActivity t70}
+      mActivityComponent=com.facebook.katana/.activity.FbMainTabActivity
+      realActivity=ComponentInfo{com.facebook.katana/com.facebook.katana.activity.FbMainTabActivity}
+""".strip()
+    window_stdout = "  mCurrentFocus=Window{abc u0 com.facebook.katana/com.facebook.katana.LoginActivity}\n"
+
+    class _FakeClient:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def run_shell_command(_serial, command, timeout=10):
+            if command == ["dumpsys", "activity", "activities"]:
+                return SimpleNamespace(stdout=activity_stdout)
+            if command == ["dumpsys", "window"]:
+                return SimpleNamespace(stdout=window_stdout)
+            raise AssertionError(command)
+
+    original = adb_client.is_available
+    original_run = adb_client.run_shell_command
+    try:
+        adb_client.is_available = _FakeClient.is_available
+        adb_client.run_shell_command = _FakeClient.run_shell_command
+        assert _read_device_foreground_target("SERIAL") == (
+            "com.facebook.katana",
+            "com.facebook.katana.activity.FbMainTabActivity",
+        )
+    finally:
+        adb_client.is_available = original
+        adb_client.run_shell_command = original_run
+
+
+def test_read_device_foreground_target_resolves_messenger_startscreen_alias() -> None:
+    import scytaledroid.DeviceAnalysis.adb.client as adb_client
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _read_device_foreground_target
+
+    activity_stdout = """
+  topResumedActivity=ActivityRecord{4eb712c u0 com.facebook.orca/com.facebook.orca.auth.StartScreenActivity t72}
+  * Task{59f98a #72 type=standard A=10404:com.facebook.orca U=0 visible=true visibleRequested=true mode=fullscreen translucent=false sz=1}
+    * Hist  #0: ActivityRecord{4eb712c u0 com.facebook.orca/.auth.StartScreenActivity t72}
+      mActivityComponent=com.facebook.orca/com.facebook.messenger.neue.MainActivity
+""".strip()
+    window_stdout = "  mCurrentFocus=Window{abc u0 com.facebook.orca/com.facebook.orca.auth.StartScreenActivity}\n"
+
+    class _FakeClient:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def run_shell_command(_serial, command, timeout=10):
+            if command == ["dumpsys", "activity", "activities"]:
+                return SimpleNamespace(stdout=activity_stdout)
+            if command == ["dumpsys", "window"]:
+                return SimpleNamespace(stdout=window_stdout)
+            raise AssertionError(command)
+
+    original = adb_client.is_available
+    original_run = adb_client.run_shell_command
+    try:
+        adb_client.is_available = _FakeClient.is_available
+        adb_client.run_shell_command = _FakeClient.run_shell_command
+        assert _read_device_foreground_target("SERIAL") == (
+            "com.facebook.orca",
+            "com.facebook.messenger.neue.MainActivity",
+        )
+    finally:
+        adb_client.is_available = original
+        adb_client.run_shell_command = original_run
+
+
 def test_baseline_idle_checkpoint_messages_include_package() -> None:
     from scytaledroid.DynamicAnalysis.scenarios.manual import _baseline_idle_checkpoint_messages
 
@@ -524,5 +739,138 @@ def test_baseline_idle_checkpoint_messages_are_news_reader_specific() -> None:
     from scytaledroid.DynamicAnalysis.scenarios.manual import _baseline_idle_checkpoint_messages
 
     messages = _baseline_idle_checkpoint_messages("com.guardian")
-    assert "calm article or section" in messages[60]
-    assert "autoplay video" in messages[120]
+    assert "My Guardian" in messages[60]
+    assert "sign-in / free-registration walls" in messages[120]
+
+
+def test_launch_package_to_foreground_prefers_am_start(monkeypatch) -> None:
+    import scytaledroid.DeviceAnalysis.adb.shell as adb_shell
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _launch_package_to_foreground
+
+    calls: list[list[str]] = []
+
+    def _fake_run_shell(_serial, command, timeout=10, check=False):
+        calls.append(list(command))
+        if command[:4] == ["cmd", "package", "resolve-activity", "--brief"]:
+            return "priority=0 preferredOrder=0\ncom.facebook.orca/.auth.StartScreenActivity"
+        return "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.facebook.orca/.auth.StartScreenActivity }"
+
+    monkeypatch.setattr(adb_shell, "run_shell", _fake_run_shell)
+
+    _launch_package_to_foreground("SERIAL", "com.facebook.orca")
+
+    assert calls == [
+        [
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "com.facebook.orca",
+        ],
+        [
+            "am",
+            "start",
+            "-n",
+            "com.facebook.orca/.auth.StartScreenActivity",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+        ],
+    ]
+
+
+def test_launch_package_to_foreground_falls_back_to_monkey_on_launch_error(monkeypatch) -> None:
+    import scytaledroid.DeviceAnalysis.adb.shell as adb_shell
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _launch_package_to_foreground
+
+    calls: list[list[str]] = []
+
+    def _fake_run_shell(_serial, command, timeout=10, check=False):
+        calls.append(list(command))
+        if command[:4] == ["cmd", "package", "resolve-activity", "--brief"]:
+            return "priority=0 preferredOrder=0\ncom.facebook.orca/.auth.StartScreenActivity"
+        if command[:3] == ["am", "start", "-n"]:
+            return "Error: Activity not started, unable to resolve Intent"
+        if command[:2] == ["am", "start"]:
+            return "Error: Activity not started, unable to resolve Intent"
+        return "Events injected: 1"
+
+    monkeypatch.setattr(adb_shell, "run_shell", _fake_run_shell)
+
+    _launch_package_to_foreground("SERIAL", "com.facebook.orca")
+
+    assert calls == [
+        [
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "com.facebook.orca",
+        ],
+        [
+            "am",
+            "start",
+            "-n",
+            "com.facebook.orca/.auth.StartScreenActivity",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+        ],
+        [
+            "am",
+            "start",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "-p",
+            "com.facebook.orca",
+        ],
+        [
+            "monkey",
+            "-p",
+            "com.facebook.orca",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+        ],
+    ]
+
+
+def test_launch_package_to_foreground_uses_package_start_when_resolution_missing(monkeypatch) -> None:
+    import scytaledroid.DeviceAnalysis.adb.shell as adb_shell
+    from scytaledroid.DynamicAnalysis.scenarios.manual import _launch_package_to_foreground
+
+    calls: list[list[str]] = []
+
+    def _fake_run_shell(_serial, command, timeout=10, check=False):
+        calls.append(list(command))
+        if command[:4] == ["cmd", "package", "resolve-activity", "--brief"]:
+            return "priority=0 preferredOrder=0"
+        return "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] pkg=com.facebook.orca }"
+
+    monkeypatch.setattr(adb_shell, "run_shell", _fake_run_shell)
+
+    _launch_package_to_foreground("SERIAL", "com.facebook.orca")
+
+    assert calls == [
+        [
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "com.facebook.orca",
+        ],
+        [
+            "am",
+            "start",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "-p",
+            "com.facebook.orca",
+        ],
+    ]

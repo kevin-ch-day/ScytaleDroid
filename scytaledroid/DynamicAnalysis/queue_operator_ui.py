@@ -21,12 +21,7 @@ def operator_next_action_label(row: Any) -> str:
 def queue_table_ml_pool_label(row: Any) -> str:
     """Per-app ML training pool depth for queue tables."""
     pool = row_baseline_ml_pool_size(row)
-    if pool > 0:
-        return str(pool)
-    need = int(getattr(row, "need_baseline", 0) or 0) + int(getattr(row, "need_interactive", 0) or 0)
-    if need <= 0 and supplemental_baseline_queue_action(getattr(row, "next_label", None)):
-        return "0"
-    return "—"
+    return str(max(0, int(pool)))
 
 
 def workbench_ml_pool_phrase(*, extra_valid: int, low_signal_retained: int) -> str:
@@ -41,10 +36,10 @@ def workbench_ml_pool_phrase(*, extra_valid: int, low_signal_retained: int) -> s
 
 def queue_compact_legend_lines(*, has_next_marker: bool) -> list[str]:
     lines = [
-        "QA: valid / invalid / valid+id (identity mismatch) / valid+L (legacy also exists)",
-        "Build: current / mixed / legacy / drift / db-hist",
-        "Idle Base: quota-counted idle baselines (3 target) · Non-idle: valid retained baselines outside quota, often from app-driven feed/media refresh",
-        "Interactive: valid interactive runs shown against target; 'held' means baseline is not complete yet, and retained extras still stay visible in the total · ML: supplemental baseline count for training",
+        "QA: current-build QA badge only: valid / invalid / valid+id (identity mismatch). Prior-build depth is shown under Retained.",
+        "Build: current / prior-only / db-only / drift / none yet",
+        "Strict Idle: quota-counted network-idle baselines (3 target) · Quiescent FG: valid no-touch foreground baseline evidence retained outside strict-idle quota when app-driven traffic exceeds idle limits",
+        "Interactive: raw current-build interactive runs shown against target; 'held' means the strict-idle gate is still incomplete, and Quiescent FG does not unlock interactive · Retained: valid prior-build runs kept for analysis, not current-build quota · ML Pool: supplemental strict-idle baseline count retained for training/pattern averaging",
     ]
     if has_next_marker:
         lines.insert(0, "> marks recommended next app")
@@ -60,7 +55,7 @@ def queue_selection_shortcut_hint() -> str:
 
 
 def queue_selection_shortcuts_hint() -> str:
-    return "S summary · V grouped · Y history · H help · D diagnostics · B back"
+    return "P paper freeze · S summary · V grouped · Y history · H help · D diagnostics · B back"
 
 
 __all__ = [

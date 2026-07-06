@@ -29,6 +29,10 @@ def _stub_expensive_pcap_report_helpers(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.report.summarize_media_plane",
+        lambda *args, **kwargs: {"status": "no_observations", "summary": {"classification": "not_observed"}},
+    )
+    monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.report.render_security_review_md",
         lambda *args, **kwargs: "# Security review\n",
     )
@@ -97,6 +101,21 @@ def test_write_pcap_report_appends_advanced_sections(monkeypatch, tmp_path: Path
             },
             "flow_summary": {"flow_count": 2, "top_flows": []},
             "burst_summary": {"burst_count": 1},
+            "startup_profile": {
+                "window_s": 60,
+                "startup_total_bytes": 900,
+                "startup_total_packets": 9,
+                "startup_byte_share": 0.9,
+                "startup_packet_share": 0.9,
+                "post_start_total_bytes": 100,
+                "post_start_total_packets": 1,
+                "post_start_minutes": 1,
+                "post_start_median_bytes_per_min": 100.0,
+                "post_start_mean_bytes_per_min": 100.0,
+                "post_start_median_packets_per_min": 1.0,
+                "post_start_mean_packets_per_min": 1.0,
+                "startup_dominant": True,
+            },
             "tls_quic_visibility": {"tls_handshake_packets": 2, "quic_candidate_packets": 0},
         },
     )
@@ -159,9 +178,12 @@ def test_write_pcap_report_appends_advanced_sections(monkeypatch, tmp_path: Path
     assert payload["direction_summary"]["outbound_packets"] == 6
     assert payload["flow_summary"]["flow_count"] == 2
     assert payload["burst_summary"]["burst_count"] == 1
+    assert payload["startup_profile"]["startup_byte_share"] == 0.9
+    assert payload["startup_profile"]["startup_dominant"] is True
     assert payload["tls_quic_visibility"]["tls_handshake_packets"] == 2
     assert payload["tls_fingerprints"]["unique_ja3_count"] == 2
     assert payload["transport_health"]["issue_packet_count"] == 2
+    assert payload["media_plane"]["status"] == "no_observations"
     assert payload["service_context"]["status"] == "no_observations"
     assert payload["service_signals"]["status"] == "no_observations"
     assert payload["security_surface"]["status"] == "ok"

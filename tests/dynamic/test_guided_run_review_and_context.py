@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from scytaledroid.DynamicAnalysis.controllers import guided_run, selected_app_review
 from tests.dynamic._guided_run_state_support import (
@@ -230,3 +232,68 @@ def test_guided_run_history_and_diagnostics_do_not_require_device(
         assert "Capture" in out
         assert "Publication" in out
     assert device_calls == {"select": 0, "preflight": 0}
+
+
+def test_selected_app_diagnostics_show_latest_media_plane(monkeypatch, tmp_path, capsys) -> None:
+    run_id = "wa-run-1"
+    run_dir = tmp_path / "evidence" / "dynamic" / run_id / "analysis"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "media_plane": {
+                    "status": "ok",
+                    "summary": {
+                        "classification": "relay_media_likely",
+                        "relay_endpoint_count": 3,
+                        "turn_allocate_success_count": 16,
+                        "stun_frame_count": 480,
+                        "dominant_udp_flow": {
+                            "endpoint_a": "10.0.0.2:46485",
+                            "endpoint_b": "157.240.146.35:3478",
+                            "share_of_udp_bytes": 0.99,
+                        },
+                        "reason_codes": ["turn_allocate_success", "relay_media_pattern"],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(selected_app_review.app_config, "OUTPUT_DIR", str(tmp_path))
+    state = make_dataset_state(
+        "com.whatsapp",
+        valid_runs=1,
+        baseline_valid_runs=0,
+        interactive_valid_runs=1,
+        local_evidence_dir_count=1,
+        paper_eligible_local=1,
+        quota_counted_local=1,
+    )
+    latest_recent = make_recent_summary(
+        ended_at="2026-07-05T18:59:00Z",
+        run_profile="interaction_manual",
+        interaction_level="manual",
+        valid=True,
+        run_id=run_id,
+        status_label="VALID",
+    )
+
+    selected_app_review.render_selected_app_diagnostics(
+        package_name="com.whatsapp",
+        display_label="WhatsApp",
+        state=state,
+        queue_action="interactive",
+        db_active_sessions=1,
+        db_historical_sessions=0,
+        latest_recent=latest_recent,
+        has_identity_mismatch=False,
+        live_build_drift=False,
+        menu_utils=guided_run.menu_utils,
+    )
+
+    out = capsys.readouterr().out
+    assert "Latest Run Media Plane" in out
+    assert "relay media likely" in out
+    assert "157.240.146.35:3478" in out
+    assert "turn_allocate_success, relay_media_pattern" in out
