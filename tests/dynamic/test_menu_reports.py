@@ -8,6 +8,20 @@ from scytaledroid.DynamicAnalysis.menus import status_reports as menu_reports
 
 def test_render_cohort_status_details_includes_historical_context(monkeypatch, capsys) -> None:
     monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
+    monkeypatch.setattr(
+        menu_reports,
+        "_paper_freeze_summary",
+        lambda: {
+            "ready": 4,
+            "ready_current": 1,
+            "ready_prior": 3,
+            "needs_interactive": 8,
+            "needs_baseline": 0,
+            "insufficient": 3,
+            "merged_targets": 6,
+            "refresh_candidates": 8,
+        },
+    )
 
     menu_reports.render_cohort_status_details(
         dataset_apps_total=16,
@@ -50,6 +64,9 @@ def test_render_cohort_status_details_includes_historical_context(monkeypatch, c
     assert "Evidence-authoritative quota" in out
     assert "Quota-valid runs: 12 / 80" in out
     assert "Tracker-scoped latest-run state" in out
+    assert "Paper-target freeze readiness" in out
+    assert "Ready prior-build: 3" in out
+    assert "Merged build-hash targets: 6" in out
     assert "Historical context" in out
     assert "Current-build complete: 9 / 16" in out
     assert "Current-build active: 1" in out
@@ -64,6 +81,7 @@ def test_render_cohort_status_details_includes_historical_context(monkeypatch, c
     assert "Meaning" in out
     assert "Evidence-authoritative quota drives archive/freeze readiness." in out
     assert "Tracker-scoped latest-run state describes active-build queue posture." in out
+    assert "Paper-target freeze readiness describes the strongest build-backed paper candidate" in out
     assert "Current-build stale means older evidence exists" in out
     assert "Current-build DB-only means the DB knows current-build sessions" in out
     assert "Historical DB-only means older dynamic lineage exists in the DB" in out
@@ -81,28 +99,133 @@ def test_render_cohort_status_help_mentions_retained_extra_and_historical(
     assert "mixed" in out
     assert "+L" in out
     assert "identity mismatch" in out
-    assert "db-hist" in out
+    assert "prior-only" in out
+    assert "Retained" in out
     assert "drift" in out
     assert "3/3" in out
-    assert "Idle Base" in out
-    assert "Non-idle" in out
+    assert "Strict Idle" in out
+    assert "Quiescent FG" in out
     assert "Interactive" in out
     assert "Build" in out
     assert "db-only" in out
+    assert "none yet" in out
     assert "Status=restore + DB-only evidence" in out
     assert "refresh steps" in out
     assert "installed app build differs from the newest static plan" in out
     assert "identity mismatch" in out
     assert "baseline gap" in out
     assert "interactive gap" in out
-    assert "Non-idle baseline" in out
-    assert "valid retained evidence outside quota" in out
+    assert "Quiescent FG baseline" in out
+    assert "retained outside strict-idle quota" in out
     assert "feed/media refresh can trigger it" in out
-    assert "non-idle retained baselines do not unlock interactive" in out
-    assert "classifier treated the traffic as too active for idle-baseline quota" in out
+    assert "quiescent fg retained baselines do not unlock interactive" in out.lower()
+    assert "classifier treated the traffic as too active for strict-idle quota" in out.lower()
     out_lc = out.lower()
     assert "evidence-authoritative quota" in out_lc
     assert "tracker-scoped latest-run state" in out_lc
+    assert "paper-target freeze readiness" in out_lc
+
+
+def test_render_paper_freeze_readiness_brief_shows_summary(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(menu_reports.prompt_utils, "press_enter_to_continue", lambda: None)
+    monkeypatch.setattr(
+        menu_reports,
+        "build_paper_freeze_decision_board",
+        lambda: {
+            "top_note": "Paper-freeze readiness is draft-oriented.",
+            "draft_decision_mode": "heuristic default; no explicit draft target set configured.",
+            "summary": {
+                "ready": 4,
+                "ready_current": 1,
+                "ready_prior": 3,
+                "needs_interactive": 8,
+                "needs_baseline": 0,
+                "insufficient": 3,
+            },
+            "sections": {
+                "MUST_RUN_NOW": [
+                    {
+                        "package_name": "org.reddit.frontpage",
+                        "selected_version_code": "20260701",
+                        "installed_version_code": "20260701",
+                        "relation": "current",
+                        "strict_idle_count": 3,
+                        "quiescent_fg_count": 0,
+                        "baseline_count": 3,
+                        "interactive_count": 1,
+                        "missing_baseline_runs": 0,
+                        "missing_interactive_runs": 3,
+                        "valid_pcap_count": 4,
+                        "baseline_class_note": "Strict Idle is the quota baseline lane for paper readiness.",
+                        "draft_role": "current_gap",
+                        "collectability": "collectable_now",
+                        "action": "interactive",
+                        "rough_draft_blocker": "yes",
+                        "reason": "Selected current build is collectable now and missing interactive evidence.",
+                    }
+                ],
+                "READY_DO_NOT_TOUCH": [
+                    {
+                        "package_name": "com.whatsapp",
+                        "selected_version_code": "262408020",
+                        "installed_version_code": "262508000",
+                        "relation": "prior-build",
+                        "strict_idle_count": 3,
+                        "quiescent_fg_count": 0,
+                        "baseline_count": 3,
+                        "interactive_count": 5,
+                        "missing_baseline_runs": 0,
+                        "missing_interactive_runs": 0,
+                        "valid_pcap_count": 8,
+                        "baseline_class_note": "Strict Idle is the quota baseline lane for paper readiness.",
+                        "draft_role": "ready_coverage",
+                        "collectability": "ready_prior_build",
+                        "action": "leave frozen",
+                        "rough_draft_blocker": "no",
+                        "reason": "Paper target is ready on selected build; current build is refresh work.",
+                    }
+                ],
+                "SWITCH_TARGET_CANDIDATE": [],
+                "RUN_ONLY_IF_EASY": [],
+                "DEFER_REFRESH_WAVE": [],
+            },
+            "rows": [
+                {"package_name": "org.reddit.frontpage"},
+                {"package_name": "com.whatsapp"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        menu_reports,
+        "_load_paper_freeze_labels",
+        lambda _rows: {
+            "org.reddit.frontpage": "Reddit",
+            "com.whatsapp": "WhatsApp",
+        },
+    )
+    monkeypatch.setattr(
+        menu_reports,
+        "_latest_paper_freeze_export_path",
+        lambda: "output/paper/dynamic_paper_freeze_latest",
+    )
+
+    menu_reports.render_paper_freeze_readiness_brief()
+
+    out = capsys.readouterr().out
+    assert "Paper-Freeze Readiness" in out
+    assert "draft-oriented" in out.lower()
+    assert "Draft decision mode: heuristic default; no explicit draft target set configured." in out
+    assert "Ready targets: 4" in out
+    assert "Ready prior-build: 3" in out
+    assert "MUST RUN NOW" in out
+    assert "READY DO NOT TOUCH" in out
+    assert "Strict Idle is the quota baseline lane" in out
+    assert "Reddit" in out
+    assert "WhatsApp" in out
+    assert "collectable" in out.lower()
+    assert "ready_prior" in out.lower()
+    assert "Latest export: output/paper/dynamic_paper_freeze_latest" in out
+    assert "report_dynamic_paper_freeze_readiness.py" in out
 
 
 def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, capsys) -> None:
@@ -136,14 +259,14 @@ def test_render_cohort_build_history_explains_extra_and_legacy(monkeypatch, caps
     out = capsys.readouterr().out
     out_flat = " ".join(out.split())
     assert "Build history" in out
-    assert "Build lineage and why an app looks current, mixed, or legacy" in out
+    assert "Build lineage and why an app looks current, mixed, or historical" in out
     assert "Baseline" in out
     assert "Interactive" in out
     assert "Build identity detail" in out
     assert "only historical DB lineage exists" in out
     assert "exists; extra" in out
     assert "baseline retained beyond quota cap" in out_flat
-    assert "legacy evidence" in out_flat
+    assert "historical evidence" in out_flat
     assert "present" in out
     assert "historical DB-only evidence" in out
     assert "3/3 (+1 extra)" not in out or "4/3" in out
@@ -186,7 +309,7 @@ def test_render_cohort_build_history_wraps_multiple_notes(monkeypatch, capsys) -
     assert "missing locally" in out
     assert "extra" in out
     assert "baseline retained beyond quota cap" in out_flat
-    assert "legacy evidence" in out_flat
+    assert "historical evidence" in out_flat
     assert "present" in out
     assert "DB-only" in out
     assert "evidence" in out
@@ -301,6 +424,7 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
         "Base ct",
         "Base ex",
         "Base low",
+        "Base qfg",
         "Inter ct",
         "Inter ex",
         "Inter low",
@@ -312,7 +436,8 @@ def test_render_cohort_status_debug_preserves_dense_view(monkeypatch, capsys) ->
         "DB active",
         "DB hist",
     ]
-    assert raw_rows[0][10] == "4"
+    assert raw_rows[0][10] == "0"
+    assert raw_rows[0][11] == "4"
 
 
 def test_render_cohort_status_debug_summarizes_review_and_refresh_states(

@@ -5,6 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 from scytaledroid.DynamicAnalysis.controllers import guided_run, selected_app_review
+from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
+    PaperFreezeBuildCandidate,
+    PaperFreezeRecommendation,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils
 from tests.dynamic._guided_run_state_support import (
     make_dataset_state,
@@ -184,11 +188,12 @@ def test_guided_run_reports_historical_and_retained_extra_context(monkeypatch, c
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert (
-        "Historical evidence: 2 legacy valid run(s) across 1 older build(s) retained for comparison; not counted toward current quota."
+        "Retained prior-build evidence: 2 valid run(s) across 1 prior build(s) retained for analysis; not counted toward current-build quota."
         in out
     )
     assert "Qualification" in out
-    assert "Baseline     3/3" in out
+    assert "Strict idle  3/3" in out
+    assert "Quiescent FG  0" in out
     assert "Interactive  0/4 (+1 extra)" in out
 
 
@@ -237,7 +242,89 @@ def test_guided_run_reports_low_signal_retained_extra_current_build_context(
     assert select_package_calls["count"] == 2
     assert "Retained extra baseline: 2 low-signal idle run(s) retained outside quota." not in out
     assert "Qualification" in out
-    assert "Baseline     2/3 (+2 low)" in out
+    assert "Strict idle  2/3 (+2 low)" in out
+    assert "Quiescent FG  0" in out
+
+
+def test_guided_run_surfaces_quiescent_fg_and_raw_interactive_when_strict_idle_holds(
+    monkeypatch, capsys
+) -> None:
+    package = "com.zhiliaoapp.musically"
+    select_package_calls, select_package = one_shot_package_selector(package)
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="TikTok",
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            total_runs=9,
+            valid_runs=9,
+            baseline_valid_runs=0,
+            interactive_valid_runs=2,
+            quota_met=False,
+            extra_valid_runs=0,
+            local_evidence_dir_count=9,
+            reset_available=True,
+            paper_eligible_local=9,
+            quota_counted_local=2,
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+            baseline_not_idle_valid=7,
+            paper_freeze=PaperFreezeRecommendation(
+                package_name=package,
+                installed_target_version_code="2024507030",
+                installed_target_version_name="45.7.3",
+                installed_target_static_run_id="5838",
+                installed_target_base_apk_sha256="t" * 64,
+                selected_build=PaperFreezeBuildCandidate(
+                    package_name=package,
+                    version_code="2024507030",
+                    version_name="45.7.3",
+                    static_run_id="5838",
+                    base_apk_sha256="t" * 64,
+                    strict_idle_runs=0,
+                    quiescent_fg_runs=7,
+                    baseline_valid_runs=0,
+                    interactive_valid_runs=2,
+                    valid_pcap_count=9,
+                    qa_valid_count=9,
+                    first_capture_at="2026-07-04T10:00:00Z",
+                    last_capture_at="2026-07-04T10:35:00Z",
+                    relation_to_active_target="current",
+                    missing_baseline_runs=3,
+                    missing_interactive_runs=2,
+                    status="needs baseline",
+                    static_run_ids=("5838",),
+                ),
+                build_candidates=(),
+                refresh_candidate=False,
+                retained_prior_build_selected=False,
+            ),
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "Strict idle  0/3" in out
+    assert "Quiescent FG  7" in out
+    assert "Interactive  2/4 held by strict idle" in out
+    assert "Strict-idle workflow gate: incomplete (0/3)" in out
+    assert "Interactive evidence is already captured for the current build" in out
+    assert "Strict Idle and Quiescent FG stay separate in paper-target readiness" in out
+    assert "still treats baseline counts without a strict-idle versus Quiescent FG split" not in out
 
 
 def test_guided_run_diagnostics_show_retained_extra_breakdown(monkeypatch, capsys) -> None:
@@ -307,7 +394,14 @@ def test_selected_app_diagnostics_show_non_idle_reason_codes_and_ml_pool_no(
     run_dir.mkdir(parents=True)
     (run_dir / "pcap_report.json").write_text(
         json.dumps(
-            {"capinfos": {"parsed": {"capture_duration_s": 480.0, "data_size_bytes": 7_800_000}}}
+            {
+                "capinfos": {"parsed": {"capture_duration_s": 480.0, "data_size_bytes": 7_800_000}},
+                "startup_profile": {
+                    "startup_dominant": True,
+                    "startup_byte_share": 0.84,
+                    "post_start_median_bytes_per_min": 41_000.0,
+                },
+            }
         ),
         encoding="utf-8",
     )
@@ -366,12 +460,27 @@ def test_selected_app_diagnostics_show_non_idle_reason_codes_and_ml_pool_no(
     )
 
     out = capsys.readouterr().out
-    assert "Retained Non-Idle Baselines" in out
-    assert "bytes high" in out
-    assert "QUIC" in out
+    assert "Quiescent FG Baselines" in out
     assert "ML" in out
     assert "Quota" in out
     assert "no" in out
+    rows = selected_app_review._non_idle_baseline_detail_rows(package, state)
+    assert rows == [
+        [
+            run_id,
+            "8m 0s",
+            "7MB",
+            "28,500 B/s",
+            "305,000 B/s",
+            "0.68",
+            "startup-burst then quiet-tail",
+            "84.0%",
+            "41,000 B/min",
+            "bytes high, QUIC-heavy",
+            "no",
+            "no",
+        ]
+    ]
 
 
 def test_selected_app_recent_runs_show_non_idle_reason_codes_and_ml_pool_no(
@@ -383,7 +492,14 @@ def test_selected_app_recent_runs_show_non_idle_reason_codes_and_ml_pool_no(
     run_dir.mkdir(parents=True)
     (run_dir / "pcap_report.json").write_text(
         json.dumps(
-            {"capinfos": {"parsed": {"capture_duration_s": 480.0, "data_size_bytes": 7_800_000}}}
+            {
+                "capinfos": {"parsed": {"capture_duration_s": 480.0, "data_size_bytes": 7_800_000}},
+                "startup_profile": {
+                    "startup_dominant": True,
+                    "startup_byte_share": 0.84,
+                    "post_start_median_bytes_per_min": 41_000.0,
+                },
+            }
         ),
         encoding="utf-8",
     )
@@ -450,9 +566,24 @@ def test_selected_app_recent_runs_show_non_idle_reason_codes_and_ml_pool_no(
 
     out = capsys.readouterr().out
     assert "Recent Tracker Runs" in out
-    assert "Retained Non-Idle Baselines" in out
-    assert "bytes high" in out
-    assert "QUIC" in out
+    assert "Quiescent FG Baselines" in out
+    rows = selected_app_review._non_idle_baseline_detail_rows(package, state)
+    assert rows == [
+        [
+            run_id,
+            "8m 0s",
+            "7MB",
+            "28,500 B/s",
+            "305,000 B/s",
+            "0.68",
+            "startup-burst then quiet-tail",
+            "84.0%",
+            "41,000 B/min",
+            "bytes high, QUIC-heavy",
+            "no",
+            "no",
+        ]
+    ]
 
 
 def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> None:
@@ -486,7 +617,7 @@ def test_guided_run_reports_historical_db_only_context(monkeypatch, capsys) -> N
     assert select_package_calls["count"] == 2
     assert "Why:" in out
     assert (
-        "Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace."
+        "Retained prior-build DB evidence exists, but no current-build evidence pack is present in this workspace."
         in out
     )
     assert "1) Baseline run" in out

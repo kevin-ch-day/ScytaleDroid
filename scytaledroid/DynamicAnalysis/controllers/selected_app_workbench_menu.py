@@ -7,7 +7,6 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.queue_operator_ui import workbench_ml_pool_phrase
 from scytaledroid.DynamicAnalysis.run_qualification import baseline_ml_training_pool_count
-from scytaledroid.Utils.DisplayUtils import terminal
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card
 
 from .selected_app_workbench_context import workbench_summary_card_items
@@ -52,7 +51,6 @@ def build_selected_app_protocol_options(
             "2",
             "Interactive",
             badge=("suggested" if suggested_default_key in {"2", "3"} else None),
-            disabled=(not baseline_complete),
         ),
         menu_utils.MenuOption("3", "Test app", badge=None),
         menu_utils.MenuOption(
@@ -162,7 +160,6 @@ def render_recommended_screen(
     inspect_keys = [
         key for key in ["A", "H", "G", "R", "X"] if key in option_map and key != default_choice
     ]
-    use_panels = terminal.get_terminal_width(force_refresh=True) >= 108
 
     def _panel_option(key: str, *, suggested: bool = False) -> Any:
         option = option_map[key]
@@ -179,22 +176,14 @@ def render_recommended_screen(
 
     if default_choice in run_keys:
         run_options = [_panel_option(key, suggested=(key == default_choice)) for key in run_keys]
-        if use_panels:
-            menu_utils.print_menu_panels(
-                [("Run Option", run_options)],
-                columns=1,
-                default_keys=[default_choice],
-                compact=True,
-            )
-        else:
-            menu_utils.print_section("Run Option")
-            menu_utils.print_menu(
-                run_options,
-                default=default_choice,
-                show_descriptions=False,
-                show_exit=False,
-                compact=True,
-            )
+        menu_utils.print_section("Run Option")
+        menu_utils.print_menu(
+            run_options,
+            default=default_choice,
+            show_descriptions=False,
+            show_exit=False,
+            compact=True,
+        )
         if (
             default_choice == "1"
             and int(app.counts.baseline_valid_runs) >= int(app.cfg.baseline_required)
@@ -215,57 +204,35 @@ def render_recommended_screen(
             )
     else:
         recommended_options = [_panel_option(default_choice, suggested=True)]
-        if use_panels:
-            menu_utils.print_menu_panels(
-                [("Recommended", recommended_options)],
-                columns=1,
-                default_keys=[default_choice],
-                compact=True,
-            )
-        else:
-            menu_utils.print_section("Recommended")
+        menu_utils.print_section("Recommended")
+        menu_utils.print_menu(
+            recommended_options,
+            default=default_choice,
+            show_descriptions=False,
+            show_exit=False,
+            compact=True,
+        )
+        if run_keys:
+            print()
+            run_options = [_panel_option(key) for key in run_keys]
+            menu_utils.print_section("Run Option")
             menu_utils.print_menu(
-                recommended_options,
-                default=default_choice,
+                run_options,
                 show_descriptions=False,
                 show_exit=False,
                 compact=True,
             )
-        if run_keys:
-            print()
-            run_options = [_panel_option(key) for key in run_keys]
-            if use_panels:
-                menu_utils.print_menu_panels(
-                    [("Run Option", run_options)],
-                    columns=1,
-                    compact=True,
-                )
-            else:
-                menu_utils.print_section("Run Option")
-                menu_utils.print_menu(
-                    run_options,
-                    show_descriptions=False,
-                    show_exit=False,
-                    compact=True,
-                )
 
     if inspect_keys:
         print()
         inspect_options = [_panel_option(key) for key in inspect_keys]
-        if use_panels:
-            menu_utils.print_menu_panels(
-                [("Review / inspect", inspect_options)],
-                columns=1,
-                compact=True,
-            )
-        else:
-            menu_utils.print_section("Review / inspect")
-            menu_utils.print_menu(
-                inspect_options,
-                show_descriptions=False,
-                show_exit=False,
-                compact=True,
-            )
+        menu_utils.print_section("Review / inspect")
+        menu_utils.print_menu(
+            inspect_options,
+            show_descriptions=False,
+            show_exit=False,
+            compact=True,
+        )
 
     print()
     print("0) Back")
