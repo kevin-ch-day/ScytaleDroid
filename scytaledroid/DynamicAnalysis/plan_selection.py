@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.plans.loader import (
+from scytaledroid.DynamicAnalysis.plans import (
     SUPPORTED_SIGNATURE_VERSIONS,
     extract_plan_identity,
 )

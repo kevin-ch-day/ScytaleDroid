@@ -23,9 +23,10 @@ from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import peek_next_run_protocol
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools, missing_required_tools
-from scytaledroid.DynamicAnalysis.plans.loader import (
+from scytaledroid.DynamicAnalysis.plans import (
     build_plan_validation_event,
     load_dynamic_plan,
+    plan_validation_pass_message,
     render_plan_validation_block,
     validate_dynamic_plan,
 )
@@ -417,7 +418,12 @@ class DynamicAnalysisEngine:
     def _emit_plan_validation(self, validation) -> None:
         if self.config.interactive:
             if getattr(validation, "is_pass", False):
-                print(status_messages.status("Plan validation: PASS (baseline shown above).", level="success"))
+                print(
+                    status_messages.status(
+                        plan_validation_pass_message(getattr(self.config, "run_profile", None)),
+                        level="success",
+                    )
+                )
             else:
                 print(render_plan_validation_block(validation))
         self.logger.info(

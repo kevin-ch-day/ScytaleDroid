@@ -181,3 +181,24 @@ def test_load_dataset_run_state_keeps_non_idle_baseline_out_of_ml_pool(monkeypat
     assert state.counts.baseline_extra_valid == 0
     assert state.counts.baseline_low_signal_valid == 0
     assert state.counts.baseline_not_idle_valid == 1
+
+
+def test_status_label_does_not_misclassify_invalid_missing_pcap_as_low_signal() -> None:
+    row = dataset_run_state.DatasetRunRecentSummary(
+        ended_at="2026-07-06T12:00:00Z",
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        messaging_activity=None,
+        valid=False,
+        countable=False,
+        cohort_eligibility="EXCLUDED",
+        invalid_reason_code="PCAP_MISSING",
+        pcap_failure_detail="PCAP_TOO_SMALL",
+        low_signal=False,
+        baseline_not_idle=False,
+        supplemental_reason=None,
+        run_id="signal-run-1",
+        status_label="",
+    )
+
+    assert dataset_run_state._status_label(row) == "INVALID:PCAP_MISSING"

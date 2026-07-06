@@ -70,8 +70,10 @@ MIN_PCAP_BYTES_FALLBACK = MIN_PCAP_BYTES
 
 # Messaging connected-idle baselines are legitimately quieter than generic app
 # baselines. Keep a separate hard floor so true thread-visible holds do not get
-# rejected just because they do not resemble media/news/feed traffic.
-MIN_PCAP_BYTES_BASELINE_CONNECTED = 20_000
+# rejected just because they do not resemble media/news/feed traffic. 10KB is
+# intentionally above empty/trivial captures while still admitting quiet
+# encrypted messaging baselines such as Signal foreground thread holds.
+MIN_PCAP_BYTES_BASELINE_CONNECTED = 10_000
 
 # Profile v3 (Paper #3) phase-specific PCAP bytes minima.
 #

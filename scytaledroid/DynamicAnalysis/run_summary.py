@@ -41,6 +41,7 @@ def print_run_summary(result, duration_label: str) -> None:
         messaging_activity = operator.get("messaging_activity")
         if messaging_activity:
             lines.append(("Messaging", str(messaging_activity)))
+        _append_call_metadata_lines(lines, operator=operator, messaging_activity=messaging_activity)
         if str(run_profile or "").startswith("interaction_scripted"):
             template_id = operator.get("template_id") or operator.get("scenario_template")
             template_requested = operator.get("template_id_requested")
@@ -68,25 +69,6 @@ def print_run_summary(result, duration_label: str) -> None:
                     lines.append(("Protocol timing", f"OVERRUN by {int(target_overrun)}s"))
             except Exception:
                 pass
-            call_templates = {
-                "messaging_call_basic_v1",
-                "messaging_voice_v1",
-                "messaging_video_v1",
-                "whatsapp_voice_v1",
-                "whatsapp_video_v1",
-            }
-            if str(template_actual or template_id or "") in call_templates:
-                lines.append(("Call type", str(operator.get("call_type") or "voice")))
-                lines.append(("Call attempted", str(bool(operator.get("call_attempted"))).lower()))
-                lines.append(("Call connected", str(bool(operator.get("call_connected"))).lower()))
-                if operator.get("call_connect_latency_s") is not None:
-                    lines.append(("Call connect latency", f"{float(operator.get('call_connect_latency_s')):.2f}s"))
-                if operator.get("call_connected_duration_s") is not None:
-                    lines.append(("Call connected duration", f"{float(operator.get('call_connected_duration_s')):.2f}s"))
-                if operator.get("call_end_reason"):
-                    lines.append(("Call end reason", str(operator.get("call_end_reason"))))
-                if operator.get("call_outcome_reason"):
-                    lines.append(("Call outcome", str(operator.get("call_outcome_reason"))))
         elif str(run_profile or "").startswith("baseline"):
             baseline_protocol_id = operator.get("baseline_protocol_id")
             baseline_protocol_version = operator.get("baseline_protocol_version")
@@ -108,18 +90,7 @@ def print_run_summary(result, duration_label: str) -> None:
             elif valid is False:
                 label = f"INVALID: {reason or 'UNKNOWN'}"
             lines.append(("Dataset verdict", label))
-            if (
-                valid is False
-                and str(reason or "").strip().upper() == "PCAP_MISSING"
-                and str(run_profile or "").strip().lower().startswith("baseline")
-            ):
-                lines.append(
-                    (
-                        "Exploratory class",
-                        "LOW_SIGNAL_IDLE (retained, not quota-counted)",
-                    )
-                )
-            elif valid is True and validity.get("baseline_not_idle") is True:
+            if valid is True and validity.get("baseline_not_idle") is True:
                 lines.append(
                     (
                         "Exploratory class",
@@ -146,9 +117,22 @@ def print_run_summary(result, duration_label: str) -> None:
                 detail = _countability_detail(str(pkg) if pkg else None, result.dynamic_run_id)
                 if detail:
                     lines.append(("Quota detail", detail))
+                if (
+                    validity.get("valid_dataset_run") is True
+                    and validity.get("countable") is True
+                    and validity.get("low_signal") is True
+                    and str(run_profile or "").strip().lower() == "baseline_connected"
+                ):
+                    lines.append(
+                        (
+                            "Messaging note",
+                            "Quiet connected-messaging baselines can remain quota-counted when first-party runtime evidence is present; low traffic alone does not mean the baseline failed.",
+                        )
+                    )
                 if _is_baseline_not_idle_extra(validity, run_profile):
                     non_idle_reasons = _baseline_not_idle_reasons(result.dynamic_run_id, validity)
                     metric_snapshot = _non_idle_metric_snapshot(run_dir)
+                    startup_snapshot = _startup_profile_snapshot(run_dir)
                     threshold_crossed = _non_idle_threshold_crossed(result.dynamic_run_id, validity)
                     lines.append(
                         (
@@ -182,6 +166,22 @@ def print_run_summary(result, duration_label: str) -> None:
                     quic_ratio = _fmt_ratio(metric_snapshot.get("quic_ratio"))
                     if quic_ratio:
                         lines.append(("QUIC ratio", quic_ratio))
+                    startup_shape = _startup_shape_label(startup_snapshot)
+                    if startup_shape:
+                        lines.append(("Traffic shape", startup_shape))
+                    startup_share = _fmt_percent_ratio(startup_snapshot.get("startup_byte_share"))
+                    if startup_share:
+                        lines.append(("Startup byte share", startup_share))
+                    post_start_rate = _fmt_rate_per_min(startup_snapshot.get("post_start_median_bytes_per_min"))
+                    if post_start_rate:
+                        lines.append(("Post-start median", post_start_rate))
+                    if _is_x_quiet_tail_pattern(result.dynamic_run_id, pkg, startup_snapshot, validity):
+                        lines.append(
+                            (
+                                "Pattern hint",
+                                "X showed a large startup/feed-media burst followed by a quieter tail; this often means the selected screen looked idle after launch, but the opening surface still pulled too much media to count toward strict idle quota.",
+                            )
+                        )
                     if threshold_crossed:
                         lines.append(("Threshold crossed", threshold_crossed))
                     lines.append(("Next baseline", _baseline_not_idle_next_step(pkg)))
@@ -351,6 +351,44 @@ def print_run_summary(result, duration_label: str) -> None:
                 level="info",
             )
         )
+
+def _append_call_metadata_lines(
+    lines: list[tuple[str, str]],
+    *,
+    operator: dict[str, object],
+    messaging_activity: object,
+) -> None:
+    activity = str(messaging_activity or "").strip().lower()
+    call_type = operator.get("call_type")
+    if not call_type and activity in {"voice_call", "video_call"}:
+        call_type = "video" if activity == "video_call" else "voice"
+    has_call_metadata = any(
+        operator.get(field) is not None
+        for field in (
+            "call_attempted",
+            "call_connected",
+            "call_connect_latency_s",
+            "call_connected_duration_s",
+            "call_end_reason",
+            "call_outcome_reason",
+        )
+    )
+    if not call_type and not has_call_metadata:
+        return
+    if call_type:
+        lines.append(("Call type", str(call_type)))
+    if operator.get("call_attempted") is not None:
+        lines.append(("Call attempted", str(bool(operator.get("call_attempted"))).lower()))
+    if operator.get("call_connected") is not None:
+        lines.append(("Call connected", str(bool(operator.get("call_connected"))).lower()))
+    if operator.get("call_connect_latency_s") is not None:
+        lines.append(("Call connect latency", f"{float(operator.get('call_connect_latency_s')):.2f}s"))
+    if operator.get("call_connected_duration_s") is not None:
+        lines.append(("Call connected duration", f"{float(operator.get('call_connected_duration_s')):.2f}s"))
+    if operator.get("call_end_reason"):
+        lines.append(("Call end reason", str(operator.get("call_end_reason"))))
+    if operator.get("call_outcome_reason"):
+        lines.append(("Call outcome", str(operator.get("call_outcome_reason"))))
 
 
 def _load_manifest(run_dir: Path | None) -> dict[str, object] | None:
@@ -704,16 +742,7 @@ def _baseline_not_idle_reason_text(code: str) -> str:
 
 
 def _baseline_not_idle_reasons(dynamic_run_id: str | None, validity: dict[str, object] | None) -> list[str]:
-    reasons: list[str] = []
-    row = _tracker_run_row(dynamic_run_id)
-    if isinstance(row, dict):
-        raw = row.get("baseline_not_idle_reasons")
-        if isinstance(raw, list):
-            reasons.extend(str(item).strip() for item in raw if str(item).strip())
-    if not reasons and isinstance(validity, dict):
-        raw = validity.get("baseline_not_idle_reasons")
-        if isinstance(raw, list):
-            reasons.extend(str(item).strip() for item in raw if str(item).strip())
+    reasons = _baseline_not_idle_reason_codes(dynamic_run_id, validity)
     out: list[str] = []
     for reason in reasons:
         label = _baseline_not_idle_reason_text(reason)
@@ -771,6 +800,82 @@ def _non_idle_metric_snapshot(run_dir: Path | None) -> dict[str, object]:
     }
 
 
+def _startup_profile_snapshot(run_dir: Path | None) -> dict[str, object]:
+    if not run_dir:
+        return {}
+    summary = _load_summary(run_dir) or {}
+    capture = summary.get("capture") if isinstance(summary.get("capture"), dict) else {}
+    startup = capture.get("startup_profile") if isinstance(capture.get("startup_profile"), dict) else {}
+    if startup:
+        return startup
+    features = _load_json(run_dir / "analysis" / "pcap_features.json") or {}
+    startup_block = features.get("startup_profile") if isinstance(features.get("startup_profile"), dict) else {}
+    summary_block = startup_block.get("summary") if isinstance(startup_block.get("summary"), dict) else {}
+    return summary_block if summary_block else {}
+
+
+def _startup_shape_label(startup: dict[str, object]) -> str | None:
+    if not isinstance(startup, dict) or not startup:
+        return None
+    startup_dominant = startup.get("startup_dominant") is True
+    post_start = _safe_float(startup.get("post_start_median_bytes_per_min"))
+    if startup_dominant and post_start is not None and post_start <= 50_000:
+        return "startup-burst then quiet-tail"
+    if startup_dominant and post_start is not None and post_start > 50_000:
+        return "startup-dominant with elevated tail"
+    if post_start is not None and post_start >= 100_000:
+        return "sustained active/downlink"
+    if post_start is not None:
+        return "mixed / periodic refresh"
+    if startup_dominant:
+        return "startup-dominant"
+    return None
+
+
+def _is_x_quiet_tail_pattern(
+    dynamic_run_id: str | None,
+    package_name: str | None,
+    startup: dict[str, object],
+    validity: dict[str, object] | None,
+) -> bool:
+    if str(package_name or "").strip().lower() != "com.twitter.android":
+        return False
+    if not isinstance(startup, dict) or not startup:
+        return False
+    if startup.get("startup_dominant") is not True:
+        return False
+    share = _safe_float(startup.get("startup_byte_share"))
+    post_start = _safe_float(startup.get("post_start_median_bytes_per_min"))
+    reasons = set(_baseline_not_idle_reason_codes(dynamic_run_id, validity))
+    return (
+        share is not None
+        and share >= 0.80
+        and post_start is not None
+        and post_start <= 50_000
+        and "BASELINE_BYTES_HIGH" in reasons
+    )
+
+
+def _baseline_not_idle_reason_codes(
+    dynamic_run_id: str | None, validity: dict[str, object] | None
+) -> list[str]:
+    reasons: list[str] = []
+    row = _tracker_run_row(dynamic_run_id)
+    if isinstance(row, dict):
+        raw = row.get("baseline_not_idle_reasons")
+        if isinstance(raw, list):
+            reasons.extend(str(item).strip().upper() for item in raw if str(item).strip())
+    if not reasons and isinstance(validity, dict):
+        raw = validity.get("baseline_not_idle_reasons")
+        if isinstance(raw, list):
+            reasons.extend(str(item).strip().upper() for item in raw if str(item).strip())
+    out: list[str] = []
+    for reason in reasons:
+        if reason and reason not in out:
+            out.append(reason)
+    return out
+
+
 def _fmt_rate(value: object) -> str | None:
     try:
         return f"{float(value):,.0f} B/s"
@@ -781,6 +886,27 @@ def _fmt_rate(value: object) -> str | None:
 def _fmt_ratio(value: object) -> str | None:
     try:
         return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_percent_ratio(value: object) -> str | None:
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_rate_per_min(value: object) -> str | None:
+    try:
+        return f"{float(value):,.0f} B/min"
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -1068,6 +1194,29 @@ def _build_pcap_qa_lines(
                 segs.append(f"domains={ud}")
             if segs:
                 lines.append("diversity: " + " ".join(segs))
+        media_plane = pcap_features.get("media_plane") or {}
+        if isinstance(media_plane, dict):
+            summary = media_plane.get("summary") or {}
+            if isinstance(summary, dict):
+                classification = str(summary.get("classification") or "").strip()
+                if classification and classification != "not_observed":
+                    parts = [classification.replace("_", " ")]
+                    relay_count = summary.get("relay_endpoint_count")
+                    if relay_count is not None:
+                        parts.append(f"relay_endpoints={relay_count}")
+                    try:
+                        share = summary.get("dominant_udp_flow", {}).get("share_of_udp_bytes")  # type: ignore[union-attr]
+                    except Exception:
+                        share = None
+                    try:
+                        if share is not None:
+                            parts.append(f"dominant_udp={float(share):.2f}")
+                    except Exception:
+                        pass
+                    alloc = summary.get("turn_allocate_success_count")
+                    if alloc is not None:
+                        parts.append(f"turn_alloc={alloc}")
+                    lines.append("media: " + " ".join(parts))
     return lines
 
 
@@ -1103,6 +1252,30 @@ def _build_indicator_summary_lines(pcap_report: dict[str, object] | None) -> lis
         out.append(dns)
     if sni:
         out.append(sni)
+    media_plane = pcap_report.get("media_plane") if isinstance(pcap_report.get("media_plane"), dict) else {}
+    media_summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
+    dominant_udp = media_summary.get("dominant_udp_flow") if isinstance(media_summary.get("dominant_udp_flow"), dict) else {}
+    relay_endpoints = media_summary.get("relay_endpoints") if isinstance(media_summary.get("relay_endpoints"), list) else []
+    classification = str(media_summary.get("classification") or "").strip()
+    if classification and classification != "not_observed":
+        parts = [classification.replace("_", " ")]
+        if relay_endpoints:
+            labels = []
+            for row in relay_endpoints[:3]:
+                if not isinstance(row, dict):
+                    continue
+                ip = str(row.get("ip") or "").strip()
+                port = row.get("port")
+                if ip and port is not None:
+                    labels.append(f"{ip}:{port}")
+            if labels:
+                parts.append("relays=" + ", ".join(labels))
+        if isinstance(dominant_udp, dict):
+            a = str(dominant_udp.get("endpoint_a") or "").strip()
+            b = str(dominant_udp.get("endpoint_b") or "").strip()
+            if a and b:
+                parts.append(f"flow={a} <-> {b}")
+        out.append("media: " + " | ".join(parts))
     return out
 
 

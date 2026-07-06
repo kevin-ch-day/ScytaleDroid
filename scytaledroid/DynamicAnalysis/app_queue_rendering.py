@@ -7,8 +7,6 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis import app_queue_state
 from scytaledroid.DynamicAnalysis.queue_operator_ui import (
-    operator_next_action_label,
-    queue_compact_legend_lines,
     queue_selection_shortcut_hint,
     queue_selection_shortcuts_hint,
     queue_table_ml_pool_label,
@@ -18,8 +16,8 @@ from scytaledroid.Utils.DisplayUtils import colors
 from scytaledroid.Utils.DisplayUtils import text_blocks as _text_blocks
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
-_QUEUE_LAYOUT_WIDE_MIN = 120
-_QUEUE_LAYOUT_STANDARD_MIN = 88
+_QUEUE_LAYOUT_WIDE_MIN = 132
+_QUEUE_LAYOUT_STANDARD_MIN = 80
 _PROGRESS_RE = re.compile(r"^\s*(\d+)\s*/\s*(\d+)")
 
 
@@ -48,9 +46,9 @@ def _style_qa_label(value: str) -> str:
     key = str(value or "").strip().lower()
     if key.startswith("invalid"):
         return _apply_style(value, "error", bold=True)
-    if "id" in key:
+    if "identity note" in key or "id" in key:
         return _apply_style(value, "warning", bold=True)
-    if key.startswith("valid+l"):
+    if "prior evidence" in key or key.startswith("valid+l"):
         return _apply_style(value, "accent", bold=True)
     if key.startswith("valid"):
         return _apply_style(value, "success", bold=True)
@@ -61,11 +59,20 @@ def _style_build_label(value: str) -> str:
     key = str(value or "").strip().lower()
     if key == "current":
         return _apply_style(value, "success", bold=True)
-    if key == "mixed":
+    if key == "db-only":
         return _apply_style(value, "warning", bold=True)
     if key == "drift":
         return _apply_style(value, "error", bold=True)
-    if key in {"legacy", "db-hist"}:
+    if key in {
+        "legacy",
+        "history",
+        "prior-build",
+        "db-hist",
+        "db-history",
+        "prior-build-db",
+        "prior-build only",
+        "prior-only",
+    }:
         return _apply_style(value, "muted")
     return _apply_style(value, "accent")
 
@@ -74,7 +81,7 @@ def _style_progress_label(value: str) -> str:
     text = str(value or "").strip()
     if not text or text == "—":
         return _apply_style(text or "—", "muted")
-    if "held" in text.lower():
+    if "held" in text.lower() or "locked until baseline" in text.lower():
         return _apply_style(text, "warning", bold=True)
     match = _PROGRESS_RE.match(text)
     if not match:
@@ -114,17 +121,17 @@ def _style_app_label(value: str, *, next_row: bool) -> str:
 
 
 def queue_app_width(*, terminal_mod: Any, layout: str | None = None) -> int:
-    width = terminal_mod.get_terminal_width(force_refresh=True)
+    width = terminal_mod.get_terminal_width(default=100, force_refresh=True)
     layout = layout or queue_layout_mode(terminal_mod=terminal_mod)
     if layout == "narrow":
-        return max(12, min(18, width // 7))
+        return max(12, min(16, width // 6))
     if layout == "wide":
-        return max(14, min(20, width // 9))
-    return max(14, min(22, width // 6))
+        return max(16, min(22, width // 7))
+    return max(16, min(24, width // 5))
 
 
 def queue_layout_mode(*, terminal_mod: Any) -> str:
-    width = terminal_mod.get_terminal_width(force_refresh=True)
+    width = terminal_mod.get_terminal_width(default=100, force_refresh=True)
     if width >= _QUEUE_LAYOUT_WIDE_MIN:
         return "wide"
     if width >= _QUEUE_LAYOUT_STANDARD_MIN:
@@ -138,7 +145,7 @@ def queue_compact_layout_mode(*, terminal_mod: Any) -> str:
 
 def queue_compact_table_headers(*, layout: str | None = None, narrow: bool = False) -> list[str]:
     if narrow or layout == "narrow":
-        return ["#", "App", "St", "QA", "Bld", "IB", "NB", "Int"]
+        return ["#", "App", "St", "QA", "Bld", "Idle", "QFG", "Int", "Ret"]
     if layout == "wide":
         return [
             "#",
@@ -146,12 +153,13 @@ def queue_compact_table_headers(*, layout: str | None = None, narrow: bool = Fal
             "Status",
             "QA",
             "Build",
-            "Idle Base",
-            "Non-idle",
+            "Strict Idle",
+            "Quiescent FG",
             "Interactive",
-            "ML",
+            "Retained",
+            "ML Pool",
         ]
-    return ["#", "App", "Status", "QA", "Build", "Idle Base", "Non-idle", "Interactive"]
+    return ["#", "App", "Status", "QA", "Build", "Idle", "QFG", "Interactive", "Retained"]
 
 
 def _queue_table_row_cells(
@@ -182,6 +190,7 @@ def _queue_table_row_cells(
         row,
         interactive_required=interactive_required,
     )
+    retained_label = app_queue_state.queue_retained_prior_build_label(row)
     cells = [
         app_queue_state.queue_table_index_label(row, next_row=next_row),
         _style_app_label(app_label, next_row=is_next),
@@ -195,6 +204,7 @@ def _queue_table_row_cells(
                 _style_progress_label(idle_label),
                 _style_non_idle_label(non_idle_label),
                 _style_progress_label(interactive_label),
+                _style_ml_label(retained_label),
                 _style_ml_label(queue_table_ml_pool_label(row)),
             ]
         )
@@ -205,6 +215,7 @@ def _queue_table_row_cells(
             _style_progress_label(idle_label),
             _style_non_idle_label(non_idle_label),
             _style_progress_label(interactive_label),
+            _style_ml_label(retained_label),
         ]
     )
     return cells
@@ -212,18 +223,18 @@ def _queue_table_row_cells(
 
 def _queue_table_min_widths(*, layout: str) -> list[int]:
     if layout == "wide":
-        return [2, 10, 8, 6, 7, 9, 8, 11, 3]
+        return [2, 14, 11, 10, 12, 9, 8, 11, 12, 7]
     if layout == "standard":
-        return [2, 12, 10, 5, 7, 9, 8, 11]
-    return [2, 10, 4, 5, 5, 4, 4, 7]
+        return [2, 15, 9, 8, 10, 4, 4, 11, 10]
+    return [2, 12, 6, 6, 8, 4, 4, 8, 7]
 
 
 def _queue_table_column_styles(*, layout: str) -> list[str]:
     if layout == "wide":
-        return ["", "", "status", "qa", "", "", "", "", "muted"]
+        return ["", "", "status", "qa", "", "", "", "", "muted", "muted"]
     if layout == "standard":
-        return ["", "", "status", "qa", "", "", "", ""]
-    return ["", "", "status", "qa", "", "", "", ""]
+        return ["", "", "status", "qa", "", "", "", "", "muted"]
+    return ["", "", "status", "qa", "", "", "", "", "muted"]
 
 
 def render_compact_queue_table(
@@ -261,67 +272,26 @@ def render_compact_queue_table(
         headers,
         table_rows,
         compact=False,
-        padding=2,
+        padding=2 if layout == "wide" else 1,
         min_widths=_queue_table_min_widths(layout=layout),
         column_styles=_queue_table_column_styles(layout=layout),
         zebra=True,
     )
-    print()
-    legend_lines = queue_compact_legend_lines(has_next_marker=next_row is not None)
-    legend_items = [
-        summary_item(
-            "QA",
-            legend_lines[1 if next_row is not None else 0].split(": ", 1)[1],
-            value_style="muted",
-        ),
-        summary_item(
-            "Build",
-            legend_lines[2 if next_row is not None else 1].split(": ", 1)[1],
-            value_style="muted",
-        ),
-        summary_item("Idle Base", "quota-counted idle baselines (3 target)", value_style="success"),
-        summary_item(
-            "Non-idle",
-            "valid retained baselines outside quota; often app-driven feed/media refresh",
-            value_style="warning",
-        ),
-        summary_item(
-            "Interactive",
-            "valid runs shown against target; held = baseline incomplete",
-            value_style="accent",
-        ),
-        summary_item(
-            "ML", "supplemental baseline count available for training", value_style="muted"
-        ),
-    ]
-    footer = legend_lines[0] if next_row is not None else None
-    print_summary_card("Queue key", legend_items, footer=footer)
-
-
-def _clean_footer_line(text: str) -> str:
-    line = str(text or "").strip()
-    if line.endswith(". Press D."):
-        return line[: -len(". Press D.")].rstrip()
-    return line
-
 
 def render_queue_footer_block(
     *,
     warnings_line: str = "",
     notes_line: str = "",
 ) -> None:
-    notes_parts: list[str] = []
-    if warnings_line:
-        notes_parts.append(_clean_footer_line(warnings_line))
-    if notes_line:
-        notes_parts.append(_clean_footer_line(notes_line))
     print()
-    if notes_parts:
-        print(f"{_apply_style('ℹ [INFO]', 'accent', bold=True)} {' | '.join(notes_parts)}")
+    if warnings_line or notes_line:
+        print(
+            f"{_apply_style('ℹ [INFO]', 'accent', bold=True)} Diagnostics available: press D."
+        )
     print(f"→ {queue_selection_shortcut_hint()}")
     print(f"→ Shortcuts: {queue_selection_shortcuts_hint()}")
     if warnings_line or notes_line:
-        print("Press D for evidence lineage detail.")
+        print("→ Evidence lineage and historical/debug detail are in Diagnostics (D).")
 
 
 def render_queue_summary_block(
@@ -337,6 +307,12 @@ def render_queue_summary_block(
 ) -> None:
     ml_pool_total = cohort_baseline_ml_pool_total(list(getattr(prepared, "row_models", None) or []))
     row_models = list(prepared.row_models or [])
+    retained_app_count = sum(
+        1
+        for row in row_models
+        if int(getattr(row, "historical_valid_runs_count", 0) or 0) > 0
+        or int(getattr(row, "db_historical_sessions", 0) or 0) > 0
+    )
 
     current_parts = [f"{prepared.current_build_ready_count}/{prepared.dataset_apps_total} complete"]
     if prepared.current_build_in_progress_count > 0:
@@ -348,14 +324,6 @@ def render_queue_summary_block(
     if prepared.current_build_db_only_count > 0:
         current_parts.append(f"{prepared.current_build_db_only_count} db-only")
 
-    history_parts = []
-    if prepared.historical_local_only_app_count > 0:
-        history_parts.append(f"{prepared.historical_local_only_app_count} local-only")
-    if prepared.historical_db_only_app_count > 0:
-        history_parts.append(f"{prepared.historical_db_only_app_count} db-only")
-    if prepared.no_evidence_anywhere_count > 0:
-        history_parts.append(f"{prepared.no_evidence_anywhere_count} empty")
-
     quota_value = f"{quota}/{prepared.expected_runs} valid"
     if remaining > 0:
         quota_value += f" ({remaining} remaining)"
@@ -364,9 +332,18 @@ def render_queue_summary_block(
 
     items = [
         summary_item(
-            "Apps",
-            f"{apps_ok}/{prepared.dataset_apps_total} quota-satisfied",
+            "Mode",
+            "current-build collection queue" if capture_device_selected else "tracked-build collection queue",
             value_style="accent",
+        ),
+        summary_item(
+            "Apps",
+            (
+                f"{prepared.current_build_ready_count}/{prepared.dataset_apps_total} current-build complete"
+                if capture_device_selected
+                else f"{prepared.current_build_ready_count}/{prepared.dataset_apps_total} tracked-build complete"
+            ),
+            value_style="success" if prepared.current_build_ready_count > 0 else "accent",
         ),
         summary_item(
             "Quota" if capture_device_selected else "Tracked-build queue",
@@ -379,8 +356,8 @@ def render_queue_summary_block(
             value_style="warning" if prepared.stale_app_count > 0 else "accent",
         ),
         summary_item(
-            "History",
-            " · ".join(history_parts) if history_parts else "—",
+            "Retained prior-build evidence",
+            f"{retained_app_count} app(s)" if retained_app_count > 0 else "—",
             value_style="muted",
         ),
         summary_item(
@@ -406,39 +383,12 @@ def render_queue_summary_block(
             )
         )
 
-    if not freeze_ok:
-        blocker_text = app_queue_state.queue_remaining_summary(row_models)
-        if blocker_text:
-            items.append(
-                summary_item(
-                    "Remaining",
-                    blocker_text,
-                    value_style="warning",
-                )
-            )
-    if next_row:
-        items.append(
-            summary_item(
-                "Next",
-                f"{next_row.display_name} — {operator_next_action_label(next_row)}",
-                value_style="accent",
-            )
-        )
     footer_lines: list[str] = []
     if not capture_device_selected:
         footer_lines.append(
             "Select a device to verify live build drift and enable capture guidance."
         )
-    elif remaining > 0:
-        capture_plan = app_queue_state.format_capture_plan_line(row_models, limit=3)
-        if capture_plan:
-            items.append(
-                summary_item(
-                    "Capture plan",
-                    capture_plan,
-                    value_style="muted",
-                )
-            )
+    footer_lines.append("For rough-draft readiness, use P for paper-freeze readiness.")
 
     print_summary_card(
         "Cohort status",

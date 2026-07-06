@@ -46,6 +46,85 @@ def test_countability_detail_keeps_baseline_connected_countable_when_low_signal(
     assert detail == "source=tracker_quota_marking, countable=true"
 
 
+def test_print_run_summary_explains_quiet_connected_messaging_baseline(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    run_id = "run-signal-1"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "target": {"package_name": "org.thoughtcrime.securesms"},
+                "operator": {
+                    "run_profile": "baseline_connected",
+                    "interaction_level": "minimal",
+                    "messaging_activity": "connected_idle",
+                },
+                "dataset": {
+                    "valid_dataset_run": True,
+                    "countable": True,
+                    "low_signal": True,
+                    "technical_validity": "VALID",
+                    "protocol_compliance": "COMPLIANT",
+                    "cohort_eligibility": "COUNTABLE",
+                    "min_pcap_bytes": 10000,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run_summary, "resolve_evidence_path", lambda _p: run_dir)
+    monkeypatch.setattr(
+        run_summary,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "org.thoughtcrime.securesms": {
+                    "valid_runs": 1,
+                    "target_runs": 7,
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "run_profile": "baseline_connected",
+                            "valid_dataset_run": True,
+                            "countable": True,
+                            "counts_toward_quota": True,
+                            "low_signal": True,
+                            "paper_exclusion_primary_reason_code": None,
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(run_summary, "_load_summary", lambda _run_dir: None)
+    monkeypatch.setattr(run_summary, "_load_engine_summary", lambda _run_dir: None)
+    monkeypatch.setattr(run_summary, "_load_json", lambda _path: None)
+    monkeypatch.setattr(run_summary.prompt_utils, "prompt_yes_no", lambda *_args, **_kwargs: False)
+
+    started_at = datetime(2026, 7, 6, 6, 8, 12, tzinfo=UTC)
+    result = DynamicSessionResult(
+        package_name="org.thoughtcrime.securesms",
+        duration_seconds=250,
+        started_at=started_at,
+        ended_at=started_at,
+        status="success",
+        dynamic_run_id=run_id,
+        evidence_path=str(run_dir),
+    )
+
+    run_summary.print_run_summary(result, "Cohort")
+    out = capsys.readouterr().out
+
+    assert "Counts toward quota" in out
+    assert "YES (baseline_connected)" in out
+    assert "Messaging note" in out
+    assert "low traffic alone does not mean the baseline failed" in out
+
+
 def test_countability_detail_marks_baseline_idle_low_signal_as_nonquota(monkeypatch) -> None:
     monkeypatch.setattr(
         run_summary,
@@ -192,6 +271,13 @@ def test_print_run_summary_explains_baseline_not_idle_extra(monkeypatch, tmp_pat
                     "bytes_per_second_p95": 410_000.0,
                 },
                 "proxies": {"quic_ratio": 0.72},
+                "startup_profile": {
+                    "summary": {
+                        "startup_byte_share": 0.91,
+                        "post_start_median_bytes_per_min": 18_704.0,
+                        "startup_dominant": True,
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -260,6 +346,12 @@ def test_print_run_summary_explains_baseline_not_idle_extra(monkeypatch, tmp_pat
     assert "410,000 B/s" in out
     assert "QUIC ratio" in out
     assert "0.72" in out
+    assert "Traffic shape" in out
+    assert "startup-burst then quiet-tail" in out
+    assert "Startup byte share" in out
+    assert "91.0%" in out
+    assert "Post-start median" in out
+    assert "18,704 B/min" in out
     assert "Threshold crossed" in out
     assert "total bytes, QUIC ratio, p95 bytes/sec" in out
     assert "Repeat with stricter idle behavior if quota progress is needed." in out
@@ -303,6 +395,13 @@ def test_print_run_summary_gives_social_feed_specific_next_baseline_guidance(
                     "bytes_per_second_p95": 410_000.0,
                 },
                 "proxies": {"quic_ratio": 0.72},
+                "startup_profile": {
+                    "summary": {
+                        "startup_byte_share": 0.947,
+                        "post_start_median_bytes_per_min": 18_704.0,
+                        "startup_dominant": True,
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -350,6 +449,8 @@ def test_print_run_summary_gives_social_feed_specific_next_baseline_guidance(
     run_summary.print_run_summary(result, "Cohort")
 
     out = colors.strip(capsys.readouterr().out)
+    assert "Pattern hint" in out
+    assert "large startup/feed-media burst followed by a quieter tail" in out
     assert (
         "Retry on profile, settings, bookmarks, lists, or another stable non-feed/non-video X screen if quota progress is needed."
         in out
@@ -384,3 +485,50 @@ def test_countability_label_keeps_manual_non_cohort_reason_when_explicit() -> No
     )
 
     assert label == "NO (manual exploratory)"
+
+
+def test_print_run_summary_does_not_mislabel_invalid_missing_pcap_as_low_signal(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    run_id = "run-signal-1"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "target": {"package_name": "org.thoughtcrime.securesms"},
+                "operator": {"run_profile": "baseline_idle", "interaction_level": "minimal"},
+                "dataset": {
+                    "valid_dataset_run": False,
+                    "countable": False,
+                    "invalid_reason_code": "PCAP_MISSING",
+                    "technical_validity": "INVALID",
+                    "protocol_compliance": "COMPLIANT",
+                    "cohort_eligibility": "EXCLUDED",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run_summary.prompt_utils, "prompt_yes_no", lambda *_a, **_k: False)
+    monkeypatch.setattr(run_summary, "_load_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_summary, "_load_engine_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_summary, "_load_db_persistence_status", lambda *_a, **_k: None)
+
+    result = DynamicSessionResult(
+        package_name="org.thoughtcrime.securesms",
+        duration_seconds=180,
+        started_at=datetime.now(UTC),
+        ended_at=datetime.now(UTC),
+        status="failed",
+        dynamic_run_id=run_id,
+        evidence_path=str(run_dir),
+    )
+
+    run_summary.print_run_summary(result, "Cohort")
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Dataset verdict" in out
+    assert "INVALID: PCAP_MISSING" in out
+    assert "LOW_SIGNAL_IDLE" not in out
+    assert "retained, not quota-counted" not in out

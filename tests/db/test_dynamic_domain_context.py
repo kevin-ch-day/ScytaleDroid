@@ -587,6 +587,28 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert bbc_live["owner_class"] == "first_party"
     assert bbc_live["role_class"] == "publisher_api"
 
+    bbc_home = classify_domain(
+        "www.bbc.com", package_name="bbc.mobile.news.ww", references=refs
+    )
+    assert bbc_home["owner_class"] == "first_party"
+    assert bbc_home["role_class"] == "publisher_content"
+
+    bbc_analytics = classify_domain(
+        "mybbc-analytics.files.bbci.co.uk",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_analytics["owner_class"] == "first_party"
+    assert bbc_analytics["role_class"] == "publisher_collection"
+
+    bbc_remote_config = classify_domain(
+        "map-remote-config.files.bbci.co.uk",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_remote_config["owner_class"] == "first_party"
+    assert bbc_remote_config["role_class"] == "sdk_configuration"
+
     bbc_cmp = classify_domain(
         "cdn.privacy-mgmt.com", package_name="bbc.mobile.news.ww", references=refs
     )
@@ -675,7 +697,37 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
         "media.licdn.com", package_name="com.linkedin.android", references=refs
     )
     assert linkedin_media["owner_class"] == "first_party"
-    assert linkedin_media["role_class"] == "content_delivery"
+    assert linkedin_media["role_class"] == "media_delivery"
+
+    linkedin_static = classify_domain(
+        "static-akam.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_static["owner_class"] == "first_party"
+    assert linkedin_static["role_class"] == "static_asset_delivery"
+
+    linkedin_dms = classify_domain(
+        "dms.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_dms["owner_class"] == "first_party"
+    assert linkedin_dms["role_class"] == "document_media_delivery"
+
+    linkedin_dms_akam = classify_domain(
+        "dms-akam.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_dms_akam["owner_class"] == "first_party"
+    assert linkedin_dms_akam["role_class"] == "document_media_delivery"
+
+    linkedin_pop_edge = classify_domain(
+        "pop-ltx1-lx.www.linkedin.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_pop_edge["owner_class"] == "first_party"
+    assert linkedin_pop_edge["role_class"] == "content_delivery"
+
+    linkedin_static_cflr = classify_domain(
+        "static-cflr.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_static_cflr["owner_class"] == "first_party"
+    assert linkedin_static_cflr["role_class"] == "static_asset_delivery"
 
     linkedin_dns = classify_domain(
         "b.ns1p.net", package_name="com.linkedin.android", references=refs
@@ -915,6 +967,12 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     assert mapbox["owner_class"] == "third_party"
     assert mapbox["role_class"] == "sdk_configuration"
 
+    mapbox_api = classify_domain(
+        "api.mapbox.com", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert mapbox_api["owner_class"] == "third_party"
+    assert mapbox_api["role_class"] == "geospatial_api"
+
     cloudflare = classify_domain(
         "cdnjs.cloudflare.com", package_name="com.cnn.mobile.android.phone", references=refs
     )
@@ -944,6 +1002,10 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     giphy = classify_domain("media4.giphy.com", package_name="com.facebook.katana", references=refs)
     assert giphy["owner_class"] == "third_party"
     assert giphy["role_class"] == "content_delivery"
+
+    zoom = classify_domain("st1.zoom.us", package_name="com.facebook.katana", references=refs)
+    assert zoom["owner_class"] == "third_party"
+    assert zoom["role_class"] == "realtime_call_transport"
 
     guardian_api = classify_domain(
         "mobile.guardianapis.com", package_name="com.guardian", references=refs
@@ -976,3 +1038,123 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     )
     assert guardian_adjust["owner_class"] == "third_party"
     assert guardian_adjust["role_class"] == "attribution_measurement"
+
+    guardian_nextgen = classify_domain(
+        "api.nextgen.guardianapps.co.uk",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_nextgen["owner_class"] == "first_party"
+    assert guardian_nextgen["role_class"] == "publisher_api"
+
+    guardian_amazon_media = classify_domain(
+        "m.media-amazon.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_amazon_media["owner_class"] == "third_party"
+    assert guardian_amazon_media["role_class"] == "ad_creative_delivery"
+
+    guardian_tungsten = classify_domain(
+        "www.btd-cmh.tq-tungsten.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_tungsten["owner_class"] == "third_party"
+    assert guardian_tungsten["role_class"] == "ad_measurement"
+
+    bbc_everest = classify_domain(
+        "creative-assets.everesttech.net",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_everest["owner_class"] == "third_party"
+    assert bbc_everest["role_class"] == "ad_creative_delivery"
+
+    cnn_politics_tiles = classify_domain(
+        "politics-explorer-tiles-static.cnn.io",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_politics_tiles["owner_class"] == "first_party"
+    assert cnn_politics_tiles["role_class"] == "content_delivery"
+
+    cnn_ix = classify_domain(
+        "ix.cnn.io",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_ix["owner_class"] == "first_party"
+    assert cnn_ix["role_class"] == "content_delivery"
+
+    facebook_lookaside = classify_domain(
+        "lookaside.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_lookaside["owner_class"] == "first_party"
+    assert facebook_lookaside["role_class"] == "content_delivery"
+
+    facebook_bapi = classify_domain(
+        "b-api.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_bapi["owner_class"] == "first_party"
+    assert facebook_bapi["role_class"] == "social_graph_api"
+
+    facebook_mqtt = classify_domain(
+        "mqtt-mini.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_mqtt["owner_class"] == "first_party"
+    assert facebook_mqtt["role_class"] == "realtime_messaging"
+
+    facebook_edge_mqtt = classify_domain(
+        "edge-mqtt.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_edge_mqtt["owner_class"] == "first_party"
+    assert facebook_edge_mqtt["role_class"] == "realtime_messaging"
+
+    facebook_mobile = classify_domain(
+        "mobile.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_mobile["owner_class"] == "first_party"
+    assert facebook_mobile["role_class"] == "social_graph_api"
+
+    facebook_gateway = classify_domain(
+        "z-m-gateway.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_gateway["owner_class"] == "first_party"
+    assert facebook_gateway["role_class"] == "social_graph_api"
+
+    facebook_bwww = classify_domain(
+        "b-www.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_bwww["owner_class"] == "first_party"
+    assert facebook_bwww["role_class"] == "social_graph_api"
+
+    facebook_genai = classify_domain(
+        "genai-graph.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_genai["owner_class"] == "first_party"
+    assert facebook_genai["role_class"] == "social_graph_api"
+
+    whatsapp_acs = classify_domain(
+        "acs.whatsapp.com",
+        package_name="com.whatsapp",
+        references=refs,
+    )
+    assert whatsapp_acs["owner_class"] == "first_party"
+    assert whatsapp_acs["role_class"] == "messaging_platform_api"

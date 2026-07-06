@@ -16,6 +16,7 @@ from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManife
 from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
 from scytaledroid.DynamicAnalysis.pcap.fingerprints import summarize_tls_fingerprints
 from scytaledroid.DynamicAnalysis.pcap.identity import ensure_report_capture_identity
+from scytaledroid.DynamicAnalysis.pcap.media_plane import summarize_media_plane
 from scytaledroid.DynamicAnalysis.pcap.security_surface import (
     render_security_review_md,
     summarize_security_surface,
@@ -130,9 +131,11 @@ def write_pcap_report(
         "direction_summary": {},
         "flow_summary": {},
         "burst_summary": {},
+        "startup_profile": {},
         "tls_quic_visibility": {},
         "tls_fingerprints": {},
         "transport_health": {},
+        "media_plane": {},
         "service_context": {},
         "service_signals": {},
         "security_surface": {},
@@ -193,6 +196,7 @@ def write_pcap_report(
             report["direction_summary"] = stats.get("direction_summary") or {}
             report["flow_summary"] = stats.get("flow_summary") or {}
             report["burst_summary"] = stats.get("burst_summary") or {}
+            report["startup_profile"] = stats.get("startup_profile") or {}
             report["tls_quic_visibility"] = stats.get("tls_quic_visibility") or {}
         try:
             report["transport_health"] = summarize_transport_health(pcap_path, tshark_path=tshark_path)
@@ -216,6 +220,17 @@ def write_pcap_report(
     else:
         report["service_context"] = context_bundle.get("service_context") or {}
         report["service_signals"] = context_bundle.get("service_signals") or {}
+
+    if report_status != "skip":
+        try:
+            report["media_plane"] = summarize_media_plane(
+                report,
+                pcap_path=pcap_path,
+                tshark_path=tshark_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log(event_logger, "pcap_report_media_plane_failed", {"error": str(exc)})
+            report["media_plane"] = {"status": "failed", "error": str(exc)}
 
     if report_status != "skip" and tshark_path and pcap_path:
         try:

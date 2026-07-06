@@ -540,7 +540,8 @@ def format_current_build_evidence_lines(summary: EvidenceQualificationSummary) -
     return [
         "Current build evidence",
         "----------------------",
-        format_bucket_evidence_line(label="Baseline", bucket=summary.baseline),
+        format_bucket_evidence_line(label="Strict idle", bucket=summary.baseline),
+        f"Quiescent FG  {summary.baseline.non_idle_retained}",
         format_bucket_evidence_line(label="Interactive", bucket=summary.interactive),
     ]
 
@@ -554,6 +555,7 @@ def format_qualification_summary_lines(summary: EvidenceQualificationSummary) ->
         f"Quota-counted valid     : {summary.quota_counted_valid}",
         f"Extra valid             : {summary.extra_valid}",
         f"Low-signal retained     : {summary.low_signal_retained}",
+        f"Quiescent FG retained   : {summary.baseline.non_idle_retained}",
         f"Total valid retained    : {summary.total_valid_retained}",
         f"Analysis-included valid : {summary.analysis_included_valid}",
         f"Quota satisfied         : {satisfied}",
@@ -562,7 +564,28 @@ def format_qualification_summary_lines(summary: EvidenceQualificationSummary) ->
 
 def format_workbench_qualification_lines(app: Any) -> list[str]:
     summary = qualification_summary_from_app_counts(app)
-    lines = format_current_build_evidence_lines(summary) + format_qualification_summary_lines(summary)
+    lines = format_current_build_evidence_lines(summary)
+    strict_idle_gate_incomplete = not summary.baseline.quota_satisfied
+    interactive_raw = (
+        int(summary.interactive.quota_counted_valid)
+        + int(summary.interactive.extra_valid)
+        + int(summary.interactive.low_signal_retained)
+    )
+    if strict_idle_gate_incomplete:
+        lines[-1] = f"Interactive  {interactive_raw}/{summary.interactive.required} held by strict idle"
+    lines += format_qualification_summary_lines(summary)
+    if strict_idle_gate_incomplete:
+        lines.append(
+            f"Strict-idle workflow gate: incomplete ({summary.baseline.quota_counted_valid}/{summary.baseline.required})"
+        )
+    if summary.baseline.non_idle_retained > 0:
+        lines.append(
+            "Quiescent FG: valid no-touch foreground baseline evidence retained outside strict-idle quota; it does not unlock interactive or enter the strict-idle ML pool."
+        )
+    if strict_idle_gate_incomplete and interactive_raw > 0:
+        lines.append(
+            "Interactive evidence is already captured for the current build, but it remains held until Strict Idle is complete."
+        )
     pool_line = format_baseline_ml_training_pool_phrase(
         extra_valid=summary.baseline.extra_valid,
         low_signal_retained=summary.baseline.low_signal_retained,

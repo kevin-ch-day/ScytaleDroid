@@ -27,13 +27,17 @@ class DynamicMenuSections:
     archive_export: list[MenuOption]
 
     @property
-    def all_options(self) -> list[MenuOption]:
+    def ordered_actions(self) -> list[MenuOption]:
         return [
             *self.primary_actions,
             *self.validation,
             *self.maintenance,
             *self.archive_export,
         ]
+
+    @property
+    def all_options(self) -> list[MenuOption]:
+        return self.ordered_actions
 
 
 def _quota_reason_text(summary, *, quota_valid: int) -> str:
@@ -53,41 +57,37 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
     return DynamicMenuSections(
         primary_actions=[
             MenuOption(
-                "1", "Focused app run", description="pick one app and run baseline or interactive"
+                "1",
+                "Current-build collection queue",
+                description="open the live cohort queue for current-build collection",
+                badge="primary",
             ),
             MenuOption(
                 "2",
-                "App queue / next action",
-                description="recommended next steps across the cohort",
-                badge="primary",
+                "Paper-freeze readiness",
+                description="review build-selected paper target readiness and latest freeze export",
+            ),
+            MenuOption(
+                "3",
+                "Focused app workbench",
+                description="open one app for run options, QA, history, and diagnostics",
             ),
         ],
         validation=[
-            MenuOption("3", "State summary", description="cohort health and collection progress"),
             MenuOption(
-                "4", "Archive readiness", description="freeze gate and publication blockers"
+                "4", "Verify capture environment", description="host PCAP tools and prerequisites"
             ),
+            MenuOption("5", "State summary", description="cohort health and collection progress"),
             MenuOption(
-                "10",
-                "Cohort security audit export",
-                description="PCAP metadata CSVs for cleartext/DNS/TLS review",
+                "6", "Archive readiness", description="freeze gate and publication blockers"
             ),
+            MenuOption("7", "Change cohort", description="switch active research dataset scope"),
         ],
         maintenance=[
             MenuOption(
-                "5", "Verify capture environment", description="host PCAP tools and prerequisites"
-            ),
-            MenuOption("6", "Change cohort", description="switch active research dataset scope"),
-            MenuOption(
-                "7", "Reindex tracker", description="rebuild tracker index from evidence packs"
-            ),
-            MenuOption(
                 "8",
-                "Prune incomplete evidence",
-                description="remove abandoned partial capture dirs",
-            ),
-            MenuOption(
-                "9", "Legacy structural tools", description="archived structural cohort utilities"
+                "Maintenance / Advanced",
+                description="reindex, cleanup, legacy tools, and operator exports",
             ),
         ],
         archive_export=[],
@@ -129,7 +129,7 @@ def render_dynamic_menu_overview() -> None:
     evidence_text = (
         "none yet"
         if int(summary.total_runs) == 0
-        else f"{summary.total_runs} packs ({summary.valid_runs} valid)"
+        else f"{summary.total_runs} packs / {summary.valid_runs} valid"
     )
     try:
         quota_summary = resolve_active_cohort_evidence_quota_summary()
@@ -151,87 +151,38 @@ def render_dynamic_menu_overview() -> None:
     device_text = (
         selected_device if selected_device and selected_device != "None" else "none selected"
     )
-    subtitle = f"{cohort_label} · {device_text}"
-    quota_text = f"{quota_valid} / {expected_valid} valid"
-    if expected_valid > 0 and not summary.can_freeze:
-        remaining = max(0, expected_valid - quota_valid)
-        quota_text += f" ({remaining} remaining)"
-    next_step = _next_step_text(
-        summary=summary,
-        handoff_ready=handoff_ready,
-        handoff_total=handoff_total,
-        selected_device_text=device_text,
-    )
+    subtitle = f"Current Device: {device_text}"
     state_items = [
+        summary_cards.summary_item("Device", device_text, value_style="muted"),
+        summary_cards.summary_item("Cohort", cohort_label, value_style="muted"),
         summary_cards.summary_item("Evidence", evidence_text, value_style="accent"),
         summary_cards.summary_item(
-            "Archive quota",
-            quota_text,
-            value_style="warning" if not summary.can_freeze else "success",
-        ),
-        *(
-            [
-                summary_cards.summary_item(
-                    "ML pool", f"{baseline_ml_pool} supplemental baselines", value_style="emphasis"
-                )
-            ]
-            if baseline_ml_pool > 0
-            else []
-        ),
-        *(
-            [
-                summary_cards.summary_item(
-                    "Retained extra", f"{extra_retained} outside quota", value_style="accent"
-                )
-            ]
-            if extra_retained > 0
-            else []
+            "Static prep",
+            handoff_status,
+            value_style="success" if handoff_status == "ready" else "warning",
         ),
         summary_cards.summary_item(
             "Archive",
             freeze_text,
             value_style="success" if summary.can_freeze else "warning",
         ),
-        summary_cards.summary_item(
-            "Why blocked", reason_text, value_style="warning" if not summary.can_freeze else "muted"
-        ),
-        summary_cards.summary_item(
-            "Static prep",
-            handoff_status,
-            value_style="success" if handoff_status == "ready" else "warning",
-        ),
     ]
     footer = None
     if int(summary.total_runs) == 0:
         footer = "No dynamic evidence packs are present. This is expected after cleanup or before the first run."
+    elif not summary.can_freeze and expected_valid > 0:
+        remaining = max(0, expected_valid - quota_valid)
+        state_items.append(
+            summary_cards.summary_item(
+                "Remaining quota-valid runs",
+                str(remaining),
+                value_style="warning",
+            )
+        )
     print(
         summary_cards.format_summary_card(
-            "Dynamic Analysis",
+            "Current Session",
             state_items,
-            subtitle=subtitle,
-            footer=footer or next_step,
+            footer=footer,
         )
     )
-
-
-def _next_step_text(
-    *,
-    summary,
-    handoff_ready: int,
-    handoff_total: int,
-    selected_device_text: str,
-) -> str:
-    if str(selected_device_text or "").strip().lower() == "none selected":
-        return "Next: select a capture device, then open App queue / next action."
-    if int(getattr(summary, "total_runs", 0) or 0) == 0:
-        return "Next: use Focused app run or App queue / next action to create evidence."
-    if handoff_total > 0 and handoff_ready < handoff_total:
-        return "Next: static prep is incomplete; review State summary before collecting more runs."
-    reason_code = str(getattr(summary, "first_failing_reason", "") or "").strip().upper()
-    if reason_code == "QUOTA_NOT_SATISFIED":
-        return "Next: open App queue / next action to continue collection."
-    if bool(getattr(summary, "can_freeze", False)):
-        return "Next: quota satisfied — run supplemental baselines (ML training pool) or review Archive readiness."
-    if not bool(getattr(summary, "can_freeze", False)):
-        return "Next: review Archive readiness for the current blocker."
-    return "Next: archive readiness checks are satisfied."

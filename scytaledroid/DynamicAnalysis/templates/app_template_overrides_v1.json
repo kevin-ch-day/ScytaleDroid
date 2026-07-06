@@ -1,7 +1,9 @@
 {
   "version": "v1",
   "packages": {
+    "bbc.mobile.news.ww": "bbc_news_behavior_v1",
     "com.facebook.katana": "facebook_behavior_v3",
+    "com.guardian": "guardian_behavior_v1",
     "com.snapchat.android": "snapchat_basic_v1",
     "com.twitter.android": "x_twitter_full_session_v1",
     "com.whatsapp": "whatsapp_basic_v1"

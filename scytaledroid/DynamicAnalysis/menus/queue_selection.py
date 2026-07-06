@@ -188,6 +188,9 @@ def run_package_selection_menu(
                 interactive_required=int(getattr(prepared.cfg, "interactive_required", 4)),
             )
             continue
+        if choice_lc in {"p", "paper", "paper-freeze", "paper_freeze"}:
+            _status_reports.render_paper_freeze_readiness_brief()
+            continue
         if choice_lc in {"y", "history"}:
             _status_reports.render_cohort_build_history(
                 list(prepared.row_models or []),
@@ -225,7 +228,8 @@ def run_package_selection_menu(
             return package_name
         print(
             status_messages.status(
-                "Invalid choice. Enter an app number/name or use S, V, Y, H, D, or B.", level="warn"
+                "Invalid choice. Enter an app number/name or use P, S, V, Y, H, D, or B.",
+                level="warn",
             )
         )
 

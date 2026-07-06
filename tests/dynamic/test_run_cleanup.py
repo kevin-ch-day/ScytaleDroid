@@ -89,3 +89,74 @@ def test_recent_tracker_runs_preserves_existing_pcap_detail(
 
     assert len(recent) == 1
     assert recent[0].pcap_failure_detail == "PCAP_LOCAL_FILE_EMPTY"
+
+
+def test_find_incomplete_dynamic_run_dirs_skips_active_pid_marker(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
+    run_dir = output_root / "evidence" / "dynamic" / "active-run"
+    marker_path = run_dir / "notes" / ".scytaledroid_in_progress"
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "active-run",
+                "started_at_utc": "2026-07-05T00:00:00+00:00",
+                "host_pid": 4242,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run_cleanup, "_process_is_alive", lambda pid: pid == 4242)
+
+    assert run_cleanup.find_incomplete_dynamic_run_dirs() == []
+
+
+def test_find_incomplete_dynamic_run_dirs_includes_dead_pid_marker(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
+    run_dir = output_root / "evidence" / "dynamic" / "dead-run"
+    marker_path = run_dir / "notes" / ".scytaledroid_in_progress"
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "dead-run",
+                "started_at_utc": "2026-07-05T00:00:00+00:00",
+                "host_pid": 99999,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run_cleanup, "_process_is_alive", lambda _pid: False)
+
+    assert run_cleanup.find_incomplete_dynamic_run_dirs() == [run_dir]
+
+
+def test_find_incomplete_dynamic_run_dirs_includes_stale_legacy_marker(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
+    run_dir = output_root / "evidence" / "dynamic" / "legacy-run"
+    marker_path = run_dir / "notes" / ".scytaledroid_in_progress"
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "legacy-run",
+                "started_at_utc": "2026-07-05T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run_cleanup, "_now_epoch_s", lambda: 1_783_872_001.0)
+
+    assert run_cleanup.find_incomplete_dynamic_run_dirs() == [run_dir]

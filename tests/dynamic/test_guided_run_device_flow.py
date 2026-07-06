@@ -170,6 +170,64 @@ def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch,
     assert "Cohort quota impact: YES (if VALID)" not in out
 
 
+def test_guided_run_dataset_baseline_uses_recommended_duration(monkeypatch) -> None:
+    package = "com.zhiliaoapp.musically"
+    captured = {}
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="TikTok",
+        active_device={"serial": "ZY22JK89DR", "model": "moto"},
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(package),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "1")
+    monkeypatch.setattr(guided_run.prompt_utils, "prompt_yes_no", lambda *_a, **_k: True)
+    monkeypatch.setattr(guided_run, "time", SimpleNamespace(sleep=lambda _s: None))
+    monkeypatch.setattr(
+        guided_run,
+        "ensure_plan_or_error",
+        lambda *_a, **_k: {"plan_path": "plan.json", "static_run_id": 5838},
+    )
+    monkeypatch.setattr(guided_run, "_pre_run_scientific_checks", lambda **_k: True)
+    monkeypatch.setattr(guided_run, "print_plan_selection_banner", lambda *_a, **_k: None)
+    monkeypatch.setattr(guided_run, "print_run_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(guided_run, "_post_run_integrity_check", lambda *_a, **_k: None)
+    monkeypatch.setattr(guided_run, "_capture_protocol_fit_feedback", lambda **_k: None)
+
+    def _build_spec(**kwargs):
+        captured["spec"] = kwargs
+        return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(guided_run, "build_dynamic_run_spec", _build_spec)
+    monkeypatch.setattr(
+        guided_run,
+        "execute_dynamic_run_spec",
+        lambda _spec: SimpleNamespace(
+            dynamic_run_id="run-1",
+            evidence_path="/tmp/run-1",
+            status="success",
+            package_name=package,
+            elapsed_seconds=10,
+            duration_seconds=10,
+        ),
+    )
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=one_shot_package_selector(package)[1],
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    assert captured["spec"]["duration_seconds"] == int(
+        getattr(guided_run.profile_config, "RECOMMENDED_SAMPLING_SECONDS", 240)
+    )
+
+
 def test_guided_run_seeds_queue_from_active_selected_device(monkeypatch) -> None:
     package = "bbc.mobile.news.ww"
     subtitles: list[str | None] = []

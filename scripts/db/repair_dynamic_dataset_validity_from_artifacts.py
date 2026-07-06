@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Repair stale dynamic dataset validity after artifact/path repairs.
+"""Repair stale dynamic dataset validity and policy-derived manifest fields.
 
-This intentionally does not relax validity or quota policy. It re-runs the
-existing dataset artifact validator and updates only manifests whose current
-dataset state is invalid while the current artifacts now validate as usable.
+This intentionally does not relax validity or quota policy. It supports two
+bounded repairs sourced from existing evidence and tracker truth:
+
+1. Re-run the existing dataset artifact validator and update manifests whose
+   current dataset state is invalid while the current artifacts now validate as
+   usable.
+2. Sync stale policy-derived manifest fields (for example ``countable``,
+   ``baseline_not_idle``, ``exploratory_class``) from the current tracker row
+   when queue/tracker truth already differs from the local evidence-pack
+   manifest.
 """
 
 from __future__ import annotations
@@ -11,13 +18,55 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+if __package__ in {None, ""}:
+    _REPO_ROOT = Path(__file__).resolve().parents[2]
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+
 
 REPAIRABLE_INVALID_REASONS = {"PCAP_MISSING", "PCAP_TOO_SMALL", "PCAP_PARSE_ERROR"}
+SYNCABLE_TRACKER_FIELDS = (
+    "valid_dataset_run",
+    "invalid_reason_code",
+    "sampling_duration_seconds",
+    "actual_sampling_seconds",
+    "actual_sampling_seconds_source",
+    "min_pcap_bytes",
+    "netstats_observed_bytes",
+    "pcap_available",
+    "pcap_size_bytes",
+    "pcap_failure_detail",
+    "pcap_failure_summary",
+    "timeline_available",
+    "timeline_complete",
+    "window_count_original",
+    "window_count_final",
+    "window_count_source",
+    "window_count",
+    "min_window_count",
+    "short_run",
+    "no_traffic_observed",
+    "countable",
+    "counts_toward_quota",
+    "extra_run",
+    "low_signal",
+    "low_signal_reasons",
+    "baseline_not_idle",
+    "baseline_not_idle_reasons",
+    "exploratory_class",
+    "paper_eligible",
+    "paper_exclusion_primary_reason_code",
+    "paper_exclusion_all_reason_codes",
+    "technical_validity",
+    "protocol_compliance",
+    "cohort_eligibility",
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -117,6 +166,7 @@ def _candidate_row(run_dir: Path) -> dict[str, Any] | None:
     if current_reason and current_reason not in REPAIRABLE_INVALID_REASONS:
         return None
     return {
+        "repair_type": "validity_repair",
         "run_id": run_dir.name,
         "package": str(target.get("package_name") or ""),
         "run_profile": str(dataset.get("run_profile") or operator.get("run_profile") or ""),
@@ -137,14 +187,80 @@ def _candidate_row(run_dir: Path) -> dict[str, Any] | None:
     }
 
 
+def _load_tracker_by_run() -> dict[str, Mapping[str, Any]]:
+    from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_plan_read_path
+
+    tracker_payload = _read_json(resolve_dataset_plan_read_path()) or {}
+    by_run: dict[str, Mapping[str, Any]] = {}
+    apps = tracker_payload.get("apps") if isinstance(tracker_payload.get("apps"), dict) else {}
+    for entry in apps.values():
+        if not isinstance(entry, Mapping):
+            continue
+        for item in entry.get("runs") or []:
+            if isinstance(item, Mapping) and item.get("run_id"):
+                by_run[str(item["run_id"])] = item
+    return by_run
+
+
+def _normalized_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return list(value)
+    return value
+
+
+def _policy_sync_candidate_row(run_dir: Path, tracker_row: Mapping[str, Any]) -> dict[str, Any] | None:
+    raw = _read_json(run_dir / "run_manifest.json")
+    if not isinstance(raw, dict):
+        return None
+    dataset = raw.get("dataset") if isinstance(raw.get("dataset"), dict) else {}
+    target = raw.get("target") if isinstance(raw.get("target"), dict) else {}
+    operator = raw.get("operator") if isinstance(raw.get("operator"), dict) else {}
+    diffs: list[str] = []
+    for key in SYNCABLE_TRACKER_FIELDS:
+        manifest_value = _normalized_value(dataset.get(key))
+        tracker_value = _normalized_value(tracker_row.get(key))
+        if manifest_value != tracker_value:
+            diffs.append(key)
+    if not diffs:
+        return None
+    return {
+        "repair_type": "policy_sync",
+        "run_id": run_dir.name,
+        "package": str(target.get("package_name") or ""),
+        "run_profile": str(dataset.get("run_profile") or operator.get("run_profile") or ""),
+        "messaging_activity": str(operator.get("messaging_activity") or ""),
+        "current_valid_dataset_run": int(dataset.get("valid_dataset_run") is True),
+        "current_invalid_reason_code": str(dataset.get("invalid_reason_code") or ""),
+        "new_valid_dataset_run": int(tracker_row.get("valid_dataset_run") is True),
+        "new_invalid_reason_code": tracker_row.get("invalid_reason_code"),
+        "current_pcap_size_bytes": dataset.get("pcap_size_bytes"),
+        "new_pcap_size_bytes": tracker_row.get("pcap_size_bytes"),
+        "new_min_pcap_bytes": tracker_row.get("min_pcap_bytes"),
+        "new_window_count": tracker_row.get("window_count"),
+        "new_min_window_count": tracker_row.get("min_window_count"),
+        "new_actual_sampling_seconds": tracker_row.get("actual_sampling_seconds"),
+        "new_sampling_duration_seconds": tracker_row.get("sampling_duration_seconds"),
+        "counts_toward_completion": int(operator.get("counts_toward_completion") is True),
+        "changed_fields": ",".join(sorted(diffs)),
+        "_tracker_row": tracker_row,
+    }
+
+
 def _candidate_rows(evidence_root: Path, run_ids: set[str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    tracker_by_run = _load_tracker_by_run()
     for run_dir in sorted([p for p in evidence_root.iterdir() if p.is_dir()], key=lambda p: p.name):
         if run_ids and run_dir.name not in run_ids:
             continue
         row = _candidate_row(run_dir)
         if row is not None:
             rows.append(row)
+            continue
+        tracker_row = tracker_by_run.get(run_dir.name)
+        if tracker_row:
+            policy_row = _policy_sync_candidate_row(run_dir, tracker_row)
+            if policy_row is not None:
+                rows.append(policy_row)
     return rows
 
 
@@ -157,35 +273,7 @@ def _sync_manifest_from_tracker(run_dir: Path, tracker_row: Mapping[str, Any]) -
         dataset = {}
         raw["dataset"] = dataset
     before = json.dumps(dataset, sort_keys=True, default=str)
-    for key in (
-        "valid_dataset_run",
-        "invalid_reason_code",
-        "sampling_duration_seconds",
-        "actual_sampling_seconds",
-        "actual_sampling_seconds_source",
-        "min_pcap_bytes",
-        "netstats_observed_bytes",
-        "pcap_available",
-        "pcap_size_bytes",
-        "pcap_failure_detail",
-        "pcap_failure_summary",
-        "timeline_available",
-        "timeline_complete",
-        "window_count_original",
-        "window_count_final",
-        "window_count_source",
-        "window_count",
-        "min_window_count",
-        "short_run",
-        "no_traffic_observed",
-        "countable",
-        "paper_eligible",
-        "paper_exclusion_primary_reason_code",
-        "paper_exclusion_all_reason_codes",
-        "technical_validity",
-        "protocol_compliance",
-        "cohort_eligibility",
-    ):
+    for key in SYNCABLE_TRACKER_FIELDS:
         if key in tracker_row:
             dataset[key] = tracker_row.get(key)
     after = json.dumps(dataset, sort_keys=True, default=str)
@@ -195,9 +283,33 @@ def _sync_manifest_from_tracker(run_dir: Path, tracker_row: Mapping[str, Any]) -
     return True
 
 
-def _apply_repairs(evidence_root: Path, output_dir: Path, rows: Sequence[Mapping[str, Any]]) -> tuple[int, int]:
+def _reindex_run_ids(evidence_root: Path, run_ids: Sequence[str]) -> int:
+    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_pack_to_db
+
+    reindexed_db_rows = 0
+    for run_id in run_ids:
+        normalized = str(run_id or "").strip()
+        if not normalized:
+            continue
+        run_dir = evidence_root / normalized
+        if not (run_dir / "run_manifest.json").exists():
+            continue
+        result = index_dynamic_evidence_pack_to_db(run_dir)
+        if result.get("ok") is True:
+            reindexed_db_rows += 1
+    return reindexed_db_rows
+
+
+def _apply_repairs(
+    evidence_root: Path,
+    output_dir: Path,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    explicit_run_ids: Sequence[str] = (),
+) -> tuple[int, int, int]:
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
     from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_plan_read_path
+    from scripts.dynamic import refresh_analysis_summaries as refresh_summaries
 
     backups_dir = output_dir / "manifest_backups"
     backups_dir.mkdir(parents=True, exist_ok=True)
@@ -216,10 +328,11 @@ def _apply_repairs(evidence_root: Path, output_dir: Path, rows: Sequence[Mapping
         old_valid = dataset.get("valid_dataset_run")
         old_countable = dataset.get("countable")
         operator = raw.get("operator") if isinstance(raw.get("operator"), dict) else {}
-        for key, value in (row.get("_validity") or {}).items():
-            dataset[key] = value
-        if old_valid is False and old_countable is False and operator.get("counts_toward_completion") is True:
-            dataset.pop("countable", None)
+        if row.get("repair_type") == "validity_repair":
+            for key, value in (row.get("_validity") or {}).items():
+                dataset[key] = value
+            if old_valid is False and old_countable is False and operator.get("counts_toward_completion") is True:
+                dataset.pop("countable", None)
         _write_json(manifest_path, raw)
         updated_manifests += 1
 
@@ -240,7 +353,25 @@ def _apply_repairs(evidence_root: Path, output_dir: Path, rows: Sequence[Mapping
         tracker_row = tracker_by_run.get(str(row["run_id"]))
         if tracker_row and _sync_manifest_from_tracker(evidence_root / str(row["run_id"]), tracker_row):
             synced_manifests += 1
-    return updated_manifests, synced_manifests
+    if rows:
+        refresh_summaries.refresh_summaries(
+            root=evidence_root,
+            apply=True,
+            refresh_pcap_report=True,
+            refresh_pcap_features=True,
+            refresh_overlap=True,
+            run_ids={str(row["run_id"]) for row in rows if str(row.get("run_id") or "").strip()},
+        )
+    reindex_run_ids = [str(row.get("run_id") or "").strip() for row in rows if str(row.get("run_id") or "").strip()]
+    if explicit_run_ids:
+        seen = set(reindex_run_ids)
+        for run_id in explicit_run_ids:
+            normalized = str(run_id or "").strip()
+            if normalized and normalized not in seen:
+                reindex_run_ids.append(normalized)
+                seen.add(normalized)
+    reindexed_db_rows = _reindex_run_ids(evidence_root, reindex_run_ids)
+    return updated_manifests, synced_manifests, reindexed_db_rows
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -255,10 +386,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     applied_rows = 0
     synced_rows = 0
+    reindexed_db_rows = 0
     if args.apply and rows:
-        applied_rows, synced_rows = _apply_repairs(evidence_root, output_dir, rows)
+        applied_rows, synced_rows, reindexed_db_rows = _apply_repairs(
+            evidence_root,
+            output_dir,
+            rows,
+            explicit_run_ids=sorted(run_ids),
+        )
+    elif args.apply and run_ids:
+        reindexed_db_rows = _reindex_run_ids(evidence_root, sorted(run_ids))
 
     fields = (
+        "repair_type",
         "run_id",
         "package",
         "run_profile",
@@ -275,6 +415,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "new_actual_sampling_seconds",
         "new_sampling_duration_seconds",
         "counts_toward_completion",
+        "changed_fields",
     )
     plan_csv = output_dir / "dynamic_dataset_validity_repair_plan.csv"
     _write_csv(plan_csv, public_rows, fields)
@@ -285,7 +426,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "candidate_rows": len(public_rows),
         "applied_rows": int(applied_rows),
         "synced_manifest_rows": int(synced_rows),
-        "note": "Repairs only stale invalid manifests whose current artifacts pass the existing dataset validator.",
+        "reindexed_db_rows": int(reindexed_db_rows),
+        "note": (
+            "Repairs stale invalid manifests, syncs stale policy-derived dataset fields from "
+            "tracker truth into local evidence-pack manifests, refreshes the repaired runs' "
+            "derived analysis artifacts, and reindexes repaired runs into DB truth."
+        ),
         "output_files": {
             "repair_plan_csv": str(plan_csv.resolve()),
             "summary_json": str((output_dir / "summary.json").resolve()),

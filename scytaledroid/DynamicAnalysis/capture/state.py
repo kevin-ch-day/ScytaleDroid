@@ -39,6 +39,7 @@ class CaptureState:
     wall_elapsed_s: float = 0.0
     valid_elapsed_s: float = 0.0
     foreground_package: str | None = None
+    foreground_component: str | None = None
     latest_event: str = ""
     latest_warning: str = ""
     observer_status: ObserverStatus = field(default_factory=ObserverStatus)

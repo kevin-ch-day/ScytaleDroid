@@ -165,6 +165,22 @@ def test_render_plan_validation_block_surfaces_static_handoff_hash_status(monkey
     assert "Dynamic execution blocked." in block
 
 
+def test_plan_validation_pass_message_uses_baseline_wording_for_baseline_profiles():
+    assert loader.plan_validation_pass_message("baseline_idle") == "Plan validation: PASS (baseline shown above)."
+    assert loader.plan_validation_pass_message("baseline_connected") == "Plan validation: PASS (baseline shown above)."
+
+
+def test_plan_validation_pass_message_uses_selected_build_wording_for_interactive_profiles():
+    assert (
+        loader.plan_validation_pass_message("interaction_manual")
+        == "Plan validation: PASS (selected app/build shown above)."
+    )
+    assert (
+        loader.plan_validation_pass_message("interaction_scripted")
+        == "Plan validation: PASS (selected app/build shown above)."
+    )
+
+
 def test_build_plan_validation_event_includes_summary_counts(monkeypatch):
     plan = _base_plan()
     plan["run_identity"].pop("static_handoff_hash")

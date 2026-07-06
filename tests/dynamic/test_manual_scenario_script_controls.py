@@ -25,6 +25,10 @@ def test_scripted_protocol_step_prompt_wording_is_compact(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.prompt_yes_no",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual._run_countdown",
         lambda _seconds, **_kwargs: datetime.now(UTC),
     )
@@ -60,6 +64,10 @@ def test_facebook_behavior_no_repeat_plan_skips_optional_repeats(
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.press_enter_to_continue",
         lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.prompt_yes_no",
+        lambda *_args, **_kwargs: False,
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual._run_countdown",
@@ -395,6 +403,10 @@ def test_news_subscription_branch_skips_article_scroll_and_records_markers(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.prompt_yes_no",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual._run_countdown",
         lambda _seconds, **_kwargs: datetime.now(UTC),
     )
@@ -455,6 +467,10 @@ def test_scripted_early_finalize_keeps_zero_exit_code(monkeypatch, tmp_path: Pat
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.prompt_yes_no",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual._run_countdown",
         lambda _seconds, **_kwargs: datetime.now(UTC),
     )
@@ -499,6 +515,10 @@ def test_news_article_opened_path_runs_article_scroll(monkeypatch, tmp_path: Pat
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.prompt_yes_no",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual._run_countdown",
         lambda _seconds, **_kwargs: datetime.now(UTC),
     )
@@ -540,6 +560,10 @@ def test_news_login_required_branch_does_not_ask_for_article_scroll(
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.press_enter_to_continue",
         lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.scenarios.manual.prompt_utils.prompt_yes_no",
+        lambda *_args, **_kwargs: False,
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.scenarios.manual._run_countdown",

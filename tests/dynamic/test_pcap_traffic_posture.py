@@ -31,6 +31,13 @@ def test_summarize_traffic_posture_derives_ratios_and_density() -> None:
         visibility_summary={
             "tls_handshake_packets": 6,
         },
+        startup_summary={
+            "startup_byte_share": 0.92,
+            "startup_packet_share": 0.7,
+            "post_start_median_bytes_per_min": 18000.0,
+            "post_start_mean_bytes_per_min": 22000.0,
+            "startup_dominant": True,
+        },
     )
 
     assert summary["outbound_packet_ratio"] == 0.6
@@ -45,3 +52,8 @@ def test_summarize_traffic_posture_derives_ratios_and_density() -> None:
     assert summary["top_flow_packet_share"] == 0.4
     assert summary["top_flow_byte_share"] == 0.5
     assert summary["tls_handshakes_per_min"] == 18.0
+    assert summary["startup_byte_share"] == 0.92
+    assert summary["startup_packet_share"] == 0.7
+    assert summary["post_start_median_bytes_per_min"] == 18000.0
+    assert summary["post_start_mean_bytes_per_min"] == 22000.0
+    assert summary["startup_dominant"] is True

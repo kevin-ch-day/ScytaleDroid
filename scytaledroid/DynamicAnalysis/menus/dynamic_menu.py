@@ -248,6 +248,7 @@ def dynamic_analysis_menu() -> None:
             resolve_active_cohort_for_run=_resolve_active_cohort_for_run,
             run_guided_dataset_run=_run_guided_dataset_run,
             run_focused_app_run=_run_focused_app_run,
+            run_paper_freeze_readiness=_run_paper_freeze_readiness,
             run_state_summary=_run_state_summary,
             run_freeze_readiness_audit=_run_freeze_readiness_audit,
             verify_host_pcap_tools=_verify_host_pcap_tools,
@@ -277,6 +278,10 @@ def _repair_reindex_tracker() -> None:
 
 def _run_freeze_readiness_audit() -> None:
     _maintenance_adapter.run_freeze_readiness_audit()
+
+
+def _run_paper_freeze_readiness() -> None:
+    _maintenance_adapter.run_paper_freeze_readiness()
 
 
 def _run_state_summary() -> None:

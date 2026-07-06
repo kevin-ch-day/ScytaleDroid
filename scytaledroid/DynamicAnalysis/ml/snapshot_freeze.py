@@ -21,7 +21,7 @@ from typing import Any
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
-from scytaledroid.DynamicAnalysis.plans.loader import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
 
 _REQUIRED_RELATIVE_INPUTS = (
     "run_manifest.json",

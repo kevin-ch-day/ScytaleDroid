@@ -57,7 +57,7 @@ def test_compact_warning_line_uses_count_summaries_for_large_groups() -> None:
     assert warning == ""
     assert (
         note
-        == "Facebook, X (Twitter) mixed current/legacy evidence | 3 history-only apps. Press D."
+        == "Facebook, X (Twitter) mixed current/historical evidence | 3 history-only apps. Press D."
     )
 
 
@@ -73,7 +73,7 @@ def test_compact_note_line_mentions_mixed_current_legacy_context() -> None:
             )
         ]
     )
-    assert note == "CNN mixed current/legacy evidence. Press D."
+    assert note == "CNN mixed current/historical evidence. Press D."
 
 
 def test_compact_warning_line_mentions_historical_db_only() -> None:
@@ -129,7 +129,7 @@ def test_compact_note_line_keeps_legacy_identity_mismatch() -> None:
             )
         ]
     )
-    assert note == "TikTok legacy identity note | TikTok history-only app. Press D."
+    assert note == "TikTok historical identity note | TikTok history-only app. Press D."
 
 
 def test_archive_blocker_summary_keeps_refresh_visible_with_overlapping_counts() -> None:

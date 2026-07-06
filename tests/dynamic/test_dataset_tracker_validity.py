@@ -237,7 +237,7 @@ def test_evaluate_dataset_validity_accepts_small_connected_baseline_above_connec
 
     assert validity["valid_dataset_run"] is True
     assert validity["invalid_reason_code"] is None
-    assert validity["min_pcap_bytes"] == 20_000
+    assert validity["min_pcap_bytes"] == 10_000
     assert validity.get("pcap_size_bytes") == pcap_bytes
 
 
@@ -330,5 +330,109 @@ def test_evaluate_dataset_validity_accepts_small_manual_messaging_text_above_con
 
     assert validity["valid_dataset_run"] is True
     assert validity["invalid_reason_code"] is None
-    assert validity["min_pcap_bytes"] == 20_000
+    assert validity["min_pcap_bytes"] == 10_000
+
+
+def test_evaluate_dataset_validity_accepts_signal_like_quiet_connected_baseline_above_new_floor(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "dynamic" / "run-signal"
+    capture_dir = run_dir / "artifacts" / "pcapdroid_capture"
+    analysis_dir = run_dir / "analysis"
+    capture_dir.mkdir(parents=True, exist_ok=True)
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    pcap_bytes = 12_893
+    (capture_dir / "scytaledroid_run-signal.pcap").write_bytes(b"x" * pcap_bytes)
+    (capture_dir / "pcapdroid_capture_meta.json").write_text(
+        json.dumps(
+            {
+                "pcap_name": "scytaledroid_run-signal.pcap",
+                "resolved_pcap_name": "scytaledroid_run-signal.pcap",
+                "pcap_size_bytes": pcap_bytes,
+                "pcap_valid": False,
+                "min_pcap_bytes": 20_000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "telemetry": {
+                    "stats": {"netstats_bytes_in_total": 2398, "netstats_bytes_out_total": 1959}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis_dir / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "capinfos": {
+                    "parsed": {
+                        "capture_duration_s": 250.85,
+                        "packet_count": 110,
+                        "data_size_bytes": 11_109,
+                    }
+                },
+                "protocol_hierarchy": [{"protocol": "tls", "bytes": pcap_bytes}],
+                "top_dns": [{"value": "grpc.chat.signal.org", "count": 4}],
+                "top_sni": [{"value": "grpc.chat.signal.org", "count": 2}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (analysis_dir / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "capture_duration_s": 250.85,
+                    "data_size_bytes": 11_109,
+                    "packet_count": 110,
+                },
+                "proxies": {
+                    "unique_domains_topn": 1,
+                    "unique_ja4_count": 1,
+                    "tls_client_hello_count": 2,
+                },
+                "quality": {"report_status": "ok", "pcap_valid": True, "pcap_enrichment": {"status": "ok"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-signal",
+        created_at="2026-07-06T00:00:00Z",
+        scenario={"id": "basic_usage"},
+        target={"package_name": "org.thoughtcrime.securesms"},
+        operator={
+            "run_profile": "baseline_connected",
+            "run_sequence": 1,
+            "interaction_level": "minimal",
+            "messaging_activity": "connected_idle",
+            "baseline_protocol_id": "baseline_connected_v2",
+            "baseline_protocol_version": 2,
+        },
+        observers=[
+            ObserverRecord(observer_id="pcapdroid_capture", status="failed", error="too small")
+        ],
+        artifacts=[
+            ArtifactRecord(
+                relative_path="artifacts/pcapdroid_capture/pcapdroid_capture_meta.json",
+                type="pcapdroid_capture_meta",
+                produced_by="pcapdroid_capture",
+            )
+        ],
+    )
+
+    validity = evaluate_dataset_validity(run_dir, manifest, {}, DatasetTrackerConfig())
+
+    assert validity["valid_dataset_run"] is True
+    assert validity["invalid_reason_code"] is None
+    assert validity["min_pcap_bytes"] == 10_000
+    assert validity.get("pcap_size_bytes") == pcap_bytes
     assert validity.get("pcap_size_bytes") == pcap_bytes

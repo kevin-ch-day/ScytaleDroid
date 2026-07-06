@@ -234,16 +234,16 @@ def compact_note_line(row_models: list[Any]) -> str:
         issues.append(
             _format_issue(
                 mixed_rows,
-                singular_suffix="mixed current/legacy evidence",
-                plural_label="mixed current/legacy evidence states",
+                singular_suffix="mixed current/historical evidence",
+                plural_label="mixed current/historical evidence states",
             )
         )
     if legacy_mismatch_rows:
         issues.append(
             _format_issue(
                 legacy_mismatch_rows,
-                singular_suffix="legacy identity note",
-                plural_label="legacy identity notes",
+                singular_suffix="historical identity note",
+                plural_label="historical identity notes",
             )
         )
     if historical_rows:

@@ -9,10 +9,11 @@ _QUEUE_TABLE_HEADERS = [
     "Status",
     "QA",
     "Build",
-    "Idle Base",
-    "Non-idle",
+    "Strict Idle",
+    "Quiescent FG",
     "Interactive",
-    "ML",
+    "Retained",
+    "ML Pool",
 ]
 _QUEUE_TABLE_HEADERS_STANDARD = [
     "#",
@@ -20,11 +21,12 @@ _QUEUE_TABLE_HEADERS_STANDARD = [
     "Status",
     "QA",
     "Build",
-    "Idle Base",
-    "Non-idle",
+    "Idle",
+    "QFG",
     "Interactive",
+    "Retained",
 ]
-_QUEUE_TABLE_HEADERS_NARROW = ["#", "App", "St", "QA", "Bld", "IB", "NB", "Int"]
+_QUEUE_TABLE_HEADERS_NARROW = ["#", "App", "St", "QA", "Bld", "Idle", "QFG", "Int", "Ret"]
 
 
 class _Cfg:
@@ -85,6 +87,13 @@ def test_queue_layout_mode_uses_standard_with_build_column(monkeypatch) -> None:
         app_queue_rendering.queue_compact_table_headers(layout="standard")
         == _QUEUE_TABLE_HEADERS_STANDARD
     )
+
+
+def test_queue_layout_mode_uses_standard_at_80_columns(monkeypatch) -> None:
+    monkeypatch.setattr(menu_selection.terminal, "get_terminal_width", lambda *args, **kwargs: 80)
+    from scytaledroid.DynamicAnalysis import app_queue_rendering
+
+    assert app_queue_rendering.queue_layout_mode(terminal_mod=menu_selection.terminal) == "standard"
 
 
 def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
@@ -253,26 +262,28 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
     assert result is None
     out = capsys.readouterr().out
     assert "Cohort status" in out
-    assert "quota-satisfied" in out
+    assert "1/3 current-build complete" in out
     assert "8/5 valid" in out
     assert "retained extra" in out
+    assert "current-build collection queue" in out
+    assert "paper-freeze readiness" in out
     assert "Current build" in out
     assert "1/3 complete" in out
     assert "blocked" in out
-    assert "Remaining:" in out
-    assert "interactive gap" in out
-    assert "Next: ESPN" in out
-    assert "review QA" in out
+    assert "Remaining:" not in out
+    assert "Capture plan:" not in out
+    assert "Next: ESPN" not in out
     assert "Warnings:" not in out
     assert "Notes   :" not in out
     assert "Attention needed" not in out
     assert "Ready for manual interaction" not in out
     assert "Needs baseline capture" not in out
     assert "Complete / over-quota" not in out
-    assert "> marks recommended" in out
+    assert "Queue key" not in out
     assert "Freeze/export" not in out
     assert "Next recommended run" not in out
     assert "Select an app by number or name" in out
+    assert "P paper freeze" in out
     assert "S summary" in out
     assert "V grouped" in out
     assert "Y history" in out
@@ -288,6 +299,7 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
         "3/3",
         "0",
         "2/2",
+        "0",
         "1",
     ]
     assert captured["rows"][1][1:] == [
@@ -298,18 +310,20 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
         "3/3",
         "0",
         "0/2",
-        "—",
+        "0",
+        "0",
     ]
     assert captured["rows"][2] == [
         ">3",
         "ESPN",
         "review",
         "invalid",
-        "ready",
+        "none yet",
         "0/3",
         "0",
         "0/2 held",
-        "—",
+        "0",
+        "0",
     ]
 
 
@@ -371,6 +385,9 @@ def test_queue_summary_without_selected_device_uses_tracked_build_wording(capsys
     )
 
     out = capsys.readouterr().out
+    assert "tracked-build collection queue" in out
+    assert "paper-freeze readiness" in out
+    assert "0/1 tracked-build complete" in out
     assert "Tracked-build queue" in out
     assert "Tracked build" in out
     assert "Select a device to verify live build drift and enable capture guidance." in out
@@ -387,13 +404,59 @@ def test_queue_footer_block_surfaces_attention_notes_and_shortcuts(capsys) -> No
     )
 
     out = capsys.readouterr().out
-    assert "Pinterest drifted build" in out
-    assert "7 history-only apps" in out
+    assert "Diagnostics available: press D." in out
+    assert "Pinterest drifted build" not in out
+    assert "7 history-only apps" not in out
     assert "Select an app by number or name" in out
     assert "Shortcuts:" in out
+    assert "P paper freeze" in out
     assert "S summary" in out
     assert "D diagnostics" in out
-    assert "Press D for evidence lineage detail." in out
+    assert "Evidence lineage and historical/debug detail are in Diagnostics (D)." in out
+
+
+def test_run_package_selection_menu_routes_paper_shortcut(monkeypatch) -> None:
+    prepared = menu_selection.PreparedPackageSelectionView(
+        packages=[("bbc.mobile.news.ww", None, None, "BBC News")],
+        dataset_pkgs={"bbc.mobile.news.ww"},
+        cfg=_Cfg(),
+        rows=[],
+        op_rows=[],
+        build_rows=[],
+        dataset_apps_total=1,
+        dataset_apps_complete=0,
+        dataset_valid_runs_total=0,
+        row_models=[],
+        expected_runs=5,
+        evidence_summary={
+            "evidence_root_exists": True,
+            "quota_runs_counted": 0,
+            "apps_satisfied": 0,
+            "extra_eligible_runs": 0,
+        },
+    )
+    seen = {"paper": 0}
+    choices = iter(["p", "b"])
+    monkeypatch.setattr(
+        menu_selection.prompt_utils,
+        "prompt_text",
+        lambda *_a, **_k: next(choices),
+    )
+    monkeypatch.setattr(
+        menu_selection._status_reports,
+        "render_paper_freeze_readiness_brief",
+        lambda: seen.__setitem__("paper", seen["paper"] + 1),
+    )
+    monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
+
+    assert (
+        menu_selection.run_package_selection_menu(
+            prepared,
+            summarize_evidence_quota_fn=lambda *_a, **_k: prepared.evidence_summary,
+        )
+        is None
+    )
+    assert seen["paper"] == 1
 
 
 def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeypatch) -> None:
@@ -459,22 +522,24 @@ def test_compact_queue_table_distinguishes_historical_db_only_from_empty(monkeyp
         "Facebook Msg",
         "baseline",
         "—",
-        "db-hist",
+        "prior-only",
         "0/3",
         "0",
         "0/2 held",
-        "—",
+        "0",
+        "0",
     ]
     assert captured["rows"][1] == [
         "2",
         "Guardian",
         "baseline",
         "—",
-        "ready",
+        "none yet",
         "0/3",
         "0",
         "0/2 held",
-        "—",
+        "0",
+        "0",
     ]
 
 
@@ -501,10 +566,10 @@ def test_compact_queue_table_shows_non_idle_baseline_supplemental(monkeypatch) -
                 baseline_countable=0,
                 baseline_extra=0,
                 baseline_not_idle_supplemental=3,
-                interactive_countable=0,
+                interactive_countable=2,
                 interactive_extra=0,
                 need_baseline=3,
-                need_interactive=2,
+                need_interactive=0,
                 prep_label="current",
                 qa_label="valid",
                 next_label="baseline",
@@ -524,8 +589,9 @@ def test_compact_queue_table_shows_non_idle_baseline_supplemental(monkeypatch) -
         "current",
         "0/3",
         "3",
-        "0/2 held",
-        "—",
+        "2/2 held",
+        "0",
+        "0",
     ]
 
 
@@ -649,7 +715,7 @@ def test_main_progress_label_prefers_extra_suffix_over_rolled_fraction() -> None
     assert menu_selection._main_progress_label(0, 0, required=2, missing=2) == "0/2 need 2"
 
 
-def test_manual_progress_label_uses_locked_until_baseline_complete() -> None:
+def test_manual_progress_label_surfaces_raw_interactive_progress_when_strict_idle_holds() -> None:
     row = menu_selection.PreparedPackageSelectionRow(
         full_row=[],
         op_row=[],
@@ -662,13 +728,47 @@ def test_manual_progress_label_uses_locked_until_baseline_complete() -> None:
         interactive_countable=0,
         interactive_extra=0,
     )
-    assert menu_selection._manual_progress_label(row, interactive_required=2) == "locked"
+    assert menu_selection._manual_progress_label(row, interactive_required=2) == "0/2 held"
 
 
 def test_compact_qa_label_captures_legacy_and_identity_variants() -> None:
     assert menu_selection._compact_qa_label("valid (L)") == "valid+L"
     assert menu_selection._compact_qa_label("valid (id_mismatch)") == "valid+id"
     assert menu_selection._compact_qa_label("valid (id_mismatch) (L)") == "valid+id+L"
+
+
+def test_queue_table_display_labels_use_friendlier_operator_text() -> None:
+    prior_row = menu_selection.PreparedPackageSelectionRow(
+        full_row=[],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=0,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=0,
+        prep_label="hist-db",
+        qa_label="valid (id_mismatch) (L)",
+    )
+    locked_row = menu_selection.PreparedPackageSelectionRow(
+        full_row=[],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=0,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=0,
+        need_baseline=1,
+        interactive_countable=0,
+        interactive_extra=0,
+        interactive_low_signal_supplemental=0,
+    )
+
+    assert menu_selection._app_queue_state.queue_table_qa_label(prior_row) == "valid+id"
+    assert menu_selection._app_queue_state.queue_table_build_label(prior_row) == "prior-only"
+    assert (
+        menu_selection._app_queue_state.queue_interactive_total_label(
+            locked_row, interactive_required=4
+        )
+        == "0/4 held"
+    )
 
 
 def test_render_queue_section_table_preserves_mixed_validl_and_invalid_states(monkeypatch) -> None:
@@ -729,11 +829,12 @@ def test_render_queue_section_table_preserves_mixed_validl_and_invalid_states(mo
         "4",
         "Facebook",
         "interactive",
-        "valid+L",
-        "mixed",
+        "valid",
+        "current",
         "3/3",
         "0",
         "0/2",
+        "0",
         "1",
     ]
     assert captured["rows"][1] == [
@@ -741,11 +842,12 @@ def test_render_queue_section_table_preserves_mixed_validl_and_invalid_states(mo
         "ESPN",
         "review",
         "invalid",
-        "ready",
+        "none yet",
         "0/3",
         "0",
         "0/2 held",
-        "—",
+        "0",
+        "0",
     ]
 
 
@@ -832,17 +934,19 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
         "3/3",
         "0",
         "2/2",
+        "0",
         "1",
     ]
     assert captured["rows"][1] == [
         "2",
         "Facebook",
         "interactive",
-        "valid+L",
-        "mixed",
+        "valid",
+        "current",
         "3/3",
         "0",
         "0/2",
+        "0",
         "1",
     ]
     assert captured["rows"][2] == [
@@ -850,11 +954,12 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
         "ESPN",
         "review",
         "invalid",
-        "ready",
+        "none yet",
         "0/3",
         "0",
         "0/2 held",
-        "—",
+        "0",
+        "0",
     ]
 
 
@@ -902,11 +1007,12 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
         "4",
         "Facebook",
         "refresh",
-        "valid+L",
+        "valid",
         "drift",
         "3/3",
         "0",
         "0/2",
+        "1",
         "1",
     ]
 
@@ -1018,17 +1124,19 @@ def test_compact_queue_table_shows_supplemental_suffixes_without_inflating_quota
         "3/3",
         "0",
         "3/2",
-        "—",
+        "0",
+        "0",
     ]
     assert captured["rows"][1] == [
         "15",
         "X",
         "baseline",
-        "valid+L",
+        "valid",
         "current",
         "2/3",
         "0",
         "0/2 held",
+        "0",
         "2",
     ]
 
@@ -1077,7 +1185,18 @@ def test_compact_queue_table_shows_x_baseline_against_baseline_target(monkeypatc
     )
 
     assert captured["headers"] == _QUEUE_TABLE_HEADERS
-    assert captured["rows"][0] == ["15", "X", "refresh", "valid+L", "drift", "3/3", "0", "0/2", "—"]
+    assert captured["rows"][0] == [
+        "15",
+        "X",
+        "refresh",
+        "valid",
+        "drift",
+        "3/3",
+        "0",
+        "0/2",
+        "17",
+        "0",
+    ]
 
 
 def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch) -> None:
@@ -1126,11 +1245,12 @@ def test_compact_queue_table_marks_current_build_db_only_as_restore(monkeypatch)
         "0/3",
         "0",
         "0/2 held",
-        "—",
+        "0",
+        "0",
     ]
 
 
-def test_compact_queue_table_uses_narrow_layout_when_terminal_is_tight(monkeypatch) -> None:
+def test_compact_queue_table_uses_standard_layout_at_80_columns(monkeypatch) -> None:
     captured = {}
 
     monkeypatch.setattr(menu_selection.terminal, "get_terminal_width", lambda *args, **kwargs: 80)
@@ -1187,18 +1307,59 @@ def test_compact_queue_table_uses_narrow_layout_when_terminal_is_tight(monkeypat
         interactive_required=2,
     )
 
-    assert captured["headers"] == _QUEUE_TABLE_HEADERS_NARROW
-    assert captured["rows"][0] == ["2", "CNN", "review", "invalid", "current", "3/3", "0", "0/2"]
+    assert captured["headers"] == _QUEUE_TABLE_HEADERS_STANDARD
+    assert captured["rows"][0] == ["2", "CNN", "review", "invalid", "current", "3/3", "0", "0/2", "0"]
     assert captured["rows"][1] == [
         "3",
         "Facebook",
         "interactive",
-        "valid+L",
-        "mixed",
+        "valid",
+        "current",
         "3/3",
         "0",
         "0/2",
+        "0",
     ]
+
+
+def test_compact_queue_table_uses_narrow_layout_when_terminal_is_very_tight(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(menu_selection.terminal, "get_terminal_width", lambda *args, **kwargs: 79)
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["2"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.cnn.mobile.android.phone",
+                display_name="CNN",
+                baseline_countable=3,
+                baseline_extra=0,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=0,
+                need_interactive=2,
+                prep_label="current",
+                qa_label="invalid",
+                next_label="review QA",
+                lineage_state="current_build_observed",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=2,
+    )
+
+    assert captured["headers"] == _QUEUE_TABLE_HEADERS_NARROW
 
 
 def test_run_package_selection_menu_shows_current_build_refresh_summary(
@@ -1282,5 +1443,4 @@ def test_run_package_selection_menu_shows_current_build_refresh_summary(
     out = capsys.readouterr().out
     assert "Current build" in out
     assert "1 drift" in out
-    assert "Remaining:" in out
-    assert "refresh" in out
+    assert "Remaining:" not in out

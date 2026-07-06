@@ -13,10 +13,57 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_evidence_text,
     selected_app_qa_text,
 )
+from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import (
+    estimate_device_capture_size_bytes,
+)
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 _FOREGROUND_READY_TIMEOUT_S = 12.0
 _FOREGROUND_READY_POLL_S = 1.0
+_CALL_SURFACE_COMPONENT_TOKENS = (
+    "voip",
+    "calling",
+    "incall",
+    "video_call",
+    "voice_call",
+    "videocall",
+    "voicecall",
+)
+_BASELINE_SETUP_COMPONENT_TOKENS = (
+    "auth",
+    "login",
+    "logon",
+    "signin",
+    "sign_in",
+    "signup",
+    "sign_up",
+    "register",
+    "registration",
+    "onboarding",
+    "welcome",
+    "consent",
+    "permission",
+    "permissions",
+    "intro",
+    "startscreen",
+    "start_screen",
+    "setup",
+    "first_run",
+    "firsttime",
+)
+_KNOWN_FALSE_POSITIVE_SETUP_COMPONENTS: dict[str, tuple[str, ...]] = {
+    "com.facebook.katana": (
+        "com.facebook.katana.LoginActivity",
+    ),
+}
+_PACKAGE_BASELINE_MEDIA_COMPONENT_TOKENS: dict[str, tuple[str, ...]] = {
+    "com.facebook.katana": (
+        "immersiveactivity",
+        "immersiveportraitactivity",
+        "storyvieweractivity",
+        "stories.viewer",
+    ),
+}
 
 
 def _drift_evidence_text(build: str, evidence: str) -> str:
@@ -75,26 +122,260 @@ def _drift_harvest_context(package_name: str, plan_drift: dict[str, Any]) -> lis
     ]
 
 
-def read_device_foreground_package(device_serial: str | None) -> str | None:
+def _normalize_component_name(package_name: str | None, component_name: str | None) -> str | None:
+    package = str(package_name or "").strip()
+    component = str(component_name or "").strip()
+    if not component:
+        return None
+    if component.startswith(".") and package:
+        return f"{package}{component}"
+    return component
+
+
+def _parse_foreground_record(text: str) -> tuple[str | None, str | None, str | None]:
+    for line in str(text or "").splitlines():
+        match = re.search(
+            r"ActivityRecord\{[^}]*\su0\s+([a-zA-Z0-9_.]+)/([a-zA-Z0-9_.$]+)\s+t(\d+)",
+            line,
+        )
+        if match:
+            package = str(match.group(1) or "").strip() or None
+            component = _normalize_component_name(package, match.group(2))
+            task_id = str(match.group(3) or "").strip() or None
+            return package, component, task_id
+    return None, None, None
+
+
+def _parse_component_info_line(line: str, package_name: str) -> tuple[str | None, bool]:
+    package = str(package_name or "").strip()
+    if not package:
+        return None, False
+    component_patterns = (
+        rf"mActivityComponent={re.escape(package)}/([a-zA-Z0-9_.$]+)",
+        rf"topActivity=ComponentInfo\{{{re.escape(package)}/([a-zA-Z0-9_.$]+)\}}",
+        rf"realActivity=ComponentInfo\{{{re.escape(package)}/([a-zA-Z0-9_.$]+)\}}",
+        rf"baseActivity=ComponentInfo\{{{re.escape(package)}/([a-zA-Z0-9_.$]+)\}}",
+    )
+    for pattern in component_patterns:
+        match = re.search(pattern, line)
+        if match:
+            raw_component = str(match.group(1) or "").strip()
+            return _normalize_component_name(package, raw_component), "realActivity=" in line
+    return None, False
+
+
+def _resolve_task_component_from_activity_dump(
+    text: str,
+    *,
+    package_name: str | None,
+    task_id: str | None,
+) -> str | None:
+    package = str(package_name or "").strip()
+    if not package:
+        return None
+    if not str(task_id or "").strip():
+        preferred_real: str | None = None
+        fallback: str | None = None
+        for line in str(text or "").splitlines():
+            component, is_real = _parse_component_info_line(line, package)
+            if not component:
+                continue
+            if is_real:
+                return component
+            preferred_real = preferred_real or component
+            fallback = fallback or component
+        return preferred_real or fallback
+
+    lines = str(text or "").splitlines()
+    in_task = False
+    preferred_real: str | None = None
+    fallback: str | None = None
+    task_marker = f"Task{{"
+    task_id_marker = f"#{str(task_id).strip()}"
+    for line in lines:
+        if task_marker in line and task_id_marker in line:
+            in_task = True
+        elif in_task and task_marker in line and task_id_marker not in line:
+            break
+        if not in_task:
+            continue
+        component, is_real = _parse_component_info_line(line, package)
+        if not component:
+            continue
+        if is_real:
+            return component
+        preferred_real = preferred_real or component
+        fallback = fallback or component
+    return preferred_real or fallback
+
+
+def _component_looks_like_setup(component_name: str | None) -> bool:
+    component_lc = str(component_name or "").strip().lower()
+    if not component_lc:
+        return False
+    return any(token in component_lc for token in _BASELINE_SETUP_COMPONENT_TOKENS)
+
+
+def _is_known_false_positive_setup_component(
+    package_name: str | None,
+    component_name: str | None,
+) -> bool:
+    package = str(package_name or "").strip().lower()
+    component = str(component_name or "").strip().lower()
+    if not package or not component:
+        return False
+    known_components = _KNOWN_FALSE_POSITIVE_SETUP_COMPONENTS.get(package, ())
+    return any(component == candidate.lower() for candidate in known_components)
+
+
+def _package_specific_baseline_surface_reason(
+    package_name: str | None,
+    component_name: str | None,
+) -> str | None:
+    package = str(package_name or "").strip().lower()
+    component = str(component_name or "").strip().lower()
+    if not package or not component:
+        return None
+    media_tokens = _PACKAGE_BASELINE_MEDIA_COMPONENT_TOKENS.get(package, ())
+    if any(token in component for token in media_tokens):
+        return "media/story surface"
+    return None
+
+
+def _read_activity_foreground_target(adb_client: object, serial: str) -> tuple[str | None, str | None]:
+    completed = adb_client.run_shell_command(serial, ["dumpsys", "activity", "activities"], timeout=10)
+    text = str(getattr(completed, "stdout", "") or "")
+    package, component, task_id = _parse_foreground_record(text)
+    if package and component and _component_looks_like_setup(component):
+        resolved_component = _resolve_task_component_from_activity_dump(
+            text,
+            package_name=package,
+            task_id=task_id,
+        )
+        if resolved_component and not _component_looks_like_setup(resolved_component):
+            component = resolved_component
+    if package or component:
+        return package, component
+    return None, None
+
+
+def _read_window_foreground_target(adb_client: object, serial: str) -> tuple[str | None, str | None]:
+    completed = adb_client.run_shell_command(serial, ["dumpsys", "window"], timeout=10)
+    text = str(getattr(completed, "stdout", "") or "")
+    for line in text.splitlines():
+        if "mCurrentFocus" not in line and "mFocusedApp" not in line:
+            continue
+        match = re.search(r"u0\s+([a-zA-Z0-9_.]+)/([a-zA-Z0-9_.$]+)", line)
+        if match:
+            package = str(match.group(1) or "").strip() or None
+            component = _normalize_component_name(package, match.group(2))
+            return package, component
+    return None, None
+
+
+def read_device_foreground_target(device_serial: str | None) -> tuple[str | None, str | None]:
     serial = str(device_serial or "").strip()
     if not serial:
-        return None
+        return (None, None)
     try:
         from scytaledroid.DeviceAnalysis.adb import client as adb_client
 
         if not adb_client.is_available():
-            return None
-        completed = adb_client.run_shell_command(serial, ["dumpsys", "window"], timeout=10)
-        text = str(getattr(completed, "stdout", "") or "")
+            return (None, None)
+        activity_package, activity_component = _read_activity_foreground_target(adb_client, serial)
+        if activity_package or activity_component:
+            return activity_package, activity_component
+        window_package, window_component = _read_window_foreground_target(adb_client, serial)
+        if window_package or window_component:
+            return window_package, window_component
+    except Exception:
+        return (None, None)
+    return (None, None)
+
+
+def read_device_foreground_package(device_serial: str | None) -> str | None:
+    package, _component = read_device_foreground_target(device_serial)
+    return package
+
+
+def _baseline_surface_block_reason(
+    *,
+    package_name: str | None,
+    run_profile: str | None,
+    component_name: str | None,
+) -> str | None:
+    profile_lc = str(run_profile or "").strip().lower()
+    if not profile_lc.startswith("baseline"):
+        return None
+    component_lc = str(component_name or "").strip().lower()
+    if not component_lc:
+        return None
+    if _is_known_false_positive_setup_component(package_name, component_name):
+        return None
+    package_reason = _package_specific_baseline_surface_reason(package_name, component_name)
+    if package_reason:
+        return package_reason
+    if any(token in component_lc for token in _BASELINE_SETUP_COMPONENT_TOKENS):
+        return "login/setup"
+    if profile_lc == "baseline_connected" and any(
+        token in component_lc for token in _CALL_SURFACE_COMPONENT_TOKENS
+    ):
+        return "call/voip"
+    return None
+
+
+def _normalize_foreground_reading(reading: object) -> tuple[str | None, str | None]:
+    if isinstance(reading, tuple):
+        pkg = str(reading[0] or "").strip() if len(reading) >= 1 else ""
+        component = str(reading[1] or "").strip() if len(reading) >= 2 else ""
+        return (pkg or None, component or None)
+    pkg = str(reading or "").strip()
+    return (pkg or None, None)
+
+
+def _launch_output_has_error(text: str | None) -> bool:
+    output = str(text or "").strip().lower()
+    if not output:
+        return False
+    error_tokens = (
+        "error:",
+        "exception occurred",
+        "unable to resolve intent",
+        "activity class",
+        "securityexception",
+    )
+    return any(token in output for token in error_tokens)
+
+
+def _parse_resolved_launcher_component(package_name: str | None, text: str | None) -> str | None:
+    package = str(package_name or "").strip()
+    if not package:
+        return None
+    for line in reversed(str(text or "").splitlines()):
+        candidate = str(line or "").strip()
+        if "/" not in candidate:
+            continue
+        pkg, component = candidate.split("/", 1)
+        if pkg.strip() != package:
+            continue
+        return f"{package}/{component.strip()}"
+    return None
+
+
+def _resolve_launcher_component(serial: str, package_name: str) -> str | None:
+    try:
+        from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+
+        output = adb_shell.run_shell(
+            serial,
+            ["cmd", "package", "resolve-activity", "--brief", package_name],
+            timeout=10,
+        )
     except Exception:
         return None
-    for line in text.splitlines():
-        if "mCurrentFocus" not in line and "mFocusedApp" not in line:
-            continue
-        match = re.search(r"u0\s+([a-zA-Z0-9_.]+)/", line)
-        if match:
-            return str(match.group(1))
-    return None
+    if _launch_output_has_error(output):
+        return None
+    return _parse_resolved_launcher_component(package_name, output)
 
 
 def launch_package_to_foreground(device_serial: str | None, package_name: str | None) -> None:
@@ -105,6 +386,42 @@ def launch_package_to_foreground(device_serial: str | None, package_name: str | 
     try:
         from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 
+        resolved_component = _resolve_launcher_component(serial, package)
+        launch_output: str | None = None
+        if resolved_component:
+            launch_output = adb_shell.run_shell(
+                serial,
+                [
+                    "am",
+                    "start",
+                    "-n",
+                    resolved_component,
+                    "-a",
+                    "android.intent.action.MAIN",
+                    "-c",
+                    "android.intent.category.LAUNCHER",
+                ],
+                timeout=10,
+            )
+            if _launch_output_has_error(launch_output):
+                launch_output = None
+        if launch_output is None:
+            launch_output = adb_shell.run_shell(
+                serial,
+                [
+                    "am",
+                    "start",
+                    "-a",
+                    "android.intent.action.MAIN",
+                    "-c",
+                    "android.intent.category.LAUNCHER",
+                    "-p",
+                    package,
+                ],
+                timeout=10,
+            )
+        if not _launch_output_has_error(launch_output):
+            return
         adb_shell.run_shell(
             serial,
             [
@@ -154,7 +471,35 @@ def build_capture_state(
 
 
 def make_runtime_foreground_provider(device_serial: str | None) -> Callable[[], str | None]:
-    return lambda: read_device_foreground_package(device_serial)
+    return lambda: read_device_foreground_target(device_serial)
+
+
+def make_runtime_foreground_surface_validator(
+    *,
+    package_name: str,
+    run_profile: str | None,
+) -> Callable[[CaptureState], tuple[bool, str | None]]:
+    package = str(package_name or "").strip()
+    profile_lc = str(run_profile or "").strip().lower()
+
+    def _validator(state: CaptureState) -> tuple[bool, str | None]:
+        actual_package = str(getattr(state, "foreground_package", "") or "").strip()
+        actual_component = str(getattr(state, "foreground_component", "") or "").strip()
+        expected_package = str(getattr(state, "expected_package", "") or package).strip()
+        if expected_package and actual_package != expected_package:
+            return False, "package drift"
+        block_reason = _baseline_surface_block_reason(
+            package_name=expected_package,
+            run_profile=profile_lc,
+            component_name=actual_component,
+        )
+        if block_reason == "call/voip":
+            return False, "call surface"
+        if block_reason == "login/setup":
+            return False, "setup surface"
+        return True, None
+
+    return _validator
 
 
 def make_runtime_relaunch_callback(
@@ -187,16 +532,39 @@ def make_runtime_observer_status_provider(
     return _provider
 
 
+def make_runtime_pcap_bytes_provider(
+    *,
+    device_serial: str | None,
+    package_name: str,
+    dynamic_run_id: str | None,
+) -> Callable[[], int | None]:
+    serial = str(device_serial or "").strip()
+    package = str(package_name or "").strip()
+    run_id = str(dynamic_run_id or "").strip()
+
+    def _provider() -> int | None:
+        if not serial or not package or not run_id:
+            return None
+        return estimate_device_capture_size_bytes(
+            device_serial=serial,
+            package_name=package,
+            dynamic_run_id=run_id,
+        )
+
+    return _provider
+
+
 def ensure_target_foreground_before_capture(
     *,
     device_serial: str | None,
     package_name: str,
     app_name: str,
     static_plan: dict[str, object] | None,
+    run_profile: str | None = None,
     on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
     prompt_continue_fn: Callable[[str], None],
     status_printer: Callable[[str, str], None],
-    read_foreground_fn: Callable[[str | None], str | None] = read_device_foreground_package,
+    read_foreground_fn: Callable[[str | None], object] = read_device_foreground_target,
     launch_callback: Callable[[str | None, str | None], None] = launch_package_to_foreground,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
@@ -212,9 +580,11 @@ def ensure_target_foreground_before_capture(
         waited = False
         attempted_return = False
         actual_pkg: str | None = None
+        actual_component: str | None = None
+        surface_retry_requested = False
         deadline = float(clock()) + _FOREGROUND_READY_TIMEOUT_S
         while float(clock()) < deadline:
-            actual_pkg = read_foreground_fn(serial)
+            actual_pkg, actual_component = _normalize_foreground_reading(read_foreground_fn(serial))
             if actual_pkg is None:
                 status_printer(
                     "Foreground verification unavailable; continuing without a live foreground gate.",
@@ -222,12 +592,40 @@ def ensure_target_foreground_before_capture(
                 )
                 return
             if actual_pkg == package:
+                block_reason = _baseline_surface_block_reason(
+                    package_name=package,
+                    run_profile=run_profile,
+                    component_name=actual_component,
+                )
+                if block_reason:
+                    component_display = str(actual_component or actual_pkg).strip() or "unknown"
+                    status_printer(
+                        f"{target_label} is on {component_display}, which looks like a {block_reason} screen. "
+                        "Move to a stable in-app screen before capture starts.",
+                        "warn",
+                    )
+                    if on_protocol_event:
+                        on_protocol_event(
+                            "TARGET_SURFACE_NOT_READY",
+                            {
+                                "expected_package": package,
+                                "actual_package": actual_pkg,
+                                "actual_component": actual_component,
+                                "reason": block_reason,
+                            },
+                        )
+                    prompt_continue_fn(
+                        f"Move {target_label} off {component_display}, then press Enter to re-check"
+                    )
+                    surface_retry_requested = True
+                    break
                 if on_protocol_event:
                     on_protocol_event(
                         "TARGET_FOREGROUND_READY",
                         {
                             "expected_package": package,
                             "actual_package": actual_pkg,
+                            "actual_component": actual_component,
                         },
                     )
                 return
@@ -241,12 +639,15 @@ def ensure_target_foreground_before_capture(
                         {
                             "expected_package": package,
                             "actual_package": actual_pkg,
+                            "actual_component": actual_component,
                         },
                     )
             elif not waited:
                 status_printer(f"Waiting for {target_label} foreground...", "info")
                 waited = True
             sleep(_FOREGROUND_READY_POLL_S)
+        if surface_retry_requested:
+            continue
         actual_display = str(actual_pkg or "unknown").strip() or "unknown"
         status_printer(
             f"Foreground still shows {actual_display}. Return {target_label} to the foreground before capture starts.",
