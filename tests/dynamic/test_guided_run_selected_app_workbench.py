@@ -4,6 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 from scytaledroid.DynamicAnalysis.controllers import guided_run
+from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
+    PaperFreezeBuildCandidate,
+    PaperFreezeRecommendation,
+)
 from tests.dynamic._guided_run_state_support import (
     make_dataset_state,
     make_protocol_options_app,
@@ -95,7 +99,7 @@ def test_guided_run_uses_dataset_state_for_summary_and_default(monkeypatch, caps
     assert device_calls == {"select": 0, "preflight": 0}
 
 
-def test_selected_app_protocol_options_hold_interaction_until_baseline_complete() -> None:
+def test_selected_app_protocol_options_allow_interaction_even_when_baseline_incomplete() -> None:
     app = make_protocol_options_app(
         baseline_valid_runs=0,
         interactive_valid_runs=0,
@@ -108,8 +112,33 @@ def test_selected_app_protocol_options_hold_interaction_until_baseline_complete(
 
     assert options["1"].description is None
     assert options["2"].description is None
-    assert options["2"].disabled is True
+    assert options["2"].disabled is False
     assert options["3"].description is None
+
+
+def test_selected_app_workbench_accepts_interactive_selection_before_baseline_complete(
+    monkeypatch,
+) -> None:
+    app = make_protocol_options_app(
+        baseline_valid_runs=0,
+        interactive_valid_runs=0,
+        scripted_template_ready=True,
+    )
+    app = guided_run._with_selected_app_display(
+        app,
+        package_name=app.package_name,
+        display_label="TikTok",
+    )
+    app = guided_run.replace(app, queue_action="baseline", suggested_default_key="1")
+
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "2")
+
+    choice = guided_run._render_selected_app_workbench(
+        app=app,
+        print_tier1_qa_result=None,
+    )
+
+    assert choice == "2"
 
 
 def test_selected_app_protocol_options_mark_completed_quota_as_retained_extra() -> None:
@@ -363,7 +392,7 @@ def test_guided_run_reports_review_queue_action_for_invalid_complete_current_bui
     assert "2) Interactive run (default)" not in out
 
 
-def test_selected_app_workbench_legacy_evidence_does_not_label_target_legacy(
+def test_selected_app_workbench_retained_prior_build_evidence_does_not_label_target_lost(
     monkeypatch, capsys
 ) -> None:
     package = "com.twitter.android"
@@ -374,8 +403,8 @@ def test_selected_app_workbench_legacy_evidence_does_not_label_target_legacy(
         package_name=package,
         display_name="X (Twitter)",
         lineage_context={
-            "db_active_sessions": 3,
-            "db_historical_sessions": 11,
+            "db_active_sessions": 0,
+            "db_historical_sessions": 14,
             "db_total_sessions": 14,
         },
     )
@@ -393,6 +422,7 @@ def test_selected_app_workbench_legacy_evidence_does_not_label_target_legacy(
             quota_counted_local=0,
             historical_valid_runs=3,
             historical_build_count=1,
+            historical_pcap_count=3,
             suggested_profile_from_tracker="baseline_idle",
             effective_suggested_profile="baseline_idle",
             suggested_slot=1,
@@ -409,8 +439,112 @@ def test_selected_app_workbench_legacy_evidence_does_not_label_target_legacy(
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert (
-        "Historical evidence: 3 legacy valid run(s) across 1 older build(s) retained for comparison; not counted toward current quota."
+        "Retained prior-build evidence: 3 valid run(s) across 1 prior build(s) retained for analysis; not counted toward current-build quota."
         in out
     )
-    assert "current-build evidence (db-only)" in out
+    assert "Target build    : unknown" in out
+    assert "Current baseline: 0/3" in out
+    assert "Current inter.  : 0/4" in out
+    assert "Retained runs   : 3 valid prior-build run(s)" in out
+    assert "Retained builds : 1" in out
+    assert "Retained PCAPs  : 3" in out
+    assert "retained prior-build evidence (local-only)" in out
     assert "Legacy build · historical evidence" not in out
+
+
+def test_selected_app_workbench_whatsapp_like_prior_build_state_shows_retained_counts(
+    monkeypatch, capsys
+) -> None:
+    package = "com.whatsapp"
+    select_package_calls, select_package = one_shot_package_selector(package)
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="WhatsApp",
+        lineage_context={
+            "db_active_sessions": 0,
+            "db_historical_sessions": 8,
+            "db_total_sessions": 8,
+        },
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            total_runs=8,
+            valid_runs=0,
+            baseline_valid_runs=0,
+            interactive_valid_runs=0,
+            local_evidence_dir_count=8,
+            paper_eligible_local=0,
+            quota_counted_local=0,
+            active_version_code="262508000",
+            historical_valid_runs=8,
+            historical_build_count=1,
+            historical_pcap_count=8,
+            paper_freeze=PaperFreezeRecommendation(
+                package_name=package,
+                installed_target_version_code="262508000",
+                installed_target_version_name="2.26.25.80",
+                installed_target_static_run_id="5837",
+                installed_target_base_apk_sha256="b696" * 16,
+                selected_build=PaperFreezeBuildCandidate(
+                    package_name=package,
+                    version_code="262408020",
+                    version_name="2.26.24.80",
+                    static_run_id="5700",
+                    base_apk_sha256="a" * 64,
+                    strict_idle_runs=3,
+                    quiescent_fg_runs=0,
+                    baseline_valid_runs=3,
+                    interactive_valid_runs=5,
+                    valid_pcap_count=8,
+                    qa_valid_count=8,
+                    first_capture_at="2026-07-01T10:00:00Z",
+                    last_capture_at="2026-07-01T10:35:00Z",
+                    relation_to_active_target="prior-build",
+                    missing_baseline_runs=0,
+                    missing_interactive_runs=0,
+                    status="ready",
+                    static_run_ids=("5700", "5835"),
+                ),
+                build_candidates=(),
+                refresh_candidate=True,
+                retained_prior_build_selected=True,
+            ),
+            suggested_profile_from_tracker="baseline_connected",
+            effective_suggested_profile="baseline_connected",
+            suggested_slot=1,
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "Target build    : 262508000" in out
+    assert "Current baseline: 0/3" in out
+    assert "Current inter.  : 0/4" in out
+    assert "Retained runs   : 8 valid prior-build run(s)" in out
+    assert "Retained builds : 1" in out
+    assert "Retained PCAPs  : 8" in out
+    assert "Paper target" in out
+    assert "262408020 (prior-build, ready)" in out
+    assert "Paper provenance" in out
+    assert "2 static runs merged (5700, 5835)" in out
+    assert "Paper target    : 262408020 (prior-build)" in out
+    assert "Paper strict    : 3" in out
+    assert "Paper q-fg      : 0" in out
+    assert "Paper inter.    : 5" in out
+    assert "Refresh candid. : yes" in out
+    assert "Paper static IDs: 5700, 5835" in out
+    assert "Paper provenance: merged across 2 static runs for the same build hash" in out
+    assert "Retained prior-build evidence exists locally" in out
+    assert "lost" not in out.lower()

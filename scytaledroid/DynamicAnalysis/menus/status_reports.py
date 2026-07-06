@@ -27,6 +27,10 @@ from scytaledroid.DynamicAnalysis.menus.status_reports_queue_debug import (
     render_cohort_status_help as _render_cohort_status_help_impl,
 )
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
+from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
+    build_paper_freeze_decision_board,
+    build_paper_freeze_manifest,
+)
 from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
 from scytaledroid.DynamicAnalysis import app_queue_state
 from scytaledroid.DynamicAnalysis.run_qualification import (
@@ -63,6 +67,231 @@ def _freeze_path() -> Path:
 
 def _capture_environment_summary() -> dict[str, object]:
     return _capture_environment_summary_impl()
+
+
+def _paper_freeze_summary() -> dict[str, int | str]:
+    try:
+        manifest = build_paper_freeze_manifest()
+    except Exception:
+        return {}
+    rows = manifest.get("apps") if isinstance(manifest.get("apps"), list) else []
+    summary = manifest.get("summary") if isinstance(manifest.get("summary"), dict) else {}
+    ready_current = 0
+    ready_prior = 0
+    merged_targets = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("status") or "").strip() == "ready":
+            relation = str(row.get("selected_relation") or "").strip()
+            if relation == "current":
+                ready_current += 1
+            elif relation == "prior-build":
+                ready_prior += 1
+        static_run_ids = str(row.get("selected_static_run_ids") or "").strip()
+        if static_run_ids and "," in static_run_ids:
+            merged_targets += 1
+    return {
+        "ready": int(summary.get("ready") or 0),
+        "needs_baseline": int(summary.get("needs_baseline") or 0),
+        "needs_interactive": int(summary.get("needs_interactive") or 0),
+        "insufficient": int(summary.get("insufficient") or 0),
+        "refresh_candidates": int(summary.get("refresh_candidates") or 0),
+        "ready_current": ready_current,
+        "ready_prior": ready_prior,
+        "merged_targets": merged_targets,
+    }
+
+
+def _latest_paper_freeze_export_path() -> str:
+    paper_root = Path("output/paper")
+    if not paper_root.exists():
+        return ""
+    candidates = [
+        path
+        for path in paper_root.glob("dynamic_paper_freeze_*")
+        if path.is_dir()
+    ]
+    if not candidates:
+        return ""
+    latest = max(candidates, key=lambda path: path.stat().st_mtime)
+    return str(latest)
+
+
+def _load_paper_freeze_labels(rows: list[dict[str, object]]) -> dict[str, str]:
+    packages = sorted(
+        {
+            str(row.get("package_name") or "").strip().lower()
+            for row in rows
+            if str(row.get("package_name") or "").strip()
+        }
+    )
+    if not packages:
+        return {}
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+    except Exception:
+        return {}
+    placeholders = ", ".join(["%s"] * len(packages))
+    try:
+        results = core_q.run_sql(
+            f"""
+            SELECT LOWER(TRIM(package_name)) AS package_name,
+                   NULLIF(display_name, '') AS display_name
+            FROM apps
+            WHERE LOWER(TRIM(package_name)) IN ({placeholders})
+            """,
+            tuple(packages),
+            fetch="all",
+            dictionary=True,
+            query_name="dynamic.paper_freeze.board_labels",
+        ) or []
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for row in results:
+        pkg = str(row.get("package_name") or "").strip().lower()
+        label = str(row.get("display_name") or "").strip()
+        if pkg and label:
+            out[pkg] = label
+    return out
+
+
+def _compact_bi(row: dict[str, object]) -> str:
+    return (
+        f"S{int(row.get('strict_idle_count') or 0)}"
+        f" Q{int(row.get('quiescent_fg_count') or 0)}"
+        f" I{int(row.get('interactive_count') or 0)}"
+    )
+
+
+def _compact_missing(row: dict[str, object]) -> str:
+    return f"{int(row.get('missing_baseline_runs') or 0)}B {int(row.get('missing_interactive_runs') or 0)}I"
+
+
+def _decision_action_label(row: dict[str, object]) -> str:
+    action = str(row.get("action") or "").strip()
+    return action or "—"
+
+
+def render_paper_freeze_readiness_brief() -> None:
+    print()
+    menu_utils.print_header("Paper-Freeze Readiness")
+    board = build_paper_freeze_decision_board()
+    summary = dict(board.get("summary") or {})
+    rows = list(board.get("rows") or [])
+    latest_export = _latest_paper_freeze_export_path()
+    if not summary:
+        print(
+            status_messages.status(
+                "Paper-freeze readiness is available from scripts/db/report_dynamic_paper_freeze_readiness.py",
+                level="info",
+            )
+        )
+        if latest_export:
+            print(status_messages.status(f"Latest export: {latest_export}", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    menu_utils.print_hint(str(board.get("top_note") or "").strip())
+    print(
+        status_messages.status(
+            "Draft decision mode: "
+            + str(board.get("draft_decision_mode") or "heuristic default"),
+            level="info",
+        )
+    )
+    print(
+        status_messages.status(
+            "Strict Idle is the quota baseline lane. Quiescent FG is valid retained no-touch foreground evidence and does not satisfy strict-idle readiness.",
+            level="info",
+        )
+    )
+    summary_cards.print_summary_card(
+        "Paper target readiness",
+        [
+            summary_cards.summary_item("Ready targets", str(int(summary.get("ready") or 0))),
+            summary_cards.summary_item(
+                "Ready current-build", str(int(summary.get("ready_current") or 0))
+            ),
+            summary_cards.summary_item(
+                "Ready prior-build", str(int(summary.get("ready_prior") or 0))
+            ),
+            summary_cards.summary_item(
+                "Needs interactive", str(int(summary.get("needs_interactive") or 0))
+            ),
+            summary_cards.summary_item(
+                "Needs baseline", str(int(summary.get("needs_baseline") or 0))
+            ),
+            summary_cards.summary_item(
+                "Insufficient", str(int(summary.get("insufficient") or 0))
+            ),
+        ],
+    )
+    labels = _load_paper_freeze_labels(rows)
+    for section in (
+        "MUST_RUN_NOW",
+        "READY_DO_NOT_TOUCH",
+        "SWITCH_TARGET_CANDIDATE",
+        "RUN_ONLY_IF_EASY",
+        "DEFER_REFRESH_WAVE",
+    ):
+        section_rows = list((board.get("sections") or {}).get(section) or [])
+        if not section_rows:
+            continue
+        print()
+        menu_utils.print_section(section.replace("_", " "))
+        table_rows = []
+        for row in section_rows:
+            pkg = str(row.get("package_name") or "").strip().lower()
+            display = labels.get(pkg, pkg or "—")
+            table_rows.append(
+                [
+                    display,
+                    str(row.get("selected_version_code") or "—") or "—",
+                    str(row.get("installed_version_code") or "—") or "—",
+                    str(row.get("relation") or "none") or "none",
+                    _compact_bi(row),
+                    _compact_missing(row),
+                    str(int(row.get("valid_pcap_count") or 0)),
+                    str(row.get("baseline_class_note") or "—"),
+                    str(row.get("draft_role") or "—"),
+                    str(row.get("collectability") or "—"),
+                    _decision_action_label(row),
+                    str(row.get("rough_draft_blocker") or "no"),
+                    str(row.get("reason") or "—"),
+                ]
+            )
+        table_utils.render_table(
+            [
+                "App",
+                "Sel VC",
+                "Inst VC",
+                "Rel",
+                "S/Q/I",
+                "Missing",
+                "PCAPs",
+                "Baseline note",
+                "Role",
+                "Collect",
+                "Action",
+                "Blk",
+                "Reason",
+            ],
+            table_rows,
+            compact=False,
+            padding=2,
+            min_widths=[12, 8, 8, 8, 9, 6, 5, 24, 12, 14, 10, 3, 24],
+        )
+    if latest_export:
+        print(status_messages.status(f"Latest export: {latest_export}", level="info"))
+    print(
+        status_messages.status(
+            "Regenerate: PYTHONPATH=. python scripts/db/report_dynamic_paper_freeze_readiness.py",
+            level="info",
+        )
+    )
+    prompt_utils.press_enter_to_continue()
 
 
 def run_freeze_readiness_audit_report() -> None:
@@ -465,6 +694,27 @@ def render_cohort_status_details(
         ]
     )
     summary_cards.print_summary_card("Tracker posture", tracker_items)
+    paper_freeze = _paper_freeze_summary()
+    if paper_freeze:
+        print()
+        menu_utils.print_section("Paper-target freeze readiness")
+        freeze_items = [
+            summary_cards.summary_item("Ready targets", str(int(paper_freeze.get("ready") or 0))),
+            summary_cards.summary_item("Ready current-build", str(int(paper_freeze.get("ready_current") or 0))),
+            summary_cards.summary_item("Ready prior-build", str(int(paper_freeze.get("ready_prior") or 0))),
+            summary_cards.summary_item("Needs interactive", str(int(paper_freeze.get("needs_interactive") or 0))),
+            summary_cards.summary_item("Needs baseline", str(int(paper_freeze.get("needs_baseline") or 0))),
+            summary_cards.summary_item("Insufficient", str(int(paper_freeze.get("insufficient") or 0))),
+        ]
+        if int(paper_freeze.get("merged_targets") or 0) > 0:
+            freeze_items.append(
+                summary_cards.summary_item("Merged build-hash targets", str(int(paper_freeze.get("merged_targets") or 0)))
+            )
+        if int(paper_freeze.get("refresh_candidates") or 0) > 0:
+            freeze_items.append(
+                summary_cards.summary_item("Refresh candidates", str(int(paper_freeze.get("refresh_candidates") or 0)))
+            )
+        summary_cards.print_summary_card("Paper freeze", freeze_items)
     if (
         historical_valid_runs_total > 0
         or historical_build_count_total > 0
@@ -513,6 +763,7 @@ def render_cohort_status_details(
     for line in (
         "Evidence-authoritative quota drives archive/freeze readiness.",
         "Tracker-scoped latest-run state describes active-build queue posture.",
+        "Paper-target freeze readiness describes the strongest build-backed paper candidate, which may be a retained prior build.",
         "Current-build stale means older evidence exists, but the installed app version needs fresh harvest/static.",
         "Current-build DB-only means the DB knows current-build sessions, but the local evidence pack is not present.",
         "Historical DB-only means older dynamic lineage exists in the DB, but the local evidence pack is not present.",
@@ -558,7 +809,7 @@ def _render_cohort_evidence_qualification_section(
     if baseline_pool > 0 or apps_satisfied >= int(dataset_apps_total):
         print(f"  ML training pool        : {baseline_pool} supplemental baseline(s) (tracker-scoped)")
     if baseline_non_idle > 0:
-        print(f"  Non-idle baselines      : {baseline_non_idle} retained outside quota")
+        print(f"  Quiescent FG baselines  : {baseline_non_idle} retained outside strict-idle quota")
     print()
     print("  Per app")
     table_rows = [
@@ -597,7 +848,7 @@ def render_cohort_build_history(
                 value_style="warning" if drift_count > 0 else "muted",
             ),
         ],
-        subtitle="Build lineage and why an app looks current, mixed, or legacy",
+        subtitle="Build lineage and why an app looks current, mixed, or historical",
     )
     print()
     summary_rows = []
@@ -612,7 +863,7 @@ def render_cohort_build_history(
         if int(getattr(row, "interactive_low_signal_supplemental", 0)) > 0:
             notes.append("low-signal interactive retained")
         if int(getattr(row, "historical_valid_runs_count", 0)) > 0:
-            notes.append("legacy evidence present")
+            notes.append("historical evidence present")
         if str(getattr(row, "lineage_state", "")) == "historical_db_only":
             notes.append("historical DB-only evidence")
         if str(getattr(row, "lineage_state", "")) == "current_build_db_only":
@@ -671,7 +922,7 @@ def _history_reason_and_notes(row: object) -> tuple[str, list[str]]:
     if lineage_state == "historical_db_only":
         return "only historical DB lineage exists", []
     if lineage_state == "historical_local_only":
-        return "only legacy local evidence exists", []
+        return "only historical local evidence exists", []
     if qa_label.startswith("invalid") and need_baseline <= 0 and need_interactive <= 0:
         return "latest current-build QA invalid", []
     if need_baseline > 0:

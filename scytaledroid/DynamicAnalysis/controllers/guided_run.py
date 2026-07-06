@@ -134,6 +134,7 @@ class _SelectedAppContext:
     db_historical_sessions: int
     historical_valid_local: int
     historical_build_count: int
+    historical_pcap_count: int
     extra_valid_local: int
     suggested_default_key: str
     suggested_is_interactive: bool
@@ -278,8 +279,15 @@ def _print_selected_app_evidence_context(
     active_valid_runs: int,
     legacy_valid_runs: int,
     historical_build_count: int,
+    historical_pcap_count: int,
+    active_version_code: str,
+    baseline_valid_runs: int,
+    interactive_valid_runs: int,
+    baseline_required: int,
+    interactive_required: int,
     db_active_sessions: int,
     db_historical_sessions: int,
+    paper_freeze: Any | None = None,
     include_why: bool = True,
 ) -> None:
     state = _selected_app_lineage_state(
@@ -290,16 +298,17 @@ def _print_selected_app_evidence_context(
     )
     if int(legacy_valid_runs) > 0:
         build_text = (
-            f" across {historical_build_count} older build(s)" if historical_build_count > 0 else ""
+            f" across {historical_build_count} prior build(s)" if historical_build_count > 0 else ""
         )
         print(
             status_messages.status(
-                f"Historical evidence: {legacy_valid_runs} legacy valid run(s){build_text} retained for comparison; not counted toward current quota.",
+                f"Retained prior-build evidence: {legacy_valid_runs} valid run(s){build_text} retained for analysis; not counted toward current-build quota.",
                 level="info",
             )
         )
     if not include_why:
         return
+    paper_lines = _paper_freeze_context_lines(paper_freeze)
     if state == "current_build_db_only":
         print()
         print("Why:")
@@ -312,22 +321,42 @@ def _print_selected_app_evidence_context(
         print()
         print("Current target")
         print("--------------")
-        print("Installed build : installed/current")
+        print(f"Target build    : {active_version_code or 'unknown'}")
         print("Current evidence: none yet")
-        print(f"Historical      : {legacy_valid_runs} legacy valid run(s) retained for comparison")
+        print(f"Current baseline: {baseline_valid_runs}/{baseline_required}")
+        print(f"Current inter.  : {interactive_valid_runs}/{interactive_required}")
+        print(f"Retained runs   : {legacy_valid_runs} valid prior-build run(s)")
+        print(f"Retained builds : {historical_build_count}")
+        if historical_pcap_count > 0:
+            print(f"Retained PCAPs  : {historical_pcap_count}")
+        for line in paper_lines:
+            print(line)
         print("Current QA      : unknown until current-build evidence exists")
         print()
         print("Why:")
         print(
-            "Historical evidence exists locally, but current-build evidence is still missing for this app."
+            "Retained prior-build evidence exists locally, but current-build evidence is still missing for this app."
         )
         print("Baseline collection should target the installed build.")
         return
     if state == "historical_db_only":
         print()
+        print("Current target")
+        print("--------------")
+        print(f"Target build    : {active_version_code or 'unknown'}")
+        print("Current evidence: none yet")
+        print(f"Current baseline: {baseline_valid_runs}/{baseline_required}")
+        print(f"Current inter.  : {interactive_valid_runs}/{interactive_required}")
+        print(f"Retained runs   : {legacy_valid_runs} valid prior-build run(s)")
+        print(f"Retained builds : {historical_build_count}")
+        if historical_pcap_count > 0:
+            print(f"Retained PCAPs  : {historical_pcap_count}")
+        for line in paper_lines:
+            print(line)
+        print()
         print("Why:")
         print(
-            "Historical DB-only evidence exists, but no current-build evidence pack is present in this workspace."
+            "Retained prior-build DB evidence exists, but no current-build evidence pack is present in this workspace."
         )
         print("Collect baseline evidence for the installed build.")
         return
@@ -336,6 +365,42 @@ def _print_selected_app_evidence_context(
         print("Why:")
         print(f"No dynamic evidence exists yet for {package_name}.")
         print("This run will establish the first current-build baseline.")
+
+
+def _paper_freeze_context_lines(paper_freeze: Any | None) -> list[str]:
+    selected = getattr(paper_freeze, "selected_build", None)
+    if selected is None:
+        return []
+    static_run_ids = tuple(
+        str(value).strip()
+        for value in (getattr(selected, "static_run_ids", None) or ())
+        if str(value).strip()
+    )
+    lines = [
+        f"Paper target    : {str(getattr(selected, 'version_code', '') or 'unknown')}"
+        f" ({str(getattr(selected, 'relation_to_active_target', '') or 'retained')})",
+        f"Paper strict    : {int(getattr(selected, 'strict_idle_runs', 0) or 0)}",
+        f"Paper q-fg      : {int(getattr(selected, 'quiescent_fg_runs', 0) or 0)}",
+        f"Paper inter.    : {int(getattr(selected, 'interactive_valid_runs', 0) or 0)}",
+        f"Paper status    : {str(getattr(selected, 'status', '') or 'insufficient')}",
+        "Refresh candid. : "
+        + ("yes" if bool(getattr(paper_freeze, "refresh_candidate", False)) else "no"),
+    ]
+    if int(getattr(selected, "quiescent_fg_runs", 0) or 0) > 0:
+        lines.append(
+            "Paper baseline  : Quiescent FG is retained analysis evidence; strict-idle readiness stays separate"
+        )
+    if static_run_ids:
+        if len(static_run_ids) == 1:
+            lines.append(f"Paper static ID : {static_run_ids[0]}")
+        else:
+            lines.append(f"Paper static IDs: {', '.join(static_run_ids)}")
+            lines.append(f"Paper provenance: merged across {len(static_run_ids)} static runs for the same build hash")
+    if bool(getattr(paper_freeze, "retained_prior_build_selected", False)):
+        lines.append(
+            "Paper policy    : retained prior-build evidence is selected for freeze; current-build quota remains separate"
+        )
+    return lines
 
 
 def _selected_app_queue_action(
@@ -662,6 +727,7 @@ def _load_selected_app_context(
     extra_valid_local = int(counts.extra_valid_runs)
     historical_valid_local = int(state.historical_valid_runs)
     historical_build_count = int(state.historical_build_count)
+    historical_pcap_count = int(getattr(state, "historical_pcap_count", 0) or 0)
     db_lineage_context = _load_db_dynamic_lineage_context(package_name)
     db_active_sessions = int(db_lineage_context.get("db_active_sessions") or 0)
     db_historical_sessions = int(db_lineage_context.get("db_historical_sessions") or 0)
@@ -706,6 +772,7 @@ def _load_selected_app_context(
         db_historical_sessions=db_historical_sessions,
         historical_valid_local=historical_valid_local,
         historical_build_count=historical_build_count,
+        historical_pcap_count=historical_pcap_count,
         extra_valid_local=extra_valid_local,
         suggested_default_key=suggested_default_key,
         suggested_is_interactive=suggested_is_interactive,
@@ -1841,7 +1908,9 @@ def _run_guided_dataset_iteration(
     pcapdroid_api_key: str | None = None,
 ) -> bool:
     scenario_id = "basic_usage"
-    duration_seconds = 0
+    duration_seconds = int(getattr(profile_config, "RECOMMENDED_SAMPLING_SECONDS", 240) or 240)
+    if duration_seconds <= 0:
+        duration_seconds = 240
     label = "Cohort"
 
     groups = group_artifacts()
