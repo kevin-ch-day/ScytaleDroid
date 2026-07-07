@@ -190,7 +190,13 @@ def _with_selected_app_display(
 
 
 def _selected_app_active_valid_runs(app: _SelectedAppContext) -> int:
-    return int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
+    quota_active = int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
+    return _selected_app_state.selected_app_local_current_valid_runs(
+        technical_valid_active=int(getattr(app.counts, "total_runs", 0) or 0),
+        quota_active_valid=quota_active,
+        historical_valid_runs_count=int(getattr(app, "historical_valid_local", 0) or 0),
+        db_active_sessions=int(getattr(app, "db_active_sessions", 0) or 0),
+    )
 
 
 def _initial_device_context() -> dict[str, str | None]:
@@ -749,7 +755,12 @@ def _load_selected_app_context(
         latest_invalid_reason=getattr(latest_recent, "invalid_reason_code", None),
         latest_pcap_failure_detail=getattr(latest_recent, "pcap_failure_detail", None),
         db_active_sessions=db_active_sessions,
-        active_valid_runs=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
+        active_valid_runs=_selected_app_state.selected_app_local_current_valid_runs(
+            technical_valid_active=int(getattr(counts, "total_runs", 0) or 0),
+            quota_active_valid=int(counts.baseline_valid_runs) + int(counts.interactive_valid_runs),
+            historical_valid_runs_count=historical_valid_local,
+            db_active_sessions=db_active_sessions,
+        ),
     )
     return _SelectedAppContext(
         package_name=package_name,
@@ -971,6 +982,33 @@ def _is_supplemental_baseline_capture(
     if not str(run_profile or "").strip().lower().startswith("baseline"):
         return False
     return int(baseline_valid_runs) >= int(cfg.baseline_required)
+
+
+def _interactive_strict_idle_hold_notice(
+    *,
+    selected_protocol: str,
+    run_profile: str,
+    counts: Any,
+    cfg: Any,
+) -> tuple[str, str, str] | None:
+    if str(selected_protocol or "").strip() != "2":
+        return None
+    if not _is_interactive_profile(run_profile):
+        return None
+    if int(getattr(counts, "baseline_valid_runs", 0) or 0) >= int(cfg.baseline_required):
+        return None
+    quiescent_fg = int(getattr(counts, "baseline_not_idle_valid", 0) or 0)
+    if quiescent_fg <= 0:
+        return None
+    return (
+        (
+            "Interactive run allowed under strict-idle hold. "
+            "This will be retained as current-build interactive evidence, "
+            "but strict quota remains held until Strict Idle is complete."
+        ),
+        "Proceed with retained interactive evidence run anyway?",
+        "Run canceled. Strict Idle is still incomplete; choose baseline if you want strict quota progress.",
+    )
 
 
 def _is_interactive_profile(profile: str) -> bool:
@@ -1431,17 +1469,20 @@ def _is_manual_preparation_run(
 
 def _render_baseline_requirement_block(
     *,
+    selected_protocol: str,
+    run_profile: str,
     counts: Any,
     cfg: Any,
     manual_preparation_run: bool,
 ) -> None:
-    progress = f"{int(counts.baseline_valid_runs)}/{int(cfg.baseline_required)} valid baseline runs"
-    items = [
-        summary_item("Baseline progress", progress, value_style="warning"),
-    ]
+    baseline_progress = (
+        f"{int(counts.baseline_valid_runs)}/{int(cfg.baseline_required)} valid baseline runs"
+    )
+    items: list[Any] = []
     if manual_preparation_run:
         items.extend(
             [
+                summary_item("Baseline progress", baseline_progress, value_style="warning"),
                 summary_item("Path", "manual preparation run", value_style="accent"),
                 summary_item("Counts toward quota", "no", value_style="muted"),
                 summary_item("Retained as", "extra evidence", value_style="muted"),
@@ -1466,16 +1507,51 @@ def _render_baseline_requirement_block(
         )
         return
 
-    items.extend(
-        [
-            summary_item("Recommended next run", "baseline", value_style="warning"),
-            summary_item(
-                "Counts toward quota", "not until baseline is complete", value_style="muted"
-            ),
-        ]
+    held_interactive_notice = _interactive_strict_idle_hold_notice(
+        selected_protocol=selected_protocol,
+        run_profile=run_profile,
+        counts=counts,
+        cfg=cfg,
     )
+    if held_interactive_notice is not None:
+        items.extend(
+            [
+                summary_item(
+                    "Strict Idle progress",
+                    f"{int(counts.baseline_valid_runs)}/{int(cfg.baseline_required)}",
+                    value_style="warning",
+                ),
+                summary_item(
+                    "Quiescent FG evidence",
+                    f"{int(getattr(counts, 'baseline_not_idle_valid', 0) or 0)} valid no-touch run(s)",
+                    value_style="accent",
+                ),
+                summary_item(
+                    "Recommended strict-quota run",
+                    "strict-idle baseline",
+                    value_style="warning",
+                ),
+                summary_item("Strict quota", "held until Strict Idle is complete", value_style="muted"),
+                summary_item(
+                    "Interactive run",
+                    "retained as current-build evidence",
+                    value_style="accent",
+                ),
+            ]
+        )
+    else:
+        items.extend(
+            [
+                summary_item("Baseline progress", baseline_progress, value_style="warning"),
+                summary_item("Recommended next run", "baseline", value_style="warning"),
+                summary_item(
+                    "Counts toward quota", "not until baseline is complete", value_style="muted"
+                ),
+            ]
+        )
     print_summary_card("Baseline requirement", items)
-    print(status_messages.status("Recommended next run is baseline.", level="warn"))
+    if held_interactive_notice is None:
+        print(status_messages.status("Recommended next run is baseline.", level="warn"))
 
 
 def _render_supplemental_baseline_block(*, counts: Any) -> None:
@@ -1508,6 +1584,10 @@ def _render_supplemental_baseline_block(*, counts: Any) -> None:
 
 def _print_paper_quota_impact(
     *,
+    selected_protocol: str,
+    run_profile: str,
+    counts: Any,
+    cfg: Any,
     counts_toward_completion: bool,
     supplemental_baseline: bool,
 ) -> None:
@@ -1516,6 +1596,20 @@ def _print_paper_quota_impact(
             status_messages.status(
                 "Quota candidate: yes, subject to validity and quota eligibility.",
                 level="success",
+            )
+        )
+        return
+    held_interactive_notice = _interactive_strict_idle_hold_notice(
+        selected_protocol=selected_protocol,
+        run_profile=run_profile,
+        counts=counts,
+        cfg=cfg,
+    )
+    if held_interactive_notice is not None:
+        print(
+            status_messages.status(
+                "Cohort quota: NO · retained current-build interactive evidence (strict-idle hold)",
+                level="info",
             )
         )
         return
@@ -2080,6 +2174,8 @@ def _run_guided_dataset_iteration(
         cfg.baseline_required
     ):
         _render_baseline_requirement_block(
+            selected_protocol=selected_protocol,
+            run_profile=run_profile,
             counts=counts,
             cfg=cfg,
             manual_preparation_run=manual_preparation_run,
@@ -2111,21 +2207,25 @@ def _run_guided_dataset_iteration(
         and not counts_toward_completion
         and not manual_preparation_run
     ):
-        print(
-            status_messages.status(
-                "Selected intent is not quota-suggested and will be saved as retained extra evidence (not quota-counted).",
-                level="warn",
+        held_interactive_notice = _interactive_strict_idle_hold_notice(
+            selected_protocol=selected_protocol,
+            run_profile=run_profile,
+            counts=counts,
+            cfg=cfg,
+        )
+        if held_interactive_notice is None:
+            warning_text = (
+                "Selected intent is not quota-suggested and will be saved as retained extra evidence "
+                "(not quota-counted)."
             )
-        )
-        proceed = prompt_utils.prompt_yes_no(
-            "Proceed with retained extra run anyway?", default=False
-        )
+            prompt_text = "Proceed with retained extra run anyway?"
+            cancel_text = "Run canceled. Choose the suggested intent to fill quota."
+        else:
+            warning_text, prompt_text, cancel_text = held_interactive_notice
+        print(status_messages.status(warning_text, level="warn"))
+        proceed = prompt_utils.prompt_yes_no(prompt_text, default=False)
         if not proceed:
-            print(
-                status_messages.status(
-                    "Run canceled. Choose the suggested intent to fill quota.", level="info"
-                )
-            )
+            print(status_messages.status(cancel_text, level="info"))
             return True
 
     # Manual runs can be quota-counted (by policy), so do not gate behind an
@@ -2218,6 +2318,10 @@ def _run_guided_dataset_iteration(
 
     # Operator-facing paper quota impact label (avoid generic "countable" wording).
     _print_paper_quota_impact(
+        selected_protocol=selected_protocol,
+        run_profile=run_profile,
+        counts=counts,
+        cfg=cfg,
         counts_toward_completion=counts_toward_completion,
         supplemental_baseline=supplemental_baseline,
     )

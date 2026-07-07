@@ -103,6 +103,24 @@ def _latest_run_media_plane_rows(run_id: str) -> list[list[str]]:
     if not classification or classification == "not_observed":
         return []
     rows: list[list[str]] = [["Classification", classification.replace("_", " ")]]
+    rtc_candidate_count = summary.get("rtc_flow_candidate_count")
+    if rtc_candidate_count is not None:
+        rows.append(["RTC flow candidates", str(rtc_candidate_count)])
+    rtc_sustained_count = summary.get("rtc_sustained_session_count")
+    if rtc_sustained_count is not None:
+        rows.append(["RTC sustained sessions", str(rtc_sustained_count)])
+    rtc_total_bytes = summary.get("rtc_total_bytes")
+    if rtc_total_bytes is not None:
+        rows.append(["RTC bytes", _format_bytes(rtc_total_bytes)])
+    rtc_total_packets = summary.get("rtc_total_packets")
+    if rtc_total_packets is not None:
+        rows.append(["RTC packets", str(rtc_total_packets)])
+    rtc_relay_peer_count = summary.get("rtc_relay_peer_count")
+    if rtc_relay_peer_count is not None:
+        rows.append(["RTC relay peers", str(rtc_relay_peer_count)])
+    protocol_mix = _rtc_protocol_mix_label(summary)
+    if protocol_mix:
+        rows.append(["RTC protocol mix", protocol_mix])
     relay_count = summary.get("relay_endpoint_count")
     if relay_count is not None:
         rows.append(["Relay endpoints", str(relay_count)])
@@ -129,6 +147,73 @@ def _latest_run_media_plane_rows(run_id: str) -> list[list[str]]:
         labels = [str(item).strip() for item in reasons if str(item).strip()]
         if labels:
             rows.append(["Reason codes", ", ".join(labels)])
+    return rows
+
+
+def _rtc_protocol_mix_label(summary: dict[str, Any]) -> str | None:
+    labels: list[str] = []
+    mapping = [
+        ("rtc_stun_packet_count", "stun"),
+        ("rtc_dtls_packet_count", "dtls"),
+        ("rtc_rtp_packet_count", "rtp"),
+        ("rtc_srtcp_packet_count", "srtcp"),
+        ("rtc_quic_packet_count", "quic"),
+    ]
+    for key, label in mapping:
+        try:
+            if int(summary.get(key) or 0) > 0:
+                labels.append(label)
+        except (TypeError, ValueError):
+            continue
+    return ", ".join(labels) if labels else None
+
+
+def _latest_run_runtime_surface_rows(run_id: str) -> list[list[str]]:
+    if not run_id:
+        return []
+    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+    summary = _load_json(run_dir / "analysis" / "summary.json")
+    indicators = summary.get("indicators") if isinstance(summary.get("indicators"), dict) else {}
+    runtime_surfaces = (
+        indicators.get("runtime_surfaces")
+        if isinstance(indicators, dict) and isinstance(indicators.get("runtime_surfaces"), dict)
+        else {}
+    )
+    if not runtime_surfaces:
+        return []
+    rows: list[list[str]] = []
+    labels = runtime_surfaces.get("labels")
+    if isinstance(labels, list) and labels:
+        rendered = [str(item).strip() for item in labels if str(item).strip()]
+        if rendered:
+            rows.append(["Observed surfaces", ", ".join(rendered)])
+    primary_label = str(runtime_surfaces.get("primary_label") or "").strip()
+    primary_detail = str(runtime_surfaces.get("primary_detail") or "").strip()
+    if primary_label:
+        primary_text = primary_label
+        if primary_detail:
+            primary_text += f" ({primary_detail})"
+        rows.append(["Primary surface", primary_text])
+    transition_count = runtime_surfaces.get("transition_count")
+    if transition_count is not None:
+        rows.append(["Transition count", str(transition_count)])
+    transitions = runtime_surfaces.get("transitions")
+    if isinstance(transitions, list) and transitions:
+        for idx, row in enumerate(transitions[:5], start=1):
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("surface_label") or "").strip()
+            if not label:
+                continue
+            detail = str(row.get("surface_detail") or "").strip()
+            elapsed = row.get("elapsed_s")
+            try:
+                value = f"{int(elapsed)}s {label}"
+            except (TypeError, ValueError):
+                value = label
+            if detail:
+                value += f" ({detail})"
+            rows.append([f"Transition {idx}", value])
     return rows
 
 
@@ -583,6 +668,11 @@ def render_selected_app_diagnostics(
     menu_utils.print_section("Detail")
     menu_utils.print_table(["Field", "Value"], rows)
     latest_run_id = str(getattr(latest_recent, "run_id", "") or "").strip() if latest_recent is not None else ""
+    runtime_surface_rows = _latest_run_runtime_surface_rows(latest_run_id)
+    if runtime_surface_rows:
+        print()
+        menu_utils.print_section("Latest Run Runtime Surfaces")
+        menu_utils.print_table(["Field", "Value"], runtime_surface_rows)
     media_rows = _latest_run_media_plane_rows(latest_run_id)
     if media_rows:
         print()

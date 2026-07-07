@@ -38,6 +38,7 @@ class ActiveCaptureConfig:
     device_serial: str | None = None
     foreground_package: str | None = None
     checkpoint_messages: dict[int, str] | None = None
+    surface_probe: Callable[[object], tuple[str | None, str | None]] | None = None
 
 
 def capture_controls_status_message() -> str:
@@ -305,6 +306,7 @@ class ActiveCaptureRuntime:
         target_reached_announced = {"value": False}
         checkpoint_emitted: set[int] = set()
         last_status: dict[str, object] = {"value": None}
+        last_surface: dict[str, tuple[str | None, str | None] | None] = {"value": None}
         foreground_surface_validator = (
             self._foreground_surface_validator_factory(
                 package_name=target_package,
@@ -342,6 +344,8 @@ class ActiveCaptureRuntime:
                 target_duration_s=int(config.target_duration_s),
                 target_reached_announced_ref=target_reached_announced,
                 last_status_ref=last_status,
+                last_surface_ref=last_surface,
+                surface_probe=config.surface_probe,
                 on_elapsed=on_elapsed,
                 on_protocol_event=on_protocol_event,
             ),
@@ -381,6 +385,8 @@ class ActiveCaptureRuntime:
         target_duration_s: int,
         target_reached_announced_ref: dict[str, bool],
         last_status_ref: dict[str, object],
+        last_surface_ref: dict[str, tuple[str | None, str | None] | None],
+        surface_probe: Callable[[object], tuple[str | None, str | None]] | None,
         on_elapsed: Callable[[int, Callable[[str, str], None]], None] | None,
         on_protocol_event: Callable[[str, dict[str, object]], None] | None,
     ) -> None:
@@ -408,6 +414,27 @@ class ActiveCaptureRuntime:
                     {"expected_package": getattr(state, "expected_package", None)},
                 )
             last_status_ref["value"] = getattr(state, "status", None)
+        if surface_probe is not None:
+            try:
+                surface_label, surface_detail = surface_probe(state)
+            except Exception:
+                surface_label, surface_detail = (None, None)
+            setattr(state, "foreground_surface_label", surface_label)
+            setattr(state, "foreground_surface_detail", surface_detail)
+            current_surface = (surface_label, surface_detail)
+            if current_surface != last_surface_ref.get("value"):
+                last_surface_ref["value"] = current_surface
+                if surface_label and on_protocol_event:
+                    on_protocol_event(
+                        "FOREGROUND_SURFACE_CHANGE",
+                        {
+                            "elapsed_s": int(elapsed_i),
+                            "foreground_package": getattr(state, "foreground_package", None),
+                            "foreground_component": getattr(state, "foreground_component", None),
+                            "surface_label": surface_label,
+                            "surface_detail": surface_detail,
+                        },
+                    )
         for checkpoint_s, checkpoint_msg in sorted((checkpoint_messages or {}).items()):
             if checkpoint_s in checkpoint_emitted or elapsed_i < int(checkpoint_s):
                 continue

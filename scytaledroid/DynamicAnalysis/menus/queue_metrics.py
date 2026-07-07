@@ -164,14 +164,15 @@ def summarize_evidence_quota(
 
 def resolve_active_cohort_evidence_quota_summary() -> dict[str, int | bool]:
     """Queue-aligned quota summary for the active research cohort."""
-    from scytaledroid.Config import app_config, profile_config
+    from scytaledroid.Config import app_config
     from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
-    from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
-    from scytaledroid.DynamicAnalysis.tracker_scope import (
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
+    from scytaledroid.DynamicAnalysis.menus.summary_support import (
         min_windows_per_run as _min_windows_per_run,
         run_profile_bucket as _run_profile_bucket,
     )
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
+    from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
 
     cfg = DatasetTrackerConfig()
     dataset_pkgs = {

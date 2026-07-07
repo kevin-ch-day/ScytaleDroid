@@ -72,6 +72,8 @@ def _drift_evidence_text(build: str, evidence: str) -> str:
         return "tracked-build evidence (local+db)"
     if evidence_key == "db-only":
         return "tracked-build evidence (db-only)"
+    if evidence_key == "local-only":
+        return "historical evidence (local-only)"
     if evidence_key in {"empty", "none"}:
         return "no tracked-build evidence"
     return selected_app_evidence_text(build, evidence)

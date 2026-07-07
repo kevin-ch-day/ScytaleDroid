@@ -238,6 +238,33 @@ def test_selected_app_diagnostics_show_latest_media_plane(monkeypatch, tmp_path,
     run_id = "wa-run-1"
     run_dir = tmp_path / "evidence" / "dynamic" / run_id / "analysis"
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "indicators": {
+                    "runtime_surfaces": {
+                        "labels": ["thread_surface", "rtc_call_video_surface"],
+                        "primary_label": "thread_surface",
+                        "primary_detail": "messenger conversation thread",
+                        "transition_count": 3,
+                        "transitions": [
+                            {
+                                "elapsed_s": 10,
+                                "surface_label": "thread_surface",
+                                "surface_detail": "messenger conversation thread",
+                            },
+                            {
+                                "elapsed_s": 65,
+                                "surface_label": "rtc_call_video_surface",
+                                "surface_detail": "messenger rtc video call surface",
+                            },
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     (run_dir / "pcap_report.json").write_text(
         json.dumps(
             {
@@ -245,6 +272,16 @@ def test_selected_app_diagnostics_show_latest_media_plane(monkeypatch, tmp_path,
                     "status": "ok",
                     "summary": {
                         "classification": "relay_media_likely",
+                        "rtc_flow_candidate_count": 3,
+                        "rtc_sustained_session_count": 2,
+                        "rtc_total_bytes": 623350,
+                        "rtc_total_packets": 9,
+                        "rtc_stun_packet_count": 2,
+                        "rtc_dtls_packet_count": 1,
+                        "rtc_rtp_packet_count": 4,
+                        "rtc_srtcp_packet_count": 2,
+                        "rtc_quic_packet_count": 1,
+                        "rtc_relay_peer_count": 2,
                         "relay_endpoint_count": 3,
                         "turn_allocate_success_count": 16,
                         "stun_frame_count": 480,
@@ -293,7 +330,22 @@ def test_selected_app_diagnostics_show_latest_media_plane(monkeypatch, tmp_path,
     )
 
     out = capsys.readouterr().out
+    assert "Latest Run Runtime Surfaces" in out
+    assert "Observed surfaces" in out
+    assert "thread_surface, rtc_call_video_surface" in out
+    assert "Primary surface" in out
+    assert "messenger conversation thread" in out
+    assert "Transition 2" in out
+    assert "65s rtc_call_video_surface" in out
     assert "Latest Run Media Plane" in out
     assert "relay media likely" in out
+    assert "RTC flow candidates" in out
+    assert "RTC sustained sessions" in out
+    assert "RTC bytes" in out
+    assert "609KB" in out
+    assert "RTC packets" in out
+    assert "RTC relay peers" in out
+    assert "RTC protocol mix" in out
+    assert "stun, dtls, rtp, srtcp, quic" in out
     assert "157.240.146.35:3478" in out
     assert "turn_allocate_success, relay_media_pattern" in out

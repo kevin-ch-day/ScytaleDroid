@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from scytaledroid.DeviceAnalysis.harvest.models import PullResult
 from tests.device_analysis._harvest_runner_support import (
     isolate_storage_contract,
     make_artifact_plan,
@@ -129,6 +130,88 @@ def test_execute_harvest_keeps_db_repo_available_for_package_writes(
         ("artifact_path", 23, 7, "SERIAL123/20260328/com.example.app/com_example_app_1__base.apk"),
         ("source_path", 23, "/data/app/com.example.app/base.apk"),
     ]
+
+
+def test_execute_harvest_library_hit_skips_adb_pull(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.Database.db_utils import diagnostics
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.services import apk_library_service, artifact_store
+
+    patch_runner_common(monkeypatch, runner=runner, diagnostics=diagnostics, tmp_path=tmp_path, write_db=False)
+
+    calls: list[str] = []
+
+    def _fake_pull(**kwargs):
+        calls.append(kwargs["source_path"])
+        raise AssertionError("adb pull should not run for an APK library hit")
+
+    monkeypatch.setattr(runner, "adb_pull", _fake_pull)
+
+    digest = "c" * 64
+    canonical = artifact_store.canonical_apk_path(digest)
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    canonical.write_bytes(b"known-apk")
+    canonical_rel = artifact_store.repo_relative_path(canonical)
+    inventory = make_inventory_row(
+        package_name="com.example.known",
+        app_label="Known App",
+        primary_path="/data/app/com.example.known/base.apk",
+        version_name="1.0",
+        version_code="1",
+        apk_paths=["/data/app/com.example.known/base.apk"],
+    )
+    plan = make_package_plan(
+        inventory=inventory,
+        artifacts=[
+            make_artifact_plan(
+                source_path="/data/app/com.example.known/base.apk",
+                artifact="base",
+                file_name="com_example_known_1__base.apk",
+            )
+        ],
+    )
+    seed = PullResult(plan=plan)
+    seed.ok.append(
+        runner.ArtifactResult(
+            file_name="com_example_known_1__base.apk",
+            apk_id=None,
+            dest_path=canonical,
+            source_path="/data/app/com.example.known/base.apk",
+            sha256=digest,
+            file_size=canonical.stat().st_size,
+            artifact_label="base",
+            is_base=True,
+            canonical_store_path=canonical_rel,
+        )
+    )
+    assert apk_library_service.register_result(seed, serial="SERIAL123", session_stamp="seed") is not None
+
+    results = runner.execute_harvest(
+        serial="SERIAL123",
+        adb_path="adb",
+        dest_root=tmp_path / "SERIAL123" / "20260329",
+        session_stamp="20260329",
+        plans=[plan],
+        config=object(),
+        pull_mode="inventory",
+    )
+
+    assert calls == []
+    assert len(results) == 1
+    result = results[0]
+    assert result.capture_status == "clean"
+    assert result.research_status == "pending_audit"
+    assert result.ok[0].status == "library_hit"
+    assert result.ok[0].dest_path == canonical.resolve()
+    assert "apk_library_hit" in result.skipped
+    assert result.package_manifest_path is not None
+    payload = result.package_manifest_path.read_text(encoding="utf-8")
+    assert '"pull_outcome": "library_hit"' in payload
+    assert '"apk_library_hit": true' in payload
+    assert not (result.package_manifest_path.parent / "com_example_known_1__base.apk").exists()
 
 
 def test_execute_harvest_preserves_capture_when_db_mirror_fails(

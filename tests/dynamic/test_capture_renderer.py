@@ -31,6 +31,7 @@ def test_render_capture_dashboard_is_deterministic() -> None:
     assert "WhatsApp" in first
     assert "com.emanuelef.remote_capture" in first
     assert "Activity   : unknown" in first
+    assert "Surface    : unknown" in first
     assert "PAUSED_FOREGROUND_DRIFT (foreground drift paused)" in first
     assert "Timing     : wall 00:42 | valid 00:00" in first
     assert "Goal       : 00:00 / 03:00 minimum | 04:00 target" in first
@@ -69,6 +70,32 @@ def test_render_capture_dashboard_truncates_long_status_fields() -> None:
     assert "Guidance   : Baseline-connected prompt: perform the single refresh/check a..." in rendered
     assert "PCAP       : pending" in rendered
     assert "PCAP       : unknown (unknown)" not in rendered
+
+
+def test_render_capture_dashboard_shows_surface_label() -> None:
+    state = CaptureState(
+        app_name="Guardian",
+        package_name="com.guardian",
+        expected_package="com.guardian",
+        version_code="23011",
+        phase="Manual interactive",
+        status=CaptureStatus.RUNNING_VALID,
+        wall_started_at=0.0,
+        wall_elapsed_s=105.0,
+        valid_elapsed_s=105.0,
+        foreground_package="com.guardian",
+        foreground_component="com.guardian.feature.stream.HomeActivity",
+        foreground_surface_label="my_guardian",
+        foreground_surface_detail="personalized guardian lane",
+        latest_event="Foreground surface changed to my_guardian.",
+        observer_status=ObserverStatus(pcapdroid="running", logcat="running", pcap_bytes=98304),
+        target_duration_s=240,
+        minimum_duration_s=180,
+    )
+
+    rendered = render_capture_dashboard(state)
+
+    assert "Surface    : my_guardian - personalized guardian lane" in rendered
 
 
 def test_render_capture_dashboard_suppresses_generic_target_reached_message() -> None:

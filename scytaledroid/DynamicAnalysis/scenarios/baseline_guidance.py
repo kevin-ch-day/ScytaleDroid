@@ -33,6 +33,10 @@ def pinterest_stable_screen_guidance() -> str:
     return "profile, settings, saved items, a static board page, or another non-video/non-promoted surface"
 
 
+def instagram_stable_screen_guidance() -> str:
+    return "Settings and activity, Saved, Archive, or another calm non-feed/non-reels/non-story surface"
+
+
 def guardian_stable_screen_guidance() -> str:
     return "My Guardian, Profile, Menu, or another calm non-article/non-podcast screen"
 
@@ -124,6 +128,27 @@ def pinterest_baseline_warning_line() -> str:
     )
 
 
+def instagram_baseline_tip_line() -> str:
+    return (
+        "  - Instagram baseline tip: Home, Stories, Reels, and autoplay post surfaces can keep pulling media, suggestions, "
+        "and messaging indicators even when you stop touching the app; prefer Settings and activity, Saved, Archive, or another calm surface"
+    )
+
+
+def instagram_launch_surface_tip_line() -> str:
+    return (
+        "  - If Instagram relaunches to Home, switch once to Settings and activity, Saved, Archive, "
+        "or another calm non-feed/non-reels/non-story surface before the timer starts"
+    )
+
+
+def instagram_baseline_warning_line() -> str:
+    return (
+        "Quota baseline requires a calm Instagram foreground surface. Home feed, Stories, Reels, profile-grid browsing, "
+        "and autoplay post/video surfaces can keep generating app-driven traffic even when the operator is hands-off."
+    )
+
+
 def baseline_idle_behavior_lines(package_name: str, *, target_label: str) -> list[str]:
     pkg = str(package_name or "").strip()
     category = package_category_name(pkg)
@@ -151,6 +176,10 @@ def baseline_idle_behavior_lines(package_name: str, *, target_label: str) -> lis
             lines[2] = f"  - Prefer a stable low-motion screen such as {pinterest_stable_screen_guidance()}"
             lines.insert(3, pinterest_launch_surface_tip_line())
             lines.append(pinterest_baseline_tip_line())
+        if pkg.lower() == "com.instagram.android":
+            lines[2] = f"  - Prefer a stable low-motion screen such as {instagram_stable_screen_guidance()}"
+            lines.insert(3, instagram_launch_surface_tip_line())
+            lines.append(instagram_baseline_tip_line())
         return lines
     if category == "news_reader":
         if pkg.lower() == "bbc.mobile.news.ww":
@@ -204,6 +233,8 @@ def baseline_idle_quota_warning(package_name: str, *, profile: str | None) -> st
         return facebook_baseline_warning_line()
     if pkg == "com.pinterest":
         return pinterest_baseline_warning_line()
+    if pkg == "com.instagram.android":
+        return instagram_baseline_warning_line()
     if not is_social_feed_package(package_name):
         return None
     return (
@@ -241,6 +272,11 @@ def baseline_idle_ready_note(package_name: str) -> str | None:
         return (
             "Pinterest often reopens on Home after relaunch. Before pressing Enter, switch once to "
             "profile, saved items, a static board page, settings, or another non-video/non-promoted surface if Home is still selected."
+        )
+    if pkg == "com.instagram.android":
+        return (
+            "Instagram often reopens on Home after relaunch. Before pressing Enter, switch once to "
+            "Settings and activity, Saved, Archive, or another calm non-feed/non-reels/non-story surface if Home is still selected."
         )
     return None
 
@@ -280,6 +316,17 @@ def baseline_idle_checkpoint_messages(package_name: str) -> dict[int, str]:
                 120: (
                     "120s checkpoint: keep Pinterest off Home feed refresh, promoted pins, and video/media cards; "
                     "avoid search, opening pins, scrolling, or switching back into feed discovery."
+                ),
+            }
+        if pkg == "com.instagram.android":
+            return {
+                60: (
+                    "60s checkpoint: if Instagram is still on Home, Stories, Reels, or an autoplay post surface, "
+                    "switch once to Settings and activity, Saved, Archive, or another calm non-feed screen, then hold idle."
+                ),
+                120: (
+                    "120s checkpoint: keep Instagram off Home feed refresh, Stories, Reels, profile-grid browsing, and autoplay post/video surfaces; "
+                    "avoid search, opening posts, scrolling, or switching back into discovery surfaces."
                 ),
             }
         return {
@@ -356,6 +403,10 @@ def baseline_not_idle_next_step(package_name: str | None) -> str:
         if pkg == "com.pinterest":
             return (
                 "Retry on profile, saved items, a static board page, settings, or another non-video/non-promoted Pinterest screen if quota progress is needed."
+            )
+        if pkg == "com.instagram.android":
+            return (
+                "Retry on Settings and activity, Saved, Archive, or another calm non-feed/non-reels/non-story Instagram screen if quota progress is needed."
             )
         return "Retry on a stable non-feed/non-video screen if quota progress is needed."
     if pkg == "com.guardian":

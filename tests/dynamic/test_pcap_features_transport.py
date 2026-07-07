@@ -55,6 +55,20 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
                 "turn_allocate_request_count": 1,
                 "turn_allocate_success_count": 1,
                 "relay_endpoint_count": 1,
+                "rtc_flow_candidate_count": 2,
+                "rtc_sustained_session_count": 1,
+                "rtc_total_bytes": 1200000,
+                "rtc_total_packets": 1800,
+                "rtc_stun_packet_count": 40,
+                "rtc_dtls_packet_count": 8,
+                "rtc_rtp_packet_count": 1200,
+                "rtc_srtcp_packet_count": 520,
+                "rtc_quic_packet_count": 32,
+                "rtc_max_session_bytes": 950000,
+                "rtc_max_session_duration_s": 184.5,
+                "rtc_relay_peer_count": 2,
+                "rtc_call_observed": True,
+                "rtc_multi_session_observed": False,
                 "relay_media_likely": True,
                 "dominant_udp_flow": {"bytes": 900, "share_of_udp_bytes": 0.9},
             },
@@ -107,6 +121,20 @@ def test_pcap_features_include_intensity_and_transport_ratios() -> None:
     assert proxies["top1_ja3_share"] == 2.0 / 3.0
     assert proxies["stun_frame_count"] == 480
     assert proxies["turn_allocate_success_count"] == 1
+    assert proxies["rtc_flow_candidate_count"] == 2
+    assert proxies["rtc_sustained_session_count"] == 1
+    assert proxies["rtc_total_bytes"] == 1200000
+    assert proxies["rtc_total_packets"] == 1800
+    assert proxies["rtc_stun_packet_count"] == 40
+    assert proxies["rtc_dtls_packet_count"] == 8
+    assert proxies["rtc_rtp_packet_count"] == 1200
+    assert proxies["rtc_srtcp_packet_count"] == 520
+    assert proxies["rtc_quic_packet_count"] == 32
+    assert proxies["rtc_max_session_bytes"] == 950000
+    assert proxies["rtc_max_session_duration_s"] == 184.5
+    assert proxies["rtc_relay_peer_count"] == 2
+    assert proxies["rtc_call_observed"] == 1
+    assert proxies["rtc_multi_session_observed"] == 0
     assert proxies["dominant_udp_flow_share"] == 0.9
     assert proxies["relay_media_detected"] == 1
     assert proxies["startup_byte_share"] == 0.96

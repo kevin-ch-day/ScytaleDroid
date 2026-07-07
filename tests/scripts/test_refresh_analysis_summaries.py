@@ -188,9 +188,12 @@ def test_refresh_summaries_apply_restores_top_level_summary_compat_fields(tmp_pa
     refreshed = json.loads((run_dir / "analysis" / "summary.json").read_text(encoding="utf-8"))
     assert refreshed["package_name"] == "com.facebook.katana"
     assert refreshed["version_code"] == 472527906
+    assert refreshed["interaction_mode"] == "baseline"
+    assert refreshed["countable"] is True
     assert refreshed["pcap_bytes"] == 1144155
     assert refreshed["capture_duration_s"] == 301.5
     assert refreshed["cohort_eligibility"] == "COUNTABLE"
+    assert refreshed["domains_count"] == 2
     assert refreshed["top_dns"] == [{"value": "graph.facebook.com", "count": 6}]
     assert refreshed["top_sni"] == [{"value": "payments-graph.facebook.com", "count": 4}]
 

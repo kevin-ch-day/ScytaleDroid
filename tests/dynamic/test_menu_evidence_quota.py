@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.menus import dynamic_menu as menu
+from scytaledroid.DynamicAnalysis.menus import queue_metrics
+from scytaledroid.DynamicAnalysis import research_cohort_runtime
 
 
 class _Cfg:
@@ -150,3 +153,19 @@ def test_summarize_evidence_quota_respects_explicit_non_countable_low_signal_run
     assert out["apps_satisfied"] == 0
     assert out["extra_eligible_runs"] == 1
     assert out["low_signal_exploratory_runs"] == 1
+
+
+def test_resolve_active_cohort_evidence_quota_summary_imports_profile_config_from_dynamic_ml(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", str(tmp_path / "output"))
+    monkeypatch.setattr(
+        research_cohort_runtime,
+        "active_research_cohort_packages",
+        lambda: ["com.example.current"],
+    )
+
+    out = queue_metrics.resolve_active_cohort_evidence_quota_summary()
+
+    assert out["evidence_root_exists"] is False
+    assert out["quota_runs_counted"] == 0

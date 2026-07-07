@@ -60,6 +60,7 @@ def test_web_static_dynamic_summary_prefers_completed_canonical_static_rows() ->
     assert "UPPER(COALESCE(sar3.run_class, '')) = 'CANONICAL'" in sql
     assert "latest_feature_dynamic_run_id" in sql
     assert "latest_run_missing_features_older_features_exist" in sql
+    assert "latest_static_base_apk_sha256" in sql
 
 
 def test_web_runtime_run_index_prefers_dynamic_run_context_semantics() -> None:
@@ -94,6 +95,7 @@ def test_web_dynamic_app_queue_v1_uses_cohort_and_quota_semantics() -> None:
     assert "db_current_build" in sql
     assert "latest_scoped_valid_dataset_run" in sql
     assert "current_build_invalid_run_count" in sql
+    assert "NULLIF(sds.latest_static_base_apk_sha256, '')" in sql
     assert "3 AS baseline_required" in sql
     assert "4 AS interactive_required" in sql
 

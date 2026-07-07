@@ -142,6 +142,24 @@ def selected_app_evidence_compact_label(evidence: str) -> str:
     }.get(str(evidence or "").strip(), str(evidence or "").strip() or "—")
 
 
+def selected_app_local_current_valid_runs(
+    *,
+    technical_valid_active: int,
+    quota_active_valid: int,
+    historical_valid_runs_count: int = 0,
+    db_active_sessions: int = 0,
+) -> int:
+    technical_i = max(0, int(technical_valid_active))
+    quota_i = max(0, int(quota_active_valid))
+    if technical_i <= 0:
+        return quota_i
+    if quota_i > 0 or int(db_active_sessions) > 0:
+        return technical_i
+    if int(historical_valid_runs_count) > 0:
+        return quota_i
+    return technical_i
+
+
 def selected_app_qa_badge(latest_valid: bool | None) -> str:
     if latest_valid is True:
         return "✓"
@@ -342,6 +360,7 @@ __all__ = [
     "selected_app_evidence_compact_label",
     "selected_app_evidence_label",
     "selected_app_evidence_text",
+    "selected_app_local_current_valid_runs",
     "selected_app_need_label",
     "selected_app_qa_badge",
     "selected_app_qa_badge_from_label",

@@ -9,6 +9,7 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
     selected_app_build_label,
     selected_app_evidence_label,
     selected_app_evidence_text,
+    selected_app_local_current_valid_runs,
     selected_app_qa_badge,
     selected_app_qa_text,
 )
@@ -24,7 +25,13 @@ def workbench_summary_card_items(app: Any) -> list[Any]:
         f"quota {int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)}"
         f"/{int(app.cfg.baseline_required) + int(app.cfg.interactive_required)}"
     )
-    active_valid_runs = int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
+    quota_active = int(app.counts.baseline_valid_runs) + int(app.counts.interactive_valid_runs)
+    active_valid_runs = selected_app_local_current_valid_runs(
+        technical_valid_active=int(getattr(app.counts, "total_runs", 0) or 0),
+        quota_active_valid=quota_active,
+        historical_valid_runs_count=int(app.historical_valid_local),
+        db_active_sessions=int(app.db_active_sessions),
+    )
     build_label = selected_app_build_label(
         active_valid_runs=active_valid_runs,
         legacy_valid_runs=int(app.historical_valid_local),

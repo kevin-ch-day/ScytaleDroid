@@ -6,14 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping
 
-from scytaledroid.StaticAnalysis.engine.strings_capture import (
-    _classify_resource_parse_state,
-    _summarize_bounds_warnings,
-)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 _SHA_RE = re.compile(r"([0-9a-fA-F]{64})\.apk$")
 
@@ -135,6 +135,11 @@ def _merge_lines(existing: object, repair_lines: list[str]) -> list[str]:
 
 
 def _patch_payload(payload: dict[str, Any], repair_lines: list[str]) -> bool:
+    from scytaledroid.StaticAnalysis.engine.strings_capture import (
+        _classify_resource_parse_state,
+        _summarize_bounds_warnings,
+    )
+
     metadata = payload.setdefault("metadata", {})
     if not isinstance(metadata, dict):
         return False

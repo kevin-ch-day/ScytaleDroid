@@ -204,6 +204,54 @@ def test_pinterest_non_idle_next_step_mentions_stable_pinterest_surfaces() -> No
     assert "non-video/non-promoted Pinterest screen" in text
 
 
+def test_instagram_baseline_guidance_is_surface_specific() -> None:
+    lines = baseline_guidance.baseline_idle_behavior_lines(
+        "com.instagram.android",
+        target_label="4 mins 0 sec (240s)",
+    )
+    text = "\n".join(lines)
+
+    assert "Avoid Home / For You / feed timelines" in text
+    assert "Avoid video/media-heavy screens" in text
+    assert "Settings and activity, Saved, Archive" in text
+    assert "If Instagram relaunches to Home, switch once" in text
+    assert "Instagram baseline tip" in text
+    assert "Stories, Reels" in text
+
+
+def test_instagram_baseline_warning_mentions_home_stories_reels_and_profile_grid() -> None:
+    warning = baseline_guidance.baseline_idle_quota_warning(
+        "com.instagram.android", profile="baseline_idle"
+    )
+
+    assert warning is not None
+    assert "Home feed, Stories, Reels" in warning
+    assert "profile-grid browsing" in warning
+
+
+def test_instagram_checkpoint_messages_are_surface_specific() -> None:
+    messages = baseline_guidance.baseline_idle_checkpoint_messages("com.instagram.android")
+
+    assert "Home, Stories, Reels" in messages[60]
+    assert "Settings and activity, Saved, Archive" in messages[60]
+    assert "profile-grid browsing" in messages[120]
+
+
+def test_instagram_ready_note_mentions_switch_before_timer() -> None:
+    note = baseline_guidance.baseline_idle_ready_note("com.instagram.android")
+
+    assert note is not None
+    assert "Instagram often reopens on Home after relaunch" in note
+    assert "Before pressing Enter, switch once" in note
+
+
+def test_instagram_non_idle_next_step_mentions_calm_instagram_surfaces() -> None:
+    text = baseline_guidance.baseline_not_idle_next_step("com.instagram.android")
+
+    assert "Settings and activity, Saved, Archive" in text
+    assert "non-feed/non-reels/non-story Instagram screen" in text
+
+
 def test_guardian_baseline_guidance_is_surface_specific() -> None:
     lines = baseline_guidance.baseline_idle_behavior_lines(
         "com.guardian",
