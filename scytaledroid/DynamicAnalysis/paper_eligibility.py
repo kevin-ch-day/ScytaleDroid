@@ -44,7 +44,14 @@ _TEMPLATE_SUCCESSOR_COMPATIBILITY = {
     # satisfied the current protocol/version/step/hash checks.
     "facebook_behavior_v3": {"facebook_basic_v2"},
     "news_reader_behavior_v2": {"news_reader_basic_v1"},
+    "bbc_news_behavior_v1": {"news_reader_basic_v1"},
 }
+_TEMPLATE_COMPATIBILITY_PAIRS = {
+    (expected, compatible)
+    for expected, compatible_set in _TEMPLATE_SUCCESSOR_COMPATIBILITY.items()
+    for compatible in compatible_set
+}
+_TEMPLATE_COMPATIBILITY_PAIRS.update({(compatible, expected) for expected, compatible in tuple(_TEMPLATE_COMPATIBILITY_PAIRS)})
 
 EXCLUSION_REASON_CODES: tuple[str, ...] = (
     "EXCLUDED_SCRIPT_HASH_MISMATCH",
@@ -248,7 +255,7 @@ def derive_paper_eligibility(
             elif expected_template:
                 if (
                     observed_template != expected_template
-                    and observed_template not in _TEMPLATE_SUCCESSOR_COMPATIBILITY.get(expected_template, set())
+                    and (expected_template, observed_template) not in _TEMPLATE_COMPATIBILITY_PAIRS
                     and not call_template_exception
                     and not messaging_activity_template_exception
                 ):

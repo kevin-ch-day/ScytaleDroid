@@ -89,10 +89,23 @@ def _current_build_flag_sql() -> str:
     """
 
 
+def _static_target_sha_sql(alias: str = "sds") -> str:
+    static_sha = (
+        f"TRIM(CONVERT(COALESCE({alias}.latest_static_base_apk_sha256, '') "
+        f"USING utf8mb4) COLLATE utf8mb4_unicode_ci)"
+    )
+    harvest_sha = (
+        f"TRIM(CONVERT(COALESCE({alias}.latest_apk_sha256, '') "
+        f"USING utf8mb4) COLLATE utf8mb4_unicode_ci)"
+    )
+    return f"COALESCE(NULLIF({static_sha}, ''), {harvest_sha}, '')"
+
+
 def sql_probes(*, cohort_key: str | None) -> list[tuple[str, str]]:
     cohort = _cohort_subquery(cohort_key)
     bucket = _profile_bucket_sql("ctx.effective_run_profile")
     build_flag = _current_build_flag_sql()
+    static_target_sha = _static_target_sha_sql("sds")
 
     return [
         (
@@ -136,7 +149,7 @@ def sql_probes(*, cohort_key: str | None) -> list[tuple[str, str]]:
             WITH targets AS (
               SELECT
                 LOWER(TRIM(sds.package_name)) AS package_name,
-                LOWER(TRIM(COALESCE(sds.latest_apk_sha256, ''))) AS latest_sha
+                LOWER({static_target_sha}) AS latest_sha
               FROM v_web_static_dynamic_app_summary sds
               WHERE LOWER(TRIM(sds.package_name)) IN ({cohort})
             ),
@@ -195,9 +208,9 @@ def sql_probes(*, cohort_key: str | None) -> list[tuple[str, str]]:
             f"""
             SELECT
               CASE
-                WHEN COALESCE(TRIM(sds.latest_apk_sha256), '') = '' THEN 'no_static_sha'
+                WHEN {static_target_sha} = '' THEN 'no_static_sha'
                 WHEN LOWER(TRIM(CONVERT(COALESCE(ds.base_apk_sha256, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci))
-                   = LOWER(TRIM(CONVERT(COALESCE(sds.latest_apk_sha256, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci))
+                   = LOWER({static_target_sha})
                   THEN 'sha_match'
                 ELSE 'sha_mismatch'
               END AS sha_state,
@@ -238,7 +251,8 @@ def sql_probes(*, cohort_key: str | None) -> list[tuple[str, str]]:
               ctx.quota_state,
               ctx.started_at_utc,
               ctx.low_signal,
-              sds.latest_apk_sha256
+              sds.latest_apk_sha256,
+              sds.latest_static_base_apk_sha256
             FROM v_dynamic_run_context_v1 ctx
             LEFT JOIN v_web_static_dynamic_app_summary sds
               ON LOWER(TRIM(sds.package_name)) = LOWER(TRIM(ctx.package_name))
@@ -324,7 +338,7 @@ def sql_probes(*, cohort_key: str | None) -> list[tuple[str, str]]:
             WITH targets AS (
               SELECT
                 LOWER(TRIM(sds.package_name)) AS package_name,
-                LOWER(TRIM(COALESCE(sds.latest_apk_sha256, ''))) AS latest_sha
+                LOWER({static_target_sha}) AS latest_sha
               FROM v_web_static_dynamic_app_summary sds
               WHERE LOWER(TRIM(sds.package_name)) IN ({cohort})
             )

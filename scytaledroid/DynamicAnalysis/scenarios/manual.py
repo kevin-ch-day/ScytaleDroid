@@ -16,9 +16,9 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.capture.console import CbreakTerminal, LiveCaptureConsole, SelectInputReader
-from scytaledroid.DynamicAnalysis.capture.state import CaptureAction, CaptureState, ObserverStatus
-from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    build_capture_state as _build_capture_state,
+from scytaledroid.DynamicAnalysis.capture.state import CaptureAction
+from scytaledroid.DynamicAnalysis.capture.surface_probe import (
+    infer_runtime_surface as _infer_runtime_surface,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     ensure_target_foreground_before_capture as _guided_ensure_target_foreground_before_capture,
@@ -28,12 +28,6 @@ from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     make_runtime_foreground_provider as _guided_make_runtime_foreground_provider,
-)
-from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    make_runtime_foreground_surface_validator as _guided_make_runtime_foreground_surface_validator,
-)
-from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    make_runtime_observer_status_provider as _guided_make_runtime_observer_status_provider,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     make_runtime_pcap_bytes_provider as _guided_make_runtime_pcap_bytes_provider,
@@ -98,17 +92,15 @@ from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
     baseline_idle_ready_note as _guidance_baseline_idle_ready_note,
     messaging_connected_behavior_lines as _guidance_messaging_connected_behavior_lines,
 )
+from scytaledroid.DynamicAnalysis.scenarios.interactive_guidance import (
+    manual_interaction_behavior_lines as _guidance_manual_interaction_behavior_lines,
+    manual_interaction_checkpoint_messages as _guidance_manual_interaction_checkpoint_messages,
+)
 from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
     ActiveCaptureConfig as _ActiveCaptureConfig,
 )
 from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
     ActiveCaptureRuntime as _ActiveCaptureRuntime,
-)
-from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
-    capture_console_exit_message as _runtime_capture_console_exit_message,
-)
-from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
-    capture_console_launch_message as _runtime_capture_console_launch_message,
 )
 from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
     capture_controls_status_message as _runtime_capture_controls_status_message,
@@ -125,11 +117,23 @@ from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
 from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
     resolve_capture_version_code as _runtime_resolve_capture_version_code,
 )
-from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
-    run_countdown_fallback as _runtime_run_countdown_fallback,
+from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
+    capture_console_exit_message as _driver_capture_console_exit_message,
 )
-from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
-    run_stopwatch_fallback as _runtime_run_stopwatch_fallback,
+from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
+    capture_console_launch_message as _driver_capture_console_launch_message,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
+    make_runtime_surface_probe as _driver_make_runtime_surface_probe,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
+    run_baseline_interactive_loop as _driver_run_baseline_interactive_loop,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
+    run_countdown as _driver_run_countdown,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
+    run_stopwatch as _driver_run_stopwatch,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_call_outcome import (
     collect_manual_call_outcome as _collect_manual_call_outcome,
@@ -311,8 +315,12 @@ class ManualScenarioRunner:
                         _baseline_idle_behavior_lines(getattr(run_ctx, "package_name", "") or "")
                     )
             else:
-                block.append("  - Keep the app in the foreground")
-                block.append("  - Use the app normally")
+                block.extend(
+                    _manual_interaction_behavior_lines(
+                        getattr(run_ctx, "package_name", "") or "",
+                        target_label=_social_feed_baseline_target_label(),
+                    )
+                )
             print(status_messages.status("\n".join(block).rstrip(), level="info"))
             baseline_warning = _baseline_idle_quota_warning(
                 getattr(run_ctx, "package_name", "") or "",
@@ -366,6 +374,7 @@ class ManualScenarioRunner:
                         device_serial=getattr(run_ctx, "device_serial", None),
                         foreground_package=pkg,
                         checkpoint_messages=_baseline_idle_checkpoint_messages(pkg),
+                        surface_probe=_make_runtime_surface_probe(run_ctx),
                         on_protocol_event=on_protocol_event,
                     )
                 else:
@@ -381,6 +390,10 @@ class ManualScenarioRunner:
                     minimum_duration_s=min_s,
                     device_serial=getattr(run_ctx, "device_serial", None),
                     foreground_package=str(getattr(run_ctx, "package_name", "") or "").strip(),
+                    checkpoint_messages=_manual_interaction_checkpoint_messages(
+                        str(getattr(run_ctx, "package_name", "") or "").strip()
+                    ),
+                    surface_probe=_make_runtime_surface_probe(run_ctx),
                 )
             else:
                 ended_at = _run_stopwatch()
@@ -476,11 +489,11 @@ def _capture_controls_status_message() -> str:
 
 
 def _capture_console_launch_message() -> str:
-    return _runtime_capture_console_launch_message()
+    return _driver_capture_console_launch_message()
 
 
 def _capture_console_exit_message(action: CaptureAction) -> str:
-    return _runtime_capture_console_exit_message(action)
+    return _driver_capture_console_exit_message(action)
 
 
 def _read_device_foreground_package(device_serial: str | None) -> str | None:
@@ -541,6 +554,14 @@ def _baseline_idle_ready_note(package_name: str) -> str | None:
     return _guidance_baseline_idle_ready_note(package_name)
 
 
+def _manual_interaction_behavior_lines(package_name: str, *, target_label: str) -> list[str]:
+    return _guidance_manual_interaction_behavior_lines(package_name, target_label=target_label)
+
+
+def _manual_interaction_checkpoint_messages(package_name: str) -> dict[int, str]:
+    return _guidance_manual_interaction_checkpoint_messages(package_name)
+
+
 def _extra_hold_timer_message(
     *,
     target_duration_s: int,
@@ -564,6 +585,16 @@ def _resolve_capture_version_code(run_ctx: RunContext) -> str | None:
     return _runtime_resolve_capture_version_code(run_ctx)
 
 
+def _make_runtime_surface_probe(
+    run_ctx: RunContext,
+) -> Callable[[object], tuple[str | None, str | None]] | None:
+    return _driver_make_runtime_surface_probe(
+        run_ctx,
+        clock=time.monotonic,
+        infer_runtime_surface_fn=_infer_runtime_surface,
+    )
+
+
 def _run_baseline_interactive_loop(
     target_duration_s: int,
     *,
@@ -577,49 +608,41 @@ def _run_baseline_interactive_loop(
     device_serial: str | None = None,
     foreground_package: str | None = None,
     checkpoint_messages: dict[int, str] | None = None,
+    surface_probe: Callable[[object], tuple[str | None, str | None]] | None = None,
     on_elapsed: Callable[[int, Callable[[str, str], None]], None] | None = None,
     on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
     pcap_bytes_provider: Callable[[], int | None] | None = None,
 ) -> datetime:
-    runtime = _ActiveCaptureRuntime(
-        build_capture_state=_build_capture_state,
-        observer_status_provider_factory=_guided_make_runtime_observer_status_provider,
-        read_foreground_target=_read_device_foreground_target,
-        foreground_surface_validator_factory=_guided_make_runtime_foreground_surface_validator,
-        launch_package_to_foreground=_launch_package_to_foreground,
-        should_continue_collecting=_should_continue_collecting,
-        console_class=LiveCaptureConsole,
-        input_reader_factory=SelectInputReader,
-        terminal_factory=CbreakTerminal,
-        clock=time.monotonic,
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-        status_printer=lambda message, level="info": print(status_messages.status(message, level=level)),
-    )
-    config = _ActiveCaptureConfig(
-        target_duration_s=int(target_duration_s),
+    return _driver_run_baseline_interactive_loop(
+        int(target_duration_s),
         continue_after_target=bool(continue_after_target),
+        run_profile=run_profile,
         timer_detail=str(timer_detail or ""),
         app_name=app_name,
-        run_profile=run_profile,
         version_code=version_code,
         phase=phase,
-        minimum_duration_s=int(minimum_duration_s or _effective_min_sampling_seconds()),
+        minimum_duration_s=minimum_duration_s,
+        minimum_duration_default_s=_effective_min_sampling_seconds(),
         device_serial=device_serial,
         foreground_package=foreground_package,
         checkpoint_messages=checkpoint_messages,
+        surface_probe=surface_probe,
+        on_elapsed=on_elapsed,
+        on_protocol_event=on_protocol_event,
+        pcap_bytes_provider=pcap_bytes_provider,
+        read_foreground_target=_read_device_foreground_target,
+        launch_package_to_foreground=_launch_package_to_foreground,
+        should_continue_collecting_fn=_should_continue_collecting,
+        clock=time.monotonic,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        abort_exception_factory=ScenarioAbortRequested,
+        runtime_class=_ActiveCaptureRuntime,
+        capture_config_class=_ActiveCaptureConfig,
+        console_class=LiveCaptureConsole,
+        input_reader_factory=SelectInputReader,
+        terminal_factory=CbreakTerminal,
     )
-    try:
-        return runtime.run_baseline_interactive_loop(
-            config,
-            on_elapsed=on_elapsed,
-            on_protocol_event=on_protocol_event,
-            pcap_bytes_provider=pcap_bytes_provider,
-        )
-    except RuntimeError as exc:
-        if str(exc) == "ABORT_DISCARD":
-            raise ScenarioAbortRequested("ABORT_DISCARD") from None
-        raise
 
 
 def _run_countdown(
@@ -637,6 +660,7 @@ def _run_countdown(
     device_serial: str | None = None,
     foreground_package: str | None = None,
     checkpoint_messages: dict[int, str] | None = None,
+    surface_probe: Callable[[object], tuple[str | None, str | None]] | None = None,
     on_protocol_event: Callable[[str, dict[str, object]], None] | None = None,
 ) -> datetime:
     if allow_early_stop and not ignore_stop_inputs:
@@ -652,39 +676,54 @@ def _run_countdown(
             device_serial=device_serial,
             foreground_package=foreground_package,
             checkpoint_messages=checkpoint_messages,
+            surface_probe=surface_probe,
             on_protocol_event=on_protocol_event,
         )
-    return _runtime_run_countdown_fallback(
+    return _driver_run_countdown(
         int(duration_seconds),
         continue_after_target=continue_after_target,
         allow_early_stop=allow_early_stop,
         ignore_stop_inputs=ignore_stop_inputs,
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-        clock=time.monotonic,
-        sleep=time.sleep,
-        format_duration=_format_duration,
-        pulse_marker=_pulse_marker,
-        extra_hold_timer_message_fn=_extra_hold_timer_message,
-        clear_status_line_fn=_clear_status_line,
-        parse_timing_action_fn=_parse_timing_action,
+        run_profile=run_profile,
+        app_name=app_name,
+        version_code=version_code,
+        phase=phase,
+        minimum_duration_s=minimum_duration_s,
+        minimum_duration_default_s=_effective_min_sampling_seconds(),
+        timer_detail=timer_detail,
+        device_serial=device_serial,
+        foreground_package=foreground_package,
+        checkpoint_messages=checkpoint_messages,
+        surface_probe=surface_probe,
+        on_protocol_event=on_protocol_event,
         should_continue_collecting_fn=_should_continue_collecting,
         abort_exception_factory=ScenarioAbortRequested,
         stop_exception_factory=_StopScriptEarly,
+        format_duration_fn=_format_duration,
+        pulse_marker_fn=_pulse_marker,
+        extra_hold_timer_message_fn=_extra_hold_timer_message,
+        clear_status_line_fn=_clear_status_line,
+        parse_timing_action_fn=_parse_timing_action,
+        read_foreground_target=_read_device_foreground_target,
+        launch_package_to_foreground=_launch_package_to_foreground,
+        clock=time.monotonic,
+        sleep=time.sleep,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
     )
 
 
 def _run_stopwatch() -> datetime:
-    return _runtime_run_stopwatch_fallback(
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-        clock=time.monotonic,
-        format_duration=_format_duration,
+    return _driver_run_stopwatch(
+        format_duration_fn=_format_duration,
         controls_message=status_messages.status(_capture_controls_status_message(), level="info"),
         parse_timing_action_fn=_parse_timing_action,
         should_continue_collecting_fn=_should_continue_collecting,
         abort_exception_factory=ScenarioAbortRequested,
         prompt_continue_fn=prompt_utils.press_enter_to_continue,
+        clock=time.monotonic,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
     )
 
 
@@ -893,6 +932,7 @@ def _run_messaging_connected_baseline(
         timer_detail="connected baseline",
         device_serial=getattr(run_ctx, "device_serial", None),
         foreground_package=pkg,
+        surface_probe=_make_runtime_surface_probe(run_ctx),
         on_elapsed=_on_elapsed,
         on_protocol_event=on_protocol_event,
         pcap_bytes_provider=_guided_make_runtime_pcap_bytes_provider(

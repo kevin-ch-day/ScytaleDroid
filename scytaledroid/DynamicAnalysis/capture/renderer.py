@@ -104,6 +104,16 @@ def _status_message_line(state: CaptureState) -> tuple[str, str] | None:
     return ("Latest", event)
 
 
+def _format_surface(state: CaptureState) -> str:
+    label = str(state.foreground_surface_label or "").strip()
+    detail = str(state.foreground_surface_detail or "").strip()
+    if not label:
+        return "unknown"
+    if not detail:
+        return label
+    return f"{label} - {detail}"
+
+
 def render_capture_dashboard(state: CaptureState) -> str:
     pcap_bytes = state.observer_status.pcap_bytes
     pcap_display = _format_pcap_bytes(
@@ -126,6 +136,7 @@ def render_capture_dashboard(state: CaptureState) -> str:
         "",
         f"Foreground : {_truncate(state.foreground_package or 'unknown', width=_VALUE_WIDTH)}",
         f"Activity   : {_truncate(state.foreground_component or 'unknown', width=_VALUE_WIDTH)}",
+        f"Surface    : {_truncate(_format_surface(state), width=_VALUE_WIDTH)}",
         f"Expected   : {_truncate(state.expected_package or 'unknown', width=_VALUE_WIDTH)}",
         f"Timing     : {_truncate(f'wall {_format_duration(state.wall_elapsed_s)} | valid {_format_duration(state.valid_elapsed_s)}', width=_VALUE_WIDTH)}",
         f"Goal       : {_truncate(_format_valid_time(state), width=_VALUE_WIDTH)}",

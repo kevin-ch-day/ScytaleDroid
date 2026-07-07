@@ -291,6 +291,7 @@ def test_summarizer_includes_media_plane_indicator(tmp_path: Path) -> None:
                         "classification": "relay_media_likely",
                         "relay_endpoint_count": 3,
                         "turn_allocate_success_count": 16,
+                        "rtc_sustained_session_count": 2,
                     },
                 },
             }
@@ -303,6 +304,7 @@ def test_summarizer_includes_media_plane_indicator(tmp_path: Path) -> None:
 
     assert summary["indicators"]["media_plane"]["status"] == "ok"
     assert summary["indicators"]["media_plane"]["summary"]["classification"] == "relay_media_likely"
+    assert summary["indicators"]["media_plane"]["summary"]["rtc_sustained_session_count"] == 2
 
 
 def test_summarizer_includes_manual_call_outcome_fields(tmp_path: Path) -> None:
@@ -742,9 +744,13 @@ def test_summarizer_promotes_runtime_network_fields_to_top_level(tmp_path: Path)
     summary = DynamicRunSummarizer(writer)._build_summary(manifest)
 
     assert summary["version_name"] == "436.0.0.41.73"
+    assert summary["interaction_mode"] == "baseline"
     assert summary["pcap_valid"] is True
+    assert summary["countable"] is True
+    assert summary["cohort_eligibility"] == "COUNTABLE"
     assert summary["capinfos_capture_duration_s"] == 301.8
     assert summary["domain_count"] == 2
+    assert summary["domains_count"] == 2
     assert summary["dns_count"] == 4
     assert summary["sni_count"] == 3
     assert summary["service_families_observed"] == "messaging, social_platform"
@@ -760,6 +766,31 @@ def test_summarizer_promotes_runtime_network_fields_to_top_level(tmp_path: Path)
     assert summary["top_ja4"] == [{"value": "ja4-a", "count": 3}]
     assert summary["indicators"]["tls_fingerprints"]["unique_ja4_count"] == 4
     assert summary["indicators"]["top_alpn"] == [{"value": "h2", "count": 3}]
+
+
+def test_summarizer_derives_manual_interaction_mode_from_run_profile(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="guardian-manual",
+        created_at="2026-07-06T00:00:00Z",
+        status="success",
+        dataset={
+            "valid_dataset_run": True,
+            "countable": False,
+            "cohort_eligibility": "EXTRA",
+        },
+        operator={"run_profile": "interaction_manual"},
+        target={"package_name": "com.guardian", "version_code": 23011},
+        artifacts=[],
+    )
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+
+    assert summary["interaction_mode"] == "manual"
+    assert summary["countable"] is False
+    assert summary["cohort_eligibility"] == "EXTRA"
 
 
 def test_summarizer_marks_present_but_too_small_pcap_with_explicit_failure_detail(
@@ -811,3 +842,67 @@ def test_summarizer_marks_present_but_too_small_pcap_with_explicit_failure_detai
     assert summary["pcap_valid"] is False
     assert summary["pcap_failure_detail"] == "PCAP_TOO_SMALL"
     assert summary["quota_detail"]["pcap_failure_detail"] == "PCAP_TOO_SMALL"
+
+
+def test_summarizer_includes_runtime_surface_sequence(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    notes_dir = tmp_path / "notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    (notes_dir / "run_events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-07T04:00:10Z",
+                        "event_type": "FOREGROUND_SURFACE_CHANGE",
+                        "details": {
+                            "elapsed_s": 10,
+                            "surface_label": "thread_surface",
+                            "surface_detail": "messenger conversation thread",
+                            "foreground_component": "com.facebook.messenger.neue.MainActivity",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-07T04:01:05Z",
+                        "event_type": "FOREGROUND_SURFACE_CHANGE",
+                        "details": {
+                            "elapsed_s": 65,
+                            "surface_label": "rtc_call_video_surface",
+                            "surface_detail": "messenger rtc video call surface",
+                            "foreground_component": "com.facebook.messaging.rtc.incall.activity.InCallActivity",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-07T04:02:40Z",
+                        "event_type": "FOREGROUND_SURFACE_CHANGE",
+                        "details": {
+                            "elapsed_s": 160,
+                            "surface_label": "thread_surface",
+                            "surface_detail": "messenger conversation thread",
+                            "foreground_component": "com.facebook.messenger.neue.MainActivity",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = _manifest(artifacts=[])
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    runtime_surfaces = summary["indicators"]["runtime_surfaces"]
+    assert runtime_surfaces["transition_count"] == 3
+    assert runtime_surfaces["labels"] == ["rtc_call_video_surface", "thread_surface"]
+    assert runtime_surfaces["primary_label"] == "thread_surface"
+    assert runtime_surfaces["transitions"][1]["surface_label"] == "rtc_call_video_surface"
+    assert "## Runtime surfaces" in rendered
+    assert "Observed surfaces: rtc_call_video_surface, thread_surface." in rendered
+    assert "Surface sequence: 10s thread_surface" in rendered

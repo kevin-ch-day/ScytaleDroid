@@ -53,10 +53,7 @@ class SelectInputReader:
     def __init__(self, stream=None) -> None:
         self._stream = stream or sys.__stdin__
 
-    def poll(self, timeout_s: float) -> str | None:
-        readable, _, _ = select.select([self._stream], [], [], max(float(timeout_s), 0.0))
-        if not readable:
-            return None
+    def _read_once(self) -> str | None:
         if hasattr(self._stream, "read"):
             try:
                 value = self._stream.read(1)
@@ -70,6 +67,14 @@ class SelectInputReader:
                 return None
             return str(line or "")[:1] or None
         return None
+
+    def poll(self, timeout_s: float) -> str | None:
+        if self._stream is not sys.__stdin__ and self._stream is not sys.stdin:
+            return self._read_once()
+        readable, _, _ = select.select([self._stream], [], [], max(float(timeout_s), 0.0))
+        if not readable:
+            return None
+        return self._read_once()
 
     def drain_startup_input(self, *, max_reads: int = 8) -> str | None:
         """Drop stale buffered newlines while preserving the first real hotkey."""

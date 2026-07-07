@@ -602,6 +602,9 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     pf_visibility = pf.get("visibility") if isinstance(pf.get("visibility"), dict) else {}
     pf_transport_health = pf.get("transport_health") if isinstance(pf.get("transport_health"), dict) else {}
     pf_fingerprints = pf.get("fingerprints") if isinstance(pf.get("fingerprints"), dict) else {}
+    pf_startup = pf.get("startup_profile") if isinstance(pf.get("startup_profile"), dict) else {}
+    if not pf_startup:
+        pf_startup = pf.get("startup") if isinstance(pf.get("startup"), dict) else {}
 
     pf_direction_summary = (
         pf_direction.get("summary")
@@ -631,6 +634,11 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     pf_fingerprint_summary = (
         pf_fingerprints.get("summary")
         if isinstance(pf_fingerprints.get("summary"), dict)
+        else {}
+    )
+    pf_startup_summary = (
+        pf_startup.get("summary")
+        if isinstance(pf_startup.get("summary"), dict)
         else {}
     )
 
@@ -697,6 +705,7 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
                 if pf_visibility_summary
                 else visibility
             ),
+            startup_summary=pf_startup_summary,
         )
 
     def _safe_int(value: object) -> int | None:

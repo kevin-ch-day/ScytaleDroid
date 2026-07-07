@@ -680,6 +680,51 @@ def test_guided_run_current_build_db_only_offers_restore_or_recollect(monkeypatc
     )
 
 
+def test_guided_run_current_build_retained_local_evidence_is_not_db_only(
+    monkeypatch, capsys
+) -> None:
+    package = "com.snapchat.android"
+    select_package_calls, select_package = one_shot_package_selector(package)
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="Snapchat",
+        lineage_context={
+            "db_active_sessions": 1,
+            "db_historical_sessions": 0,
+            "db_total_sessions": 1,
+        },
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            total_runs=1,
+            valid_runs=0,
+            baseline_valid_runs=0,
+            interactive_valid_runs=0,
+            extra_valid_runs=1,
+            baseline_not_idle_valid=1,
+            local_evidence_dir_count=1,
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: "0")
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 2
+    assert "current-build evidence (local+db)" in out
+    assert "local evidence pack is missing" not in out
+    assert "R) Restore / recollect" not in out
+
+
 def test_guided_run_reports_no_evidence_anywhere_context(monkeypatch, capsys) -> None:
     package = "com.guardian"
     select_package_calls, select_package = one_shot_package_selector(package)

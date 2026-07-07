@@ -70,6 +70,9 @@ def test_run_summary_surfaces_media_plane_summary(tmp_path, monkeypatch, capsys)
                     "status": "ok",
                     "summary": {
                         "classification": "relay_media_likely",
+                        "rtc_sustained_session_count": 2,
+                        "rtc_total_bytes": 623350,
+                        "rtc_relay_peer_count": 2,
                         "relay_endpoint_count": 2,
                         "turn_allocate_success_count": 8,
                         "relay_endpoints": [{"ip": "157.240.146.35", "port": 3478}],
@@ -100,6 +103,9 @@ def test_run_summary_surfaces_media_plane_summary(tmp_path, monkeypatch, capsys)
                     "status": "ok",
                     "summary": {
                         "classification": "relay_media_likely",
+                        "rtc_sustained_session_count": 2,
+                        "rtc_total_bytes": 623350,
+                        "rtc_relay_peer_count": 2,
                         "relay_endpoint_count": 2,
                         "turn_allocate_success_count": 8,
                         "dominant_udp_flow": {"share_of_udp_bytes": 0.99},
@@ -131,8 +137,8 @@ def test_run_summary_surfaces_media_plane_summary(tmp_path, monkeypatch, capsys)
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "media: relay media likely relay_endpoints=2 dominant_udp=0.99 turn_alloc=8" in out
-    assert "media: relay media likely | relays=157.240.146.35:3478" in out
+    assert "media: relay media likely rtc_sessions=2 rtc_bytes=608.7KB rtc_peers=2 relay_endpoints=2 dominant_udp=0.99 turn_alloc=8" in out
+    assert "media: relay media likely | rtc_sessions=2 | rtc_bytes=608.7KB | rtc_peers=2 | relays=157.240.146.35:3478" in out
 
 
 def test_run_summary_surfaces_manual_call_outcome(tmp_path, monkeypatch, capsys) -> None:
@@ -185,3 +191,63 @@ def test_run_summary_surfaces_manual_call_outcome(tmp_path, monkeypatch, capsys)
     assert "Call attempted" in out and "true" in out
     assert "Call connected" in out and "false" in out
     assert "Call outcome" in out and "CALL_NOT_CONNECTED" in out
+
+
+def test_run_summary_surfaces_runtime_surface_sequence(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "analysis").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "operator": {"run_profile": "interaction_manual", "interaction_level": "manual"},
+                "target": {"package_name": "com.facebook.orca", "display_name": "Messenger"},
+                "dataset": {"valid_dataset_run": True, "countable": True, "min_pcap_bytes": 50000},
+                "artifacts": [],
+                "outputs": [],
+                "observers": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "analysis" / "summary.json").write_text(
+        json.dumps(
+            {
+                "indicators": {
+                    "runtime_surfaces": {
+                        "labels": ["thread_surface", "rtc_call_video_surface"],
+                        "primary_label": "thread_surface",
+                        "primary_detail": "messenger conversation thread",
+                        "transitions": [
+                            {"elapsed_s": 10, "surface_label": "thread_surface"},
+                            {"elapsed_s": 65, "surface_label": "rtc_call_video_surface"},
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._dataset_quota_label", lambda *_a, **_k: "4/7")
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._countability_detail", lambda *_a, **_k: "")
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._three_verdict_label", lambda *_a, **_k: None)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._load_db_persistence_status", lambda *_a, **_k: None)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._load_engine_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary.prompt_utils.prompt_yes_no", lambda *_a, **_k: False)
+
+    print_run_summary(
+        DynamicSessionResult(
+            package_name="com.facebook.orca",
+            duration_seconds=240,
+            started_at=datetime.now(UTC),
+            ended_at=datetime.now(UTC),
+            status="success",
+            dynamic_run_id="run-surfaces",
+            evidence_path=str(tmp_path),
+        ),
+        "Cohort",
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Runtime surfaces" in out
+    assert "observed: thread_surface, rtc_call_video_surface" in out
+    assert "primary: thread_surface (messenger conversation thread)" in out
+    assert "sequence: 10s thread_surface -> 65s rtc_call_video_surface" in out

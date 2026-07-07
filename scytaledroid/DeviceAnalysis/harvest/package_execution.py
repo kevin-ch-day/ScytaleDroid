@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+from scytaledroid.DeviceAnalysis.services import apk_library_service
+
 from . import package_contract, package_refresh, stale_replan
 from .common import DedupeTracker, HarvestOptions, package_evidence_dir
 from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan, PullResult
@@ -96,18 +98,31 @@ def execute_package_plan(
         },
     )
 
-    package_stats = _run_artifact_loop(
+    library_hit = _try_resolve_from_apk_library(
         request=request,
-        deps=deps,
         result=result,
-        package_dir=package_dir,
-        effective_options=effective_options,
-        app_id=app_id,
-        group_id=group_id,
-        package_name=package_name,
+        write_db_requested=effective_options.write_db,
     )
+    if library_hit is not None:
+        package_stats = library_hit
+    else:
+        package_stats = _run_artifact_loop(
+            request=request,
+            deps=deps,
+            result=result,
+            package_dir=package_dir,
+            effective_options=effective_options,
+            app_id=app_id,
+            group_id=group_id,
+            package_name=package_name,
+        )
+        package_contract.finalize_package_result(result, write_db_requested=request.options.write_db)
+        apk_library_service.register_result(
+            result,
+            serial=request.serial,
+            session_stamp=request.session_stamp,
+        )
 
-    package_contract.finalize_package_result(result, write_db_requested=request.options.write_db)
     if effective_options.write_db and request.db_install_sets is not None and result.ok:
         deps.persist_install_set_spine(
             result=result,
@@ -144,6 +159,52 @@ def execute_package_plan(
         },
     )
     return result
+
+
+def _try_resolve_from_apk_library(
+    *,
+    request: PackageExecutionRequest,
+    result: PullResult,
+    write_db_requested: bool,
+) -> dict[str, int] | None:
+    if request.options.overwrite_existing:
+        return None
+    entry = apk_library_service.find_entry_for_plan(request.plan)
+    if entry is None:
+        return None
+    artifacts = apk_library_service.artifact_results_for_entry(entry, request.plan)
+    if len(artifacts) != len(request.plan.artifacts):
+        return None
+    result.ok.extend(artifacts)
+    result.skipped.append("apk_library_hit")
+    apk_library_service.record_observation(
+        entry,
+        plan=request.plan,
+        serial=request.serial,
+        session_stamp=request.session_stamp,
+        pull_action="skipped_existing_library_entry",
+    )
+    package_contract.finalize_package_result(result, write_db_requested=write_db_requested)
+    result.comparison.setdefault("apk_library_hit", True)
+    result.comparison["apk_library_manifest_path"] = str(entry.manifest_path)
+    request.stats["artifacts_skipped"] += len(artifacts)
+    request.emit(
+        "info",
+        "harvest.package.apk_library_hit",
+        extra={
+            "package_name": request.plan.inventory.package_name,
+            "version_code": request.plan.inventory.version_code,
+            "artifact_total": len(artifacts),
+            "apk_library_manifest_path": str(entry.manifest_path),
+            "planned_split_set_hash": entry.planned_split_set_hash,
+        },
+    )
+    return {
+        "saved": 0,
+        "skipped": len(artifacts),
+        "errors": 0,
+        "bytes": 0,
+    }
 
 
 def _handle_preflight_skip(

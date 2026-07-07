@@ -298,8 +298,11 @@ def print_run_summary(result, duration_label: str) -> None:
             _print_simple_list("Evidence", evidence_lines)
 
         indicator_lines = _build_indicator_summary_lines(pcap_report)
+        runtime_surface_lines = _build_runtime_surface_summary_lines(summary_payload)
         if indicator_lines:
             _print_simple_list("Indicators (Top)", indicator_lines)
+        if runtime_surface_lines:
+            _print_simple_list("Runtime surfaces", runtime_surface_lines)
 
         if engine_summary:
             warnings = engine_summary.get("diagnostics_warnings") or []
@@ -1201,6 +1204,18 @@ def _build_pcap_qa_lines(
                 classification = str(summary.get("classification") or "").strip()
                 if classification and classification != "not_observed":
                     parts = [classification.replace("_", " ")]
+                    rtc_sessions = summary.get("rtc_sustained_session_count")
+                    if rtc_sessions is not None:
+                        parts.append(f"rtc_sessions={rtc_sessions}")
+                    rtc_bytes = summary.get("rtc_total_bytes")
+                    try:
+                        if rtc_bytes is not None and int(rtc_bytes) > 0:
+                            parts.append(f"rtc_bytes={_format_bytes_brief(int(rtc_bytes))}")
+                    except (TypeError, ValueError):
+                        pass
+                    rtc_peers = summary.get("rtc_relay_peer_count")
+                    if rtc_peers is not None:
+                        parts.append(f"rtc_peers={rtc_peers}")
                     relay_count = summary.get("relay_endpoint_count")
                     if relay_count is not None:
                         parts.append(f"relay_endpoints={relay_count}")
@@ -1259,6 +1274,18 @@ def _build_indicator_summary_lines(pcap_report: dict[str, object] | None) -> lis
     classification = str(media_summary.get("classification") or "").strip()
     if classification and classification != "not_observed":
         parts = [classification.replace("_", " ")]
+        rtc_sessions = media_summary.get("rtc_sustained_session_count")
+        if rtc_sessions is not None:
+            parts.append(f"rtc_sessions={rtc_sessions}")
+        rtc_bytes = media_summary.get("rtc_total_bytes")
+        try:
+            if rtc_bytes is not None and int(rtc_bytes) > 0:
+                parts.append(f"rtc_bytes={_format_bytes_brief(int(rtc_bytes))}")
+        except (TypeError, ValueError):
+            pass
+        rtc_peers = media_summary.get("rtc_relay_peer_count")
+        if rtc_peers is not None:
+            parts.append(f"rtc_peers={rtc_peers}")
         if relay_endpoints:
             labels = []
             for row in relay_endpoints[:3]:
@@ -1276,6 +1303,56 @@ def _build_indicator_summary_lines(pcap_report: dict[str, object] | None) -> lis
             if a and b:
                 parts.append(f"flow={a} <-> {b}")
         out.append("media: " + " | ".join(parts))
+    return out
+
+
+def _format_bytes_brief(value: int) -> str:
+    if value < 1024:
+        return f"{value}B"
+    if value < 1024 * 1024:
+        return f"{value / 1024.0:.1f}KB"
+    return f"{value / (1024.0 * 1024.0):.1f}MB"
+
+
+def _build_runtime_surface_summary_lines(summary_payload: dict[str, object] | None) -> list[str]:
+    if not isinstance(summary_payload, dict):
+        return []
+    indicators = summary_payload.get("indicators")
+    if not isinstance(indicators, dict):
+        return []
+    runtime_surfaces = indicators.get("runtime_surfaces")
+    if not isinstance(runtime_surfaces, dict) or not runtime_surfaces:
+        return []
+    out: list[str] = []
+    labels = runtime_surfaces.get("labels")
+    if isinstance(labels, list) and labels:
+        rendered = [str(item).strip() for item in labels if str(item).strip()]
+        if rendered:
+            out.append("observed: " + ", ".join(rendered))
+    primary_label = str(runtime_surfaces.get("primary_label") or "").strip()
+    primary_detail = str(runtime_surfaces.get("primary_detail") or "").strip()
+    if primary_label:
+        primary_text = primary_label
+        if primary_detail:
+            primary_text += f" ({primary_detail})"
+        out.append("primary: " + primary_text)
+    transitions = runtime_surfaces.get("transitions")
+    if isinstance(transitions, list) and transitions:
+        rendered_steps: list[str] = []
+        for row in transitions[:4]:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("surface_label") or "").strip()
+            if not label:
+                continue
+            elapsed = row.get("elapsed_s")
+            try:
+                step = f"{int(elapsed)}s {label}"
+            except (TypeError, ValueError):
+                step = label
+            rendered_steps.append(step)
+        if rendered_steps:
+            out.append("sequence: " + " -> ".join(rendered_steps))
     return out
 
 

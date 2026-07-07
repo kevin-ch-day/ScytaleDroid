@@ -40,6 +40,8 @@ class CaptureState:
     valid_elapsed_s: float = 0.0
     foreground_package: str | None = None
     foreground_component: str | None = None
+    foreground_surface_label: str | None = None
+    foreground_surface_detail: str | None = None
     latest_event: str = ""
     latest_warning: str = ""
     observer_status: ObserverStatus = field(default_factory=ObserverStatus)

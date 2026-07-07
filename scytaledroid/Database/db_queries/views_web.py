@@ -1016,6 +1016,7 @@ SELECT
   latest_apk.version_code AS latest_version_code,
   latest_apk.harvested_at AS latest_harvested_at,
   COALESCE(latest_static_run.id, latest_static.static_run_id, latest_risk.static_run_id) AS latest_static_run_id,
+  latest_static_run.base_apk_sha256 AS latest_static_base_apk_sha256,
   CONVERT(
     COALESCE(latest_static.session_stamp, latest_static_run.session_stamp, latest_risk.session_stamp) USING utf8mb4
   ) COLLATE utf8mb4_unicode_ci AS latest_static_session_stamp,
@@ -1441,7 +1442,10 @@ static_targets AS (
     sds.latest_version_name,
     sds.latest_version_code,
     sds.latest_dynamic_run_id,
-    LOWER(TRIM(CONVERT(COALESCE(sds.latest_apk_sha256, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci)) AS latest_apk_sha256_lc
+    LOWER(TRIM(CONVERT(
+      COALESCE(NULLIF(sds.latest_static_base_apk_sha256, ''), sds.latest_apk_sha256, '')
+      USING utf8mb4
+    ) COLLATE utf8mb4_unicode_ci)) AS latest_apk_sha256_lc
   FROM v_web_static_dynamic_app_summary sds
 ),
 profiled_runs AS (

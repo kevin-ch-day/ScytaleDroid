@@ -56,6 +56,7 @@ class DynamicRunSummarizer:
             if isinstance(pcap_report.get("media_plane"), dict)
             else {}
         )
+        runtime_surfaces = self._load_runtime_surfaces()
         fingerprint_summary = self._fingerprint_summary(pcap_report, pcap_features)
         cleartext_flag = self._detect_cleartext(destinations, pcap_report)
         security_surface = (
@@ -170,11 +171,18 @@ class DynamicRunSummarizer:
             and isinstance(pcap_features.get("startup_profile", {}).get("summary"), dict)
             else {}
         )
+        interaction_level = operator.get("interaction_level")
+        interaction_mode = self._interaction_mode(
+            run_profile=operator.get("run_profile"),
+            interaction_level=interaction_level,
+        )
         return {
             "dynamic_run_id": manifest.dynamic_run_id,
             "status": manifest.status,
             "tier": tier,
             "run_profile": operator.get("run_profile"),
+            "interaction_level": interaction_level,
+            "interaction_mode": interaction_mode,
             "messaging_activity": operator.get("messaging_activity"),
             "call_type": operator.get("call_type"),
             "call_attempted": operator.get("call_attempted"),
@@ -186,6 +194,7 @@ class DynamicRunSummarizer:
             "version_code": target.get("version_code"),
             "version_name": target.get("version_name"),
             "dataset_verdict": dataset_verdict,
+            "countable": dataset.get("countable"),
             "counts_toward_quota": dataset.get("countable"),
             "countability_reason": countability_reason,
             "exploratory_class": dataset.get("exploratory_class"),
@@ -196,6 +205,7 @@ class DynamicRunSummarizer:
             "capinfos_capture_duration_s": pcap_report.get("capture_duration_s"),
             "pcap_valid": pcap_valid,
             "domain_count": len(destinations),
+            "domains_count": len(destinations),
             "dns_count": _safe_int(pcap_report.get("dns_unique_count")) or len(top_dns),
             "sni_count": _safe_int(pcap_report.get("sni_unique_count")) or len(top_sni),
             "service_families_observed": ", ".join(service_family_names) if service_family_names else None,
@@ -237,6 +247,7 @@ class DynamicRunSummarizer:
                 "top_dns": top_dns,
                 "top_sni": top_sni,
                 "top_alpn": top_alpn,
+                "runtime_surfaces": runtime_surfaces,
                 "service_context": service_context,
                 "service_signals": service_signals,
                 "media_plane": media_plane,
@@ -343,6 +354,7 @@ class DynamicRunSummarizer:
         security_risk_flags_text = ", ".join(security_risk_flags) if security_risk_flags else "none"
         cleartext_posture = indicators.get("cleartext_posture") or {}
         cleartext_mismatch_text = self._display_text(cleartext_posture.get("mismatch_summary"))
+        runtime_surface_lines = self._runtime_surface_lines(indicators.get("runtime_surfaces"))
         quota_window_lines = self._quota_window_lines(capture.get("quota_window_metrics"))
         startup_profile_lines = self._startup_profile_lines(capture.get("startup_profile"))
         lines = [
@@ -391,6 +403,8 @@ class DynamicRunSummarizer:
             lines.extend(["", "## Quota windows", *quota_window_lines])
         if startup_profile_lines:
             lines.extend(["", "## Startup profile", *startup_profile_lines])
+        if runtime_surface_lines:
+            lines.extend(["", "## Runtime surfaces", *runtime_surface_lines])
         lines.extend(
             [
                 "",
@@ -481,6 +495,22 @@ class DynamicRunSummarizer:
         if dataset.get("countable") is False:
             return exclusion_reason or "EXTRA_RUN"
         return invalid_reason
+
+    @staticmethod
+    def _interaction_mode(*, run_profile: object, interaction_level: object) -> str:
+        profile = str(run_profile or "").strip().lower()
+        level = str(interaction_level or "").strip().lower()
+        if profile.startswith("baseline"):
+            return "baseline"
+        if "script" in profile:
+            return "scripted"
+        if "manual" in profile:
+            return "manual"
+        if level:
+            return level
+        if profile.startswith("interaction") or profile.startswith("interactive"):
+            return "interactive"
+        return "unknown"
 
     def _pcap_failure_detail(
         self,
@@ -665,6 +695,41 @@ class DynamicRunSummarizer:
             lines.append(f"- Startup dominant: {'yes' if bool(startup_dominant) else 'no'}.")
         return lines
 
+    def _runtime_surface_lines(self, payload: object) -> list[str]:
+        if not isinstance(payload, dict) or not payload:
+            return []
+        lines: list[str] = []
+        labels = payload.get("labels")
+        if isinstance(labels, list) and labels:
+            rendered = [str(item).strip() for item in labels if str(item).strip()]
+            if rendered:
+                lines.append(f"- Observed surfaces: {', '.join(rendered)}.")
+        primary_label = str(payload.get("primary_label") or "").strip()
+        primary_detail = str(payload.get("primary_detail") or "").strip()
+        if primary_label:
+            primary_text = primary_label
+            if primary_detail:
+                primary_text += f" ({primary_detail})"
+            lines.append(f"- Primary surface: {primary_text}.")
+        transitions = payload.get("transitions")
+        if isinstance(transitions, list) and transitions:
+            rendered_steps: list[str] = []
+            for row in transitions[:5]:
+                if not isinstance(row, dict):
+                    continue
+                label = str(row.get("surface_label") or "").strip()
+                if not label:
+                    continue
+                at = self._display_metric(row.get("elapsed_s"))
+                detail = str(row.get("surface_detail") or "").strip()
+                text = f"{at}s {label}"
+                if detail:
+                    text += f" ({detail})"
+                rendered_steps.append(text)
+            if rendered_steps:
+                lines.append(f"- Surface sequence: {' -> '.join(rendered_steps)}.")
+        return lines
+
     @staticmethod
     def _display_metric(value: object, *, precision: int = 0) -> str:
         if value is None:
@@ -816,6 +881,70 @@ class DynamicRunSummarizer:
             if "Cleartext" in content:
                 signals.append("CleartextTraffic")
         return sorted(set(signals))
+
+    def _load_runtime_surfaces(self) -> dict[str, Any]:
+        events_path = self.writer.run_dir / "notes" / "run_events.jsonl"
+        if not events_path.exists():
+            return {}
+        transitions: list[dict[str, Any]] = []
+        try:
+            for raw_line in events_path.read_text(encoding="utf-8").splitlines():
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                try:
+                    payload = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("event_type") != "FOREGROUND_SURFACE_CHANGE":
+                    continue
+                details = payload.get("details")
+                if not isinstance(details, dict):
+                    continue
+                label = str(details.get("surface_label") or "").strip()
+                if not label:
+                    continue
+                transitions.append(
+                    {
+                        "elapsed_s": _safe_int(details.get("elapsed_s")),
+                        "surface_label": label,
+                        "surface_detail": str(details.get("surface_detail") or "").strip() or None,
+                        "foreground_component": str(details.get("foreground_component") or "").strip() or None,
+                    }
+                )
+        except OSError:
+            return {}
+        if not transitions:
+            return {}
+        counts: dict[str, int] = {}
+        first_details: dict[str, str] = {}
+        for row in transitions:
+            label = str(row.get("surface_label") or "").strip()
+            counts[label] = counts.get(label, 0) + 1
+            detail = str(row.get("surface_detail") or "").strip()
+            if detail and label not in first_details:
+                first_details[label] = detail
+        primary_label = max(
+            counts.items(),
+            key=lambda item: (
+                item[1],
+                -min(
+                    int(t.get("elapsed_s") or 0)
+                    for t in transitions
+                    if str(t.get("surface_label") or "").strip() == item[0]
+                ),
+            ),
+        )[0]
+        return {
+            "transition_count": len(transitions),
+            "labels": sorted(counts.keys()),
+            "counts": counts,
+            "primary_label": primary_label,
+            "primary_detail": first_details.get(primary_label),
+            "transitions": transitions[:12],
+        }
 
     def _network_capture_present(self, manifest: RunManifest, pcap_meta: dict[str, Any]) -> str:
         capture_types = {"pcapdroid_capture"}

@@ -319,8 +319,154 @@ def test_guided_run_interactive_mode_back_returns_without_capture(monkeypatch) -
         print_device_badge=lambda *_args: None,
     )
 
+
+def test_guided_run_qfg_held_interactive_warning_uses_retained_interactive_language(
+    monkeypatch, capsys
+) -> None:
+    package = "com.zhiliaoapp.musically"
+    select_package_calls, select_package = one_shot_package_selector(package)
+    prompts: list[tuple[str, bool]] = []
+    answers = iter([True, False])
+    choices = iter(["2", "1"])
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="TikTok",
+    )
+    monkeypatch.setattr(
+        guided_run, "resolved_template_for_package", lambda _pkg: "tiktok_basic_v1"
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            valid_runs=9,
+            baseline_valid_runs=0,
+            interactive_valid_runs=2,
+            baseline_not_idle_valid=7,
+            local_evidence_dir_count=9,
+            paper_eligible_local=9,
+            quota_counted_local=2,
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+        ),
+    )
+    monkeypatch.setattr(
+        guided_run, "_prepare_selected_app_capture", lambda **_kwargs: ("ZY22JK89DR", "moto")
+    )
+    monkeypatch.setattr(
+        guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices)
+    )
+    monkeypatch.setattr(
+        guided_run.prompt_utils,
+        "prompt_yes_no",
+        lambda prompt, default=False, **_kwargs: (
+            prompts.append((prompt, bool(default))) or next(answers)
+        ),
+    )
+    monkeypatch.setattr(guided_run, "ensure_plan_or_error", lambda *_a, **_k: pytest.fail("should not reach plan selection"))
+
+    guided_run.run_guided_dataset_run(
+        select_package_from_groups=select_package,
+        select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+        print_device_badge=lambda *_args: None,
+    )
+
+    out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert prepare_calls["count"] == 0
+    assert "Strict Idle progress" in out
+    assert "0/3" in out
+    assert "Quiescent FG evidence" in out
+    assert "7 valid no-touch run(s)" in out
+    assert "Recommended strict-quota run" in out
+    assert "strict-idle baseline" in out
+    assert "Strict quota" in out
+    assert "held until Strict Idle is complete" in out
+    assert "Interactive run" in out
+    assert "retained as current-build evidence" in out
+    assert "Baseline progress: 0/3 valid baseline runs" not in out
+    assert "Recommended next run is baseline." not in out
+    assert "Counts toward quota: not until baseline is complete" not in out
+    assert "Interactive run allowed under strict-idle hold." in out
+    assert "retained as current-build interactive evidence" in out
+    assert "Selected intent is not quota-suggested and will be saved as retained extra evidence" not in out
+    assert prompts == [
+        ("Proceed with interaction anyway?", False),
+        ("Proceed with retained interactive evidence run anyway?", False),
+    ]
+    assert "Run canceled. Strict Idle is still incomplete; choose baseline if you want strict quota progress." in out
+
+
+def test_guided_run_qfg_held_interactive_quota_line_uses_current_build_evidence_language(
+    monkeypatch, capsys
+) -> None:
+    package = "com.zhiliaoapp.musically"
+    select_package_calls, select_package = one_shot_package_selector(package)
+    prompts: list[tuple[str, bool]] = []
+    answers = iter([True, True])
+    choices = iter(["2", "1"])
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="TikTok",
+    )
+    monkeypatch.setattr(
+        guided_run, "resolved_template_for_package", lambda _pkg: "tiktok_basic_v1"
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            valid_runs=9,
+            baseline_valid_runs=0,
+            interactive_valid_runs=2,
+            baseline_not_idle_valid=7,
+            local_evidence_dir_count=9,
+            paper_eligible_local=9,
+            quota_counted_local=2,
+            suggested_profile_from_tracker="baseline_idle",
+            effective_suggested_profile="baseline_idle",
+            suggested_slot=1,
+        ),
+    )
+    monkeypatch.setattr(
+        guided_run, "_prepare_selected_app_capture", lambda **_kwargs: ("ZY22JK89DR", "moto")
+    )
+    monkeypatch.setattr(
+        guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices)
+    )
+    monkeypatch.setattr(
+        guided_run.prompt_utils,
+        "prompt_yes_no",
+        lambda prompt, default=False, **_kwargs: (
+            prompts.append((prompt, bool(default))) or next(answers)
+        ),
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "ensure_plan_or_error",
+        lambda *_a, **_k: pytest.fail("stop after quota line"),
+    )
+
+    with pytest.raises(pytest.fail.Exception):
+        guided_run.run_guided_dataset_run(
+            select_package_from_groups=select_package,
+            select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+            print_device_badge=lambda *_args: None,
+        )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 1
+    assert prompts == [
+        ("Proceed with interaction anyway?", False),
+        ("Proceed with retained interactive evidence run anyway?", False),
+    ]
+    assert "Cohort quota: NO · retained current-build interactive evidence (strict-idle hold)" in out
 
 
 def test_selected_app_latest_recent_summary_prefers_scoped_state_over_unscoped_recent_tracker(

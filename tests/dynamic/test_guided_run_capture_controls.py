@@ -292,6 +292,78 @@ def test_active_capture_does_not_print_generic_target_reached_status(monkeypatch
     assert "Target reached. Keep collecting if needed; press Enter when finished." not in output
 
 
+def test_guardian_baseline_run_wires_runtime_surface_probe(monkeypatch, tmp_path: Path) -> None:
+    runner = ManualScenarioRunner()
+    ctx = RunContext(
+        dynamic_run_id="r-guardian",
+        package_name="com.guardian",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="baseline_idle",
+        interaction_level="minimal",
+        device_serial="SERIAL",
+        static_plan={"display_label": "Guardian"},
+    )
+    seen: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def __init__(self, **_kwargs) -> None:
+            return None
+
+        def run_baseline_interactive_loop(self, config, **_kwargs):
+            seen["surface_probe"] = config.surface_probe
+            return datetime.now(UTC)
+
+    monkeypatch.setattr(manual, "_ActiveCaptureRuntime", _FakeRuntime)
+    monkeypatch.setattr(manual, "_maybe_show_raw_high_value_permissions", lambda _run_ctx: True)
+    monkeypatch.setattr(manual, "_ensure_target_foreground_before_capture", lambda *_args, **_kwargs: None)
+
+    runner.run(ctx, on_start=lambda: None)
+
+    assert callable(seen.get("surface_probe"))
+
+
+def test_x_manual_run_wires_runtime_surface_probe(monkeypatch, tmp_path: Path) -> None:
+    runner = ManualScenarioRunner()
+    ctx = RunContext(
+        dynamic_run_id="r-x",
+        package_name="com.twitter.android",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="interaction_manual",
+        interaction_level="normal",
+        device_serial="SERIAL",
+        static_plan={"display_label": "X"},
+    )
+    seen: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def __init__(self, **_kwargs) -> None:
+            return None
+
+        def run_baseline_interactive_loop(self, config, **_kwargs):
+            seen["surface_probe"] = config.surface_probe
+            return datetime.now(UTC)
+
+    monkeypatch.setattr(manual, "_ActiveCaptureRuntime", _FakeRuntime)
+    monkeypatch.setattr(manual, "_maybe_show_raw_high_value_permissions", lambda _run_ctx: True)
+    monkeypatch.setattr(manual, "_ensure_target_foreground_before_capture", lambda *_args, **_kwargs: None)
+
+    runner.run(ctx, on_start=lambda: None)
+
+    assert callable(seen.get("surface_probe"))
+
+
 def test_facebook_baseline_gate_allows_known_loginactivity_false_positive(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
