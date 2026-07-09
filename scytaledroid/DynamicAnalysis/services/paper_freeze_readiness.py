@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
@@ -42,6 +42,7 @@ class PaperFreezeBuildCandidate:
     missing_interactive_runs: int
     status: str
     static_run_ids: tuple[str, ...] = field(default_factory=tuple)
+    run_ids: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,34 @@ class PaperFreezeDecisionRow:
     bucket: str
 
 
+@dataclass(frozen=True)
+class PaperEvidenceTierRow:
+    package_name: str
+    evidence_tier: str
+    paper_usable: str
+    selected_relation: str
+    selected_version_code: str
+    selected_version_name: str
+    installed_version_code: str
+    current_installed_drifted: str
+    operational_installed_version_code: str
+    operational_live_drifted: str
+    operational_drift_detail: str
+    selected_static_run_ids: str
+    selected_dynamic_run_ids: str
+    pcap_available_count: int
+    strict_idle_count: int
+    quiescent_fg_count: int
+    baseline_count: int
+    interactive_count: int
+    retained_prior_build_count: int
+    build_candidates_seen: int
+    evidence_scope: str
+    caveat: str
+    recommended_final_run_tonight: str
+    future_work: str
+
+
 _DECISION_BUCKET_ORDER = (
     "MUST_RUN_NOW",
     "READY_DO_NOT_TOUCH",
@@ -87,6 +116,14 @@ _DECISION_BUCKET_ORDER = (
     "RUN_ONLY_IF_EASY",
     "DEFER_REFRESH_WAVE",
 )
+
+_PAPER_EVIDENCE_TIER_ORDER = {
+    "STRICT_CURRENT_BUILD_COMPLETE": 1,
+    "CURRENT_BUILD_MIXED_BASELINE": 2,
+    "PRIOR_BUILD_PAPER_EVIDENCE": 3,
+    "SUPPLEMENTAL_LEGACY_CONTEXT": 4,
+    "TRUE_EVIDENCE_HOLE": 5,
+}
 
 
 def _norm_text(value: Any) -> str:
@@ -205,8 +242,6 @@ def _current_candidate(
 
 def _action_for_current_gap(candidate: PaperFreezeBuildCandidate) -> str:
     if int(candidate.missing_baseline_runs) > 0:
-        if int(candidate.quiescent_fg_runs) > 0:
-            return "strict idle retry"
         return "baseline"
     if int(candidate.missing_interactive_runs) > 0:
         return "interactive"
@@ -215,13 +250,20 @@ def _action_for_current_gap(candidate: PaperFreezeBuildCandidate) -> str:
 
 def _reason_for_current_gap(candidate: PaperFreezeBuildCandidate) -> str:
     if int(candidate.missing_baseline_runs) > 0:
-        if int(candidate.quiescent_fg_runs) > 0:
-            return (
-                "Selected current build is collectable now; quiescent foreground evidence exists, "
-                "but strict-idle baseline quota is still incomplete."
-            )
         return "Selected current build is collectable now and missing baseline evidence."
     return "Selected current build is collectable now and missing interactive evidence."
+
+
+def _reason_for_optional_interactive_depth(candidate: PaperFreezeBuildCandidate) -> str:
+    if int(candidate.quiescent_fg_runs) > 0:
+        return (
+            "Selected build has baseline evidence, including Quiescent FG app-activity tags; "
+            "additional interactive captures improve depth but do not block the rough draft."
+        )
+    return (
+        "Selected build has complete baseline evidence and is paper-usable; "
+        "additional interactive captures improve depth but do not block the rough draft."
+    )
 
 
 def _baseline_class_note(candidate: PaperFreezeBuildCandidate | None) -> str:
@@ -229,21 +271,17 @@ def _baseline_class_note(candidate: PaperFreezeBuildCandidate | None) -> str:
         return "No selected paper target."
     strict_i = int(candidate.strict_idle_runs)
     quiescent_i = int(candidate.quiescent_fg_runs)
-    interactive_i = int(candidate.interactive_valid_runs)
-    if quiescent_i > 0 and int(candidate.missing_baseline_runs) > 0:
-        if interactive_i > 0:
-            return (
-                "Quiescent FG evidence is retained and analysis-included, but strict idle is incomplete; "
-                "interactive evidence exists and remains workflow-held by strict idle."
-            )
-        return (
-            "Quiescent FG evidence is retained and analysis-included, but strict idle is incomplete."
-        )
     if strict_i > 0 and quiescent_i > 0:
-        return "Strict Idle and Quiescent FG evidence both exist for this selected build."
+        return "Baseline evidence includes Quiescent FG app-activity tags for this selected build."
     if quiescent_i > 0:
-        return "Quiescent FG evidence exists for this selected build."
-    return "Strict Idle is the quota baseline lane for paper readiness."
+        return "Quiescent FG evidence exists as app-activity tagged baseline evidence for this selected build."
+    return "No-touch foreground baseline evidence is the quota baseline lane for paper readiness."
+
+
+def _strict_no_touch_count(candidate: PaperFreezeBuildCandidate | None) -> int:
+    if candidate is None:
+        return 0
+    return max(0, int(candidate.strict_idle_runs))
 
 
 def _recommended_plan_action(
@@ -254,12 +292,6 @@ def _recommended_plan_action(
     if status == "needs interactive":
         return "interactive"
     if status in {"needs baseline", "insufficient"}:
-        if (
-            selected is not None
-            and int(selected.missing_baseline_runs) > 0
-            and int(selected.quiescent_fg_runs) > 0
-        ):
-            return "strict idle retry"
         return "baseline"
     return "none"
 
@@ -292,7 +324,7 @@ def _classify_decision_row(
             selected_version_name=_norm_text(selected.version_name),
             installed_version_code=installed_vc,
             relation=selected_relation or "none",
-            strict_idle_count=int(selected.strict_idle_runs),
+            strict_idle_count=_strict_no_touch_count(selected),
             quiescent_fg_count=int(selected.quiescent_fg_runs),
             baseline_count=int(selected.baseline_valid_runs),
             interactive_count=int(selected.interactive_valid_runs),
@@ -315,13 +347,36 @@ def _classify_decision_row(
         and _norm_text(selected.version_code) == installed_vc
         and _missing_total(selected) > 0
     ):
+        missing_baseline = int(selected.missing_baseline_runs)
+        if missing_baseline <= 0 and int(selected.missing_interactive_runs) > 0:
+            return PaperFreezeDecisionRow(
+                package_name=recommendation.package_name,
+                selected_version_code=_norm_text(selected.version_code),
+                selected_version_name=_norm_text(selected.version_name),
+                installed_version_code=installed_vc,
+                relation=selected_relation,
+                strict_idle_count=_strict_no_touch_count(selected),
+                quiescent_fg_count=int(selected.quiescent_fg_runs),
+                baseline_count=int(selected.baseline_valid_runs),
+                interactive_count=int(selected.interactive_valid_runs),
+                missing_baseline_runs=int(selected.missing_baseline_runs),
+                missing_interactive_runs=int(selected.missing_interactive_runs),
+                valid_pcap_count=int(selected.valid_pcap_count),
+                baseline_class_note=_baseline_class_note(selected),
+                draft_role="interactive_depth_gap",
+                collectability="optional_current_depth",
+                action="interactive if claim needs it",
+                blocker=False,
+                reason=_reason_for_optional_interactive_depth(selected),
+                bucket="RUN_ONLY_IF_EASY",
+            )
         return PaperFreezeDecisionRow(
             package_name=recommendation.package_name,
             selected_version_code=_norm_text(selected.version_code),
             selected_version_name=_norm_text(selected.version_name),
             installed_version_code=installed_vc,
             relation=selected_relation,
-            strict_idle_count=int(selected.strict_idle_runs),
+            strict_idle_count=_strict_no_touch_count(selected),
             quiescent_fg_count=int(selected.quiescent_fg_runs),
             baseline_count=int(selected.baseline_valid_runs),
             interactive_count=int(selected.interactive_valid_runs),
@@ -367,25 +422,36 @@ def _classify_decision_row(
         )
         if current_faster:
             basis = current_candidate if current_candidate is not None else selected
+            basis_note = _baseline_class_note(basis)
+            if basis is current_candidate:
+                basis_note = (
+                    f"{basis_note} Counts in this decision row describe the current installed "
+                    "switch candidate; selected prior-build paper evidence counts remain in "
+                    "paper_freeze_manifest and paper_evidence_tiers."
+                )
             return PaperFreezeDecisionRow(
                 package_name=recommendation.package_name,
                 selected_version_code=_norm_text(selected.version_code),
                 selected_version_name=_norm_text(selected.version_name),
                 installed_version_code=installed_vc,
                 relation=selected_relation,
-                strict_idle_count=int(selected.strict_idle_runs),
+                strict_idle_count=_strict_no_touch_count(selected),
                 quiescent_fg_count=int(selected.quiescent_fg_runs),
                 baseline_count=int(basis.baseline_valid_runs),
                 interactive_count=int(basis.interactive_valid_runs),
                 missing_baseline_runs=int(basis.missing_baseline_runs),
                 missing_interactive_runs=int(basis.missing_interactive_runs),
                 valid_pcap_count=int(basis.valid_pcap_count),
-                baseline_class_note=_baseline_class_note(basis),
+                baseline_class_note=basis_note,
                 draft_role="target_decision",
                 collectability="switch_target_candidate",
                 action="decide target",
                 blocker=False,
-                reason="Selected prior build is incomplete; installed build appears faster to finish.",
+                reason=(
+                    "Selected prior build is incomplete; installed build appears faster to finish. "
+                    "This row's run-count columns use the current installed switch candidate, not "
+                    "the selected prior-build paper evidence."
+                ),
                 bucket="SWITCH_TARGET_CANDIDATE",
             )
         if selected_missing <= 2 and (
@@ -397,7 +463,7 @@ def _classify_decision_row(
                 selected_version_name=_norm_text(selected.version_name),
                 installed_version_code=installed_vc,
                 relation=selected_relation,
-                strict_idle_count=int(selected.strict_idle_runs),
+                strict_idle_count=_strict_no_touch_count(selected),
                 quiescent_fg_count=int(selected.quiescent_fg_runs),
                 baseline_count=int(selected.baseline_valid_runs),
                 interactive_count=int(selected.interactive_valid_runs),
@@ -418,7 +484,7 @@ def _classify_decision_row(
             selected_version_name=_norm_text(selected.version_name),
             installed_version_code=installed_vc,
             relation=selected_relation,
-            strict_idle_count=int(selected.strict_idle_runs),
+            strict_idle_count=_strict_no_touch_count(selected),
             quiescent_fg_count=int(selected.quiescent_fg_runs),
             baseline_count=int(selected.baseline_valid_runs),
             interactive_count=int(selected.interactive_valid_runs),
@@ -463,7 +529,7 @@ def _classify_decision_row(
         selected_version_name=_norm_text(selected.version_name),
         installed_version_code=installed_vc,
         relation=selected_relation or "none",
-        strict_idle_count=int(selected.strict_idle_runs),
+        strict_idle_count=_strict_no_touch_count(selected),
         quiescent_fg_count=int(selected.quiescent_fg_runs),
         baseline_count=int(selected.baseline_valid_runs),
         interactive_count=int(selected.interactive_valid_runs),
@@ -529,7 +595,7 @@ def summarize_build_candidates(
                 row["quiescent_fg_runs"] += 1
             else:
                 row["strict_idle_runs"] += 1
-                row["baseline_valid_runs"] += 1
+            row["baseline_valid_runs"] += 1
         elif mode == "interactive":
             row["interactive_valid_runs"] += 1
         if bool(run.get("pcap_available")) or _safe_int(run.get("pcap_size_bytes")) > 0:
@@ -556,6 +622,7 @@ def summarize_build_candidates(
                 version_name=_norm_text(row["version_name"]),
                 static_run_id=static_run_ids[0] if static_run_ids else "",
                 static_run_ids=static_run_ids,
+                run_ids=tuple(sorted(str(value) for value in row["run_ids"] if _norm_text(value))),
                 base_apk_sha256=_norm_text(row["base_apk_sha256"]).lower(),
                 strict_idle_runs=int(row["strict_idle_runs"]),
                 quiescent_fg_runs=int(row["quiescent_fg_runs"]),
@@ -684,8 +751,9 @@ def build_paper_freeze_manifest(
             "selected_version_name": _norm_text(selected.version_name if selected else ""),
             "selected_static_run_id": _norm_text(selected.static_run_id if selected else ""),
             "selected_static_run_ids": ",".join(selected.static_run_ids) if selected else "",
+            "selected_dynamic_run_ids": ",".join(selected.run_ids) if selected else "",
             "selected_base_apk_sha256": _norm_text(selected.base_apk_sha256 if selected else ""),
-            "strict_idle_count": int(selected.strict_idle_runs) if selected else 0,
+            "strict_idle_count": _strict_no_touch_count(selected),
             "quiescent_fg_count": int(selected.quiescent_fg_runs) if selected else 0,
             "baseline_count": int(selected.baseline_valid_runs) if selected else 0,
             "interactive_count": int(selected.interactive_valid_runs) if selected else 0,
@@ -755,6 +823,7 @@ def build_paper_freeze_manifest(
                 "missing_baseline_runs": candidate.missing_baseline_runs,
                 "missing_interactive_runs": candidate.missing_interactive_runs,
                 "status": candidate.status,
+                "run_ids": list(candidate.run_ids),
             }
             for candidate in recommendation.build_candidates
         ]
@@ -816,6 +885,11 @@ def build_paper_freeze_decision_board(
                 missing_baseline_runs=_safe_int(row.get("missing_baseline_runs")),
                 missing_interactive_runs=_safe_int(row.get("missing_interactive_runs")),
                 status=_norm_text(row.get("status")),
+                run_ids=tuple(
+                    value.strip()
+                    for value in str(row.get("selected_dynamic_run_ids") or "").split(",")
+                    if value.strip()
+                ),
             )
         build_candidates = tuple(
             PaperFreezeBuildCandidate(
@@ -841,6 +915,11 @@ def build_paper_freeze_decision_board(
                 missing_baseline_runs=_safe_int(candidate.get("missing_baseline_runs")),
                 missing_interactive_runs=_safe_int(candidate.get("missing_interactive_runs")),
                 status=_norm_text(candidate.get("status")),
+                run_ids=tuple(
+                    _norm_text(value)
+                    for value in (candidate.get("run_ids") or [])
+                    if _norm_text(value)
+                ),
             )
             for candidate in (row.get("build_candidates") or [])
             if isinstance(candidate, dict)
@@ -893,9 +972,8 @@ def build_paper_freeze_decision_board(
         "top_note": (
             "Paper-freeze readiness is draft-oriented. It selects the strongest build-backed "
             "evidence set for the paper, which may be a retained prior build. Use Current-build "
-            "collection queue for installed-build refresh work. Strict Idle is the network-quiet "
-            "quota baseline; Quiescent FG is valid no-touch foreground evidence retained outside "
-            "strict-idle quota, and paper readiness keeps those lanes separate."
+            "collection queue for installed-build refresh work. No-touch foreground baselines "
+            "are the quota baseline; Quiescent FG remains visible as an app-activity tag."
         ),
         "sections": sections,
         "rows": [
@@ -907,10 +985,281 @@ def build_paper_freeze_decision_board(
     }
 
 
+def _prior_build_candidate_count(candidates: tuple[PaperFreezeBuildCandidate, ...]) -> int:
+    return sum(1 for candidate in candidates if candidate.relation_to_active_target == "prior-build")
+
+
+def _paper_tier_for_candidate(
+    *,
+    selected: PaperFreezeBuildCandidate | None,
+    tracker_cfg: DatasetTrackerConfig,
+) -> tuple[str, str, str, str, str]:
+    if selected is None or int(selected.valid_pcap_count) <= 0:
+        return (
+            "TRUE_EVIDENCE_HOLE",
+            "no",
+            "none",
+            "No useful valid dynamic evidence was available by the cutoff.",
+            "Seed at least baseline evidence in a future refresh wave.",
+        )
+
+    strict_no_touch = _strict_no_touch_count(selected)
+    relation = _norm_text(selected.relation_to_active_target) or "retained"
+    baseline_ready = int(selected.baseline_valid_runs) >= int(tracker_cfg.baseline_required)
+    strict_ready = strict_no_touch >= int(tracker_cfg.baseline_required)
+    interactive_ready = int(selected.interactive_valid_runs) >= int(tracker_cfg.interactive_required)
+    static_linked = bool(selected.static_run_ids)
+
+    if relation == "current" and strict_ready and interactive_ready and static_linked:
+        return (
+            "STRICT_CURRENT_BUILD_COMPLETE",
+            "yes",
+            "current-build",
+            "Strict no-touch baseline and interactive evidence are complete on the current installed build.",
+            "Freeze this evidence bundle; do not chase app updates for the rough draft.",
+        )
+    if relation == "current" and baseline_ready and static_linked:
+        return (
+            "CURRENT_BUILD_MIXED_BASELINE",
+            "yes",
+            "current-build",
+            (
+                "Current-build baseline evidence is usable; strict idle and QFG/no-touch foreground "
+                "evidence must be reported separately and interactive coverage may be incomplete."
+            ),
+            "Run interactive only if tonight's time permits; otherwise use as current-build baseline evidence.",
+        )
+    if relation == "prior-build" and static_linked and int(selected.valid_pcap_count) > 0 and (
+        baseline_ready or int(selected.interactive_valid_runs) > 0
+    ):
+        return (
+            "PRIOR_BUILD_PAPER_EVIDENCE",
+            "yes",
+            "prior-build",
+            "Valid retained prior-build evidence is build-backed, static-linked, and PCAP-backed; label it as prior-build evidence.",
+            "Do not refresh for the rough draft unless the app is already open and easy to capture tonight.",
+        )
+    return (
+        "SUPPLEMENTAL_LEGACY_CONTEXT",
+        "context-only",
+        "mixed-or-legacy",
+        "Evidence exists but is incomplete for primary claims; use only as supporting context.",
+        "Treat refresh/current-build completion as future work.",
+    )
+
+
+def _final_run_recommendation_for_tier(
+    *,
+    package_name: str,
+    tier: str,
+    selected: PaperFreezeBuildCandidate | None,
+    tracker_cfg: DatasetTrackerConfig,
+) -> str:
+    if tier == "TRUE_EVIDENCE_HOLE":
+        return "seed baseline only if time remains after current apps; otherwise list as evidence hole"
+    if selected is None:
+        return "none"
+    strict_no_touch = _strict_no_touch_count(selected)
+    if package_name == "com.snapchat.android" and selected.relation_to_active_target == "current":
+        if strict_no_touch < int(tracker_cfg.baseline_required):
+            return "one strict idle retry is worthwhile tonight"
+        return "skip strict idle; baseline is cutoff-usable, interactive is optional"
+    if package_name == "com.reddit.frontpage" and selected.relation_to_active_target == "current":
+        return "do not chase strict idle; current mixed baseline is sufficient for rough draft"
+    if package_name == "com.pinterest" and selected.relation_to_active_target == "current":
+        return "finish current baseline run if already in progress; interactive is optional for rough draft"
+    if tier == "CURRENT_BUILD_MIXED_BASELINE" and int(selected.interactive_valid_runs) <= 0:
+        return "interactive run only if easy after Snapchat/Telegram priorities"
+    if tier == "PRIOR_BUILD_PAPER_EVIDENCE":
+        return "no tonight run required for rough draft; label prior-build provenance"
+    if tier == "STRICT_CURRENT_BUILD_COMPLETE":
+        return "none; freeze evidence"
+    return "none"
+
+
+def build_paper_evidence_tier_report(
+    *,
+    package_filter: list[str] | tuple[str, ...] | None = None,
+    cfg: DatasetTrackerConfig | None = None,
+    live_drift_map: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    tracker_cfg = cfg or DatasetTrackerConfig()
+    tracker_status, payload, _raw_payload = _load_tracker_payload(tracker_cfg)
+    apps = payload.get("apps") if isinstance(payload, dict) else {}
+    app_rows = apps if isinstance(apps, dict) else {}
+    wanted = [
+        _norm_text(package).lower()
+        for package in (
+            package_filter
+            or active_research_cohort_packages()
+            or tuple(sorted(_norm_text(pkg).lower() for pkg in app_rows.keys() if _norm_text(pkg)))
+        )
+        if _norm_text(package)
+    ]
+
+    rows: list[dict[str, Any]] = []
+    live_drift_checked = live_drift_map is not None
+    operational_drift = {
+        _norm_text(package).lower(): value
+        for package, value in (live_drift_map or {}).items()
+        if _norm_text(package)
+    }
+    for package_name in wanted:
+        entry = app_rows.get(package_name) if isinstance(app_rows, dict) else None
+        runs = entry.get("runs") if isinstance(entry, dict) and isinstance(entry.get("runs"), list) else []
+        recommendation = recommend_paper_freeze_for_runs(package_name, runs, cfg=tracker_cfg)
+        selected = recommendation.selected_build
+        tier, usable, scope, caveat, future_work = _paper_tier_for_candidate(
+            selected=selected,
+            tracker_cfg=tracker_cfg,
+        )
+        strict_no_touch = _strict_no_touch_count(selected)
+        selected_version_code = _norm_text(selected.version_code if selected else "")
+        drift_info = operational_drift.get(package_name) or {}
+        if live_drift_checked:
+            operational_installed_version_code = _norm_text(
+                drift_info.get("observed_version_code") if isinstance(drift_info, Mapping) else ""
+            ) or recommendation.installed_target_version_code
+            operational_live_drifted = (
+                "yes"
+                if selected_version_code
+                and operational_installed_version_code
+                and selected_version_code != operational_installed_version_code
+                else "no"
+            )
+        else:
+            operational_installed_version_code = ""
+            operational_live_drifted = "not_checked"
+        operational_drift_detail = ""
+        if operational_live_drifted == "yes":
+            operational_drift_detail = (
+                f"live installed build {operational_installed_version_code} differs from selected paper build "
+                f"{selected_version_code}; retain selected build as paper evidence and treat refresh as future work"
+            )
+        elif operational_live_drifted == "not_checked":
+            operational_drift_detail = "live installed-build drift was not checked for this report"
+        row = PaperEvidenceTierRow(
+            package_name=package_name,
+            evidence_tier=tier,
+            paper_usable=usable,
+            selected_relation=_norm_text(selected.relation_to_active_target if selected else "none") or "none",
+            selected_version_code=selected_version_code,
+            selected_version_name=_norm_text(selected.version_name if selected else ""),
+            installed_version_code=recommendation.installed_target_version_code,
+            current_installed_drifted=(
+                "yes"
+                if selected
+                and selected.relation_to_active_target == "prior-build"
+                and _norm_text(recommendation.installed_target_version_code)
+                else "no"
+            ),
+            operational_installed_version_code=operational_installed_version_code,
+            operational_live_drifted=operational_live_drifted,
+            operational_drift_detail=operational_drift_detail,
+            selected_static_run_ids=",".join(selected.static_run_ids) if selected else "",
+            selected_dynamic_run_ids=",".join(selected.run_ids) if selected else "",
+            pcap_available_count=int(selected.valid_pcap_count) if selected else 0,
+            strict_idle_count=strict_no_touch,
+            quiescent_fg_count=int(selected.quiescent_fg_runs) if selected else 0,
+            baseline_count=int(selected.baseline_valid_runs) if selected else 0,
+            interactive_count=int(selected.interactive_valid_runs) if selected else 0,
+            retained_prior_build_count=_prior_build_candidate_count(recommendation.build_candidates),
+            build_candidates_seen=len(recommendation.build_candidates),
+            evidence_scope=scope,
+            caveat=caveat,
+            recommended_final_run_tonight=_final_run_recommendation_for_tier(
+                package_name=package_name,
+                tier=tier,
+                selected=selected,
+                tracker_cfg=tracker_cfg,
+            ),
+            future_work=future_work,
+        )
+        rows.append(
+            {
+                "package_name": row.package_name,
+                "evidence_tier": row.evidence_tier,
+                "paper_usable": row.paper_usable,
+                "selected_relation": row.selected_relation,
+                "selected_version_code": row.selected_version_code,
+                "selected_version_name": row.selected_version_name,
+                "installed_version_code": row.installed_version_code,
+                "current_installed_drifted": row.current_installed_drifted,
+                "operational_installed_version_code": row.operational_installed_version_code,
+                "operational_live_drifted": row.operational_live_drifted,
+                "operational_drift_detail": row.operational_drift_detail,
+                "selected_static_run_ids": row.selected_static_run_ids,
+                "selected_dynamic_run_ids": row.selected_dynamic_run_ids,
+                "pcap_available_count": row.pcap_available_count,
+                "strict_idle_count": row.strict_idle_count,
+                "quiescent_fg_count": row.quiescent_fg_count,
+                "baseline_count": row.baseline_count,
+                "interactive_count": row.interactive_count,
+                "retained_prior_build_count": row.retained_prior_build_count,
+                "build_candidates_seen": row.build_candidates_seen,
+                "evidence_scope": row.evidence_scope,
+                "caveat": row.caveat,
+                "recommended_final_run_tonight": row.recommended_final_run_tonight,
+                "future_work": row.future_work,
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            _PAPER_EVIDENCE_TIER_ORDER.get(str(row["evidence_tier"]), 99),
+            str(row["package_name"]),
+        )
+    )
+    tier_counts: dict[str, int] = {}
+    for row in rows:
+        tier = str(row["evidence_tier"])
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+    usable_count = sum(1 for row in rows if row["paper_usable"] == "yes")
+    drifted_usable_count = sum(
+        1
+        for row in rows
+        if row["paper_usable"] == "yes" and row.get("operational_live_drifted") == "yes"
+    )
+    prior_build_usable_count = sum(
+        1
+        for row in rows
+        if row["paper_usable"] == "yes" and row.get("current_installed_drifted") == "yes"
+    )
+    context_count = sum(1 for row in rows if row["paper_usable"] == "context-only")
+    hole_count = sum(1 for row in rows if row["evidence_tier"] == "TRUE_EVIDENCE_HOLE")
+    return {
+        "tracker_status": tracker_status,
+        "cohort_label": active_research_cohort_label(),
+        "cutoff_policy": "collection_cutoff_build_backed_evidence_bundles",
+        "methodology_current_build_churn": (
+            "Dynamic collection was closed at a fixed cutoff because consumer applications update frequently "
+            "during study execution. Evidence was assembled as app-level build-backed bundles rather than "
+            "an endless current-build chase."
+        ),
+        "methodology_baseline_classes": (
+            "Strict idle baselines, quiescent foreground baselines, and interactive captures are reported "
+            "as separate evidence classes and are not silently merged."
+        ),
+        "rows": rows,
+        "summary": {
+            "apps_total": len(rows),
+            "paper_usable": usable_count,
+            "drifted_but_paper_usable": drifted_usable_count,
+            "prior_build_paper_usable": prior_build_usable_count,
+            "live_drift_checked": live_drift_checked,
+            "context_only": context_count,
+            "true_evidence_holes": hole_count,
+            "tier_counts": tier_counts,
+        },
+    }
+
+
 __all__ = [
     "PaperFreezeBuildCandidate",
     "PaperFreezeDecisionRow",
+    "PaperEvidenceTierRow",
     "PaperFreezeRecommendation",
+    "build_paper_evidence_tier_report",
     "build_paper_freeze_decision_board",
     "build_paper_freeze_manifest",
     "recommend_paper_freeze_for_runs",

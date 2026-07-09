@@ -169,6 +169,22 @@ def _try_resolve_from_apk_library(
 ) -> dict[str, int] | None:
     if request.options.overwrite_existing:
         return None
+    variant_entry = apk_library_service.content_variant_entry_for_plan(request.plan)
+    if variant_entry is not None:
+        request.emit(
+            "info",
+            "harvest.package.apk_library_content_variant_pull_required",
+            extra={
+                "package_name": request.plan.inventory.package_name,
+                "version_code": request.plan.inventory.version_code,
+                "artifact_total": len(request.plan.artifacts),
+                "apk_library_manifest_path": str(variant_entry.manifest_path),
+                "planned_split_set_hash": variant_entry.planned_split_set_hash,
+                "split_set_hash": variant_entry.split_set_hash,
+                "reason": "content_variant_requires_fresh_pull",
+            },
+        )
+        return None
     entry = apk_library_service.find_entry_for_plan(request.plan)
     if entry is None:
         return None
@@ -204,6 +220,7 @@ def _try_resolve_from_apk_library(
         "skipped": len(artifacts),
         "errors": 0,
         "bytes": 0,
+        "library_hits": len(artifacts),
     }
 
 

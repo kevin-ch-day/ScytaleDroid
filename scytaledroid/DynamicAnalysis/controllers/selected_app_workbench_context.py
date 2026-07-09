@@ -170,12 +170,12 @@ def print_selected_app_workbench_summary(
         print(line)
     if int(getattr(app.counts, "baseline_not_idle_valid", 0) or 0) > 0:
         print(
-            "Quiescent FG baselines are valid no-touch foreground captures for the current target build. They remain analysis-included retained evidence, but they do not satisfy strict-idle quota."
+            "Quiescent FG baselines are valid no-touch foreground captures for the current target build. The tag records app-generated foreground activity; it is not proof of operator interaction."
         )
         freeze = getattr(app_state, "paper_freeze", None)
         if freeze is not None and getattr(freeze, "selected_build", None) is not None:
             print(
-                "Paper-freeze note: Strict Idle and Quiescent FG stay separate in paper-target readiness. Quiescent FG supports retained analysis coverage, but strict-idle readiness remains its own lane."
+                "Paper-freeze note: Quiescent FG remains visible as an activity tag while baseline readiness follows countable no-touch captures."
             )
     if (
         is_messaging_package_or_category_fn(app.package_name)

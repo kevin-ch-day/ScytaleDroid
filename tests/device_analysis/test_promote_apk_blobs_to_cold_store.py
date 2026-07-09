@@ -268,6 +268,33 @@ def test_already_cold_symlink_is_skipped(tmp_path: Path) -> None:
     assert actions[0].status == "skipped"
 
 
+def test_relative_already_cold_symlink_is_skipped_without_resolving_to_cold(tmp_path: Path) -> None:
+    data_root, local, digest = _write_hot(tmp_path, b"payload")
+    mount = tmp_path / "mnt" / "MERCURY_DATA_V2"
+    cold_root = mount / "scytaledroid_artifacts" / "apk_store" / "cold"
+    cold = _cold_path(cold_root, digest)
+    cold.parent.mkdir(parents=True)
+    cold.write_bytes(b"payload")
+    local.unlink()
+    local.symlink_to(cold)
+    relative_local = local.relative_to(tmp_path).as_posix()
+
+    actions, blocked, _verification = promote.plan_or_apply(
+        [_input(sha=digest, local=Path(relative_local), cold=cold)],
+        data_root=data_root,
+        cold_root=cold_root,
+        mount_root=mount,
+        apply=True,
+        is_mount=lambda path: Path(path) == mount,
+    )
+
+    assert not blocked
+    assert actions[0].action == "already_cold"
+    assert actions[0].status == "skipped"
+    assert actions[0].reason == "local_path_already_symlink"
+    assert actions[0].local_path == local.as_posix()
+
+
 def test_receipt_is_written(tmp_path: Path) -> None:
     data_root, local, digest = _write_hot(tmp_path)
     mount = tmp_path / "mnt" / "MERCURY_DATA_V2"

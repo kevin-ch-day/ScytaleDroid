@@ -207,17 +207,17 @@ Do not strip inline finding evidence until all of the following are true:
 | `audit_static_session.py` | Cohort audit: canonical tables + `v_web_*` + handoff + legacy-table counts (informational); prints copyable SQL. |
 | `report_static_session_grain_integrity.py` | Read-only grain map: SAR counts + optional archive JSON pipeline rollups vs DB findings (split-heavy triage). |
 | `report_apk_lineage_availability.py` | Read-only package/version/hash/install-set lineage, byte availability, static coverage, dynamic coverage, and design checks. |
-| `report_package_lineage_coverage.py` | Compatibility wrapper for package lineage coverage. |
 | `report_package_lineage_workbench.py` | Read-only package-first operator workbench for identity, bytes, static/dynamic coverage, gaps, and recommended actions. |
 | `report_static_analysis_targets.py` | Read-only queue-like static target model derived from package/hash lineage, including block reasons. |
 | `report_dynamic_static_alignment.py` | Read-only exact dynamic/static hash alignment and worklist; optional exact-target readiness output. |
-| `report_dynamic_static_recovery_plan.py` | Read-only exact-gap artifact recovery planner; default old-root posture is historical identity only; writes only a non-destructive JSON receipt when `--write-receipt` is passed. |
-| `report_dynamic_static_pairing_eligibility.py` | Read-only dynamic-session dataset eligibility report for strict paired analysis, historical identity only, reharvest, and current-byte states. |
+| `report_dynamic_static_recovery_plan.py` | Read-only exact-gap artifact recovery planner; default old-root posture is historical identity only; `--write-report` emits CSV/JSON worklists, and `--write-receipt` writes a non-destructive JSON recovery receipt. |
+| `report_dynamic_static_pairing_eligibility.py` | Read-only dynamic-session dataset eligibility report for strict paired analysis, historical identity only, reharvest, and current-byte states; `--write-report` emits CSV/JSON session and package worklists. |
+| `repair_dynamic_dataset_validity_from_db_issues.py` | Dry-run default DB-only repair for legacy dynamic rows whose latest `dynamic_session_issues.dataset_validity` payload already proves `valid_dataset_run=true`; `--apply` fills bounded `dynamic_sessions` columns by run ID only. |
 | `report_current_corpus_preflight.py` | Read-only current-corpus preflight after fresh inventory/harvest: repository rows, canonical store files, apk_sets, split metadata, and static target states. |
 | `refresh_external_sdk_tracker_intel.py` | Dry-run default refresh of repo-owned external tracker/SDK reference intel from the Exodus public API; `--apply` upserts additive rows and can write a receipt bundle. |
 | `report_external_tracker_context.py` | Read-only overlap audit between external tracker intel and selected static endpoint root domains; separates specific overlaps from generic-root/infrastructure-root overlap. |
 | `backfill_apk_sets_from_receipts.py` | Dry-run default install-set spine backfill from receipt-backed harvest artifacts; `--apply` writes additive rows. |
-| `backfill_apk_set_links.py` | Dry-run default `apk_set_id` link backfill for static/dynamic rows with unique artifact-set matches; `--apply` writes nullable links only. |
+| `backfill_apk_set_links.py` | Dry-run default `apk_set_id` link backfill for static/dynamic rows with unique artifact-set matches; `--apply` writes nullable links only and a timestamped receipt by default (`--receipt-dir` for explicit dry-run/apply receipts). |
 | `smoke_web_db.sh` | Wraps **`ScytaleDroid-Web/scripts/sd_web_db_smoke.php`** (PDO read smoke). |
 
 ## Naming contract

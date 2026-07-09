@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,8 +25,10 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
     )
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
     monkeypatch.setattr(app_main.menu_utils, "print_header", lambda *_a, **_k: None)
+
     def _capture_menu(items, **kwargs):
         rendered_menus.append(([item.label for item in items], kwargs))
+
     monkeypatch.setattr(app_main.menu_utils, "print_menu", _capture_menu)
     monkeypatch.setattr(app_main.prompt_utils, "get_choice", lambda *_a, **_k: "0")
     monkeypatch.setattr(app_main.status_messages, "print_status", lambda *_a, **_k: None)
@@ -46,6 +49,7 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
                     "Governance & Readiness",
                     "Evidence & Workspace",
                     "APK library",
+                    "Mercury APK storage mount",
                     "About ScytaleDroid",
                 ],
             {
@@ -80,6 +84,11 @@ def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, cap
         "_describe_main_menu_database",
         lambda *_a, **_k: "scytaledroid_core_prod @ localhost:3306",
     )
+    monkeypatch.setattr(
+        app_main,
+        "_describe_main_menu_mercury",
+        lambda: "mounted at /mnt/MERCURY_DATA_V2",
+    )
     monkeypatch.setattr(app_main.prompt_utils, "get_choice", lambda *_a, **_k: "0")
     monkeypatch.setattr(app_main.status_messages, "print_status", lambda *_a, **_k: None)
     monkeypatch.setattr(app_main.status_messages, "print_strip", lambda *_a, **_k: None)
@@ -89,7 +98,49 @@ def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, cap
     out = capsys.readouterr().out
     assert "Selected device: moto g 5G 2024 · ZY22JK89DR" in out
     assert "Database: scytaledroid_core_prod @ localhost:3306" in out
+    assert "Mercury: mounted at /mnt/MERCURY_DATA_V2" in out
     assert "-----" in out
+
+
+def test_main_menu_mercury_status_variants(monkeypatch) -> None:
+    from scytaledroid.Utils.System import mercury_storage
+
+    def _status(*, mounted=False, user_mounted=False, device_exists=True):
+        return mercury_storage.MercuryStorageStatus(
+            label="MERCURY_DATA_V2",
+            device_path=Path("/dev/disk/by-label/MERCURY_DATA_V2"),
+            device_exists=device_exists,
+            mountpoint=Path("/mnt/MERCURY_DATA_V2"),
+            mountpoint_exists=True,
+            mountpoint_mounted=mounted,
+            user_media_mount=Path("/run/media/secadmin/MERCURY_DATA_V2"),
+            user_media_mounted=user_mounted,
+            compatibility_alias_exists=False,
+            compatibility_alias_target=None,
+        )
+
+    monkeypatch.setattr(mercury_storage, "mercury_storage_status", lambda: _status(mounted=True))
+    assert app_main._describe_main_menu_mercury() == "mounted at /mnt/MERCURY_DATA_V2"
+
+    monkeypatch.setattr(
+        mercury_storage,
+        "mercury_storage_status",
+        lambda: _status(user_mounted=True),
+    )
+    assert (
+        app_main._describe_main_menu_mercury()
+        == "user-session only at /run/media/secadmin/MERCURY_DATA_V2 (use menu 11)"
+    )
+
+    monkeypatch.setattr(mercury_storage, "mercury_storage_status", lambda: _status())
+    assert app_main._describe_main_menu_mercury() == "not mounted (use menu 11)"
+
+    monkeypatch.setattr(
+        mercury_storage,
+        "mercury_storage_status",
+        lambda: _status(device_exists=False),
+    )
+    assert app_main._describe_main_menu_mercury() == "drive not detected"
 
 
 def test_handle_select_device_starts_selector_on_new_line(monkeypatch, capsys) -> None:

@@ -15,6 +15,20 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.DynamicAnalysis.ip_context import classify_ip_destination, normalize_ip
+
+
+def _endpoint_host(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("[") and "]" in text:
+        return text[1 : text.index("]")]
+    if ":" in text and text.count(":") == 1:
+        host, maybe_port = text.rsplit(":", 1)
+        if maybe_port.isdigit():
+            return host
+    return text
 
 
 def extract_network_indicators_from_pcap_report(report: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -64,6 +78,43 @@ def extract_network_indicators_from_pcap_report(report: Mapping[str, Any]) -> li
 
     _append_top("dns", report.get("top_dns"), source="top_dns")
     _append_top("sni", report.get("top_sni"), source="top_sni")
+
+    package_name = str(report.get("package_name") or "").strip()
+    flow_summary = report.get("flow_summary")
+    top_flows = flow_summary.get("top_flows") if isinstance(flow_summary, dict) else None
+    if isinstance(top_flows, list):
+        for flow in top_flows:
+            if not isinstance(flow, Mapping):
+                continue
+            endpoint_candidates = [_endpoint_host(flow.get("endpoint_b")), _endpoint_host(flow.get("endpoint_a"))]
+            for candidate in endpoint_candidates:
+                ip_text = normalize_ip(candidate)
+                if not ip_text:
+                    continue
+                ctx = classify_ip_destination(ip_text, package_name=package_name)
+                if not ctx.get("first_party"):
+                    continue
+                meta = {
+                    "bytes": _safe_int(flow.get("bytes"), default=None),
+                    "packets": _safe_int(flow.get("packets"), default=None),
+                    "protocol": flow.get("protocol"),
+                    "endpoint_a": flow.get("endpoint_a"),
+                    "endpoint_b": flow.get("endpoint_b"),
+                    "cidr": ctx.get("cidr"),
+                    "owner_class": ctx.get("owner_class"),
+                    "role_class": ctx.get("role_class"),
+                    "classification_basis": ctx.get("basis"),
+                    "match_type": ctx.get("match_type"),
+                    "package_name_scope": ctx.get("package_name_scope"),
+                }
+                _append(
+                    "ip_dst",
+                    ip_text,
+                    source="top_flow_ip",
+                    count=_safe_int(flow.get("packets"), default=None),
+                    meta_json=meta,
+                )
+                break
 
     surface = report.get("security_surface")
     if isinstance(surface, dict) and surface.get("status") == "ok":

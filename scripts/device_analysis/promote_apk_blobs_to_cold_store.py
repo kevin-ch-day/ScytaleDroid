@@ -344,9 +344,9 @@ def _existing_cold_status(path: Path, sha: str) -> str:
 def _resolve_local(value: str, *, data_root: Path) -> Path:
     path = Path(value)
     if path.is_absolute():
-        return path
+        return _absolute_no_symlink(path)
     repo_root = data_root.resolve().parent
-    return (repo_root / path).resolve(strict=False)
+    return _absolute_no_symlink(repo_root / path)
 
 
 def _resolve_cold(value: str, *, cold_root: Path, sha: str) -> Path:
@@ -354,6 +354,11 @@ def _resolve_cold(value: str, *, cold_root: Path, sha: str) -> Path:
     if path.is_absolute():
         return path.resolve(strict=False)
     return (cold_root / "data" / "store" / "apk" / "sha256" / sha[:2] / f"{sha}.apk").resolve(strict=False)
+
+
+def _absolute_no_symlink(path: Path) -> Path:
+    """Return an absolute path without resolving the final symlink target."""
+    return Path(os.path.abspath(os.fspath(path)))
 
 
 def _base_action(row: PromotionInput, *, local: Path, cold: Path, action: str) -> PromotionAction:

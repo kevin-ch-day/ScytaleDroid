@@ -826,6 +826,163 @@ def test_thin_harvest_session_apks_apply_replaces_regular_apk_with_symlink(tmp_p
     assert summary["reason_counts"] == {"eligible_verified": 1}
 
 
+def test_thin_harvest_session_apks_accepts_cold_canonical_symlink(tmp_path: Path) -> None:
+    from scripts.device_analysis import thin_harvest_session_apks
+
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.cold/Cold_v1/com_example_cold_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"cold-thin-me"
+    sha = _write_apk(session_apk, payload)
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    cold_path = tmp_path / "mercury" / "cold" / "data" / "store" / "apk" / "sha256" / sha[:2] / f"{sha}.apk"
+    _write_apk(cold_path, payload)
+    canonical_path = tmp_path / canonical_rel
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_path.symlink_to(os.path.relpath(cold_path, start=canonical_path.parent))
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.cold",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+        session_label=session_label,
+    )
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.cold",
+        version_code="1",
+        observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+        session_label=session_label,
+    )
+    out_dir = tmp_path / "audit"
+
+    rc = thin_harvest_session_apks.main(
+        [
+            "--data-root",
+            root.as_posix(),
+            "--session",
+            session_label,
+            "--verify",
+            "--apply",
+            "--output-dir",
+            out_dir.as_posix(),
+            "--stamp",
+            "cold",
+        ]
+    )
+
+    assert rc == 0
+    assert session_apk.is_symlink()
+    assert session_apk.resolve() == cold_path.resolve()
+    summary = json.loads((out_dir / "thin_session_apply_cold.json").read_text(encoding="utf-8"))
+    assert summary["applied_files"] == 1
+    assert summary["reason_counts"] == {"eligible_verified": 1}
+
+
+def test_thin_harvest_session_apks_blocks_unmounted_cold_canonical_symlink(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from scripts.device_analysis import thin_harvest_session_apks
+
+    root = tmp_path / "data"
+    session_label = "run1"
+    rel = f"SER1/runs/{session_label}/com.example.unmounted/Unmounted_v1/com_example_unmounted_1__base.apk"
+    session_apk = root / "device_apks" / rel
+    payload = b"cold-drive-unmounted"
+    sha = _write_apk(session_apk, payload)
+    canonical_rel = f"data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    canonical_path = tmp_path / canonical_rel
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_path.symlink_to(
+        f"/mnt/MERCURY_DATA_V2/scytaledroid_artifacts/apk_store/cold/data/store/apk/sha256/{sha[:2]}/{sha}.apk"
+    )
+    _write_sidecar(
+        session_apk.with_suffix(".apk.meta.json"),
+        package_name="com.example.unmounted",
+        version_code="1",
+        sha=sha,
+        canonical_rel=canonical_rel,
+        local_rel=rel,
+        session_label=session_label,
+    )
+    _write_manifest_with_observed(
+        session_apk.parent / "harvest_package_manifest.json",
+        package_name="com.example.unmounted",
+        version_code="1",
+        observed_artifacts=[_observed_entry(local_rel=rel, canonical_rel=canonical_rel, sha=sha)],
+        session_label=session_label,
+    )
+    out_dir = tmp_path / "audit"
+    monkeypatch.setattr(thin_harvest_session_apks.os.path, "ismount", lambda _path: False)
+
+    rc = thin_harvest_session_apks.main(
+        [
+            "--data-root",
+            root.as_posix(),
+            "--session",
+            session_label,
+            "--verify",
+            "--output-dir",
+            out_dir.as_posix(),
+            "--stamp",
+            "unmounted",
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    assert session_apk.is_file()
+    summary = json.loads((out_dir / "thin_session_apply_unmounted.json").read_text(encoding="utf-8"))
+    assert summary["eligible_files"] == 0
+    assert summary["reason_counts"] == {"cold_apk_store_unmounted": 1}
+
+
+def test_thin_harvest_session_apks_ignores_package_directory_ending_in_apk(tmp_path: Path) -> None:
+    from scripts.device_analysis import thin_harvest_session_apks
+
+    root = tmp_path / "data"
+    session_label = "run1"
+    package_dir = (
+        root
+        / "device_apks"
+        / "SER1"
+        / "runs"
+        / session_label
+        / "com.google.android.appsearch.apk"
+        / "com.google.android.appsearch.apk_v37_17"
+    )
+    _write_manifest(
+        package_dir / "harvest_package_manifest.json",
+        package_name="com.google.android.appsearch.apk",
+        version_code="37",
+        session_label=session_label,
+    )
+    out_dir = tmp_path / "audit"
+
+    rc = thin_harvest_session_apks.main(
+        [
+            "--data-root",
+            root.as_posix(),
+            "--session",
+            session_label,
+            "--output-dir",
+            out_dir.as_posix(),
+            "--stamp",
+            "apkdir",
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    summary = json.loads((out_dir / "thin_session_apply_apkdir.json").read_text(encoding="utf-8"))
+    assert summary["rows_seen"] == 0
+    assert summary["reason_counts"] == {}
+
+
 def test_thin_session_gate_latest_session_selects_newest_directory_deterministically(tmp_path: Path) -> None:
     root = tmp_path / "data"
     old_label = "SER1-20260626-170424-000001"

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from scripts.db import prune_artifact_registry_dangling as prune_script
 from scytaledroid.Database.db_utils.artifact_registry_prune import (
     effective_cutoff_days,
     run_prune_dangling_artifact_registry,
@@ -145,3 +146,78 @@ def test_run_prune_sample_ids_without_receipt() -> None:
     )
     assert out.candidate_count == 2
     assert out.sample_artifact_ids == (100,)
+
+
+def test_prune_cli_policy_guard_allows_safe_candidates(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.artifact_registry_cleanup_report.collect_cleanup_candidate_report",
+        lambda *_a, **_k: {
+            "summary_counts": {
+                "safe_prune_candidate_rows": 3,
+                "review_or_blocked_rows": 0,
+                "linked_keep_rows": 9,
+                "total_rows": 12,
+            }
+        },
+    )
+
+    allowed, message, counts = prune_script._policy_guard_for_apply(
+        run_sql=MagicMock(),
+        run_type_filter="static",
+        candidate_count=2,
+        allow_review_category_prune=False,
+    )
+
+    assert allowed is True
+    assert message is None
+    assert counts["safe_prune_candidate_rows"] == 3
+
+
+def test_prune_cli_policy_guard_blocks_review_candidates(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.artifact_registry_cleanup_report.collect_cleanup_candidate_report",
+        lambda *_a, **_k: {
+            "summary_counts": {
+                "safe_prune_candidate_rows": 0,
+                "review_or_blocked_rows": 5,
+                "linked_keep_rows": 9,
+                "total_rows": 14,
+            }
+        },
+    )
+
+    allowed, message, counts = prune_script._policy_guard_for_apply(
+        run_sql=MagicMock(),
+        run_type_filter="static",
+        candidate_count=5,
+        allow_review_category_prune=False,
+    )
+
+    assert allowed is False
+    assert message and "blocked apply" in message
+    assert counts["review_or_blocked_rows"] == 5
+
+
+def test_prune_cli_policy_guard_override_allows_review_candidates(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_utils.artifact_registry_cleanup_report.collect_cleanup_candidate_report",
+        lambda *_a, **_k: {
+            "summary_counts": {
+                "safe_prune_candidate_rows": 0,
+                "review_or_blocked_rows": 5,
+                "linked_keep_rows": 9,
+                "total_rows": 14,
+            }
+        },
+    )
+
+    allowed, message, counts = prune_script._policy_guard_for_apply(
+        run_sql=MagicMock(),
+        run_type_filter="static",
+        candidate_count=5,
+        allow_review_category_prune=True,
+    )
+
+    assert allowed is True
+    assert message and "--allow-review-category-prune" in message
+    assert counts["review_or_blocked_rows"] == 5

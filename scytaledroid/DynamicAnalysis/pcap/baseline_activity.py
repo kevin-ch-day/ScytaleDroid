@@ -1,8 +1,8 @@
-"""Baseline-idle activity tagging (inverse of low_signal).
+"""Baseline-idle app-activity tagging (inverse of low_signal).
 
-Valid baseline_idle runs that carry heavy feed/media traffic (autoplay video,
-large QUIC downlink bursts) are retained for analysis but flagged so they do
-not consume cohort quota slots.
+The tag captures app-generated foreground traffic during a no-touch baseline.
+It is an analysis signal, not proof of operator interaction and not by itself a
+quota exclusion.
 """
 
 from __future__ import annotations

@@ -57,8 +57,6 @@ def _baseline_run(
         row["countable"] = False
     elif baseline_not_idle:
         row["baseline_not_idle"] = True
-        row["extra_run"] = 1
-        row["countable"] = False
     elif extra_run:
         row["extra_run"] = 1
         row["countable"] = False
@@ -154,11 +152,16 @@ def test_x_baseline_two_countable_plus_one_low_signal() -> None:
     assert summary.baseline.low_signal_retained == 1
 
 
-def test_non_idle_baseline_uses_dedicated_retained_lane_not_generic_extra() -> None:
+def test_app_active_no_touch_baseline_can_count_after_quota_marking() -> None:
     runs = [
         _baseline_run("b1", ended_at="2026-01-01T10:00:00+00:00", countable=True),
         _baseline_run("b2", ended_at="2026-01-01T11:00:00+00:00", countable=True),
-        _baseline_run("b3", ended_at="2026-01-01T12:00:00+00:00", baseline_not_idle=True),
+        _baseline_run(
+            "b3",
+            ended_at="2026-01-01T12:00:00+00:00",
+            countable=True,
+            baseline_not_idle=True,
+        ),
     ]
 
     summary = summarize_tracker_runs_qualification(
@@ -174,10 +177,10 @@ def test_non_idle_baseline_uses_dedicated_retained_lane_not_generic_extra() -> N
         non_idle=summary.baseline.non_idle_retained,
     )
 
-    assert label == "2/3 (+1 non-idle)"
-    assert summary.baseline.quota_counted_valid == 2
+    assert label == "3/3"
+    assert summary.baseline.quota_counted_valid == 3
     assert summary.baseline.extra_valid == 0
-    assert summary.baseline.non_idle_retained == 1
+    assert summary.baseline.non_idle_retained == 0
     assert summary.baseline.total_valid_retained == 3
 
 
@@ -345,6 +348,39 @@ def test_messaging_interaction_low_traffic_stays_valid_not_auto_low_signal(
         run_dir,
         package_name=package_name,
         run_profile="interaction_manual",
+    )
+
+    assert decision is not None
+    assert decision["low_signal"] is False
+    assert decision["low_signal_reasons"] == []
+
+
+def test_connected_idle_messaging_baseline_accepts_quiet_signal_shape(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    _write_json(
+        run_dir / "analysis" / "pcap_features.json",
+        {
+            "metrics": {
+                "capture_duration_s": 251.9,
+                "data_size_bytes": 10_927,
+                "packet_count": 106,
+            },
+            "proxies": {
+                "unique_domains_topn": 1,
+                "unique_dst_ip_count": 3,
+                "unique_dst_port_count": 6,
+            },
+            "quality": {
+                "report_status": "ok",
+                "pcap_valid": True,
+            },
+        },
+    )
+
+    decision = compute_low_signal_for_run(
+        run_dir,
+        package_name="org.thoughtcrime.securesms",
+        run_profile="baseline_connected",
     )
 
     assert decision is not None

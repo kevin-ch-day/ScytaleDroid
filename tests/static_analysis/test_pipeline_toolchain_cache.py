@@ -61,3 +61,24 @@ def test_build_parser_provenance_marks_minor_complex_entry_bounds_note() -> None
     assert provenance["resource_parse_state"] == "minor"
     assert provenance["resource_parse_partial"] is False
     assert provenance["resource_reparse_candidate"] is False
+
+
+def test_build_parser_provenance_marks_aapt2_resource_string_recovery() -> None:
+    provenance = _build_parser_provenance(  # noqa: SLF001 - targeted contract test
+        {
+            "resource_bounds_warnings": ["We are out of bound with this complex entry. Count: 2048"],
+            "string_index_resource_strings": 2633,
+            "resource_string_fallback_count": 2600,
+            "resource_fallback": {
+                "fallback_used": False,
+                "aapt2_available": True,
+            },
+        }
+    )
+
+    assert provenance["resource_open_source"] == "androguard+aapt2_resource_strings"
+    assert provenance["resource_string_fallback_used"] is True
+    assert provenance["resource_string_fallback_count"] == 2600
+    assert provenance["resource_parse_state"] == "fallback_recovered"
+    assert provenance["resource_parse_partial"] is False
+    assert provenance["resource_reparse_candidate"] is False

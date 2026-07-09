@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 from pathlib import Path
 
 import pytest
@@ -154,3 +155,23 @@ def test_checker_blocks_canonical_symlink_outside_allowed_roots(tmp_path: Path) 
 
     assert report["status"] == "BLOCKED"
     assert report["canonical_store"]["canonical_symlink_outside_allowed_roots_count"] == 1
+
+
+def test_checker_sha_progress_reports_canonical_path_count(tmp_path: Path) -> None:
+    data = tmp_path / "repo" / "data"
+    apk_root = data / "store" / "apk"
+    _write_canonical(apk_root, b"one")
+    _write_canonical(apk_root, b"two")
+    progress = io.StringIO()
+
+    report = checker.build_report(
+        data_root=data,
+        verify_sha256=True,
+        progress_every=1,
+        progress_stream=progress,
+    )
+
+    assert report["status"] == "OK"
+    lines = progress.getvalue().strip().splitlines()
+    assert len(lines) == 2
+    assert lines[-1] == "SHA progress: 2/2 canonical APK paths; mismatches=0"

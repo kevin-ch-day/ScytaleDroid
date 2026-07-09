@@ -129,14 +129,40 @@ duplicate work. Operators must read each script's docstring before re-run.
 
 ---
 
-## First archive candidates (reference check done for this pass)
+## First Removed Historical Helpers
 
 | Path | Basis |
 | --- | --- |
-| `scripts/db/backfill_static_session_id_on_runs.py` | **Writes** `static_session_id` on historical runs; **only** referenced from maintenance docs (`db_scripts_inventory.md`, this file), not from `scytaledroid/` or tests. Strong **migration_historical** → **candidate_archive** after org confirmation. |
-| `scripts/db/sql/backfill_static_analysis_runs_static_session_id.sql` | Companion SQL for the same rollout; archive **with** the Python backfill in the same folder. |
+| `scripts/db/backfill_static_session_id_on_runs.py` | Removed from active scripts after reference check; historical one-time rollout helper. Use `refresh_static_analysis_sessions.py` and `verify_static_session_id_rollout.py` for maintained session repair/verification. |
+| `scripts/db/sql/backfill_static_analysis_runs_static_session_id.sql` | Removed with the Python backfill companion; no active code/test imports. |
+| `scripts/db/report_dynamic_baseline_sufficiency_audit.py` | Removed unreferenced standalone audit wrapper; historical outputs remain under `output/audit/dynamic_baseline_sufficiency/`. |
+| `scripts/db/report_dynamic_collection_queue_alignment.py` | Removed unreferenced standalone audit wrapper; queue/read-model checks should be routed through maintained dynamic reports or menus. |
+| `scripts/db/report_dynamic_db_truth_audit.py` | Removed unreferenced standalone audit wrapper; superseded by maintained dynamic deep/readiness reports for active workflows. |
+| `scripts/db/report_dynamic_evidence_scope_audit.py` | Removed unreferenced standalone audit wrapper; historical outputs remain under `output/audit/dynamic_evidence_scope/`. |
+| `scripts/db/report_dynamic_sql_audit.py` | Removed unreferenced standalone SQL audit wrapper; no code/test/menu references. |
+| `scripts/db/report_storage_pressure.py` | Removed misplaced DB wrapper around DeviceAnalysis storage-pressure logic; active storage tooling lives under `scytaledroid/DeviceAnalysis/services/storage_pressure.py` and `scripts/device_analysis/`. |
+| `scripts/db/report_phase_b1_join_key_normalization.py` | Removed compatibility wrapper; use `scripts/db/phase_b1_join_key_normalization.py report`. |
+| `scripts/db/apply_phase_b1_join_key_normalization.py` | Removed compatibility wrapper; use `scripts/db/phase_b1_join_key_normalization.py apply`. |
+| `scripts/db/report_phase_b1_session_stamp_backlog.py` | Removed compatibility wrapper; use `scripts/db/phase_b1_session_stamp_backlog.py report`. |
+| `scripts/db/apply_phase_b1_session_stamp_backlog.py` | Removed compatibility wrapper; use `scripts/db/phase_b1_session_stamp_backlog.py apply`. |
+| `scripts/db/report_schema_version_width_hotfix.py` | Removed compatibility wrapper; use `scripts/db/schema_version_width_hotfix.py report`. |
+| `scripts/db/apply_schema_version_width_hotfix.py` | Removed compatibility wrapper; use `scripts/db/schema_version_width_hotfix.py apply`. |
+| `scripts/db/report_package_lineage_coverage.py` | Removed compatibility wrapper; use `scripts/db/report_apk_lineage_availability.py` with the same flags. |
+| `scripts/static_analysis/headless_all_apps.py` | Removed unreferenced headless static wrapper; use maintained static CLI/menu flows for all-app runs. |
+| `scripts/operator/measure_inventory_latency.py` | Removed unreferenced inventory timing helper; use inventory logs and maintained device inventory workflows. |
+| `scripts/operator/backfill_dynamic_pcap_identity.py` | Removed unreferenced historical dynamic PCAP identity backfill helper; current dynamic writers populate capture identity. |
+| `scripts/device_analysis/audit_apk_storage_retention.py` | Removed stale retention-audit wrapper; current storage checks use storage-pressure, thin-session, and APK transition reports. |
+| `scripts/device_analysis/migrate_legacy_harvest_storage.py` | Removed unreferenced legacy harvest migration wrapper after APK-library/storage transition tooling superseded it. |
+| `scytaledroid/DeviceAnalysis/services/legacy_harvest_migration.py` | Removed dead backing service for the deleted legacy harvest migration wrapper; no active imports remained. |
+| `scripts/db/sql/deep_db_exploration_20260614.sql` | Removed dated one-off read-only exploration workbench; maintained posture/audit SQL companions remain. |
+| `scripts/device_analysis/audit_apk_library_migration.py` | Removed stale first-pass APK-library migration audit; use current APK inventory, transition-debt, retirement, and integrity reports. |
+| `scripts/static_analysis/refresh_persistence_audit_summary.py` | Removed unreferenced static persistence-audit artifact refresher; maintained persistence-audit logic remains in `scytaledroid/StaticAnalysis/cli/flows/run_persistence_audit.py`. |
+| `scripts/db/report_research_cohorts.py` | Removed redundant standalone cohort report; research cohort selection/readout is exposed through dynamic/static/reporting flows and `scytaledroid.Database.db_func.research_cohorts`. |
+| `scripts/operator/diagnose_scope.py` | Removed unreferenced harvest-scope diagnostic helper; current inventory/harvest menus show scoped counts and exclusion state. |
+| `scripts/operator/backfill_dynamic_network_features.py` | Removed unreferenced one-off dynamic feature backfill wrapper. Current dynamic evidence DB indexing owns feature-row persistence. |
+| `scytaledroid/DynamicAnalysis/storage/feature_backfill.py` | Removed dead backing service for the deleted dynamic feature backfill wrapper; no active imports remained. |
 
-All other paths need a **per-environment** decision (e.g. whether every deployed DB has been backfilled) before a move.
+All other paths still need a **per-environment** decision before removal.
 
 ---
 
@@ -153,7 +179,6 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | `check_evidence_latest_write_posture.py` | workflow_helper | RO | core | yes | recent findings vs inline env + web-shaped evidence | post fresh static run | keep |
 | `report_dynamic_static_alignment.py` | workflow_helper | RO | core | yes | dynamic↔static hash alignment; static analysis worklist | research triage | keep |
 | `report_apk_lineage_availability.py` | workflow_helper | RO | core | yes | package/version/hash/install-set lineage and availability | package lineage coverage | keep · combine_later |
-| `report_package_lineage_coverage.py` | workflow_helper | RO | core | yes | compatibility wrapper for package lineage coverage | package lineage coverage | keep · combine_later |
 | `report_package_lineage_workbench.py` | supported_operator | RO | core | yes | package-first operator view; APK Library menu | APK Library → Package Lineage Workbench | **keep** (explicit list) · combine_later |
 | `report_static_analysis_targets.py` | supported_operator | RO | core | yes | queue-like static target read model | APK Library / static target planning | **keep** (explicit list) · combine_later |
 | `report_dynamic_static_recovery_plan.py` | supported_operator | MIX | core | yes | exact dynamic/static artifact recovery plan; optional receipt only | APK Library / artifact lifecycle planning | **keep** (explicit list) · combine_later |
@@ -182,7 +207,6 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | `report_artifact_registry_cleanup_candidates.py` | workflow_helper | RO | core | yes | artifact_registry_cleanup_track.md | operator triage | keep |
 | `prune_artifact_registry_dangling.py` | workflow_helper | default RO; W with `--apply` | core | yes | artifact_registry_cleanup_track.md §4; JSON receipt v1 envelope | maintenance | keep |
 | `run_permission_intel_scytale_s2_readiness_audit.sh` | workflow_helper | RO | core+intel | n/a | PI readiness docs | Bundle smoke | keep |
-| `backfill_static_session_id_on_runs.py` | migration_historical | W | core | yes | db_scripts_inventory; **no code imports** | superseded by normal rollup + verify | **archive_later** (see template) |
 | `__init__.py` | workflow_helper | RO | none | yes | package marker | n/a | keep |
 
 ---
@@ -191,7 +215,6 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 
 | Path | Class | R/W | DB | `--help` | Key references | Owner / integration | Action |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backfill_static_analysis_runs_static_session_id.sql` | migration_historical | W | core | n/a | paired with Python backfill | archive with backfill py | **archive_later** |
 | `verify_static_session_id_rollout.sql` | workflow_helper | RO | core | n/a | optional manual verify | ops SQL pack | keep |
 | `session_summary_from_static_analysis_runs.sql` | workflow_helper | RO | core | n/a | database_target_schema_v2.md; static_child_table_join_map | analyst SQL | keep |
 | `report_static_session_stamp_cohort_rollups.sql` | workflow_helper | RO | core | n/a | golden session / supersession rollups; child join map | analyst SQL | keep |
@@ -225,7 +248,6 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | `permission_session_insights.py` | workflow_helper | RO | opt | yes | same | Static audit | keep · deprecate_cli later |
 | `permission_app_drilldown.py` | workflow_helper | RO | opt | yes | same | Static audit | keep · deprecate_cli later |
 | `replay_persist_run_summary.py` | workflow_helper | MIX | opt | yes | permission_intelligence_pipeline.md | persistence QA | keep |
-| `headless_all_apps.py` | workflow_helper | RO | none | yes | **no in-repo refs** beyond file | overlaps `headless_run` / `main.py` | **investigate** · **candidate_archive** if unused externally |
 | `static_baseline_tables.py` | workflow_helper | RO | opt | partial | README baseline | research corpus | keep · fix import path doc if needed |
 | `static_baseline_tables_impl.py` | workflow_helper | RO | opt | yes | imported by static_baseline_tables | research corpus | keep |
 
@@ -271,14 +293,11 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | `run_profile_v3_demo.sh` | demo_transitional | RO | none | n/a | supported_entrypoints; repo_ownership_map | v3 demo | keep |
 | `provenance_stamp.py` | demo_transitional | MIX | none | yes | demo sh wrappers | demo | keep |
 | `diagnose_static_pipeline.py` | workflow_helper | RO | core | yes | legacy_static_reader map | static health | **expose_menu** candidate |
-| `diagnose_scope.py` | workflow_helper | RO | none | yes | docstring only | harvest scope | keep |
 | `env_check.py` | workflow_helper | RO | none | yes | `lib/android_tools.sh` | env | keep |
 | `ensure_permission_matrix.py` | workflow_helper | MIX | core | yes | matrix QA | static DB | keep |
-| `measure_inventory_latency.py` | unknown_needs_owner | RO | none | yes | low grep | inventory perf | **investigate** |
 | `log_run_timeline.py` | workflow_helper | RO | none | yes | logs_operator_hygiene_plan.md | ops logs | keep |
 | `log_error_summary.py` | workflow_helper | RO | none | yes | logs_operator_hygiene_plan.md | ops logs | keep |
 | `profile_v3_freeze_bundle.py` | workflow_helper | RO | none | yes | freeze workflow | publication | keep |
-| `backfill_dynamic_network_features.py` | migration_historical | W | core | yes | dynamic network | one-off backfill | keep · **archive_later** if completed |
 | `audit_dynamic_network_consistency.py` | workflow_helper | RO | core | yes | dynamic QA | dynamic menu candidate | keep |
 
 ---
@@ -300,8 +319,6 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `inventory_determinism_gate.py` | ci_or_gate | RO | none | yes | repo_ownership_map | harvest CI | keep |
 | `replay_harvest_db_mirror.py` | workflow_helper | MIX | core | yes | harvest replay service | device ops | keep |
-| `migrate_legacy_harvest_storage.py` | migration_historical | MIX | none | yes | legacy_harvest_migration | one-off migration | **archive_later** when FS fully migrated |
-| `audit_apk_storage_retention.py` | unknown_needs_owner | RO | none | yes | low grep | retention audit | **investigate** |
 
 ---
 
@@ -356,9 +373,8 @@ All other paths need a **per-environment** decision (e.g. whether every deployed
 
 ## Next steps (outside this doc-only PR)
 
-1. Grep org-wide for `backfill_static_session_id_on_runs` / SQL twin; open archive PR with README template.
-2. Pick **post-run audit bundle** orchestration module; wire read-only calls to `session_static_health`, `report_static_session_grain_integrity`, `report_artifact_registry_integrity` (subprocess or imports).
-3. Resolve **unknown_needs_owner** rows with team (external CI, personal aliases).
-4. Optionally add **`python -m`** entrypoints for thin duplicates (`permission_intel_readiness`, static audit CLIs) before deprecating argv paths.
+1. Pick **post-run audit bundle** orchestration module; wire read-only calls to `session_static_health`, `report_static_session_grain_integrity`, `report_artifact_registry_integrity` (subprocess or imports).
+2. Resolve **unknown_needs_owner** rows with team (external CI, personal aliases).
+3. Optionally add **`python -m`** entrypoints for thin duplicates (`permission_intel_readiness`, static audit CLIs) before deprecating argv paths.
 
 When adding a new script, add a row to this file **and** a row to [`db_scripts_inventory.md`](db_scripts_inventory.md) if it lives under `scripts/db/`.

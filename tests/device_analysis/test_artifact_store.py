@@ -96,6 +96,21 @@ def test_repo_relative_path_keeps_canonical_store_logical_when_symlinked(
     assert artifact_store.repo_relative_path(canonical) == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
 
 
+def test_repo_relative_path_maps_absolute_mercury_cold_blob_to_logical_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    external_mount = tmp_path / "mnt" / "MERCURY_DATA_V2"
+    monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
+
+    digest = "1" * 64
+    cold_blob = external_mount / "scytaledroid_artifacts" / "apk_store" / "cold" / "data" / "store" / "apk" / "sha256" / digest[:2] / f"{digest}.apk"
+
+    assert artifact_store.repo_relative_path(cold_blob) == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
+
+
 def test_materialize_apk_refuses_unmounted_external_symlink(
     tmp_path: Path,
     monkeypatch,

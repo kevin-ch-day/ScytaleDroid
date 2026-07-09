@@ -46,6 +46,9 @@ READINESS_WEIGHTS = {
     "capture_reliability": 10,
 }
 
+SERVICE_MAPPING_READINESS_THRESHOLD = 0.85
+PCAP_RECOLLECT_NETSTATS_MIN_BYTES = 20_000
+
 KNOWN_LIMITATIONS = [
     "provider_authority_status depends on persisted static_provider_acl coverage and may expose join/persistence debt rather than a real absence of provider surface.",
     "phase-aware service/signal attribution is not implemented; phase coverage is timeline/transport only.",
@@ -106,6 +109,17 @@ STATIC_ENRICHMENT_GAP_FIELDS = (
     "recommended_action",
 )
 
+STATIC_ENRICHMENT_OVERLAY_IMPACT_FIELDS = (
+    "package",
+    "app_label",
+    "static_run_id",
+    "gap_type",
+    "overlay_status",
+    "related_gap_type",
+    "embedded_recommended_action",
+    "active_recommended_action",
+)
+
 PHASE_COVERAGE_FIELDS = (
     "run_id",
     "package",
@@ -139,6 +153,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--package",
         default=None,
         help="Optional package-name filter for a scoped read-only audit.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Accepted for consistency; this read-only report already prints JSON by default.",
+    )
+    parser.add_argument(
+        "--stdout-json",
+        action="store_true",
+        help="Alias for --json; this read-only report already prints JSON by default.",
     )
     parser.add_argument(
         "--overlay-latest-static",
@@ -985,7 +1009,9 @@ def _capture_health_score(run: Mapping[str, Any], limitations: list[str]) -> int
         for obs in ((run.get("manifest") or {}).get("observers") or [])
         if isinstance(obs, Mapping)
     ]
-    if observer_statuses and all(status in {"ok", "completed", "complete"} for status in observer_statuses):
+    if observer_statuses and all(
+        status in {"ok", "success", "completed", "complete"} for status in observer_statuses
+    ):
         score += 2
     elif observer_statuses:
         limitations.append("observer_status_degraded")
@@ -1150,7 +1176,18 @@ def _pcap_requires_recollection(run: Mapping[str, Any]) -> bool:
         return False
     if bool(pcap_info.get("pcap_present")):
         return False
-    return _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes")) > 0
+    return _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes")) >= PCAP_RECOLLECT_NETSTATS_MIN_BYTES
+
+
+def _pcap_needs_low_volume_capture_review(run: Mapping[str, Any]) -> bool:
+    pcap_info = run.get("pcap_info") if isinstance(run.get("pcap_info"), Mapping) else {}
+    detail = _norm_text(pcap_info.get("pcap_failure_detail"))
+    if not detail or detail in {"PCAP_ARTIFACT_UNREGISTERED", "PCAP_ARTIFACT_PATH_MISMATCH"}:
+        return False
+    if bool(pcap_info.get("pcap_present")):
+        return False
+    netstats_observed_bytes = _safe_int((run.get("telemetry") or {}).get("netstats_observed_bytes"))
+    return 0 < netstats_observed_bytes < PCAP_RECOLLECT_NETSTATS_MIN_BYTES
 
 
 def _pcap_needs_validity_review(run: Mapping[str, Any]) -> bool:
@@ -1232,6 +1269,7 @@ def _score_run(run: Mapping[str, Any], join_row: Mapping[str, Any] | None) -> di
     deduped_limitations = sorted({item for item in limitations if item})
     pcap_info = run.get("pcap_info") if isinstance(run.get("pcap_info"), Mapping) else {}
     telemetry = run.get("telemetry") if isinstance(run.get("telemetry"), Mapping) else {}
+    media = _media_plane_summary(run)
     return {
         "run_id": run["run_id"],
         "package": run["package"],
@@ -1256,6 +1294,18 @@ def _score_run(run: Mapping[str, Any], join_row: Mapping[str, Any] | None) -> di
         "pcap_size_bytes": _safe_int(pcap_info.get("pcap_size_bytes")),
         "netstats_observed_bytes": _safe_int(telemetry.get("netstats_observed_bytes")),
         "pcap_netstats_consistency": run.get("pcap_netstats_consistency"),
+        "media_plane_classification": _norm_text(media.get("classification")),
+        "relay_media_likely": int(bool(media.get("relay_media_likely"))),
+        "nat_traversal_observed": int(bool(media.get("nat_traversal_observed"))),
+        "turn_allocate_success_count": _safe_int(media.get("turn_allocate_success_count")),
+        "turn_allocate_request_count": _safe_int(media.get("turn_allocate_request_count")),
+        "stun_frame_count": _safe_int(media.get("stun_frame_count")),
+        "rtc_flow_candidate_count": _safe_int(media.get("rtc_flow_candidate_count")),
+        "rtc_sustained_session_count": _safe_int(media.get("rtc_sustained_session_count")),
+        "udp_media_session_count": _safe_int(media.get("udp_media_session_count")),
+        "udp_media_multi_session_observed": int(bool(media.get("udp_media_multi_session_observed"))),
+        "udp_media_total_bytes": _safe_int(media.get("udp_media_total_bytes")),
+        "udp_media_max_session_duration_s": _safe_float(media.get("udp_media_max_session_duration_s")),
         "service_count": _safe_int(run.get("service_count")),
         "signal_count": _safe_int(run.get("signal_count")),
         "unresolved_service_count": _safe_int(run.get("unresolved_service_count")),
@@ -1276,6 +1326,33 @@ def _score_run(run: Mapping[str, Any], join_row: Mapping[str, Any] | None) -> di
     }
 
 
+def _media_plane_summary(run: Mapping[str, Any]) -> Mapping[str, Any]:
+    report = run.get("pcap_report") or run.get("report")
+    if isinstance(report, Mapping):
+        media_plane = report.get("media_plane")
+        if isinstance(media_plane, Mapping):
+            summary = media_plane.get("summary")
+            if isinstance(summary, Mapping):
+                return summary
+    features = run.get("features")
+    if isinstance(features, Mapping):
+        media_plane = features.get("media_plane")
+        if isinstance(media_plane, Mapping):
+            summary = media_plane.get("summary")
+            if isinstance(summary, Mapping):
+                return summary
+    summary_payload = run.get("summary_payload")
+    if isinstance(summary_payload, Mapping):
+        indicators = summary_payload.get("indicators")
+        if isinstance(indicators, Mapping):
+            media_plane = indicators.get("media_plane")
+            if isinstance(media_plane, Mapping):
+                summary = media_plane.get("summary")
+                if isinstance(summary, Mapping):
+                    return summary
+    return {}
+
+
 def _gap_class_for_key(key: str) -> str:
     if key in {"enriched_domain_metadata_missing", "actionable_corroboration_missing", "phase_service_attribution_not_supported"}:
         return "not_yet_supported"
@@ -1292,6 +1369,19 @@ def _gap_class_for_key(key: str) -> str:
     if key in {"pcap_artifact_registration_gap"}:
         return "ledger_bug"
     return "not_yet_supported"
+
+
+def _service_mapping_readiness_total(
+    unresolved_service_total: int,
+    service_resolution_rate: float | None,
+) -> int:
+    if unresolved_service_total <= 0:
+        return 0
+    if service_resolution_rate is None:
+        return unresolved_service_total
+    if service_resolution_rate < SERVICE_MAPPING_READINESS_THRESHOLD:
+        return unresolved_service_total
+    return 0
 
 
 def _bridge_gaps_for_package(
@@ -1369,19 +1459,34 @@ def _bridge_gaps_for_package(
                 "recommended_followup": "review_static_provider_join",
             }
         )
-    if any(_safe_int(run.get("unresolved_service_count")) > 0 for run in runs):
+    unresolved_service_total = sum(_safe_int(run.get("unresolved_service_count")) for run in runs)
+    service_count_total = sum(_safe_int(run.get("service_count")) for run in runs)
+    service_resolution_rate = None
+    if service_count_total + unresolved_service_total > 0:
+        service_resolution_rate = service_count_total / float(service_count_total + unresolved_service_total)
+    readiness_unresolved_total = _service_mapping_readiness_total(
+        unresolved_service_total,
+        service_resolution_rate,
+    )
+    if unresolved_service_total > 0:
         rows.append(
             {
                 "package": package,
                 "app_label": app_label,
                 "static_run_id": static_run_id,
                 "gap_key": "service_mapping_gaps",
-                "gap_class": "true_missing_data",
-                "severity": "medium",
-                "current_value": str(sum(_safe_int(run.get("unresolved_service_count")) for run in runs)),
-                "expected_value": "0 unresolved service rows",
+                "gap_class": "true_missing_data" if readiness_unresolved_total > 0 else "residual_context_gap",
+                "severity": "medium" if readiness_unresolved_total > 0 else "low",
+                "current_value": str(unresolved_service_total),
+                "expected_value": (
+                    "0 unresolved service rows"
+                    if readiness_unresolved_total > 0
+                    else f"service resolution rate >= {SERVICE_MAPPING_READINESS_THRESHOLD:.2f}"
+                ),
                 "source_surface": "pcap_report/service_context",
-                "recommended_followup": "repair_service_mapping",
+                "recommended_followup": (
+                    "repair_service_mapping" if readiness_unresolved_total > 0 else "review_residual_service_domains"
+                ),
             }
         )
     static_allowed = bool((join_row or {}).get("uses_cleartext_traffic")) if isinstance(join_row, Mapping) else False
@@ -1461,6 +1566,28 @@ def _bridge_gaps_for_package(
     if any(
         _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail"))
         and _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail")) not in artifact_registration_details
+        and _pcap_needs_low_volume_capture_review(run)
+        for run in runs
+    ):
+        rows.append(
+            {
+                "package": package,
+                "app_label": app_label,
+                "static_run_id": static_run_id,
+                "gap_key": "pcap_low_volume_capture_gap",
+                "gap_class": "governance_review",
+                "severity": "low",
+                "current_value": (
+                    f"missing/empty PCAP with <{PCAP_RECOLLECT_NETSTATS_MIN_BYTES} netstats bytes in at least one run"
+                ),
+                "expected_value": "review whether low-volume traffic matters before recollection",
+                "source_surface": "pcapdroid_capture + telemetry",
+                "recommended_followup": "review_low_volume_capture_gap",
+            }
+        )
+    if any(
+        _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail"))
+        and _norm_text((run.get("pcap_info") or {}).get("pcap_failure_detail")) not in artifact_registration_details
         and _pcap_needs_validity_review(run)
         for run in runs
     ):
@@ -1517,7 +1644,7 @@ def _service_mapping_gap_rows(runs: Sequence[Mapping[str, Any]]) -> list[dict[st
                     "package": package,
                     "app_label": app_label,
                     "domain": domain,
-                    "root_domain": _norm_text(row.get("root_domain")) or _root_domain(domain),
+                    "root_domain": _root_domain(domain) or _norm_text(row.get("root_domain")),
                     "observed_count": 0,
                     "gap_type": "service_unresolved",
                     "suggested_service_key": "",
@@ -1578,6 +1705,96 @@ def _static_enrichment_gap_rows(
     return rows
 
 
+def _package_runs_with_embedded_corroboration(
+    package_runs: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    embedded: dict[str, list[dict[str, Any]]] = {}
+    for package, runs in package_runs.items():
+        embedded_runs: list[dict[str, Any]] = []
+        for run in runs:
+            row = dict(run)
+            row["plan"] = run.get("embedded_plan") if isinstance(run.get("embedded_plan"), Mapping) else {}
+            row["static_plan"] = row["plan"]
+            row["corroboration"] = (
+                run.get("embedded_corroboration")
+                if isinstance(run.get("embedded_corroboration"), Mapping)
+                else {}
+            )
+            embedded_runs.append(row)
+        embedded[str(package)] = embedded_runs
+    return embedded
+
+
+def _static_enrichment_overlay_impact_rows(
+    *,
+    embedded_rows: Sequence[Mapping[str, Any]],
+    active_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    embedded_by_key = {
+        (str(row.get("package") or ""), str(row.get("gap_type") or "")): row
+        for row in embedded_rows
+    }
+    active_by_key = {
+        (str(row.get("package") or ""), str(row.get("gap_type") or "")): row
+        for row in active_rows
+    }
+    embedded_gap_types_by_package: dict[str, set[str]] = defaultdict(set)
+    active_gap_types_by_package: dict[str, set[str]] = defaultdict(set)
+    for package, gap_type in embedded_by_key:
+        embedded_gap_types_by_package[package].add(gap_type)
+    for package, gap_type in active_by_key:
+        active_gap_types_by_package[package].add(gap_type)
+    rows: list[dict[str, Any]] = []
+    for package, gap_type in sorted(embedded_by_key.keys() - active_by_key.keys()):
+        key = (package, gap_type)
+        row = embedded_by_key[key]
+        related_active_gaps = sorted(active_gap_types_by_package.get(package, set()))
+        rows.append(
+            {
+                "package": row.get("package"),
+                "app_label": row.get("app_label"),
+                "static_run_id": row.get("static_run_id"),
+                "gap_type": row.get("gap_type"),
+                "overlay_status": "refined_by_overlay" if related_active_gaps else "resolved_by_overlay",
+                "related_gap_type": ";".join(related_active_gaps),
+                "embedded_recommended_action": row.get("recommended_action"),
+                "active_recommended_action": "",
+            }
+        )
+    for package, gap_type in sorted(active_by_key.keys() - embedded_by_key.keys()):
+        key = (package, gap_type)
+        row = active_by_key[key]
+        related_embedded_gaps = sorted(embedded_gap_types_by_package.get(package, set()))
+        rows.append(
+            {
+                "package": row.get("package"),
+                "app_label": row.get("app_label"),
+                "static_run_id": row.get("static_run_id"),
+                "gap_type": row.get("gap_type"),
+                "overlay_status": "refined_active_gap" if related_embedded_gaps else "introduced_by_overlay",
+                "related_gap_type": ";".join(related_embedded_gaps),
+                "embedded_recommended_action": "",
+                "active_recommended_action": row.get("recommended_action"),
+            }
+        )
+    for key in sorted(active_by_key.keys() & embedded_by_key.keys()):
+        row = active_by_key[key]
+        embedded_row = embedded_by_key[key]
+        rows.append(
+            {
+                "package": row.get("package"),
+                "app_label": row.get("app_label"),
+                "static_run_id": row.get("static_run_id") or embedded_row.get("static_run_id"),
+                "gap_type": row.get("gap_type"),
+                "overlay_status": "still_open",
+                "related_gap_type": "",
+                "embedded_recommended_action": embedded_row.get("recommended_action"),
+                "active_recommended_action": row.get("recommended_action"),
+            }
+        )
+    return rows
+
+
 def _phase_coverage_rows(runs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for run in runs:
@@ -1606,7 +1823,12 @@ def _template_label(package_name: str) -> str:
     template_id = str(requested_script_template(package_name=package_name) or "").strip().lower()
     if template_id in {"", "unknown"}:
         return "none"
-    if template_id in {"news_reader_basic_v1", "news_reader_behavior_v2"}:
+    if template_id in {
+        "news_reader_basic_v1",
+        "news_reader_behavior_v2",
+        "bbc_news_behavior_v1",
+        "guardian_behavior_v1",
+    }:
         return "news"
     if template_id in {
         "facebook_basic_v2",
@@ -1731,7 +1953,7 @@ def _recommend_for_app(
     elif template_label != "none" and not scripted_phase_available:
         next_action = "scripted_interaction"
         recommended_template = (
-            "news_reader_behavior_v2"
+            requested_template_id or "news_reader_behavior_v2"
             if template_label == "news"
             else requested_template_id
         )
@@ -1862,6 +2084,10 @@ def _app_readiness_rows(
         service_resolution_rate = None
         if service_count_total + unresolved_service_total > 0:
             service_resolution_rate = service_count_total / float(service_count_total + unresolved_service_total)
+        readiness_unresolved_service_total = _service_mapping_readiness_total(
+            unresolved_service_total,
+            service_resolution_rate,
+        )
         signal_resolution_rate = None
         if signal_count_total + unresolved_signal_total > 0:
             signal_resolution_rate = signal_count_total / float(signal_count_total + unresolved_signal_total)
@@ -1993,7 +2219,7 @@ def _app_readiness_rows(
             manual_valid_count=manual_valid_count,
             static_plan_enriched=static_plan_enriched,
             static_endpoint_inventory_status=static_endpoint_inventory_status,
-            unresolved_service_total=unresolved_service_total,
+            unresolved_service_total=readiness_unresolved_service_total,
             pcap_failure_count=pcap_failure_count,
             pcap_recollect_failure_count=pcap_recollect_failure_count,
             valid_run_count=len(valid_runs),
@@ -2007,7 +2233,7 @@ def _app_readiness_rows(
             pcap_recollect_failure_count=pcap_recollect_failure_count,
             static_endpoint_inventory_status=static_endpoint_inventory_status,
             static_plan_enriched=static_plan_enriched,
-            unresolved_service_total=unresolved_service_total,
+            unresolved_service_total=readiness_unresolved_service_total,
             provider_authority_status=provider_authority_status,
             scripted_phase_available=scripted_phase_available,
             template_label=template_label,
@@ -2024,7 +2250,7 @@ def _app_readiness_rows(
                 "pcap_failure_count": pcap_failure_count,
                 "pcap_recollect_failure_count": pcap_recollect_failure_count,
                 "pcap_validity_review_count": pcap_validity_review_count,
-                "unresolved_service_total": unresolved_service_total,
+                "unresolved_service_total": readiness_unresolved_service_total,
                 "static_endpoint_inventory_status": static_endpoint_inventory_status,
                 "static_plan_enriched": static_plan_enriched,
                 "scripted_phase_available": scripted_phase_available,
@@ -2047,6 +2273,8 @@ def _app_readiness_rows(
                 "pcap_failure_count": pcap_failure_count,
                 "pcap_recollect_failure_count": pcap_recollect_failure_count,
                 "pcap_validity_review_count": pcap_validity_review_count,
+                "unresolved_service_total": unresolved_service_total,
+                "readiness_unresolved_service_total": readiness_unresolved_service_total,
                 "service_resolution_rate": round(service_resolution_rate, 4) if service_resolution_rate is not None else "",
                 "signal_resolution_rate": round(signal_resolution_rate, 4) if signal_resolution_rate is not None else "",
                 "baseline_manual_delta_available": int(baseline_manual_delta_available),
@@ -2126,8 +2354,10 @@ def _capture_failure_rows(runs: Sequence[Mapping[str, Any]]) -> list[dict[str, A
             recommended_action = "repair_artifact_registration"
         elif bool(pcap_info.get("pcap_present")) and not bool(run.get("valid_pack")):
             recommended_action = "review_invalid_pcap_state"
-        elif netstats_observed_bytes > 0:
+        elif netstats_observed_bytes >= PCAP_RECOLLECT_NETSTATS_MIN_BYTES:
             recommended_action = "recollect_capture"
+        elif netstats_observed_bytes > 0:
+            recommended_action = "review_low_volume_capture_gap"
         else:
             recommended_action = "review_capture_environment"
         rows.append(
@@ -2182,8 +2412,9 @@ def _paper_pattern_rows(
             _norm_text(readiness.get("static_endpoint_inventory_status")) != "present"
             or _safe_int(readiness.get("static_plan_enriched")) == 0
         )
+        readiness_unresolved_service_total = _safe_int(readiness.get("readiness_unresolved_service_total"))
         service_resolution_gap_flag = bool(
-            (service_resolution_rate >= 0.0 and service_resolution_rate < 1.0)
+            readiness_unresolved_service_total > 0
             or (signal_resolution_rate >= 0.0 and signal_resolution_rate < 1.0)
         )
         capture_reliability_gap_flag = _safe_int(readiness.get("pcap_recollect_failure_count")) > 0
@@ -2343,6 +2574,19 @@ def generate_report(
     capture_failure_rows = _capture_failure_rows(run_rows)
     service_gap_rows = _service_mapping_gap_rows(run_rows)
     static_enrichment_rows = _static_enrichment_gap_rows(package_runs, join_rows)
+    embedded_static_enrichment_rows = (
+        _static_enrichment_gap_rows(_package_runs_with_embedded_corroboration(package_runs), join_rows)
+        if overlay_enabled
+        else []
+    )
+    static_enrichment_overlay_impact_rows = (
+        _static_enrichment_overlay_impact_rows(
+            embedded_rows=embedded_static_enrichment_rows,
+            active_rows=static_enrichment_rows,
+        )
+        if overlay_enabled
+        else []
+    )
     phase_rows = _phase_coverage_rows(run_rows)
 
     if output_dir is None:
@@ -2359,6 +2603,10 @@ def generate_report(
     capture_failure_rows_sorted = sorted(capture_failure_rows, key=lambda row: (str(row["package"]), str(row["run_id"])))
     service_gap_rows_sorted = sorted(service_gap_rows, key=lambda row: (str(row["package"]), -int(row["observed_count"]), str(row["domain"])))
     static_enrichment_rows_sorted = sorted(static_enrichment_rows, key=lambda row: str(row["package"]))
+    static_enrichment_overlay_impact_rows_sorted = sorted(
+        static_enrichment_overlay_impact_rows,
+        key=lambda row: (str(row["overlay_status"]), str(row["package"]), str(row["gap_type"])),
+    )
     phase_rows_sorted = sorted(phase_rows, key=lambda row: (str(row["package"]), str(row["run_id"])))
 
     _write_csv(output_dir / "run_evidence_quality.csv", run_rows_sorted)
@@ -2383,6 +2631,12 @@ def generate_report(
         static_enrichment_rows_sorted,
         fieldnames=STATIC_ENRICHMENT_GAP_FIELDS,
     )
+    if overlay_enabled:
+        _write_csv(
+            output_dir / "static_enrichment_overlay_impact.csv",
+            static_enrichment_overlay_impact_rows_sorted,
+            fieldnames=STATIC_ENRICHMENT_OVERLAY_IMPACT_FIELDS,
+        )
     _write_csv(output_dir / "phase_coverage_audit.csv", phase_rows_sorted, fieldnames=PHASE_COVERAGE_FIELDS)
 
     summary = {
@@ -2444,6 +2698,7 @@ def generate_report(
             "dynamic_evidence_quality": QUALITY_WEIGHTS,
             "dynamic_readiness": READINESS_WEIGHTS,
         },
+        "service_mapping_readiness_threshold": SERVICE_MAPPING_READINESS_THRESHOLD,
         "tier_definitions": {
             "dynamic_evidence_quality": QUALITY_TIER_DEFINITIONS,
         },
@@ -2523,7 +2778,42 @@ def generate_report(
                     if overlay_actionable_static
                     else None
                 ),
+                "static_enrichment_overlay_impact": {
+                    "embedded_gap_count": len(embedded_static_enrichment_rows),
+                    "active_gap_count": len(static_enrichment_rows_sorted),
+                    "resolved_by_overlay": sum(
+                        1
+                        for row in static_enrichment_overlay_impact_rows_sorted
+                        if row.get("overlay_status") == "resolved_by_overlay"
+                    ),
+                    "refined_by_overlay": sum(
+                        1
+                        for row in static_enrichment_overlay_impact_rows_sorted
+                        if row.get("overlay_status") == "refined_by_overlay"
+                    ),
+                    "refined_active_gap": sum(
+                        1
+                        for row in static_enrichment_overlay_impact_rows_sorted
+                        if row.get("overlay_status") == "refined_active_gap"
+                    ),
+                    "introduced_by_overlay": sum(
+                        1
+                        for row in static_enrichment_overlay_impact_rows_sorted
+                        if row.get("overlay_status") == "introduced_by_overlay"
+                    ),
+                    "still_open": sum(
+                        1
+                        for row in static_enrichment_overlay_impact_rows_sorted
+                        if row.get("overlay_status") == "still_open"
+                    ),
+                },
             }
+        )
+        summary["output_files"]["static_enrichment_overlay_impact_csv"] = str(
+            (output_dir / "static_enrichment_overlay_impact.csv").resolve()
+        )
+        summary["row_counts"]["static_enrichment_overlay_impact"] = len(
+            static_enrichment_overlay_impact_rows_sorted
         )
         limitations = [
             "overlay_latest_static is a read-only reanalysis mode and does not mutate historical embedded plans inside dynamic evidence packs.",

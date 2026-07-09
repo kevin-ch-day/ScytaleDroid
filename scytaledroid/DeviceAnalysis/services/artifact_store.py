@@ -364,8 +364,29 @@ def _canonical_store_logical_repo_path(path: Path) -> str | None:
     try:
         rel = candidate.relative_to(resolved_root)
     except ValueError:
+        pass
+    else:
+        return (logical_rel_to_cwd / rel).as_posix()
+
+    external_root = _external_mount_root_for(candidate, EXTERNAL_APK_STORE_MOUNT_ROOTS)
+    if external_root is None:
         return None
-    return (logical_rel_to_cwd / rel).as_posix()
+    logical_suffix = _canonical_store_suffix(candidate)
+    if logical_suffix is None:
+        return None
+    return (Path(app_config.DATA_DIR) / "store" / "apk" / logical_suffix).as_posix()
+
+
+def _canonical_store_suffix(path: Path) -> Path | None:
+    parts = path.parts
+    marker = ("data", "store", "apk")
+    for index in range(0, len(parts) - len(marker) + 1):
+        if parts[index : index + len(marker)] != marker:
+            continue
+        suffix = Path(*parts[index + len(marker) :])
+        if len(suffix.parts) == 3 and suffix.parts[0] == "sha256":
+            return suffix
+    return None
 
 
 def _external_mount_root_for(path: Path, roots: Sequence[Path]) -> Path | None:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
+from scytaledroid.Utils.System import mercury_storage
 from scytaledroid.Utils.DisplayUtils import (
     display_settings,
     menu_utils,
@@ -345,6 +346,7 @@ def workspace_menu() -> None:
             menu_utils.MenuOption("10", "Prune derived dynamic DB orphans (safe)"),
             menu_utils.MenuOption("11", "Clear dangling dynamic/static DB links (safe)"),
             menu_utils.MenuOption("12", "Prune orphan artifact registry rows (safe)"),
+            menu_utils.MenuOption("13", "Mercury APK storage mount"),
         ]
         spec_kwargs = display_settings.apply_menu_defaults(
             {"items": items, "exit_label": "Back", "show_exit": True}
@@ -415,6 +417,8 @@ def workspace_menu() -> None:
             _clear_dangling_dynamic_static_links()
         elif choice == "12":
             _prune_artifact_registry_orphans()
+        elif choice == "13":
+            mercury_apk_storage_menu()
         else:
             print(status_messages.status("Option not available yet.", level="warn"))
             prompt_utils.press_enter_to_continue()
@@ -576,4 +580,200 @@ def _prune_artifact_registry_orphans() -> None:
     prompt_utils.press_enter_to_continue()
 
 
-__all__ = ["workspace_menu"]
+def _print_mercury_status() -> None:
+    status = mercury_storage.mercury_storage_status()
+    rows = [
+        ["Label", status.label],
+        ["Device", str(status.device_path)],
+        ["Device visible", "yes" if status.device_exists else "no"],
+        ["Preferred mount", str(status.mountpoint)],
+        ["Preferred mount exists", "yes" if status.mountpoint_exists else "no"],
+        ["Preferred mounted", "yes" if status.mountpoint_mounted else "no"],
+        ["User-session mount", str(status.user_media_mount)],
+        ["User-session mounted", "yes" if status.user_media_mounted else "no"],
+        ["Compatibility alias", "yes" if status.compatibility_alias_exists else "no"],
+        ["Alias target", status.compatibility_alias_target or "—"],
+    ]
+    table_utils.render_table(["Item", "Value"], rows, compact=True, accent_first_column=True)
+
+
+def _print_mercury_command_result(result: mercury_storage.CommandResult) -> None:
+    command = " ".join(result.command)
+    level = "success" if result.ok else "error"
+    print(status_messages.status(f"{command} -> exit {result.returncode}", level=level))
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.stderr.strip():
+        print(result.stderr.strip())
+
+
+_SHA_SKIPPED_FINDING = "Canonical SHA-256 byte verification was skipped."
+
+
+def _mercury_checker_status_line(report: dict[str, object], *, verify_sha256: bool) -> tuple[str, str]:
+    status = str(report.get("status") or "WARN")
+    findings = [str(item) for item in (report.get("findings") or [])]
+    if not verify_sha256 and status == "WARN" and findings == [_SHA_SKIPPED_FINDING]:
+        return ("success", "Quick APK store checker status: OK (SHA-256 skipped)")
+    level = {"OK": "success", "WARN": "warn", "BLOCKED": "blocked"}.get(status, "warn")
+    prefix = "Full APK store checker status" if verify_sha256 else "Quick APK store checker status"
+    return (level, f"{prefix}: {status}")
+
+
+def _run_external_apk_store_checker(
+    *,
+    verify_sha256: bool = False,
+    progress_every: int = 0,
+) -> None:
+    import sys
+
+    from scripts.device_analysis import check_external_apk_store_mount as checker
+
+    report = checker.build_report(
+        verify_sha256=verify_sha256,
+        progress_every=progress_every,
+        progress_stream=sys.stdout if progress_every and verify_sha256 else None,
+    )
+    level, message = _mercury_checker_status_line(report, verify_sha256=verify_sha256)
+    print(status_messages.status(message, level=level))
+    for finding in report.get("findings") or []:
+        finding_text = str(finding)
+        finding_level = "info" if finding_text == _SHA_SKIPPED_FINDING and not verify_sha256 else "warn"
+        print(status_messages.status(finding_text, level=finding_level))
+    canonical = report.get("canonical_store") or {}
+    legacy = report.get("legacy_device_apks") or {}
+    rows = [
+        ["Canonical APK blobs", str(canonical.get("canonical_apk_blob_count", "—"))],
+        ["Local hot regular blobs", str(canonical.get("local_hot_regular_blob_count", "—"))],
+        ["Cold symlink blobs", str(canonical.get("cold_symlink_blob_count", "—"))],
+        ["Broken canonical symlinks", str(canonical.get("broken_canonical_symlink_count", "—"))],
+        ["Outside allowed roots", str(canonical.get("canonical_symlink_outside_allowed_roots_count", "—"))],
+        ["Legacy broken symlinks", str(legacy.get("broken_apk_symlink_count", "—"))],
+    ]
+    table_utils.render_table(["Check", "Value"], rows, compact=True, accent_first_column=True)
+
+
+def _run_full_external_apk_store_checker() -> None:
+    print(
+        status_messages.status(
+            "Full verification hashes canonical APK blobs and can take several minutes.",
+            level="info",
+        )
+    )
+    if not prompt_utils.prompt_yes_no("Run full APK store SHA-256 verification now?", default=False):
+        print(status_messages.status("Cancelled.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+    _run_external_apk_store_checker(verify_sha256=True, progress_every=100)
+    prompt_utils.press_enter_to_continue()
+
+
+def _mount_mercury_preferred() -> None:
+    status = mercury_storage.mercury_storage_status()
+    if status.mountpoint_mounted:
+        print(status_messages.status(f"Already mounted at {status.mountpoint}.", level="success"))
+        prompt_utils.press_enter_to_continue()
+        return
+    if not status.device_exists:
+        print(status_messages.status(f"Device label not found: {status.device_path}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+    if status.user_media_mounted:
+        print(
+            status_messages.status(
+                f"Mercury is currently mounted at {status.user_media_mount}. "
+                "Preferred ScytaleDroid cold-store paths use /mnt/MERCURY_DATA_V2.",
+                level="warn",
+            )
+        )
+        if prompt_utils.prompt_yes_no("Unmount the user-session mount first?", default=True):
+            _print_mercury_command_result(mercury_storage.unmount_mercury_v2_user_session())
+    print(status_messages.status("This will run sudo mount and may prompt for your password.", level="info"))
+    if not prompt_utils.prompt_yes_no(f"Mount {status.device_path} at {status.mountpoint} now?", default=True):
+        print(status_messages.status("Cancelled.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+    _print_mercury_command_result(mercury_storage.mount_mercury_v2_at_mnt())
+    _print_mercury_status()
+    _run_external_apk_store_checker(verify_sha256=False)
+    prompt_utils.press_enter_to_continue()
+
+
+def _unmount_mercury_preferred() -> None:
+    status = mercury_storage.mercury_storage_status()
+    if not status.mountpoint_mounted:
+        print(status_messages.status(f"{status.mountpoint} is not mounted.", level="warn"))
+        prompt_utils.press_enter_to_continue()
+        return
+    print(status_messages.status("This will run sudo umount and may prompt for your password.", level="info"))
+    if not prompt_utils.prompt_yes_no(f"Unmount {status.mountpoint} now?", default=False):
+        print(status_messages.status("Cancelled.", level="info"))
+        prompt_utils.press_enter_to_continue()
+        return
+    _print_mercury_command_result(mercury_storage.unmount_mercury_v2_from_mnt())
+    _print_mercury_status()
+    prompt_utils.press_enter_to_continue()
+
+
+def _mount_mercury_user_session() -> None:
+    print(
+        status_messages.status(
+            "Mounting with udisksctl does not require sudo, but ScytaleDroid's preferred "
+            "cold-store root remains /mnt/MERCURY_DATA_V2.",
+            level="info",
+        )
+    )
+    _print_mercury_command_result(mercury_storage.mount_mercury_v2_user_session())
+    _print_mercury_status()
+    prompt_utils.press_enter_to_continue()
+
+
+def _unmount_mercury_user_session() -> None:
+    _print_mercury_command_result(mercury_storage.unmount_mercury_v2_user_session())
+    _print_mercury_status()
+    prompt_utils.press_enter_to_continue()
+
+
+def mercury_apk_storage_menu() -> None:
+    while True:
+        print()
+        menu_utils.print_header("Mercury APK Storage")
+        _print_mercury_status()
+        print()
+        menu_utils.print_hint(
+            "Preferred state: MERCURY_DATA_V2 mounted at /mnt/MERCURY_DATA_V2 before harvest/static/APK cold-store work."
+        )
+        items = [
+            menu_utils.MenuOption("1", "Refresh status"),
+            menu_utils.MenuOption("2", "Mount Mercury V2 at /mnt/MERCURY_DATA_V2 (sudo)"),
+            menu_utils.MenuOption("3", "Unmount /mnt/MERCURY_DATA_V2 (sudo)"),
+            menu_utils.MenuOption("4", "Mount Mercury V2 in user session (udisksctl fallback)"),
+            menu_utils.MenuOption("5", "Unmount user-session Mercury mount"),
+            menu_utils.MenuOption("6", "Run quick APK store mount check"),
+            menu_utils.MenuOption("7", "Run full APK store SHA-256 check"),
+        ]
+        spec_kwargs = display_settings.apply_menu_defaults(
+            {"items": items, "exit_label": "Back", "show_exit": True}
+        )
+        menu_utils.render_menu(menu_utils.MenuSpec(**spec_kwargs))
+        choice = prompt_utils.get_choice(menu_utils.selectable_keys(items, include_exit=True), default="1")
+        if choice == "0":
+            break
+        if choice == "1":
+            continue
+        if choice == "2":
+            _mount_mercury_preferred()
+        elif choice == "3":
+            _unmount_mercury_preferred()
+        elif choice == "4":
+            _mount_mercury_user_session()
+        elif choice == "5":
+            _unmount_mercury_user_session()
+        elif choice == "6":
+            _run_external_apk_store_checker(verify_sha256=False)
+            prompt_utils.press_enter_to_continue()
+        elif choice == "7":
+            _run_full_external_apk_store_checker()
+
+
+__all__ = ["mercury_apk_storage_menu", "workspace_menu"]

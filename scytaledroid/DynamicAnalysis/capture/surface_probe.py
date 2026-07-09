@@ -305,6 +305,70 @@ def infer_messenger_surface(
     return (None, None)
 
 
+def infer_signal_surface(
+    *,
+    package_name: str | None,
+    component_name: str | None,
+    ui_strings: Sequence[str] | None = None,
+) -> tuple[str | None, str | None]:
+    if str(package_name or "").strip().lower() != "org.thoughtcrime.securesms":
+        return (None, None)
+    component = _normalize_component(component_name)
+    strings = list(ui_strings or [])
+
+    if "components.webrtc.v2.webrtccallactivity" in component:
+        if _contains_any(strings, "turn camera off", "flip camera", "showing front camera", "video"):
+            return ("webrtc_video_call_surface", "signal webrtc video call surface")
+        if _contains_any(strings, "turn camera on", "speaker"):
+            return ("webrtc_voice_call_surface", "signal webrtc voice call surface")
+        return ("webrtc_call_surface", "signal webrtc call surface")
+
+    if component.endswith(".routingactivity"):
+        return ("routing_activity", "signal routing activity")
+
+    if "conversation" in component or "conversationactivity" in component:
+        return ("conversation_surface", "signal conversation surface")
+
+    if "mainactivity" in component:
+        return ("main_activity", "signal main activity")
+
+    return (None, None)
+
+
+def infer_telegram_surface(
+    *,
+    package_name: str | None,
+    component_name: str | None,
+    ui_strings: Sequence[str] | None = None,
+) -> tuple[str | None, str | None]:
+    if str(package_name or "").strip().lower() != "org.telegram.messenger":
+        return (None, None)
+    component = _normalize_component(component_name)
+    strings = list(ui_strings or [])
+
+    if "defaulticon" not in component and "launchactivity" not in component and "telegramactivity" not in component:
+        return (None, None)
+
+    if _contains_any(strings, "telegram video call"):
+        return ("telegram_video_call_surface", "telegram video call surface")
+
+    if _contains_any(strings, "telegram call", "encryption key of this call") and _contains_any(
+        strings,
+        "end call",
+        "mute",
+    ):
+        if _contains_any(strings, "stop video", "flip camera", "camera off"):
+            return ("telegram_video_call_surface", "telegram video call surface")
+        if _contains_any(strings, "start video", "speaker"):
+            return ("telegram_voice_call_surface", "telegram voice call surface")
+        return ("telegram_call_surface", "telegram call surface")
+
+    if _contains_any(strings, "chats", "contacts", "settings") and _contains_any(strings, "telegram"):
+        return ("telegram_main_surface", "telegram main surface")
+
+    return (None, None)
+
+
 def infer_runtime_surface(
     *,
     expected_package: str | None,
@@ -317,12 +381,33 @@ def infer_runtime_surface(
     component = _normalize_component(foreground_component)
     serial = str(device_serial or "").strip()
 
-    if expected != "com.guardian":
-        if expected != "com.twitter.android":
-            if expected != "bbc.mobile.news.ww":
-                if expected != "com.facebook.orca":
-                    if expected != "com.instagram.android":
-                        return (None, None)
+    supported = {
+        "bbc.mobile.news.ww",
+        "com.facebook.orca",
+        "com.guardian",
+        "com.instagram.android",
+        "com.twitter.android",
+        "org.telegram.messenger",
+        "org.thoughtcrime.securesms",
+    }
+    if expected not in supported:
+        return (None, None)
+
+    if expected == "org.telegram.messenger" and actual == "org.telegram.messenger":
+        strings = _read_ui_strings(serial) if serial else []
+        return infer_telegram_surface(
+            package_name=actual,
+            component_name=component,
+            ui_strings=strings,
+        )
+
+    if expected == "org.thoughtcrime.securesms" and actual == "org.thoughtcrime.securesms":
+        strings = _read_ui_strings(serial) if serial else []
+        return infer_signal_surface(
+            package_name=actual,
+            component_name=component,
+            ui_strings=strings,
+        )
 
     if expected == "com.facebook.orca" and actual == "com.facebook.orca":
         strings = _read_ui_strings(serial) if serial else []
@@ -344,7 +429,8 @@ def infer_runtime_surface(
         if expected != "com.twitter.android":
             if expected != "bbc.mobile.news.ww":
                 if expected != "com.instagram.android":
-                    return (None, None)
+                    if expected != "org.thoughtcrime.securesms":
+                        return (None, None)
 
     if expected == "com.instagram.android" and actual == "com.android.chrome":
         if "customtabs.customtabactivity" in component:
@@ -409,5 +495,7 @@ __all__ = [
     "infer_instagram_surface",
     "infer_messenger_surface",
     "infer_runtime_surface",
+    "infer_signal_surface",
+    "infer_telegram_surface",
     "infer_x_surface",
 ]

@@ -68,6 +68,11 @@ def render_reset_outcome(outcome: object, *, session_label: str | None = None) -
     actions.render_reset_outcome(outcome, session_label=session_label)
 
 
+def render_artifact_purge_outcome(outcome: object, *, session_label: str | None = None) -> None:
+    actions = _load_menu_actions()
+    actions.render_artifact_purge_outcome(outcome, session_label=session_label)
+
+
 def collect_view_options(command: Command) -> tuple[bool, bool, bool, bool]:
     from ..commands.models import SelectionMode
 
@@ -565,6 +570,7 @@ __all__ = [
     "diff_last_available",
     "prompt_run_setup",
     "prompt_session_label",
+    "render_artifact_purge_outcome",
     "render_run_preflight",
     "render_reset_outcome",
     "render_version_diff",

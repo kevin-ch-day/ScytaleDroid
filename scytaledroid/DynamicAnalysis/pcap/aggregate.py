@@ -186,6 +186,18 @@ def export_protocol_ledger_csv(
             "call_end_reason": operator.get("call_end_reason"),
             "call_outcome_reason": operator.get("call_outcome_reason"),
             "call_outcome_flag": operator.get("call_outcome_flag"),
+            "call_primary_outcome_reason": operator.get("call_primary_outcome_reason"),
+            "call_attempt_count": operator.get("call_attempt_count"),
+            "call_connected_count": operator.get("call_connected_count"),
+            "call_not_connected_count": operator.get("call_not_connected_count"),
+            "call_connected_short_count": operator.get("call_connected_short_count"),
+            "call_canceled_count": operator.get("call_canceled_count"),
+            "call_outcome_summary": operator.get("call_outcome_summary"),
+            "call_activity_inferred_from_foreground": operator.get(
+                "call_activity_inferred_from_foreground"
+            ),
+            "call_activity_original_tag": operator.get("call_activity_original_tag"),
+            "call_activity_foreground_component": operator.get("call_activity_foreground_component"),
             "ai_used": operator.get("ai_used"),
             "ai_provider": operator.get("ai_provider"),
             "ai_prompt_id": operator.get("ai_prompt_id"),

@@ -10,6 +10,7 @@ from typing import Any
 from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
+from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import messaging_activity_label
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 
 
@@ -176,6 +177,7 @@ class DynamicRunSummarizer:
             run_profile=operator.get("run_profile"),
             interaction_level=interaction_level,
         )
+        call_metadata = self._call_metadata(operator=operator, media_plane=media_plane)
         return {
             "dynamic_run_id": manifest.dynamic_run_id,
             "status": manifest.status,
@@ -184,12 +186,27 @@ class DynamicRunSummarizer:
             "interaction_level": interaction_level,
             "interaction_mode": interaction_mode,
             "messaging_activity": operator.get("messaging_activity"),
-            "call_type": operator.get("call_type"),
-            "call_attempted": operator.get("call_attempted"),
-            "call_connected": operator.get("call_connected"),
-            "call_connected_duration_s": operator.get("call_connected_duration_s"),
-            "call_outcome_reason": operator.get("call_outcome_reason"),
-            "call_outcome_flag": operator.get("call_outcome_flag"),
+            "call_type": call_metadata.get("call_type"),
+            "call_attempted": call_metadata.get("call_attempted"),
+            "call_connected": call_metadata.get("call_connected"),
+            "call_connected_duration_s": call_metadata.get("call_connected_duration_s"),
+            "call_outcome_reason": call_metadata.get("call_outcome_reason"),
+            "call_outcome_flag": call_metadata.get("call_outcome_flag"),
+            "call_primary_outcome_reason": call_metadata.get("call_primary_outcome_reason"),
+            "call_attempt_count": call_metadata.get("call_attempt_count"),
+            "call_connected_count": call_metadata.get("call_connected_count"),
+            "call_not_connected_count": call_metadata.get("call_not_connected_count"),
+            "call_connected_short_count": call_metadata.get("call_connected_short_count"),
+            "call_canceled_count": call_metadata.get("call_canceled_count"),
+            "call_outcome_summary": call_metadata.get("call_outcome_summary"),
+            "call_outcome_events": call_metadata.get("call_outcome_events"),
+            "call_activity_inferred_from_foreground": call_metadata.get(
+                "call_activity_inferred_from_foreground"
+            ),
+            "call_activity_original_tag": call_metadata.get("call_activity_original_tag"),
+            "call_activity_foreground_component": call_metadata.get(
+                "call_activity_foreground_component"
+            ),
             "package_name": target.get("package_name"),
             "version_code": target.get("version_code"),
             "version_name": target.get("version_name"),
@@ -341,11 +358,17 @@ class DynamicRunSummarizer:
         top_sni = indicators.get("top_sni") or []
         top_dns_text = self._top_indicator_text(top_dns)
         top_sni_text = self._top_indicator_text(top_sni)
-        messaging_activity_text = self._display_text(summary.get("messaging_activity"))
+        messaging_activity_text = messaging_activity_label(summary.get("messaging_activity"))
         call_type_text = self._display_text(summary.get("call_type"))
         call_attempted_text = self._bool_text(summary.get("call_attempted"))
         call_connected_text = self._bool_text(summary.get("call_connected"))
         call_outcome_text = self._display_text(summary.get("call_outcome_reason"))
+        call_attempt_count = _safe_int(summary.get("call_attempt_count"))
+        call_connected_count = _safe_int(summary.get("call_connected_count"))
+        call_not_connected_count = _safe_int(summary.get("call_not_connected_count"))
+        call_canceled_count = _safe_int(summary.get("call_canceled_count"))
+        call_outcome_summary_text = self._display_text(summary.get("call_outcome_summary"))
+        call_inferred_text = self._bool_text(summary.get("call_activity_inferred_from_foreground"))
         security = indicators.get("security_surface") or {}
         security_findings = security.get("findings") or []
         security_risk_flags = security.get("risk_flags") or []
@@ -393,12 +416,29 @@ class DynamicRunSummarizer:
             for field in ("call_type", "call_attempted", "call_connected", "call_outcome_reason")
         ):
             insert_at = 9 if str(summary.get("messaging_activity") or "").strip() else 8
-            lines[insert_at:insert_at] = [
+            call_lines = [
                 f"- Call type: {call_type_text}.",
                 f"- Call attempted: {call_attempted_text}.",
                 f"- Call connected: {call_connected_text}.",
                 f"- Call outcome: {call_outcome_text}.",
             ]
+            if call_attempt_count is not None:
+                call_lines.append(f"- Call attempts observed by operator: {call_attempt_count}.")
+            if call_connected_count is not None:
+                call_lines.append(f"- Operator connected attempts: {call_connected_count}.")
+            if call_not_connected_count is not None:
+                call_lines.append(f"- Operator no-connect/ringing attempts: {call_not_connected_count}.")
+            if call_canceled_count is not None:
+                call_lines.append(f"- Operator canceled attempts: {call_canceled_count}.")
+            if summary.get("call_outcome_summary"):
+                call_lines.append(f"- Call outcome summary: {call_outcome_summary_text}.")
+            if summary.get("call_activity_inferred_from_foreground") is not None:
+                call_lines.append(f"- Call tag inferred from foreground: {call_inferred_text}.")
+            if summary.get("call_activity_original_tag"):
+                call_lines.append(
+                    f"- Original messaging tag: {messaging_activity_label(summary.get('call_activity_original_tag'))}."
+                )
+            lines[insert_at:insert_at] = call_lines
         if quota_window_lines:
             lines.extend(["", "## Quota windows", *quota_window_lines])
         if startup_profile_lines:
@@ -462,8 +502,6 @@ class DynamicRunSummarizer:
             return "NO (LOW_SIGNAL_IDLE)"
         if exclusion_reason == "EXCLUDED_MANUAL_NON_COHORT":
             return "NO (manual exploratory)"
-        if dataset.get("baseline_not_idle") is True and profile_lc == "baseline_idle":
-            return "NO (BASELINE_NOT_IDLE)"
         if cohort_eligibility == "EXTRA":
             return "NO (extra run)"
         if dataset.get("countable") is False:
@@ -486,8 +524,6 @@ class DynamicRunSummarizer:
         cohort_eligibility = str(dataset.get("cohort_eligibility") or "").strip().upper()
         if dataset.get("low_signal") is True and profile_lc == "baseline_idle":
             return "LOW_SIGNAL_IDLE"
-        if dataset.get("baseline_not_idle") is True and profile_lc == "baseline_idle":
-            return "BASELINE_NOT_IDLE"
         if exclusion_reason == "EXCLUDED_MANUAL_NON_COHORT":
             return exclusion_reason
         if cohort_eligibility == "EXTRA":
@@ -511,6 +547,110 @@ class DynamicRunSummarizer:
         if profile.startswith("interaction") or profile.startswith("interactive"):
             return "interactive"
         return "unknown"
+
+    @staticmethod
+    def _call_metadata(*, operator: dict[str, Any], media_plane: dict[str, Any]) -> dict[str, Any]:
+        activity = str(operator.get("messaging_activity") or "").strip().lower()
+        call_type = operator.get("call_type")
+        if call_type in (None, "") and activity in {"voice_call", "video_call"}:
+            call_type = "video" if activity == "video_call" else "voice"
+
+        summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
+        media_observed = bool(
+            summary.get("rtc_call_observed")
+            or summary.get("relay_media_likely")
+            or _safe_int(summary.get("rtc_sustained_session_count"))
+        )
+
+        call_attempted = operator.get("call_attempted")
+        if call_attempted is None and activity in {"voice_call", "video_call"}:
+            call_attempted = True
+
+        call_connected = operator.get("call_connected")
+        if call_connected is None and media_observed:
+            call_connected = True
+
+        duration_s = operator.get("call_connected_duration_s")
+        if duration_s is None and call_connected is True:
+            inferred_duration = _safe_float(summary.get("rtc_max_session_duration_s"))
+            if inferred_duration is not None and inferred_duration > 0:
+                duration_s = inferred_duration
+
+        outcome_reason = operator.get("call_outcome_reason")
+        if not outcome_reason and media_observed:
+            outcome_reason = "CALL_MEDIA_OBSERVED"
+
+        call_attempt_count = _safe_int(operator.get("call_attempt_count"))
+        call_connected_count = _safe_int(operator.get("call_connected_count"))
+        call_not_connected_count = _safe_int(operator.get("call_not_connected_count"))
+        call_connected_short_count = _safe_int(operator.get("call_connected_short_count"))
+        call_canceled_count = _safe_int(operator.get("call_canceled_count"))
+        if call_attempt_count is None and call_attempted is True:
+            call_attempt_count = 1
+        if call_connected_count is None:
+            call_connected_count = (
+                1
+                if call_connected is True
+                or outcome_reason in {"CALL_CONNECTED_OK", "CALL_CONNECTED_SHORT", "CALL_MEDIA_OBSERVED"}
+                else 0
+                if call_attempt_count is not None
+                else None
+            )
+        if call_not_connected_count is None:
+            call_not_connected_count = (
+                1
+                if outcome_reason == "CALL_NOT_CONNECTED"
+                else 0
+                if call_attempt_count is not None
+                else None
+            )
+        if call_canceled_count is None:
+            call_canceled_count = (
+                1
+                if outcome_reason == "CALL_CANCELED"
+                else 0
+                if call_attempt_count is not None
+                else None
+            )
+        if call_connected_short_count is None:
+            call_connected_short_count = (
+                1
+                if outcome_reason == "CALL_CONNECTED_SHORT"
+                else 0
+                if call_attempt_count is not None
+                else None
+            )
+        call_outcome_summary = operator.get("call_outcome_summary")
+        if not call_outcome_summary and call_attempt_count is not None:
+            call_outcome_summary = _format_call_outcome_summary(
+                attempt_count=call_attempt_count,
+                connected_count=call_connected_count,
+                not_connected_count=call_not_connected_count,
+                canceled_count=call_canceled_count,
+                connected_short_count=call_connected_short_count,
+            )
+
+        return {
+            "call_type": call_type,
+            "call_attempted": call_attempted,
+            "call_connected": call_connected,
+            "call_connected_duration_s": duration_s,
+            "call_outcome_reason": outcome_reason,
+            "call_outcome_flag": operator.get("call_outcome_flag"),
+            "call_primary_outcome_reason": operator.get("call_primary_outcome_reason") or outcome_reason,
+            "call_attempt_count": call_attempt_count,
+            "call_connected_count": call_connected_count,
+            "call_not_connected_count": call_not_connected_count,
+            "call_connected_short_count": call_connected_short_count,
+            "call_canceled_count": call_canceled_count,
+            "call_outcome_summary": call_outcome_summary,
+            "call_outcome_events": operator.get("call_outcome_events"),
+            "call_activity_inferred_from_foreground": operator.get(
+                "call_activity_inferred_from_foreground"
+            ),
+            "call_activity_original_tag": operator.get("call_activity_original_tag"),
+            "call_activity_foreground_component": operator.get("call_activity_foreground_component"),
+        }
 
     def _pcap_failure_detail(
         self,
@@ -1017,6 +1157,32 @@ def _safe_int(value: object) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_call_outcome_summary(
+    *,
+    attempt_count: int | None,
+    connected_count: int | None,
+    not_connected_count: int | None,
+    canceled_count: int | None,
+    connected_short_count: int | None,
+) -> str:
+    parts = [
+        f"attempts={int(attempt_count or 0)}",
+        f"connected={int(connected_count or 0)}",
+        f"not_connected={int(not_connected_count or 0)}",
+        f"canceled={int(canceled_count or 0)}",
+    ]
+    if connected_short_count:
+        parts.append(f"connected_short={int(connected_short_count)}")
+    return ";".join(parts)
 
 
 __all__ = ["DynamicRunSummarizer"]

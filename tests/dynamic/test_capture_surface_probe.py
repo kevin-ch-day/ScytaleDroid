@@ -10,6 +10,8 @@ from scytaledroid.DynamicAnalysis.capture.surface_probe import (
     infer_instagram_surface,
     infer_messenger_surface,
     infer_runtime_surface,
+    infer_signal_surface,
+    infer_telegram_surface,
     infer_x_surface,
 )
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
@@ -218,6 +220,90 @@ def test_infer_runtime_surface_detects_messenger_rtc_call(monkeypatch) -> None:
 
     assert label == "rtc_call_audio_surface"
     assert detail == "messenger rtc audio call surface"
+
+
+def test_infer_signal_surface_detects_webrtc_video_call_surface() -> None:
+    label, detail = infer_signal_surface(
+        package_name="org.thoughtcrime.securesms",
+        component_name="org.thoughtcrime.securesms.components.webrtc.v2.WebRtcCallActivity",
+        ui_strings=["Turn camera off", "Flip camera", "Mute microphone", "End call"],
+    )
+
+    assert label == "webrtc_video_call_surface"
+    assert detail == "signal webrtc video call surface"
+
+
+def test_infer_runtime_surface_detects_signal_webrtc_call(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.capture.surface_probe._read_ui_strings",
+        lambda _serial: ["Turn camera on", "Speaker", "Mute microphone", "End call"],
+    )
+
+    label, detail = infer_runtime_surface(
+        expected_package="org.thoughtcrime.securesms",
+        foreground_package="org.thoughtcrime.securesms",
+        foreground_component="org.thoughtcrime.securesms.components.webrtc.v2.WebRtcCallActivity",
+        device_serial="SERIAL",
+    )
+
+    assert label == "webrtc_voice_call_surface"
+    assert detail == "signal webrtc voice call surface"
+
+
+def test_infer_telegram_surface_detects_voice_call_surface() -> None:
+    label, detail = infer_telegram_surface(
+        package_name="org.telegram.messenger",
+        component_name="org.telegram.messenger.DefaultIcon",
+        ui_strings=[
+            "Telegram Call",
+            "Encryption key of this call",
+            "Speaker",
+            "Start Video",
+            "Mute",
+            "End Call",
+        ],
+    )
+
+    assert label == "telegram_voice_call_surface"
+    assert detail == "telegram voice call surface"
+
+
+def test_infer_runtime_surface_detects_telegram_voice_call(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.capture.surface_probe._read_ui_strings",
+        lambda _serial: [
+            "Telegram Call",
+            "Encryption key of this call",
+            "Speaker",
+            "Start Video",
+            "Mute",
+            "End Call",
+        ],
+    )
+
+    label, detail = infer_runtime_surface(
+        expected_package="org.telegram.messenger",
+        foreground_package="org.telegram.messenger",
+        foreground_component="org.telegram.messenger.DefaultIcon",
+        device_serial="SERIAL",
+    )
+
+    assert label == "telegram_voice_call_surface"
+    assert detail == "telegram voice call surface"
+
+
+def test_infer_telegram_surface_detects_minimal_video_call_surface() -> None:
+    label, detail = infer_telegram_surface(
+        package_name="org.telegram.messenger",
+        component_name="org.telegram.messenger.DefaultIcon",
+        ui_strings=[
+            "Telegram Video Call",
+            "Encryption key of this call",
+        ],
+    )
+
+    assert label == "telegram_video_call_surface"
+    assert detail == "telegram video call surface"
 
 
 def test_infer_instagram_surface_detects_home_feed() -> None:
@@ -701,6 +787,67 @@ def test_bbc_runtime_surface_probe_is_wired_and_throttled(monkeypatch, tmp_path:
     assert calls == [
         ("bbc.mobile.news.ww", "com.mobile.MainActivity"),
         ("bbc.mobile.news.ww", "com.mobile.MainActivity#verify"),
+    ]
+
+
+def test_telegram_runtime_surface_probe_is_wired_and_throttled(monkeypatch, tmp_path: Path) -> None:
+    ctx = RunContext(
+        dynamic_run_id="r-telegram",
+        package_name="org.telegram.messenger",
+        duration_seconds=240,
+        scenario_id="basic_usage",
+        run_dir=tmp_path / "run",
+        artifacts_dir=tmp_path / "run/artifacts",
+        analysis_dir=tmp_path / "run/analysis",
+        notes_dir=tmp_path / "run/notes",
+        interactive=True,
+        run_profile="interaction_manual",
+        interaction_level="normal",
+        device_serial="SERIAL",
+        static_plan={"display_label": "Telegram"},
+    )
+    calls: list[tuple[str, str]] = []
+    ticks = iter([0.0, 1.0, 9.5])
+
+    monkeypatch.setattr(manual.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(
+        manual,
+        "_infer_runtime_surface",
+        lambda **kwargs: (
+            calls.append(
+                (
+                    str(kwargs.get("foreground_package") or ""),
+                    str(kwargs.get("foreground_component") or ""),
+                )
+            )
+            or ("telegram_voice_call_surface", "telegram voice call surface")
+        ),
+    )
+
+    probe = manual._make_runtime_surface_probe(ctx)
+    state = CaptureState(
+        app_name="Telegram",
+        package_name="org.telegram.messenger",
+        expected_package="org.telegram.messenger",
+        version_code="400",
+        phase="Manual interactive",
+        status=CaptureStatus.RUNNING_VALID,
+        foreground_package="org.telegram.messenger",
+        foreground_component="org.telegram.messenger.DefaultIcon",
+        observer_status=ObserverStatus(),
+        target_duration_s=240,
+        minimum_duration_s=180,
+    )
+
+    assert probe is not None
+    assert probe(state) == ("telegram_voice_call_surface", "telegram voice call surface")
+    assert probe(state) == ("telegram_voice_call_surface", "telegram voice call surface")
+    state.foreground_component = "org.telegram.messenger.LaunchActivity"
+    assert probe(state) == ("telegram_voice_call_surface", "telegram voice call surface")
+
+    assert calls == [
+        ("org.telegram.messenger", "org.telegram.messenger.DefaultIcon"),
+        ("org.telegram.messenger", "org.telegram.messenger.LaunchActivity"),
     ]
 
 

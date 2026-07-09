@@ -4,6 +4,7 @@ from pathlib import Path
 from scytaledroid.DeviceAnalysis.harvest.models import (
     ArtifactError,
     ArtifactPlan,
+    ArtifactResult,
     HarvestPlan,
     InventoryRow,
     PackagePlan,
@@ -16,6 +17,7 @@ from scytaledroid.DeviceAnalysis.harvest.summary import (
     build_harvest_run_report,
     render_harvest_summary,
     _build_summary_card_lines,
+    _operator_harvest_finish_line,
 )
 from scytaledroid.DeviceAnalysis.harvest.status import HarvestRunStatus
 from scytaledroid.DeviceAnalysis.harvest.status import build_harvest_run_status_from_runtime_stats
@@ -347,6 +349,69 @@ def test_build_harvest_run_report_tolerates_legacy_pull_result_without_replan_fi
     assert report.metrics.path_stale_packages == 0
     assert report.metrics.replanned_packages == 0
     assert report.status == "success"
+
+
+def test_build_harvest_run_report_labels_apk_library_hits_as_reuse():
+    selection, plan, pkg_plan = _single_package_plan()
+    result = PullResult(
+        plan=pkg_plan,
+        ok=[
+            ArtifactResult(
+                file_name="artifact.apk",
+                apk_id=1,
+                dest_path=Path("data/store/apk/sha256/aa/aa.apk"),
+                source_path="/data/app/com.example.app/base.apk",
+                status="library_hit",
+                skip_reason="apk_library_hit",
+            )
+        ],
+        skipped=["apk_library_hit"],
+        capture_status="clean",
+    )
+
+    report = build_harvest_run_report(plan, [result], selection=selection)
+
+    assert report.status_summary.operator_summary.endswith("resolved 1 · OK")
+    assert report.skip_counts_line == "skips: runtime_reused=1"
+    assert any("Reuse" in line and "already in APK library" in line for line in report.summary_card_lines)
+    assert ("info", "1 package reused from APK library") in report.highlights
+
+
+def test_operator_finish_line_includes_apk_library_reuse_count():
+    metrics = HarvestRunMetrics(
+        total_packages=578,
+        blocked_packages=426,
+        executed_packages=152,
+        planned_artifacts=580,
+        artifacts_written=84,
+        artifacts_failed=0,
+        artifact_status_counter=Counter({"written": 84, "library_hit": 496}),
+        packages_with_writes=21,
+        packages_with_errors=0,
+        packages_failed=0,
+        packages_drifted=0,
+        packages_with_mirror_failures=0,
+        packages_skipped_runtime=131,
+        runtime_skips=Counter({"apk_library_hit": 131}),
+        runtime_notes=Counter(),
+        preflight_skips=Counter({"policy_non_root": 426}),
+        reviewed_packages=578,
+        eligible_packages=152,
+        harvested_packages=152,
+    )
+    report = type(
+        "ReportLike",
+        (),
+        {
+            "metrics": metrics,
+            "status": "success",
+            "harvest_result": type("HarvestResultLike", (), {"scope_name": "All pullable packages"})(),
+        },
+    )()
+
+    line = _operator_harvest_finish_line(report, run_id="run1")
+
+    assert "artifacts 84/580 written, 496 reused from APK library" in line
 
 
 def test_render_harvest_summary_consumes_report_without_rederiving_status(monkeypatch, capsys):

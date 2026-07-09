@@ -20,10 +20,11 @@ from scytaledroid.DynamicAnalysis.capture.state import (
     ObserverStatus,
 )
 
-_CLEAR_AND_HOME = "\033[2J\033[H"
-_HOME_AND_CLEAR_REST = "\033[H\033[J"
-_ALT_SCREEN_ENTER = "\033[?1049h\033[H\033[?25l"
-_ALT_SCREEN_EXIT = "\033[?25h\033[?1049l"
+_ESC = chr(27)
+_CLEAR_AND_HOME = f"{_ESC}[2J{_ESC}[H"
+_HOME_AND_CLEAR_REST = f"{_ESC}[H{_ESC}[J"
+_ALT_SCREEN_ENTER = f"{_ESC}[?1049h{_ESC}[H{_ESC}[?25l"
+_ALT_SCREEN_EXIT = f"{_ESC}[?25h{_ESC}[?1049l"
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 

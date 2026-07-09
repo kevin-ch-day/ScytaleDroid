@@ -39,8 +39,10 @@ _QUERIES: tuple[tuple[str, str], ...] = (
         SELECT COUNT(*)
         FROM static_analysis_sessions sas
         LEFT JOIN static_analysis_runs sar
-          ON TRIM(BOTH FROM sar.session_stamp) = TRIM(BOTH FROM sas.session_stamp)
-         AND COALESCE(TRIM(BOTH FROM sar.scope_label), '') = COALESCE(TRIM(BOTH FROM sas.scope_label), '')
+          ON CONVERT(TRIM(BOTH FROM sar.session_stamp) USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+             CONVERT(TRIM(BOTH FROM sas.session_stamp) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+         AND CONVERT(COALESCE(TRIM(BOTH FROM sar.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+             CONVERT(COALESCE(TRIM(BOTH FROM sas.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
         WHERE sar.id IS NULL
         """,
     ),

@@ -109,6 +109,20 @@ def test_web_static_dynamic_summary_reads_explicit_latest_static_surfaces() -> N
     assert "dynamic_cohort_eligibility_state" in sql
 
 
+def test_latest_apk_per_package_is_package_unique_with_deterministic_tiebreak() -> None:
+    sql = views.CREATE_VW_LATEST_APK_PER_PACKAGE.lower()
+
+    assert "create or replace view vw_latest_apk_per_package" in sql
+    assert "row_number() over" in sql
+    assert "partition by convert(ar2.package_name using utf8mb4)" in sql
+    assert "from apk_sets aset" in sql
+    assert "where aset.base_apk_id = ar2.apk_id" in sql
+    assert "coalesce(ar2.updated_at, ar2.harvested_at, ar2.created_at) desc" in sql
+    assert "cast(coalesce(nullif(ar2.version_code, ''), '0') as unsigned) desc" in sql
+    assert "ar2.apk_id desc" in sql
+    assert "where ranked.rn = 1" in sql
+
+
 def test_web_app_findings_joins_evidence_payload_store() -> None:
     sql = views.CREATE_V_WEB_APP_FINDINGS.lower()
     assert "create or replace view v_web_app_findings" in sql

@@ -36,10 +36,10 @@ def workbench_ml_pool_phrase(*, extra_valid: int, low_signal_retained: int) -> s
 
 def queue_compact_legend_lines(*, has_next_marker: bool) -> list[str]:
     lines = [
-        "QA: current-build QA badge only: valid / invalid / valid+id (identity mismatch). Prior-build depth is shown under Retained.",
+        "QA: current-build QA badge only: valid / valid+low (valid but low-signal extra) / invalid / valid+id (identity mismatch). Prior-build depth is shown under Retained.",
         "Build: current / prior-only / db-only / drift / none yet",
-        "Strict Idle: quota-counted network-idle baselines (3 target) · Quiescent FG: valid no-touch foreground baseline evidence retained outside strict-idle quota when app-driven traffic exceeds idle limits",
-        "Interactive: raw current-build interactive runs shown against target; 'held' means the strict-idle gate is still incomplete, and Quiescent FG does not unlock interactive · Retained: valid prior-build runs kept for analysis, not current-build quota · ML Pool: supplemental strict-idle baseline count retained for training/pattern averaging",
+        "Strict Idle: quota-counted no-touch foreground baselines (3 target) · Quiescent FG: app-generated foreground activity tag retained for analysis, not proof of operator interaction",
+        "Interactive: raw current-build interactive runs shown against target; 'held' means the baseline minimum is still incomplete · Retained: valid prior-build runs kept for analysis, not current-build quota · ML Pool: supplemental low-signal baseline count retained for training/pattern averaging",
     ]
     if has_next_marker:
         lines.insert(0, "> marks recommended next app")

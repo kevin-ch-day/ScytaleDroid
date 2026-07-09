@@ -83,6 +83,106 @@ def test_non_messaging_voice_call_rich_udp_run_suppresses_domains_low(tmp_path: 
     assert decision["low_signal_reasons"] == []
 
 
+def test_messaging_call_media_plane_suppresses_domains_low_for_direct_ip_rtc(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "operator": {
+                "run_profile": "interaction_manual",
+                "messaging_activity": "video_call",
+            }
+        },
+    )
+    _write_json(
+        run_dir / "analysis" / "pcap_features.json",
+        {
+            "metrics": {
+                "capture_duration_s": 240.0,
+                "data_size_bytes": 52_000_541,
+                "packet_count": 60_578,
+            },
+            "proxies": {
+                "unique_domains_topn": 0,
+                "udp_ratio": 0.996,
+                "unique_dst_ip_count": 1,
+            },
+            "media_plane": {
+                "status": "ok",
+                "summary": {
+                    "classification": "relay_media_likely",
+                    "relay_media_likely": True,
+                    "rtc_call_observed": True,
+                    "rtc_sustained_session_count": 1,
+                    "rtc_total_bytes": 50_823_859,
+                    "rtc_total_packets": 60_578,
+                    "rtc_max_session_duration_s": 215.172,
+                    "stun_frame_count": 27_018,
+                },
+            },
+        },
+    )
+
+    decision = compute_low_signal_for_run(
+        run_dir,
+        package_name="org.telegram.messenger",
+        run_profile="interaction_manual",
+    )
+
+    assert decision is not None
+    assert decision["low_signal"] is False
+    assert decision["low_signal_reasons"] == []
+
+
+def test_messaging_call_weak_media_plane_keeps_domains_low(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "operator": {
+                "run_profile": "interaction_manual",
+                "messaging_activity": "video_call",
+            }
+        },
+    )
+    _write_json(
+        run_dir / "analysis" / "pcap_features.json",
+        {
+            "metrics": {
+                "capture_duration_s": 240.0,
+                "data_size_bytes": 1_832_028,
+                "packet_count": 11_229,
+            },
+            "proxies": {
+                "unique_domains_topn": 0,
+                "udp_ratio": 0.967,
+                "unique_dst_ip_count": 1,
+            },
+            "media_plane": {
+                "status": "ok",
+                "summary": {
+                    "classification": "no_observations",
+                    "relay_media_likely": False,
+                    "rtc_call_observed": False,
+                    "rtc_sustained_session_count": 0,
+                },
+            },
+        },
+    )
+
+    decision = compute_low_signal_for_run(
+        run_dir,
+        package_name="org.telegram.messenger",
+        run_profile="interaction_manual",
+    )
+
+    assert decision is not None
+    assert decision["low_signal"] is True
+    assert decision["low_signal_reasons"] == ["DOMAINS_LOW"]
+
+
 def test_non_messaging_interaction_keeps_domains_low(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     _write_json(

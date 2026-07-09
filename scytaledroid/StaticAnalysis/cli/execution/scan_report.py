@@ -72,6 +72,7 @@ def _append_resource_warning(
     resource_string_count = metadata.get("string_index_resource_strings")
     parse_error_resources = bool(metadata.get("parse_error_resources"))
     resource_fallback_used = bool(metadata.get("resource_fallback_used"))
+    resource_string_fallback_count = int(metadata.get("resource_string_fallback_count") or 0)
     if level == "info":
         warnings.append(
             "Resource table parser emitted a minor complex-entry bounds note "
@@ -83,7 +84,11 @@ def _append_resource_warning(
             "String/resource coverage may be slightly incomplete; re-run only if this APK needs deep string/resource review."
         )
     else:
-        likely_partial = parse_error_resources or not resource_fallback_used or resource_string_count in (None, 0)
+        recovered = resource_string_fallback_count > 0
+        likely_partial = (
+            not recovered
+            and (parse_error_resources or not resource_fallback_used or resource_string_count in (None, 0))
+        )
         if likely_partial:
             warnings.append(
                 "Resource table parser emitted bounds warnings that likely indicate a partial resource parse "
@@ -98,10 +103,12 @@ def _append_resource_warning(
             warnings.append(
                 "Resource table parser emitted bounds warnings "
                 f"(package={package_name}, artifact={artifact_label}{count_hint}). "
-                "String/resource results may be partial; re-run this APK if needed."
+                "String/resource results were recovered with fallback parsing; re-run only if manual resource review needs confirmation."
             )
-            headline = "Resource table bounds warning (string/resource parsing)."
-            guidance = "String/resource results may be partial; re-run this APK if needed."
+            headline = "Resource table bounds warning with fallback recovery."
+            guidance = (
+                "String/resource results include fallback-recovered resource strings; re-run only if manual resource review needs confirmation."
+            )
 
     inline_lines: list[ResourceWarningLine] = [
         (level, headline),
@@ -118,6 +125,7 @@ def _append_resource_warning(
         inline_lines.append((level, f"Count values: {', '.join(str(val) for val in sorted(set(counts)))}"))
 
     inline_lines.append((level, guidance))
+    inline_lines.append((level, "Detector coverage warning only; APK analysis execution is still OK unless execution errors are reported."))
 
     return inline_lines
 

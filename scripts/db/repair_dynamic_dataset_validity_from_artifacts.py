@@ -11,6 +11,9 @@ bounded repairs sourced from existing evidence and tracker truth:
    ``baseline_not_idle``, ``exploratory_class``) from the current tracker row
    when queue/tracker truth already differs from the local evidence-pack
    manifest.
+
+Apply mode refreshes derived tracker truth before candidate selection so stale
+tracker state does not hide newly repairable runs.
 """
 
 from __future__ import annotations
@@ -74,6 +77,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence-root", default=None, help="Dynamic evidence root; defaults to app_config output/evidence/dynamic.")
     parser.add_argument("--output-dir", default=None, help="Directory for repair plan outputs.")
     parser.add_argument("--run-id", action="append", default=[], help="Restrict to one or more dynamic run IDs.")
+    parser.add_argument(
+        "--refresh-tracker",
+        action="store_true",
+        help=(
+            "Recompute derived dataset tracker truth before candidate selection. "
+            "Dry-run only uses this when explicitly requested; --apply refreshes automatically."
+        ),
+    )
     parser.add_argument("--apply", action="store_true", help="Update candidate run_manifest.json files and refresh tracker state.")
     parser.add_argument("--stdout-json", action="store_true", help="Print summary JSON after writing outputs.")
     return parser
@@ -202,10 +213,28 @@ def _load_tracker_by_run() -> dict[str, Mapping[str, Any]]:
     return by_run
 
 
+def _refresh_tracker_truth() -> None:
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
+
+    recompute_dataset_tracker(config=DatasetTrackerConfig())
+
+
+_MISSING = object()
+
+
 def _normalized_value(value: Any) -> Any:
     if isinstance(value, list):
         return list(value)
     return value
+
+
+def _normalized_policy_value(key: str, value: Any, *, dataset: Mapping[str, Any]) -> Any:
+    if value is _MISSING:
+        if key == "extra_run":
+            return 0
+        if key == "counts_toward_quota" and dataset.get("countable") is True:
+            return True
+    return _normalized_value(value)
 
 
 def _policy_sync_candidate_row(run_dir: Path, tracker_row: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -215,10 +244,23 @@ def _policy_sync_candidate_row(run_dir: Path, tracker_row: Mapping[str, Any]) ->
     dataset = raw.get("dataset") if isinstance(raw.get("dataset"), dict) else {}
     target = raw.get("target") if isinstance(raw.get("target"), dict) else {}
     operator = raw.get("operator") if isinstance(raw.get("operator"), dict) else {}
+    current_reason = str(dataset.get("invalid_reason_code") or "").strip().upper()
+    if current_reason == "ABORTED_DISCARD":
+        return None
     diffs: list[str] = []
     for key in SYNCABLE_TRACKER_FIELDS:
-        manifest_value = _normalized_value(dataset.get(key))
-        tracker_value = _normalized_value(tracker_row.get(key))
+        if key not in tracker_row:
+            continue
+        manifest_value = _normalized_policy_value(
+            key,
+            dataset[key] if key in dataset else _MISSING,
+            dataset=dataset,
+        )
+        tracker_value = _normalized_policy_value(
+            key,
+            tracker_row[key],
+            dataset=dataset,
+        )
         if manifest_value != tracker_value:
             diffs.append(key)
     if not diffs:
@@ -381,6 +423,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_dir = Path(args.output_dir) if args.output_dir else _default_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
     run_ids = {str(value).strip() for value in (args.run_id or []) if str(value).strip()}
+    tracker_refreshed_before_candidate_selection = bool(args.apply or args.refresh_tracker)
+    if tracker_refreshed_before_candidate_selection:
+        _refresh_tracker_truth()
     rows = _candidate_rows(evidence_root, run_ids)
     public_rows = [{key: value for key, value in row.items() if not key.startswith("_")} for row in rows]
 
@@ -423,6 +468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "generated_at_utc": datetime.now(tz=UTC).isoformat(),
         "evidence_root": str(evidence_root.resolve()),
         "apply": bool(args.apply),
+        "tracker_refreshed_before_candidate_selection": tracker_refreshed_before_candidate_selection,
         "candidate_rows": len(public_rows),
         "applied_rows": int(applied_rows),
         "synced_manifest_rows": int(synced_rows),

@@ -40,6 +40,9 @@ from scytaledroid.DynamicAnalysis.ml import deliverable_bundle_paths as bundle_p
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (  # noqa: E402
     resolve_dataset_freeze_read_path,
 )
+from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import (  # noqa: E402
+    messaging_activity_label,
+)
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance  # noqa: E402
 from scytaledroid.Utils.LatexUtils import (  # noqa: E402
     LatexTableSpec,
@@ -1273,6 +1276,14 @@ def generate_publication_exports() -> int:
                 "runs_interactive_manual": int(runs_by_pkg[pkg]["manual"]),
                 "script_names": ",".join(sorted(stim_by_pkg[pkg]["script_names"])),
                 "manual_activity_tags": ",".join(sorted(stim_by_pkg[pkg]["manual_activity"])),
+                "manual_activity_labels": ",".join(
+                    sorted(
+                        {
+                            messaging_activity_label(activity)
+                            for activity in stim_by_pkg[pkg]["manual_activity"]
+                        }
+                    )
+                ),
                 "scenario_ids": ",".join(sorted(stim_by_pkg[pkg]["scenario_ids"])),
                 "static_reason_notes": str(t6r.get("notes") or ""),
             }

@@ -20,20 +20,20 @@ def render_cohort_status_help(
     menu_utils.print_section("Columns")
     for line in (
         "Status = workflow state: complete, review, interactive, baseline, restore, refresh, or blocked.",
-        "Strict Idle = quota-counted network-idle baselines over the minimum (e.g. 3/3).",
-        "Quiescent FG = valid no-touch foreground baseline attempts retained outside strict-idle quota because app/runtime traffic exceeded idle-baseline limits.",
-        "Interactive = valid interactive runs against the target; retained extras stay visible in the total and strict idle must be complete first.",
+        "Strict Idle = quota-counted no-touch foreground baselines over the minimum (e.g. 3/3).",
+        "Quiescent FG = app-generated foreground activity tag on a no-touch baseline; it is retained for analysis and is not proof of operator interaction.",
+        "Interactive = valid interactive runs against the target; retained extras stay visible in the total and the baseline minimum must be complete first.",
         "QA = latest current-build run QA badge (invalid, valid+id, valid+L); explains Status=review.",
         "Build = current target state (current, drift, prior-only, db-only, none yet); wide terminals only.",
-        "ML pool = quota-complete app with optional supplemental strict-idle baselines for training/pattern averages.",
-        "Quiescent FG baseline = valid retained no-touch foreground evidence outside strict-idle quota; app-driven feed/media refresh can trigger it even when the operator is trying to stay idle.",
+        "ML pool = quota-complete app with optional supplemental low-signal baselines for training/pattern averages.",
+        "Quiescent FG baseline = valid no-touch foreground evidence with app-driven feed/media refresh activity.",
     ):
         print(status_messages.status(line, level="info", show_prefix=False))
     print()
     menu_utils.print_section("States and gaps")
     for line in (
-        "held/locked = interactive quota is not open until strict-idle baseline minimum is met; the queue may still show retained interactive evidence as 0/4 held, 1/4 held, and so on.",
-        "Quiescent FG retained baselines do not unlock interactive; rerun baseline with the app mostly idle because the classifier treated the traffic as too active for strict-idle quota.",
+        "held/locked = interactive quota is not open until the baseline minimum is met; the queue may still show retained interactive evidence as 0/4 held, 1/4 held, and so on.",
+        "Quiescent FG is an analysis tag; low-signal baselines remain the supplemental baseline case.",
         "mixed = current-build and legacy-build evidence both exist.",
         "refresh = installed app build differs from the newest static plan (Status=refresh). Harvest/static refresh is required before dynamic continuation.",
         "identity mismatch = latest valid run does not match the active build identity; review historical vs current evidence carefully.",

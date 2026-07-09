@@ -195,7 +195,7 @@ def _build_operator_summary(
         f"reviewed {packages_reviewed}/{packages_total}"
         f" · eligible {eligible_count}"
         f" · attempted {attempted_count}"
-        f" · harvested {harvested_count}"
+        f" · resolved {harvested_count}"
     )
     if blocked_preflight_count > 0:
         line += f" · blocked before pull {blocked_preflight_count}"

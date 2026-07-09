@@ -297,7 +297,7 @@ def assess_exact_target_readiness(
     split_rows = _lookup_same_capture_split_rows(row)
     split_files_expected = len(split_rows)
     recorded_base_path = _resolve_recorded_local_path(row)
-    canonical_base_path = _resolve_canonical_store_path(row)
+    canonical_base_path = _resolve_available_canonical_store_path(row)
     recorded_abs_path = _candidate_recorded_abs_path(row)
     canonical_store_path = _candidate_canonical_store_path(row)
     recorded_available = bool(recorded_base_path and recorded_base_path.exists())
@@ -313,7 +313,7 @@ def assess_exact_target_readiness(
     split_files_available = 0
     split_hash_mismatch = False
     for split_row in split_rows:
-        split_path = _resolve_recorded_local_path(split_row) or _resolve_canonical_store_path(split_row)
+        split_path = _resolve_recorded_local_path(split_row) or _resolve_available_canonical_store_path(split_row)
         split_sha = _normalize_sha256(split_row.get("sha256"))
         if split_path and split_path.exists() and split_sha:
             actual = _sha256_file(split_path)
@@ -705,10 +705,7 @@ def _resolve_local_path(row: Mapping[str, object]) -> Path | None:
     recorded = _resolve_recorded_local_path(row)
     if recorded and recorded.exists():
         return recorded
-    canonical = _resolve_canonical_store_path(row)
-    if canonical and canonical.exists():
-        return canonical
-    return None
+    return _resolve_available_canonical_store_path(row)
 
 
 def _resolve_recorded_local_path(row: Mapping[str, object]) -> Path | None:
@@ -763,6 +760,16 @@ def _resolve_canonical_store_path(row: Mapping[str, object]) -> Path | None:
     if sha:
         return artifact_store.canonical_apk_path(sha)
     return None
+
+
+def _resolve_available_canonical_store_path(row: Mapping[str, object]) -> Path | None:
+    sha = _normalize_sha256(row.get("sha256"))
+    if not sha:
+        return None
+    try:
+        return artifact_store.ensure_canonical_apk_blob_available(sha)
+    except FileNotFoundError:
+        return None
 
 
 def _has_recorded_or_canonical_location(

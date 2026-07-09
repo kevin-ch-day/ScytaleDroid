@@ -264,8 +264,8 @@ def test_checkpoint_card_multiline_shape_default_table() -> None:
     assert "Reports 118 / 531" in card
     assert "Elapsed 18m 0s · ETA ~40m" in card
     assert "Warnings 3" in card
-    assert "Policy failures 1" in card
-    assert "Finding failures 0" in card
+    assert "Policy gate failures 1" in card
+    assert "Finding signals 0" in card
     assert "Execution errors 0" in card
     assert "Skipped stages" not in card or "Skipped stages 0" not in card
     assert "OK detector stages" not in card
@@ -298,7 +298,7 @@ def test_checkpoint_card_concise_pipeline_block_collapses_to_dense_lines() -> No
         verbose_metrics=False,
     )
 
-    assert "Warnings 475 · Policy failures 0 · Finding failures 94 · Execution errors 0" in card
+    assert "Warnings 475 · Policy gate failures 0 · Finding signals 94 · Execution errors 0" in card
     assert "Skipped stages 1424 · Parse est. 35" in card
     assert "Current package : Android Auto · com.google.android.projection.gearhead" in card
     assert "Packages 80 / 152 · APK artifacts 286 / 576 · Reports 286 / 576" in card

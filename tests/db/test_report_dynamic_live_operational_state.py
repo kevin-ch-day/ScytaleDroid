@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from scripts.db import report_dynamic_live_operational_state as report
@@ -203,3 +204,21 @@ def test_summarize_prepared_view_reports_empty_queue_explicitly() -> None:
 
     assert summary["freeze_guidance"]["mode"] == "empty_queue"
     assert "No dataset apps were resolved" in summary["freeze_guidance"]["summary"]
+
+
+def test_main_accepts_stdout_json_alias(monkeypatch, tmp_path, capsys) -> None:
+    def fake_generate_report(*, candidate_limit: int, output_dir):
+        assert candidate_limit == 3
+        assert output_dir == tmp_path
+        return {
+            "queue_summary": {"dataset_apps_total": 15},
+            "output_files": {"summary_json": str(tmp_path / "summary.json")},
+        }
+
+    monkeypatch.setattr(report, "generate_report", fake_generate_report)
+
+    rc = report.main(["--stdout-json", "--candidate-limit", "3", "--output-dir", str(tmp_path)])
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["queue_summary"]["dataset_apps_total"] == 15

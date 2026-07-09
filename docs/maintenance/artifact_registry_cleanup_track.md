@@ -188,7 +188,7 @@ treat as **legacy / mis-keyed** and review before any bulk action.
 | Select | ``v_artifact_registry_integrity`` with ``link_state <> 'linked'`` (never SAR/dynamic-linked rows). |
 | Age | ``created_at_utc < UTC_TIMESTAMP() - INTERVAL max(--min-age-days, --cooling-off-days) DAY`` (defaults 90 / 7). Optional ``--include-null-created-at`` for NULL timestamps. |
 | Receipt | With ``--receipt-dir``, writes ``artifact_registry_prune_<timestamp>.{json,csv,sql}`` **before** any ``DELETE``. JSON uses envelope ``scytaledroid.artifact_registry_prune_receipt.v1`` (``meta`` + ``artifact_rows``); CSV is flat rows; SQL lists commented ``DELETE`` batches. |
-| Delete | Only with ``--apply``; **requires** ``--receipt-dir`` when the candidate set is non-empty. |
+| Delete | Only with ``--apply``; **requires** ``--receipt-dir`` when the candidate set is non-empty. Apply runs the cleanup-candidate policy preflight and blocks review/blocked buckets unless ``--allow-review-category-prune`` is explicitly set. |
 | Counts | Prints total ``artifact_registry`` rows before, candidate count, deleted count, total after (when ``--apply`` ran deletes). |
 | Files | **No** filesystem deletes; **no** APK removal. |
 
@@ -197,7 +197,7 @@ Suggested operator flow:
 1. ``report_artifact_registry_cleanup_candidates.py`` (optional) — confirm buckets.
 2. ``prune_artifact_registry_dangling.py --min-age-days …`` — dry-run counts.
 3. ``prune_artifact_registry_dangling.py --receipt-dir data/state/artifact_registry_prune`` — write receipt, still dry-run.
-4. Same command **+** ``--apply`` — receipt then batched ``DELETE``.
+4. Same command **+** ``--apply`` — receipt then batched ``DELETE`` only if policy buckets are safe. If the preflight blocks, use the static detached / static legacy-session prune tools or pass ``--allow-review-category-prune`` only after explicit review.
 
 Workspace menu **prune all orphans** remains a last-resort hammer (all non-linked rows).
 

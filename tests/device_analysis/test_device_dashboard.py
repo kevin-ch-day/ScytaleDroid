@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.device_menu import dashboard
@@ -65,7 +66,7 @@ def test_print_dashboard_uses_compact_active_device_layout(monkeypatch, capsys) 
     # Compact pipeline strip: word labels (operator-readable) vs legacy "117 hv" tokens
     assert "117" in out and "411" in out and "18" in out
     assert "pullable" in out and "policy-blocked" in out and "scope-blocked" in out
-    assert "117 runs" in out
+    assert "117 resolved" in out
     assert "Harvest 117" not in out
     assert "aligned to 26" in out
     assert "Next: static analysis (menu 2)" in out
@@ -158,7 +159,7 @@ def test_print_device_details_shows_moved_pipeline_and_evidence_blocks(monkeypat
     assert "Inventory and Harvest" in out
     assert "Status       : FRESH | Last sync : 14 hrs 39 mins ago | Packages : 546" in out
     assert "Inventory    : 546 inventoried | 546 in scope | 117 eligible" in out
-    assert "Harvest      : 117 scheduled | 117 harvested | 546 receipts" in out
+    assert "Harvest      : 117 scheduled | 117 resolved | 546 receipts" in out
     assert "Blocked      : 411 policy | 18 scope" in out
     assert "Mode         : harvest-ready" in out
     assert "Identity     : pm_list_show_versioncode | strict" in out
@@ -279,6 +280,50 @@ def test_dashboard_compact_status_marks_aligned_drifted_harvest_for_review(monke
     assert "Next: review latest harvest drift/issues, then refresh inventory or re-harvest as needed." in out
 
 
+def test_latest_harvest_overview_groups_package_manifests_by_session_and_ignores_policy_blocks(
+    monkeypatch, tmp_path
+) -> None:
+    serial = "ZY22JK89DR"
+    session = "ZY22JK89DR-20260708-025120-462407"
+    device_root = tmp_path / "device_apks"
+    receipts_root = tmp_path / "receipts" / "harvest"
+
+    def write_manifest(package: str, capture_status: str, *, preflight_reason: str | None) -> None:
+        leaf = device_root / serial / "runs" / session / package / f"{package}_v1"
+        leaf.mkdir(parents=True)
+        payload = {
+            "package": {"package_name": package, "session_label": session, "snapshot_id": 79},
+            "planning": {"preflight_reason": preflight_reason},
+            "status": {
+                "capture_status": capture_status,
+                "persistence_status": "not_requested" if preflight_reason else "mirrored",
+                "research_status": "ineligible" if preflight_reason else "pending_audit",
+            },
+        }
+        (leaf / "harvest_package_manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    write_manifest("com.example.clean_one", "clean", preflight_reason=None)
+    write_manifest("com.example.clean_two", "clean", preflight_reason=None)
+    write_manifest("com.example.policy_blocked", "failed", preflight_reason="policy_non_root")
+    (receipts_root / session).mkdir(parents=True)
+    for package in ("com.example.clean_one", "com.example.clean_two", "com.example.policy_blocked"):
+        (receipts_root / session / f"{package}.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(dashboard.artifact_store, "device_apks_root", lambda: device_root)
+    monkeypatch.setattr(dashboard.artifact_store, "harvest_receipts_root", lambda: receipts_root)
+    monkeypatch.setattr(dashboard.artifact_store, "repo_relative_path", lambda path: str(path))
+
+    overview = dashboard._load_latest_harvest_overview(serial)
+
+    assert overview["session_label"] == session
+    assert overview["manifest_count"] == 3
+    assert overview["receipt_count"] == 3
+    assert overview["executed"] == 2
+    assert overview["blocked_policy"] == 1
+    assert overview["session_state"] == "current"
+    assert overview["session_note"] is None
+
+
 def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monkeypatch, capsys) -> None:
     active = {
         "serial": "ZY22JK89DR",
@@ -330,7 +375,7 @@ def test_dashboard_compact_status_uses_operator_friendly_full_refresh_label(monk
     assert "full device" in out
     assert "baseline-full" not in out
     assert "aligned to 60" in out
-    assert "1 run" in out
+    assert "1 resolved" in out
 
 
 def test_print_device_details_marks_aligned_drifted_harvest_for_review(monkeypatch, capsys) -> None:

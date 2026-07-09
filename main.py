@@ -151,6 +151,27 @@ def _describe_main_menu_database(ok: bool, message: str, detail: str) -> str:
         return f"error — {trimmed}"
     return "error"
 
+
+def _describe_main_menu_mercury() -> str:
+    """Return a compact Mercury APK storage mount summary for the main menu."""
+
+    try:
+        from scytaledroid.Utils.System import mercury_storage
+
+        status = mercury_storage.mercury_storage_status()
+    except Exception as exc:  # pragma: no cover - defensive menu guard
+        log.warning(f"Failed to read Mercury mount status: {exc}", category="application")
+        return "unknown"
+
+    if status.mountpoint_mounted:
+        return f"mounted at {status.mountpoint}"
+    if status.user_media_mounted:
+        return f"user-session only at {status.user_media_mount} (use menu 11)"
+    if status.device_exists:
+        return "not mounted (use menu 11)"
+    return "drive not detected"
+
+
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
@@ -167,7 +188,8 @@ def main_menu() -> None:
         ("8", "Governance & Readiness", handle_data_workspace),
         ("9", "Evidence & Workspace", handle_workspace),
         ("10", "APK library", handle_browse_apks),
-        ("11", "About ScytaleDroid", handle_about),
+        ("11", "Mercury APK storage mount", handle_mercury_storage),
+        ("12", "About ScytaleDroid", handle_about),
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
@@ -211,6 +233,7 @@ def main_menu() -> None:
         selected_device = active_device if active_device and active_device != "None" else "none"
         print(f"Selected device: {selected_device}")
         print(f"Database: {_describe_main_menu_database(ok, message, detail or '')}")
+        print(f"Mercury: {_describe_main_menu_mercury()}")
         print("-----")
         print()
         menu_utils.print_menu(
@@ -514,6 +537,13 @@ def handle_workspace() -> None:
     from scytaledroid.Utils.System.workspace_maintenance_menu import workspace_menu
 
     workspace_menu()
+
+
+def handle_mercury_storage() -> None:
+    from scytaledroid.Utils.System.workspace_maintenance_menu import mercury_apk_storage_menu
+
+    _start_screen_transition()
+    mercury_apk_storage_menu()
 
 
 def handle_browse_apks() -> None:

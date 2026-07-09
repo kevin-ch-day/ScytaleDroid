@@ -216,6 +216,69 @@ def test_build_domain_observation_rows_from_network_indicators() -> None:
     assert all(row["indicator_type"] in {"dns", "sni"} for row in rows)
 
 
+def test_build_domain_observation_rows_includes_telegram_direct_ip_context() -> None:
+    rows = domain_context_index.build_domain_observation_rows_from_pcap_report(
+        {
+            "package_name": "org.telegram.messenger",
+            "top_dns": [{"value": "firebaselogging.googleapis.com", "count": 2}],
+            "flow_summary": {
+                "top_flows": [
+                    {
+                        "endpoint_a": "10.215.173.1:41568",
+                        "endpoint_b": "149.154.175.51:443",
+                        "packets": 210,
+                        "bytes": 41430,
+                        "protocol": "tcp",
+                    },
+                    {
+                        "endpoint_a": "10.215.173.1:42258",
+                        "endpoint_b": "91.108.56.196:443",
+                        "packets": 19,
+                        "bytes": 14128,
+                        "protocol": "tcp",
+                    },
+                ]
+            },
+        },
+        dynamic_run_id="run-telegram",
+        package_name="org.telegram.messenger",
+    )
+
+    ip_rows = [row for row in rows if row["indicator_type"] == "ip_dst"]
+    assert {row["observed_domain"] for row in ip_rows} == {"149.154.175.51", "91.108.56.196"}
+    assert {row["root_domain"] for row in ip_rows} == {"149.154.160.0/20", "91.108.56.0/22"}
+    assert all(row["owner_class"] == "first_party" for row in ip_rows)
+    assert all(row["role_class"] == "telegram_datacenter_transport" for row in ip_rows)
+    assert all(row["classification_basis"] == "curated_cidr" for row in ip_rows)
+
+
+def test_build_domain_observation_rows_from_network_indicators_accepts_telegram_ip_dst() -> None:
+    rows = domain_context_index.build_domain_observation_rows_from_network_indicators(
+        [
+            {
+                "indicator_type": "ip_dst",
+                "indicator_value": "149.154.167.151",
+                "indicator_count": 45,
+                "indicator_source": "top_flow_ip",
+            },
+            {
+                "indicator_type": "ip_dst",
+                "indicator_value": "216.239.38.223",
+                "indicator_count": 17,
+                "indicator_source": "top_flow_ip",
+            },
+        ],
+        dynamic_run_id="run-telegram",
+        package_name="org.telegram.messenger",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["observed_domain"] == "149.154.167.151"
+    assert rows[0]["root_domain"] == "149.154.160.0/20"
+    assert rows[0]["owner_class"] == "first_party"
+    assert rows[0]["role_class"] == "telegram_datacenter_transport"
+
+
 def test_index_dynamic_domain_context_from_network_indicators_only_missing(monkeypatch) -> None:
     query_names: list[str] = []
     inserted: list[tuple[object, ...]] = []
@@ -693,6 +756,12 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert linkedin_perf["owner_class"] == "first_party"
     assert linkedin_perf["role_class"] == "performance_telemetry"
 
+    linkedin_ei_perf = classify_domain(
+        "rum22.perf.linkedin-ei.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_ei_perf["owner_class"] == "first_party"
+    assert linkedin_ei_perf["role_class"] == "performance_telemetry"
+
     linkedin_media = classify_domain(
         "media.licdn.com", package_name="com.linkedin.android", references=refs
     )
@@ -743,6 +812,14 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert linkedin_bot_defense["owner_class"] == "third_party"
     assert linkedin_bot_defense["role_class"] == "bot_defense"
 
+    linkedin_human_xlgmedia = classify_domain(
+        "s.xlgmedia.com",
+        package_name="com.linkedin.android",
+        references=refs,
+    )
+    assert linkedin_human_xlgmedia["owner_class"] == "third_party"
+    assert linkedin_human_xlgmedia["role_class"] == "bot_defense"
+
     pinterest_api = classify_domain(
         "api.pinterest.com", package_name="com.pinterest", references=refs
     )
@@ -752,6 +829,14 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     pinterest_media = classify_domain("i.pinimg.com", package_name="com.pinterest", references=refs)
     assert pinterest_media["owner_class"] == "first_party"
     assert pinterest_media["role_class"] == "content_delivery"
+
+    pinterest_amazon_media = classify_domain(
+        "m.media-amazon.com",
+        package_name="com.pinterest",
+        references=refs,
+    )
+    assert pinterest_amazon_media["owner_class"] == "third_party"
+    assert pinterest_amazon_media["role_class"] == "content_delivery"
 
     pinterest_recaptcha = classify_domain(
         "www.recaptcha.net", package_name="com.pinterest", references=refs
@@ -887,6 +972,14 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert tiktok_attribution["owner_class"] == "first_party"
     assert tiktok_attribution["role_class"] == "attribution_measurement"
 
+    tiktok_ads_measurement = classify_domain(
+        "tiktok.adsmeasurement.com",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_ads_measurement["owner_class"] == "first_party"
+    assert tiktok_ads_measurement["role_class"] == "ad_measurement"
+
 
 def test_index_dynamic_evidence_pack_to_db_includes_domain_context(
     monkeypatch, tmp_path: Path
@@ -1019,6 +1112,12 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     assert guardian_collection["owner_class"] == "first_party"
     assert guardian_collection["role_class"] == "publisher_collection"
 
+    guardian_collection_alias = classify_domain(
+        "j.ophan.co.uk", package_name="com.guardian", references=refs
+    )
+    assert guardian_collection_alias["owner_class"] == "first_party"
+    assert guardian_collection_alias["role_class"] == "publisher_collection"
+
     guardian_cmp = classify_domain(
         "cdn.privacy-mgmt.com", package_name="com.guardian", references=refs
     )
@@ -1062,6 +1161,23 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     )
     assert guardian_tungsten["owner_class"] == "third_party"
     assert guardian_tungsten["role_class"] == "ad_measurement"
+
+    guardian_mainroll = classify_domain(
+        "stats.mainroll.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_mainroll["owner_class"] == "third_party"
+    assert guardian_mainroll["role_class"] == "ad_measurement"
+    assert guardian_mainroll["confidence"] == "medium"
+
+    unscoped_mainroll = classify_domain(
+        "stats.mainroll.com",
+        package_name="com.example.other",
+        references=refs,
+    )
+    assert unscoped_mainroll["owner_class"] == "unknown"
+    assert unscoped_mainroll["role_class"] == "unknown"
 
     bbc_everest = classify_domain(
         "creative-assets.everesttech.net",
@@ -1150,6 +1266,38 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     )
     assert facebook_genai["owner_class"] == "first_party"
     assert facebook_genai["role_class"] == "social_graph_api"
+
+    facebook_infosec = classify_domain(
+        "www.infosecworldusa.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_infosec["owner_class"] == "third_party"
+    assert facebook_infosec["role_class"] == "conference_site_content"
+
+    facebook_swoogo = classify_domain(
+        "assets.swoogo.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_swoogo["owner_class"] == "third_party"
+    assert facebook_swoogo["role_class"] == "event_platform_assets"
+
+    facebook_steam = classify_domain(
+        "store.steampowered.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_steam["owner_class"] == "third_party"
+    assert facebook_steam["role_class"] == "external_storefront_content"
+
+    facebook_steam_static = classify_domain(
+        "store.fastly.steamstatic.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_steam_static["owner_class"] == "third_party"
+    assert facebook_steam_static["role_class"] == "static_asset_delivery"
 
     whatsapp_acs = classify_domain(
         "acs.whatsapp.com",

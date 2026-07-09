@@ -244,7 +244,7 @@ def test_workbench_shows_quiescent_fg_as_separate_baseline_lane() -> None:
     assert "Quiescent FG  7" in out
     assert "Quiescent FG retained   : 7" in out
     assert "valid no-touch foreground baseline evidence" in out
-    assert "does not unlock interactive" in out
+    assert "low-signal baselines remain the supplemental baseline case" in out
 
 
 def test_workbench_shows_whatsapp_style_qualification() -> None:

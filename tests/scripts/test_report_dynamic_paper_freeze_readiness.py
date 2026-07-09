@@ -73,6 +73,38 @@ def test_main_writes_manifest_plan_and_decision_board_exports(tmp_path: Path, mo
     )
     monkeypatch.setattr(
         freeze,
+        "build_paper_evidence_tier_report",
+        lambda package_filter=None, live_drift_map=None: {
+            "cohort_label": "Research Dataset Beta",
+            "summary": {
+                "apps_total": 1,
+                "paper_usable": 1,
+                "drifted_but_paper_usable": 1,
+                "context_only": 0,
+                "true_evidence_holes": 0,
+                "tier_counts": {"CURRENT_BUILD_MIXED_BASELINE": 1},
+            },
+            "rows": [
+                {
+                    "app": "TikTok",
+                    "package_name": "com.zhiliaoapp.musically",
+                    "evidence_tier": "CURRENT_BUILD_MIXED_BASELINE",
+                    "paper_usable": "yes",
+                    "selected_relation": "current",
+                    "selected_version_code": "2024507030",
+                    "operational_installed_version_code": "2024509040",
+                    "operational_live_drifted": "yes",
+                    "operational_drift_detail": "live installed build changed after cutoff",
+                    "strict_idle_count": 0,
+                    "quiescent_fg_count": 7,
+                    "caveat": "QFG reported separately.",
+                    "recommended_final_run_tonight": "interactive only if easy",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        freeze,
         "build_paper_freeze_decision_board",
         lambda package_filter=None: {
             "cohort_label": "Research Dataset Beta",
@@ -108,6 +140,15 @@ def test_main_writes_manifest_plan_and_decision_board_exports(tmp_path: Path, mo
         "_load_app_labels",
         lambda packages: {"com.zhiliaoapp.musically": "TikTok"},
     )
+    monkeypatch.setattr(
+        report,
+        "_load_live_drift_map",
+        lambda packages: (
+            {"com.zhiliaoapp.musically": {"observed_version_code": "2024509040"}},
+            "ZY22",
+            "moto g",
+        ),
+    )
 
     rc = report.main(["--output-dir", str(tmp_path), "--stdout-json"])
     assert rc == 0
@@ -117,12 +158,18 @@ def test_main_writes_manifest_plan_and_decision_board_exports(tmp_path: Path, mo
     plan_csv = tmp_path / "paper_minimal_run_plan.csv"
     board_json = tmp_path / "paper_freeze_decision_board.json"
     board_csv = tmp_path / "paper_freeze_decision_board.csv"
+    tier_json = tmp_path / "paper_evidence_tiers.json"
+    tier_csv = tmp_path / "paper_evidence_tiers.csv"
+    summary_json = tmp_path / "summary.json"
 
     assert manifest_json.exists()
     assert manifest_csv.exists()
     assert plan_csv.exists()
     assert board_json.exists()
     assert board_csv.exists()
+    assert tier_json.exists()
+    assert tier_csv.exists()
+    assert summary_json.exists()
 
     manifest = json.loads(manifest_json.read_text(encoding="utf-8"))
     assert manifest["apps"][0]["strict_idle_count"] == 0
@@ -131,6 +178,8 @@ def test_main_writes_manifest_plan_and_decision_board_exports(tmp_path: Path, mo
     board = json.loads(board_json.read_text(encoding="utf-8"))
     assert board["rows"][0]["action"] == "strict idle retry"
     assert board["rows"][0]["baseline_class_note"].startswith("Quiescent FG evidence")
+    tier = json.loads(tier_json.read_text(encoding="utf-8"))
+    assert tier["rows"][0]["evidence_tier"] == "CURRENT_BUILD_MIXED_BASELINE"
 
     board_csv_text = board_csv.read_text(encoding="utf-8")
     assert "strict_idle_count" in board_csv_text
@@ -142,8 +191,28 @@ def test_main_writes_manifest_plan_and_decision_board_exports(tmp_path: Path, mo
     assert "strict_idle_count" in plan_csv_text
     assert "quiescent_fg_count" in plan_csv_text
     assert "strict idle retry" in plan_csv_text
+    tier_csv_text = tier_csv.read_text(encoding="utf-8")
+    assert "evidence_tier" in tier_csv_text
+    assert "CURRENT_BUILD_MIXED_BASELINE" in tier_csv_text
+    assert "operational_live_drifted" in tier_csv_text
 
     out = capsys.readouterr().out
     summary = json.loads(out)
+    written_summary = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert written_summary == summary
+    assert summary["live_drift_checked"] is True
+    assert summary["live_drifted_package_count"] == 1
     assert summary["paper_freeze_decision_board_json"].endswith("paper_freeze_decision_board.json")
     assert summary["paper_freeze_decision_board_csv"].endswith("paper_freeze_decision_board.csv")
+    assert summary["paper_evidence_tiers_json"].endswith("paper_evidence_tiers.json")
+    assert summary["paper_evidence_tiers_csv"].endswith("paper_evidence_tiers.csv")
+    assert summary["summary_json"].endswith("summary.json")
+    assert summary["evidence_tier_summary"]["paper_usable"] == 1
+    assert summary["evidence_tier_summary"]["drifted_but_paper_usable"] == 1
+
+    alias_dir = tmp_path / "alias"
+    rc = report.main(["--output-dir", str(alias_dir), "--json", "--skip-live-drift"])
+    assert rc == 0
+    alias_summary = json.loads(capsys.readouterr().out)
+    assert alias_summary["paper_freeze_manifest_json"].endswith("paper_freeze_manifest.json")
+    assert alias_summary["live_drift_checked"] is False

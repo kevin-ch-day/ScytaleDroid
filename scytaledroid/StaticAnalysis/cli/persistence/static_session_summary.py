@@ -81,6 +81,7 @@ class StaticSessionRunRollups:
     total_run_count: int
     completed_run_count: int
     failed_run_count: int
+    running_run_count: int
     interrupted_run_count: int
     persist_error_run_count: int
     missing_artifacts_run_count: int
@@ -100,6 +101,8 @@ def fetch_static_session_run_rollups(session_stamp: str, scope_label: str) -> St
           COUNT(*) AS total_run_count,
           SUM(CASE WHEN sar.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_run_count,
           SUM(CASE WHEN sar.status = 'FAILED' THEN 1 ELSE 0 END) AS failed_run_count,
+          SUM(CASE WHEN UPPER(COALESCE(sar.status, '')) IN ('STARTED','RUNNING') THEN 1 ELSE 0 END)
+            AS running_run_count,
           SUM(
             CASE
               WHEN sar.abort_reason IN ('user_abort', 'SIGINT') OR sar.abort_signal = 'SIGINT'
@@ -136,11 +139,12 @@ def fetch_static_session_run_rollups(session_stamp: str, scope_label: str) -> St
         total_run_count=total,
         completed_run_count=int(g("completed_run_count", 1) or 0),
         failed_run_count=int(g("failed_run_count", 2) or 0),
-        interrupted_run_count=int(g("interrupted_run_count", 3) or 0),
-        persist_error_run_count=int(g("persist_error_run_count", 4) or 0),
-        missing_artifacts_run_count=int(g("missing_artifacts_run_count", 5) or 0),
-        first_created_at=_as_db_datetime(g("first_created_at", 6)),
-        last_ended_at=_as_db_datetime(g("last_ended_at", 7)),
+        running_run_count=int(g("running_run_count", 3) or 0),
+        interrupted_run_count=int(g("interrupted_run_count", 4) or 0),
+        persist_error_run_count=int(g("persist_error_run_count", 5) or 0),
+        missing_artifacts_run_count=int(g("missing_artifacts_run_count", 6) or 0),
+        first_created_at=_as_db_datetime(g("first_created_at", 7)),
+        last_ended_at=_as_db_datetime(g("last_ended_at", 8)),
     )
 
 
@@ -322,10 +326,55 @@ WHERE r.session_stamp = %s
 """
 
 
+def materialize_static_session_rollup(
+    *,
+    session_stamp: str,
+    scope_label: str | None,
+) -> bool:
+    """Upsert the compact ``static_session_rollups`` row for one session/scope."""
+
+    stamp = (session_stamp or "").strip()
+    scope = _norm_scope(scope_label)
+    if not stamp:
+        return False
+
+    rollups = fetch_static_session_run_rollups(stamp, scope)
+    if rollups is None:
+        return False
+
+    core_q.run_sql(
+        """
+        INSERT INTO static_session_rollups (
+          session_stamp, scope_label, apps_total, completed, failed, aborted, running
+        )
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+        ON DUPLICATE KEY UPDATE
+          apps_total=VALUES(apps_total),
+          completed=VALUES(completed),
+          failed=VALUES(failed),
+          aborted=VALUES(aborted),
+          running=VALUES(running)
+        """,
+        (
+            stamp,
+            scope,
+            rollups.total_run_count,
+            rollups.completed_run_count,
+            rollups.failed_run_count,
+            rollups.interrupted_run_count,
+            rollups.running_run_count,
+        ),
+        fetch="none",
+        query_name="static_session.materialize_rollup",
+    )
+    return True
+
+
 def refresh_static_analysis_session_summary(
     *,
     session_stamp: str,
     scope_label: str | None,
+    materialize_rollup: bool = False,
 ) -> bool:
     """Recompute aggregate columns from child tables for one natural session key.
 
@@ -341,6 +390,9 @@ def refresh_static_analysis_session_summary(
     rollups = fetch_static_session_run_rollups(stamp, scope)
     if rollups is None:
         return False
+
+    if materialize_rollup:
+        materialize_static_session_rollup(session_stamp=stamp, scope_label=scope)
 
     sid_row = core_q.run_sql(
         """
@@ -463,12 +515,16 @@ def list_distinct_session_keys_from_runs() -> list[tuple[str, str]]:
     return out
 
 
-def refresh_all_static_analysis_sessions_from_runs() -> int:
+def refresh_all_static_analysis_sessions_from_runs(*, materialize_rollups: bool = False) -> int:
     """Refresh every (session_stamp, scope_label) observed in ``static_analysis_runs``."""
 
     n = 0
     for stamp, scope in list_distinct_session_keys_from_runs():
-        if refresh_static_analysis_session_summary(session_stamp=stamp, scope_label=scope):
+        if refresh_static_analysis_session_summary(
+            session_stamp=stamp,
+            scope_label=scope,
+            materialize_rollup=materialize_rollups,
+        ):
             n += 1
     return n
 

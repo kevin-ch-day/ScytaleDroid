@@ -203,7 +203,7 @@ def render_paper_freeze_readiness_brief() -> None:
     )
     print(
         status_messages.status(
-            "Strict Idle is the quota baseline lane. Quiescent FG is valid retained no-touch foreground evidence and does not satisfy strict-idle readiness.",
+            "Strict Idle is the quota baseline lane. Quiescent FG is an app-activity tag on valid no-touch foreground evidence.",
             level="info",
         )
     )
@@ -809,7 +809,7 @@ def _render_cohort_evidence_qualification_section(
     if baseline_pool > 0 or apps_satisfied >= int(dataset_apps_total):
         print(f"  ML training pool        : {baseline_pool} supplemental baseline(s) (tracker-scoped)")
     if baseline_non_idle > 0:
-        print(f"  Quiescent FG baselines  : {baseline_non_idle} retained outside strict-idle quota")
+        print(f"  Quiescent FG baselines  : {baseline_non_idle} app-active no-touch tag(s)")
     print()
     print("  Per app")
     table_rows = [

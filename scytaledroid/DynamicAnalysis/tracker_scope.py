@@ -259,11 +259,13 @@ def _is_repairable_stale_baseline_noncountable(run: dict, profile_lc: str) -> bo
         return False
     if run.get("valid_dataset_run") is False or run.get("paper_eligible") is False:
         return False
-    if bool(run.get("extra_run")):
+    if bool(run.get("extra_run")) and not (
+        profile_lc == "baseline_idle"
+        and bool(run.get("baseline_not_idle"))
+        and not bool(run.get("low_signal"))
+    ):
         return False
     if profile_lc == "baseline_idle" and bool(run.get("low_signal")):
-        return False
-    if profile_lc == "baseline_idle" and bool(run.get("baseline_not_idle")):
         return False
     return True
 

@@ -65,6 +65,17 @@ def split_set_dir(package_name: str, version_code: str, planned_split_set_hash: 
     return package_version_dir(package_name, version_code) / "split_sets" / planned_split_set_hash
 
 
+def _planned_manifest_path(plan: PackagePlan, planned_hash: str) -> Path:
+    return (
+        split_set_dir(
+            plan.inventory.package_name,
+            str(plan.inventory.version_code or "unknown"),
+            planned_hash,
+        )
+        / "package_manifest.json"
+    )
+
+
 def planned_split_set_hash_for_plan(plan: PackagePlan) -> str:
     """Hash the pre-pull split identity available from inventory/planning."""
 
@@ -89,13 +100,11 @@ def find_entry_for_plan(plan: PackagePlan, *, promote_legacy_receipt: bool = Tru
     """Return a complete library entry for *plan* if one is already available."""
 
     planned_hash = planned_split_set_hash_for_plan(plan)
-    manifest_path = split_set_dir(
-        plan.inventory.package_name,
-        str(plan.inventory.version_code or "unknown"),
-        planned_hash,
-    ) / "package_manifest.json"
+    manifest_path = _planned_manifest_path(plan, planned_hash)
     entry = _entry_from_manifest(manifest_path)
     if entry is not None and _entry_matches_plan(entry, plan):
+        if entry_has_content_variants(entry):
+            return None
         return entry
     if not promote_legacy_receipt:
         return None
@@ -103,6 +112,16 @@ def find_entry_for_plan(plan: PackagePlan, *, promote_legacy_receipt: bool = Tru
     if receipt is None:
         return None
     return register_legacy_receipt(receipt, plan=plan)
+
+
+def content_variant_entry_for_plan(plan: PackagePlan) -> ApkLibraryEntry | None:
+    """Return the planned library entry when a plan is blocked by content variants."""
+
+    planned_hash = planned_split_set_hash_for_plan(plan)
+    entry = _entry_from_manifest(_planned_manifest_path(plan, planned_hash))
+    if entry is None or not _entry_matches_plan(entry, plan):
+        return None
+    return entry if entry_has_content_variants(entry) else None
 
 
 def artifact_results_for_entry(entry: ApkLibraryEntry, plan: PackagePlan) -> list[ArtifactResult]:
@@ -229,6 +248,18 @@ def register_legacy_receipt(receipt_path: Path, *, plan: PackagePlan | None = No
     )
 
 
+def entry_has_content_variants(entry: ApkLibraryEntry) -> bool:
+    """Return True when one planned split-set has multiple observed content hashes."""
+
+    variants_dir = entry.entry_dir / "content_variants"
+    if any(variants_dir.glob("*/package_manifest.json")) if variants_dir.exists() else False:
+        return True
+    hashes = _history_content_hashes(entry.entry_dir / "harvest_history.csv")
+    if entry.split_set_hash:
+        hashes.add(entry.split_set_hash)
+    return len(hashes) > 1
+
+
 def legacy_receipt_seedable(receipt_path: Path) -> tuple[bool, str]:
     """Return whether a receipt has enough canonical data to seed the APK library."""
 
@@ -339,9 +370,35 @@ def _write_entry(
     artifact_store.ensure_external_path_available(library_root(), description="External APK library")
     planned_hash = planned_split_set_hash_for_plan(plan)
     content_hash = _content_split_set_hash(artifacts)
-    entry_dir = split_set_dir(plan.inventory.package_name, str(plan.inventory.version_code or "unknown"), planned_hash)
+    planned_entry_dir = split_set_dir(plan.inventory.package_name, str(plan.inventory.version_code or "unknown"), planned_hash)
+    planned_entry_dir.mkdir(parents=True, exist_ok=True)
+    planned_manifest_path = planned_entry_dir / "package_manifest.json"
+    existing_payload = _read_json(planned_manifest_path)
+    existing_content_hash = str(existing_payload.get("split_set_hash") or "").strip()
+    variant_entry = bool(existing_content_hash and existing_content_hash != content_hash)
+    entry_dir = (
+        planned_entry_dir / "content_variants" / content_hash
+        if variant_entry
+        else planned_entry_dir
+    )
     entry_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = entry_dir / "package_manifest.json"
+    if existing_content_hash and existing_content_hash != content_hash:
+        _append_harvest_history(
+            planned_entry_dir / "harvest_history.csv",
+            {
+                "observed_at_utc": _now_z(),
+                "session_label": session_stamp,
+                "device_serial": serial,
+                "package_name": plan.inventory.package_name,
+                "version_code": str(plan.inventory.version_code or ""),
+                "version_name": str(plan.inventory.version_name or ""),
+                "planned_split_set_hash": planned_hash,
+                "split_set_hash": content_hash,
+                "pull_action": f"{pull_action}_content_variant_indexed",
+                "source": source,
+            },
+        )
     payload = {
         "schema": "apk_library_entry_v1",
         "generated_at_utc": _now_z(),
@@ -358,6 +415,8 @@ def _write_entry(
         "source_device_serials": sorted({serial for serial in [serial] if serial}),
         "status": "available",
         "source": source,
+        "entry_kind": "content_variant" if variant_entry else "planned_split_set",
+        "primary_planned_manifest_path": artifact_store.repo_relative_path(planned_manifest_path) if variant_entry else "",
     }
     atomic_write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     _write_artifacts_csv(entry_dir / "artifacts.csv", artifacts)
@@ -639,6 +698,21 @@ def _append_harvest_history(path: Path, row: Mapping[str, Any]) -> None:
         writer.writerow({key: row.get(key, "") for key in fieldnames})
 
 
+def _history_content_hashes(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    hashes: set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                value = str(row.get("split_set_hash") or "").strip()
+                if value:
+                    hashes.add(value)
+    except OSError:
+        return set()
+    return hashes
+
+
 def _existing_first_seen(path: Path) -> str | None:
     payload = _read_json(path)
     value = payload.get("first_seen_at") if payload else None
@@ -705,7 +779,9 @@ __all__ = [
     "ApkLibraryArtifact",
     "ApkLibraryEntry",
     "artifact_results_for_entry",
+    "content_variant_entry_for_plan",
     "find_entry_for_plan",
+    "entry_has_content_variants",
     "library_root",
     "list_groups",
     "list_sessions",

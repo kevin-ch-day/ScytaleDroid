@@ -198,3 +198,56 @@ def test_generate_report_overlays_missing_repo_seed_service_maps(
     assert "api.live.bbcx-internal.com" in package_rows
     assert "bbc_first_party" in package_rows
     assert unresolved_rows == ""
+
+
+def test_generate_report_resolves_telegram_ip_context_from_observed_classification(
+    tmp_path: Path, monkeypatch
+) -> None:
+    observation_rows = [
+        {
+            "package_name": "org.telegram.messenger",
+            "display_name": "Telegram",
+            "domain": "149.154.175.51",
+            "root_domain": "149.154.160.0/20",
+            "owner_class": "first_party",
+            "role_class": "telegram_datacenter_transport",
+            "confidence": "high",
+            "total_hits": 210,
+            "observed_run_count": 1,
+        },
+        {
+            "package_name": "org.telegram.messenger",
+            "display_name": "Telegram",
+            "domain": "firebaselogging.googleapis.com",
+            "root_domain": "googleapis.com",
+            "owner_class": "third_party",
+            "role_class": "google_api_platform",
+            "confidence": "medium",
+            "total_hits": 3,
+            "observed_run_count": 1,
+        },
+    ]
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        if query_name == "dynamic.service_context.report.services":
+            return []
+        if query_name == "dynamic.service_context.report.maps":
+            return []
+        if query_name == "dynamic.service_context.report.observations":
+            return observation_rows
+        raise AssertionError(f"unexpected query_name={query_name!r} sql={sql[:80]!r}")
+
+    monkeypatch.setattr("scytaledroid.Database.db_core.db_queries.run_sql", fake_run_sql)
+    monkeypatch.setattr(report, "_load_network_context_coverage", lambda packages=None: [])
+
+    out_dir = tmp_path / "audit"
+    summary = report.generate_report(output_dir=out_dir)
+
+    assert summary["unresolved_domain_rows"] == 0
+    package_rows = (out_dir / "package_service_context.csv").read_text(encoding="utf-8")
+    summary_rows = (out_dir / "package_service_summary.csv").read_text(encoding="utf-8")
+    assert "149.154.175.51" in package_rows
+    assert "telegram_platform" in package_rows
+    assert "Telegram Messaging Platform" in package_rows
+    assert "google_platform" in package_rows
+    assert "telegram_platform:1" in summary_rows

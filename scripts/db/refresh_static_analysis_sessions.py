@@ -32,6 +32,11 @@ def main() -> int:
         default="",
         help="Target scope_label (omit or empty string for '').",
     )
+    parser.add_argument(
+        "--materialize-rollups",
+        action="store_true",
+        help="Also upsert missing static_session_rollups rows from static_analysis_runs aggregates.",
+    )
     args = parser.parse_args()
 
     from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
@@ -40,7 +45,9 @@ def main() -> int:
     )
 
     if args.all:
-        n = refresh_all_static_analysis_sessions_from_runs()
+        n = refresh_all_static_analysis_sessions_from_runs(
+            materialize_rollups=args.materialize_rollups,
+        )
         print(f"sessions_refreshed={n}")
         return 0
 
@@ -49,7 +56,11 @@ def main() -> int:
         parser.error("--session-stamp is required unless --all is set")
 
     scope = args.scope_label if args.scope_label is not None else ""
-    ok = refresh_static_analysis_session_summary(session_stamp=stamp, scope_label=scope)
+    ok = refresh_static_analysis_session_summary(
+        session_stamp=stamp,
+        scope_label=scope,
+        materialize_rollup=args.materialize_rollups,
+    )
     print(f"refreshed={1 if ok else 0}")
     return 0 if ok else 1
 

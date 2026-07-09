@@ -226,6 +226,8 @@ def _build_parser_provenance(metadata: Mapping[str, object]) -> dict[str, object
     fallback_payload = fallback if isinstance(fallback, Mapping) else {}
     fallback_used = _coerce_bool(fallback_payload.get("fallback_used"))
     fallback_reason = str(fallback_payload.get("fallback_reason") or "").strip() or None
+    resource_string_fallback_count = _coerce_int(metadata.get("resource_string_fallback_count")) or 0
+    resource_string_fallback_used = resource_string_fallback_count > 0
 
     label_source = str(metadata.get("label_fallback") or "").strip() or "androguard"
     if label_source == "package_name":
@@ -245,6 +247,12 @@ def _build_parser_provenance(metadata: Mapping[str, object]) -> dict[str, object
                 parse_error_resources=_coerce_bool(metadata.get("parse_error_resources")),
                 resource_fallback_used=fallback_used,
             )
+            if resource_string_fallback_used:
+                parse_state = {
+                    "parse_state": "fallback_recovered",
+                    "parse_partial": False,
+                    "reparse_candidate": False,
+                }
         else:
             parse_state = {
                 "parse_state": "none",
@@ -264,9 +272,13 @@ def _build_parser_provenance(metadata: Mapping[str, object]) -> dict[str, object
         "manifest_semantics_source": str(
             metadata.get("manifest_semantics_source") or metadata.get("manifest_source") or "androguard"
         ),
-        "resource_open_source": "aapt2_metadata_fallback" if fallback_used else "androguard",
+        "resource_open_source": "aapt2_metadata_fallback"
+        if fallback_used
+        else ("androguard+aapt2_resource_strings" if resource_string_fallback_used else "androguard"),
         "resource_fallback_used": fallback_used,
         "resource_fallback_reason": fallback_reason,
+        "resource_string_fallback_used": resource_string_fallback_used,
+        "resource_string_fallback_count": resource_string_fallback_count,
         "resource_bounds_warning_count": warning_count,
         "resource_bounds_warning_severity": str(warning_summary.get("severity") or "none"),
         "resource_bounds_warning_kind": str(warning_summary.get("warning_kind") or "none"),
@@ -396,6 +408,7 @@ def _summarize_string_index_metadata(string_index: object) -> dict[str, object]:
         "string_index_resource_strings": resource_strings,
         "string_index_native_strings": native_strings,
         "string_index_asset_strings": asset_strings,
+        "resource_string_fallback_count": int(getattr(string_index, "aapt2_resource_fallback_count", 0) or 0),
     }
 
 

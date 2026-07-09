@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
 
-from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
+    fetch_static_session_run_rollups,
+    materialize_static_session_rollup,
+)
 
 from ...core import StaticAnalysisReport
 from ..core.models import RunParameters
@@ -17,19 +20,10 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
         return
     scope_label = scope_label or ""
     try:
-        row = core_q.run_sql(
-            """
-            SELECT
-              COUNT(*) AS total,
-              SUM(CASE WHEN UPPER(COALESCE(status, ''))='COMPLETED' THEN 1 ELSE 0 END) AS completed,
-              SUM(CASE WHEN UPPER(COALESCE(status, ''))='FAILED' THEN 1 ELSE 0 END) AS failed,
-              SUM(CASE WHEN UPPER(COALESCE(status, '')) IN ('STARTED','RUNNING') THEN 1 ELSE 0 END) AS running
-            FROM static_analysis_runs
-            WHERE session_stamp=%s AND scope_label=%s
-            """,
-            (session_stamp, scope_label),
-            fetch="one",
-            dictionary=True,
+        rollups = fetch_static_session_run_rollups(session_stamp, scope_label)
+        rollup_written = materialize_static_session_rollup(
+            session_stamp=session_stamp,
+            scope_label=scope_label,
         )
     except Exception as exc:
         log.warning(
@@ -38,49 +32,7 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
         )
         return
 
-    if not row:
-        return
-
-    if isinstance(row, Mapping):
-        total = int(row.get("total") or 0)
-        completed = int(row.get("completed") or 0)
-        failed = int(row.get("failed") or 0)
-        running = int(row.get("running") or 0)
-    else:
-        row_seq = tuple(row) if isinstance(row, (tuple, list)) else ()
-        total = int(row_seq[0] or 0) if len(row_seq) > 0 else 0
-        completed = int(row_seq[1] or 0) if len(row_seq) > 1 else 0
-        failed = int(row_seq[2] or 0) if len(row_seq) > 2 else 0
-        running = int(row_seq[3] or 0) if len(row_seq) > 3 else 0
-    try:
-        core_q.run_sql(
-            """
-            INSERT INTO static_session_rollups (
-              session_stamp, scope_label, apps_total, completed, failed, aborted, running
-            )
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-            ON DUPLICATE KEY UPDATE
-              apps_total=VALUES(apps_total),
-              completed=VALUES(completed),
-              failed=VALUES(failed),
-              aborted=VALUES(aborted),
-              running=VALUES(running)
-            """,
-            (
-                session_stamp,
-                scope_label,
-                total,
-                completed,
-                failed,
-                0,
-                running,
-            ),
-        )
-    except Exception as exc:
-        log.warning(
-            f"Failed to persist cohort rollup for session={session_stamp}: {exc}",
-            category="static_analysis",
-        )
+    if not rollups or not rollup_written:
         return
 
     # Per-run finalization refreshes the session header before the cohort rollup exists.
@@ -125,8 +77,9 @@ def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -
         status_messages.status(
             (
                 f"Session history (DB rollup): static_analysis_runs rows matching this session="
-                f"{total} | COMPLETED={completed} | FAILED={failed} | "
-                f"still_STARTED_or_RUNNING={running} "
+                f"{rollups.total_run_count} | COMPLETED={rollups.completed_run_count} | "
+                f"FAILED={rollups.failed_run_count} | "
+                f"still_STARTED_or_RUNNING={rollups.running_run_count} "
                 "(non-terminal status rows only; usually 0 after the cohort finishes cleanly)"
             ),
             level=level,

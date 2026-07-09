@@ -12,8 +12,11 @@ No DDL, DML, filesystem writes, static runs, or dynamic links are made.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
+from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +43,19 @@ def main(argv: list[str] | None = None) -> int:
             "How to classify exact gaps whose recorded storage root is missing. "
             "Default: unrecoverable."
         ),
+    )
+    parser.add_argument(
+        "--write-report",
+        action="store_true",
+        help=(
+            "Write a read-only audit bundle under output/audit/dynamic_static_pairing_eligibility. "
+            "No DB rows or APK files are changed."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Report output directory when --write-report is used.",
     )
     args = parser.parse_args(argv)
 
@@ -136,6 +152,14 @@ def main(argv: list[str] | None = None) -> int:
             "recommended_dataset_use prefers normalized governance from v_dynamic_run_context_v1 when available.",
         ],
     }
+    if args.write_report or args.output_dir:
+        output_dir = (
+            Path(args.output_dir)
+            if args.output_dir
+            else Path("output/audit/dynamic_static_pairing_eligibility") / _utc_stamp()
+        )
+        payload["output_files"] = _write_report_bundle(payload, output_dir=output_dir)
+
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
@@ -492,6 +516,90 @@ def _print_text(payload: dict[str, Any]) -> None:
     print("=== Notes ===")
     for note in payload["notes"]:
         print(f"  - {note}")
+    if payload.get("output_files"):
+        print()
+        print("=== Report bundle ===")
+        for label, path in sorted(payload["output_files"].items()):
+            print(f"  {label}: {path}")
+
+
+def _write_report_bundle(payload: dict[str, Any], *, output_dir: Path) -> dict[str, str]:
+    from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "summary_json": output_dir / "summary.json",
+        "packages_csv": output_dir / "packages.csv",
+        "sessions_csv": output_dir / "sessions.csv",
+        "historical_identity_only_csv": output_dir / "historical_identity_only.csv",
+        "reharvest_candidates_csv": output_dir / "reharvest_candidates.csv",
+        "static_analysis_candidates_csv": output_dir / "static_analysis_candidates.csv",
+    }
+    serializable_payload = dict(payload)
+    serializable_payload["output_files"] = {key: str(path) for key, path in files.items()}
+    atomic_write_text(
+        files["summary_json"],
+        json.dumps(serializable_payload, indent=2, sort_keys=True, default=str) + "\n",
+    )
+    _write_csv(files["packages_csv"], payload.get("packages") or [])
+    sessions = list(payload.get("sessions") or [])
+    _write_csv(files["sessions_csv"], sessions)
+    _write_csv(
+        files["historical_identity_only_csv"],
+        [
+            row
+            for row in sessions
+            if str(row.get("classification") or "")
+            in {"historical_identity_only", "unpaired_unrecoverable_without_archive"}
+        ],
+    )
+    _write_csv(
+        files["reharvest_candidates_csv"],
+        [
+            row
+            for row in sessions
+            if str(row.get("classification") or "") == "unpaired_reharvest_required"
+        ],
+    )
+    _write_csv(
+        files["static_analysis_candidates_csv"],
+        [
+            row
+            for row in sessions
+            if str(row.get("classification") or "")
+            in {"unpaired_exact_static_available", "unpaired_static_missing_but_bytes_available"}
+        ],
+    )
+    return {key: str(path) for key, path in files.items()}
+
+
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+    if not rows:
+        atomic_write_text(path, "")
+        return
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(str(key))
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _csv_value(row.get(key)) for key in fieldnames})
+    atomic_write_text(path, buffer.getvalue())
+
+
+def _csv_value(value: Any) -> Any:
+    if isinstance(value, (dict, list, tuple, set)):
+        return json.dumps(value, sort_keys=True, default=str)
+    return value
+
+
+def _utc_stamp() -> str:
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _norm_sha(value: Any) -> str:

@@ -36,7 +36,14 @@ def selected_app_queue_action(
     interactive_missing = max(0, int(interactive_required) - int(interactive_valid_runs))
     if int(active_valid_runs) <= 0 and int(db_active_sessions) > 0:
         return ("restore local evidence", "current-build evidence exists in the DB, but the local evidence pack is missing")
-    if latest_valid is False:
+    latest_invalid_allows_interactive_continuation = (
+        latest_valid is False
+        and int(active_valid_runs) > 0
+        and baseline_missing <= 0
+        and interactive_missing > 0
+    )
+    latest_invalid_blocks_collection = latest_valid is False and not latest_invalid_allows_interactive_continuation
+    if latest_invalid_blocks_collection:
         detail = (
             str(latest_pcap_failure_detail or "").strip().upper()
             or str(latest_invalid_reason or "").strip().upper()

@@ -118,7 +118,7 @@ def test_print_progress_line_separates_reviewed_eligible_attempted_and_blocked(
     assert "reviewed 120/578" in out
     assert "eligible 152" in out
     assert "attempted 31" in out
-    assert "harvested 28" in out
+    assert "resolved 28" in out
     assert "blocked before pull 89" in out
     assert "replanned 2 (failed 1)" in out
     assert "blocked reviewed" not in out

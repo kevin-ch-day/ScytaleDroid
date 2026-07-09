@@ -360,7 +360,7 @@ def test_harvest_run_context_detail_lines_include_status_and_counts() -> None:
         {
             "harvest_status": "aborted_device_unavailable",
             "harvest_status_reason": "device_unavailable",
-            "harvest_operator_summary": "reviewed 2/2 · eligible 1 · attempted 1 · harvested 0 · blocked before pull 1 · issues (failed=1 drifted=0 partial=0)",
+            "harvest_operator_summary": "reviewed 2/2 · eligible 1 · attempted 1 · resolved 0 · blocked before pull 1 · issues (failed=1 drifted=0 partial=0)",
             "packages_reviewed": 2,
             "packages_eligible": 1,
             "packages_executed": 1,
@@ -376,11 +376,11 @@ def test_harvest_run_context_detail_lines_include_status_and_counts() -> None:
 
     assert "Harvest status: aborted_device_unavailable" in lines
     assert "Harvest status reason: device_unavailable" in lines
-    assert "Harvest summary: reviewed 2/2 · eligible 1 · attempted 1 · harvested 0 · blocked before pull 1 · issues (failed=1 drifted=0 partial=0)" in lines
+    assert "Harvest summary: reviewed 2/2 · eligible 1 · attempted 1 · resolved 0 · blocked before pull 1 · issues (failed=1 drifted=0 partial=0)" in lines
     assert "Packages reviewed: 2" in lines
     assert "Packages eligible: 1" in lines
     assert "Packages executed: 1" in lines
-    assert "Packages harvested: 0" in lines
+    assert "Packages resolved: 0" in lines
     assert "Packages blocked before pull: 1" in lines
     assert "Packages with path drift: 1" in lines
     assert "Packages replanned: 1" in lines
@@ -409,4 +409,4 @@ def test_print_harvest_success_menu_feedback_prefers_actual_harvest_counts(
     )
 
     out = capsys.readouterr().out
-    assert "Harvest complete: 105 harvested / 109 eligible / 578 in scope (469 blocked before pull)." in out
+    assert "Harvest complete: 105 resolved / 109 eligible / 578 in scope (469 blocked before pull)." in out

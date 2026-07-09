@@ -108,6 +108,72 @@ def test_collect_static_session_retirement_report(monkeypatch, tmp_path: Path) -
     assert sessions[1]["recommended_action"] == "blocked_file_present_review"
 
 
+def test_collect_static_session_retirement_blocks_package_mismatch(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        retirement,
+        "collect_artifact_registry_static_dangling_report",
+        lambda run_sql, repo_root: {  # noqa: ARG005
+            "static_dangling_rows": [
+                {
+                    "artifact_id": 1,
+                    "resolved_static_run_id": 100,
+                    "legacy_runs_row_present": True,
+                    "host_path_exists": False,
+                    "host_path_family": "static_baseline_json",
+                    "primary_reason": "legacy_mirror_only_file_missing",
+                    "meta_package_name": "",
+                    "created_at_utc": "2026-02-08 00:00:00",
+                    "host_path": str(
+                        tmp_path / "data" / "static_analysis" / "baseline" / "com.disney.disneyplus-full-all-20260429T010517Z.json"
+                    ),
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        retirement,
+        "collect_static_legacy_overlap_report",
+        lambda run_sql: {  # noqa: ARG005
+            "legacy_overlap_sessions": [
+                {
+                    "session_stamp": "phase4a-closeout-smoke",
+                    "overlap_run_ids": 1,
+                    "metrics_rows": 1,
+                    "buckets_rows": 1,
+                    "contributor_rows": 1,
+                    "finding_rows": 1,
+                },
+            ],
+            "legacy_overlap_runs": [
+                {
+                    "run_id": 100,
+                    "package": "android.autoinstalls.config.motorola.layout",
+                    "session_stamp": "phase4a-closeout-smoke",
+                    "metrics_rows": 1,
+                    "buckets_rows": 1,
+                    "contributor_rows": 1,
+                    "finding_rows": 1,
+                },
+            ],
+        },
+    )
+
+    report = retirement.collect_static_session_retirement_report(
+        lambda *args, **kwargs: None, repo_root=tmp_path
+    )
+
+    summary = report["summary"]
+    assert summary["candidate_session_count"] == 0
+    assert summary["blocked_session_count"] == 1
+    assert summary["package_mismatch_registry_rows"] == 1
+    assert summary["package_mismatch_session_count"] == 1
+    session = report["legacy_session_retirement_sessions"][0]
+    assert session["recommended_action"] == "blocked_package_mismatch_review"
+    sample = report["legacy_session_retirement_samples"][0]
+    assert sample["artifact_path_package"] == "com.disney.disneyplus"
+    assert sample["legacy_package_mismatch"] is True
+
+
 def test_write_static_session_retirement_bundle(tmp_path: Path) -> None:
     report = {
         "summary": {"legacy_overlap_session_count": 1},

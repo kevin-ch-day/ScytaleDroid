@@ -88,6 +88,7 @@ class StringIndex:
 
     strings: tuple[IndexedString, ...] = ()
     resource_bounds_warnings: tuple[str, ...] = ()
+    aapt2_resource_fallback_count: int = 0
     _hash_lookup: Mapping[str, IndexedString] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

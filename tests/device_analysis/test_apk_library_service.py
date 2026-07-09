@@ -61,24 +61,29 @@ def _stored_apk(digest: str, content: bytes = b"apk") -> str:
     return artifact_store.repo_relative_path(path)
 
 
+def _pull_result(plan, digest: str, canonical: str) -> PullResult:
+    result = PullResult(plan=plan)
+    result.ok.append(
+        ArtifactResult(
+            file_name=plan.artifacts[0].file_name,
+            apk_id=None,
+            dest_path=Path(canonical),
+            source_path=plan.artifacts[0].source_path,
+            sha256=digest,
+            file_size=3,
+            artifact_label=plan.artifacts[0].artifact,
+            is_base=not plan.artifacts[0].is_split_member,
+            canonical_store_path=canonical,
+        )
+    )
+    return result
+
+
 def test_register_result_creates_package_version_split_set_entry() -> None:
     plan = _plan()
     digest = "a" * 64
     canonical = _stored_apk(digest)
-    result = PullResult(plan=plan)
-    result.ok.append(
-        ArtifactResult(
-            file_name="com_example_app_1__base.apk",
-            apk_id=None,
-            dest_path=Path(canonical),
-            source_path="/data/app/com.example.app/base.apk",
-            sha256=digest,
-            file_size=3,
-            artifact_label="base",
-            is_base=True,
-            canonical_store_path=canonical,
-        )
-    )
+    result = _pull_result(plan, digest, canonical)
 
     entry = apk_library_service.register_result(result, serial="SER", session_stamp="run-1")
 
@@ -88,6 +93,32 @@ def test_register_result_creates_package_version_split_set_entry() -> None:
     assert (entry.entry_dir / "artifacts.csv").exists()
     assert (entry.entry_dir / "harvest_history.csv").exists()
     assert apk_library_service.find_entry_for_plan(plan) is not None
+
+
+def test_register_result_indexes_same_planned_split_set_content_variant_without_overwrite() -> None:
+    plan = _plan()
+    first_digest = "a" * 64
+    second_digest = "b" * 64
+    first_canonical = _stored_apk(first_digest, b"first")
+    second_canonical = _stored_apk(second_digest, b"second")
+
+    first_entry = apk_library_service.register_result(_pull_result(plan, first_digest, first_canonical), serial="SER", session_stamp="run-1")
+    second_entry = apk_library_service.register_result(_pull_result(plan, second_digest, second_canonical), serial="SER", session_stamp="run-2")
+
+    assert first_entry is not None
+    assert second_entry is not None
+    assert second_entry.entry_dir == first_entry.entry_dir / "content_variants" / second_entry.split_set_hash
+    payload = json.loads(first_entry.manifest_path.read_text(encoding="utf-8"))
+    assert payload["split_set_hash"] == first_entry.split_set_hash
+    assert payload["artifacts"][0]["sha256"] == first_digest
+    variant_payload = json.loads(second_entry.manifest_path.read_text(encoding="utf-8"))
+    assert variant_payload["entry_kind"] == "content_variant"
+    assert variant_payload["artifacts"][0]["sha256"] == second_digest
+    history = (first_entry.entry_dir / "harvest_history.csv").read_text(encoding="utf-8")
+    assert first_entry.split_set_hash in history
+    assert "content_variant_indexed" in history
+    assert apk_library_service.find_entry_for_plan(plan) is None
+    assert apk_library_service.content_variant_entry_for_plan(plan) == first_entry
 
 
 def test_split_set_difference_creates_distinct_entry() -> None:

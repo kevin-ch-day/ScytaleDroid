@@ -90,6 +90,118 @@ def test_sync_manifest_from_tracker_updates_non_idle_policy_fields(tmp_path: Pat
     assert dataset["exploratory_class"] == "BASELINE_NOT_IDLE"
 
 
+def test_policy_sync_treats_missing_quota_defaults_as_equivalent(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-defaults"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": True,
+                "countable": True,
+                "cohort_eligibility": "COUNTABLE",
+            },
+            "target": {"package_name": "com.guardian"},
+            "operator": {"run_profile": "baseline_idle"},
+        },
+    )
+    tracker_row = {
+        "run_id": "run-defaults",
+        "valid_dataset_run": True,
+        "countable": True,
+        "counts_toward_quota": True,
+        "extra_run": 0,
+        "cohort_eligibility": "COUNTABLE",
+    }
+
+    assert repair._policy_sync_candidate_row(run_dir, tracker_row) is None
+
+
+def test_policy_sync_treats_missing_tracker_optional_none_as_equivalent(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-optional-none"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": True,
+                "countable": True,
+                "cohort_eligibility": "COUNTABLE",
+                "exploratory_class": None,
+            },
+            "target": {"package_name": "com.guardian"},
+            "operator": {"run_profile": "baseline_idle"},
+        },
+    )
+    tracker_row = {
+        "run_id": "run-optional-none",
+        "valid_dataset_run": True,
+        "countable": True,
+        "counts_toward_quota": True,
+        "extra_run": 0,
+        "cohort_eligibility": "COUNTABLE",
+    }
+
+    assert repair._policy_sync_candidate_row(run_dir, tracker_row) is None
+
+
+def test_policy_sync_still_detects_missing_false_quota_flag(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-noncountable"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": True,
+                "countable": False,
+                "cohort_eligibility": "EXTRA",
+            },
+            "target": {"package_name": "com.guardian"},
+            "operator": {"run_profile": "baseline_idle"},
+        },
+    )
+    tracker_row = {
+        "run_id": "run-noncountable",
+        "valid_dataset_run": True,
+        "countable": False,
+        "counts_toward_quota": False,
+        "extra_run": 1,
+        "cohort_eligibility": "EXTRA",
+    }
+
+    row = repair._policy_sync_candidate_row(run_dir, tracker_row)
+
+    assert row is not None
+    changed = set(str(row["changed_fields"]).split(","))
+    assert {"counts_toward_quota", "extra_run"} <= changed
+
+
+def test_policy_sync_does_not_rewrite_aborted_discard_runs(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-aborted"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": False,
+                "countable": False,
+                "invalid_reason_code": "ABORTED_DISCARD",
+                "cohort_eligibility": "EXCLUDED",
+                "low_signal": True,
+            },
+            "target": {"package_name": "org.telegram.messenger"},
+            "operator": {"run_profile": "interaction_manual", "messaging_activity": "voice_call"},
+        },
+    )
+    tracker_row = {
+        "run_id": "run-aborted",
+        "valid_dataset_run": False,
+        "countable": False,
+        "invalid_reason_code": "INSUFFICIENT_DURATION",
+        "cohort_eligibility": "EXCLUDED",
+        "low_signal": False,
+        "low_signal_reasons": [],
+    }
+
+    assert repair._policy_sync_candidate_row(run_dir, tracker_row) is None
+
+
 def test_apply_repairs_refreshes_all_derived_artifacts_for_repaired_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -235,3 +347,126 @@ def test_apply_repairs_reindexes_explicit_run_id_even_when_no_manifest_candidate
     assert synced == 0
     assert reindexed == 1
     assert reindex_calls == [run_dir]
+
+
+def test_main_dry_run_does_not_refresh_tracker_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def _fake_refresh() -> None:
+        calls.append("refresh")
+
+    def _fake_candidates(evidence_root: Path, run_ids: set[str]):
+        calls.append("candidates")
+        assert evidence_root == tmp_path / "evidence"
+        assert run_ids == {"run-1"}
+        return []
+
+    monkeypatch.setattr(repair, "_refresh_tracker_truth", _fake_refresh)
+    monkeypatch.setattr(repair, "_candidate_rows", _fake_candidates)
+
+    assert (
+        repair.main(
+            [
+                "--evidence-root",
+                str(tmp_path / "evidence"),
+                "--output-dir",
+                str(tmp_path / "audit"),
+                "--run-id",
+                "run-1",
+            ]
+        )
+        == 0
+    )
+
+    assert calls == ["candidates"]
+    summary = json.loads((tmp_path / "audit" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["tracker_refreshed_before_candidate_selection"] is False
+
+
+def test_main_dry_run_refresh_tracker_option_runs_before_candidate_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(repair, "_refresh_tracker_truth", lambda: calls.append("refresh"))
+    monkeypatch.setattr(repair, "_candidate_rows", lambda evidence_root, run_ids: calls.append("candidates") or [])
+
+    assert (
+        repair.main(
+            [
+                "--evidence-root",
+                str(tmp_path / "evidence"),
+                "--output-dir",
+                str(tmp_path / "audit"),
+                "--run-id",
+                "run-1",
+                "--refresh-tracker",
+            ]
+        )
+        == 0
+    )
+
+    assert calls == ["refresh", "candidates"]
+    summary = json.loads((tmp_path / "audit" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["tracker_refreshed_before_candidate_selection"] is True
+
+
+def test_main_apply_refreshes_tracker_before_candidate_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    rows = [
+        {
+            "repair_type": "policy_sync",
+            "run_id": "run-1",
+            "package": "org.thoughtcrime.securesms",
+            "run_profile": "baseline_connected",
+            "messaging_activity": "connected_idle",
+            "current_valid_dataset_run": 1,
+            "current_invalid_reason_code": "",
+            "new_valid_dataset_run": 1,
+            "new_invalid_reason_code": None,
+            "changed_fields": "low_signal,low_signal_reasons",
+        }
+    ]
+
+    def _fake_candidates(evidence_root: Path, run_ids: set[str]):
+        calls.append("candidates")
+        return rows
+
+    def _fake_apply(evidence_root: Path, output_dir: Path, selected_rows, *, explicit_run_ids=()):
+        calls.append("apply")
+        assert selected_rows == rows
+        assert explicit_run_ids == ["run-1"]
+        return (0, 1, 1)
+
+    monkeypatch.setattr(repair, "_refresh_tracker_truth", lambda: calls.append("refresh"))
+    monkeypatch.setattr(repair, "_candidate_rows", _fake_candidates)
+    monkeypatch.setattr(repair, "_apply_repairs", _fake_apply)
+
+    assert (
+        repair.main(
+            [
+                "--evidence-root",
+                str(tmp_path / "evidence"),
+                "--output-dir",
+                str(tmp_path / "audit"),
+                "--run-id",
+                "run-1",
+                "--apply",
+            ]
+        )
+        == 0
+    )
+
+    assert calls == ["refresh", "candidates", "apply"]
+    summary = json.loads((tmp_path / "audit" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["tracker_refreshed_before_candidate_selection"] is True
+    assert summary["candidate_rows"] == 1
+    assert summary["synced_manifest_rows"] == 1
+    assert summary["reindexed_db_rows"] == 1

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from hashlib import sha256
 from pathlib import Path
 
 from scripts.dynamic import refresh_analysis_summaries as refresh
@@ -129,6 +130,57 @@ def test_refresh_summaries_apply_rewrites_summary(tmp_path: Path) -> None:
     refreshed = json.loads((run_dir / "analysis" / "summary.json").read_text(encoding="utf-8"))
     assert refreshed["destinations_observed"] == ["collector.cdp.cnn.com", "media.cnn.com"]
     assert (run_dir / "analysis" / "summary.md").exists()
+
+
+def test_refresh_summaries_apply_syncs_manifest_output_hashes(tmp_path: Path) -> None:
+    root = tmp_path / "output" / "evidence" / "dynamic"
+    run_dir = root / "run-hash-sync"
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "run_manifest_version": 1,
+            "dynamic_run_id": "run-hash-sync",
+            "created_at": "2026-07-09T00:00:00Z",
+            "status": "success",
+            "target": {"package_name": "org.thoughtcrime.securesms"},
+            "artifacts": [],
+            "outputs": [
+                {
+                    "relative_path": "analysis/summary.json",
+                    "type": "analysis_summary_json",
+                    "produced_by": "summarizer",
+                    "sha256": "stale",
+                    "size_bytes": 5,
+                }
+            ],
+            "operator": {"run_profile": "interaction_manual"},
+        },
+    )
+    _write_json(run_dir / "analysis" / "summary.json", {"destinations_observed": []})
+    _write_json(
+        run_dir / "analysis" / "pcap_report.json",
+        {"top_dns": [{"value": "grpc.chat.signal.org", "count": 2}], "top_sni": []},
+    )
+
+    summary = refresh.refresh_summaries(root=root, apply=True)
+
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    outputs = {
+        str(row.get("relative_path")): row
+        for row in manifest.get("outputs", [])
+        if isinstance(row, dict)
+    }
+    summary_json = run_dir / "analysis" / "summary.json"
+    summary_md = run_dir / "analysis" / "summary.md"
+
+    assert summary["manifest_outputs_synced"] == 2
+    assert summary["manifest_writes"] == 1
+    assert summary["no_manifest_writes"] is False
+    assert outputs["analysis/summary.json"]["sha256"] == sha256(summary_json.read_bytes()).hexdigest()
+    assert outputs["analysis/summary.json"]["size_bytes"] == summary_json.stat().st_size
+    assert outputs["analysis/summary.md"]["sha256"] == sha256(summary_md.read_bytes()).hexdigest()
+    assert outputs["analysis/summary.md"]["size_bytes"] == summary_md.stat().st_size
+    assert "dataset" not in manifest
 
 
 def test_refresh_summaries_apply_restores_top_level_summary_compat_fields(tmp_path: Path) -> None:

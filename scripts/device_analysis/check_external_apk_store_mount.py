@@ -9,7 +9,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, TextIO
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -30,6 +30,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="External mount root to accept; repeatable. Defaults to Mercury V2/USB roots.",
     )
     parser.add_argument("--skip-sha256", action="store_true", help="Skip byte hashing of canonical APK blobs.")
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=0,
+        metavar="N",
+        help="During SHA verification, print progress every N canonical APK paths. Default: no progress.",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON only.")
     return parser
 
@@ -41,6 +48,8 @@ def build_report(
     mount_roots: Sequence[Path] | None = None,
     verify_sha256: bool = True,
     is_mount: Callable[[str], bool] | None = None,
+    progress_every: int = 0,
+    progress_stream: TextIO | None = None,
 ) -> dict[str, Any]:
     """Build a read-only APK store report."""
 
@@ -60,6 +69,8 @@ def build_report(
         verify_sha256=verify_sha256,
         mount_roots=roots,
         is_mount=is_mount,
+        progress_every=progress_every,
+        progress_stream=progress_stream,
     )
     broken_legacy = _broken_legacy_apk_symlinks(root / "device_apks" / serial / "runs")
 
@@ -146,6 +157,8 @@ def _canonical_counts(
     verify_sha256: bool,
     mount_roots: Sequence[Path] | None = None,
     is_mount: Callable[[str], bool] | None = None,
+    progress_every: int = 0,
+    progress_stream: TextIO | None = None,
 ) -> dict[str, Any]:
     count = 0
     hot_regular = 0
@@ -163,7 +176,20 @@ def _canonical_counts(
     mismatch: int | None = 0 if verify_sha256 else None
     roots = tuple(mount_roots or artifact_store.EXTERNAL_APK_STORE_MOUNT_ROOTS)
     mount_check = is_mount or os.path.ismount
-    for path in sorted(root.rglob("*.apk")) if root.exists() else []:
+    apk_paths = sorted(root.rglob("*.apk")) if root.exists() else []
+    total_paths = len(apk_paths)
+    progress_n = max(int(progress_every or 0), 0)
+
+    def emit_progress() -> None:
+        _maybe_emit_progress(
+            current=count,
+            total=total_paths,
+            progress_every=progress_n,
+            progress_stream=progress_stream,
+            mismatch_count=mismatch,
+        )
+
+    for path in apk_paths:
         count += 1
         stem = path.stem.lower()
         try:
@@ -194,9 +220,11 @@ def _canonical_counts(
             if not path.exists():
                 broken_symlink += 1
             if not target_exists or (external and not mount_check(str(external))):
+                emit_progress()
                 continue
             if not os.access(path, os.R_OK):
                 unreadable += 1
+                emit_progress()
                 continue
             if path.stat().st_size == 0:
                 zero += 1
@@ -204,8 +232,10 @@ def _canonical_counts(
                 digest = _sha256(path)
                 if digest != stem:
                     mismatch = int(mismatch or 0) + 1
+            emit_progress()
             continue
         if not path.is_file():
+            emit_progress()
             continue
         hot_regular += 1
         if not os.access(path, os.R_OK):
@@ -219,6 +249,7 @@ def _canonical_counts(
             digest = _sha256(path)
             if digest != stem:
                 mismatch = int(mismatch or 0) + 1
+        emit_progress()
     return {
         "path": root.as_posix(),
         "canonical_apk_blob_count": count,
@@ -255,6 +286,24 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _maybe_emit_progress(
+    *,
+    current: int,
+    total: int,
+    progress_every: int,
+    progress_stream: TextIO | None,
+    mismatch_count: int | None,
+) -> None:
+    if progress_every <= 0 or progress_stream is None:
+        return
+    if current % progress_every != 0 and current != total:
+        return
+    progress_stream.write(
+        f"SHA progress: {current}/{total} canonical APK paths; mismatches={int(mismatch_count or 0)}\n"
+    )
+    progress_stream.flush()
 
 
 def _external_mount_root_for(path: Path, roots: Sequence[Path]) -> Path | None:
@@ -302,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
         serial=args.serial,
         mount_roots=mount_roots,
         verify_sha256=not args.skip_sha256,
+        progress_every=max(int(args.progress_every or 0), 0),
+        progress_stream=sys.stderr if args.progress_every and not args.skip_sha256 else None,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
