@@ -1,7 +1,7 @@
 """S2-P0: pure transform from static analysis facts → proposed PI observation payload.
 
 No database writes. Contract fields align with
-``docs/database/permission_intel_scytaledroid_s2_observation_design.md`` §13.
+``docs/database/permission_intel_contract.md``.
 """
 
 from __future__ import annotations

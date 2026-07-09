@@ -5,8 +5,8 @@ from __future__ import annotations
 from scytaledroid.DynamicAnalysis.capture.state import CaptureState
 
 _CONTROLS_LINE = (
-    "Enter = stop & finalize | A = abort & discard | R = relaunch target | "
-    "Ctrl+C = emergency abort"
+    "Enter = stop & finalize | A = discard run (not countable) | "
+    "R = relaunch target | Ctrl+C = emergency abort"
 )
 _VALUE_WIDTH = 64
 _LATEST_WIDTH = 64

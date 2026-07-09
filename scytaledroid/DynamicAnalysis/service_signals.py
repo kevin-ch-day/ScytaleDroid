@@ -106,6 +106,15 @@ def default_signal_catalog_entries() -> tuple[SignalCatalogEntry, ...]:
             analyst_guidance="Usually lower-priority unless paired with stronger privacy/security signals.",
         ),
         SignalCatalogEntry(
+            signal_key="third_party_content_delivery",
+            display_name="Third-Party Content Delivery",
+            signal_family="content_delivery",
+            focus_area="context",
+            severity_hint="low",
+            description="Observed service delivers third-party media, static assets, previews, or product imagery.",
+            analyst_guidance="Treat as content-delivery context; do not interpret as tracking or ad measurement without companion evidence.",
+        ),
+        SignalCatalogEntry(
             signal_key="first_party_publisher_api",
             display_name="First-Party Publisher API",
             signal_family="first_party_content",
@@ -193,6 +202,7 @@ def default_service_signal_map_entries() -> tuple[ServiceSignalMapEntry, ...]:
         ServiceSignalMapEntry("google_ads", "third_party_advertising"),
         ServiceSignalMapEntry("google_ads", "ad_measurement_or_verification", signal_strength="secondary", confidence="medium"),
         ServiceSignalMapEntry("amazon_ads", "third_party_advertising", confidence="medium"),
+        ServiceSignalMapEntry("amazon_media_cdn", "third_party_content_delivery", confidence="medium"),
         ServiceSignalMapEntry("microsoft_ads_atlas", "third_party_advertising", confidence="medium"),
         ServiceSignalMapEntry("microsoft_ads_atlas", "ad_measurement_or_verification", signal_strength="secondary", confidence="medium"),
         ServiceSignalMapEntry("ozone_project", "third_party_advertising"),

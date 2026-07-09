@@ -1,9 +1,24 @@
+import contextlib
 import re
+import sys
+import types
+from io import StringIO
 from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.inventory import views
 from scytaledroid.DeviceAnalysis.inventory.views import print_inventory_run_summary_from_result
 from scytaledroid.Utils.DisplayUtils import colors
+
+
+def _fake_pkg(pkg_name, partition, category=None, source=None, split=1):
+    return {
+        "package_name": pkg_name,
+        "partition": partition,
+        "profile_name": category,
+        "source": source,
+        "base_code_path": "/data/app/" + pkg_name,
+        "code_paths": ["/data/app/" + pkg_name] * split,
+    }
 
 
 def _fake_result():
@@ -36,6 +51,33 @@ def _fake_result():
         fallback_used=True,
         stats=SimpleNamespace(total_packages=2, split_packages=0, path_enriched_packages=1, bulk_identity_only_packages=1),
     )
+
+
+def test_inventory_summary_no_duplicate_partitions(capsys):
+    # Avoid heavy imports/circular deps by stubbing device_service before import.
+    stub_device_service = types.SimpleNamespace()
+    sys.modules["scytaledroid.DeviceAnalysis.services.device_service"] = stub_device_service
+
+    from scytaledroid.DeviceAnalysis.inventory.summary import render_inventory_summary
+
+    rows = [
+        _fake_pkg("app.user", "Data", category="User", source="Play Store"),
+        _fake_pkg("app.oem", "Product", category="OEM", source="Sideload"),
+        _fake_pkg("app.sys", "System", category="System", source="Play Store"),
+        _fake_pkg("app.apex", "Apex", category="Mainline", source="Play Store"),
+    ]
+
+    buf = StringIO()
+    with contextlib.redirect_stdout(buf):
+        render_inventory_summary(rows)
+
+    out = buf.getvalue()
+
+    # Ensure partition labels appear once, not duplicated under multiple headings.
+    assert out.count("/data") == 1
+    assert out.count("/product") == 1
+    assert out.count("/system") == 1
+    assert out.count("/apex") == 1
 
 
 def test_print_inventory_run_summary_from_result(capsys):

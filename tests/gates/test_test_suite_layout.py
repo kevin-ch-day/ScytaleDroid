@@ -41,6 +41,10 @@ def test_retired_test_buckets_have_no_active_modules() -> None:
     retired = [
         Path("tests/static"),
         Path("tests/db_utils"),
+        Path("tests/db"),
+        Path("tests/profile_tools"),
+        Path("tests/logging"),
+        Path("tests/diagnostics"),
     ]
     active = {
         str(path): sorted(child.name for child in path.glob("test_*.py"))

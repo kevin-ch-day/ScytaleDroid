@@ -103,7 +103,7 @@ rg 'INSERT INTO (runs|findings|metrics|buckets|contributors)\b' scytaledroid --g
 
 #### Related (planning)
 
-- [fast_implementation_backlog_lanes.md](fast_implementation_backlog_lanes.md) — Lane 2 batch notes.
+- [archive/completed-plans/fast_implementation_backlog_lanes.md](archive/completed-plans/fast_implementation_backlog_lanes.md) — historical Lane 2 batch notes.
 
 ---
 
@@ -336,7 +336,7 @@ Second-pass checks against greps, `static_database_schema_audit_plan.md`, `legac
 
 | Item | Detail |
 | --- | --- |
-| **`ownership_matrix_v1_3.csv`** | **Phase 2A+ hygiene:** legacy-five **`write_owner`** / **notes** rows were refreshed to match the no-`INSERT` baseline in current Python (see **`legacy_static_phase2a_policy_alignment_plan.md`**). If a row drifts again (e.g. new script claims a writer without grep proof), fix the CSV in the same PR as the code or revert the doc claim. |
+| **`ownership_matrix_v1_3.csv`** | **Phase 2A+ hygiene:** legacy-five **`write_owner`** / **notes** rows were refreshed to match the no-`INSERT` baseline in current Python (see **`archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md`**). If a row drifts again (e.g. new script claims a writer without grep proof), fix the CSV in the same PR as the code or revert the doc claim. |
 | **`bridge_posture.py` `current_readers`** | Tuple lists are **partial**; prefer this map + fresh `rg` when arguing “no readers.” |
 
 ### 8.5 Policy / contract contradictions (operator confusion)
@@ -378,7 +378,7 @@ Second-pass checks against greps, `static_database_schema_audit_plan.md`, `legac
 ## Related documents
 
 - [legacy_static_deprecation_playbook.md](legacy_static_deprecation_playbook.md) — phased exit; this map feeds **Phase 2–3**.
-- [legacy_static_phase2a_policy_alignment_plan.md](legacy_static_phase2a_policy_alignment_plan.md) — **completed** policy record + verification commands (stub).
+- [archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md](archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md) — **completed** policy record + verification commands (stub).
 - [legacy_static_tables_consumer_audit.md](legacy_static_tables_consumer_audit.md) — **index page** (baseline grep + pointers); per-table matrices live in **this doc §3**.
 - [static_database_schema_audit_plan.md](static_database_schema_audit_plan.md) — schema inventory semantics.
 - [legacy_static_deprecation_playbook.md](legacy_static_deprecation_playbook.md#legacy-static-table-compatibility-appendix) — relabel vs migrate buckets (**Appendix A**, merged from the former reduction plan doc).

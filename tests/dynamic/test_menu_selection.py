@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+from scytaledroid.DynamicAnalysis.menus import queue_data_sources
 from scytaledroid.DynamicAnalysis.menus import queue_selection as menu_selection
 
 _QUEUE_TABLE_HEADERS = [
@@ -34,9 +37,15 @@ class _Cfg:
     interactive_required = 2
 
 
+class _CfgFourInteractive:
+    baseline_required = 3
+    interactive_required = 4
+
+
 @pytest.fixture(autouse=True)
 def _wide_queue_layout(monkeypatch) -> None:
     monkeypatch.setattr(menu_selection.terminal, "get_terminal_width", lambda *args, **kwargs: 140)
+    monkeypatch.setattr(menu_selection._app_queue_rendering, "_paper_cutoff_summary_label", lambda: "")
 
 
 def test_queue_table_marks_next_recommended_row(monkeypatch) -> None:
@@ -266,6 +275,7 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
     assert "8/5 valid" in out
     assert "retained extra" in out
     assert "current-build collection queue" in out
+    assert "Paper cutoff" not in out
     assert "paper-freeze readiness" in out
     assert "Current build" in out
     assert "1/3 complete" in out
@@ -283,13 +293,6 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
     assert "Freeze/export" not in out
     assert "Next recommended run" not in out
     assert "Select an app by number or name" in out
-    assert "P paper freeze" in out
-    assert "S summary" in out
-    assert "V grouped" in out
-    assert "Y history" in out
-    assert "H help" in out
-    assert "D diagnostics" in out
-    assert "B back" in out
     assert captured["headers"] == _QUEUE_TABLE_HEADERS
     assert captured["rows"][0][1:] == [
         "BBC News",
@@ -325,6 +328,82 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
         "0",
         "0",
     ]
+
+
+def test_run_package_selection_menu_surfaces_paper_cutoff_summary(monkeypatch, capsys) -> None:
+    row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["1"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=1,
+        dataset_valid_runs_count=7,
+        historical_valid_runs_count=0,
+        package_name="com.pinterest",
+        display_name="Pinterest",
+        baseline_countable=3,
+        interactive_countable=2,
+        need_baseline=0,
+        need_interactive=2,
+        prep_label="current",
+        qa_label="valid",
+        next_label="manual interaction",
+        lineage_state="current_build_observed",
+    )
+    prepared = menu_selection.PreparedPackageSelectionView(
+        packages=[("com.pinterest", None, None, "Pinterest")],
+        dataset_pkgs={"com.pinterest"},
+        cfg=_Cfg(),
+        rows=[],
+        op_rows=[row.op_row],
+        build_rows=[],
+        dataset_apps_total=15,
+        dataset_apps_complete=5,
+        dataset_valid_runs_total=87,
+        current_build_ready_count=5,
+        current_build_in_progress_count=7,
+        current_build_review_count=0,
+        stale_app_count=0,
+        mixed_identity_app_count=0,
+        legacy_only_app_count=0,
+        historical_local_only_app_count=0,
+        row_models=[row],
+        expected_runs=105,
+        evidence_summary={
+            "evidence_root_exists": True,
+            "quota_runs_counted": 87,
+            "apps_satisfied": 7,
+            "extra_eligible_runs": 137,
+        },
+    )
+    monkeypatch.setattr(menu_selection.menu_utils, "print_header", lambda *_a, **_k: None)
+    monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
+    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
+    monkeypatch.setattr(
+        menu_selection._app_queue_rendering,
+        "_paper_cutoff_summary_label",
+        lambda: "15/15 paper-usable · ready targets 10 · holes 0 · needs interactive 5",
+    )
+
+    result = menu_selection.run_package_selection_menu(
+        prepared,
+        summarize_evidence_quota_fn=lambda *_a, **_k: prepared.evidence_summary,
+    )
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "Paper cutoff" in out
+    assert "15/15 paper-usable" in out
+    assert "ready targets 10" in out
+    assert "holes 0" in out
+    assert "needs interactive 5" in out
+    assert "P paper freeze" in out
+    assert "S summary" in out
+    assert "V grouped" in out
+    assert "Y history" in out
+    assert "H help" in out
+    assert "D diagnostics" in out
+    assert "B back" in out
 
 
 def test_queue_summary_without_selected_device_uses_tracked_build_wording(capsys) -> None:
@@ -1585,3 +1664,116 @@ def test_run_package_selection_menu_guides_non_drift_capture_before_redoing_drif
     out = capsys.readouterr().out
     assert "capture non-drift quota-impact rows first" in out
     assert "drift changes provenance labels, not evidence availability" in out
+
+
+def test_resolve_live_build_drift_map_uses_identity_static_run_id_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        queue_data_sources,
+        "load_plan_candidates",
+        lambda package_name: (
+            [
+                {
+                    "generated_at": "2026-06-30T00:00:00Z",
+                    "version_name": "12.3.1-release.0",
+                    "version_code": "312031000",
+                    "identity": {
+                        "version_code": "312031000",
+                        "static_run_id": "5207",
+                    },
+                }
+            ],
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        queue_data_sources,
+        "read_observed_version_code_details",
+        lambda *_args, **_kwargs: {"version_code": "312040000"},
+    )
+
+    drift_map = queue_data_sources.resolve_live_build_drift_map(
+        ["com.twitter.android"],
+        device_serial="ZY22JK89DR",
+    )
+
+    assert drift_map == {
+        "com.twitter.android": {
+            "expected_version_code": "312031000",
+            "expected_version_name": "12.3.1-release.0",
+            "observed_version_code": "312040000",
+            "static_run_id": "5207",
+        }
+    }
+
+
+def test_build_package_selection_row_accepts_live_build_drift_for_refresh_action() -> None:
+    row = menu_selection.build_package_selection_row(
+        idx=2,
+        package="com.cnn.mobile.android.phone",
+        app_label="CNN",
+        collisions=set(),
+        dataset_pkgs={"com.cnn.mobile.android.phone"},
+        tracker_apps={
+            "com.cnn.mobile.android.phone": {
+                "runs": [
+                    {
+                        "run_id": "run-1",
+                        "version_code": "19127521",
+                        "base_sha256": "abc123",
+                    }
+                ]
+            }
+        },
+        cfg=_CfgFourInteractive(),
+        recent_tracker_runs=lambda _package, limit=1: [
+            SimpleNamespace(
+                valid=False,
+                run_id="run-1",
+                invalid_reason_code="PCAP_MISSING",
+                pcap_failure_detail="PCAP_LOCAL_FILE_MISSING",
+            )
+        ],
+        live_build_drift={
+            "observed_version_code": "19250507",
+            "expected_version_code": "19127521",
+            "expected_version_name": "8.4.50",
+            "static_run_id": 4701,
+        },
+        db_lineage_context={
+            "db_active_sessions": 1,
+            "db_historical_sessions": 0,
+            "db_total_sessions": 1,
+        },
+        truncate_visible_fn=lambda value, _limit: value,
+        bucket_progress_label_fn=lambda count, required, extra_count=0, low_signal=0, need=0: (
+            f"{count + extra_count + low_signal}/{required}" + (f" need {need}" if need else "")
+        ),
+        quota_progress_label_fn=lambda count, required, extra_count=0, low_signal=0: (
+            f"{count}/{required}"
+            + (f" +{extra_count + low_signal}" if (extra_count + low_signal) else "")
+        ),
+        static_build_label_fn=lambda active_runs, legacy_valid: (
+            "current" if active_runs or not legacy_valid else "legacy"
+        ),
+        next_action_from_need_fn=lambda need: need,
+        build_scoped_dataset_counts_fn=lambda _package, _runs, cfg: {
+            "baseline_countable": 3,
+            "baseline_extra": 0,
+            "interactive_countable": 4,
+            "interactive_extra": 0,
+            "legacy_valid": 0,
+            "legacy_builds": 0,
+            "active_version_code": "19127521",
+            "active_base_sha": "abc123",
+            "technical_valid_active": 7,
+        },
+        resolve_tracker_run_identity_fn=lambda _package, run: (
+            str(run.get("version_code") or "") or None,
+            str(run.get("base_sha256") or "") or None,
+        ),
+    )
+
+    assert row.live_build_drift is True
+    assert row.full_row[5] == "refresh"
+    assert row.next_label == "refresh static"
+    assert row.prep_label == "stale"

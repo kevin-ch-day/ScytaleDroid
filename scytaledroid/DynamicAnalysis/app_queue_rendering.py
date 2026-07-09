@@ -120,6 +120,39 @@ def _style_app_label(value: str, *, next_row: bool) -> str:
     return value
 
 
+def _paper_cutoff_summary_label() -> str:
+    try:
+        from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
+            build_paper_evidence_tier_report,
+            build_paper_freeze_manifest,
+        )
+
+        manifest = build_paper_freeze_manifest()
+        tier_report = build_paper_evidence_tier_report()
+    except Exception:
+        return ""
+    if not isinstance(manifest, dict) or not isinstance(tier_report, dict):
+        return ""
+    summary = manifest.get("summary")
+    tier_summary = tier_report.get("summary")
+    if not isinstance(summary, dict) or not isinstance(tier_summary, dict):
+        return ""
+    apps_total = int(tier_summary.get("apps_total") or summary.get("apps_total") or 0)
+    paper_usable = int(tier_summary.get("paper_usable") or 0)
+    true_holes = int(tier_summary.get("true_evidence_holes") or summary.get("insufficient") or 0)
+    ready = int(summary.get("ready") or 0)
+    needs_baseline = int(summary.get("needs_baseline") or 0)
+    needs_interactive = int(summary.get("needs_interactive") or 0)
+    if apps_total <= 0:
+        return ""
+    parts = [f"{paper_usable}/{apps_total} paper-usable", f"ready targets {ready}", f"holes {true_holes}"]
+    if needs_baseline > 0:
+        parts.append(f"needs baseline {needs_baseline}")
+    if needs_interactive > 0:
+        parts.append(f"needs interactive {needs_interactive}")
+    return " · ".join(parts)
+
+
 def queue_app_width(*, terminal_mod: Any, layout: str | None = None) -> int:
     width = terminal_mod.get_terminal_width(default=100, force_refresh=True)
     layout = layout or queue_layout_mode(terminal_mod=terminal_mod)
@@ -380,6 +413,16 @@ def render_queue_summary_block(
                 "ML pool",
                 "run supplemental baselines for training",
                 value_style="muted",
+            )
+        )
+
+    paper_cutoff_label = _paper_cutoff_summary_label()
+    if paper_cutoff_label:
+        items.append(
+            summary_item(
+                "Paper cutoff",
+                paper_cutoff_label,
+                value_style="success" if "holes 0" in paper_cutoff_label else "warning",
             )
         )
 

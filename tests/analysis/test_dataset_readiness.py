@@ -1,6 +1,21 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+from scytaledroid.Reporting import menu_actions
 from scytaledroid.Reporting.services import dataset_readiness
+from scytaledroid.Reporting.services import publication_exports_service
+from scytaledroid.Reporting.services import publication_pipeline_audit_service
+from scytaledroid.Reporting.services import publication_results_numbers_service
+from scytaledroid.Reporting.services import publication_scientific_qa_service
+from scytaledroid.Reporting.services import risk_scoring_artifacts_service
+from scripts.publication import publication_ml_audit_report
+
+
+def _write_manifest(run_dir: Path, payload: dict[str, object]) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_manifest.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_fetch_dataset_readiness_dashboard_prefers_research_cohort_members(monkeypatch) -> None:
@@ -140,3 +155,102 @@ def test_classify_dataset_readiness_distinguishes_valid_invalid_and_legacy_captu
     assert dataset_readiness.classify_dataset_readiness(invalid_row) == "INVALID_EVIDENCE_ONLY"
     assert dataset_readiness.classify_dataset_readiness(legacy_row) == "LEGACY_EVIDENCE_ONLY"
     assert dataset_readiness.classify_dataset_readiness(mixed_row) == "INVALID_AND_LEGACY_ONLY"
+
+
+def test_reporting_services_resolve_freeze_path_at_runtime(monkeypatch, tmp_path: Path) -> None:
+    freeze_path = tmp_path / "archive" / "research_cohorts" / "research_dataset_beta" / "dataset_freeze.json"
+    freeze_path.parent.mkdir(parents=True, exist_ok=True)
+    freeze_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        publication_exports_service,
+        "resolve_dataset_freeze_read_path",
+        lambda: freeze_path,
+    )
+    monkeypatch.setattr(
+        publication_results_numbers_service,
+        "resolve_dataset_freeze_read_path",
+        lambda: freeze_path,
+    )
+    monkeypatch.setattr(
+        publication_scientific_qa_service,
+        "resolve_dataset_freeze_read_path",
+        lambda: freeze_path,
+    )
+    monkeypatch.setattr(
+        publication_pipeline_audit_service,
+        "resolve_dataset_freeze_read_path",
+        lambda: freeze_path,
+    )
+    monkeypatch.setattr(
+        risk_scoring_artifacts_service,
+        "resolve_dataset_freeze_read_path",
+        lambda: freeze_path,
+    )
+    monkeypatch.setattr(
+        publication_ml_audit_report,
+        "resolve_dataset_freeze_read_path",
+        lambda: freeze_path,
+    )
+
+    assert publication_exports_service._freeze_path() == freeze_path
+    assert publication_results_numbers_service._freeze_path() == freeze_path
+    assert publication_scientific_qa_service._freeze_path() == freeze_path
+    assert publication_pipeline_audit_service._freeze_path() == freeze_path
+    assert risk_scoring_artifacts_service._freeze_path() == freeze_path
+    assert publication_ml_audit_report._freeze_path() == freeze_path
+
+
+def test_fetch_tier1_status_exposes_quota_named_evidence_counts_with_compat_aliases(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "output"
+    data_dir = tmp_path / "data"
+    dynamic_root = output_dir / "evidence" / "dynamic"
+
+    _write_manifest(
+        dynamic_root / "run-valid",
+        {"dataset": {"tier": "dataset", "countable": True, "valid_dataset_run": True}},
+    )
+    _write_manifest(
+        dynamic_root / "run-invalid",
+        {"dataset": {"tier": "dataset", "countable": True, "valid_dataset_run": False}},
+    )
+    _write_manifest(
+        dynamic_root / "run-supplemental",
+        {"dataset": {"tier": "dataset", "countable": False, "valid_dataset_run": True}},
+    )
+    _write_manifest(
+        dynamic_root / "run-other-tier",
+        {"dataset": {"tier": "adhoc", "countable": True, "valid_dataset_run": True}},
+    )
+
+    monkeypatch.setattr(menu_actions.app_config, "OUTPUT_DIR", str(output_dir))
+    monkeypatch.setattr(menu_actions.app_config, "DATA_DIR", str(data_dir))
+
+    def fake_run_sql(sql, *args, **kwargs):  # noqa: ANN001
+        if "SELECT version FROM schema_version" in sql:
+            return {"version": "test-schema"}
+        if "SELECT COUNT(*) AS cnt FROM dynamic_sessions WHERE tier='dataset'" in sql:
+            return {"cnt": 12}
+        if "SELECT COUNT(*) AS cnt FROM dynamic_sessions" in sql:
+            return {"cnt": 14}
+        if "SUM(CASE WHEN pcap_valid = 1 THEN 1 ELSE 0 END)" in sql:
+            return {"valid_count": 9, "linked_count": 11}
+        if "FROM dynamic_sessions ds" in sql and "telemetry_partial_samples" in sql:
+            return {"cnt": 8}
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr(menu_actions.core_q, "run_sql", fake_run_sql)
+
+    status = menu_actions.fetch_tier1_status()
+
+    assert status["db_dynamic_sessions_total"] == 14
+    assert status["db_dynamic_sessions_dataset_tier"] == 12
+    assert status["db_dynamic_sessions_dataset"] == 12
+    assert status["evidence_packs_total"] == 4
+    assert status["evidence_quota_eligible_packs"] == 2
+    assert status["evidence_quota_valid_packs"] == 1
+    assert status["evidence_dataset_packs"] == 2
+    assert status["evidence_dataset_valid"] == 1

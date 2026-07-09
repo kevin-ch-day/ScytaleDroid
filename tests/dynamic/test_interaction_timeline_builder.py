@@ -29,6 +29,22 @@ def test_build_interaction_timeline_from_run_dir_complete(tmp_path: Path) -> Non
     assert timeline["steps"][0]["operator_completed"] is True
 
 
+def test_interaction_phases_end_to_end_timeline_and_rows(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    manifest = scripted_manifest("run-1", "bbc.mobile.news.ww")
+    write_json(run_dir / "run_manifest.json", manifest)
+    write_jsonl(run_dir / "notes" / "run_events.jsonl", news_events())
+
+    timeline = interaction_phases.build_interaction_timeline_from_run_dir(run_dir)
+    assert timeline is not None
+
+    rows = interaction_phases.build_protocol_phase_marker_rows(timeline)
+    assert timeline["timeline_complete"] is True
+    assert len(rows) == timeline["completed_step_count"]
+    assert rows[0]["marker_type"] == "step_window"
+    assert rows[0]["phase_id"] == "open_home"
+
+
 def test_build_interaction_timeline_marks_missing_step_end(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     manifest = scripted_manifest("run-2", "bbc.mobile.news.ww")

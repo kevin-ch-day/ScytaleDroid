@@ -35,7 +35,7 @@ is a navigation aid for maintenance work, not a contract for refactoring.
 | --- | --- |
 | Owns | Dynamic session orchestration, guided runs, runtime evidence packs, PCAP capture/indexing, dynamic persistence, anomaly/ML preparation, dynamic menus and datasets. |
 | Status | `active` |
-| Main entrypoints | `main.py` → `handle_dynamic`; `DynamicAnalysis/menu.py`; `run_dynamic_analysis.py`; `core/orchestrator.py`; `controllers/guided_run.py`; `storage/persistence.py`; `tools/freeze_gate.py`. |
+| Main entrypoints | `main.py` → `handle_dynamic`; `DynamicAnalysis/menus/dynamic_menu.py`; `run_dynamic_analysis.py`; `core/orchestrator.py`; `controllers/guided_run.py`; `storage/persistence.py`; `tools/freeze_gate.py`. |
 | Common tasks that should start here | Dynamic run bugs, freeze/dataset readiness, PCAP and telemetry issues, evidence-pack rebuild problems, dynamic run menu flow issues. |
 | Common tasks that should not start here | Static detector changes, Web app page fixes, base DB schema ownership, device harvest rules. |
 | Related tests / smoke checks | `tests/dynamic/*`, `tests/analysis/*`, `tests/ml/*`; scripts under `scripts/dynamic/`; dynamic menu flows in `./run.sh`. |
@@ -50,7 +50,7 @@ is a navigation aid for maintenance work, not a contract for refactoring.
 | Main entrypoints | `db_core/db_engine.py`; `db_core/schema_introspection.py` (single helper for **`information_schema.tables`** presence on the operational DB via `run_sql` — distinct from **`db_core/permission_intel.py`** probes); `db_queries/schema_manifest.py`; `db_queries/views.py`; `db_utils/database_menu.py`; `tools/bootstrap.py`; `tools/db_status.py`; `db_core/permission_intel.py`; `scripts/db/recreate_web_consumer_views.py`; `docs/maintenance/database_governance_runbook.md`. |
 | Common tasks that should start here | Schema/view changes, read-model additions, DB cleanup/pruning, schema gates, permission-intel split, bridge freeze/deprecation, diagnostics around persistence surfaces. |
 | Common tasks that should not start here | Static detector semantics, dynamic orchestration logic, PHP rendering, publication formatting. |
-| Related tests / smoke checks | `tests/database/*`, `tests/db/*`, `tests/gates/test_static_gate.py`; DB tools menu in `./run.sh`; `python -m py_compile` for DB modules. |
+| Related tests / smoke checks | `tests/database/*`, `tests/database/*`, `tests/gates/test_static_gate.py`; DB tools menu in `./run.sh`; `python -m py_compile` for DB modules. |
 | High-risk / large files | `db_queries/views.py` (largest DB contract file), `db_utils/menus/health_checks.py`, `db_utils/menu_actions.py`, `db_utils/reset_static.py`, `db_utils/static_reconcile.py`, `db_core/db_engine.py`. These are central contract and maintenance surfaces. |
 
 ### `scytaledroid/Reporting` and `scytaledroid/Publication`
@@ -299,7 +299,7 @@ CLI repo:
 - [scytaledroid/DynamicAnalysis/ml/evidence_pack_ml_orchestrator.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/DynamicAnalysis/ml/evidence_pack_ml_orchestrator.py)
 - [scytaledroid/StaticAnalysis/cli/execution/results.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/StaticAnalysis/cli/execution/results.py)
 - [scytaledroid/StaticAnalysis/cli/persistence/run_summary.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/StaticAnalysis/cli/persistence/run_summary.py)
-- [scytaledroid/DynamicAnalysis/menu.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/DynamicAnalysis/menu.py)
+- [scytaledroid/DynamicAnalysis/menus/dynamic_menu.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/DynamicAnalysis/menus/dynamic_menu.py)
 - [scytaledroid/Database/db_queries/views.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/Database/db_queries/views.py)
 - [scytaledroid/Database/db_utils/menus/health_checks.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/Database/db_utils/menus/health_checks.py)
 - [scytaledroid/Database/db_utils/menu_actions.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/Database/db_utils/menu_actions.py)

@@ -13,10 +13,22 @@ def test_social_feed_baseline_guidance_for_x_mentions_stable_screen() -> None:
     assert "Avoid Home / For You / feed timelines" in text
     assert "Avoid video/media-heavy screens" in text
     assert "Prefer a stable low-motion screen" in text
-    assert "Stop near the" in text
-    assert "target; longer capture is optional evidence" in text
+    assert "Stop/finalize near the" in text
+    assert "extra hold is optional supplemental evidence" in text
     assert "X baseline tip" in text
     assert "video autoplay is enabled" in text
+
+
+def test_snapchat_baseline_guidance_makes_extra_hold_optional() -> None:
+    lines = baseline_guidance.baseline_idle_behavior_lines(
+        "com.snapchat.android",
+        target_label="4 mins 0 sec (240s)",
+    )
+    text = "\n".join(lines)
+
+    assert "Avoid Home / For You / feed timelines" in text
+    assert "Stop/finalize near the 4 mins 0 sec (240s) target" in text
+    assert "extra hold is optional supplemental evidence" in text
 
 
 def test_generic_baseline_guidance_remains_compact_for_unknown_package() -> None:

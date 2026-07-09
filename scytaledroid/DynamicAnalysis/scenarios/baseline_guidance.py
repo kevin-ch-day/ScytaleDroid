@@ -159,7 +159,7 @@ def baseline_idle_behavior_lines(package_name: str, *, target_label: str) -> lis
             f"  - Prefer a stable low-motion screen such as {social_feed_stable_screen_guidance()}",
             "  - Let initial loading settle before the timer starts",
             "  - Do not scroll, refresh, open media, type, search, or follow links",
-            f"  - Stop near the {target_label} target; longer capture is optional evidence, not better quota evidence",
+            f"  - Stop/finalize near the {target_label} target; extra hold is optional supplemental evidence, not better quota evidence",
         ]
         if pkg.lower() == "com.twitter.android":
             lines.append(x_baseline_tip_line())
@@ -189,7 +189,7 @@ def baseline_idle_behavior_lines(package_name: str, *, target_label: str) -> lis
                 "  - Avoid Video, Live, autoplay media, and Audio playback during quota baseline attempts",
                 "  - Do not open articles, trigger sign-in / register prompts, search, or follow links during idle quota attempts",
                 "  - If you need article-open, sign-in/register-wall, Video, Live, or Audio evidence, use manual/scripted interactive instead",
-                f"  - Stop near the {target_label} target; longer capture is optional evidence, not better quota evidence",
+                f"  - Stop/finalize near the {target_label} target; extra hold is optional supplemental evidence, not better quota evidence",
             ]
         if pkg.lower() == "com.guardian":
             return [
@@ -198,7 +198,7 @@ def baseline_idle_behavior_lines(package_name: str, *, target_label: str) -> lis
                 "  - Avoid Search, Support us, Follow, Podcasts playback, and sign-in / free-registration walls",
                 "  - Do not scroll, open articles, trigger Follow/account-create flows, or start audio/video",
                 "  - If you need section/search navigation, native podcast-playback, article-open, or registration-wall evidence, use manual/scripted interactive instead",
-                f"  - Stop near the {target_label} target; longer capture is optional evidence, not better quota evidence",
+                f"  - Stop/finalize near the {target_label} target; extra hold is optional supplemental evidence, not better quota evidence",
             ]
         return [
             "  - Get the app into a calm foreground surface before the timer starts",

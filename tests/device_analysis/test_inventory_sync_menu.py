@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from scytaledroid.DeviceAnalysis.device_menu import actions, inventory_sync_feedback
+from scytaledroid.DeviceAnalysis.device_menu import actions, harvest_entry, inventory_sync_feedback
+from scytaledroid.Utils.DisplayUtils import text_blocks
 
 
 def test_run_inventory_sync_runs_full_baseline_mode_directly(monkeypatch) -> None:
@@ -29,6 +30,32 @@ def test_run_inventory_sync_runs_full_baseline_mode_directly(monkeypatch) -> Non
 
     assert captured["args"][0] == "SERIAL123"
     assert captured["kwargs"]["mode"] == "baseline"
+
+
+def test_refresh_inventory_for_harvest_menu_uses_harvest_ready_mode(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        harvest_entry.device_service,
+        "fetch_inventory_metadata",
+        lambda _serial: SimpleNamespace(status_label="FRESH"),
+    )
+    monkeypatch.setattr(text_blocks, "UI_PREFS", None, raising=False)
+
+    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
+
+    monkeypatch.setattr(
+        inventory_workflow,
+        "run_inventory_sync",
+        lambda **kwargs: captured.update({"run_kwargs": kwargs})
+        or SimpleNamespace(stats=SimpleNamespace(total_packages=10), snapshot_id=5, elapsed_seconds=3.0),
+    )
+
+    ok, status = harvest_entry.refresh_inventory_for_harvest_menu("SERIAL123")
+
+    assert ok is True
+    assert status.status_label == "FRESH"
+    assert captured["run_kwargs"]["mode"] == "bulk"
 
 
 def test_build_main_menu_options_uses_pipeline_language(monkeypatch) -> None:

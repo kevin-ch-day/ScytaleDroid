@@ -3,7 +3,7 @@
 **Intent:** Evidence-driven validation before any `android_permission_obs_sample` writes.  
 **Constraints:** Read-only on shared PI; no schema/migrations/obs inserts; no Erebus code import; no queue apply.
 
-**Related:** [S2 observation design](permission_intel_scytaledroid_s2_observation_design.md), [schema drift vs Erebus](permission_intel_schema_drift_erebus_vs_scytaledroid.md), [S1.5 classifier contract](permission_intel_scytaledroid_s1_5_classifier_contract.md).
+**Related:** [Permission Intel contract](permission_intel_contract.md), [schema drift vs Erebus](permission_intel_schema_drift_erebus_vs_scytaledroid.md), [archived S1/S2 phase notes](archive/permission-intel-phase-notes/).
 
 ---
 

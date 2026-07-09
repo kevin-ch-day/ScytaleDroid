@@ -4,7 +4,10 @@ This document is the **first-pass script lifecycle inventory** for everything un
 
 **Goals:** reduce mystery scripts and manual operator burden **without** breaking stable paths, docs, CI, or personal workflows.
 
-**First PR scope (this document only):** inventory / classification / archive candidates / integration targets. **No deletions, no file moves, no behavior changes** beyond documentation.
+**Current cleanup posture:** inventory / classification / archive candidates /
+integration targets first. Generated caches may be removed immediately. Tracked
+script paths should be deleted or moved only after replacement paths, docs,
+tests, and operator habits are covered.
 
 ---
 
@@ -88,6 +91,33 @@ Current combine-later families: package lineage / exact recovery, evidence
 storage, dynamic/static alignment, static sessions, artifact registry,
 Permission Intel, and catalog hygiene.
 
+### 2026-07-09 prune checkpoint
+
+The active script tree has already had several stale wrappers removed (see
+**First Removed Historical Helpers** below). The next safe cleanup wave is
+archive-oriented, not delete-first:
+
+| Bucket | Candidate paths | Replacement / reason to preserve for now |
+| --- | --- | --- |
+| Legacy dynamic shell helpers | `scripts/dynamic/run_idle.sh`, `scripts/dynamic/run_scripted_interaction.sh` | Superseded by TUI dynamic capture flows, but may still be used by external operator aliases. Archive only after external-use check. |
+| Historical DB backfills | `scripts/db/backfill_*` | One-time or rare migrations. Keep while rollout/repair receipts are still being reconciled; archive after stable DB posture. |
+| Historical normalization helpers | `scripts/db/normalize_*`, `scripts/db/phase_b1_*`, `scripts/db/schema_version_width_hotfix.py` | Maintenance helpers with explicit dry-run/apply behavior. Archive only after schema posture proves no active need. |
+| Dynamic repair tools with no current in-repo caller | `scripts/db/repair_dynamic_*` | Keep while Paper 3 evidence repair remains active. These are operator-triggered recovery tools, not dead code. |
+| Static report repair tools | `scripts/static_analysis/repair_*`, `scripts/static_analysis/quarantine_unreferenced_static_archive_reports.py` | Keep through Paper 3 static/report stabilization. |
+
+The current active Paper 3 / APK-storage additions are not archive candidates:
+
+| Path | Reason |
+| --- | --- |
+| `scripts/db/report_dynamic_paper_freeze_readiness.py` | Generates cutoff evidence tiers and paper-readiness framing. |
+| `scripts/db/report_paper3_writing_package.py` | Generates the Paper 3 writing bridge/workspace. |
+| `scripts/device_analysis/check_external_apk_store_mount.py` | Mercury/APK-store guard and operator check. |
+| `scripts/device_analysis/audit_apk_cold_promotion.py` | Read-only hot/cold candidate classification. |
+| `scripts/device_analysis/promote_apk_blobs_to_cold_store.py` | Dry-run default cold-promotion apply tool. |
+| `scripts/device_analysis/report_apk_inventory_model.py` | APK identity transition and run-retirement analysis. |
+| `scripts/device_analysis/report_legacy_harvest_run_retirement.py` | Legacy harvest folder retirement safety checks. |
+| `scripts/device_analysis/verify_apk_library_integrity.py` | APK library/storage integrity verification. |
+
 ---
 
 ## Suggested archive layout (future PR only)
@@ -161,6 +191,8 @@ duplicate work. Operators must read each script's docstring before re-run.
 | `scripts/operator/diagnose_scope.py` | Removed unreferenced harvest-scope diagnostic helper; current inventory/harvest menus show scoped counts and exclusion state. |
 | `scripts/operator/backfill_dynamic_network_features.py` | Removed unreferenced one-off dynamic feature backfill wrapper. Current dynamic evidence DB indexing owns feature-row persistence. |
 | `scytaledroid/DynamicAnalysis/storage/feature_backfill.py` | Removed dead backing service for the deleted dynamic feature backfill wrapper; no active imports remained. |
+| `scripts/db/report_dynamic_draft_package.py` | Removed superseded Paper 3 draft-package exporter; current cutoff/writeup workflow uses `scripts/db/report_dynamic_paper_freeze_readiness.py` and `scripts/db/report_paper3_writing_package.py`. |
+| `tests/database/test_report_dynamic_draft_package.py` | Removed with the superseded exporter; its private-helper assertions only protected the deleted script. |
 
 All other paths still need a **per-environment** decision before removal.
 
@@ -242,7 +274,7 @@ All other paths still need a **per-environment** decision before removal.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `run_artifact_map.py` | supported_operator | RO | opt | yes | supported_entrypoints; `test_run_artifact_map_script.py` | Static diagnostics | keep |
 | `determinism_gate.py` | ci_or_gate | RO | opt | yes | README determinism; `test_determinism_gate_schema.py` | CI static | keep |
-| `validate_report_permission_risk.py` | ci_or_gate | RO | none | yes | `test_validate_report_permission_risk_safety.py` | CI safety | keep |
+| `validate_report_permission_risk.py` | ci_or_gate | RO | none | yes | `test_scripts_help_contract.py` | CI safety | keep |
 | `verify_persistence_audit.py` | workflow_helper | RO | none | yes | persistence QA | post-run | **expose_menu** candidate |
 | `post_run_session_summary.py` | workflow_helper | RO | opt | yes | permission_intelligence_pipeline.md; wraps `cli.audit.post_run_session_summary` | Static post-run | keep · **deprecate_cli** when menu parity |
 | `permission_session_insights.py` | workflow_helper | RO | opt | yes | same | Static audit | keep · deprecate_cli later |
@@ -319,6 +351,17 @@ All other paths still need a **per-environment** decision before removal.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `inventory_determinism_gate.py` | ci_or_gate | RO | none | yes | repo_ownership_map | harvest CI | keep |
 | `replay_harvest_db_mirror.py` | workflow_helper | MIX | core | yes | harvest replay service | device ops | keep |
+| `check_external_apk_store_mount.py` | supported_operator | RO | none | yes | Mercury/APK storage guard | Evidence & Workspace / main menu | keep |
+| `audit_apk_cold_promotion.py` | workflow_helper | RO | opt | yes | hot/cold storage transition | APK storage maintenance | keep |
+| `promote_apk_blobs_to_cold_store.py` | workflow_helper | MIX | none | yes | hot/cold storage transition | APK storage maintenance | keep |
+| `seed_apk_library_from_receipts.py` | migration_historical | MIX | none | yes | APK library transition | APK storage maintenance | keep · archive_later after rollout |
+| `repair_apk_library_logical_paths.py` | migration_historical | MIX | none | yes | APK library logical-path repair | APK storage maintenance | keep through rollout |
+| `repair_regular_legacy_apks.py` | workflow_helper | MIX | none | yes | legacy regular APK repair | APK storage maintenance | keep through rollout |
+| `report_apk_inventory_model.py` | workflow_helper | RO | none | yes | APK inventory transition | APK storage maintenance | keep |
+| `report_apk_transition_debt.py` | workflow_helper | RO | none | yes | APK transition debt report | APK storage maintenance | keep |
+| `report_legacy_harvest_run_retirement.py` | workflow_helper | RO | opt | yes | legacy harvest retirement | APK storage maintenance | keep |
+| `thin_harvest_session_apks.py` | workflow_helper | MIX | none | yes | storage thinning receipts | APK storage maintenance | keep |
+| `verify_apk_library_integrity.py` | workflow_helper | RO | none | yes | APK library integrity | APK storage maintenance | keep |
 
 ---
 
@@ -327,8 +370,9 @@ All other paths still need a **per-environment** decision before removal.
 | Path | Class | R/W | DB | `--help` | Key references | Owner / integration | Action |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `evidence_hunt.py` | workflow_helper | MIX | opt | yes | legacy term gate | dynamic evidence | keep |
-| `run_idle.sh` | workflow_helper | RO | none | n/a | comment usage | dynamic shell | keep |
-| `run_scripted_interaction.sh` | workflow_helper | RO | none | n/a | comment usage | dynamic shell | keep |
+| `refresh_analysis_summaries.py` | workflow_helper | MIX | opt | yes | dynamic summary refresh | dynamic maintenance | keep |
+| `run_idle.sh` | candidate_archive | RO | none | n/a | comment usage | dynamic shell | archive_later after external-use check |
+| `run_scripted_interaction.sh` | candidate_archive | RO | none | n/a | comment usage | dynamic shell | archive_later after external-use check |
 
 ---
 

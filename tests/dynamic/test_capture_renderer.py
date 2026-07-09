@@ -39,6 +39,7 @@ def test_render_capture_dashboard_is_deterministic() -> None:
     assert "Drift      : none" in first
     assert "PCAP       : 18.0 KB (18420 bytes)" in first
     assert "Warning    : Foreground drift active; return to WhatsApp." in first
+    assert "A = discard run (not countable)" in first
 
 
 def test_render_capture_dashboard_truncates_long_status_fields() -> None:
@@ -123,3 +124,4 @@ def test_render_capture_dashboard_suppresses_generic_target_reached_message() ->
     assert "Guidance   :" not in rendered
     assert "Warning    :" not in rendered
     assert "Controls   :" in rendered
+    assert "A = discard run (not countable)" in rendered

@@ -2,7 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scytaledroid.DynamicAnalysis.datasets import research_dataset_alpha
 from scytaledroid.DynamicAnalysis import research_cohort_runtime
+
+
+def test_load_dataset_packages_prefers_db_backed_research_cohort(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "scytaledroid.Database.db_func.research_cohorts.fetch_active_research_cohort_packages",
+        lambda _key: ["com.example.one", "com.example.two"],
+    )
+
+    packages = research_dataset_alpha.load_dataset_packages()
+
+    assert packages == ["com.example.one", "com.example.two"]
 
 
 def test_active_research_cohort_context_uses_persisted_selection_when_env_unset(monkeypatch, tmp_path: Path) -> None:

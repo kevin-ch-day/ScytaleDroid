@@ -2,7 +2,7 @@
 
 These tests do **not** assert current production triage — they lock **documentation semantics**
 for the split described in
-``docs/database/permission_intel_classification_taxonomy_refinement.md``.
+``docs/database/archive/permission-intel-phase-notes/permission_intel_classification_taxonomy_refinement.md``.
 
 When ``custom_triage`` / ``unknown_obfuscated`` become real ``triage_status`` values or derived
 report buckets, extend this module with golden-string classification tests.

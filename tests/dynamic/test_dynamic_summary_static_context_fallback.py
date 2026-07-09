@@ -3,7 +3,36 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scytaledroid.DynamicAnalysis.core.static_context import compute_static_context
 from scytaledroid.DynamicAnalysis.pcap.aggregate import _build_run_summary_row
+
+
+def test_compute_static_context_basic_tags() -> None:
+    plan = {
+        "permissions": {"declared": ["a"], "dangerous": ["b"], "high_value": ["CAMERA"]},
+        "exported_components": {"total": 25},
+        "risk_flags": {
+            "uses_cleartext_traffic": True,
+            "request_legacy_external_storage": True,
+            "allow_backup": True,
+        },
+        "network_targets": {
+            "domains": ["example.com"],
+            "cleartext_domains": [],
+            "domain_sources": [{"domain": "example.com", "sources": ["strings", "nsc"]}],
+        },
+    }
+    ctx = compute_static_context(plan)
+    tags = ctx.get("tags")
+    assert isinstance(tags, list)
+    assert "PRIVACY_SENSITIVE" in tags
+    assert "EXPORT_HEAVY" in tags
+    assert "NETWORK_CLEARTEXT_ALLOWED" in tags
+    assert "LEGACY_STORAGE" in tags
+    assert "ALLOW_BACKUP" in tags
+    expectations = ctx.get("network_expectations") or {}
+    assert expectations.get("domain_sources_counts", {}).get("strings") == 1
+    assert expectations.get("domain_sources_counts", {}).get("nsc") == 1
 
 
 def test_dynamic_summary_derives_static_tags_from_embedded_plan(tmp_path: Path) -> None:
@@ -34,4 +63,3 @@ def test_dynamic_summary_derives_static_tags_from_embedded_plan(tmp_path: Path) 
     assert row["static_tags"] is not None
     assert "PRIVACY_SENSITIVE" in json.loads(row["static_tags"])
     assert row["exported_components_total"] == 25
-

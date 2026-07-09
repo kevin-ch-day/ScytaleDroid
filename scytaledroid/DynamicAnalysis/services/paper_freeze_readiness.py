@@ -1225,6 +1225,21 @@ def build_paper_evidence_tier_report(
         for row in rows
         if row["paper_usable"] == "yes" and row.get("current_installed_drifted") == "yes"
     )
+    live_drift_detected_usable_count = sum(
+        1
+        for row in rows
+        if row["paper_usable"] == "yes" and str(row.get("package_name") or "").lower() in operational_drift
+    )
+    current_mixed_usable_count = sum(
+        1
+        for row in rows
+        if row["paper_usable"] == "yes" and row.get("evidence_tier") == "CURRENT_BUILD_MIXED_BASELINE"
+    )
+    non_strict_current_usable_count = sum(
+        1
+        for row in rows
+        if row["paper_usable"] == "yes" and row.get("evidence_tier") != "STRICT_CURRENT_BUILD_COMPLETE"
+    )
     context_count = sum(1 for row in rows if row["paper_usable"] == "context-only")
     hole_count = sum(1 for row in rows if row["evidence_tier"] == "TRUE_EVIDENCE_HOLE")
     return {
@@ -1244,7 +1259,13 @@ def build_paper_evidence_tier_report(
         "summary": {
             "apps_total": len(rows),
             "paper_usable": usable_count,
+            # Kept for compatibility: this means the selected paper evidence is usable even
+            # when it is not the strict current installed build. Use the clearer aliases below
+            # for new reports.
             "drifted_but_paper_usable": drifted_usable_count,
+            "live_drift_detected_paper_usable": live_drift_detected_usable_count,
+            "current_build_mixed_paper_usable": current_mixed_usable_count,
+            "non_strict_current_paper_usable": non_strict_current_usable_count,
             "prior_build_paper_usable": prior_build_usable_count,
             "live_drift_checked": live_drift_checked,
             "context_only": context_count,

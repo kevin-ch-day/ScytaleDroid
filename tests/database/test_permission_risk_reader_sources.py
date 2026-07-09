@@ -7,6 +7,12 @@ from scytaledroid.Database.db_queries.canonical import schema as canonical_schem
 from scytaledroid.Database.db_utils.health_checks import inventory_checks
 
 
+def test_canonical_schema_includes_static_session_id_on_runs():
+    blob = "\n".join(getattr(canonical_schema, "_DDL_STATEMENTS", []))
+    assert "static_session_id" in blob
+    assert "ix_static_analysis_runs_static_session_id" in blob
+
+
 def test_latest_permission_risk_view_uses_risk_scores_not_legacy_table():
     sql = views.CREATE_VW_LATEST_PERMISSION_RISK.lower()
     assert "risk_scores" in sql

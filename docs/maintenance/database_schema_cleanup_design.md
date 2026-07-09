@@ -234,7 +234,7 @@ Hypotheses to validate on the failing row (read-only):
 
 - Re-run hygiene script: session absent or `cleanup_status=pruned`.  
 - `recreate_web_consumer_views.py` + `smoke_web_db.sh` (Web tree).  
-- `pytest tests/database tests/db -q` slice.
+- `pytest tests/database -q` slice.
 
 ### 6.5 Child dependency order (session-scoped prune)
 
@@ -341,7 +341,7 @@ Under e.g. `sql/migrations/db_cleanup/` (exact tree TBD), stage artifacts:
 
 - `pytest tests/database/test_session_hygiene_report.py -q` (new).  
 - `python -m py_compile scripts/db/session_hygiene_report.py`.  
-- After any view PR: `pytest tests/database tests/db -q` + `PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py posture`.
+- After any view PR: `pytest tests/database -q` + `PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py posture`.
 
 ### SQL audit commands (read-only)
 

@@ -4,6 +4,13 @@ from scytaledroid.Database.db_utils.static_session_operator_audit import (
     classify_session_header_diagnostic,
     sql_literal_for_session,
 )
+from scytaledroid.Database.db_utils.menus.static_session_diagnostics_menu import (
+    run_static_session_canonical_audit,
+)
+
+
+def test_run_static_session_canonical_audit_rejects_empty_stamp() -> None:
+    assert run_static_session_canonical_audit("  ") == 1
 
 
 def test_sql_literal_for_session_escapes_single_quotes() -> None:

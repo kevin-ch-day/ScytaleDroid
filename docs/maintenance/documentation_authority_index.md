@@ -46,6 +46,7 @@ Notes:
   - [workflow_entrypoint_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/workflow_entrypoint_map.md)
   - [v1_evidence_catalog_verification.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/design/v1_evidence_catalog_verification.md) — ACK-pending V1 schema/verify semantics (**do not reopen without blocker**)
   - [apk_lineage_redesign_assessment.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/apk_lineage_redesign_assessment.md) — current exact-hash/static-dynamic availability findings; package/version/hash lineage redesign assessment
+  - [apk_inventory_model_transition.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/apk_inventory_model_transition.md) — active package/version APK inventory transition, hot/cold byte-store reports, and legacy run-retirement model
 - `historical`
   - none currently separated
 
@@ -73,14 +74,14 @@ Notes:
   - [legacy_static_deprecation_playbook.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_deprecation_playbook.md) — phased legacy-five retirement; **Appendix A** = relabel/migrate/Web-grep buckets (merged Wave W1)
   - [legacy_static_reader_dependency_map.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_reader_dependency_map.md) — **file/function-level** map of legacy-five readers; Phase 2 retirement ordering; `metrics.run_id` ambiguity; **§2.1.1** mirror-helper wiring (merged Wave W1); **§8** follow-up (planning; not runtime truth)
   - [legacy_static_tables_consumer_audit.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_tables_consumer_audit.md) — **index**: legacy five scope, INSERT grep baseline, classification legend; per-table detail → dependency map §3
-  - [legacy_static_phase2a_policy_alignment_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/legacy_static_phase2a_policy_alignment_plan.md) — **completed** Phase 2A record + verification commands (stub; full narrative in git history)
   - [session_identity_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/session_identity_contract.md) — `session_stamp` vs `session_label`, `static_run_id` vs legacy `runs.run_id`, canonical join rules, forbidden SQL patterns
   - [session_static_health_hygiene_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/session_static_health_hygiene_plan.md) — align `session_static_health.py` with canonical-first / legacy-optional (planned; script not changed in slice)
   - [evidence_run_manifest_spec.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/evidence_run_manifest_spec.md) — design-only run-root evidence manifest (no writer yet)
   - [pi_erebus_operational_boundary.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/pi_erebus_operational_boundary.md) — PI vs Erebus ownership and pre-`obs_sample` blockers
-  - [fast_implementation_backlog_lanes.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/fast_implementation_backlog_lanes.md) — Lane 1/2/3 batching + standard verification commands
 - `historical`
   - [archive/next_pass_docs_policy_implementation_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/archive/next_pass_docs_policy_implementation_plan.md) — **completed** 2026-05-09 docs/policy slice checklist (archived; see [archive/README.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/archive/README.md))
+  - [archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md) — completed Phase 2A record + verification commands
+  - [archive/completed-plans/fast_implementation_backlog_lanes.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/archive/completed-plans/fast_implementation_backlog_lanes.md) — historical Lane 1/2/3 batch tracker
 
 Notes:
 - use this cluster for static pipeline semantics, persistence flow, and data-shape questions
@@ -94,6 +95,7 @@ Notes:
   - [storage_contract_v2.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/storage_contract_v2.md)
 - `support`
   - [contracts/freeze_capture_policy_v1.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/contracts/freeze_capture_policy_v1.md)
+  - [contracts/profile_v3_execution_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/contracts/profile_v3_execution_contract.md) — Profile v3 structural cohort execution protocol and reproducibility minima.
   - profile v3 minima and frozen-input notes are folded into `dynamic_analysis_contract.md`
 - `generated-spec`
   - [contracts/export_manifest_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/contracts/export_manifest_contract.md)
@@ -127,12 +129,16 @@ Notes:
 ### Permission-intel split, bridge cleanup, and phase migration
 
 - `authority`
+  - [database/permission_intel_contract.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/permission_intel_contract.md) — active ScytaleDroid Permission Intel boundary, static writer vocabulary, and pre-observation-write contract
   - [database/permission_split_execution_phases.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/permission_split_execution_phases.md)
 - `support`
   - [maintenance/phase5c_task_list.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/maintenance/phase5c_task_list.md)
+  - [database/framework_permissions_catalog.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/framework_permissions_catalog.md) — framework permission catalog feed/parser notes and offline YAML fallback behavior.
   - [database/permission_intel_schema_drift_erebus_vs_scytaledroid.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/permission_intel_schema_drift_erebus_vs_scytaledroid.md) — Erebus vs Scytale PI drift; **§0** Permission Intel vs Erebus **catalog / DSN** mental model
+  - [database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md) — read-only PI queue/static observation readiness bundle
 - `historical`
-  - older split/cutover phase notes were consolidated into the active phase docs
+  - [archive/2026-06-checkpoints/](archive/2026-06-checkpoints/) — historical June 2026 schema/inventory/dynamic checkpoint notes; use active schema/governance docs first.
+  - [database/archive/permission-intel-phase-notes/](/home/secadmin/Laughlin/GitHub/ScytaleDroid/docs/database/archive/permission-intel-phase-notes/) — archived S1/S2 Permission Intel phase notes superseded by the active contract/readiness docs.
 
 Notes:
 - use this cluster for permission-intel cutover, bridge posture, and phase planning

@@ -5,6 +5,7 @@ import numpy as np
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
 from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import fixed_model_specs
+from scytaledroid.DynamicAnalysis.ml.operational_risk import build_static_inputs_from_plan
 from scytaledroid.DynamicAnalysis.ml.query_mode_runner import _apply_winsorization
 
 
@@ -54,3 +55,23 @@ def test_apply_winsorization_clips_with_train_bounds() -> None:
     assert np.all(all_ >= lower)
     assert np.all(all_ <= upper)
 
+
+def test_build_static_inputs_prefers_static_features_snapshot() -> None:
+    plan = {
+        "static_features": {
+            "exported_components_total": 21,
+            "dangerous_permission_count": 9,
+            "uses_cleartext_traffic": True,
+            "sdk_indicator_score": 0.75,
+        },
+        "exported_components": {"total": 1},
+        "permissions": {"dangerous": ["android.permission.CAMERA"]},
+        "risk_flags": {"uses_cleartext_traffic": False},
+        "sdk_indicators": {"score": 0.1},
+    }
+    out = build_static_inputs_from_plan(plan)
+    assert out is not None
+    assert out.exported_components_total == 21
+    assert out.dangerous_permission_count == 9
+    assert out.uses_cleartext_traffic == 1
+    assert abs(out.sdk_indicator_score - 0.75) < 1e-9

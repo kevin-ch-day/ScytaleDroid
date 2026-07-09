@@ -76,7 +76,8 @@ PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py counts
    `PYTHONPATH=. python scripts/db/audit_permission_intel_queue_compatibility.py`  
    `PYTHONPATH=. python scripts/db/audit_static_permission_observation_linkage.py`  
    Or bundle: `./scripts/db/run_permission_intel_scytale_s2_readiness_audit.sh`  
-   Narrative: `docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md`.
+   Narrative: `docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md`;
+   contract summary: `docs/database/permission_intel_contract.md`.
 
 ## Cohort static session audit
 

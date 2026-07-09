@@ -1,9 +1,12 @@
 # Database Query Reference
 
-This folder documents the read-side queries the future PHP/MySQL portal will
-need. The PHP application consumes data solely from the MySQL
-repository—no direct integration with the Python CLI is required. Each
-markdown file covers:
+This folder is the historical entrypoint for PHP/MySQL read-side query sketches.
+The current contract is repo-owned DB views and scripts, not one-off Markdown
+pseudo-SQL files. Use this README as a routing note before consulting archived
+query sketches.
+
+The PHP application consumes data solely from the MySQL repository—no direct
+integration with the Python CLI is required. Historical query sketches covered:
 
 * **Purpose** – where the query is used in the UI
 * **Inputs** – parameters the web layer must supply
@@ -43,20 +46,24 @@ standardise on the following workflow when materialising them:
 > class with the same name in PHP and link back to the markdown file in a
 > docblock. This keeps cross-language references aligned.
 
-## Contents
+## Current Sources
 
-| Document | Focus |
+| Source | Focus |
 | --- | --- |
-| [`apps_by_category.md`](apps_by_category.md) | Category coverage + counts |
-| [`uncategorized_apps.md`](uncategorized_apps.md) | Packages missing category assignments |
-| [`latest_harvest_by_device.md`](latest_harvest_by_device.md) | Most recent pull per device |
-| [`device_inventory_latest.md`](device_inventory_latest.md) | Current inventory view for a device |
-| [`artifacts_for_app.md`](artifacts_for_app.md) | Artifact lineup for a single package |
-| [`duplicate_artifacts.md`](duplicate_artifacts.md) | SHA-256 collisions and reuse |
-| [`harvest_gaps.md`](harvest_gaps.md) | Installed apps without repository entries |
-| [`harvest_paths.md`](harvest_paths.md) | DDL for path-related tables |
-| [`recent_changes.md`](recent_changes.md) | Version deltas between snapshots |
-| [`topline_kpi.md`](topline_kpi.md) | High-level rollup metrics |
+| [`../view_contract_v_web_static_dynamic_app_summary.md`](../view_contract_v_web_static_dynamic_app_summary.md) | Current Web static/dynamic app summary contract |
+| [`../../maintenance/database_governance_runbook.md`](../../maintenance/database_governance_runbook.md) | Operational DB/view recovery and governance |
+| [`../../maintenance/database_target_schema_v2.md`](../../maintenance/database_target_schema_v2.md) | Target schema and read-model direction |
+| [`../../maintenance/database_schema_cleanup_design.md`](../../maintenance/database_schema_cleanup_design.md) | Phased schema cleanup and view posture |
+| `scytaledroid/Database/db_queries/` | Runtime-owned view/query definitions |
+| `scripts/db/` | Operator audit, posture, semantic, and smoke scripts |
+
+## Archived Sketches
+
+Early standalone query sketches live under
+[`archive/legacy-web-query-sketches/`](archive/legacy-web-query-sketches/).
+They are useful for historical context and SQL examples, but they are not the
+active contract for new DB/Web work.
+
 > ⚠️ These files describe **read queries only**. Do not run them against
 > production data without validating table names and access controls.
 

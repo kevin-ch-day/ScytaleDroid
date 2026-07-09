@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import inspect
 import re
+from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.persistence import run_summary as rs
 from scytaledroid.StaticAnalysis.cli.persistence import run_writers as rw
@@ -55,3 +56,12 @@ def test_persistence_direct_write_targets_are_declared():
     allowed = SCIENTIFIC_UOW_TABLES | LEDGER_TABLES
     undeclared = sorted(touched - allowed)
     assert not undeclared, f"Undeclared write targets in persistence path: {undeclared}"
+
+
+def test_persistence_uow_doc_matches_contract_constant():
+    doc_path = Path("docs/contracts/persistence_uow_tables.md")
+    text = doc_path.read_text(encoding="utf-8")
+    listed = set(re.findall(r"`([a-z0-9_]+)`", text))
+    listed_scientific = {name for name in listed if name in SCIENTIFIC_UOW_TABLES}
+
+    assert SCIENTIFIC_UOW_TABLES.issubset(listed_scientific)
