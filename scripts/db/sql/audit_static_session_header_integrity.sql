@@ -75,14 +75,17 @@ LEFT JOIN (
   FROM static_analysis_runs sar
   GROUP BY sar.session_stamp, COALESCE(TRIM(BOTH FROM sar.scope_label), '')
 ) r
-  ON r.session_stamp = s.session_stamp
- AND r.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
+  ON CONVERT(r.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(r.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN (
   SELECT session_stamp, COUNT(*) AS actual_link_rows
   FROM static_session_run_links
   GROUP BY session_stamp
 ) l
-  ON l.session_stamp = s.session_stamp
+  ON CONVERT(l.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN (
   SELECT
     session_stamp,
@@ -91,8 +94,10 @@ LEFT JOIN (
   FROM static_session_rollups
   GROUP BY session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '')
 ) ro
-  ON ro.session_stamp = s.session_stamp
- AND ro.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
+  ON CONVERT(ro.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(ro.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
 ORDER BY diagnostic_status DESC, s.session_stamp DESC, s.scope_label ASC;
 
 
@@ -128,14 +133,17 @@ LEFT JOIN (
   FROM static_analysis_runs sar
   GROUP BY sar.session_stamp, COALESCE(TRIM(BOTH FROM sar.scope_label), '')
 ) r
-  ON r.session_stamp = s.session_stamp
- AND r.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
+  ON CONVERT(r.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(r.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN (
   SELECT session_stamp, COUNT(*) AS actual_link_rows
   FROM static_session_run_links
   GROUP BY session_stamp
 ) l
-  ON l.session_stamp = s.session_stamp
+  ON CONVERT(l.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
 LEFT JOIN (
   SELECT
     session_stamp,
@@ -144,7 +152,11 @@ LEFT JOIN (
   FROM static_session_rollups
   GROUP BY session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '')
 ) ro
-  ON ro.session_stamp = s.session_stamp
- AND ro.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
-WHERE s.session_stamp = '20260613-all-full'
-  AND COALESCE(TRIM(BOTH FROM s.scope_label), '') = 'All harvested apps';
+  ON CONVERT(ro.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+ AND CONVERT(ro.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+     CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
+WHERE CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+      CONVERT('20260613-all-full' USING utf8mb4) COLLATE utf8mb4_unicode_ci
+  AND CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+      CONVERT('All harvested apps' USING utf8mb4) COLLATE utf8mb4_unicode_ci;

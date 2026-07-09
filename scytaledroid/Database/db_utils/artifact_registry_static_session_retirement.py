@@ -44,6 +44,18 @@ def _norm_bool(value: Any) -> bool:
     return bool(value)
 
 
+def _infer_package_from_host_path(host_path: Any) -> str | None:
+    path = _norm_text_or_none(host_path)
+    if not path:
+        return None
+    name = Path(path.replace("\\", "/")).name
+    for marker in ("-full-", "-base-", "-profile-"):
+        if marker in name:
+            package = name.split(marker, 1)[0].strip()
+            return package or None
+    return None
+
+
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     row_list = list(rows)
     if not row_list:
@@ -62,6 +74,12 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
 
 
 def _session_action(file_present_rows: int, run_count: int) -> str:
+    return _session_action_with_context(file_present_rows, run_count, package_mismatch_rows=0)
+
+
+def _session_action_with_context(file_present_rows: int, run_count: int, *, package_mismatch_rows: int) -> str:
+    if package_mismatch_rows > 0:
+        return "blocked_package_mismatch_review"
     if file_present_rows > 0:
         return "blocked_file_present_review"
     if run_count <= 12:
@@ -74,7 +92,9 @@ def _session_priority(action: str, run_count: int, registry_rows: int) -> tuple[
         return (0, run_count, registry_rows)
     if action == "candidate_large_session_retirement_review":
         return (1, run_count, registry_rows)
-    return (2, run_count, registry_rows)
+    if action == "blocked_file_present_review":
+        return (2, run_count, registry_rows)
+    return (3, run_count, registry_rows)
 
 
 def collect_static_session_retirement_report(
@@ -119,6 +139,12 @@ def collect_static_session_retirement_report(
         run_info = overlap_run_lookup.get(resolved_run_id, {})
         session_stamp = _norm_text_or_none(run_info.get("session_stamp")) or "(unknown)"
         package_name = _norm_text_or_none(run_info.get("package")) or _norm_text_or_none(row.get("meta_package_name")) or "(unknown)"
+        artifact_path_package = _infer_package_from_host_path(row.get("host_path"))
+        package_mismatch = bool(
+            artifact_path_package
+            and package_name != "(unknown)"
+            and artifact_path_package.lower() != package_name.lower()
+        )
         primary_reason = _norm_text_or_none(row.get("primary_reason")) or "unknown"
         file_exists = row.get("host_path_exists")
 
@@ -132,6 +158,7 @@ def collect_static_session_retirement_report(
                 "file_present_registry_rows": 0,
                 "file_missing_registry_rows": 0,
                 "unknown_file_state_registry_rows": 0,
+                "package_mismatch_registry_rows": 0,
                 "metrics_rows": int((session_summary_lookup.get(session_stamp) or {}).get("metrics_rows") or 0),
                 "buckets_rows": int((session_summary_lookup.get(session_stamp) or {}).get("buckets_rows") or 0),
                 "contributor_rows": int((session_summary_lookup.get(session_stamp) or {}).get("contributor_rows") or 0),
@@ -157,6 +184,7 @@ def collect_static_session_retirement_report(
                 "file_present_registry_rows": 0,
                 "file_missing_registry_rows": 0,
                 "unknown_file_state_registry_rows": 0,
+                "package_mismatch_registry_rows": 0,
                 "primary_reason_counts_json": "",
                 "path_family_counts_json": "",
                 "metrics_rows": int(run_info.get("metrics_rows") or 0),
@@ -178,6 +206,9 @@ def collect_static_session_retirement_report(
         else:
             session_group["unknown_file_state_registry_rows"] = int(session_group["unknown_file_state_registry_rows"]) + 1
             run_group["unknown_file_state_registry_rows"] = int(run_group["unknown_file_state_registry_rows"]) + 1
+        if package_mismatch:
+            session_group["package_mismatch_registry_rows"] = int(session_group["package_mismatch_registry_rows"]) + 1
+            run_group["package_mismatch_registry_rows"] = int(run_group["package_mismatch_registry_rows"]) + 1
 
         created_at = _norm_text_or_none(row.get("created_at_utc"))
         if created_at:
@@ -211,6 +242,8 @@ def collect_static_session_retirement_report(
                     "session_stamp": session_stamp,
                     "run_id": resolved_run_id,
                     "package": package_name,
+                    "artifact_path_package": artifact_path_package,
+                    "legacy_package_mismatch": package_mismatch,
                     "primary_reason": primary_reason,
                     "host_path_exists": file_exists,
                     "host_path_family": row.get("host_path_family"),
@@ -223,6 +256,8 @@ def collect_static_session_retirement_report(
                 **dict(row),
                 "session_stamp": session_stamp,
                 "package": package_name,
+                "artifact_path_package": artifact_path_package,
+                "legacy_package_mismatch": package_mismatch,
                 "run_id": resolved_run_id,
             }
         )
@@ -244,9 +279,10 @@ def collect_static_session_retirement_report(
         row["primary_reason_counts_json"] = json.dumps(dict(sorted(reason_counts.items())), sort_keys=True)
         row["path_family_counts_json"] = json.dumps(dict(sorted(path_counts.items())), sort_keys=True)
         row["top_packages_csv"] = ",".join(package for package, _ in package_counts.most_common(8))
-        row["recommended_action"] = _session_action(
+        row["recommended_action"] = _session_action_with_context(
             int(row.get("file_present_registry_rows") or 0),
             int(row.get("overlap_run_ids") or 0),
+            package_mismatch_rows=int(row.get("package_mismatch_registry_rows") or 0),
         )
         row["priority_bucket"] = row["recommended_action"].replace("_review", "")
         sessions_out.append(row)
@@ -278,7 +314,7 @@ def collect_static_session_retirement_report(
     runs_out.sort(key=lambda row: (_norm_text(row.get("session_stamp")), int(row.get("run_id") or 0)))
 
     candidates = [row for row in sessions_out if _norm_text(row.get("recommended_action")).startswith("candidate_")]
-    blocked = [row for row in sessions_out if _norm_text(row.get("recommended_action")) == "blocked_file_present_review"]
+    blocked = [row for row in sessions_out if _norm_text(row.get("recommended_action")).startswith("blocked_")]
 
     summary = {
         "legacy_overlap_registry_rows": sum(int(row.get("overlap_registry_rows") or 0) for row in sessions_out),
@@ -288,6 +324,10 @@ def collect_static_session_retirement_report(
         "blocked_session_count": len(blocked),
         "candidate_registry_rows": sum(int(row.get("overlap_registry_rows") or 0) for row in candidates),
         "blocked_registry_rows": sum(int(row.get("overlap_registry_rows") or 0) for row in blocked),
+        "package_mismatch_registry_rows": sum(int(row.get("package_mismatch_registry_rows") or 0) for row in sessions_out),
+        "package_mismatch_session_count": sum(
+            1 for row in sessions_out if int(row.get("package_mismatch_registry_rows") or 0) > 0
+        ),
         "recommended_candidate_order": [str(row.get("session_stamp") or "") for row in candidates[:12]],
         "blocked_sessions": [str(row.get("session_stamp") or "") for row in blocked[:12]],
     }

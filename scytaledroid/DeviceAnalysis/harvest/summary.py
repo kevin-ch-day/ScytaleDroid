@@ -553,7 +553,12 @@ def _operator_harvest_finish_line(report: HarvestRunReport, *, run_id: str | Non
     if m.blocked_packages:
         parts.append(f"policy-blocked {m.blocked_packages} (skipped before pull)")
     if m.planned_artifacts:
-        parts.append(f"artifacts {m.artifacts_written}/{m.planned_artifacts} written (APK paths, splits count separately)")
+        artifact_summary = f"artifacts {m.artifacts_written}/{m.planned_artifacts} written"
+        if m.artifacts_reused_from_library:
+            artifact_summary = (
+                f"{artifact_summary}, {m.artifacts_reused_from_library} reused from APK library"
+            )
+        parts.append(f"{artifact_summary} (APK paths, splits count separately)")
     return " · ".join(parts)
 
 

@@ -20,7 +20,7 @@ def _dataset_impact_label(latest_recent: Any) -> str:
         if supplemental_reason == "LOW_SIGNAL_IDLE":
             return "ML training pool (LOW_SIGNAL_IDLE)"
         if supplemental_reason == "BASELINE_NOT_IDLE":
-            return "retained non-idle baseline"
+            return "app-active no-touch baseline tag"
         if supplemental_reason == "MANUAL_EXTRA_RUN":
             return "retained extra (manual extra)"
         if supplemental_reason == "SCRIPTED_EXTRA_RUN":

@@ -58,6 +58,10 @@ class DynamicTargetState:
 def _study_status(
     *,
     active_valid_runs: int,
+    baseline_countable: int,
+    baseline_required: int,
+    interactive_countable: int,
+    interactive_required: int,
     quota_met: bool,
     latest_valid: bool | None,
     historical_valid_runs: int,
@@ -68,7 +72,13 @@ def _study_status(
             return "historical_only"
         return "not_started"
     if latest_valid is False:
-        return "qa_review"
+        latest_invalid_allows_interactive_continuation = (
+            not quota_met
+            and int(baseline_countable) >= int(baseline_required)
+            and int(interactive_countable) < int(interactive_required)
+        )
+        if not latest_invalid_allows_interactive_continuation:
+            return "qa_review"
     if quota_met:
         return "complete"
     return "in_progress"
@@ -153,6 +163,10 @@ def derive_dynamic_target_state(
 
     study_status = _study_status(
         active_valid_runs=active_valid_runs,
+        baseline_countable=baseline_countable,
+        baseline_required=baseline_required,
+        interactive_countable=interactive_countable,
+        interactive_required=interactive_required,
         quota_met=quota_met,
         latest_valid=latest_valid,
         historical_valid_runs=historical_valid_runs,

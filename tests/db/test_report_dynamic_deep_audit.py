@@ -21,6 +21,7 @@ def test_write_csv_can_emit_empty_schema(tmp_path: Path) -> None:
         "static_dynamic_bridge_gaps.csv": report.STATIC_DYNAMIC_BRIDGE_GAP_FIELDS,
         "capture_failure_audit.csv": report.CAPTURE_FAILURE_FIELDS,
         "static_enrichment_gap_audit.csv": report.STATIC_ENRICHMENT_GAP_FIELDS,
+        "static_enrichment_overlay_impact.csv": report.STATIC_ENRICHMENT_OVERLAY_IMPACT_FIELDS,
         "phase_coverage_audit.csv": report.PHASE_COVERAGE_FIELDS,
     }
 
@@ -29,6 +30,73 @@ def test_write_csv_can_emit_empty_schema(tmp_path: Path) -> None:
         report._write_csv(path, [], fieldnames=fieldnames)
 
         assert path.read_text(encoding="utf-8").strip() == ",".join(fieldnames)
+
+
+def test_capture_health_treats_success_observer_status_as_healthy() -> None:
+    limitations: list[str] = []
+    run = {
+        "telemetry": {
+            "netstats_available": True,
+            "netstats_observed_bytes": 100_000,
+            "capture_ratio": 1.0,
+            "max_gap_s": 1.0,
+        },
+        "pcap_netstats_consistency": "consistent",
+        "manifest": {
+            "observers": [
+                {"observer_id": "pcapdroid_capture", "status": "success"},
+                {"observer_id": "system_log_capture", "status": "success"},
+            ]
+        },
+    }
+
+    score = report._capture_health_score(run, limitations)
+
+    assert score == 15
+    assert "observer_status_degraded" not in limitations
+
+
+def test_score_run_surfaces_media_plane_summary_columns() -> None:
+    run = _run(
+        run_id="signal-call",
+        package="org.thoughtcrime.securesms",
+        app_label="Signal",
+        run_profile="interaction_manual",
+        interaction_mode="manual",
+        valid_pack=True,
+    )
+    run["report"]["media_plane"] = {
+        "status": "ok",
+        "summary": {
+            "classification": "multi_phase_opaque_udp_media_observed",
+            "relay_media_likely": True,
+            "nat_traversal_observed": True,
+            "turn_allocate_success_count": 3,
+            "turn_allocate_request_count": 33,
+            "stun_frame_count": 945,
+            "rtc_flow_candidate_count": 7,
+            "rtc_sustained_session_count": 0,
+            "udp_media_session_count": 2,
+            "udp_media_multi_session_observed": True,
+            "udp_media_total_bytes": 63_242_111,
+            "udp_media_max_session_duration_s": 111.43,
+        },
+    }
+
+    row = report._score_run(run, join_row=None)
+
+    assert row["media_plane_classification"] == "multi_phase_opaque_udp_media_observed"
+    assert row["relay_media_likely"] == 1
+    assert row["nat_traversal_observed"] == 1
+    assert row["turn_allocate_success_count"] == 3
+    assert row["turn_allocate_request_count"] == 33
+    assert row["stun_frame_count"] == 945
+    assert row["rtc_flow_candidate_count"] == 7
+    assert row["rtc_sustained_session_count"] == 0
+    assert row["udp_media_session_count"] == 2
+    assert row["udp_media_multi_session_observed"] == 1
+    assert row["udp_media_total_bytes"] == 63_242_111
+    assert row["udp_media_max_session_duration_s"] == 111.43
 
 
 def test_plan_overlay_bundle_passes_string_reanalysis_flag(monkeypatch) -> None:
@@ -85,6 +153,29 @@ def test_plan_overlay_bundle_passes_string_reanalysis_flag(monkeypatch) -> None:
     assert bundle["overlay_enriched_metadata_present"] is True
 
 
+def test_high_resolution_residual_service_gap_is_not_repair_blocker() -> None:
+    rows = report._bridge_gaps_for_package(
+        package="com.example.app",
+        app_label="Example",
+        join_row={"static_run_id": 123},
+        runs=[
+            {
+                "valid_pack": True,
+                "service_count": 9,
+                "unresolved_service_count": 1,
+                "corroboration": {"enriched_domain_metadata_present": True},
+                "pcap_info": {},
+                "phase": report.RunPhaseCoverage(None, False, False, 0, 0, "not_applicable", "none"),
+            }
+        ],
+    )
+
+    service_gap = next(row for row in rows if row["gap_key"] == "service_mapping_gaps")
+    assert service_gap["gap_class"] == "residual_context_gap"
+    assert service_gap["severity"] == "low"
+    assert service_gap["recommended_followup"] == "review_residual_service_domains"
+
+
 def test_generate_report_passes_package_filter(tmp_path: Path, monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -124,6 +215,23 @@ def test_generate_report_passes_package_filter(tmp_path: Path, monkeypatch) -> N
     assert summary["plan_analysis_mode"] == "overlay_string_reanalysis"
 
 
+def test_main_accepts_json_compatibility_flags(monkeypatch, tmp_path: Path, capsys) -> None:
+    def fake_generate_report(**kwargs):
+        assert kwargs["output_dir"] == tmp_path
+        assert kwargs["package_filter"] == "com.example.app"
+        return {
+            "runs_scanned": 1,
+            "output_files": {"summary_json": str(tmp_path / "summary.json")},
+        }
+
+    monkeypatch.setattr(report, "generate_report", fake_generate_report)
+
+    assert report.main(["--json", "--stdout-json", "--package", "com.example.app", "--output-dir", str(tmp_path)]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["runs_scanned"] == 1
+
+
 def test_static_enrichment_gap_ignores_zero_actionable_static_domains() -> None:
     runs = [
         _run(
@@ -149,6 +257,99 @@ def test_static_enrichment_gap_ignores_zero_actionable_static_domains() -> None:
     )
 
     assert rows == []
+
+
+def test_static_enrichment_overlay_impact_labels_resolved_and_open_rows() -> None:
+    embedded_rows = [
+        {
+            "package": "com.example.resolved",
+            "app_label": "Resolved",
+            "static_run_id": "1",
+            "gap_type": "enriched_domain_metadata_missing",
+            "recommended_action": "repair_static_enrichment",
+        },
+        {
+            "package": "com.example.open",
+            "app_label": "Open",
+            "static_run_id": "2",
+            "gap_type": "actionable_corroboration_missing",
+            "recommended_action": "repair_static_enrichment",
+        },
+    ]
+    active_rows = [
+        {
+            "package": "com.example.open",
+            "app_label": "Open",
+            "static_run_id": "2",
+            "gap_type": "actionable_corroboration_missing",
+            "recommended_action": "repair_static_enrichment",
+        },
+        {
+            "package": "com.example.new",
+            "app_label": "New",
+            "static_run_id": "3",
+            "gap_type": "actionable_corroboration_missing",
+            "recommended_action": "repair_static_enrichment",
+        },
+    ]
+
+    rows = report._static_enrichment_overlay_impact_rows(
+        embedded_rows=embedded_rows,
+        active_rows=active_rows,
+    )
+
+    statuses = {(row["package"], row["overlay_status"]) for row in rows}
+    assert statuses == {
+        ("com.example.resolved", "resolved_by_overlay"),
+        ("com.example.open", "still_open"),
+        ("com.example.new", "introduced_by_overlay"),
+    }
+
+
+def test_static_enrichment_overlay_impact_labels_refined_package_gap() -> None:
+    rows = report._static_enrichment_overlay_impact_rows(
+        embedded_rows=[
+            {
+                "package": "com.example.refined",
+                "app_label": "Refined",
+                "static_run_id": "4",
+                "gap_type": "static_endpoint_inventory_missing",
+                "recommended_action": "repair_static_enrichment",
+            }
+        ],
+        active_rows=[
+            {
+                "package": "com.example.refined",
+                "app_label": "Refined",
+                "static_run_id": "4",
+                "gap_type": "enriched_domain_metadata_missing",
+                "recommended_action": "repair_static_enrichment",
+            }
+        ],
+    )
+
+    assert rows == [
+        {
+            "package": "com.example.refined",
+            "app_label": "Refined",
+            "static_run_id": "4",
+            "gap_type": "static_endpoint_inventory_missing",
+            "overlay_status": "refined_by_overlay",
+            "related_gap_type": "enriched_domain_metadata_missing",
+            "embedded_recommended_action": "repair_static_enrichment",
+            "active_recommended_action": "",
+        },
+        {
+            "package": "com.example.refined",
+            "app_label": "Refined",
+            "static_run_id": "4",
+            "gap_type": "enriched_domain_metadata_missing",
+            "overlay_status": "refined_active_gap",
+            "related_gap_type": "static_endpoint_inventory_missing",
+            "embedded_recommended_action": "",
+            "active_recommended_action": "repair_static_enrichment",
+        },
+    ]
 
 
 def test_static_dynamic_corroboration_matches_dynamic_subdomains(tmp_path: Path) -> None:
@@ -458,6 +659,40 @@ def test_registered_invalid_pcap_recommends_validity_review_not_recapture() -> N
     )
 
 
+def test_low_volume_missing_pcap_recommends_review_not_recapture() -> None:
+    run = _run(
+        run_id="run-low-volume-missing-pcap",
+        package="com.example.pcap",
+        app_label="PCAP App",
+        run_profile="interaction_manual",
+        interaction_mode="manual",
+        valid_pack=False,
+        pcap_present=False,
+        pcap_size_bytes=0,
+        pcap_failure_detail="PCAP_MISSING",
+        netstats_observed_bytes=16_000,
+    )
+
+    capture_rows = report._capture_failure_rows([run])
+    bridge_rows = report._bridge_gaps_for_package(
+        package="com.example.pcap",
+        app_label="PCAP App",
+        join_row={"static_run_id": 42, "static_endpoint_inventory_status": "present"},
+        runs=[run],
+    )
+
+    assert report._pcap_requires_recollection(run) is False
+    assert report._pcap_needs_low_volume_capture_review(run) is True
+    assert capture_rows[0]["recommended_action"] == "review_low_volume_capture_gap"
+    assert any(
+        row["gap_key"] == "pcap_low_volume_capture_gap"
+        and row["severity"] == "low"
+        and row["recommended_followup"] == "review_low_volume_capture_gap"
+        for row in bridge_rows
+    )
+    assert not any(row["gap_key"] == "pcap_capture_gap" for row in bridge_rows)
+
+
 def test_pattern_matrix_uses_recollect_failures_for_capture_reliability() -> None:
     rows = report._paper_pattern_rows(
         readiness_rows=[
@@ -568,7 +803,8 @@ def test_scripted_recommendation_precedes_static_enrichment_gap() -> None:
         },
     )
     assert recommendation["recommended_run_intent"] == "scripted_interaction"
-    assert recommendation["recommended_template"] == "news_reader_behavior_v2"
+    assert recommendation["recommended_template"] == "bbc_news_behavior_v1"
+    assert recommendation["recommended_phase"] == "open_article"
     assert recommendation["evidence_source"] == "phase_coverage_audit"
 
 
@@ -995,7 +1231,8 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
             valid_pack=True,
             unresolved_service_count=1,
             unresolved_domains=[
-                {"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7}
+                {"domain": "unknown.example.net", "root_domain": "example.net", "total_hits": 7},
+                {"domain": "j.ophan.co.uk", "root_domain": "co.uk", "total_hits": 3},
             ],
         ),
         _run(
@@ -1235,6 +1472,12 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
         row["package"] == "com.example.servicegap" and row["domain"] == "unknown.example.net"
         for row in service_gap_rows
     )
+    assert any(
+        row["package"] == "com.example.servicegap"
+        and row["domain"] == "j.ophan.co.uk"
+        and row["root_domain"] == "ophan.co.uk"
+        for row in service_gap_rows
+    )
 
     with (out_dir / "static_enrichment_gap_audit.csv").open(encoding="utf-8") as handle:
         enrichment_rows = list(csv.DictReader(handle))
@@ -1255,7 +1498,7 @@ def test_generate_report_scores_and_exports_expected_gaps(tmp_path: Path, monkey
         recommendation_rows = {row["package"]: row for row in csv.DictReader(handle)}
     assert (
         recommendation_rows["bbc.mobile.news.ww"]["recommended_template"]
-        == "news_reader_behavior_v2"
+        == "bbc_news_behavior_v1"
     )
     assert recommendation_rows["bbc.mobile.news.ww"]["recommended_phase"] == "open_article"
     assert (
@@ -1475,6 +1718,17 @@ def test_overlay_latest_static_reanalysis_adds_provenance_without_mutating_evide
     assert summary["runs_with_actionable_corroboration_embedded"] == 0
     assert summary["runs_with_actionable_corroboration_overlay"] == 1
     assert summary["actionable_corroboration_rate_overlay"] == 1.0
+    assert summary["static_enrichment_overlay_impact"] == {
+        "active_gap_count": 0,
+        "embedded_gap_count": 1,
+        "introduced_by_overlay": 0,
+        "refined_active_gap": 0,
+        "refined_by_overlay": 0,
+        "resolved_by_overlay": 1,
+        "still_open": 0,
+    }
+    assert summary["row_counts"]["static_enrichment_overlay_impact"] == 1
+    assert "static_enrichment_overlay_impact_csv" in summary["output_files"]
     assert plan_path.read_bytes() == original_bytes
 
     with (out_dir / "run_evidence_quality.csv").open(encoding="utf-8") as handle:
@@ -1490,3 +1744,18 @@ def test_overlay_latest_static_reanalysis_adds_provenance_without_mutating_evide
     assert row["overlay_static_report_path"]
     serialized = json.dumps(row, sort_keys=True)
     assert "AIzaSensitiveRawValueShouldNotSurface" not in serialized
+
+    with (out_dir / "static_enrichment_overlay_impact.csv").open(encoding="utf-8") as handle:
+        impact_rows = list(csv.DictReader(handle))
+    assert impact_rows == [
+        {
+            "package": "com.example.overlay",
+            "app_label": "Example Overlay",
+            "static_run_id": "99",
+            "gap_type": "enriched_domain_metadata_missing",
+            "overlay_status": "resolved_by_overlay",
+            "related_gap_type": "",
+            "embedded_recommended_action": "repair_static_enrichment",
+            "active_recommended_action": "",
+        }
+    ]

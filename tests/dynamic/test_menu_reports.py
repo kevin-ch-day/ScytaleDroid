@@ -116,10 +116,8 @@ def test_render_cohort_status_help_mentions_retained_extra_and_historical(
     assert "baseline gap" in out
     assert "interactive gap" in out
     assert "Quiescent FG baseline" in out
-    assert "retained outside strict-idle quota" in out
-    assert "feed/media refresh can trigger it" in out
-    assert "quiescent fg retained baselines do not unlock interactive" in out.lower()
-    assert "classifier treated the traffic as too active for strict-idle quota" in out.lower()
+    assert "app-driven feed/media refresh activity" in out
+    assert "low-signal baselines remain the supplemental baseline case" in out.lower()
     out_lc = out.lower()
     assert "evidence-authoritative quota" in out_lc
     assert "tracker-scoped latest-run state" in out_lc

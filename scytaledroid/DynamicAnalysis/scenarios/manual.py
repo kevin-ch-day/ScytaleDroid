@@ -188,6 +188,17 @@ class _StopScriptEarly(RuntimeError):
 
 
 BASELINE_PROTOCOL_VERSION = 2
+_CALL_SURFACE_LABELS = {
+    "rtc_call_audio_surface",
+    "rtc_call_surface",
+    "rtc_call_video_surface",
+    "telegram_call_surface",
+    "telegram_video_call_surface",
+    "telegram_voice_call_surface",
+    "webrtc_call_surface",
+    "webrtc_video_call_surface",
+    "webrtc_voice_call_surface",
+}
 BASELINE_PROTOCOL_ID_CONNECTED = "baseline_connected_v2"
 BASELINE_PROTOCOL_ID_IDLE = "baseline_idle_v1"
 CALL_CONNECT_TIMEOUT_S = 30
@@ -1012,8 +1023,83 @@ def _manual_call_protocol(run_profile: str | None, run_ctx: RunContext) -> dict[
     profile_lc = str(run_profile or "").strip().lower()
     if profile_lc != "interaction_manual":
         return None
-    return _collect_manual_call_outcome(
-        messaging_activity=getattr(run_ctx, "messaging_activity", None),
+    messaging_activity = getattr(run_ctx, "messaging_activity", None)
+    effective_activity, foreground_component = _effective_manual_call_activity(run_ctx, messaging_activity)
+    payload = _collect_manual_call_outcome(messaging_activity=effective_activity)
+    if payload and effective_activity != messaging_activity:
+        payload["call_activity_inferred_from_foreground"] = True
+        payload["call_activity_original_tag"] = messaging_activity
+        payload["call_activity_foreground_component"] = foreground_component
+    return payload
+
+
+def _effective_manual_call_activity(
+    run_ctx: RunContext,
+    messaging_activity: str | None,
+) -> tuple[str | None, str | None]:
+    activity = str(messaging_activity or "").strip().lower()
+    if activity in {"voice_call", "video_call"}:
+        return messaging_activity, None
+    foreground_package, foreground_component = _guided_read_device_foreground_target(
+        getattr(run_ctx, "device_serial", None)
+    )
+    expected_package = str(getattr(run_ctx, "package_name", "") or "").strip().lower()
+    actual_package = str(foreground_package or "").strip().lower()
+    component = str(foreground_component or "").strip()
+    component_lc = component.lower()
+    if actual_package != expected_package:
+        return messaging_activity, component or None
+    looks_like_call = _looks_like_call_component(component_lc)
+    if not looks_like_call:
+        try:
+            surface_label, _surface_detail = _infer_runtime_surface(
+                expected_package=expected_package,
+                foreground_package=actual_package,
+                foreground_component=component,
+                device_serial=getattr(run_ctx, "device_serial", None),
+            )
+        except Exception:
+            surface_label = None
+        looks_like_call = str(surface_label or "").strip() in _CALL_SURFACE_LABELS
+    if not looks_like_call:
+        return messaging_activity, component or None
+    if not sys.stdin.isatty():
+        return messaging_activity, component or None
+    print(
+        status_messages.status(
+            f"Foreground call surface detected ({component}). The run was tagged {activity or 'none'}.",
+            level="warn",
+        )
+    )
+    print("Record this manual run as a call?")
+    print("1) Voice call")
+    print("2) Video call")
+    print("0) Keep original tag / skip call outcome")
+    choice = prompt_utils.get_choice(
+        ["1", "2", "0"],
+        default="1",
+        invalid_message="Choose 1, 2, or 0.",
+    )
+    if choice == "1":
+        return "voice_call", component or None
+    if choice == "2":
+        return "video_call", component or None
+    return messaging_activity, component or None
+
+
+def _looks_like_call_component(component_lc: str) -> bool:
+    if not component_lc:
+        return False
+    return any(
+        token in component_lc
+        for token in (
+            "webrtccallactivity",
+            "callactivity",
+            "incall",
+            "voip",
+            "voicecall",
+            "videocall",
+        )
     )
 
 

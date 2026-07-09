@@ -318,6 +318,13 @@ def test_summarizer_includes_manual_call_outcome_fields(tmp_path: Path) -> None:
         "call_attempted": True,
         "call_connected": False,
         "call_outcome_reason": "CALL_NOT_CONNECTED",
+        "call_attempt_count": 3,
+        "call_connected_count": 1,
+        "call_not_connected_count": 2,
+        "call_canceled_count": 0,
+        "call_outcome_summary": "attempts=3;connected=1;not_connected=2;canceled=0",
+        "call_activity_inferred_from_foreground": True,
+        "call_activity_original_tag": "none",
     }
     manifest.target = {
         "package_name": "com.facebook.orca",
@@ -339,8 +346,127 @@ def test_summarizer_includes_manual_call_outcome_fields(tmp_path: Path) -> None:
     assert summary["call_attempted"] is True
     assert summary["call_connected"] is False
     assert summary["call_outcome_reason"] == "CALL_NOT_CONNECTED"
+    assert summary["call_attempt_count"] == 3
+    assert summary["call_not_connected_count"] == 2
     assert "- Call connected: no." in rendered
     assert "- Call outcome: CALL_NOT_CONNECTED." in rendered
+    assert "- Call attempts observed by operator: 3." in rendered
+    assert "- Operator no-connect/ringing attempts: 2." in rendered
+    assert "- Call tag inferred from foreground: yes." in rendered
+    assert "- Original messaging tag: None." in rendered
+
+
+def test_summarizer_renders_messaging_activity_with_operator_label(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    manifest = _manifest(artifacts=[])
+    manifest.operator = {
+        "run_profile": "interaction_manual",
+        "messaging_activity": "manual_freeform",
+    }
+    manifest.target = {
+        "package_name": "org.telegram.messenger",
+    }
+    manifest.environment = {
+        "device_model": "moto g 5G 2024",
+        "android_version": "15",
+        "security_patch_level": "2026-06-05",
+        "play_services_version": "25.22.35",
+    }
+    manifest.scenario = {"id": "basic_usage"}
+    manifest.dataset = {"valid_dataset_run": True, "countable": True}
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["messaging_activity"] == "manual_freeform"
+    assert "- Messaging activity: Freeform / setup." in rendered
+    assert "manual_freeform" not in rendered
+
+
+def test_summarizer_derives_call_counts_for_legacy_primary_outcome(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    manifest = _manifest(artifacts=[])
+    manifest.operator = {
+        "run_profile": "interaction_manual",
+        "messaging_activity": "voice_call",
+        "call_type": "voice",
+        "call_attempted": True,
+        "call_connected": True,
+        "call_outcome_reason": "CALL_CONNECTED_OK",
+    }
+    manifest.target = {
+        "package_name": "org.telegram.messenger",
+    }
+    manifest.scenario = {"id": "basic_usage"}
+    manifest.dataset = {"valid_dataset_run": True, "countable": True}
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+
+    assert summary["call_attempt_count"] == 1
+    assert summary["call_connected_count"] == 1
+    assert summary["call_not_connected_count"] == 0
+    assert summary["call_canceled_count"] == 0
+    assert summary["call_connected_short_count"] == 0
+    assert summary["call_primary_outcome_reason"] == "CALL_CONNECTED_OK"
+    assert summary["call_outcome_summary"] == "attempts=1;connected=1;not_connected=0;canceled=0"
+
+
+def test_summarizer_infers_interrupted_call_from_media_plane(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    report_path = tmp_path / "analysis" / "pcap_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "package_name": "org.telegram.messenger",
+                "media_plane": {
+                    "status": "ok",
+                    "summary": {
+                        "classification": "relay_media_likely",
+                        "relay_media_likely": True,
+                        "rtc_call_observed": True,
+                        "rtc_sustained_session_count": 1,
+                        "rtc_max_session_duration_s": 85.061,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = _manifest(artifacts=[])
+    manifest.operator = {
+        "run_profile": "interaction_manual",
+        "messaging_activity": "voice_call",
+        "call_type": None,
+        "call_attempted": None,
+        "call_connected": None,
+        "call_connected_duration_s": None,
+        "call_outcome_reason": None,
+        "interrupted": True,
+        "interrupted_reason": "ABORTED_DISCARD",
+    }
+    manifest.target = {"package_name": "org.telegram.messenger"}
+    manifest.dataset = {
+        "valid_dataset_run": False,
+        "countable": False,
+        "invalid_reason_code": "ABORTED_DISCARD",
+    }
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["dataset_verdict"] == "INVALID"
+    assert summary["countable"] is False
+    assert summary["call_type"] == "voice"
+    assert summary["call_attempted"] is True
+    assert summary["call_connected"] is True
+    assert summary["call_connected_duration_s"] == 85.061
+    assert summary["call_outcome_reason"] == "CALL_MEDIA_OBSERVED"
+    assert "- Counts toward quota: NO (ABORTED_DISCARD)." in rendered
+    assert "- Call connected: yes." in rendered
 
 
 def test_summarizer_includes_cleartext_posture_mismatch(tmp_path: Path) -> None:
@@ -542,7 +668,7 @@ def test_summarizer_renders_dash_for_missing_invalid_reason(tmp_path: Path) -> N
     assert "Invalid reason: —." in rendered
 
 
-def test_summarizer_labels_baseline_not_idle_explicitly(tmp_path: Path) -> None:
+def test_summarizer_keeps_baseline_not_idle_as_activity_tag_not_exclusion(tmp_path: Path) -> None:
     writer = EvidencePackWriter(tmp_path)
     writer.ensure_layout()
     manifest = RunManifest(
@@ -574,17 +700,17 @@ def test_summarizer_labels_baseline_not_idle_explicitly(tmp_path: Path) -> None:
     assert summary["package_name"] == "com.zhiliaoapp.musically"
     assert summary["version_code"] == 2024507030
     assert summary["counts_toward_quota"] is False
-    assert summary["countability_reason"] == "BASELINE_NOT_IDLE"
+    assert summary["countability_reason"] == "EXTRA_RUN"
     assert summary["exploratory_class"] == "BASELINE_NOT_IDLE"
     assert summary["capture_duration_s"] == 301.2
-    assert summary["quota_detail"]["countability_label"] == "NO (BASELINE_NOT_IDLE)"
+    assert summary["quota_detail"]["countability_label"] == "NO (extra run)"
     assert summary["quota_detail"]["exploratory_class"] == "BASELINE_NOT_IDLE"
     assert summary["quota_detail"]["baseline_not_idle"] is True
     assert summary["quota_detail"]["baseline_not_idle_reasons"] == [
         "BASELINE_BYTES_HIGH",
         "BASELINE_QUIC_MEDIA_HEAVY",
     ]
-    assert "Counts toward quota: NO (BASELINE_NOT_IDLE)." in rendered
+    assert "Counts toward quota: NO (extra run)." in rendered
 
 
 def test_summarizer_surfaces_quota_window_metrics_from_pcap_features(tmp_path: Path) -> None:

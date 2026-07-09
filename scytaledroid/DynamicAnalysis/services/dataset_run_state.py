@@ -235,8 +235,6 @@ def _supplemental_reason(
     cohort_lc = str(cohort_eligibility or "").strip().upper()
     if profile_lc == "baseline_idle" and low_signal is True:
         return "LOW_SIGNAL_IDLE"
-    if profile_lc == "baseline_idle" and baseline_not_idle is True:
-        return "BASELINE_NOT_IDLE"
     if extra_run or cohort_lc == "EXTRA":
         if profile_lc == "interaction_manual":
             return "MANUAL_EXTRA_RUN"

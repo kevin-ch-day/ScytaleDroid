@@ -14,6 +14,20 @@ from scytaledroid.DynamicAnalysis.domain_context import (
     default_domain_references,
     normalize_domain,
 )
+from scytaledroid.DynamicAnalysis.ip_context import classify_ip_destination, normalize_ip
+
+
+def _endpoint_host(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("[") and "]" in text:
+        return text[1 : text.index("]")]
+    if ":" in text and text.count(":") == 1:
+        host, maybe_port = text.rsplit(":", 1)
+        if maybe_port.isdigit():
+            return host
+    return text
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -123,6 +137,47 @@ def build_domain_observation_rows_from_pcap_report(
 
     _append("dns", report.get("top_dns"), source="top_dns")
     _append("sni", report.get("top_sni"), source="top_sni")
+    flow_summary = report.get("flow_summary")
+    top_flows = flow_summary.get("top_flows") if isinstance(flow_summary, Mapping) else None
+    seen_ip_rows: set[tuple[str, str]] = set()
+    if isinstance(top_flows, list):
+        for flow in top_flows:
+            if not isinstance(flow, Mapping):
+                continue
+            for endpoint_key in ("endpoint_b", "endpoint_a"):
+                ip_text = normalize_ip(_endpoint_host(flow.get(endpoint_key)))
+                if not ip_text:
+                    continue
+                ctx = classify_ip_destination(ip_text, package_name=package_name)
+                if not ctx.get("first_party"):
+                    continue
+                dedupe_key = ("ip_dst", ip_text)
+                if dedupe_key in seen_ip_rows:
+                    break
+                seen_ip_rows.add(dedupe_key)
+                try:
+                    count_i = int(flow.get("packets")) if flow.get("packets") is not None else None
+                except Exception:
+                    count_i = None
+                rows.append(
+                    {
+                        "dynamic_run_id": dynamic_run_id,
+                        "package_name": package_name,
+                        "indicator_type": "ip_dst",
+                        "observed_domain": ctx.get("ip"),
+                        "root_domain": ctx.get("cidr") or ctx.get("ip"),
+                        "indicator_count": count_i,
+                        "indicator_source": "top_flow_ip",
+                        "owner_class": ctx.get("owner_class"),
+                        "role_class": ctx.get("role_class"),
+                        "confidence": ctx.get("confidence"),
+                        "classification_basis": ctx.get("basis"),
+                        "package_name_scope": ctx.get("package_name_scope"),
+                        "match_type": ctx.get("match_type"),
+                        "is_first_party": 1 if ctx.get("first_party") else 0,
+                    }
+                )
+                break
     return rows
 
 
@@ -137,7 +192,37 @@ def build_domain_observation_rows_from_network_indicators(
     refs = references or default_domain_references()
     for item in indicator_rows:
         kind = str(item.get("indicator_type") or "").strip().lower()
-        if kind not in {"dns", "sni"}:
+        if kind not in {"dns", "sni", "ip_dst"}:
+            continue
+        if kind == "ip_dst":
+            ip_text = normalize_ip(item.get("indicator_value"))
+            if not ip_text:
+                continue
+            try:
+                count_i = int(item.get("indicator_count") or 0)
+            except Exception:
+                count_i = 0
+            ctx = classify_ip_destination(ip_text, package_name=package_name)
+            if not ctx.get("first_party"):
+                continue
+            rows.append(
+                {
+                    "dynamic_run_id": dynamic_run_id,
+                    "package_name": package_name,
+                    "indicator_type": kind,
+                    "observed_domain": ctx.get("ip"),
+                    "root_domain": ctx.get("cidr") or ctx.get("ip"),
+                    "indicator_count": count_i,
+                    "indicator_source": str(item.get("indicator_source") or "dynamic_network_indicators")[:32],
+                    "owner_class": ctx.get("owner_class"),
+                    "role_class": ctx.get("role_class"),
+                    "confidence": ctx.get("confidence"),
+                    "classification_basis": ctx.get("basis"),
+                    "package_name_scope": ctx.get("package_name_scope"),
+                    "match_type": ctx.get("match_type"),
+                    "is_first_party": 1 if ctx.get("first_party") else 0,
+                }
+            )
             continue
         domain = normalize_domain(item.get("indicator_value"))
         if not domain:
@@ -257,7 +342,7 @@ def index_dynamic_domain_context_from_network_indicators(*, only_missing: bool =
         FROM dynamic_sessions ds
         JOIN dynamic_network_indicators dni
           ON dni.dynamic_run_id = ds.dynamic_run_id
-        WHERE dni.indicator_type IN ('dns', 'sni')
+        WHERE dni.indicator_type IN ('dns', 'sni', 'ip_dst')
           {missing_clause}
         GROUP BY ds.dynamic_run_id, ds.package_name
         ORDER BY ds.package_name, ds.dynamic_run_id
@@ -288,7 +373,7 @@ def index_dynamic_domain_context_from_network_indicators(*, only_missing: bool =
                   MIN(COALESCE(indicator_source, 'dynamic_network_indicators')) AS indicator_source
                 FROM dynamic_network_indicators
                 WHERE dynamic_run_id = %s
-                  AND indicator_type IN ('dns', 'sni')
+                  AND indicator_type IN ('dns', 'sni', 'ip_dst')
                 GROUP BY indicator_type, indicator_value
                 ORDER BY indicator_type, indicator_value
                 """,

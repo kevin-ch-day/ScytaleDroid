@@ -214,6 +214,124 @@ def test_execute_harvest_library_hit_skips_adb_pull(
     assert not (result.package_manifest_path.parent / "com_example_known_1__base.apk").exists()
 
 
+def test_execute_harvest_does_not_library_hit_known_content_variant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.Database.db_utils import diagnostics
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.services import apk_library_service, artifact_store
+
+    patch_runner_common(monkeypatch, runner=runner, diagnostics=diagnostics, tmp_path=tmp_path, write_db=False)
+
+    calls: list[str] = []
+    events: list[dict[str, object]] = []
+
+    class CaptureLogger:
+        extra: dict[str, object] = {}
+
+        def info(self, message, *, extra=None):
+            del message
+            events.append(extra or {})
+
+        def warning(self, message, *, extra=None):
+            del message
+            events.append(extra or {})
+
+        def error(self, message, *, extra=None):
+            del message
+            events.append(extra or {})
+
+    def _fake_pull(**kwargs):
+        calls.append(kwargs["source_path"])
+        kwargs["dest_path"].write_bytes(b"fresh-apk-variant")
+        return True
+
+    monkeypatch.setattr(runner, "adb_pull", _fake_pull)
+
+    inventory = make_inventory_row(
+        package_name="com.example.variant",
+        app_label="Variant App",
+        primary_path="/data/app/com.example.variant/base.apk",
+        version_name="1.0",
+        version_code="1",
+        apk_paths=["/data/app/com.example.variant/base.apk"],
+    )
+    plan = make_package_plan(
+        inventory=inventory,
+        artifacts=[
+            make_artifact_plan(
+                source_path="/data/app/com.example.variant/base.apk",
+                artifact="base",
+                file_name="com_example_variant_1__base.apk",
+            )
+        ],
+    )
+    first_digest = "d" * 64
+    second_digest = "e" * 64
+    first_canonical = artifact_store.canonical_apk_path(first_digest)
+    first_canonical.parent.mkdir(parents=True, exist_ok=True)
+    first_canonical.write_bytes(b"known-apk")
+    second_canonical = artifact_store.canonical_apk_path(second_digest)
+    second_canonical.parent.mkdir(parents=True, exist_ok=True)
+    second_canonical.write_bytes(b"other-known-apk")
+    seed = PullResult(plan=plan)
+    seed.ok.append(
+        runner.ArtifactResult(
+            file_name="com_example_variant_1__base.apk",
+            apk_id=None,
+            dest_path=first_canonical,
+            source_path="/data/app/com.example.variant/base.apk",
+            sha256=first_digest,
+            file_size=first_canonical.stat().st_size,
+            artifact_label="base",
+            is_base=True,
+            canonical_store_path=artifact_store.repo_relative_path(first_canonical),
+        )
+    )
+    variant = PullResult(plan=plan)
+    variant.ok.append(
+        runner.ArtifactResult(
+            file_name="com_example_variant_1__base.apk",
+            apk_id=None,
+            dest_path=second_canonical,
+            source_path="/data/app/com.example.variant/base.apk",
+            sha256=second_digest,
+            file_size=second_canonical.stat().st_size,
+            artifact_label="base",
+            is_base=True,
+            canonical_store_path=artifact_store.repo_relative_path(second_canonical),
+        )
+    )
+    assert apk_library_service.register_result(seed, serial="SERIAL123", session_stamp="seed") is not None
+    assert apk_library_service.register_result(variant, serial="SERIAL123", session_stamp="variant") is not None
+
+    results = runner.execute_harvest(
+        serial="SERIAL123",
+        adb_path="adb",
+        dest_root=tmp_path / "SERIAL123" / "20260330",
+        session_stamp="20260330",
+        plans=[plan],
+        config=object(),
+        pull_mode="inventory",
+        harvest_logger=CaptureLogger(),
+    )
+
+    assert calls == ["/data/app/com.example.variant/base.apk"]
+    assert len(results) == 1
+    result = results[0]
+    assert "apk_library_hit" not in result.skipped
+    assert result.ok[0].status != "library_hit"
+    assert result.package_manifest_path is not None
+    payload = result.package_manifest_path.read_text(encoding="utf-8")
+    assert '"apk_library_hit": true' not in payload
+    assert any(
+        event.get("event") == "harvest.package.apk_library_content_variant_pull_required"
+        and event.get("reason") == "content_variant_requires_fresh_pull"
+        for event in events
+    )
+
+
 def test_execute_harvest_preserves_capture_when_db_mirror_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

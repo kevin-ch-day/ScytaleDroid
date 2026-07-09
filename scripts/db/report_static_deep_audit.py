@@ -317,8 +317,8 @@ def _load_db_package_rows(session_stamp: str) -> tuple[dict[str, dict[str, Any]]
               FROM static_string_summary
               GROUP BY session_stamp, LOWER(TRIM(package_name))
             ) ss
-              ON ss.session_stamp = sar.session_stamp
-             AND ss.package_name_lc = LOWER(TRIM(a.package_name))
+              ON BINARY ss.session_stamp = BINARY sar.session_stamp
+             AND BINARY ss.package_name_lc = BINARY LOWER(TRIM(a.package_name))
             LEFT JOIN (
               SELECT static_run_id, COUNT(*) AS sample_rows
               FROM static_string_samples
@@ -331,7 +331,7 @@ def _load_db_package_rows(session_stamp: str) -> tuple[dict[str, dict[str, Any]]
               GROUP BY static_run_id
             ) corr
               ON corr.static_run_id = sar.id
-            WHERE sar.session_stamp = %s
+            WHERE BINARY sar.session_stamp = BINARY %s
             ORDER BY sar.id
             """,
             (session_stamp,),

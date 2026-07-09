@@ -35,6 +35,7 @@ POLICY_LABELS = {
 SKIP_LABELS = {
     "policy_non_root": "System/vendor/mainline filtered by policy",
     "no_paths": "Package returned no APK paths",
+    "apk_library_hit": "APK library reuse (already indexed)",
     # DB mirror/index warnings (filesystem artifacts remain canonical).
     "app_definition_failed": "DB mirror: failed to record app definition (non-fatal)",
     "split_group_failed": "DB mirror: failed to record split group (non-fatal)",
@@ -112,6 +113,12 @@ class HarvestRunMetrics:
         """Number of artifacts skipped due to deduplication."""
 
         return self.runtime_skips.get("dedupe_sha256", 0)
+
+    @property
+    def artifacts_reused_from_library(self) -> int:
+        """Number of APK artifact paths resolved from the APK library."""
+
+        return self.artifact_status_counter.get("library_hit", 0)
 
     @property
     def packages_successful(self) -> int:
@@ -450,13 +457,15 @@ def _build_summary_card_lines(
     )
     lines.append(format_card_line("Packages", f"{metrics.total_packages} total", package_pairs))
 
+    library_reuse_packages = metrics.runtime_skips.get("apk_library_hit", 0)
+    operator_runtime_skipped = max(metrics.packages_skipped_runtime - library_reuse_packages, 0)
     outcome_pairs = _format_breakdown_pairs(
         [
-            (metrics.packages_successful, "clean"),
-            (metrics.harvested_packages, "harvested"),
+            (metrics.packages_successful, "pulled clean"),
+            (metrics.harvested_packages, "resolved"),
             (metrics.packages_with_partial_errors, "partial issues"),
             (metrics.packages_failed, "failed"),
-            (metrics.packages_skipped_runtime, "runtime skipped"),
+            (operator_runtime_skipped, "runtime skipped"),
         ]
     )
     if outcome_pairs:
@@ -491,16 +500,24 @@ def _build_summary_card_lines(
         lines.append(f"Guard   : {guard_brief_value}")
 
     if metrics.runtime_skips:
-        runtime_breakdown = _format_breakdown_pairs(
-            [
-                (count, compact_label(_describe_reason(reason, SKIP_LABELS)))
-                for reason, count in metrics.runtime_skips.items()
-            ],
-            limit=3,
-        )
-        lines.append(
-            format_card_line("Runtime", f"{metrics.runtime_skip_total} skip(s)", runtime_breakdown)
-        )
+        if set(metrics.runtime_skips) == {"apk_library_hit"}:
+            lines.append(
+                format_card_line(
+                    "Reuse",
+                    f"{metrics.runtime_skip_total} package(s) already in APK library",
+                )
+            )
+        else:
+            runtime_breakdown = _format_breakdown_pairs(
+                [
+                    (count, compact_label(_describe_reason(reason, SKIP_LABELS)))
+                    for reason, count in metrics.runtime_skips.items()
+                ],
+                limit=3,
+            )
+            lines.append(
+                format_card_line("Runtime", f"{metrics.runtime_skip_total} skip(s)", runtime_breakdown)
+            )
 
     replan_pairs = _format_breakdown_pairs(
         [
@@ -546,7 +563,7 @@ def _harvest_highlights(metrics: HarvestRunMetrics, pull_errors: int) -> list[tu
         highlights.append(
             (
                 "success",
-                f"{count_phrase(metrics.packages_successful, 'package')} harvested cleanly",
+                f"{count_phrase(metrics.packages_successful, 'package')} pulled cleanly",
             )
         )
 
@@ -571,17 +588,24 @@ def _harvest_highlights(metrics: HarvestRunMetrics, pull_errors: int) -> list[tu
 
     if metrics.runtime_skip_total:
         top_reason = metrics.runtime_skips.most_common(1)
-        if top_reason:
+        if set(metrics.runtime_skips) == {"apk_library_hit"}:
+            highlights.append(
+                (
+                    "info",
+                    f"{count_phrase(metrics.runtime_skip_total, 'package')} reused from APK library",
+                )
+            )
+        elif top_reason:
             reason_label = _describe_reason(top_reason[0][0], SKIP_LABELS)
             detail = f" (top: {compact_label(reason_label)})"
-        else:
-            detail = ""
-        highlights.append(
-            (
-                "warn",
-                f"{count_phrase(metrics.runtime_skip_total, 'runtime skip')}{detail}",
+            highlights.append(
+                (
+                    "warn",
+                    f"{count_phrase(metrics.runtime_skip_total, 'runtime skip')}{detail}",
+                )
             )
-        )
+        else:
+            highlights.append(("warn", f"{count_phrase(metrics.runtime_skip_total, 'runtime skip')}"))
 
     if pull_errors:
         highlights.append(
@@ -595,6 +619,8 @@ def _derive_harvest_status(
     metrics: HarvestRunMetrics,
     results: Sequence[PullResult],
 ) -> HarvestRunStatus:
+    library_reuse_packages = metrics.runtime_skips.get("apk_library_hit", 0)
+    operator_runtime_skips = max(metrics.packages_skipped_runtime - library_reuse_packages, 0)
     return build_harvest_run_status(
         packages_total=metrics.total_packages,
         packages_reviewed=metrics.reviewed_packages,
@@ -602,7 +628,7 @@ def _derive_harvest_status(
         attempted_count=metrics.executed_packages,
         harvested_count=metrics.harvested_packages,
         blocked_preflight_count=metrics.blocked_packages,
-        skipped_count=metrics.packages_skipped_runtime,
+        skipped_count=operator_runtime_skips,
         failed_count=metrics.packages_failed,
         partial_count=metrics.packages_with_partial_errors,
         drifted_count=metrics.packages_drifted,
@@ -691,7 +717,12 @@ def _build_skip_counts_line(metrics: HarvestRunMetrics) -> str | None:
     if metrics.preflight_skips:
         skip_parts.append(f"preflight={sum(metrics.preflight_skips.values())}")
     if metrics.runtime_skips:
-        skip_parts.append(f"runtime={sum(metrics.runtime_skips.values())}")
+        library_hits = metrics.runtime_skips.get("apk_library_hit", 0)
+        other_runtime = sum(metrics.runtime_skips.values()) - library_hits
+        if library_hits:
+            skip_parts.append(f"runtime_reused={library_hits}")
+        if other_runtime:
+            skip_parts.append(f"runtime={other_runtime}")
     if not skip_parts:
         return None
     return f"skips: {', '.join(skip_parts)}"

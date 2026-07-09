@@ -10,6 +10,7 @@ from scytaledroid.StaticAnalysis.cli.flows import exact_target
 from scytaledroid.StaticAnalysis.cli.flows import headless_run
 from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
+from scytaledroid.DeviceAnalysis.services import artifact_store
 
 
 def _sha(data: bytes) -> str:
@@ -110,6 +111,26 @@ def test_missing_local_artifact_aborts(monkeypatch, tmp_path):
         exact_target.resolve_exact_static_target(apk_id=11, include_splits="base-only")
 
 
+def test_exact_target_canonical_cold_blob_fails_clearly_when_mercury_unmounted(
+    monkeypatch,
+    tmp_path,
+):
+    sha = "c" * 64
+    external_mount = tmp_path / "mnt" / "MERCURY_DATA_V2"
+    cold_apk = external_mount / "cold" / "data" / "store" / "apk" / "sha256" / "cc" / f"{sha}.apk"
+    cold_apk.parent.mkdir(parents=True, exist_ok=True)
+    cold_apk.write_text("apk", encoding="utf-8")
+    canonical_link = tmp_path / "data" / "store" / "apk" / "sha256" / "cc" / f"{sha}.apk"
+    canonical_link.parent.mkdir(parents=True, exist_ok=True)
+    canonical_link.symlink_to(cold_apk)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(artifact_store, "EXTERNAL_APK_STORE_MOUNT_ROOTS", (external_mount,))
+    monkeypatch.setattr(artifact_store.os.path, "ismount", lambda _path: False)
+
+    with pytest.raises(artifact_store.ColdApkBlobUnavailable, match="Mercury drive is not mounted"):
+        exact_target._resolve_local_path(_row(sha=sha, path=None))
+
+
 def test_base_only_requires_explicit_mode(monkeypatch, tmp_path):
     path, expected = _apk(tmp_path, "base.apk", b"base")
     _patch_db(monkeypatch, _row(sha=expected, path=path))
@@ -207,7 +228,7 @@ def test_readiness_missing_base_bytes_recommends_restore_artifacts(monkeypatch, 
     monkeypatch.setattr(
         exact_target.artifact_store,
         "canonical_apk_path",
-        lambda sha: tmp_path / "sha-store" / f"{sha}.apk",
+        lambda sha, **_kwargs: tmp_path / "sha-store" / f"{sha}.apk",
     )
 
     readiness = exact_target.assess_exact_target_readiness(

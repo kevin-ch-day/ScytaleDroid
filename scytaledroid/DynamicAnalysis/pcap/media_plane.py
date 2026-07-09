@@ -32,11 +32,21 @@ def summarize_media_plane(
     dominant_udp_flow = _select_dominant_udp_flow(top_flows, udp_bytes=udp_bytes)
     stun_turn = _summarize_stun_turn(pcap_path=pcap_path, tshark_path=tshark_path)
     rtc_sessions = _summarize_rtc_sessions(pcap_path=pcap_path, tshark_path=tshark_path)
+    udp_media = _summarize_udp_media_sessions(
+        pcap_path=pcap_path,
+        tshark_path=tshark_path,
+        udp_bytes=udp_bytes,
+    )
 
     relay_media_likely = bool(
         stun_turn["turn_allocate_success_count"] > 0
-        and dominant_udp_flow.get("share_of_udp_bytes") is not None
-        and float(dominant_udp_flow["share_of_udp_bytes"]) >= 0.5
+        and (
+            (
+                dominant_udp_flow.get("share_of_udp_bytes") is not None
+                and float(dominant_udp_flow["share_of_udp_bytes"]) >= 0.5
+            )
+            or udp_media["udp_media_session_count"] > 0
+        )
         and (udp_ratio or 0.0) >= 0.7
     )
     nat_traversal_observed = bool(
@@ -74,6 +84,14 @@ def summarize_media_plane(
     if rtc_sessions["rtc_sustained_session_count"] > 1:
         reason_codes.append("multi_phase_rtc_observed")
         classification = "multi_session_rtc_observed"
+    if udp_media["udp_media_session_count"] > 0:
+        reason_codes.append("opaque_udp_media_sessions_observed")
+        if classification in {"not_observed", "nat_traversal_observed", "udp_media_candidate"}:
+            classification = "opaque_udp_media_observed"
+    if udp_media["udp_media_session_count"] > 1:
+        reason_codes.append("multi_phase_opaque_udp_media_observed")
+        if classification != "multi_session_rtc_observed":
+            classification = "multi_phase_opaque_udp_media_observed"
 
     summary = {
         "classification": classification,
@@ -108,6 +126,13 @@ def summarize_media_plane(
         "rtc_relay_peer_count": rtc_sessions["rtc_relay_peer_count"],
         "rtc_relay_peers": rtc_sessions["rtc_relay_peers"],
         "rtc_sessions": rtc_sessions["rtc_sessions"],
+        "udp_media_session_count": udp_media["udp_media_session_count"],
+        "udp_media_multi_session_observed": bool(udp_media["udp_media_session_count"] > 1),
+        "udp_media_total_bytes": udp_media["udp_media_total_bytes"],
+        "udp_media_total_packets": udp_media["udp_media_total_packets"],
+        "udp_media_max_session_bytes": udp_media["udp_media_max_session_bytes"],
+        "udp_media_max_session_duration_s": udp_media["udp_media_max_session_duration_s"],
+        "udp_media_sessions": udp_media["udp_media_sessions"],
         "reason_codes": reason_codes,
     }
     status = (
@@ -116,6 +141,138 @@ def summarize_media_plane(
         else "no_observations"
     )
     return {"status": status, "summary": summary}
+
+
+def _summarize_udp_media_sessions(
+    *,
+    pcap_path: Path | None,
+    tshark_path: str | None,
+    udp_bytes: int,
+) -> dict[str, Any]:
+    empty = {
+        "udp_media_session_count": 0,
+        "udp_media_total_bytes": 0,
+        "udp_media_total_packets": 0,
+        "udp_media_max_session_bytes": 0,
+        "udp_media_max_session_duration_s": 0.0,
+        "udp_media_sessions": [],
+    }
+    if not pcap_path or not tshark_path or not pcap_path.exists():
+        return empty
+    result = _run_command(
+        [
+            tshark_path,
+            "-n",
+            "-r",
+            str(pcap_path),
+            "-Y",
+            "udp && !(dns)",
+            "-T",
+            "fields",
+            "-E",
+            "separator=\t",
+            "-e",
+            "frame.time_relative",
+            "-e",
+            "ip.src",
+            "-e",
+            "udp.srcport",
+            "-e",
+            "ip.dst",
+            "-e",
+            "udp.dstport",
+            "-e",
+            "frame.len",
+            "-e",
+            "frame.protocols",
+        ]
+    )
+    stdout = str(result.get("stdout") or "")
+    if not stdout:
+        return empty
+
+    flows: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw_line in stdout.splitlines():
+        parts = raw_line.split("\t")
+        if len(parts) < 7:
+            continue
+        time_s = _safe_float(parts[0])
+        src_ip = str(parts[1] or "").strip()
+        src_port = _safe_int(parts[2])
+        dst_ip = str(parts[3] or "").strip()
+        dst_port = _safe_int(parts[4])
+        frame_len = _safe_int(parts[5]) or 0
+        protocols = str(parts[6] or "").strip().lower()
+        if time_s is None or not src_ip or not dst_ip or src_port is None or dst_port is None:
+            continue
+        proto_set = set(protocols.split(":"))
+        if "dns" in proto_set:
+            continue
+        endpoint_a = f"{src_ip}:{src_port}"
+        endpoint_b = f"{dst_ip}:{dst_port}"
+        flow_key = tuple(sorted((endpoint_a, endpoint_b)))
+        entry = flows.setdefault(
+            flow_key,
+            {
+                "endpoint_a": flow_key[0],
+                "endpoint_b": flow_key[1],
+                "first_ts": time_s,
+                "last_ts": time_s,
+                "bytes": 0,
+                "packets": 0,
+                "stun_packets": 0,
+            },
+        )
+        entry["first_ts"] = min(float(entry["first_ts"]), float(time_s))
+        entry["last_ts"] = max(float(entry["last_ts"]), float(time_s))
+        entry["bytes"] = int(entry["bytes"]) + max(frame_len, 0)
+        entry["packets"] = int(entry["packets"]) + 1
+        if "stun" in proto_set:
+            entry["stun_packets"] = int(entry["stun_packets"]) + 1
+
+    sessions: list[dict[str, Any]] = []
+    total_bytes = 0
+    total_packets = 0
+    max_bytes = 0
+    max_duration = 0.0
+    for row in flows.values():
+        flow_bytes = int(row.get("bytes") or 0)
+        packets = int(row.get("packets") or 0)
+        duration_s = max(0.0, float(row["last_ts"]) - float(row["first_ts"]))
+        share = _bounded_ratio(flow_bytes, udp_bytes)
+        if flow_bytes < 1_000_000 or packets < 500 or duration_s < 20.0 or share < 0.02:
+            continue
+        total_bytes += flow_bytes
+        total_packets += packets
+        max_bytes = max(max_bytes, flow_bytes)
+        max_duration = max(max_duration, duration_s)
+        sessions.append(
+            {
+                "endpoint_a": row["endpoint_a"],
+                "endpoint_b": row["endpoint_b"],
+                "first_ts": round(float(row["first_ts"]), 3),
+                "last_ts": round(float(row["last_ts"]), 3),
+                "duration_s": round(duration_s, 3),
+                "bytes": flow_bytes,
+                "packets": packets,
+                "share_of_udp_bytes": share,
+                "stun_packets": int(row.get("stun_packets") or 0),
+            }
+        )
+    sessions.sort(
+        key=lambda item: (
+            float(item.get("first_ts") or 0.0),
+            -int(item.get("bytes") or 0),
+        )
+    )
+    return {
+        "udp_media_session_count": len(sessions),
+        "udp_media_total_bytes": total_bytes,
+        "udp_media_total_packets": total_packets,
+        "udp_media_max_session_bytes": max_bytes,
+        "udp_media_max_session_duration_s": round(max_duration, 3),
+        "udp_media_sessions": sessions[:8],
+    }
 
 
 def _summarize_stun_turn(*, pcap_path: Path | None, tshark_path: str | None) -> dict[str, Any]:

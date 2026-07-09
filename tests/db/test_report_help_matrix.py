@@ -131,11 +131,6 @@ import pytest
             ),
         ),
         (
-            "scripts/db/report_research_cohorts.py",
-            (),
-            ("--all-members",),
-        ),
-        (
             "scripts/db/report_artifact_registry_static_dangling.py",
             (),
             (
@@ -197,16 +192,6 @@ import pytest
             (),
         ),
         (
-            "scripts/db/report_phase_b1_join_key_normalization.py",
-            (),
-            (),
-        ),
-        (
-            "scripts/db/apply_phase_b1_join_key_normalization.py",
-            (),
-            (),
-        ),
-        (
             "scripts/db/phase_b1_session_stamp_backlog.py",
             (),
             (),
@@ -222,16 +207,6 @@ import pytest
             (),
         ),
         (
-            "scripts/db/report_phase_b1_session_stamp_backlog.py",
-            (),
-            (),
-        ),
-        (
-            "scripts/db/apply_phase_b1_session_stamp_backlog.py",
-            (),
-            (),
-        ),
-        (
             "scripts/db/schema_version_width_hotfix.py",
             (),
             (),
@@ -244,16 +219,6 @@ import pytest
         (
             "scripts/db/schema_version_width_hotfix.py",
             ("apply",),
-            (),
-        ),
-        (
-            "scripts/db/report_schema_version_width_hotfix.py",
-            (),
-            (),
-        ),
-        (
-            "scripts/db/apply_schema_version_width_hotfix.py",
-            (),
             (),
         ),
         (
@@ -320,15 +285,6 @@ import pytest
                 "--only-gaps",
                 "--design-checks",
                 "lineage",
-            ),
-        ),
-        (
-            "scripts/db/report_package_lineage_coverage.py",
-            (),
-            (
-                "--design-checks",
-                "--drift-details",
-                "install-set",
             ),
         ),
         (

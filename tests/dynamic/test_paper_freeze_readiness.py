@@ -334,7 +334,7 @@ def test_paper_freeze_decision_board_whatsapp_ready_prior_build(monkeypatch) -> 
     assert row["rough_draft_blocker"] == "no"
 
 
-def test_paper_freeze_decision_board_current_gap_becomes_must_run_now(monkeypatch) -> None:
+def test_paper_freeze_decision_board_current_interactive_gap_is_optional_depth(monkeypatch) -> None:
     monkeypatch.setattr(subject, "active_research_cohort_packages", lambda: ("org.reddit.frontpage",))
     monkeypatch.setattr(subject, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(
@@ -362,13 +362,48 @@ def test_paper_freeze_decision_board_current_gap_becomes_must_run_now(monkeypatc
     board = subject.build_paper_freeze_decision_board()
     row = board["rows"][0]
 
-    assert row["bucket"] == "MUST_RUN_NOW"
+    assert row["bucket"] == "RUN_ONLY_IF_EASY"
     assert row["strict_idle_count"] == 3
     assert row["quiescent_fg_count"] == 0
+    assert row["draft_role"] == "interactive_depth_gap"
+    assert row["collectability"] == "optional_current_depth"
+    assert row["action"] == "interactive if claim needs it"
+    assert row["rough_draft_blocker"] == "no"
+    assert "do not block the rough draft" in row["reason"]
+
+
+def test_paper_freeze_decision_board_current_baseline_gap_stays_must_run_now(monkeypatch) -> None:
+    monkeypatch.setattr(subject, "active_research_cohort_packages", lambda: ("org.reddit.frontpage",))
+    monkeypatch.setattr(subject, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(
+        subject,
+        "_load_tracker_payload",
+        lambda cfg: (
+            "ok",
+            {
+                "apps": {
+                    "org.reddit.frontpage": {
+                        "runs": [
+                            _run(run_id="rd-b1", version_code="300", version_name="2026.26", static_run_id="6101", base_sha="r" * 64, profile="baseline_idle"),
+                            _run(run_id="rd-i1", version_code="300", version_name="2026.26", static_run_id="6101", base_sha="r" * 64, profile="interaction_manual"),
+                        ]
+                    }
+                }
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(subject, "resolve_active_package_identity", lambda package: ("300", "r" * 64))
+
+    board = subject.build_paper_freeze_decision_board()
+    row = board["rows"][0]
+
+    assert row["bucket"] == "MUST_RUN_NOW"
     assert row["draft_role"] == "current_gap"
     assert row["collectability"] == "collectable_now"
-    assert row["action"] == "interactive"
+    assert row["action"] == "baseline"
     assert row["rough_draft_blocker"] == "yes"
+    assert "missing baseline evidence" in row["reason"]
 
 
 def test_paper_freeze_decision_board_switch_target_candidate(monkeypatch) -> None:
@@ -482,28 +517,29 @@ def test_paper_freeze_keeps_quiescent_fg_separate_from_strict_idle(monkeypatch) 
     assert row["strict_idle_count"] == 0
     assert row["quiescent_fg_count"] == 7
     assert row["interactive_count"] == 2
-    assert row["strict_idle_ready"] == "no"
+    assert row["strict_idle_ready"] == "yes"
     assert row["quiescent_fg_available"] == "yes"
-    assert row["strict_workflow_blocked"] == "yes"
-    assert row["status"] == "needs baseline"
+    assert row["strict_workflow_blocked"] == "no"
+    assert row["status"] == "needs interactive"
     assert "Quiescent FG evidence" in row["baseline_class_note"]
 
     board = subject.build_paper_freeze_decision_board()
     board_row = board["rows"][0]
-    assert board_row["bucket"] == "MUST_RUN_NOW"
+    assert board_row["bucket"] == "RUN_ONLY_IF_EASY"
     assert board_row["strict_idle_count"] == 0
     assert board_row["quiescent_fg_count"] == 7
     assert board_row["interactive_count"] == 2
-    assert board_row["action"] == "strict idle retry"
-    assert "strict-idle baseline quota is still incomplete" in board_row["reason"]
+    assert board_row["action"] == "interactive if claim needs it"
+    assert board_row["rough_draft_blocker"] == "no"
+    assert "do not block the rough draft" in board_row["reason"]
     plan = manifest["paper_minimal_run_plan"][0]
-    assert plan["recommended_next_action"] == "strict idle retry"
+    assert plan["recommended_next_action"] == "interactive"
     assert plan["strict_idle_count"] == 0
     assert plan["quiescent_fg_count"] == 7
     assert "Quiescent FG evidence" in plan["baseline_class_note"]
 
 
-def test_paper_freeze_reddit_like_row_shows_missing_strict_idle(monkeypatch) -> None:
+def test_paper_freeze_reddit_like_row_counts_baseline_and_separate_qfg(monkeypatch) -> None:
     monkeypatch.setattr(subject, "active_research_cohort_packages", lambda: ("org.reddit.frontpage",))
     monkeypatch.setattr(subject, "active_research_cohort_label", lambda: "Research Dataset Beta")
     monkeypatch.setattr(
@@ -571,5 +607,142 @@ def test_paper_freeze_reddit_like_row_shows_missing_strict_idle(monkeypatch) -> 
     row = manifest["apps"][0]
     assert row["strict_idle_count"] == 2
     assert row["quiescent_fg_count"] == 3
-    assert row["missing_baseline_runs"] == 1
-    assert row["status"] == "needs baseline"
+    assert row["baseline_count"] == 5
+    assert row["missing_baseline_runs"] == 0
+    assert row["status"] == "needs interactive"
+
+
+def test_paper_evidence_tier_report_classifies_cutoff_bundles(monkeypatch) -> None:
+    monkeypatch.setattr(
+        subject,
+        "active_research_cohort_packages",
+        lambda: ("bbc.mobile.news.ww", "com.reddit.frontpage", "com.facebook.katana", "org.telegram.messenger"),
+    )
+    monkeypatch.setattr(subject, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(
+        subject,
+        "_load_tracker_payload",
+        lambda cfg: (
+            "ok",
+            {
+                "apps": {
+                    "bbc.mobile.news.ww": {
+                        "runs": [
+                            _run(run_id=f"bbc-b{i}", version_code="100", version_name="1.0", static_run_id="1", base_sha="b" * 64, profile="baseline_idle")
+                            for i in range(1, 4)
+                        ]
+                        + [
+                            _run(run_id=f"bbc-i{i}", version_code="100", version_name="1.0", static_run_id="1", base_sha="b" * 64, profile="interaction_manual")
+                            for i in range(1, 5)
+                        ]
+                    },
+                    "com.reddit.frontpage": {
+                        "runs": [
+                            _run(run_id="rd-s1", version_code="300", version_name="2026.26", static_run_id="2", base_sha="r" * 64, profile="baseline_idle"),
+                            _run(run_id="rd-s2", version_code="300", version_name="2026.26", static_run_id="2", base_sha="r" * 64, profile="baseline_idle"),
+                            _run(run_id="rd-q1", version_code="300", version_name="2026.26", static_run_id="2", base_sha="r" * 64, profile="baseline_idle", baseline_not_idle=True),
+                            _run(run_id="rd-q2", version_code="300", version_name="2026.26", static_run_id="2", base_sha="r" * 64, profile="baseline_idle", baseline_not_idle=True),
+                            _run(run_id="rd-q3", version_code="300", version_name="2026.26", static_run_id="2", base_sha="r" * 64, profile="baseline_idle", baseline_not_idle=True),
+                        ]
+                    },
+                    "com.facebook.katana": {
+                        "runs": [
+                            _run(run_id=f"fb-b{i}", version_code="200", version_name="2.0", static_run_id="3", base_sha="f" * 64, profile="baseline_idle")
+                            for i in range(1, 4)
+                        ]
+                        + [
+                            _run(run_id=f"fb-i{i}", version_code="200", version_name="2.0", static_run_id="3", base_sha="f" * 64, profile="interaction_manual")
+                            for i in range(1, 5)
+                        ]
+                    },
+                    "org.telegram.messenger": {"runs": []},
+                }
+            },
+            None,
+        ),
+    )
+
+    def active_identity(package: str) -> tuple[str, str]:
+        return {
+            "bbc.mobile.news.ww": ("100", "b" * 64),
+            "com.reddit.frontpage": ("300", "r" * 64),
+            "com.facebook.katana": ("201", "x" * 64),
+            "org.telegram.messenger": ("400", "t" * 64),
+        }[package]
+
+    monkeypatch.setattr(subject, "resolve_active_package_identity", active_identity)
+
+    report = subject.build_paper_evidence_tier_report(
+        live_drift_map={
+            "bbc.mobile.news.ww": {"observed_version_code": "101"},
+            "com.facebook.katana": {"observed_version_code": "202"},
+        }
+    )
+    rows = {row["package_name"]: row for row in report["rows"]}
+
+    assert rows["bbc.mobile.news.ww"]["evidence_tier"] == "STRICT_CURRENT_BUILD_COMPLETE"
+    assert rows["bbc.mobile.news.ww"]["paper_usable"] == "yes"
+    assert rows["bbc.mobile.news.ww"]["operational_live_drifted"] == "yes"
+    assert rows["bbc.mobile.news.ww"]["operational_installed_version_code"] == "101"
+    assert rows["com.reddit.frontpage"]["evidence_tier"] == "CURRENT_BUILD_MIXED_BASELINE"
+    assert rows["com.reddit.frontpage"]["strict_idle_count"] == 2
+    assert rows["com.reddit.frontpage"]["quiescent_fg_count"] == 3
+    assert rows["com.reddit.frontpage"]["paper_usable"] == "yes"
+    assert rows["com.facebook.katana"]["evidence_tier"] == "PRIOR_BUILD_PAPER_EVIDENCE"
+    assert rows["com.facebook.katana"]["current_installed_drifted"] == "yes"
+    assert rows["com.facebook.katana"]["operational_live_drifted"] == "yes"
+    assert rows["org.telegram.messenger"]["evidence_tier"] == "TRUE_EVIDENCE_HOLE"
+    assert rows["org.telegram.messenger"]["paper_usable"] == "no"
+    assert report["summary"]["tier_counts"] == {
+        "CURRENT_BUILD_MIXED_BASELINE": 1,
+        "PRIOR_BUILD_PAPER_EVIDENCE": 1,
+        "STRICT_CURRENT_BUILD_COMPLETE": 1,
+        "TRUE_EVIDENCE_HOLE": 1,
+    }
+    assert report["summary"]["drifted_but_paper_usable"] == 2
+
+
+def test_paper_evidence_tier_report_skip_live_drift_does_not_claim_operational_drift(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(subject, "active_research_cohort_packages", lambda: ("com.facebook.katana",))
+    monkeypatch.setattr(subject, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(
+        subject,
+        "_load_tracker_payload",
+        lambda cfg: (
+            "ok",
+            {
+                "apps": {
+                    "com.facebook.katana": {
+                        "runs": [
+                            _run(
+                                run_id=f"fb-b{i}",
+                                version_code="200",
+                                version_name="2.0",
+                                static_run_id="3",
+                                base_sha="f" * 64,
+                                profile="baseline_idle",
+                            )
+                            for i in range(1, 4)
+                        ]
+                    }
+                }
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(subject, "resolve_active_package_identity", lambda package: ("201", "x" * 64))
+
+    report = subject.build_paper_evidence_tier_report(live_drift_map=None)
+    row = report["rows"][0]
+
+    assert row["evidence_tier"] == "PRIOR_BUILD_PAPER_EVIDENCE"
+    assert row["paper_usable"] == "yes"
+    assert row["current_installed_drifted"] == "yes"
+    assert row["operational_live_drifted"] == "not_checked"
+    assert row["operational_installed_version_code"] == ""
+    assert "not checked" in row["operational_drift_detail"]
+    assert report["summary"]["live_drift_checked"] is False
+    assert report["summary"]["drifted_but_paper_usable"] == 0
+    assert report["summary"]["prior_build_paper_usable"] == 1

@@ -11,6 +11,7 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_track
 from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
     baseline_not_idle_next_step as _guidance_baseline_not_idle_next_step,
 )
+from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import messaging_activity_label
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.time_utils import format_seconds
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
@@ -40,7 +41,7 @@ def print_run_summary(result, duration_label: str) -> None:
             lines.append(("Interaction", str(interaction)))
         messaging_activity = operator.get("messaging_activity")
         if messaging_activity:
-            lines.append(("Messaging", str(messaging_activity)))
+            lines.append(("Messaging", messaging_activity_label(messaging_activity)))
         _append_call_metadata_lines(lines, operator=operator, messaging_activity=messaging_activity)
         if str(run_profile or "").startswith("interaction_scripted"):
             template_id = operator.get("template_id") or operator.get("scenario_template")
@@ -93,8 +94,8 @@ def print_run_summary(result, duration_label: str) -> None:
             if valid is True and validity.get("baseline_not_idle") is True:
                 lines.append(
                     (
-                        "Exploratory class",
-                        "BASELINE_NOT_IDLE (retained non-idle baseline, not quota-counted)",
+                        "App activity tag",
+                        "BASELINE_NOT_IDLE (app-generated foreground traffic; not proof of operator interaction)",
                     )
                 )
             min_bytes = validity.get("min_pcap_bytes")
@@ -129,6 +130,18 @@ def print_run_summary(result, duration_label: str) -> None:
                             "Quiet connected-messaging baselines can remain quota-counted when first-party runtime evidence is present; low traffic alone does not mean the baseline failed.",
                         )
                     )
+                if _is_low_signal_idle_nonquota(validity, run_profile):
+                    lines.append(
+                        (
+                            "Quota explanation",
+                            "This run was valid and retained, but excluded from strict-idle quota because the capture was too quiet for quota evidence.",
+                        )
+                    )
+                    low_signal_reasons = _low_signal_reason_lines(run_dir, validity)
+                    if low_signal_reasons:
+                        lines.append(("Low-signal reasons", "; ".join(low_signal_reasons)))
+                    lines.append(("Retained as", "low-signal idle baseline evidence"))
+                    lines.append(("Included in idle ML pool", "yes"))
                 if _is_baseline_not_idle_extra(validity, run_profile):
                     non_idle_reasons = _baseline_not_idle_reasons(result.dynamic_run_id, validity)
                     metric_snapshot = _non_idle_metric_snapshot(run_dir)
@@ -374,6 +387,12 @@ def _append_call_metadata_lines(
             "call_connected_duration_s",
             "call_end_reason",
             "call_outcome_reason",
+            "call_attempt_count",
+            "call_connected_count",
+            "call_not_connected_count",
+            "call_canceled_count",
+            "call_outcome_summary",
+            "call_activity_inferred_from_foreground",
         )
     )
     if not call_type and not has_call_metadata:
@@ -392,6 +411,37 @@ def _append_call_metadata_lines(
         lines.append(("Call end reason", str(operator.get("call_end_reason"))))
     if operator.get("call_outcome_reason"):
         lines.append(("Call outcome", str(operator.get("call_outcome_reason"))))
+    if operator.get("call_attempt_count") is not None:
+        lines.append(("Call attempts", str(operator.get("call_attempt_count"))))
+    if operator.get("call_connected_count") is not None:
+        lines.append(("Connected attempts", str(operator.get("call_connected_count"))))
+    if operator.get("call_not_connected_count") is not None:
+        lines.append(("No-connect/ringing attempts", str(operator.get("call_not_connected_count"))))
+    if operator.get("call_canceled_count") is not None:
+        lines.append(("Canceled attempts", str(operator.get("call_canceled_count"))))
+    if operator.get("call_outcome_summary"):
+        lines.append(("Call outcome summary", str(operator.get("call_outcome_summary"))))
+    if operator.get("call_activity_inferred_from_foreground") is not None:
+        lines.append(
+            (
+                "Call tag inferred",
+                str(bool(operator.get("call_activity_inferred_from_foreground"))).lower(),
+            )
+        )
+    if operator.get("call_activity_original_tag"):
+        lines.append(
+            (
+                "Original messaging tag",
+                messaging_activity_label(operator.get("call_activity_original_tag")),
+            )
+        )
+    if operator.get("call_activity_foreground_component"):
+        lines.append(
+            (
+                "Call foreground component",
+                str(operator.get("call_activity_foreground_component")),
+            )
+        )
 
 
 def _load_manifest(run_dir: Path | None) -> dict[str, object] | None:
@@ -709,10 +759,12 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
         if isinstance(ds, dict) and baseline_not_idle is None and ds.get("baseline_not_idle") is not None:
             baseline_not_idle = bool(ds.get("baseline_not_idle"))
     run_profile = str(run.get("run_profile") or "").strip().lower()
-    if run.get("valid_dataset_run") is True and run_profile == "baseline_idle" and baseline_not_idle:
-        source = "baseline_activity_policy"
-        reason = "BASELINE_NOT_IDLE"
-    elif run.get("valid_dataset_run") is True and run_profile == "baseline_idle" and low_signal:
+    if (
+        run.get("valid_dataset_run") is True
+        and run_profile == "baseline_idle"
+        and low_signal
+        and not countable
+    ):
         source = "low_signal_policy"
         reason = "LOW_SIGNAL_IDLE"
     elif run.get("valid_dataset_run") is True and not countable and bool(run.get("extra_run")):
@@ -726,12 +778,7 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
 
 
 def _is_baseline_not_idle_extra(validity: dict[str, object], run_profile: str | None) -> bool:
-    return (
-        validity.get("valid_dataset_run") is True
-        and validity.get("countable") is False
-        and validity.get("baseline_not_idle") is True
-        and str(run_profile or "").strip().lower() == "baseline_idle"
-    )
+    return False
 
 
 def _baseline_not_idle_reason_text(code: str) -> str:
@@ -1058,8 +1105,6 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
     profile_lc = str(run_profile or "").strip().lower()
     if validity.get("low_signal") is True and profile_lc == "baseline_idle":
         return "NO (LOW_SIGNAL_IDLE)"
-    if validity.get("baseline_not_idle") is True and profile_lc == "baseline_idle":
-        return "NO (BASELINE_NOT_IDLE)"
     if validity.get("countable") is False:
         exclusion_reason = str(validity.get("paper_exclusion_primary_reason_code") or "").strip().upper()
         cohort_eligibility = str(validity.get("cohort_eligibility") or "").strip().upper()
@@ -1069,6 +1114,111 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
             return "NO (extra run)"
         return "NO (extra run)"
     return "UNKNOWN"
+
+
+def _is_low_signal_idle_nonquota(validity: dict[str, object], run_profile: str | None) -> bool:
+    profile_lc = str(run_profile or "").strip().lower()
+    return (
+        validity.get("valid_dataset_run") is True
+        and validity.get("countable") is not True
+        and validity.get("low_signal") is True
+        and profile_lc == "baseline_idle"
+    )
+
+
+def _low_signal_reason_lines(
+    run_dir: Path | None,
+    validity: dict[str, object],
+) -> list[str]:
+    reasons = validity.get("low_signal_reasons")
+    if not isinstance(reasons, list):
+        return []
+    metrics = _low_signal_metric_snapshot(run_dir, validity)
+    labels: list[str] = []
+    for raw in reasons:
+        code = str(raw or "").strip().upper()
+        if not code:
+            continue
+        if code == "PCAP_BYTES_LOW":
+            label = "PCAP bytes low"
+            data_size = metrics.get("data_size_bytes")
+            threshold = metrics.get("min_data_size_bytes")
+            if data_size is not None and threshold is not None:
+                label += f" ({_format_bytes(int(data_size))} < {_format_bytes(int(threshold))})"
+            labels.append(label)
+        elif code == "PCAP_PACKETS_LOW":
+            label = "packet count low"
+            packet_count = metrics.get("packet_count")
+            threshold = metrics.get("min_packet_count")
+            if packet_count is not None and threshold is not None:
+                label += f" ({int(packet_count)} < {int(threshold)})"
+            labels.append(label)
+        elif code == "DOMAINS_LOW":
+            label = "domain diversity low"
+            domain_count = metrics.get("unique_domains_topn")
+            threshold = metrics.get("min_unique_domains_topn")
+            if domain_count is not None and threshold is not None:
+                label += f" ({int(domain_count)} < {int(threshold)})"
+            labels.append(label)
+        elif code == "PCAP_CAPTURE_TOO_SHORT":
+            label = "capture duration low"
+            duration = metrics.get("capture_duration_s")
+            threshold = metrics.get("min_capture_duration_s")
+            if duration is not None and threshold is not None:
+                label += f" ({format_seconds(float(duration))} < {format_seconds(float(threshold))})"
+            labels.append(label)
+        else:
+            labels.append(code)
+    return labels
+
+
+def _low_signal_metric_snapshot(
+    run_dir: Path | None,
+    validity: dict[str, object],
+) -> dict[str, object]:
+    features = _load_json(run_dir / "analysis" / "pcap_features.json") if run_dir else {}
+    report = _load_json(run_dir / "analysis" / "pcap_report.json") if run_dir else {}
+    metrics = features.get("metrics") if isinstance(features, dict) and isinstance(features.get("metrics"), dict) else {}
+    proxies = features.get("proxies") if isinstance(features, dict) and isinstance(features.get("proxies"), dict) else {}
+    cap = (
+        (report.get("capinfos") or {}).get("parsed")
+        if isinstance(report, dict) and isinstance(report.get("capinfos"), dict)
+        else {}
+    )
+    thresholds = validity.get("low_signal_thresholds")
+    thresholds = thresholds if isinstance(thresholds, dict) else {}
+    return {
+        "capture_duration_s": _first_present(
+            metrics.get("capture_duration_s") if isinstance(metrics, dict) else None,
+            cap.get("capture_duration_s") if isinstance(cap, dict) else None,
+            validity.get("actual_sampling_seconds"),
+        ),
+        "data_size_bytes": _first_present(
+            metrics.get("data_size_bytes") if isinstance(metrics, dict) else None,
+            cap.get("data_size_bytes") if isinstance(cap, dict) else None,
+            validity.get("pcap_size_bytes"),
+        ),
+        "packet_count": _first_present(
+            metrics.get("packet_count") if isinstance(metrics, dict) else None,
+            cap.get("packet_count") if isinstance(cap, dict) else None,
+        ),
+        "unique_domains_topn": _first_present(
+            proxies.get("unique_domains_topn") if isinstance(proxies, dict) else None,
+            report.get("service_domain_unique_count") if isinstance(report, dict) else None,
+            report.get("dns_unique_count") if isinstance(report, dict) else None,
+        ),
+        "min_capture_duration_s": thresholds.get("min_capture_duration_s"),
+        "min_data_size_bytes": thresholds.get("min_data_size_bytes"),
+        "min_packet_count": thresholds.get("min_packet_count"),
+        "min_unique_domains_topn": thresholds.get("min_unique_domains_topn"),
+    }
+
+
+def _first_present(*values: object) -> object | None:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
 
 
 def _build_evidence_lines(

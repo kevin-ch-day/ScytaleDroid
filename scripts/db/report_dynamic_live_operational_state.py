@@ -51,6 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Print summary JSON to stdout.")
     parser.add_argument(
+        "--stdout-json",
+        action="store_true",
+        help="Alias for --json; kept for consistency with adjacent report scripts.",
+    )
+    parser.add_argument(
         "--candidate-limit",
         type=int,
         default=5,
@@ -252,11 +257,11 @@ def generate_report(*, candidate_limit: int, output_dir: Path | None = None) -> 
         device_label=device_label,
         candidate_limit=candidate_limit,
         queue_status_label_fn=app_queue_state.queue_status_label,
-        baseline_label_fn=lambda row: app_queue_state.queue_baseline_runs_label(
+        baseline_label_fn=lambda row: app_queue_state.queue_baseline_quota_label(
             row,
             baseline_required=int(getattr(prepared.cfg, "baseline_required", 3) or 3),
         ),
-        interactive_label_fn=lambda row: app_queue_state.queue_interactive_runs_label(
+        interactive_label_fn=lambda row: app_queue_state.queue_interactive_quota_label(
             row,
             interactive_required=int(getattr(prepared.cfg, "interactive_required", 4) or 4),
         ),
@@ -281,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     output_dir = Path(args.output_dir).resolve() if args.output_dir else None
     summary = generate_report(candidate_limit=max(1, int(args.candidate_limit)), output_dir=output_dir)
-    if args.json:
+    if args.json or args.stdout_json:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:
         print(json.dumps({"summary_json": summary["output_files"]["summary_json"]}, indent=2, sort_keys=True))

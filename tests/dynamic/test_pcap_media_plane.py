@@ -142,3 +142,77 @@ def test_media_plane_derives_sustained_rtc_sessions(monkeypatch, tmp_path: Path)
     assert payload["rtc_sessions"][0]["sustained"] is True
     assert payload["rtc_sessions"][0]["bytes"] >= 3_000
     assert "multi_phase_rtc_observed" in payload["reason_codes"]
+
+
+def test_media_plane_detects_multi_phase_opaque_udp_media(monkeypatch, tmp_path: Path) -> None:
+    pcap_path = tmp_path / "signal-video.pcap"
+    pcap_path.write_bytes(b"pcap")
+
+    def _fake_run(cmd):
+        if "-e" in cmd and "stun.type" in cmd:
+            return {
+                "stdout": "\n".join(
+                    [
+                        "0x0003\t0x0003\t0x0000\t141.101.90.1\t3478",
+                        "0x0103\t0x0003\t0x0010\t10.215.173.1\t48679",
+                    ]
+                ),
+                "stderr": "",
+                "error": None,
+            }
+        rows = []
+        for idx in range(600):
+            ts = 43.944 + (200.274 * idx / 599)
+            src, dst = (
+                ("10.215.173.1\t48679", "192.168.0.13\t57159")
+                if idx % 2 == 0
+                else ("192.168.0.13\t57159", "10.215.173.1\t48679")
+            )
+            rows.append(f"{ts:.3f}\t{src}\t{dst}\t10000\tip:udp:data")
+        for idx in range(600):
+            ts = 295.785 + (211.805 * idx / 599)
+            src, dst = (
+                ("10.215.173.1\t41313", "192.168.0.13\t63166")
+                if idx % 2 == 0
+                else ("192.168.0.13\t63166", "10.215.173.1\t41313")
+            )
+            rows.append(f"{ts:.3f}\t{src}\t{dst}\t10000\tip:udp:data")
+        rows.append("295.284\t10.215.173.1\t41313\t141.101.90.1\t3478\t120\tip:udp:stun")
+        stdout = "\n".join(rows)
+        return {"stdout": stdout, "stderr": "", "error": None}
+
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.media_plane._run_command",
+        _fake_run,
+    )
+    report = {
+        "protocol_hierarchy_agg": {
+            "bytes": {"ip": 200_000_000, "udp": 190_000_000},
+            "frames": {"ip": 200_000, "udp": 198_000, "stun": 1000},
+        },
+        "protocol_ratios": {"udp_ratio": 0.99, "tcp_ratio": 0.01},
+        "flow_summary": {
+            "top_flows": [
+                {
+                    "protocol": "udp",
+                    "endpoint_a": "10.215.173.1:48679",
+                    "endpoint_b": "192.168.0.13:57159",
+                    "packets": 96_346,
+                    "bytes": 92_210_145,
+                    "directionality": "unknown",
+                }
+            ]
+        },
+    }
+
+    summary = summarize_media_plane(report, pcap_path=pcap_path, tshark_path="tshark")
+    payload = summary["summary"]
+
+    assert payload["classification"] == "multi_phase_opaque_udp_media_observed"
+    assert payload["relay_media_likely"] is True
+    assert payload["udp_media_session_count"] == 2
+    assert payload["udp_media_multi_session_observed"] is True
+    assert payload["udp_media_total_bytes"] == 12_000_000
+    assert payload["udp_media_sessions"][0]["duration_s"] == 200.274
+    assert payload["udp_media_sessions"][1]["duration_s"] == 211.805
+    assert "multi_phase_opaque_udp_media_observed" in payload["reason_codes"]

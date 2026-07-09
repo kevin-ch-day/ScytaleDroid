@@ -161,7 +161,112 @@ def test_countability_detail_marks_baseline_idle_low_signal_as_nonquota(monkeypa
     assert detail == "source=low_signal_policy, countable=false, reason=LOW_SIGNAL_IDLE"
 
 
-def test_countability_detail_marks_baseline_not_idle_as_nonquota(monkeypatch) -> None:
+def test_print_run_summary_explains_low_signal_idle_thresholds(monkeypatch, tmp_path, capsys) -> None:
+    run_id = "run-pinterest-low"
+    run_dir = tmp_path / run_id
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "target": {"package_name": "com.pinterest"},
+                "operator": {"run_profile": "baseline_idle", "interaction_level": "minimal"},
+                "dataset": {
+                    "valid_dataset_run": True,
+                    "countable": False,
+                    "low_signal": True,
+                    "low_signal_reasons": ["PCAP_BYTES_LOW", "PCAP_PACKETS_LOW"],
+                    "low_signal_thresholds": {
+                        "min_capture_duration_s": 30.0,
+                        "min_data_size_bytes": 1_000_000,
+                        "min_packet_count": 1_000,
+                        "min_unique_domains_topn": 3,
+                    },
+                    "technical_validity": "VALID",
+                    "protocol_compliance": "COMPLIANT",
+                    "cohort_eligibility": "EXTRA",
+                    "min_pcap_bytes": 50_000,
+                    "pcap_size_bytes": 67_602,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "capinfos": {
+                    "parsed": {
+                        "capture_duration_s": 300.8,
+                        "data_size_bytes": 64_474,
+                        "packet_count": 194,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "capture_duration_s": 300.8,
+                    "data_size_bytes": 64_474,
+                    "packet_count": 194,
+                },
+                "proxies": {"unique_domains_topn": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        run_summary,
+        "load_dataset_tracker",
+        lambda: {
+            "apps": {
+                "com.pinterest": {
+                    "valid_runs": 2,
+                    "target_runs": 7,
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "run_profile": "baseline_idle",
+                            "valid_dataset_run": True,
+                            "countable": False,
+                            "low_signal": True,
+                            "paper_exclusion_primary_reason_code": None,
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(run_summary.prompt_utils, "prompt_yes_no", lambda *_a, **_k: False)
+    monkeypatch.setattr(run_summary, "_load_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_summary, "_load_engine_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_summary, "_load_db_persistence_status", lambda *_a, **_k: None)
+    result = DynamicSessionResult(
+        package_name="com.pinterest",
+        duration_seconds=300,
+        started_at=datetime.now(UTC),
+        ended_at=datetime.now(UTC),
+        status="success",
+        dynamic_run_id=run_id,
+        evidence_path=str(run_dir),
+    )
+
+    run_summary.print_run_summary(result, "Cohort")
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Quota explanation" in out
+    assert "too quiet for quota evidence" in out
+    assert "Low-signal reasons" in out
+    assert "PCAP bytes low (63KB < 977KB)" in out
+    assert "packet count low (194 < 1000)" in out
+    assert "Retained as" in out
+    assert "low-signal idle baseline evidence" in out
+
+
+def test_countability_detail_keeps_app_active_baseline_countable(monkeypatch) -> None:
     monkeypatch.setattr(
         run_summary,
         "load_dataset_tracker",
@@ -173,8 +278,8 @@ def test_countability_detail_marks_baseline_not_idle_as_nonquota(monkeypatch) ->
                             "run_id": "run-fb-1",
                             "run_profile": "baseline_idle",
                             "valid_dataset_run": True,
-                            "countable": False,
-                            "extra_run": 1,
+                            "countable": True,
+                            "extra_run": 0,
                             "baseline_not_idle": True,
                             "paper_exclusion_primary_reason_code": None,
                         }
@@ -195,10 +300,10 @@ def test_countability_detail_marks_baseline_not_idle_as_nonquota(monkeypatch) ->
 
     detail = run_summary._countability_detail("com.facebook.katana", "run-fb-1")
 
-    assert detail == "source=baseline_activity_policy, countable=false, reason=BASELINE_NOT_IDLE"
+    assert detail == "source=tracker_quota_marking, countable=true"
 
 
-def test_countability_detail_prefers_tracker_non_idle_truth_over_stale_manifest(
+def test_countability_detail_does_not_treat_app_active_tag_as_exclusion(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -232,10 +337,10 @@ def test_countability_detail_prefers_tracker_non_idle_truth_over_stale_manifest(
 
     detail = run_summary._countability_detail("com.facebook.katana", "run-fb-1")
 
-    assert detail == "source=baseline_activity_policy, countable=false, reason=BASELINE_NOT_IDLE"
+    assert detail == "source=tracker_quota_marking, countable=false"
 
 
-def test_print_run_summary_explains_baseline_not_idle_extra(monkeypatch, tmp_path, capsys) -> None:
+def test_print_run_summary_keeps_baseline_not_idle_as_activity_tag(monkeypatch, tmp_path, capsys) -> None:
     run_id = "run-fb-1"
     run_dir = tmp_path / run_id
     (run_dir / "analysis").mkdir(parents=True)
@@ -326,35 +431,10 @@ def test_print_run_summary_explains_baseline_not_idle_extra(monkeypatch, tmp_pat
     run_summary.print_run_summary(result, "Cohort")
 
     out = colors.strip(capsys.readouterr().out)
-    assert (
-        "excluded from idle-baseline quota because runtime traffic exceeded idle-baseline limits"
-        in out
-    )
-    assert "Reasons" in out
-    assert "total bytes crossed the idle-baseline limit" in out
-    assert "QUIC-heavy transport crossed the idle-baseline limit" in out
-    assert "Retained as" in out
-    assert "non-idle baseline evidence" in out
-    assert "Included in idle ML pool" in out
-    assert "no" in out
-    assert "Duration" in out
-    assert "Total bytes" in out
-    assert "MB" in out
-    assert "Avg bytes/sec" in out
-    assert "40,000 B/s" in out
-    assert "P95 bytes/sec" in out
-    assert "410,000 B/s" in out
-    assert "QUIC ratio" in out
-    assert "0.72" in out
-    assert "Traffic shape" in out
-    assert "startup-burst then quiet-tail" in out
-    assert "Startup byte share" in out
-    assert "91.0%" in out
-    assert "Post-start median" in out
-    assert "18,704 B/min" in out
-    assert "Threshold crossed" in out
-    assert "total bytes, QUIC ratio, p95 bytes/sec" in out
-    assert "Repeat with stricter idle behavior if quota progress is needed." in out
+    assert "App activity tag" in out
+    assert "not proof of operator interaction" in out
+    assert "excluded from idle-baseline quota" not in out
+    assert "non-idle baseline evidence" not in out
 
 
 def test_print_run_summary_gives_social_feed_specific_next_baseline_guidance(
@@ -449,12 +529,9 @@ def test_print_run_summary_gives_social_feed_specific_next_baseline_guidance(
     run_summary.print_run_summary(result, "Cohort")
 
     out = colors.strip(capsys.readouterr().out)
-    assert "Pattern hint" in out
-    assert "large startup/feed-media burst followed by a quieter tail" in out
-    assert (
-        "Retry on profile, settings, bookmarks, lists, or another stable non-feed/non-video X screen if quota progress is needed."
-        in out
-    )
+    assert "App activity tag" in out
+    assert "not proof of operator interaction" in out
+    assert "Pattern hint" not in out
 
 
 def test_countability_label_treats_manual_extra_run_as_extra_not_exploratory() -> None:

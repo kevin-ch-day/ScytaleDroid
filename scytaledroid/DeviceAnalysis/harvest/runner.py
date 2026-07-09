@@ -897,15 +897,24 @@ def _print_package_footer(
     skipped = int(stats.get("skipped", 0) or 0)
     errors = int(stats.get("errors", 0) or 0)
     total_bytes = int(stats.get("bytes", 0) or 0)
+    library_hits = int(stats.get("library_hits", 0) or 0)
+    pure_library_hit = library_hits > 0 and library_hits == skipped and saved == 0 and errors == 0
 
-    if _quiet_mode() and errors == 0 and skipped == 0:
+    if _quiet_mode() and (pure_library_hit or (errors == 0 and skipped == 0)):
         return
 
     parts: list[str] = []
-    parts.append(
-        f"saved {saved} artifact{'s' if saved != 1 else ''}"
-    )
-    parts.append(f"skipped {skipped}")
+    if pure_library_hit:
+        parts.append(f"reused {library_hits} from APK library")
+        parts.append("pulled 0")
+    else:
+        parts.append(f"saved {saved} artifact{'s' if saved != 1 else ''}")
+        if library_hits:
+            parts.append(f"reused {library_hits} from APK library")
+            remaining_skips = max(skipped - library_hits, 0)
+            parts.append(f"other skipped {remaining_skips}")
+        else:
+            parts.append(f"skipped {skipped}")
     parts.append(f"errors {errors}")
     if total_bytes > 0:
         parts.append(format_file_size(total_bytes))
@@ -915,20 +924,28 @@ def _print_package_footer(
 
     if errors:
         level = "error"
+    elif pure_library_hit:
+        level = "info"
     elif skipped and not saved:
         level = "warn"
     else:
         level = "success"
 
     if compact_mode:
-        if _quiet_mode() and errors == 0 and skipped == 0:
+        if _quiet_mode() and (pure_library_hit or (errors == 0 and skipped == 0)):
             return
         total_planned = saved + skipped + errors
         prefix = f"[{package_index}/{package_total}] "
-        compact_line = (
-            f"{prefix}{plan.inventory.package_name} • saved {saved}/{total_planned} • "
-            f"skipped {skipped} • errors {errors}"
-        )
+        if pure_library_hit:
+            compact_line = (
+                f"{prefix}{plan.inventory.package_name} • "
+                f"reused {library_hits}/{total_planned} from APK library • errors {errors}"
+            )
+        else:
+            compact_line = (
+                f"{prefix}{plan.inventory.package_name} • saved {saved}/{total_planned} • "
+                f"skipped {skipped} • errors {errors}"
+            )
         if total_bytes > 0:
             compact_line += f" • {format_file_size(total_bytes)}"
         print(status_messages.status(compact_line, level=level))

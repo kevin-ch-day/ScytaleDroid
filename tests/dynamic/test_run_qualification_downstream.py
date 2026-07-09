@@ -141,7 +141,7 @@ def test_x_style_downstream_retains_low_signal_without_quota_complete() -> None:
     assert all(run_included_in_default_analysis(valid_dataset_run=True) for _ in included)
 
 
-def test_non_idle_baseline_is_retained_for_analysis_without_polluting_extra_bucket() -> None:
+def test_stale_noncountable_app_active_baseline_is_reported_as_extra_until_repaired() -> None:
     runs = [
         _baseline_row("b1", countable=True),
         _baseline_row("b2", countable=True),
@@ -162,8 +162,8 @@ def test_non_idle_baseline_is_retained_for_analysis_without_polluting_extra_buck
 
     assert summary.baseline.quota_satisfied is False
     assert summary.baseline.quota_counted_valid == 2
-    assert summary.baseline.extra_valid == 0
-    assert summary.baseline.non_idle_retained == 1
+    assert summary.baseline.extra_valid == 1
+    assert summary.baseline.non_idle_retained == 0
     assert summary.baseline.total_valid_retained == 3
     assert len(included) == 3
 

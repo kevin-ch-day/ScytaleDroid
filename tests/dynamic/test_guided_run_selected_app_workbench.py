@@ -195,6 +195,28 @@ def test_queue_action_suggests_supplemental_baseline_when_quota_met() -> None:
     assert "ML training" in str(reason or "")
 
 
+def test_queue_action_continues_collection_when_latest_invalid_but_quota_incomplete() -> None:
+    from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
+        selected_app_queue_action,
+    )
+
+    action, reason = selected_app_queue_action(
+        baseline_valid_runs=3,
+        interactive_valid_runs=1,
+        baseline_required=3,
+        interactive_required=4,
+        scripted_template_ready=False,
+        latest_valid=False,
+        latest_invalid_reason="INSUFFICIENT_DURATION",
+        latest_pcap_failure_detail=None,
+        db_active_sessions=4,
+        active_valid_runs=4,
+    )
+
+    assert action == "manual interaction"
+    assert reason == "3 interactive runs needed"
+
+
 def test_selected_app_workbench_groups_review_run_and_maintenance_actions(
     monkeypatch, capsys
 ) -> None:

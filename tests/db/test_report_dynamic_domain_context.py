@@ -117,6 +117,40 @@ def test_context_for_domain_resolves_new_curated_provider_suffixes_and_exact_hos
     assert nielsen["role_class"] == "audience_measurement"
 
 
+def test_top_ip_destinations_resolves_telegram_direct_ip_flows() -> None:
+    top = report._top_ip_destinations(
+        {
+            "flow_summary": {
+                "top_flows": [
+                    {
+                        "endpoint_a": "10.215.173.1:41568",
+                        "endpoint_b": "149.154.175.51:443",
+                        "packets": 210,
+                    },
+                    {
+                        "endpoint_a": "10.215.173.1:42258",
+                        "endpoint_b": "91.108.56.196:443",
+                        "packets": 19,
+                    },
+                    {
+                        "endpoint_a": "10.215.173.1:42242",
+                        "endpoint_b": "91.108.56.196:443",
+                        "packets": 24,
+                    },
+                    {
+                        "endpoint_a": "10.215.173.1:49578",
+                        "endpoint_b": "216.239.38.223:443",
+                        "packets": 17,
+                    },
+                ]
+            }
+        },
+        package_name="org.telegram.messenger",
+    )
+
+    assert top == (("149.154.175.51", 210), ("91.108.56.196", 43))
+
+
 def test_generate_report_summarizes_runs_and_context(tmp_path: Path) -> None:
     dynamic_root = tmp_path / "output" / "evidence" / "dynamic"
     run_dir = dynamic_root / "run-1"
@@ -263,3 +297,69 @@ def test_generate_report_summarizes_runs_and_context(tmp_path: Path) -> None:
     assert "runtime_domains_exceed_static_domain_context" in gap_rows
     assert "manual_only_domain_count" in contrast_rows
     assert "device-api.urbanairship.com" in contrast_rows
+
+
+def test_generate_report_includes_telegram_ip_context(tmp_path: Path) -> None:
+    dynamic_root = tmp_path / "output" / "evidence" / "dynamic"
+    run_dir = dynamic_root / "run-telegram"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-telegram",
+                "ended_at": "2026-07-09T03:36:04+00:00",
+                "target": {
+                    "package_name": "org.telegram.messenger",
+                    "display_name": "Telegram",
+                },
+                "dataset": {
+                    "run_profile": "baseline_connected",
+                    "valid_dataset_run": True,
+                    "paper_eligible": True,
+                    "countable": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "top_dns": [{"value": "firebaselogging.googleapis.com", "count": 2}],
+                "top_sni": [{"value": "firebaselogging.googleapis.com", "count": 1}],
+                "flow_summary": {
+                    "top_flows": [
+                        {
+                            "endpoint_a": "10.215.173.1:41568",
+                            "endpoint_b": "149.154.175.51:443",
+                            "packets": 210,
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    original_repo = report._REPO_ROOT
+    original_dynamic_root = report._dynamic_root
+    original_state_rows = report._load_state_rows
+    try:
+        report._REPO_ROOT = tmp_path  # type: ignore[assignment]
+        report._dynamic_root = lambda: dynamic_root  # type: ignore[assignment]
+        report._load_state_rows = lambda packages: {}  # type: ignore[assignment]
+        out_dir = tmp_path / "audit"
+        summary = report.generate_dynamic_domain_context_report(output_dir=out_dir)
+    finally:
+        report._REPO_ROOT = original_repo  # type: ignore[assignment]
+        report._dynamic_root = original_dynamic_root  # type: ignore[assignment]
+        report._load_state_rows = original_state_rows  # type: ignore[assignment]
+
+    assert summary["observed_domains_total"] == 2
+    assert summary["owner_class_counts"]["first_party"] == 1
+    domain_rows = (out_dir / "package_domain_context.csv").read_text(encoding="utf-8")
+    assert "149.154.175.51" in domain_rows
+    assert "149.154.160.0/20" in domain_rows
+    assert "telegram_datacenter_transport" in domain_rows
+    assert "curated_cidr" in domain_rows
+    assert "firebaselogging.googleapis.com" in domain_rows

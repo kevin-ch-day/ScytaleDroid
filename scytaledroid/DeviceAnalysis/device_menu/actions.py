@@ -55,7 +55,7 @@ def _harvest_run_context_detail_lines(context: Mapping[str, object] | None) -> l
         ("packages_reviewed", "Packages reviewed"),
         ("packages_eligible", "Packages eligible"),
         ("packages_executed", "Packages executed"),
-        ("packages_harvested", "Packages harvested"),
+        ("packages_harvested", "Packages resolved"),
         ("packages_blocked_preflight", "Packages blocked before pull"),
         ("packages_path_stale", "Packages with path drift"),
         ("packages_replanned", "Packages replanned"),
@@ -81,22 +81,22 @@ def _print_harvest_success_menu_feedback(result_context: Mapping[str, object] | 
         # Simple-mode transcript already ends with harvest summary paths; skip extra menu echo.
         return
 
-    harvested = ctx.get("packages_harvested", ctx.get("packages", "—"))
+    resolved = ctx.get("packages_harvested", ctx.get("packages", "—"))
     eligible = ctx.get("packages_eligible")
     total_scope = ctx.get("packages_total", ctx.get("packages_reviewed"))
     blocked = ctx.get("packages_blocked_preflight", ctx.get("packages_blocked"))
     if eligible not in (None, "—") and total_scope not in (None, "—") and blocked not in (None, "—"):
         harvest_summary = (
-            f"Harvest complete: {harvested} harvested / {eligible} eligible / {total_scope} in scope "
+            f"Harvest complete: {resolved} resolved / {eligible} eligible / {total_scope} in scope "
             f"({blocked} blocked before pull)."
         )
     elif total_scope not in (None, "—") and blocked not in (None, "—"):
         harvest_summary = (
-            f"Harvest complete: {harvested} harvested / {total_scope} in scope "
+            f"Harvest complete: {resolved} resolved / {total_scope} in scope "
             f"({blocked} blocked)."
         )
     else:
-        harvest_summary = f"Harvest complete: {harvested} package(s)."
+        harvest_summary = f"Harvest complete: {resolved} package(s) resolved."
     _print_action_feedback(
         action_name="Execute Harvest",
         summary=harvest_summary,

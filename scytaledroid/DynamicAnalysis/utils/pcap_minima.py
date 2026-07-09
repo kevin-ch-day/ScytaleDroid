@@ -69,6 +69,9 @@ def _is_connected_messaging_text_run(
         return False
     if category_for_package(package_name) != "messaging":
         return False
+    # Keep legacy validity behavior: manual_freeform is the exploratory/setup tag
+    # for messaging runs and still uses the connected-messaging minimum. Dedicated
+    # call and mixed-known-activity runs use the general interaction minimum.
     return messaging_activity in {
         "connected_idle",
         "manual_freeform",

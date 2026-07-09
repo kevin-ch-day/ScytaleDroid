@@ -72,6 +72,44 @@ def test_extract_network_indicators_includes_security_surface_inventory() -> Non
     assert any(isinstance(row.get("meta_json"), dict) for row in http_rows)
 
 
+def test_extract_network_indicators_includes_telegram_direct_ip_flows() -> None:
+    from scytaledroid.DynamicAnalysis.storage.network_indicators import (
+        extract_network_indicators_from_pcap_report,
+    )
+
+    report = {
+        "package_name": "org.telegram.messenger",
+        "flow_summary": {
+            "top_flows": [
+                {
+                    "endpoint_a": "10.215.173.1:41568",
+                    "endpoint_b": "149.154.175.51:443",
+                    "packets": 210,
+                    "bytes": 41430,
+                    "protocol": "tcp",
+                },
+                {
+                    "endpoint_a": "10.215.173.1:49578",
+                    "endpoint_b": "216.239.38.223:443",
+                    "packets": 17,
+                    "bytes": 7862,
+                    "protocol": "tcp",
+                },
+            ]
+        },
+    }
+
+    rows = extract_network_indicators_from_pcap_report(report)
+
+    ip_rows = [row for row in rows if row["indicator_type"] == "ip_dst"]
+    assert len(ip_rows) == 1
+    assert ip_rows[0]["indicator_value"] == "149.154.175.51"
+    assert ip_rows[0]["indicator_count"] == 210
+    assert ip_rows[0]["indicator_source"] == "top_flow_ip"
+    assert ip_rows[0]["meta_json"]["cidr"] == "149.154.160.0/20"
+    assert ip_rows[0]["meta_json"]["role_class"] == "telegram_datacenter_transport"
+
+
 def test_security_operator_labels_from_run_dir_prefers_sidecar(tmp_path: Path) -> None:
     from scytaledroid.DynamicAnalysis.pcap.security_surface import (
         security_operator_labels_from_run_dir,

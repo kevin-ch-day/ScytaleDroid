@@ -301,6 +301,57 @@ def test_pairing_eligibility_package_summary_tracks_governance_buckets() -> None
     ]
 
 
+def test_pairing_eligibility_report_bundle_splits_worklists(tmp_path) -> None:
+    from scripts.db import report_dynamic_static_pairing_eligibility as pairing
+
+    payload = {
+        "report_type": "dynamic_static_pairing_eligibility",
+        "schema_version": "1",
+        "filters": {},
+        "summary": {"dynamic_sessions": 3},
+        "packages": [
+            {
+                "package_name": "com.example.old",
+                "historical_identity_only": 1,
+                "reharvest_required": 0,
+            }
+        ],
+        "sessions": [
+            {
+                "dynamic_run_id": "old-1",
+                "package_name": "com.example.old",
+                "classification": "historical_identity_only",
+            },
+            {
+                "dynamic_run_id": "reharvest-1",
+                "package_name": "com.example.current",
+                "classification": "unpaired_reharvest_required",
+            },
+            {
+                "dynamic_run_id": "static-1",
+                "package_name": "com.example.ready",
+                "classification": "unpaired_static_missing_but_bytes_available",
+            },
+        ],
+        "notes": [],
+    }
+
+    files = pairing._write_report_bundle(payload, output_dir=tmp_path)
+
+    assert sorted(files) == [
+        "historical_identity_only_csv",
+        "packages_csv",
+        "reharvest_candidates_csv",
+        "sessions_csv",
+        "static_analysis_candidates_csv",
+        "summary_json",
+    ]
+    assert "old-1" in (tmp_path / "historical_identity_only.csv").read_text()
+    assert "reharvest-1" in (tmp_path / "reharvest_candidates.csv").read_text()
+    assert "static-1" in (tmp_path / "static_analysis_candidates.csv").read_text()
+    assert '"output_files"' in (tmp_path / "summary.json").read_text()
+
+
 def test_recovery_action_recorded_bytes_without_canonical_rehydrates_store() -> None:
     from scripts.db import report_dynamic_static_recovery_plan as recovery
 
@@ -394,6 +445,62 @@ def test_recovery_plan_receipt_write_is_explicit(tmp_path) -> None:
     text = path.read_text(encoding="utf-8")
     assert '"decision": "plan_only_no_apply"' in text
     assert '"receipt_type": "artifact_recovery_plan"' in text
+
+
+def test_recovery_plan_report_bundle_splits_action_worklists(tmp_path) -> None:
+    from scripts.db import report_dynamic_static_recovery_plan as recovery
+
+    payload = {
+        "receipt_type": "artifact_recovery_plan",
+        "schema_version": "1",
+        "created_at": "2026-05-14T12:00:00Z",
+        "summary": {"exact_gap_hashes": 2},
+        "packages": [
+            {
+                "package_name": "com.example.old",
+                "dynamic_sessions_affected": 3,
+                "recommended_action": "historical_identity_only",
+            }
+        ],
+        "storage_roots": [
+            {
+                "recorded_root": "/old",
+                "root_exists": False,
+                "hashes": 1,
+                "dynamic_sessions": 3,
+                "actions": {"historical_identity_only": 1},
+            }
+        ],
+        "gaps": [
+            {
+                "package_name": "com.example.old",
+                "base_apk_sha256": "a" * 64,
+                "recommended_action": "historical_identity_only",
+            },
+            {
+                "package_name": "com.example.current",
+                "base_apk_sha256": "b" * 64,
+                "recommended_action": "explicit_reharvest",
+            },
+        ],
+        "notes": [],
+    }
+
+    files = recovery._write_report_bundle(payload, output_dir=tmp_path)
+
+    assert sorted(files) == [
+        "gaps_csv",
+        "historical_identity_only_csv",
+        "packages_csv",
+        "reharvest_candidates_csv",
+        "storage_roots_csv",
+        "summary_json",
+    ]
+    assert "com.example.old" in (tmp_path / "historical_identity_only.csv").read_text()
+    assert "com.example.current" not in (tmp_path / "historical_identity_only.csv").read_text()
+    assert "com.example.current" in (tmp_path / "reharvest_candidates.csv").read_text()
+    assert '""historical_identity_only"": 1' in (tmp_path / "storage_roots.csv").read_text()
+    assert '"output_files"' in (tmp_path / "summary.json").read_text()
 
 
 def test_static_target_dynamic_gap_missing_old_root_is_blocked() -> None:

@@ -237,7 +237,7 @@ def test_quota_marking_promotes_stale_noncountable_baselines_into_empty_slots() 
     assert app_entry["extra_valid_runs"] == 0
 
 
-def test_quota_marking_keeps_true_nonquota_baselines_supplemental() -> None:
+def test_quota_marking_counts_app_active_no_touch_baseline_but_keeps_low_signal_supplemental() -> None:
     cfg = DatasetTrackerConfig()
     app_entry = {
         "runs": [
@@ -269,13 +269,13 @@ def test_quota_marking_keeps_true_nonquota_baselines_supplemental() -> None:
     _apply_quota_marking(app_entry, cfg)
     by_id = {row["run_id"]: row for row in app_entry["runs"]}
 
-    assert by_id["not-idle"]["counts_toward_quota"] is False
-    assert by_id["not-idle"]["countable"] is False
-    assert by_id["not-idle"]["extra_run"] == 1
+    assert by_id["not-idle"]["counts_toward_quota"] is True
+    assert by_id["not-idle"]["countable"] is True
+    assert by_id["not-idle"]["extra_run"] == 0
     assert by_id["low"]["counts_toward_quota"] is False
     assert by_id["low"]["countable"] is False
     assert by_id["low"]["extra_run"] == 1
-    assert app_entry["extra_valid_runs"] == 2
+    assert app_entry["extra_valid_runs"] == 1
 
 
 def test_update_dataset_tracker_reclassifies_repaired_quota_baseline_from_extra_to_counted(

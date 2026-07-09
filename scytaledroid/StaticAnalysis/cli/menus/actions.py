@@ -328,6 +328,26 @@ def render_reset_outcome(outcome: Any, *, session_label: str | None = None) -> N
         print(status_messages.status("No tables were modified.", level="info"))
 
 
+def render_artifact_purge_outcome(outcome: Any, *, session_label: str | None = None) -> None:
+    """Display local static-artifact cleanup performed before replacing a session."""
+
+    label = session_label or "session"
+    removed = list(getattr(outcome, "removed", ()) or ())
+    failed = list(getattr(outcome, "failed", ()) or ())
+    if removed:
+        print(
+            status_messages.status(
+                f"Cleared prior local static artifacts for {label} ({len(removed)} path(s)).",
+                level="success",
+            )
+        )
+    else:
+        print(status_messages.status(f"No prior local static artifacts found for {label}.", level="info"))
+    if failed:
+        failures = ", ".join(f"{path} ({reason})" for path, reason in failed)
+        print(status_messages.status(f"Artifact cleanup failures: {failures}", level="error"))
+
+
 def _lookup_existing_session_state(session_stamp: str) -> tuple[bool, int | None, int | None]:
     sessions_dir = Path(app_config.DATA_DIR) / "sessions"
     run_map_path = sessions_dir / session_stamp / "run_map.json"

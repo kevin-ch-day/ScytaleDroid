@@ -52,6 +52,28 @@ def _load_network_context_coverage(packages: list[str] | None = None) -> list[di
     return legacy_report._build_per_app_rollup(per_run_rows)
 
 
+def _observed_ip_service_fallback(row: Mapping[str, Any], package_name: str) -> dict[str, Any]:
+    role_class = str(row.get("role_class") or "").strip()
+    owner_class = str(row.get("owner_class") or "").strip()
+    if (
+        package_name == "org.telegram.messenger"
+        and owner_class == "first_party"
+        and role_class == "telegram_datacenter_transport"
+    ):
+        return {
+            "service_key": "telegram_platform",
+            "service_display_name": "Telegram Messaging Platform",
+            "owner_name": "Telegram Messenger Inc",
+            "owner_class": "first_party",
+            "service_category": "messaging_platform",
+            "primary_use_case": "encrypted_messaging_datacenter_transport",
+            "role_class": role_class,
+            "confidence": row.get("confidence") or "high",
+            "source_url": "https://core.telegram.org/resources/cidr.txt",
+        }
+    return {}
+
+
 def generate_report(*, packages: list[str] | None = None, output_dir: Path | None = None) -> dict[str, Any]:
     from scytaledroid.Database.db_core import db_queries as core_q
     from scytaledroid.DynamicAnalysis.service_context import (
@@ -186,6 +208,8 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
             service_rows=service_tuple,
             map_rows=domain_map_tuple,
         )
+        if not resolved.get("service_key"):
+            resolved = {**resolved, **_observed_ip_service_fallback(row, package_name)}
         out_row = {
             "package_name": package_name,
             "display_name": row.get("display_name"),

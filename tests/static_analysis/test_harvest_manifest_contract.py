@@ -819,7 +819,7 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
     assert "ETA: ~1h 12m" in text
     assert "WARN detector stages" in text
     assert "Policy gate failures" in text
-    assert "Finding gate failures" in text
+    assert "Finding signals" in text
     assert "(no execution errors" in text
     assert "APK reports saved: 106 / 459" in text
     assert "Last report persist" not in text

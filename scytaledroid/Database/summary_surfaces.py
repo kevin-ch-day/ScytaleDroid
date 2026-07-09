@@ -81,19 +81,46 @@ def static_dynamic_summary_cache_is_stale(*, runner=run_sql) -> bool:
     if not count or count <= 0:
         return False
     try:
-        cache_row = runner(
-            f"SELECT MAX(latest_static_run_id) FROM {STATIC_DYNAMIC_SUMMARY_CACHE}",
-            fetch="one",
-        )
-        view_row = runner(
-            f"SELECT MAX(latest_static_run_id) FROM {STATIC_DYNAMIC_SUMMARY_VIEW}",
-            fetch="one",
-        )
+        cache_row = _summary_surface_freshness_row(STATIC_DYNAMIC_SUMMARY_CACHE, runner=runner)
+        view_row = _summary_surface_freshness_row(STATIC_DYNAMIC_SUMMARY_VIEW, runner=runner)
     except Exception:
         return False
-    cache_max = int(cache_row[0] or 0) if cache_row else 0
-    view_max = int(view_row[0] or 0) if view_row else 0
-    return cache_max < view_max
+    if not cache_row or not view_row:
+        return False
+
+    cache_count, cache_static, cache_dynamic = _normalise_freshness_row(cache_row)
+    view_count, view_static, view_dynamic = _normalise_freshness_row(view_row)
+    if cache_count != view_count:
+        return True
+    if cache_static < view_static:
+        return True
+    return cache_dynamic < view_dynamic
+
+
+def _summary_surface_freshness_row(relation: str, *, runner=run_sql):
+    return runner(
+        f"""
+        SELECT
+          COUNT(*) AS row_count,
+          COALESCE(MAX(latest_static_run_id), 0) AS latest_static_run_id,
+          MAX(latest_dynamic_started_at_utc) AS latest_dynamic_started_at_utc
+        FROM {relation}
+        """,
+        fetch="one",
+    )
+
+
+def _normalise_freshness_row(row) -> tuple[int, int, str]:
+    try:
+        row_count = int(row[0] or 0)
+    except Exception:
+        row_count = 0
+    try:
+        static_id = int(row[1] or 0)
+    except Exception:
+        static_id = 0
+    dynamic_started = "" if len(row) < 3 or row[2] is None else str(row[2])
+    return row_count, static_id, dynamic_started
 
 
 def static_dynamic_summary_cache_has_required_runtime_columns(*, runner=run_sql) -> bool:

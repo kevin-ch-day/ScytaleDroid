@@ -267,8 +267,6 @@ def classify_run_qualification_role(
         return "quota_counted"
     if _truthy_flag(low_signal):
         return "low_signal_retained"
-    if _truthy_flag(baseline_not_idle):
-        return "non_idle_retained"
     if _truthy_flag(extra_run) or _falsey_flag(countable):
         return "extra_valid"
     return "valid_retained"
@@ -580,7 +578,7 @@ def format_workbench_qualification_lines(app: Any) -> list[str]:
         )
     if summary.baseline.non_idle_retained > 0:
         lines.append(
-            "Quiescent FG: valid no-touch foreground baseline evidence retained outside strict-idle quota; it does not unlock interactive or enter the strict-idle ML pool."
+            "Quiescent FG: valid no-touch foreground baseline evidence with app-generated activity tags; low-signal baselines remain the supplemental baseline case."
         )
     if strict_idle_gate_incomplete and interactive_raw > 0:
         lines.append(

@@ -63,3 +63,4 @@ def test_large_bounds_warning_stays_warn(capsys) -> None:
 
     assert "[WARN]" in output
     assert "String/resource results may be materially incomplete" in output
+    assert "Detector coverage warning only" in output

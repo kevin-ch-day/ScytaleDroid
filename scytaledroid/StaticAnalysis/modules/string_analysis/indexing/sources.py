@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Iterable, Mapping
 
 from scytaledroid.StaticAnalysis._androguard import APK, FileNotPresent
+from scytaledroid.StaticAnalysis.engine import aapt2_fallback
 
 from .models import IndexedString
 from ..origins import canonical_origin_type
@@ -49,6 +50,7 @@ _TEXT_FORWARD_TOKENS: tuple[str, ...] = (
     "policy",
     "settings",
 )
+_AAPT2_FALLBACK_LOCALE_PREFIXES = ("en",)
 
 
 def iterate_resource_strings(resources: object) -> Iterable[str]:
@@ -138,6 +140,13 @@ def _locale_from_path(path: str) -> str | None:
         return None
     qualifier = match.group(1)
     return qualifier or None
+
+
+def _should_keep_aapt2_resource_locale(locale: str | None) -> bool:
+    """Keep default/English fallback resources to avoid localized index floods."""
+
+    normalized = (locale or "").strip().lower()
+    return not normalized or normalized == "default" or normalized.startswith(_AAPT2_FALLBACK_LOCALE_PREFIXES)
 
 
 def _is_probable_protobuf(blob: bytes) -> bool:
@@ -345,8 +354,56 @@ def collect_resource_table_strings(apk: APK) -> tuple[IndexedString, ...]:
     return tuple(collected)
 
 
+def collect_aapt2_resource_strings(apk: APK) -> tuple[IndexedString, ...]:
+    """Extract resource strings via ``aapt2 dump resources`` as a parser fallback."""
+
+    apk_path = getattr(apk, "filename", None)
+    if not apk_path:
+        return tuple()
+    rows = aapt2_fallback.extract_resource_strings(str(apk_path))
+    if not rows:
+        return tuple()
+
+    apk_hash = _apk_sha256(apk)
+    split_id = _infer_split_id(apk)
+    seen_values: set[str] = set()
+    collected: list[IndexedString] = []
+    for row in rows:
+        value = str(row.get("value") or "").strip()
+        name = str(row.get("name") or "").strip()
+        locale = str(row.get("locale") or "").strip() or None
+        if not value:
+            continue
+        if not _should_keep_aapt2_resource_locale(locale):
+            continue
+        if value in seen_values:
+            continue
+        seen_values.add(value)
+        collected.append(
+            IndexedString(
+                value=value,
+                origin=f"resources.arsc:string/{name}" if name else "resources.arsc",
+                origin_type=canonical_origin_type("resource"),
+                confidence="fallback",
+                byte_offset=None,
+                source_sha256=None,
+                source_sha_short=None,
+                context="aapt2 resource string fallback",
+                apk_sha256=apk_hash,
+                split_id=split_id,
+                apk_offset_kind="aapt2_resource_table",
+                dex_id=None,
+                locale_qualifier=locale,
+                synthetic=False,
+                derived_from=None,
+            )
+        )
+    return tuple(collected)
+
+
 __all__ = [
     "iterate_resource_strings",
+    "collect_aapt2_resource_strings",
     "collect_file_strings",
     "collect_resource_table_strings",
     "classify_origin_type",

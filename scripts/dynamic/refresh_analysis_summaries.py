@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Refresh derived dynamic run analysis artifacts from existing evidence packs.
 
-This is a safe derived-artifact maintenance tool. It does not rewrite
-``run_manifest.json`` or mutate dataset validity/countability flags.
+This is a safe derived-artifact maintenance tool. It does not mutate dataset
+validity/countability flags. In apply mode it synchronizes ``run_manifest.json``
+output records for refreshed derived artifacts so hashes and sizes remain valid.
 
 Default behavior regenerates:
 - analysis/summary.json
@@ -163,7 +164,7 @@ def _rewrite_derived_artifacts(
     refresh_pcap_report: bool,
     refresh_pcap_features: bool,
     refresh_overlap: bool,
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
     from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
     from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_overlap
@@ -177,14 +178,69 @@ def _rewrite_derived_artifacts(
         "overlap": False,
         "summary": False,
     }
+    records = []
     if refresh_pcap_report:
-        changed["pcap_report"] = write_pcap_report(manifest, run_dir) is not None
+        record = write_pcap_report(manifest, run_dir)
+        changed["pcap_report"] = record is not None
+        if record is not None:
+            records.append(record)
     if refresh_pcap_features:
-        changed["pcap_features"] = write_pcap_features(manifest, run_dir) is not None
+        record = write_pcap_features(manifest, run_dir)
+        changed["pcap_features"] = record is not None
+        if record is not None:
+            records.append(record)
     if refresh_overlap:
-        changed["overlap"] = write_static_dynamic_overlap(manifest, run_dir) is not None
-    DynamicRunSummarizer(writer).summarize(manifest)
+        record = write_static_dynamic_overlap(manifest, run_dir)
+        changed["overlap"] = record is not None
+        if record is not None:
+            records.append(record)
+    records.extend(DynamicRunSummarizer(writer).summarize(manifest))
     changed["summary"] = True
+    changed["records"] = [asdict(record) for record in records]
+    return changed
+
+
+def _sync_manifest_output_records(run_dir: Path, records: list[dict[str, Any]]) -> int:
+    if not records:
+        return 0
+    manifest_path = run_dir / "run_manifest.json"
+    payload = _read_json(manifest_path)
+    if not isinstance(payload, dict):
+        return 0
+    outputs = payload.get("outputs")
+    if not isinstance(outputs, list):
+        outputs = []
+        payload["outputs"] = outputs
+
+    changed = 0
+    by_path: dict[str, int] = {}
+    for idx, row in enumerate(outputs):
+        if isinstance(row, dict):
+            rel = str(row.get("relative_path") or "").strip()
+            if rel:
+                by_path[rel] = idx
+
+    for record in records:
+        rel = str(record.get("relative_path") or "").strip()
+        if not rel:
+            continue
+        normalized = {key: value for key, value in record.items() if value is not None}
+        existing_idx = by_path.get(rel)
+        if existing_idx is None:
+            outputs.append(normalized)
+            by_path[rel] = len(outputs) - 1
+            changed += 1
+            continue
+        existing = outputs[existing_idx]
+        if existing != normalized:
+            outputs[existing_idx] = normalized
+            changed += 1
+
+    if changed:
+        manifest_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     return changed
 
 
@@ -207,6 +263,8 @@ def refresh_summaries(
     pcap_report_refreshed = 0
     pcap_features_refreshed = 0
     overlap_refreshed = 0
+    manifest_outputs_synced = 0
+    manifest_writes = 0
     rows: list[dict[str, Any]] = []
 
     for run_dir in completed_run_dirs:
@@ -260,18 +318,12 @@ def refresh_summaries(
             pcap_report_refreshed += int(changed["pcap_report"])
             pcap_features_refreshed += int(changed["pcap_features"])
             overlap_refreshed += int(changed["overlap"])
-        elif apply and (refresh_pcap_report or refresh_pcap_features or refresh_overlap):
-            changed = _rewrite_derived_artifacts(
-                run_dir=run_dir,
-                manifest=manifest,
-                refresh_pcap_report=refresh_pcap_report,
-                refresh_pcap_features=refresh_pcap_features,
-                refresh_overlap=refresh_overlap,
+            synced = _sync_manifest_output_records(
+                run_dir,
+                [record for record in changed.get("records", []) if isinstance(record, dict)],
             )
-            updated += 1
-            pcap_report_refreshed += int(changed["pcap_report"])
-            pcap_features_refreshed += int(changed["pcap_features"])
-            overlap_refreshed += int(changed["overlap"])
+            manifest_outputs_synced += synced
+            manifest_writes += int(synced > 0)
 
     return {
         "dynamic_evidence_root": str(root.resolve()),
@@ -281,6 +333,8 @@ def refresh_summaries(
         "pcap_report_refreshed": pcap_report_refreshed,
         "pcap_features_refreshed": pcap_features_refreshed,
         "overlap_refreshed": overlap_refreshed,
+        "manifest_outputs_synced": manifest_outputs_synced,
+        "manifest_writes": manifest_writes,
         "runs_with_destination_changes": changed_destinations,
         "runs_with_network_capture_flag_changes": changed_network_capture,
         "in_progress_dirs_skipped": in_progress,
@@ -290,7 +344,9 @@ def refresh_summaries(
         "refresh_pcap_report": bool(refresh_pcap_report),
         "refresh_pcap_features": bool(refresh_pcap_features),
         "refresh_overlap": bool(refresh_overlap),
-        "no_manifest_writes": True,
+        "dataset_flags_unchanged": True,
+        "manifest_writes_limited_to_outputs": True,
+        "no_manifest_writes": not bool(manifest_writes),
     }
 
 

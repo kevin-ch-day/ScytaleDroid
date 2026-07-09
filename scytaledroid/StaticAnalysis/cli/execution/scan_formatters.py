@@ -56,7 +56,7 @@ def _append_pipeline_events_table(
             ("OK detector stages", ok),
             ("WARN detector stages", warn),
             ("Policy gate failures", pol),
-            ("Finding gate failures", fnd),
+            ("Finding signals", fnd),
             ("Execution errors", err),
             ("Skipped detector stages", skip),
             ("Parse / resource signals (est.)", parse_est),
@@ -74,7 +74,7 @@ def _append_pipeline_events_table(
             lines.append("  No detector-stage events yet · execution OK")
             return
         lines.append(
-            f"  Warnings {warn} · Policy failures {pol} · Finding failures {fnd} · Execution errors {err}"
+            f"  Warnings {warn} · Policy gate failures {pol} · Finding signals {fnd} · Execution errors {err}"
         )
         detail_parts: list[str] = []
         if skip > 0:
@@ -725,6 +725,7 @@ def _format_compact_progress_text(
                 (
                     "Live table = detector-stage roll-ups from finished packages (not DB canonical findings).",
                     "Warnings / policy / finding / execution columns match session heartbeat semantics.",
+                    "Finding signals are detector FAIL risk findings; they are not execution failures.",
                     "Parse signals ≈ resource fallback + ARSC bounds + label-parse hints (artifact roll-up).",
                     "Use --verbose for full OK + skipped-stage columns; end-of-run summary lists totals + top skips.",
                 )
@@ -734,7 +735,7 @@ def _format_compact_progress_text(
                 (
                     "OK = detector stages that finished OK (worst badge per detector per package)",
                     "WARN = detector WARN stages (same roll-up; summed across packages in session)",
-                    "Policy / Finding gates = FAIL stages from policy vs finding detectors",
+                    "Policy gate failures / finding signals = FAIL stages from policy vs non-policy detectors",
                     "Execution errors = analyzer/pipeline exceptions (not DB canonical findings)",
                     "Skipped stages = detector SKIPPED outcomes summed from each finished package",
                     "Parse est. ≈ resource fallback + ARSC bounds + label-parse hints (artifact roll-up)",

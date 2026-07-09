@@ -367,10 +367,16 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
     if not manifests:
         return {}
 
+    def _session_dir_for_manifest(manifest_path: Path) -> Path:
+        # Layout: <serial>/runs/<session>/<package>/<capture>/harvest_package_manifest.json
+        return manifest_path.parent.parent.parent
+
     latest_manifest = manifests[-1]
-    session_dir = latest_manifest.parent.parent
+    session_dir = _session_dir_for_manifest(latest_manifest)
     session_resolved = session_dir.resolve()
-    session_manifests = [m for m in manifests if m.parent.parent.resolve() == session_resolved]
+    session_manifests = [
+        m for m in manifests if _session_dir_for_manifest(m).resolve() == session_resolved
+    ]
     blocked_policy = 0
     blocked_scope = 0
     executed = 0
@@ -401,7 +407,7 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
         if isinstance(status_block, dict):
             capture_status = str(status_block.get("capture_status") or "").strip().lower()
             research_status = str(status_block.get("research_status") or "").strip().lower()
-            if capture_status:
+            if capture_status and not reason:
                 capture_status_counts[capture_status] = capture_status_counts.get(capture_status, 0) + 1
             if research_status:
                 research_status_counts[research_status] = research_status_counts.get(research_status, 0) + 1
@@ -428,9 +434,6 @@ def _load_latest_harvest_overview(serial: str | None) -> dict[str, object]:
     elif capture_status_counts.get("partial", 0) > 0:
         session_state = "partial"
         session_note = f"{capture_status_counts['partial']} partial package(s)"
-    elif research_status_counts.get("ineligible", 0) > 0:
-        session_state = "ineligible"
-        session_note = f"{research_status_counts['ineligible']} ineligible package(s)"
     return {
         "session_label": receipt_key or session_dir.name,
         "executed": executed,
@@ -688,9 +691,9 @@ def _render_compact_status(
     if harvested_count in (None, 0):
         harvest_token = "none"
     elif int(harvested_count) == 1:
-        harvest_token = "1 run"
+        harvest_token = "1 resolved"
     else:
-        harvest_token = f"{harvested_count} runs"
+        harvest_token = f"{harvested_count} resolved"
     harvest_styled = colors.apply(
         harvest_token,
         colors.style("success" if harvested_count not in (None, 0) else "muted"),
@@ -787,7 +790,7 @@ def print_device_details(
     )
     print(
         f"{'Harvest':<12} : {_styled_count_phrase(pipeline.get('scheduled'), 'scheduled', tone='accent')} | "
-        f"{_styled_count_phrase(pipeline.get('harvested'), 'harvested', tone='info')} | "
+        f"{_styled_count_phrase(pipeline.get('harvested'), 'resolved', tone='info')} | "
         f"{_styled_count_phrase(pipeline.get('receipts'), 'receipts', tone='success')}"
     )
     print(

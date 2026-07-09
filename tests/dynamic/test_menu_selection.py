@@ -1141,6 +1141,59 @@ def test_compact_queue_table_shows_supplemental_suffixes_without_inflating_quota
     ]
 
 
+def test_compact_queue_table_marks_low_signal_valid_as_supplemental_qa(
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        menu_selection.table_utils,
+        "render_table",
+        lambda headers, rows, **_kwargs: captured.update({"headers": headers, "rows": rows}),
+    )
+
+    menu_selection._render_compact_queue_table(
+        [
+            menu_selection.PreparedPackageSelectionRow(
+                full_row=["7"],
+                op_row=[],
+                build_row=None,
+                dataset_app_count=0,
+                dataset_complete_count=0,
+                dataset_valid_runs_count=0,
+                package_name="com.pinterest",
+                display_name="Pinterest",
+                baseline_countable=0,
+                baseline_extra=0,
+                baseline_low_signal_supplemental=1,
+                interactive_countable=0,
+                interactive_extra=0,
+                need_baseline=3,
+                need_interactive=4,
+                prep_label="current",
+                qa_label="valid",
+                next_label="baseline",
+                lineage_state="current_build_observed",
+            ),
+        ],
+        baseline_required=3,
+        interactive_required=4,
+    )
+
+    assert captured["rows"][0] == [
+        "7",
+        "Pinterest",
+        "baseline",
+        "valid+low",
+        "current",
+        "0/3",
+        "0",
+        "0/4 held",
+        "0",
+        "1",
+    ]
+
+
 def test_compact_queue_table_shows_x_baseline_against_baseline_target(monkeypatch) -> None:
     captured = {}
 
@@ -1392,6 +1445,7 @@ def test_run_package_selection_menu_shows_current_build_refresh_summary(
         dataset_app_count=1,
         dataset_complete_count=0,
         dataset_valid_runs_count=3,
+        historical_valid_runs_count=1,
         package_name="com.facebook.katana",
         display_name="Facebook",
         baseline_countable=3,
@@ -1443,4 +1497,91 @@ def test_run_package_selection_menu_shows_current_build_refresh_summary(
     out = capsys.readouterr().out
     assert "Current build" in out
     assert "1 drift" in out
+    assert "drift changes provenance labels, not evidence availability" in out
+    assert "freeze build-scoped evidence or refresh drifted apps" in out
     assert "Remaining:" not in out
+
+
+def test_run_package_selection_menu_guides_non_drift_capture_before_redoing_drift(
+    monkeypatch, capsys
+) -> None:
+    rows = [
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=["1"],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=1,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=3,
+            historical_valid_runs_count=1,
+            package_name="com.reddit.frontpage",
+            display_name="Reddit",
+            baseline_countable=3,
+            interactive_countable=1,
+            need_baseline=0,
+            need_interactive=3,
+            prep_label="stale",
+            qa_label="valid",
+            next_label="refresh static",
+            lineage_state="current_build_observed",
+            live_build_drift=True,
+        ),
+        menu_selection.PreparedPackageSelectionRow(
+            full_row=["2"],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=1,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=3,
+            historical_valid_runs_count=1,
+            package_name="org.telegram.messenger",
+            display_name="Telegram",
+            baseline_countable=3,
+            interactive_countable=1,
+            need_baseline=0,
+            need_interactive=3,
+            prep_label="current",
+            qa_label="valid",
+            next_label="manual interaction",
+            lineage_state="current_build_observed",
+        ),
+    ]
+    prepared = menu_selection.PreparedPackageSelectionView(
+        packages=[
+            ("com.reddit.frontpage", None, None, "Reddit"),
+            ("org.telegram.messenger", None, None, "Telegram"),
+        ],
+        dataset_pkgs={"com.reddit.frontpage", "org.telegram.messenger"},
+        cfg=_Cfg(),
+        rows=[],
+        op_rows=[],
+        build_rows=[],
+        dataset_apps_total=2,
+        dataset_apps_complete=0,
+        dataset_valid_runs_total=6,
+        current_build_ready_count=0,
+        current_build_in_progress_count=1,
+        current_build_review_count=0,
+        stale_app_count=1,
+        row_models=rows,
+        expected_runs=10,
+        evidence_summary={
+            "evidence_root_exists": True,
+            "quota_runs_counted": 6,
+            "apps_satisfied": 0,
+            "extra_eligible_runs": 0,
+        },
+    )
+    monkeypatch.setattr(menu_selection.menu_utils, "print_header", lambda *_a, **_k: None)
+    monkeypatch.setattr(menu_selection.table_utils, "render_table", lambda *_a, **_k: None)
+    monkeypatch.setattr(menu_selection.prompt_utils, "prompt_text", lambda *_a, **_k: "b")
+
+    result = menu_selection.run_package_selection_menu(
+        prepared,
+        summarize_evidence_quota_fn=lambda *_a, **_k: prepared.evidence_summary,
+    )
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "capture non-drift quota-impact rows first" in out
+    assert "drift changes provenance labels, not evidence availability" in out

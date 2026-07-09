@@ -229,7 +229,7 @@ def prompt_plan_action(resolution: PlanResolution) -> str:
         print("──────────────")
         if selection_label:
             print(f"Scope: {selection_label}")
-        print(f"Ready: {scheduled_packages} package(s) · ~{scheduled_files} APK path(s)")
+        print(f"Ready: {scheduled_packages} pullable package(s) · ~{scheduled_files} APK path(s)")
         if blocked_total > 0:
             print(f"Blocked before pull: {blocked_total} package(s)")
         print()
@@ -541,7 +541,10 @@ def report_harvest_started(
         detail_bits.append(
             f"Inventory: {int(candidate_count)} pkgs (pre-scope / pre-delta context)"
         )
-    detail_bits.append(f"Pulling: {int(scheduled)} package(s) · ~{int(artifacts)} APK path(s)")
+    detail_bits.append(
+        f"Processing: {int(scheduled)} pullable package(s) · ~{int(artifacts)} APK path(s) "
+        "(pull or reuse)"
+    )
     if blocked_policy or blocked_scope:
         blocked_parts: list[str] = []
         if blocked_policy:

@@ -21,7 +21,7 @@ _CHAT_LIKE_BASELINE_PACKAGES = {
     "com.snapchat.android",
 }
 _RELAXED_IDLE_MIN_BYTES = 500_000  # 500KB
-_CONNECTED_BASELINE_MIN_PACKETS = 150
+_CONNECTED_BASELINE_MIN_PACKETS = 100
 _CONNECTED_BASELINE_MIN_DOMAINS = 1
 _RICH_IDLE_CATEGORY_NAMES = {"social_feed", "news_reader"}
 _RICH_IDLE_MIN_DURATION_S = 180.0
@@ -467,8 +467,12 @@ def _should_suppress_domains_low_for_messaging_call(
         return False
 
     pf = _read_json(run_dir / "analysis" / "pcap_features.json") or {}
+    report = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
     metrics = pf.get("metrics") if isinstance(pf.get("metrics"), dict) else {}
     proxies = pf.get("proxies") if isinstance(pf.get("proxies"), dict) else {}
+
+    if _has_messaging_call_media_plane_evidence(pf, report):
+        return True
 
     try:
         packet_count = int(metrics.get("packet_count") or 0)
@@ -493,6 +497,33 @@ def _should_suppress_domains_low_for_messaging_call(
         and udp_ratio >= 0.75
         and unique_dst_ip_count >= 3
     )
+
+
+def _has_messaging_call_media_plane_evidence(pf: dict[str, Any], report: dict[str, Any]) -> bool:
+    """Return true when media-plane evidence proves a call despite sparse DNS/SNI."""
+
+    summaries: list[dict[str, Any]] = []
+    for source in (pf, report):
+        media_plane = source.get("media_plane") if isinstance(source.get("media_plane"), dict) else {}
+        summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
+        if isinstance(summary, dict) and summary:
+            summaries.append(summary)
+
+    for summary in summaries:
+        if not (
+            bool(summary.get("rtc_call_observed"))
+            or bool(summary.get("relay_media_likely"))
+            or _safe_int(summary.get("rtc_sustained_session_count")) > 0
+        ):
+            continue
+        if (
+            _safe_int(summary.get("rtc_total_packets")) >= 500
+            or _safe_int(summary.get("rtc_total_bytes")) >= 500_000
+            or _safe_float(summary.get("rtc_max_session_duration_s")) >= 60.0
+            or _safe_int(summary.get("stun_frame_count")) >= 500
+        ):
+            return True
+    return False
 
 
 def _effective_low_signal_config(

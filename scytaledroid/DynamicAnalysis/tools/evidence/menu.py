@@ -16,6 +16,7 @@ from scytaledroid.DynamicAnalysis.pcap.security_surface import security_operator
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
 )
+from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import messaging_activity_label
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
 
 
@@ -407,7 +408,18 @@ def _render_app_runs(root: Path, display_name: str, package_name: str, runs: lis
         print(status_messages.status("No runs found.", level="info"))
         return
     # Compact table with reasons (this is the drilldown view).
-    headers = ["#", "Run", "Ended", "Profile", "Interact", "ClrHTTP", "SecFind", "Valid", "Reason"]
+    headers = [
+        "#",
+        "Run",
+        "Ended",
+        "Profile",
+        "Interact",
+        "Activity",
+        "ClrHTTP",
+        "SecFind",
+        "Valid",
+        "Reason",
+    ]
     rows = []
     for idx, r in enumerate(runs, start=1):
         valid = r.get("valid")
@@ -425,6 +437,7 @@ def _render_app_runs(root: Path, display_name: str, package_name: str, runs: lis
                 str(r.get("ended_at") or "")[:19] or "—",
                 str(r.get("run_profile") or "") or "—",
                 str(r.get("interaction_level") or "") or "—",
+                messaging_activity_label(r.get("messaging_activity")),
                 clr_http,
                 sec_find,
                 valid_label,

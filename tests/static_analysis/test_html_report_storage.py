@@ -76,6 +76,30 @@ def test_save_html_report_both_mode_writes_latest_and_archive(tmp_path: Path) ->
     assert archive.exists()
 
 
+def test_save_html_report_renders_resource_fallback_recovery(tmp_path: Path) -> None:
+    report = replace(
+        _sample_report(),
+        metadata={
+            "artifact": "base.apk",
+            "session_stamp": "20260328-rda-full",
+            "parser_provenance": {
+                "resource_open_source": "androguard+aapt2_resource_strings",
+                "resource_bounds_warning_count": 3,
+                "resource_bounds_warning_severity": "warn",
+                "resource_parse_state": "fallback_recovered",
+                "resource_parse_partial": False,
+                "resource_reparse_candidate": False,
+                "resource_string_fallback_used": True,
+                "resource_string_fallback_count": 4516,
+            },
+        },
+    )
+
+    path = save_html_report(report, output_root=tmp_path, mode="latest")
+
+    assert "resource-parse=fallback-recovered(4516)" in path.read_text(encoding="utf-8")
+
+
 def test_save_html_report_uses_sha_suffix_for_non_base_split_paths(tmp_path: Path) -> None:
     report_a = replace(
         _sample_report(),

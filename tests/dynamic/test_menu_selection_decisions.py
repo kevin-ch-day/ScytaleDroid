@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from scytaledroid.DynamicAnalysis import tracker_scope
 from scytaledroid.DynamicAnalysis.menus import queue_selection as menu_selection
+from scytaledroid.DynamicAnalysis.menus.queue_prepared_view import (
+    prepare_package_selection_view,
+)
 
 
 def test_display_action_label_matches_invalid_review_status() -> None:
@@ -49,6 +52,77 @@ def test_display_action_label_uses_review_for_invalid_complete_row() -> None:
 
     assert menu_selection._display_action_label(row) == "review"
     assert menu_selection._display_next_line_action_label(row) == "review QA"
+
+
+def test_display_action_label_continues_interactive_after_failed_latest_attempt() -> None:
+    row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["11"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=4,
+        package_name="org.telegram.messenger",
+        display_name="Telegram",
+        baseline_countable=3,
+        interactive_countable=1,
+        need_baseline=0,
+        need_interactive=3,
+        prep_label="current",
+        qa_label="invalid",
+        next_label="manual interaction",
+        technical_valid_active=4,
+        lineage_state="current_build_observed",
+    )
+
+    assert menu_selection._display_action_label(row) == "interactive"
+    assert menu_selection._display_next_line_action_label(row) == "interactive"
+
+
+def test_prepare_view_counts_invalid_continuation_as_in_progress(monkeypatch) -> None:
+    from scytaledroid.DynamicAnalysis.pcap import dataset_tracker
+
+    monkeypatch.setattr(dataset_tracker, "load_dataset_tracker", lambda: {"apps": {}})
+
+    row = menu_selection.PreparedPackageSelectionRow(
+        full_row=["11"],
+        op_row=[],
+        build_row=None,
+        dataset_app_count=1,
+        dataset_complete_count=0,
+        dataset_valid_runs_count=4,
+        package_name="org.telegram.messenger",
+        display_name="Telegram",
+        baseline_countable=3,
+        interactive_countable=1,
+        need_baseline=0,
+        need_interactive=3,
+        prep_label="current",
+        qa_label="invalid",
+        next_label="manual interaction",
+        technical_valid_active=4,
+        lineage_state="current_build_observed",
+    )
+
+    prepared = prepare_package_selection_view(
+        object(),
+        load_dataset_packages=lambda: ["org.telegram.messenger"],
+        list_packages_fn=lambda _groups: [("org.telegram.messenger", None, None, "Telegram")],
+        summarize_evidence_quota_fn=lambda *_args, **_kwargs: {
+            "evidence_root_exists": True,
+            "quota_runs_counted": 4,
+            "apps_satisfied": 0,
+            "extra_eligible_runs": 0,
+        },
+        build_package_selection_row_fn=lambda **_kwargs: row,
+        resolve_live_build_drift_map_fn=lambda *_args, **_kwargs: {},
+        resolve_db_dynamic_lineage_context_map_fn=lambda *_args, **_kwargs: {},
+        device_serial="ZY22JK89DR",
+    )
+
+    assert prepared is not None
+    assert prepared.current_build_review_count == 0
+    assert prepared.current_build_in_progress_count == 1
 
 
 def test_next_recommended_row_prioritizes_review_over_manual_and_refresh() -> None:
@@ -288,6 +362,44 @@ def test_build_scoped_dataset_counts_respects_explicit_non_countable_active_run(
     assert scoped["baseline_low_signal_supplemental"] == 1
     assert scoped["interactive_countable"] == 0
     assert scoped["technical_valid_active"] == 3
+
+
+def test_build_scoped_dataset_counts_repairs_app_active_no_touch_baseline() -> None:
+    class _Cfg2:
+        baseline_required = 3
+        interactive_required = 2
+
+    runs = [
+        {
+            "run_id": "pin-active",
+            "valid_dataset_run": True,
+            "paper_eligible": True,
+            "run_profile": "baseline_idle",
+            "version_code": "14268010",
+            "base_apk_sha256": "sha-current",
+            "ended_at": "2026-07-08T19:45:00+00:00",
+            "countable": False,
+            "extra_run": 1,
+            "low_signal": False,
+            "baseline_not_idle": True,
+        }
+    ]
+
+    scoped = tracker_scope.build_scoped_dataset_counts(
+        "com.pinterest",
+        runs,
+        cfg=_Cfg2(),
+        resolve_tracker_run_identity_fn=lambda _pkg, row: (
+            str(row.get("version_code") or "") or None,
+            str(row.get("base_apk_sha256") or "") or None,
+        ),
+        active_identity_fn=lambda _pkg: ("14268010", "sha-current"),
+    )
+
+    assert scoped["baseline_countable"] == 1
+    assert scoped["baseline_not_idle_supplemental"] == 0
+    assert scoped["baseline_low_signal_supplemental"] == 0
+    assert scoped["technical_valid_active"] == 1
 
 
 def test_build_scoped_dataset_counts_tracks_explicit_non_countable_interactive_extra() -> None:

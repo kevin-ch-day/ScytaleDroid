@@ -12,9 +12,11 @@ No DDL, DML, filesystem writes, static runs, or dynamic links are made.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +46,19 @@ def main(argv: list[str] | None = None) -> int:
             "Write a non-destructive JSON recovery plan receipt under "
             "data/receipts/artifact_recovery_plans. Default is no filesystem writes."
         ),
+    )
+    parser.add_argument(
+        "--write-report",
+        action="store_true",
+        help=(
+            "Write a read-only audit bundle under output/audit/dynamic_static_recovery_plan. "
+            "No DB rows or APK files are changed."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Report output directory when --write-report is used.",
     )
     parser.add_argument(
         "--receipt-dir",
@@ -185,6 +200,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_receipt:
         receipt_path = _write_receipt(payload, receipt_dir=Path(args.receipt_dir))
         payload["receipt_path"] = str(receipt_path)
+    if args.write_report or args.output_dir:
+        output_dir = (
+            Path(args.output_dir)
+            if args.output_dir
+            else Path("output/audit/dynamic_static_recovery_plan") / _receipt_stamp(payload["created_at"])
+        )
+        payload["output_files"] = _write_report_bundle(payload, output_dir=output_dir)
 
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
@@ -549,6 +571,11 @@ def _print_text(payload: dict[str, Any]) -> None:
         print()
         print("=== Receipt ===")
         print(f"  path: {payload['receipt_path']}")
+    if payload.get("output_files"):
+        print()
+        print("=== Report bundle ===")
+        for label, path in sorted(payload["output_files"].items()):
+            print(f"  {label}: {path}")
 
 
 def _write_receipt(payload: dict[str, Any], *, receipt_dir: Path) -> Path:
@@ -561,6 +588,86 @@ def _write_receipt(payload: dict[str, Any], *, receipt_dir: Path) -> Path:
     path = receipt_dir / f"{stamp}_{suffix}.json"
     atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n")
     return path
+
+
+def _write_report_bundle(payload: dict[str, Any], *, output_dir: Path) -> dict[str, str]:
+    from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "summary_json": output_dir / "summary.json",
+        "packages_csv": output_dir / "packages.csv",
+        "storage_roots_csv": output_dir / "storage_roots.csv",
+        "gaps_csv": output_dir / "gaps.csv",
+        "historical_identity_only_csv": output_dir / "historical_identity_only.csv",
+        "reharvest_candidates_csv": output_dir / "reharvest_candidates.csv",
+    }
+    serializable_payload = dict(payload)
+    serializable_payload["output_files"] = {key: str(path) for key, path in files.items()}
+    atomic_write_text(
+        files["summary_json"],
+        json.dumps(serializable_payload, indent=2, sort_keys=True, default=str) + "\n",
+    )
+    _write_csv(files["packages_csv"], payload.get("packages") or [])
+    _write_csv(files["storage_roots_csv"], _flatten_storage_roots(payload.get("storage_roots") or []))
+    gaps = list(payload.get("gaps") or [])
+    _write_csv(files["gaps_csv"], gaps)
+    _write_csv(
+        files["historical_identity_only_csv"],
+        [
+            row
+            for row in gaps
+            if str(row.get("recommended_action") or "")
+            in {"historical_identity_only", "unrecoverable_without_archive"}
+        ],
+    )
+    _write_csv(
+        files["reharvest_candidates_csv"],
+        [
+            row
+            for row in gaps
+            if str(row.get("recommended_action") or "")
+            in {"explicit_reharvest", "current_build_reharvest_needed"}
+        ],
+    )
+    return {key: str(path) for key, path in files.items()}
+
+
+def _flatten_storage_roots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    flattened: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        actions = item.get("actions")
+        if isinstance(actions, dict):
+            item["actions_json"] = json.dumps(actions, sort_keys=True)
+        item.pop("actions", None)
+        flattened.append(item)
+    return flattened
+
+
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+    if not rows:
+        atomic_write_text(path, "")
+        return
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(str(key))
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _csv_value(row.get(key)) for key in fieldnames})
+    atomic_write_text(path, buffer.getvalue())
+
+
+def _csv_value(value: Any) -> Any:
+    if isinstance(value, (dict, list, tuple, set)):
+        return json.dumps(value, sort_keys=True, default=str)
+    return value
 
 
 def _receipt_stamp(value: str) -> str:

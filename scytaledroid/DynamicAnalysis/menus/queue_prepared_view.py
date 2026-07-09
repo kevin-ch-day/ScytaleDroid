@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.app_queue_state import queue_state_label
+
 
 @dataclass(frozen=True)
 class PreparedPackageSelectionView:
@@ -162,7 +164,7 @@ def prepare_package_selection_view(
         elif prepared_row.lineage_state == "current_build_db_only":
             current_build_db_only_count += 1
         elif prepared_row.lineage_state == "current_build_observed":
-            if str(prepared_row.qa_label or "").startswith("invalid"):
+            if queue_state_label(prepared_row) == "review":
                 current_build_review_count += 1
             elif prepared_row.dataset_complete_count > 0:
                 current_build_ready_count += 1

@@ -7,13 +7,30 @@ CREATE OR REPLACE VIEW vw_latest_apk_per_package AS
 SELECT ar.*
 FROM android_apk_repository ar
 JOIN (
-  SELECT package_name, MAX(updated_at) AS max_updated
-  FROM android_apk_repository
-  WHERE is_split_member = 0
-  GROUP BY package_name
+  SELECT ranked.apk_id
+  FROM (
+    SELECT
+      ar2.apk_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY CONVERT(ar2.package_name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+        ORDER BY
+          CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM apk_sets aset
+              WHERE aset.base_apk_id = ar2.apk_id
+            ) THEN 1 ELSE 0
+          END DESC,
+          COALESCE(ar2.updated_at, ar2.harvested_at, ar2.created_at) DESC,
+          CAST(COALESCE(NULLIF(ar2.version_code, ''), '0') AS UNSIGNED) DESC,
+          ar2.apk_id DESC
+      ) AS rn
+    FROM android_apk_repository ar2
+    WHERE COALESCE(ar2.is_split_member, 0) = 0
+  ) ranked
+  WHERE ranked.rn = 1
 ) t
-  ON t.package_name = ar.package_name AND t.max_updated = ar.updated_at
-WHERE ar.is_split_member = 0;
+  ON t.apk_id = ar.apk_id;
 """
 
 __all__ = [

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.audit.run_log_audit import (
     dynamic_run_log_candidates,
+    emit_dynamic_audit_report,
     summarize_dynamic_run_artifacts,
 )
 
@@ -59,6 +60,19 @@ def test_summarize_dynamic_run_artifacts_reports_core_paths(tmp_path: Path) -> N
         json.dumps({"attempted": True, "ok": True}),
         encoding="utf-8",
     )
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "success",
+                "dataset": {
+                    "valid_dataset_run": True,
+                    "countable": True,
+                    "invalid_reason_code": None,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     summary = summarize_dynamic_run_artifacts(
         run_id,
@@ -74,5 +88,97 @@ def test_summarize_dynamic_run_artifacts_reports_core_paths(tmp_path: Path) -> N
     assert summary["pcap_features_present"] is True
     assert summary["overlap_present"] is True
     assert summary["db_persistence_status"] == {"attempted": True, "ok": True}
+    assert summary["manifest_dataset_truth"] == {
+        "valid": True,
+        "countable": True,
+        "invalid_reason_code": None,
+        "status": "success",
+    }
     assert summary["latest_dataset_validity"] == {"valid": True, "countable": True}
     assert summary["latest_derived_indexing"] == {"feature_rows": 1, "indicator_rows": 20, "domain_rows": 20}
+
+
+def test_emit_dynamic_audit_prefers_current_db_counts(tmp_path: Path, monkeypatch, capsys) -> None:
+    evidence_root = tmp_path / "output" / "evidence" / "dynamic"
+    run_id = "run-123"
+    run_dir = evidence_root / run_id
+    (run_dir / "notes").mkdir(parents=True)
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "notes" / "run_events.jsonl").write_text(
+        json.dumps(
+            {
+                "event_type": "dynamic_derived_indexing_complete",
+                "details": {"feature_rows": 1, "indicator_rows": 0, "domain_rows": 0},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.audit.run_log_audit._load_current_db_index_counts",
+        lambda _run_id: {"feature_rows": 1, "indicator_rows": 5, "domain_rows": 5},
+    )
+
+    emit_dynamic_audit_report(run_id, logs_root=tmp_path, evidence_root=evidence_root)
+
+    out = capsys.readouterr().out
+    assert "Derived index : features=1 indicators=5 domains=5 source=DB" in out
+
+
+def test_emit_dynamic_audit_prefers_current_dataset_truth_over_stale_event(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    evidence_root = tmp_path / "output" / "evidence" / "dynamic"
+    run_id = "run-accepted"
+    run_dir = evidence_root / run_id
+    (run_dir / "notes").mkdir(parents=True)
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "notes" / "run_events.jsonl").write_text(
+        json.dumps(
+            {
+                "event_type": "dataset_validity",
+                "details": {
+                    "valid": False,
+                    "countable": False,
+                    "invalid_reason_code": "ABORTED_DISCARD",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "success",
+                "dataset": {
+                    "valid_dataset_run": True,
+                    "countable": True,
+                    "invalid_reason_code": None,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.audit.run_log_audit._load_current_db_dataset_truth",
+        lambda _run_id: {
+            "valid": True,
+            "countable": True,
+            "invalid_reason_code": None,
+            "status": "success",
+        },
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.audit.run_log_audit._load_current_db_index_counts",
+        lambda _run_id: None,
+    )
+
+    emit_dynamic_audit_report(run_id, logs_root=tmp_path, evidence_root=evidence_root)
+
+    out = capsys.readouterr().out
+    assert "Dataset truth : valid=True countable=True invalid_reason=— source=DB" in out

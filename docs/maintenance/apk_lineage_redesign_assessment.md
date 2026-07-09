@@ -498,7 +498,6 @@ Main Menu -> APK library -> Package lineage and byte/static/dynamic coverage
 Fourth additive slice implemented on 2026-05-13:
 
 ```text
-scripts/db/report_package_lineage_coverage.py
 scripts/db/report_apk_lineage_availability.py --design-checks
 ```
 
@@ -561,7 +560,7 @@ Fifth additive slice implemented on 2026-05-13:
 
 ```text
 scripts/db/report_dynamic_static_recovery_plan.py
-scripts/db/report_package_lineage_coverage.py --drift-details
+scripts/db/report_apk_lineage_availability.py --drift-details
 ```
 
 This is a read-only recovery/reharvest planner for the exact dynamic/static

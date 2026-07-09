@@ -284,6 +284,8 @@ def _discover_path_artifacts(base_dir: Path) -> list[RepositoryArtifact]:
         return artifacts
 
     for apk_path in sorted(base_dir.rglob("*.apk")):
+        if not apk_path.is_file() and not apk_path.is_symlink():
+            continue
         metadata = _load_metadata(apk_path)
         try:
             display = apk_path.resolve().relative_to(base_dir).as_posix()
@@ -381,19 +383,22 @@ def _artifacts_from_receipt(receipt_path: Path, payload: Mapping[str, object]) -
 
 
 def _resolve_receipt_artifact_path(entry: Mapping[str, object]) -> Path | None:
+    sha256 = str(entry.get("sha256") or "").strip().lower()
     canonical = str(entry.get("canonical_store_path") or "").strip()
     if canonical:
         candidate = Path(canonical)
         if not candidate.is_absolute():
             candidate = Path.cwd() / canonical
+        if sha256 and _is_expected_canonical_apk_path(candidate, sha256):
+            return artifact_store.ensure_canonical_apk_blob_available(sha256)
         if candidate.exists():
             return candidate.resolve()
 
-    sha256 = str(entry.get("sha256") or "").strip().lower()
     if sha256:
-        candidate = artifact_store.canonical_apk_path(sha256)
-        if candidate.exists():
-            return candidate.resolve()
+        try:
+            return artifact_store.ensure_canonical_apk_blob_available(sha256)
+        except FileNotFoundError:
+            pass
 
     local_path = str(entry.get("local_artifact_path") or "").strip()
     if local_path:
@@ -403,6 +408,19 @@ def _resolve_receipt_artifact_path(entry: Mapping[str, object]) -> Path | None:
         if candidate.exists():
             return candidate.resolve()
     return None
+
+
+def _is_expected_canonical_apk_path(candidate: Path, sha256: str) -> bool:
+    try:
+        expected = artifact_store.canonical_apk_path(sha256)
+    except Exception:
+        return False
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    expected_path = expected.expanduser()
+    if not expected_path.is_absolute():
+        expected_path = Path.cwd() / expected_path
+    return candidate.expanduser().absolute() == expected_path.absolute()
 
 
 def group_artifacts(

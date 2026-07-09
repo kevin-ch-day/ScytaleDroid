@@ -14,7 +14,7 @@ from scytaledroid.StaticAnalysis._androguard import APK
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .models import StringIndex
-from .sources import collect_file_strings, collect_resource_table_strings
+from .sources import collect_aapt2_resource_strings, collect_file_strings, collect_resource_table_strings
 
 _BOUNDS_WARNING_SEEN: set[str] = set()
 
@@ -92,6 +92,15 @@ def build_string_index(
         collected, fd_output = _run_with_fd_capture(_collect)
     captured = buffer.getvalue() + fd_output
     warnings = tuple(dict.fromkeys(_extract_bounds_warnings(captured)))
+    added_fallback_entries = tuple()
+    if include_resource_table and warnings:
+        fallback_entries = collect_aapt2_resource_strings(apk)
+        if fallback_entries:
+            existing_values = {entry.value for entry in collected}
+            added_fallback_entries = tuple(
+                entry for entry in fallback_entries if entry.value not in existing_values
+            )
+            collected = collected + added_fallback_entries
     if warnings:
         apk_path = getattr(apk, "filename", None)
         dedupe_key = apk_path or f"apk:{id(apk)}"
@@ -125,7 +134,11 @@ def build_string_index(
     else:
         filtered = collected
 
-    return StringIndex(strings=filtered, resource_bounds_warnings=warnings)
+    return StringIndex(
+        strings=filtered,
+        resource_bounds_warnings=warnings,
+        aapt2_resource_fallback_count=len(added_fallback_entries),
+    )
 
 
 __all__ = ["build_string_index"]

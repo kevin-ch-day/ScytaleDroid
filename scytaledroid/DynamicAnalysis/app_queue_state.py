@@ -150,6 +150,21 @@ def queue_state_label(row: Any) -> str:
             return "baseline"
         return "legacy"
     if str(getattr(row, "qa_label", "") or "").startswith("invalid"):
+        baseline_missing = int(getattr(row, "need_baseline", 0) or 0)
+        interactive_missing = int(getattr(row, "need_interactive", 0) or 0)
+        active_valid_runs = int(getattr(row, "technical_valid_active", 0) or 0)
+        if active_valid_runs <= 0:
+            active_valid_runs = int(getattr(row, "baseline_countable", 0) or 0) + int(
+                getattr(row, "interactive_countable", 0) or 0
+            )
+        next_label = str(getattr(row, "next_label", "") or "")
+        if (
+            baseline_missing <= 0
+            and interactive_missing > 0
+            and active_valid_runs > 0
+            and "interaction" in next_label.casefold()
+        ):
+            return "manual"
         return "review"
     if int(getattr(row, "need_baseline", 0) or 0) > 0:
         return "baseline"
@@ -215,6 +230,16 @@ def queue_quota_gap_label(row: Any) -> str:
 
 def queue_table_qa_label(row: Any) -> str:
     value = compact_qa_label(str(getattr(row, "qa_label", "") or "—"))
+    if (
+        value == "valid"
+        and (
+            int(getattr(row, "baseline_low_signal_supplemental", 0) or 0) > 0
+            or int(getattr(row, "interactive_low_signal_supplemental", 0) or 0) > 0
+        )
+        and int(getattr(row, "baseline_countable", 0) or 0) == 0
+        and int(getattr(row, "interactive_countable", 0) or 0) == 0
+    ):
+        return "valid+low"
     return _QUEUE_TABLE_QA_DISPLAY_LABELS.get(value, value)
 
 

@@ -388,6 +388,19 @@ def render_queue_summary_block(
         footer_lines.append(
             "Select a device to verify live build drift and enable capture guidance."
         )
+    if capture_device_selected and prepared.stale_app_count > 0 and row_models:
+        if retained_app_count >= int(getattr(prepared, "dataset_apps_total", 0) or 0):
+            footer_lines.append(
+                "All dataset apps have retained evidence; drift changes provenance labels, not evidence availability."
+            )
+        if remaining > 0 and int(getattr(prepared, "current_build_in_progress_count", 0) or 0) > 0:
+            footer_lines.append(
+                "Do not restart every app: capture non-drift quota-impact rows first, then freeze or refresh drifted apps."
+            )
+        elif remaining > 0:
+            footer_lines.append(
+                "Do not restart every app: freeze build-scoped evidence or refresh drifted apps before new live-current claims."
+            )
     footer_lines.append("For rough-draft readiness, use P for paper-freeze readiness.")
 
     print_summary_card(

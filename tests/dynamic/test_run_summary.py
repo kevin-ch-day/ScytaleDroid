@@ -154,6 +154,11 @@ def test_run_summary_surfaces_manual_call_outcome(tmp_path, monkeypatch, capsys)
                     "call_attempted": True,
                     "call_connected": False,
                     "call_outcome_reason": "CALL_NOT_CONNECTED",
+                    "call_attempt_count": 3,
+                    "call_connected_count": 1,
+                    "call_not_connected_count": 2,
+                    "call_canceled_count": 0,
+                    "call_outcome_summary": "attempts=3;connected=1;not_connected=2;canceled=0",
                 },
                 "target": {"package_name": "com.facebook.orca", "display_name": "Messenger"},
                 "dataset": {"valid_dataset_run": True, "countable": True, "min_pcap_bytes": 50000},
@@ -186,11 +191,61 @@ def test_run_summary_surfaces_manual_call_outcome(tmp_path, monkeypatch, capsys)
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "Messaging" in out and "video_call" in out
+    assert "Messaging" in out and "Video Call" in out
+    assert "video_call" not in out
     assert "Call type" in out and "video" in out
     assert "Call attempted" in out and "true" in out
     assert "Call connected" in out and "false" in out
     assert "Call outcome" in out and "CALL_NOT_CONNECTED" in out
+    assert "Call attempts" in out and "3" in out
+    assert "No-connect/ringing attempts" in out and "2" in out
+
+
+def test_run_summary_displays_manual_messaging_tags_with_operator_labels(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    (tmp_path / "analysis").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "operator": {
+                    "run_profile": "interaction_manual",
+                    "interaction_level": "manual",
+                    "messaging_activity": "manual_mixed",
+                },
+                "target": {"package_name": "org.telegram.messenger", "display_name": "Telegram"},
+                "dataset": {"valid_dataset_run": True, "countable": True, "min_pcap_bytes": 50000},
+                "artifacts": [],
+                "outputs": [],
+                "observers": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._dataset_quota_label", lambda *_a, **_k: "4/7")
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._countability_detail", lambda *_a, **_k: "")
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._three_verdict_label", lambda *_a, **_k: None)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._load_db_persistence_status", lambda *_a, **_k: None)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._load_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary._load_engine_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.run_summary.prompt_utils.prompt_yes_no", lambda *_a, **_k: False)
+
+    print_run_summary(
+        DynamicSessionResult(
+            package_name="org.telegram.messenger",
+            duration_seconds=240,
+            started_at=datetime.now(UTC),
+            ended_at=datetime.now(UTC),
+            status="success",
+            dynamic_run_id="run-manual-mixed",
+            evidence_path=str(tmp_path),
+        ),
+        "Cohort",
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "Messaging" in out and "Mixed known activities" in out
+    assert "manual_mixed" not in out
 
 
 def test_run_summary_surfaces_runtime_surface_sequence(tmp_path, monkeypatch, capsys) -> None:

@@ -35,6 +35,7 @@ from scytaledroid.DynamicAnalysis.domain_context import (
     root_domain,
     suffix_match,
 )
+from scytaledroid.DynamicAnalysis.ip_context import classify_ip_destination, normalize_ip
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class RunRow:
     domains_per_min: float | None
     top_dns: tuple[tuple[str, int], ...]
     top_sni: tuple[tuple[str, int], ...]
+    top_ip_dst: tuple[tuple[str, int], ...]
     static_domains_count: int | None
     dynamic_domains_count: int | None
 
@@ -142,6 +144,10 @@ def _context_for_domain(domain: str, *, package_name: str) -> dict[str, str | bo
     return classify_domain(domain, package_name=package_name)
 
 
+def _context_for_ip_destination(value: str, *, package_name: str) -> dict[str, str | bool]:
+    return classify_ip_destination(value, package_name=package_name)
+
+
 def _dynamic_root() -> Path:
     from scytaledroid.Config import app_config
 
@@ -206,7 +212,11 @@ def _median(values: Sequence[int | float | None]) -> float | None:
 
 
 def _run_domain_set(row: RunRow) -> set[str]:
-    return {domain for domain, _count in row.top_dns} | {domain for domain, _count in row.top_sni}
+    return (
+        {domain for domain, _count in row.top_dns}
+        | {domain for domain, _count in row.top_sni}
+        | {ip for ip, _count in row.top_ip_dst}
+    )
 
 
 def _top_values(report: Mapping[str, Any] | None, key: str) -> tuple[tuple[str, int], ...]:
@@ -228,6 +238,42 @@ def _top_values(report: Mapping[str, Any] | None, key: str) -> tuple[tuple[str, 
             count = 0
         out.append((value, count))
     return tuple(out)
+
+
+def _endpoint_host(value: object) -> str:
+    text = _norm_text(value)
+    if not text:
+        return ""
+    if text.startswith("[") and "]" in text:
+        return text[1 : text.index("]")]
+    if ":" in text and text.count(":") == 1:
+        host, maybe_port = text.rsplit(":", 1)
+        if maybe_port.isdigit():
+            return host
+    return text
+
+
+def _top_ip_destinations(report: Mapping[str, Any] | None, *, package_name: str) -> tuple[tuple[str, int], ...]:
+    if not isinstance(report, Mapping):
+        return ()
+    flow_summary = report.get("flow_summary")
+    top_flows = flow_summary.get("top_flows") if isinstance(flow_summary, Mapping) else None
+    if not isinstance(top_flows, Sequence) or isinstance(top_flows, (str, bytes, bytearray)):
+        return ()
+    out: dict[str, int] = {}
+    for flow in top_flows:
+        if not isinstance(flow, Mapping):
+            continue
+        for endpoint_key in ("endpoint_b", "endpoint_a"):
+            ip_text = normalize_ip(_endpoint_host(flow.get(endpoint_key)))
+            if not ip_text:
+                continue
+            ctx = _context_for_ip_destination(ip_text, package_name=package_name)
+            if not ctx.get("first_party"):
+                continue
+            out[ip_text] = out.get(ip_text, 0) + int(_safe_int(flow.get("packets")) or 0)
+            break
+    return tuple(sorted(out.items()))
 
 
 def _load_run_row(run_dir: Path) -> RunRow | None:
@@ -262,6 +308,7 @@ def _load_run_row(run_dir: Path) -> RunRow | None:
         domains_per_min=_safe_float(proxies.get("domains_per_min") if isinstance(proxies, Mapping) else None),
         top_dns=_top_values(report, "top_dns"),
         top_sni=_top_values(report, "top_sni"),
+        top_ip_dst=_top_ip_destinations(report, package_name=package_name),
         static_domains_count=int(overlap.get("static_domains_count")) if isinstance(overlap, Mapping) and overlap.get("static_domains_count") is not None else None,
         dynamic_domains_count=int(overlap.get("dynamic_domains_count")) if isinstance(overlap, Mapping) and overlap.get("dynamic_domains_count") is not None else None,
     )
@@ -339,7 +386,7 @@ def _domain_rows(rows: Sequence[RunRow]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     package_run_counts = Counter(row.package_name for row in rows)
     for row in rows:
-        for source_key, entries in (("dns", row.top_dns), ("sni", row.top_sni)):
+        for source_key, entries in (("dns", row.top_dns), ("sni", row.top_sni), ("ip_dst", row.top_ip_dst)):
             for domain, count in entries:
                 key = (row.package_name, domain)
                 slot = grouped.setdefault(
@@ -350,6 +397,7 @@ def _domain_rows(rows: Sequence[RunRow]) -> list[dict[str, Any]]:
                         "domain": domain,
                         "dns_hits": 0,
                         "sni_hits": 0,
+                        "ip_hits": 0,
                         "total_hits": 0,
                         "runs_seen": set(),
                         "profiles_seen": set(),
@@ -360,12 +408,16 @@ def _domain_rows(rows: Sequence[RunRow]) -> list[dict[str, Any]]:
                 slot["profiles_seen"].add(row.run_profile)
                 if source_key == "dns":
                     slot["dns_hits"] += int(count)
-                else:
+                elif source_key == "sni":
                     slot["sni_hits"] += int(count)
+                else:
+                    slot["ip_hits"] += int(count)
 
     out: list[dict[str, Any]] = []
     for (package_name, domain), row in sorted(grouped.items()):
-        ctx = _context_for_domain(domain, package_name=package_name)
+        ip_ctx = _context_for_ip_destination(domain, package_name=package_name)
+        ctx = ip_ctx if ip_ctx.get("first_party") else _context_for_domain(domain, package_name=package_name)
+        root_value = ctx.get("root_domain") or ctx.get("cidr") or ctx.get("ip") or domain
         runs_seen = sorted(str(value) for value in row["runs_seen"])
         profiles_seen = sorted(str(value) for value in row["profiles_seen"] if _norm_text(value))
         total_pkg_runs = int(package_run_counts.get(package_name, 0))
@@ -375,7 +427,7 @@ def _domain_rows(rows: Sequence[RunRow]) -> list[dict[str, Any]]:
                 "package_name": package_name,
                 "display_name": row["display_name"],
                 "domain": domain,
-                "root_domain": ctx["root_domain"],
+                "root_domain": root_value,
                 "owner_class": ctx["owner_class"],
                 "role_class": ctx["role_class"],
                 "confidence": ctx["confidence"],
@@ -383,6 +435,7 @@ def _domain_rows(rows: Sequence[RunRow]) -> list[dict[str, Any]]:
                 "first_party": int(bool(ctx["first_party"])),
                 "dns_hits": int(row["dns_hits"]),
                 "sni_hits": int(row["sni_hits"]),
+                "ip_hits": int(row["ip_hits"]),
                 "total_hits": int(row["total_hits"]),
                 "observed_run_count": observed_runs,
                 "package_run_count": total_pkg_runs,
@@ -517,7 +570,7 @@ def _summary(
         },
         "assumptions": [
             "filesystem_first_inputs",
-            "pcap_report_top_dns_top_sni_only",
+            "pcap_report_top_dns_top_sni_plus_curated_direct_ip_context",
             "curated_exact_and_suffix_classification",
             "package_root_first_party_hints_are_advisory",
         ],

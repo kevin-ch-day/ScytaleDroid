@@ -137,7 +137,7 @@ def test_dataset_impact_label_distinguishes_manual_and_scripted_extra_runs() -> 
     )
     assert (
         selected_app_review._dataset_impact_label(baseline_not_idle_row)
-        == "retained non-idle baseline"
+        == "app-active no-touch baseline tag"
     )
     assert (
         selected_app_review._dataset_impact_label(extra_baseline_row)
@@ -262,11 +262,11 @@ def test_guided_run_surfaces_quiescent_fg_and_raw_interactive_when_strict_idle_h
         "load_dataset_run_state",
         lambda _package_name, config=None: make_dataset_state(
             package,
-            total_runs=9,
-            valid_runs=9,
-            baseline_valid_runs=0,
-            interactive_valid_runs=2,
-            quota_met=False,
+                total_runs=9,
+                valid_runs=9,
+                baseline_valid_runs=7,
+                interactive_valid_runs=2,
+                quota_met=False,
             extra_valid_runs=0,
             local_evidence_dir_count=9,
             reset_available=True,
@@ -287,19 +287,19 @@ def test_guided_run_surfaces_quiescent_fg_and_raw_interactive_when_strict_idle_h
                     version_code="2024507030",
                     version_name="45.7.3",
                     static_run_id="5838",
-                    base_apk_sha256="t" * 64,
-                    strict_idle_runs=0,
-                    quiescent_fg_runs=7,
-                    baseline_valid_runs=0,
-                    interactive_valid_runs=2,
+                        base_apk_sha256="t" * 64,
+                        strict_idle_runs=7,
+                        quiescent_fg_runs=7,
+                        baseline_valid_runs=7,
+                        interactive_valid_runs=2,
                     valid_pcap_count=9,
                     qa_valid_count=9,
                     first_capture_at="2026-07-04T10:00:00Z",
                     last_capture_at="2026-07-04T10:35:00Z",
                     relation_to_active_target="current",
-                    missing_baseline_runs=3,
-                    missing_interactive_runs=2,
-                    status="needs baseline",
+                        missing_baseline_runs=0,
+                        missing_interactive_runs=2,
+                        status="needs interactive",
                     static_run_ids=("5838",),
                 ),
                 build_candidates=(),
@@ -318,12 +318,11 @@ def test_guided_run_surfaces_quiescent_fg_and_raw_interactive_when_strict_idle_h
 
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
-    assert "Strict idle  0/3" in out
+    assert "Strict idle  7/3" in out
     assert "Quiescent FG  7" in out
-    assert "Interactive  2/4 held by strict idle" in out
-    assert "Strict-idle workflow gate: incomplete (0/3)" in out
-    assert "Interactive evidence is already captured for the current build" in out
-    assert "Strict Idle and Quiescent FG stay separate in paper-target readiness" in out
+    assert "Interactive  2/4" in out
+    assert "held by strict idle" not in out
+    assert "Strict-idle workflow gate: incomplete" not in out
     assert "still treats baseline counts without a strict-idle versus Quiescent FG split" not in out
 
 

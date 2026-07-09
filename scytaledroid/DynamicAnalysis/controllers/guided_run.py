@@ -394,7 +394,7 @@ def _paper_freeze_context_lines(paper_freeze: Any | None) -> list[str]:
     ]
     if int(getattr(selected, "quiescent_fg_runs", 0) or 0) > 0:
         lines.append(
-            "Paper baseline  : Quiescent FG is retained analysis evidence; strict-idle readiness stays separate"
+            "Paper baseline  : Quiescent FG remains visible as an app-activity tag on countable no-touch evidence"
         )
     if static_run_ids:
         if len(static_run_ids) == 1:
@@ -1257,8 +1257,8 @@ def _choose_messaging_activity(
         messaging_options = [
             menu_utils.MenuOption(
                 "1",
-                "Freeform",
-                description="use the app naturally; setup, browse, text, call, or recover account state as needed",
+                "Freeform / setup",
+                description="unstructured setup, account recovery, browsing, or exploratory use; not a specific text/call claim",
             ),
             menu_utils.MenuOption("2", "Text", description="manual text/chat-focused interaction"),
             menu_utils.MenuOption("3", "Voice Call", description="manual call-focused interaction"),
@@ -1267,8 +1267,8 @@ def _choose_messaging_activity(
             ),
             menu_utils.MenuOption(
                 "5",
-                "Mixed",
-                description="several actions may occur; this is only a manual activity tag",
+                "Mixed known activities",
+                description="intentional multi-activity capture, such as text plus voice/video in one run",
             ),
         ]
         default = "1"
@@ -1280,7 +1280,8 @@ def _choose_messaging_activity(
             "5": "manual_mixed",
         }
         print(
-            "Choose the closest manual activity tag. This labels the run; it does not force a script."
+            "Choose the primary manual activity tag. Use Voice/Video Call for dedicated call captures; "
+            "use Mixed only when one run intentionally combines multiple known activity types."
         )
     menu_utils.render_menu(
         menu_utils.MenuSpec(
@@ -1299,7 +1300,15 @@ def _choose_messaging_activity(
         invalid_message=f"Choose {valid_choices[0]}-{valid_choices[-1]}.",
         disabled=[option.key for option in messaging_options if option.disabled],
     )
-    return mapping[choice]
+    selected_activity = mapping[choice]
+    if not scripted and selected_activity == "manual_mixed":
+        print(
+            status_messages.status(
+                "Mixed is for intentional multi-activity captures. For a Telegram voice or video call run, choose Voice Call or Video Call so the call outcome is recorded directly.",
+                level="warn",
+            )
+        )
+    return selected_activity
 
 
 def _select_guided_dataset_action(

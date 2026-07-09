@@ -186,29 +186,41 @@ def audit_static_session_operator(
           FROM static_analysis_runs sar
           GROUP BY sar.session_stamp, COALESCE(TRIM(BOTH FROM sar.scope_label), '')
         ) r
-          ON r.session_stamp = s.session_stamp
-         AND r.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
+          ON CONVERT(r.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+             CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+         AND CONVERT(r.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+             CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
         LEFT JOIN (
           SELECT session_stamp, COUNT(*) AS actual_link_rows
           FROM static_session_run_links
           GROUP BY session_stamp
         ) l
-          ON l.session_stamp = s.session_stamp
+          ON CONVERT(l.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+             CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
         LEFT JOIN (
           SELECT session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '') AS scope_label, COUNT(*) AS actual_rollup_rows
           FROM static_session_rollups
           GROUP BY session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '')
         ) ro
-          ON ro.session_stamp = s.session_stamp
-         AND ro.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')
-        WHERE s.session_stamp = %s
+          ON CONVERT(ro.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+             CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci
+         AND CONVERT(ro.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+             CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
+        WHERE CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+              CONVERT(%s USING utf8mb4) COLLATE utf8mb4_unicode_ci
         LIMIT 1
         """,
         (session,),
         fetch="one",
         dictionary=True,
     )
+    header_session_status = ""
+    header_actual_completed_rows = 0
+    header_actual_started_rows = 0
     if isinstance(header_row, dict):
+        header_session_status = str(header_row.get("session_status") or "").strip().upper()
+        header_actual_completed_rows = int(header_row.get("actual_completed") or 0)
+        header_actual_started_rows = int(header_row.get("actual_started") or 0)
         diagnostic_status = classify_session_header_diagnostic(
             header_total_run_count=int(header_row.get("total_run_count") or 0),
             header_session_link_rows=int(header_row.get("session_link_rows") or 0),
@@ -476,7 +488,13 @@ def audit_static_session_operator(
     warnings: list[str] = []
     fc = canonical_rows[1][1]
     if fc == 0:
-        warnings.append("static_analysis_findings count is 0 — verify detectors/persistence for this session.")
+        if header_session_status == "IN_PROGRESS" and header_actual_completed_rows == 0 and header_actual_started_rows > 0:
+            warnings.append(
+                "static_analysis_findings count is 0 because the session is still IN_PROGRESS "
+                "with no completed rows; rerun this audit after static finalization."
+            )
+        else:
+            warnings.append("static_analysis_findings count is 0 — verify detectors/persistence for this session.")
 
     if print_sql_appendix:
         print()
@@ -505,16 +523,27 @@ def audit_static_session_operator(
             "         SUM(CASE WHEN UPPER(COALESCE(sar.status, '')) IN ('STARTED','RUNNING') THEN 1 ELSE 0 END) AS actual_started\n"
             "  FROM static_analysis_runs sar\n"
             "  GROUP BY sar.session_stamp, COALESCE(TRIM(BOTH FROM sar.scope_label), '')\n"
-            ") r ON r.session_stamp = s.session_stamp AND r.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')\n"
+            ") r\n"
+            "  ON CONVERT(r.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =\n"
+            "     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci\n"
+            " AND CONVERT(r.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =\n"
+            "     CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci\n"
             "LEFT JOIN (\n"
             "  SELECT session_stamp, COUNT(*) AS actual_link_rows\n"
             "  FROM static_session_run_links GROUP BY session_stamp\n"
-            ") l ON l.session_stamp = s.session_stamp\n"
+            ") l\n"
+            "  ON CONVERT(l.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =\n"
+            "     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci\n"
             "LEFT JOIN (\n"
             "  SELECT session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '') AS scope_label, COUNT(*) AS actual_rollup_rows\n"
             "  FROM static_session_rollups GROUP BY session_stamp, COALESCE(TRIM(BOTH FROM scope_label), '')\n"
-            ") ro ON ro.session_stamp = s.session_stamp AND ro.scope_label = COALESCE(TRIM(BOTH FROM s.scope_label), '')\n"
-            f"WHERE s.session_stamp = {lit};"
+            ") ro\n"
+            "  ON CONVERT(ro.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =\n"
+            "     CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci\n"
+            " AND CONVERT(ro.scope_label USING utf8mb4) COLLATE utf8mb4_unicode_ci =\n"
+            "     CONVERT(COALESCE(TRIM(BOTH FROM s.scope_label), '') USING utf8mb4) COLLATE utf8mb4_unicode_ci\n"
+            f"WHERE CONVERT(s.session_stamp USING utf8mb4) COLLATE utf8mb4_unicode_ci =\n"
+            f"      CONVERT({lit} USING utf8mb4) COLLATE utf8mb4_unicode_ci;"
         )
         print(
             "SELECT COUNT(*) AS finding_rows FROM static_analysis_findings f\n"

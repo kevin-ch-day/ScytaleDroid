@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+EXTERNAL_APK_STORE_MOUNT_ROOTS = (Path("/mnt/MERCURY_DATA_V2"), Path("/mnt/MERCURY_DATA_USB"))
+
 
 @dataclass(frozen=True)
 class ThinCandidate:
@@ -79,12 +81,50 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _inside(path: Path, root: Path) -> bool:
+def _logical_absolute(path: Path) -> Path:
+    """Return an absolute path without resolving symlinks."""
+
+    return Path(os.path.abspath(os.fspath(path.expanduser())))
+
+
+def _inside_logical(path: Path, root: Path) -> bool:
     try:
-        path.resolve().relative_to(root.resolve())
+        _logical_absolute(path).relative_to(_logical_absolute(root))
         return True
     except ValueError:
         return False
+
+
+def _symlink_target(path: Path) -> Path:
+    raw = path.readlink()
+    if raw.is_absolute():
+        return raw.expanduser().resolve(strict=False)
+    return (path.parent / raw).expanduser().resolve(strict=False)
+
+
+def _external_mount_root_for(path: Path) -> Path | None:
+    resolved = path.expanduser().resolve(strict=False)
+    for root in sorted(EXTERNAL_APK_STORE_MOUNT_ROOTS, key=lambda item: len(item.parts), reverse=True):
+        candidate = root.expanduser().resolve(strict=False)
+        try:
+            resolved.relative_to(candidate)
+        except ValueError:
+            continue
+        return candidate
+    return None
+
+
+def _canonical_availability_reason(path: Path) -> str | None:
+    if not path.is_symlink():
+        return None if path.exists() else "canonical_missing"
+
+    target = _symlink_target(path)
+    external_root = _external_mount_root_for(target)
+    if external_root is not None and not os.path.ismount(str(external_root)):
+        return "cold_apk_store_unmounted"
+    if not target.exists():
+        return "canonical_missing"
+    return None
 
 
 def _session_label(path: Path) -> str:
@@ -154,14 +194,15 @@ def _candidate_for_apk(
         return ThinCandidate(apk_path.as_posix(), session, sha, "", size, allocated, 0, "blocked", "missing_canonical_store_path")
     canonical_path = Path(declared)
     if not canonical_path.is_absolute():
-        canonical_path = (repo_root / canonical_path).resolve()
-    if not _inside(canonical_path, canonical_root):
+        canonical_path = _logical_absolute(repo_root / canonical_path)
+    if not _inside_logical(canonical_path, canonical_root):
         return ThinCandidate(apk_path.as_posix(), session, sha, canonical_path.as_posix(), size, allocated, 0, "blocked", "canonical_outside_store")
     expected_path = canonical_root / sha[:2] / f"{sha}.apk"
-    if canonical_path.resolve() != expected_path.resolve():
+    if _logical_absolute(canonical_path) != _logical_absolute(expected_path):
         return ThinCandidate(apk_path.as_posix(), session, sha, canonical_path.as_posix(), size, allocated, 0, "blocked", "canonical_path_sha_mismatch")
-    if not canonical_path.exists():
-        return ThinCandidate(apk_path.as_posix(), session, sha, canonical_path.as_posix(), size, allocated, 0, "blocked", "canonical_missing")
+    unavailable_reason = _canonical_availability_reason(canonical_path)
+    if unavailable_reason is not None:
+        return ThinCandidate(apk_path.as_posix(), session, sha, canonical_path.as_posix(), size, allocated, 0, "blocked", unavailable_reason)
     if verify:
         if _hash_file(apk_path) != sha:
             return ThinCandidate(apk_path.as_posix(), session, sha, canonical_path.as_posix(), size, allocated, 0, "blocked", "session_hash_mismatch")
@@ -189,6 +230,8 @@ def _iter_apks(device_root: Path, *, sessions: set[str]) -> list[Path]:
     for apk_path in sorted(device_root.rglob("*.apk")):
         if "runs" not in apk_path.parts:
             continue
+        if apk_path.is_dir():
+            continue
         if sessions and _session_label(apk_path) not in sessions:
             continue
         paths.append(apk_path)
@@ -203,6 +246,10 @@ def _apply_candidate(candidate: ThinCandidate) -> ThinCandidate:
     apk_path.rename(backup)
     try:
         apk_path.symlink_to(target)
+        if not apk_path.exists() or not apk_path.is_symlink():
+            raise RuntimeError("created symlink is not readable")
+        if apk_path.resolve(strict=True) != canonical_path.resolve(strict=True):
+            raise RuntimeError("created symlink target mismatch")
         backup.unlink()
     except Exception:
         try:

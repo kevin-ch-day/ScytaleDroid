@@ -249,22 +249,78 @@ def test_guided_run_manual_messaging_activity_menu_is_freeform_first(monkeypatch
     out = capsys.readouterr().out
     assert select_package_calls["count"] == 2
     assert "Messaging Activity (Tag)" in out
-    assert (
-        "Choose the closest manual activity tag. This labels the run; it does not force a script."
-        in out
-    )
+    assert "Choose the primary manual activity tag." in out
+    assert "Use Voice/Video Call for dedicated call captures" in out
     assert captured_menu["items"] == [
         (
             "1",
-            "Freeform",
-            "use the app naturally; setup, browse, text, call, or recover account state as needed",
+            "Freeform / setup",
+            "unstructured setup, account recovery, browsing, or exploratory use; not a specific text/call claim",
         ),
         ("2", "Text", "manual text/chat-focused interaction"),
         ("3", "Voice Call", "manual call-focused interaction"),
         ("4", "Video Call", "manual video-call-focused interaction"),
-        ("5", "Mixed", "several actions may occur; this is only a manual activity tag"),
+        (
+            "5",
+            "Mixed known activities",
+            "intentional multi-activity capture, such as text plus voice/video in one run",
+        ),
     ]
     assert "Select at least one observer." in out
+
+
+def test_guided_run_manual_messaging_activity_warns_when_mixed_selected(
+    monkeypatch, capsys
+) -> None:
+    package = "org.telegram.messenger"
+    select_package_calls, select_package = one_shot_package_selector(package)
+    choices = iter(["2", "1", "5"])
+    recorded: dict[str, object] = {}
+
+    patch_guided_run_context(
+        monkeypatch,
+        package_name=package,
+        display_name="Telegram",
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "_prepare_selected_app_capture",
+        lambda **_k: ("ZY22JK89DR", "moto"),
+    )
+    monkeypatch.setattr(
+        guided_run,
+        "load_dataset_run_state",
+        lambda _package_name, config=None: make_dataset_state(
+            package,
+            baseline_valid_runs=3,
+            interactive_valid_runs=0,
+            suggested_profile_from_tracker="interaction_manual",
+            effective_suggested_profile="interaction_manual",
+        ),
+    )
+    monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *a, **k: None)
+    monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
+    monkeypatch.setattr(guided_run.prompt_utils, "prompt_yes_no", lambda *args, **kwargs: True)
+    monkeypatch.setattr(guided_run.time, "sleep", lambda *_args, **_kwargs: None)
+
+    def _capture_spec(**kwargs):
+        recorded.update(kwargs)
+        raise RuntimeError("stop after spec")
+
+    monkeypatch.setattr(guided_run, "build_dynamic_run_spec", _capture_spec)
+
+    with pytest.raises(RuntimeError, match="stop after spec"):
+        guided_run.run_guided_dataset_run(
+            select_package_from_groups=select_package,
+            select_observers=lambda device_serial, mode: ["pcapdroid_capture"],
+            print_device_badge=lambda *_args: None,
+        )
+
+    out = capsys.readouterr().out
+    assert select_package_calls["count"] == 1
+    assert recorded["messaging_activity"] == "manual_mixed"
+    assert "Mixed is for intentional multi-activity captures." in out
+    assert "choose Voice Call or Video Call so the call outcome is recorded directly" in out
 
 
 def test_guided_run_capture_setup_does_not_repeat_recent_tracker_runs(monkeypatch, capsys) -> None:

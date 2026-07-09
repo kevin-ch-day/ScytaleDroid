@@ -211,6 +211,24 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert ads["service_key"] == "google_ads"
     assert ads["service_category"] == "adtech"
 
+    pinterest_amazon_media = service_context.resolve_service_for_domain(
+        "m.media-amazon.com",
+        package_name="com.pinterest",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert pinterest_amazon_media["service_key"] == "amazon_media_cdn"
+    assert pinterest_amazon_media["role_class"] == "content_delivery"
+
+    guardian_amazon_media = service_context.resolve_service_for_domain(
+        "m.media-amazon.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_amazon_media["service_key"] == "amazon_ads"
+    assert guardian_amazon_media["role_class"] == "ad_creative_delivery"
+
     unknown = service_context.resolve_service_for_domain(
         "unknown.example.org",
         package_name="bbc.mobile.news.ww",
@@ -483,6 +501,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert linkedin_perf["service_key"] == "linkedin_platform"
     assert linkedin_perf["role_class"] == "performance_telemetry"
 
+    linkedin_ei_perf = service_context.resolve_service_for_domain(
+        "rum22.perf.linkedin-ei.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_ei_perf["service_key"] == "linkedin_platform"
+    assert linkedin_ei_perf["role_class"] == "performance_telemetry"
+
     linkedin_media = service_context.resolve_service_for_domain(
         "media.licdn.com",
         package_name="com.linkedin.android",
@@ -546,6 +573,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert linkedin_bot_defense["service_key"] == "human_security_bot_defense"
     assert linkedin_bot_defense["service_category"] == "security_or_bot_defense"
+
+    linkedin_human_xlgmedia = service_context.resolve_service_for_domain(
+        "s.xlgmedia.com",
+        package_name="com.linkedin.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert linkedin_human_xlgmedia["service_key"] == "human_security_bot_defense"
+    assert linkedin_human_xlgmedia["role_class"] == "bot_defense"
 
     linkedin_dns = service_context.resolve_service_for_domain(
         "b.ns1p.net",
@@ -972,6 +1008,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert guardian_ophan["service_key"] == "guardian_first_party"
     assert guardian_ophan["role_class"] == "publisher_collection"
 
+    guardian_ophan_alias = service_context.resolve_service_for_domain(
+        "j.ophan.co.uk",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_ophan_alias["service_key"] == "guardian_first_party"
+    assert guardian_ophan_alias["role_class"] == "publisher_collection"
+
     guardian_nextgen = service_context.resolve_service_for_domain(
         "api.nextgen.guardianapps.co.uk",
         package_name="com.guardian",
@@ -998,6 +1043,25 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert guardian_tungsten["service_key"] == "amazon_ads"
     assert guardian_tungsten["role_class"] == "ad_measurement"
+
+    guardian_mainroll = service_context.resolve_service_for_domain(
+        "stats.mainroll.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_mainroll["service_key"] == "mainroll_pixel"
+    assert guardian_mainroll["service_category"] == "adtech"
+    assert guardian_mainroll["role_class"] == "ad_measurement"
+    assert guardian_mainroll["confidence"] == "medium"
+
+    unscoped_mainroll = service_context.resolve_service_for_domain(
+        "stats.mainroll.com",
+        package_name="com.example.other",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert unscoped_mainroll["service_key"] is None
 
     bbc_everest = service_context.resolve_service_for_domain(
         "creative-assets.everesttech.net",
@@ -1124,6 +1188,51 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert zoom_meeting["service_key"] == "zoom_platform"
     assert zoom_meeting["role_class"] == "realtime_call_transport"
+
+    facebook_infosec = service_context.resolve_service_for_domain(
+        "www.infosecworldusa.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_infosec["service_key"] == "infosec_world_event_site"
+    assert facebook_infosec["role_class"] == "conference_site_content"
+
+    facebook_swoogo = service_context.resolve_service_for_domain(
+        "assets.swoogo.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_swoogo["service_key"] == "swoogo_event_platform"
+    assert facebook_swoogo["role_class"] == "event_platform_assets"
+
+    facebook_steam = service_context.resolve_service_for_domain(
+        "store.steampowered.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_steam["service_key"] == "steam_storefront"
+    assert facebook_steam["role_class"] == "external_storefront_content"
+
+    facebook_steam_static = service_context.resolve_service_for_domain(
+        "store.fastly.steamstatic.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_steam_static["service_key"] == "steam_media_cdn"
+    assert facebook_steam_static["role_class"] == "static_asset_delivery"
+
+    tiktok_ads_measurement = service_context.resolve_service_for_domain(
+        "tiktok.adsmeasurement.com",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert tiktok_ads_measurement["service_key"] == "tiktok_ads_measurement"
+    assert tiktok_ads_measurement["role_class"] == "ad_measurement"
 
     whatsapp_acs = service_context.resolve_service_for_domain(
         "acs.whatsapp.com",

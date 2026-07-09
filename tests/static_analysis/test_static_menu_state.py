@@ -4,6 +4,7 @@ import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.commands.models import Command
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.menus import static_analysis_menu_helpers as helpers
@@ -122,6 +123,25 @@ def test_static_menu_renders_pipeline_state(monkeypatch, capsys):
     ]
     review_positions = [out.index(label) for label in review_order]
     assert review_positions == sorted(review_positions)
+
+
+def test_static_menu_blocks_when_external_apk_storage_unavailable(monkeypatch, capsys):
+    menu_module = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu")
+
+    def _raise_storage_unavailable(*_args, **_kwargs):
+        raise artifact_store.ExternalApkStoreUnavailable(
+            "External APK store is configured but not mounted."
+        )
+
+    monkeypatch.setattr("scytaledroid.StaticAnalysis.core.repository.group_artifacts", _raise_storage_unavailable)
+    monkeypatch.setattr(menu_module.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
+
+    menu_module.static_analysis_menu()
+
+    out = capsys.readouterr().out
+    assert "APK storage unavailable" in out
+    assert "External APK store is configured but not mounted." in out
+    assert "Main Menu -> 11" in out
 
 
 def test_static_menu_m_routes_to_masvs_summary(monkeypatch):

@@ -30,17 +30,20 @@ def _harvest_result_context_counts(results: Sequence[harvest.PullResult]) -> dic
 
     reviewed = len(results)
     eligible = sum(1 for result in results if not result.preflight_reason)
-    harvested = sum(1 for result in results if result.ok)
+    resolved = sum(1 for result in results if result.ok)
     blocked_preflight = sum(1 for result in results if result.preflight_reason)
     replanned = sum(1 for result in results if getattr(result, "stale_replan_outcome", None))
+    artifacts_written = sum(
+        1 for result in results for artifact in result.ok if artifact.status == "written"
+    )
     return {
         "packages_reviewed": reviewed,
         "packages_eligible": eligible,
         "packages_executed": eligible,
-        "packages_harvested": harvested,
+        "packages_harvested": resolved,
         "packages_blocked_preflight": blocked_preflight,
         "packages_replanned": replanned,
-        "artifacts_written": sum(len(result.ok) for result in results),
+        "artifacts_written": artifacts_written,
         "artifacts_failed": sum(len(result.errors) for result in results),
     }
 
@@ -196,12 +199,12 @@ def run_apk_pull(
                 harvest.print_package_result(result, verbose=False)
 
     packages_total = len(resolution.plan.packages)
-    packages_harvested = sum(1 for pkg in resolution.plan.packages if not pkg.skip_reason)
-    packages_blocked = max(packages_total - packages_harvested, 0)
+    packages_resolved = sum(1 for pkg in resolution.plan.packages if not pkg.skip_reason)
+    packages_blocked = max(packages_total - packages_resolved, 0)
     outcome_context: dict[str, object] = {
         "run_id": run_id,
         "device_serial": serial,
-        "packages": packages_harvested,
+        "packages": packages_resolved,
         "packages_total": packages_total,
         "packages_blocked": packages_blocked,
         "session_stamp": session_stamp,

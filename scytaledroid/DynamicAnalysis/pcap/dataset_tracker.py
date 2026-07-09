@@ -363,8 +363,6 @@ def _explicit_noncountable_is_policy_override(row: dict[str, Any], profile_lc: s
         return True
     if prof_lc == "baseline_idle" and bool(row.get("low_signal")):
         return True
-    if prof_lc == "baseline_idle" and bool(row.get("baseline_not_idle")):
-        return True
     return False
 
 
@@ -805,9 +803,6 @@ def _apply_quota_marking(
         explicit_countable = r.get("countable")
         explicit_non_countable = explicit_countable is False and _explicit_noncountable_is_policy_override(r, prof_lc)
         if is_valid and prof_lc == "baseline_idle" and bool(r.get("low_signal")):
-            r["extra_run"] = 1
-            is_valid = False
-        if is_valid and prof_lc == "baseline_idle" and bool(r.get("baseline_not_idle")):
             r["extra_run"] = 1
             is_valid = False
         if not is_valid:

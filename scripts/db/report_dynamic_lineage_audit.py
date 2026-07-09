@@ -597,7 +597,7 @@ def generate_report(*, output_dir: Path | None = None, package_filter: str | Non
             )
         )
 
-    stamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S-%f")
     output_root = output_dir or (_REPO_ROOT / "output" / "audit" / "dynamic_lineage_audit" / stamp)
     output_root.mkdir(parents=True, exist_ok=True)
     _write_csv(output_root / "per_app_lineage_summary.csv", per_app_rows)

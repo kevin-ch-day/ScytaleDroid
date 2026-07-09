@@ -262,6 +262,8 @@ def _normalise_parser_provenance(metadata: Mapping[str, Any]) -> Mapping[str, An
         "resource_open_source": parser.get("resource_open_source") or "—",
         "resource_fallback_used": bool(parser.get("resource_fallback_used")),
         "resource_fallback_reason": parser.get("resource_fallback_reason") or "—",
+        "resource_string_fallback_used": bool(parser.get("resource_string_fallback_used")),
+        "resource_string_fallback_count": int(parser.get("resource_string_fallback_count") or 0),
         "resource_bounds_warning_count": int(parser.get("resource_bounds_warning_count") or 0),
         "resource_bounds_warning_severity": parser.get("resource_bounds_warning_severity") or "none",
         "resource_bounds_warning_kind": parser.get("resource_bounds_warning_kind") or "none",

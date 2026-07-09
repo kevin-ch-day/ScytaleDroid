@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,6 +66,26 @@ def test_render_reset_outcome_forwards_session_label(monkeypatch):
     }
 
 
+def test_render_artifact_purge_outcome_forwards_session_label(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Actions:
+        @staticmethod
+        def render_artifact_purge_outcome(outcome, *, session_label=None):
+            captured["outcome"] = outcome
+            captured["session_label"] = session_label
+
+    monkeypatch.setattr(helpers, "_load_menu_actions", lambda: _Actions())
+
+    marker = object()
+    helpers.render_artifact_purge_outcome(marker, session_label="20260328-all-full")
+
+    assert captured == {
+        "outcome": marker,
+        "session_label": "20260328-all-full",
+    }
+
+
 def _dummy_group() -> ArtifactGroup:
     artifact = RepositoryArtifact(
         path=Path("/tmp/example.apk"),
@@ -117,6 +138,7 @@ def test_run_command_for_selection_scan_bypasses_view_options(monkeypatch):
         query_runner=SimpleNamespace(render_session_digest=lambda *_a, **_k: None),
         prompt_advanced_options=lambda params: params,
         reset_static_analysis_data=lambda **_kwargs: None,
+        purge_static_session_artifacts=lambda *_args, **_kwargs: None,
         build_static_run_spec=lambda **kwargs: kwargs,
         execute_run_spec=_execute,
         static_service=SimpleNamespace(StaticServiceError=RuntimeError),
@@ -151,6 +173,7 @@ def test_run_command_for_selection_cancelled_setup_aborts_run(monkeypatch, capsy
         query_runner=SimpleNamespace(render_session_digest=lambda *_a, **_k: None),
         prompt_advanced_options=lambda params: params,
         reset_static_analysis_data=lambda **_kwargs: called.setdefault("reset", True),
+        purge_static_session_artifacts=lambda *_args, **_kwargs: called.setdefault("purge", True),
         build_static_run_spec=lambda **kwargs: called.setdefault("spec", kwargs),
         execute_run_spec=lambda _spec: called.setdefault("executed", True),
         static_service=SimpleNamespace(StaticServiceError=RuntimeError),
@@ -159,6 +182,108 @@ def test_run_command_for_selection_cancelled_setup_aborts_run(monkeypatch, capsy
     capsys.readouterr()
     assert "spec" not in called
     assert "executed" not in called
+    assert "purge" not in called
+
+
+def test_run_command_for_selection_replace_purges_prior_local_artifacts(monkeypatch, capsys):
+    command = Command(
+        id="1",
+        title="Run Static Pipeline (Full)",
+        description="Run full static profile.",
+        kind="scan",
+        profile="full",
+        auto_verify=False,
+        prompt_reset=True,
+    )
+    selection = ScopeSelection("app", "Signal", (_dummy_group(),))
+    calls: dict[str, object] = {}
+
+    monkeypatch.setattr(menu, "ask_run_controls", lambda: (_ for _ in ()).throw(AssertionError("unexpected run-options prompt")))
+    monkeypatch.setattr(menu, "apply_command_overrides", lambda params, _command: params)
+    monkeypatch.setattr(
+        menu,
+        "prompt_run_setup",
+        lambda params, _selection, _command: ("run", replace(params, session_stamp="sess-replace"), "session"),
+    )
+    monkeypatch.setattr(menu.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
+
+    def _reset(**kwargs):
+        calls["reset"] = kwargs
+        return SimpleNamespace(cleared=("static_analysis_runs",), failed=(), static_run_ids=(101, 102))
+
+    def _purge(session_label, **kwargs):
+        calls["purge"] = {"session_label": session_label, **kwargs}
+        return SimpleNamespace(removed=("data/static_analysis/reports/archive/sess",), failed=())
+
+    menu._run_command_for_selection(
+        command,
+        selection,
+        analysis_root=Path("/tmp"),
+        persistence_gate_status=lambda: (True, None),
+        query_runner=SimpleNamespace(render_session_digest=lambda *_a, **_k: None),
+        prompt_advanced_options=lambda params: params,
+        reset_static_analysis_data=_reset,
+        purge_static_session_artifacts=_purge,
+        build_static_run_spec=lambda **kwargs: kwargs,
+        execute_run_spec=lambda _spec: SimpleNamespace(session_stamp="20260427-test"),
+        static_service=SimpleNamespace(StaticServiceError=RuntimeError),
+    )
+
+    capsys.readouterr()
+    assert calls["reset"]["session_label"] == "sess-replace"
+    assert calls["purge"] == {
+        "session_label": "sess-replace",
+        "static_run_ids": (101, 102),
+    }
+
+
+def test_run_command_for_selection_replace_aborts_on_artifact_purge_failure(monkeypatch, capsys):
+    command = Command(
+        id="1",
+        title="Run Static Pipeline (Full)",
+        description="Run full static profile.",
+        kind="scan",
+        profile="full",
+        auto_verify=False,
+        prompt_reset=True,
+    )
+    selection = ScopeSelection("app", "Signal", (_dummy_group(),))
+    calls: dict[str, object] = {}
+
+    monkeypatch.setattr(menu, "ask_run_controls", lambda: (_ for _ in ()).throw(AssertionError("unexpected run-options prompt")))
+    monkeypatch.setattr(menu, "apply_command_overrides", lambda params, _command: params)
+    monkeypatch.setattr(
+        menu,
+        "prompt_run_setup",
+        lambda params, _selection, _command: ("run", replace(params, session_stamp="sess-replace"), "session"),
+    )
+    monkeypatch.setattr(menu.prompt_utils, "press_enter_to_continue", lambda *_a, **_k: None)
+
+    menu._run_command_for_selection(
+        command,
+        selection,
+        analysis_root=Path("/tmp"),
+        persistence_gate_status=lambda: (True, None),
+        query_runner=SimpleNamespace(render_session_digest=lambda *_a, **_k: None),
+        prompt_advanced_options=lambda params: params,
+        reset_static_analysis_data=lambda **_kwargs: SimpleNamespace(
+            cleared=("static_analysis_runs",),
+            failed=(),
+            static_run_ids=(101,),
+        ),
+        purge_static_session_artifacts=lambda *_args, **_kwargs: SimpleNamespace(
+            removed=(),
+            failed=(("data/static_analysis/reports/archive/sess-replace", "permission denied"),),
+        ),
+        build_static_run_spec=lambda **kwargs: calls.setdefault("spec", kwargs),
+        execute_run_spec=lambda _spec: calls.setdefault("executed", True),
+        static_service=SimpleNamespace(StaticServiceError=RuntimeError),
+    )
+
+    output = capsys.readouterr().out
+    assert "prior local artifacts could not be cleared" in output
+    assert "spec" not in calls
+    assert "executed" not in calls
 
 
 def test_run_command_for_selection_aborted_run_skips_auto_verify(monkeypatch):
@@ -186,6 +311,7 @@ def test_run_command_for_selection_aborted_run_skips_auto_verify(monkeypatch):
         query_runner=SimpleNamespace(render_session_digest=lambda *_a, **_k: calls.__setitem__("verify", calls["verify"] + 1)),
         prompt_advanced_options=lambda params: params,
         reset_static_analysis_data=lambda **_kwargs: None,
+        purge_static_session_artifacts=lambda *_args, **_kwargs: None,
         build_static_run_spec=lambda **kwargs: kwargs,
         execute_run_spec=lambda _spec: SimpleNamespace(session_stamp="20260427-test", aborted=True),
         static_service=SimpleNamespace(StaticServiceError=RuntimeError),
