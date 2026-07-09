@@ -41,4 +41,4 @@ python -m pytest \
   -q
 
 echo ""
-echo "Done. See docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md"
+echo "Done. See docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md and docs/database/permission_intel_contract.md"

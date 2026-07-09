@@ -15,6 +15,7 @@ from scytaledroid.DynamicAnalysis.scenarios.manual import (
     _resolve_script_template,
     _run_messaging_connected_baseline,
 )
+from scytaledroid.DynamicAnalysis.scenarios import interactive_guidance
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import template_steps_for_id
 from tests.dynamic._manual_protocol_support import _ctx
 
@@ -261,7 +262,7 @@ def test_extra_hold_timer_message_uses_explicit_extra_hold_wording() -> None:
     )
 
     assert message == (
-        "Target reached: 4 Mins 0 Secs | extra hold: +1 Min 30 Secs | "
+        "Target reached: 4 Mins 0 Secs | optional extra hold: +1 Min 30 Secs | "
         "press Enter to finalize | connected baseline *"
     )
 
@@ -347,6 +348,79 @@ def test_snapchat_uses_snapchat_template_override(tmp_path: Path) -> None:
     )
     template_id, _steps = _resolve_script_template(ctx)
     assert template_id == "snapchat_basic_v1"
+
+
+def test_snapchat_template_uses_view_only_non_mutating_surfaces() -> None:
+    steps = template_steps_for_id("snapchat_basic_v1")
+    step_text = "\n".join(f"{step_id}: {description}" for step_id, description, _seconds in steps).lower()
+
+    assert "stories or discover" in step_text
+    assert "spotlight" in step_text
+    assert "search" in step_text
+    assert "lens carousel" in step_text
+    assert "clearly labeled my ai" in step_text
+    assert "one short fixed non-sensitive research prompt" in step_text
+    assert "without capturing or sending" in step_text
+    assert "do not like, comment, repost, follow, or share" in step_text
+    assert "human chat" not in step_text
+    assert "add to your story" not in step_text
+    assert "open a recent thread" not in step_text
+    assert "open snap map" not in step_text
+
+
+def test_pinterest_manual_interactive_guidance_covers_high_value_surfaces() -> None:
+    lines = interactive_guidance.manual_interaction_behavior_lines(
+        "com.pinterest",
+        target_label="4 mins 0 sec (240s)",
+    )
+    text = "\n".join(lines)
+
+    assert "Home feed scroll" in text
+    assert "non-sponsored pin/detail view" in text
+    assert "Search with a neutral topic" in text
+    assert "pinterest.com or pin.it link" in text
+    assert "resolves back into Pinterest" in text
+    assert "Avoid Create, Save, Follow" in text
+    assert "outbound shopping/ad links" in text
+    assert "external share targets" in text
+
+
+def test_pinterest_manual_interactive_checkpoint_messages_are_specific() -> None:
+    messages = interactive_guidance.manual_interaction_checkpoint_messages("com.pinterest")
+
+    assert "non-sponsored pin/detail view" in messages[60]
+    assert "Pinterest Search with a neutral topic" in messages[120]
+    assert "verified app-link behavior" in messages[180]
+    assert "avoid Save, Follow, Create" in messages[180]
+
+
+def test_snapchat_manual_interactive_guidance_covers_safe_content_surfaces() -> None:
+    lines = interactive_guidance.manual_interaction_behavior_lines(
+        "com.snapchat.android",
+        target_label="4 mins 0 sec (240s)",
+    )
+    text = "\n".join(lines)
+
+    assert "Camera/Landing" in text
+    assert "Stories or Discover" in text
+    assert "Spotlight or Search" in text
+    assert "Snapchat API, analytics, and CDN traffic" in text
+    assert "thread is clearly labeled My AI" in text
+    assert "one fixed non-sensitive research prompt" in text
+    assert "If a human Chat, unlabeled text input, or record-button surface opens" in text
+    assert "Avoid capturing/sending snaps" in text
+    assert "location sharing" in text
+    assert "account changes" in text
+
+
+def test_snapchat_manual_interactive_checkpoint_messages_are_specific() -> None:
+    messages = interactive_guidance.manual_interaction_checkpoint_messages("com.snapchat.android")
+
+    assert "Camera/Landing" in messages[60]
+    assert "Stories or Discover" in messages[60]
+    assert "Spotlight or Search" in messages[120]
+    assert "My AI is allowed only with one fixed non-sensitive prompt" in messages[120]
+    assert "avoid snaps, human chats, stories" in messages[180]
 
 
 def test_twitter_uses_x_template_override(tmp_path: Path) -> None:

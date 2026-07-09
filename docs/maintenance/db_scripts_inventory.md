@@ -29,7 +29,9 @@ working decisions:
 | `delete_later` | Superseded and safe to remove only after a dedicated removal review. |
 
 The current cleanup rule is **inventory first, no deletes or renames yet**.
-Operators still use the existing script paths.
+Operators still use the existing script paths. Generated caches such as
+`__pycache__/` are safe to remove; tracked script movement needs a replacement
+path and reference update.
 
 | Script | Class | Purpose (short) | Read-only? | DB? | `--help` | Auto-call? | Menu / owner |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -52,6 +54,10 @@ Operators still use the existing script paths.
 | `report_dynamic_static_recovery_plan.py` | A / G | Exact dynamic/static gap artifact recovery planner; optional JSON receipt | default read; writes receipt with `--write-receipt` | core | yes | no | APK Library / artifact lifecycle planning |
 | `report_dynamic_static_pairing_eligibility.py` | A / G | Read-only dynamic-session eligibility for strict paired analysis vs dynamic-only/reharvest/external-artifact states | yes | core | yes | no | Dataset analysis planning |
 | `report_current_corpus_preflight.py` | A / G | Read-only current-corpus preflight after fresh inventory/harvest: repository rows, canonical store files, apk_sets, split metadata, and static target states | yes | core | yes | no | Current corpus rebuild / harvest preflight |
+| `report_dynamic_paper_freeze_readiness.py` | A | Read-only dynamic cutoff evidence tier and paper-readiness report | yes | core/evidence | yes | no | Paper 3 cutoff evidence source |
+| `report_paper3_writing_package.py` | A | Generate Paper 3 writing bridge/workspace from cutoff evidence | yes | file outputs only | yes | no | Paper 3 writing workspace |
+| `report_dynamic_live_operational_state.py` | G | Read-only live queue/current-build operational state snapshot | yes | core/evidence | yes | no | Dynamic operational vs paper-readiness split |
+| `report_dynamic_retained_evidence_reuse.py` | G | Read-only retained/prior-build evidence reuse report | yes | evidence | yes | no | Paper cutoff caveats / retained evidence |
 | `report_evidence_storage_posture.py` | G | Read-only sizes / dedupe signals (flags, findings, audit) | yes | core | yes | no | operator triage |
 | `probe_finding_evidence_hash_parity.py` | G | Sample SQL vs Python ``evidence_hash`` / mismatch hints | yes | core | yes | no | operator triage before strip-inline |
 | `backfill_static_finding_evidence_payloads.py` | M | Backfill ``evidence_hash`` + payload table; optional strip inline | default read; **writes** with ``--apply`` | core | yes | no | operator / maintenance |
@@ -87,6 +93,7 @@ menus have parity.
 | schema-view-maintenance | `recreate_web_consumer_views.py`, `view_repair_support.py`, `check_schema_posture.sql`, `smoke_web_db.sh` | keep explicit scripts | keep | DDL and Web smoke should stay deliberate operator actions. |
 | catalog-hygiene | `report_app_label_hygiene.py`, `apply_app_display_name_overrides.py` | catalog menu + package module | keep/combine_later | Never auto-apply display name overrides during static scan. |
 | apk-set migration | `backfill_apk_sets_from_receipts.py`, `backfill_apk_set_links.py` | archive folder after install-set spine is populated and new writers are stable | archive_later | Keep dry-run default and `--apply` explicit. Do not infer exact split membership from package-level `apk_split_groups`. |
+| Paper 3 cutoff/writing | `report_dynamic_paper_freeze_readiness.py`, `report_dynamic_live_operational_state.py`, `report_dynamic_retained_evidence_reuse.py`, `report_paper3_writing_package.py` | keep explicit scripts until rough-draft process is complete | keep | These scripts encode the current-build churn vs cutoff-evidence policy. Do not archive during Paper 3 drafting. |
 
 ## Package lineage / recovery overlap
 
@@ -164,15 +171,19 @@ Continue to use `AGENTS.md` smoke paths (`check_permission_intel`, `recreate_web
 Candidates to **archive** after menu/CLI parity (do not move yet):
 
 - Duplicate Intel checks if fully subsumed by `permission_intel_readiness` module + menu.
+- One-time `backfill_*`, `normalize_*`, `phase_b1_*`, and `schema_version_width_hotfix.py` helpers after DB/schema rollout receipts are no longer needed for active repair.
 
 Removed from the active `scripts/db` tree:
 
 - `backfill_static_session_id_on_runs.py`
 - `scripts/db/sql/backfill_static_analysis_runs_static_session_id.sql`
+- `report_dynamic_draft_package.py`
+- `tests/database/test_report_dynamic_draft_package.py`
 
-Those were one-time static-session rollout helpers. The maintained active paths
-are `refresh_static_analysis_sessions.py` and
-`verify_static_session_id_rollout.py`.
+The static-session rollout helpers were replaced by the maintained
+`refresh_static_analysis_sessions.py` and `verify_static_session_id_rollout.py`
+paths. The older dynamic draft exporter was replaced by
+`report_dynamic_paper_freeze_readiness.py` plus `report_paper3_writing_package.py`.
 
 Candidates to **keep as scripts** even when menu-wrapped:
 

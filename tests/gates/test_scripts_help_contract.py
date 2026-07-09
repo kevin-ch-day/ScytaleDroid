@@ -28,3 +28,33 @@ def test_python_scripts_have_safe_help(script_path: Path) -> None:
     output = (proc.stdout or proc.stderr).strip()
     assert proc.returncode == 0, output
     assert output.lower().startswith("usage:"), output[:500]
+
+
+@pytest.mark.parametrize(
+    ("script_path", "expected_terms"),
+    [
+        (
+            Path("scripts/db/static_schema_audit.py"),
+            ("--json", "schema"),
+        ),
+        (
+            Path("scripts/static_analysis/validate_report_permission_risk.py"),
+            ("--write-live", "--prune-vnext-rows"),
+        ),
+    ],
+    ids=lambda value: str(value) if isinstance(value, Path) else "-".join(value),
+)
+def test_selected_script_help_documents_safety_terms(
+    script_path: Path, expected_terms: tuple[str, ...]
+) -> None:
+    proc = subprocess.run(
+        [sys.executable, str(script_path), "--help"],
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+    out = (proc.stdout or proc.stderr).lower()
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    for term in expected_terms:
+        assert term in out

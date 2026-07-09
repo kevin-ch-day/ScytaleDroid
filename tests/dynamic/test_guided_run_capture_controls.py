@@ -102,7 +102,7 @@ def test_active_capture_a_enter_aborts_and_discards(monkeypatch) -> None:
     with pytest.raises(ScenarioAbortRequested):
         manual._run_baseline_interactive_loop(240, continue_after_target=True)
     assert "Opening live capture console. The transcript will resume after capture ends." in "".join(fake_out.buf)
-    assert "Live capture console aborted; returning to run transcript." in "".join(fake_out.buf)
+    assert "Live capture console aborted; run marked discarded/not countable; returning to run transcript." in "".join(fake_out.buf)
 
 
 def test_active_capture_ctrl_c_is_graceful_abort(monkeypatch) -> None:

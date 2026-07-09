@@ -15,10 +15,10 @@ STALE_TEST_REFS = {
     "tests/static/test_static_views.py": "tests/static_analysis/test_scan_view_cards.py",
     "tests/static/test_permission_risk_static_run_id.py": "tests/persistence/test_permission_risk.py",
     "tests/ui/test_global_menu_rollout.py": "tests/ui/test_database_menu_rollout.py or peer split files",
-    "tests/test_inventory_summary.py": "tests/inventory/test_summary.py",
+    "tests/test_inventory_summary.py": "tests/inventory/test_inventory_views.py",
     "tests/test_inventory_status.py": "tests/inventory/test_status.py",
     "tests/test_inventory_guard_state.py": "tests/inventory/test_guard_state.py",
-    "tests/test_db_paramstyle.py": "tests/database/test_db_paramstyle_integration.py",
+    "tests/test_db_paramstyle.py": "tests/database/test_db_posture_pr4b.py",
     "tests/test_main_db_maintenance.py": "tests/database/test_main_db_maintenance.py",
 }
 

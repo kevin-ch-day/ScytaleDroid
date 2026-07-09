@@ -165,7 +165,7 @@ Dynamic analysis depends on **`static_run_id`**, **handoff hashes**, **plan/base
 | Device, inventory, APK harvest, device menus | `scytaledroid/DeviceAnalysis/` | `tests/device_analysis/`, `tests/inventory/`, `tests/harvest/` |
 | Static analysis & static persistence | `scytaledroid/StaticAnalysis/` | `tests/static_analysis/`, `tests/persistence/` |
 | Dynamic analysis | `scytaledroid/DynamicAnalysis/` | `tests/dynamic/` |
-| DB, schema, read-model, DB tools | `scytaledroid/Database/` | `tests/database/`, `tests/db/` |
+| DB, schema, read-model, DB tools | `scytaledroid/Database/` | `tests/database/` |
 | Reporting & publication | `scytaledroid/Reporting/`, `scytaledroid/Publication/` | `tests/analysis/`, gates/docs as noted in maps |
 
 Additional rules:
@@ -210,7 +210,7 @@ Match tests to what you touched, then widen.
 | --- | --- |
 | Device / inventory / harvest touchpoints | `pytest tests/device_analysis tests/inventory tests/harvest -q` |
 | Static | `pytest tests/static_analysis -q` and `pytest tests/persistence -q` |
-| Database | `pytest tests/database tests/db -q` |
+| Database | `pytest tests/database -q` |
 | Dynamic | `pytest tests/dynamic -q` |
 | Gates / scripts contracts | `pytest tests/gates -q` |
 

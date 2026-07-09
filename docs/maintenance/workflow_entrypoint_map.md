@@ -165,7 +165,7 @@ operator routing does not require a second overlapping workflow doc.
 ### Validation / smoke checks
 
 - Narrow:
-  - `tests/device_analysis/test_apk_library_receipts.py`
+  - `tests/static_analysis/test_repository_capture_grouping.py`
   - `tests/device_analysis/test_static_scope_service.py`
 - Expanded:
   - manual CLI browse/mark/unmark flow

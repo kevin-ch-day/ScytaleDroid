@@ -473,8 +473,6 @@ def _gap_rows(package_rows: Sequence[Mapping[str, Any]], domain_rows: Sequence[M
             notes.append("runtime_domains_exceed_static_domain_context")
         if int(unknown_counts.get(package_name, 0)) > 0:
             notes.append(f"unknown_domains={int(unknown_counts[package_name])}")
-        if int(third_party_counts.get(package_name, 0)) > 0:
-            notes.append(f"third_party_domains={int(third_party_counts[package_name])}")
         out.append(
             {
                 "package_name": package_name,

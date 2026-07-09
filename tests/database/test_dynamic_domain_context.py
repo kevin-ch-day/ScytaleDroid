@@ -1,0 +1,1324 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from scytaledroid.Database.db_utils import dynamic_domain_context as catalog
+from scytaledroid.DynamicAnalysis.domain_context import (
+    DomainReference,
+    classify_domain,
+    default_domain_references,
+)
+from scytaledroid.DynamicAnalysis.storage import domain_context_index
+
+
+def test_backfill_dynamic_domain_context_help_is_safe(assert_safe_script_help) -> None:
+    assert_safe_script_help("scripts/db/backfill_dynamic_domain_context.py")
+
+
+def test_apply_dynamic_domain_context_migration_records_schema_and_seeds(monkeypatch) -> None:
+    ddl_statements: list[str] = []
+    appended_versions: list[str] = []
+    migration_rows: list[dict[str, object]] = []
+    seeded_rows: list[dict[str, object]] = []
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        if "FROM schema_migrations" in sql and "migration_entry_id" in sql:
+            return None
+        if query_name == "schema_migrations.latest_schema_version_from_registry":
+            return {"schema_version_after": "0.3.7-research-cohorts"}
+        if query_name == f"schema_migrations.apply.{catalog.MIGRATION_ID}":
+            ddl_statements.append(sql.strip())
+            return None
+        if query_name == "dynamic_domain_context.upsert_reference":
+            seeded_rows.append(
+                {
+                    "package_name_scope": params[0],
+                    "domain_pattern": params[1],
+                    "match_type": params[2],
+                    "owner_class": params[3],
+                    "role_class": params[4],
+                    "confidence": params[5],
+                    "classification_basis": params[6],
+                    "source_label": params[7],
+                    "source_url": params[8],
+                    "notes": params[9],
+                }
+            )
+            return None
+        if query_name == "schema_migrations.append_schema_version":
+            appended_versions.append(str(params[0]))
+            return None
+        if query_name == "dynamic_domain_context.reference_count":
+            return {"n": len(seeded_rows)}
+        if query_name == "dynamic_domain_context.load_references":
+            return list(seeded_rows)
+        if query_name == "schema_migrations.insert":
+            migration_rows.append(
+                {
+                    "migration_id": params[0],
+                    "schema_version_before": params[4],
+                    "schema_version_after": params[5],
+                    "status": params[9],
+                    "receipt_path": params[11],
+                }
+            )
+            return None
+        raise AssertionError(f"unexpected query_name={query_name!r} sql={sql[:80]!r}")
+
+    monkeypatch.setattr(
+        catalog,
+        "write_dynamic_domain_context_receipt_bundle",
+        lambda payload, _output_dir: {  # noqa: ARG005
+            "json": "/tmp/dynamic-domain-context.json",
+            "references_csv": "/tmp/dynamic-domain-context.csv",
+            "summary_txt": "/tmp/dynamic-domain-context.txt",
+        },
+    )
+
+    payload = catalog.apply_dynamic_domain_context_migration(fake_run_sql)
+
+    assert len(ddl_statements) == 2
+    assert appended_versions == ["0.3.8-dynamic-domain-context"]
+    assert payload["reference_seed_rows"] == len(seeded_rows)
+    assert len(seeded_rows) >= 10
+    assert migration_rows == [
+        {
+            "migration_id": catalog.MIGRATION_ID,
+            "schema_version_before": "0.3.7-research-cohorts",
+            "schema_version_after": "0.3.8-dynamic-domain-context",
+            "status": "applied",
+            "receipt_path": "/tmp/dynamic-domain-context.json",
+        }
+    ]
+
+
+def test_apply_dynamic_domain_context_migration_reseeds_when_already_applied() -> None:
+    seeded_rows: list[dict[str, object]] = []
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        if "FROM schema_migrations" in sql and "migration_entry_id" in sql:
+            return {"migration_entry_id": 1}
+        if query_name == "schema_migrations.latest_schema_version_from_registry":
+            return {"schema_version_after": "0.3.9-dynamic-domain-context-collation-hotfix"}
+        if query_name == "dynamic_domain_context.upsert_reference":
+            seeded_rows.append(
+                {
+                    "package_name_scope": params[0],
+                    "domain_pattern": params[1],
+                    "match_type": params[2],
+                }
+            )
+            return None
+        if query_name == "dynamic_domain_context.load_references":
+            return list(seeded_rows)
+        raise AssertionError(f"unexpected query_name={query_name!r} sql={sql[:80]!r}")
+
+    payload = catalog.apply_dynamic_domain_context_migration(fake_run_sql)
+
+    assert payload["already_applied"] is True
+    assert int(payload["reference_seed_rows"]) == len(catalog.default_domain_reference_seed_rows())
+    assert any(row["domain_pattern"] == "tiktokcdn-us.com" for row in seeded_rows)
+
+
+def test_build_and_index_domain_observation_rows(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "run-1"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "top_dns": [
+                    {"value": "collector.cdp.cnn.com", "count": 6},
+                    {"value": "googleads.g.doubleclick.net", "count": 5},
+                ],
+                "top_sni": [
+                    {"value": "combine.urbanairship.com", "count": 4},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = domain_context_index.build_domain_observation_rows_from_pcap_report(
+        {
+            "top_dns": [
+                {"value": "collector.cdp.cnn.com", "count": 6},
+                {"value": "googleads.g.doubleclick.net", "count": 5},
+            ],
+            "top_sni": [{"value": "combine.urbanairship.com", "count": 4}],
+        },
+        dynamic_run_id="run-1",
+        package_name="com.cnn.mobile.android.phone",
+    )
+    assert len(rows) == 3
+    assert any(
+        row["owner_class"] == "first_party" and row["role_class"] == "publisher_collection"
+        for row in rows
+    )
+    assert any(row["role_class"] == "adtech_monetization" for row in rows)
+    assert any(row["role_class"] == "engagement_push" for row in rows)
+
+    deleted: list[tuple[object, ...]] = []
+    inserted: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(domain_context_index, "load_domain_references_from_db", lambda: ())
+    monkeypatch.setattr(
+        domain_context_index.core_q,
+        "run_sql_write",
+        lambda sql, params=(), **_kwargs: deleted.append(tuple(params)),
+    )
+    monkeypatch.setattr(
+        domain_context_index.core_q,
+        "run_sql_many",
+        lambda sql, data, **_kwargs: inserted.extend(tuple(row) for row in data),
+    )
+
+    count = domain_context_index.index_dynamic_domain_context_for_run(
+        "run-1",
+        "com.cnn.mobile.android.phone",
+        run_dir,
+    )
+    assert count == 3
+    assert deleted == [("run-1",)]
+    assert len(inserted) == 3
+
+
+def test_build_domain_observation_rows_from_network_indicators() -> None:
+    rows = domain_context_index.build_domain_observation_rows_from_network_indicators(
+        [
+            {
+                "indicator_type": "sni",
+                "indicator_value": "gql-fed.reddit.com",
+                "indicator_count": 8,
+            },
+            {"indicator_type": "dns", "indicator_value": "cf-st.sc-cdn.net", "indicator_count": 5},
+            {
+                "indicator_type": "dns",
+                "indicator_value": "firebaseinstallations.googleapis.com",
+                "indicator_count": 3,
+            },
+            {"indicator_type": "ip", "indicator_value": "203.0.113.7", "indicator_count": 3},
+        ],
+        dynamic_run_id="run-1",
+        package_name="com.reddit.frontpage",
+    )
+
+    reddit = next(row for row in rows if row["observed_domain"] == "gql-fed.reddit.com")
+    assert reddit["owner_class"] == "first_party"
+    assert reddit["role_class"] == "community_platform_api"
+
+    firebase = next(
+        row for row in rows if row["observed_domain"] == "firebaseinstallations.googleapis.com"
+    )
+    assert firebase["owner_class"] == "third_party"
+    assert firebase["role_class"] == "installation_identity"
+
+    assert all(row["indicator_type"] in {"dns", "sni"} for row in rows)
+
+
+def test_build_domain_observation_rows_includes_telegram_direct_ip_context() -> None:
+    rows = domain_context_index.build_domain_observation_rows_from_pcap_report(
+        {
+            "package_name": "org.telegram.messenger",
+            "top_dns": [{"value": "firebaselogging.googleapis.com", "count": 2}],
+            "flow_summary": {
+                "top_flows": [
+                    {
+                        "endpoint_a": "10.215.173.1:41568",
+                        "endpoint_b": "149.154.175.51:443",
+                        "packets": 210,
+                        "bytes": 41430,
+                        "protocol": "tcp",
+                    },
+                    {
+                        "endpoint_a": "10.215.173.1:42258",
+                        "endpoint_b": "91.108.56.196:443",
+                        "packets": 19,
+                        "bytes": 14128,
+                        "protocol": "tcp",
+                    },
+                ]
+            },
+        },
+        dynamic_run_id="run-telegram",
+        package_name="org.telegram.messenger",
+    )
+
+    ip_rows = [row for row in rows if row["indicator_type"] == "ip_dst"]
+    assert {row["observed_domain"] for row in ip_rows} == {"149.154.175.51", "91.108.56.196"}
+    assert {row["root_domain"] for row in ip_rows} == {"149.154.160.0/20", "91.108.56.0/22"}
+    assert all(row["owner_class"] == "first_party" for row in ip_rows)
+    assert all(row["role_class"] == "telegram_datacenter_transport" for row in ip_rows)
+    assert all(row["classification_basis"] == "curated_cidr" for row in ip_rows)
+
+
+def test_build_domain_observation_rows_from_network_indicators_accepts_telegram_ip_dst() -> None:
+    rows = domain_context_index.build_domain_observation_rows_from_network_indicators(
+        [
+            {
+                "indicator_type": "ip_dst",
+                "indicator_value": "149.154.167.151",
+                "indicator_count": 45,
+                "indicator_source": "top_flow_ip",
+            },
+            {
+                "indicator_type": "ip_dst",
+                "indicator_value": "216.239.38.223",
+                "indicator_count": 17,
+                "indicator_source": "top_flow_ip",
+            },
+        ],
+        dynamic_run_id="run-telegram",
+        package_name="org.telegram.messenger",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["observed_domain"] == "149.154.167.151"
+    assert rows[0]["root_domain"] == "149.154.160.0/20"
+    assert rows[0]["owner_class"] == "first_party"
+    assert rows[0]["role_class"] == "telegram_datacenter_transport"
+
+
+def test_index_dynamic_domain_context_from_network_indicators_only_missing(monkeypatch) -> None:
+    query_names: list[str] = []
+    inserted: list[tuple[object, ...]] = []
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        query_names.append(str(query_name))
+        if query_name == "dynamic.domain_context.load_references":
+            return []
+        if query_name == "dynamic.domain_context.indicator_candidate_runs":
+            assert "NOT EXISTS" in sql
+            return [
+                {
+                    "dynamic_run_id": "run-1",
+                    "package_name": "org.thoughtcrime.securesms",
+                    "indicator_rows": 2,
+                }
+            ]
+        if query_name == "dynamic.domain_context.indicator_rows_for_run":
+            assert params == ("run-1",)
+            return [
+                {
+                    "indicator_type": "sni",
+                    "indicator_value": "chat.signal.org",
+                    "indicator_count": 4,
+                    "indicator_source": "legacy_indicator",
+                },
+                {
+                    "indicator_type": "dns",
+                    "indicator_value": "turn.cloudflare.com",
+                    "indicator_count": 2,
+                    "indicator_source": "legacy_indicator",
+                },
+            ]
+        raise AssertionError(f"unexpected query_name={query_name!r}")
+
+    monkeypatch.setattr(domain_context_index.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(
+        domain_context_index.core_q,
+        "run_sql_many",
+        lambda sql, data, **_kwargs: inserted.extend(tuple(row) for row in data),
+    )
+
+    result = domain_context_index.index_dynamic_domain_context_from_network_indicators(
+        only_missing=True
+    )
+
+    assert result == {"scanned": 1, "indexed_rows": 2, "errors": 0, "only_missing": True}
+    assert "dynamic.domain_context.indicator_candidate_runs" in query_names
+    assert len(inserted) == 2
+
+
+def test_refresh_dynamic_domain_observation_classifications_updates_unknown_rows(
+    monkeypatch,
+) -> None:
+    writes: list[tuple[object, ...]] = []
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        if query_name == "dynamic.domain_context.load_references":
+            return []
+        if query_name == "dynamic.domain_context.refresh_candidates":
+            assert "owner_class" in sql
+            return [
+                {
+                    "observation_id": 7,
+                    "dynamic_run_id": "run-1",
+                    "package_name": "com.linkedin.android",
+                    "observed_domain": "fpt.dfp.microsoft.com",
+                },
+                {
+                    "observation_id": 8,
+                    "dynamic_run_id": "run-1",
+                    "package_name": "com.linkedin.android",
+                    "observed_domain": "still-unmapped.example.invalid",
+                },
+            ]
+        raise AssertionError(f"unexpected query_name={query_name!r}")
+
+    monkeypatch.setattr(domain_context_index.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(
+        domain_context_index.core_q,
+        "run_sql_write",
+        lambda sql, params=(), **_kwargs: writes.append(tuple(params)),
+    )
+
+    result = domain_context_index.refresh_dynamic_domain_observation_classifications(
+        unknown_only=True
+    )
+
+    assert result == {"scanned": 2, "updated_rows": 1, "errors": 0, "unknown_only": True}
+    assert len(writes) == 1
+    assert writes[0][1:4] == ("third_party", "device_fingerprinting", "high")
+    assert writes[0][-1] == 7
+
+
+def test_refresh_dynamic_domain_observation_classifications_skips_unchanged_rows(
+    monkeypatch,
+) -> None:
+    writes: list[tuple[object, ...]] = []
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        if query_name == "dynamic.domain_context.load_references":
+            return []
+        if query_name == "dynamic.domain_context.refresh_candidates":
+            assert "WHERE LOWER" not in sql
+            return [
+                {
+                    "observation_id": 9,
+                    "dynamic_run_id": "run-1",
+                    "package_name": "com.instagram.android",
+                    "observed_domain": "scontent.ffcm1-1.fna.fbcdn.net",
+                    "root_domain": "fbcdn.net",
+                    "owner_class": "first_party",
+                    "role_class": "content_delivery",
+                    "confidence": "medium",
+                    "classification_basis": "curated_suffix",
+                    "package_name_scope": "com.instagram.android",
+                    "match_type": "SUFFIX",
+                    "is_first_party": 1,
+                }
+            ]
+        raise AssertionError(f"unexpected query_name={query_name!r}")
+
+    monkeypatch.setattr(domain_context_index.core_q, "run_sql", fake_run_sql)
+    monkeypatch.setattr(
+        domain_context_index.core_q,
+        "run_sql_write",
+        lambda sql, params=(), **_kwargs: writes.append(tuple(params)),
+    )
+
+    result = domain_context_index.refresh_dynamic_domain_observation_classifications(
+        unknown_only=False
+    )
+
+    assert result == {"scanned": 1, "updated_rows": 0, "errors": 0, "unknown_only": False}
+    assert writes == []
+
+
+def test_classify_domain_prefers_package_scoped_exact_over_global_exact() -> None:
+    refs = (
+        DomainReference(
+            "",
+            "graph.facebook.com",
+            "EXACT",
+            "third_party",
+            "social_graph_api",
+            "medium",
+            "curated_exact",
+        ),
+        DomainReference(
+            "com.facebook.katana",
+            "graph.facebook.com",
+            "EXACT",
+            "first_party",
+            "social_graph_api",
+            "high",
+            "curated_exact",
+        ),
+    )
+
+    facebook = classify_domain(
+        "graph.facebook.com", package_name="com.facebook.katana", references=refs
+    )
+    assert facebook["owner_class"] == "first_party"
+    assert facebook["package_name_scope"] == "com.facebook.katana"
+
+    tiktok = classify_domain(
+        "graph.facebook.com", package_name="com.zhiliaoapp.musically", references=refs
+    )
+    assert tiktok["owner_class"] == "third_party"
+    assert tiktok["package_name_scope"] == ""
+
+
+def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
+    refs = default_domain_references()
+
+    facebook_net = classify_domain(
+        "star.c10r.facebook.net", package_name="com.facebook.katana", references=refs
+    )
+    assert facebook_net["owner_class"] == "first_party"
+    assert facebook_net["role_class"] == "first_party_misc"
+
+    tiktok_meta = classify_domain(
+        "star.c10r.facebook.net", package_name="com.zhiliaoapp.musically", references=refs
+    )
+    assert tiktok_meta["owner_class"] == "third_party"
+    assert tiktok_meta["role_class"] == "social_graph_api"
+
+    atdmt = classify_domain("clk.atdmt.com", package_name="com.facebook.katana", references=refs)
+    assert atdmt["owner_class"] == "third_party"
+    assert atdmt["role_class"] == "adtech_monetization"
+
+    chat_e2ee = classify_domain(
+        "chat-e2ee-mini.facebook.com", package_name="com.facebook.katana", references=refs
+    )
+    assert chat_e2ee["owner_class"] == "first_party"
+    assert chat_e2ee["role_class"] == "messaging_e2ee"
+
+    connect = classify_domain(
+        "connect.facebook.net", package_name="com.zhiliaoapp.musically", references=refs
+    )
+    assert connect["owner_class"] == "third_party"
+    assert connect["role_class"] == "identity_api"
+
+    b_graph = classify_domain(
+        "b-graph.facebook.com", package_name="com.facebook.katana", references=refs
+    )
+    assert b_graph["owner_class"] == "first_party"
+    assert b_graph["role_class"] == "social_graph_api"
+
+    x_probe = classify_domain(
+        "probe.twitter.com", package_name="com.twitter.android", references=refs
+    )
+    assert x_probe["owner_class"] == "first_party"
+    assert x_probe["role_class"] == "realtime_engagement"
+
+    x_api_stream = classify_domain(
+        "api-stream.twitter.com", package_name="com.twitter.android", references=refs
+    )
+    assert x_api_stream["owner_class"] == "first_party"
+    assert x_api_stream["role_class"] == "social_graph_api"
+    assert x_api_stream["confidence"] == "high"
+
+    x_analytics = classify_domain(
+        "analytics.twitter.com", package_name="com.twitter.android", references=refs
+    )
+    assert x_analytics["owner_class"] == "first_party"
+    assert x_analytics["role_class"] == "analytics_measurement"
+    assert x_analytics["confidence"] == "high"
+
+    x_chat = classify_domain("chat-ws.x.com", package_name="com.twitter.android", references=refs)
+    assert x_chat["owner_class"] == "first_party"
+    assert x_chat["role_class"] == "realtime_engagement"
+
+    x_ads = classify_domain("ads-api.x.com", package_name="com.twitter.android", references=refs)
+    assert x_ads["owner_class"] == "first_party"
+    assert x_ads["role_class"] == "ad_measurement"
+
+    x_video_s = classify_domain(
+        "video-s.twimg.com", package_name="com.twitter.android", references=refs
+    )
+    assert x_video_s["owner_class"] == "first_party"
+    assert x_video_s["role_class"] == "content_delivery"
+
+    firebase_logging = classify_domain(
+        "firebaselogging.googleapis.com",
+        package_name="com.twitter.android",
+        references=refs,
+    )
+    assert firebase_logging["owner_class"] == "third_party"
+    assert firebase_logging["role_class"] == "google_api_platform"
+
+    firebase_remote_config = classify_domain(
+        "firebaseremoteconfig.googleapis.com",
+        package_name="com.twitter.android",
+        references=refs,
+    )
+    assert firebase_remote_config["owner_class"] == "third_party"
+    assert firebase_remote_config["role_class"] == "google_api_platform"
+
+    google_time = classify_domain(
+        "time.google.com", package_name="com.twitter.android", references=refs
+    )
+    assert google_time["owner_class"] == "third_party"
+    assert google_time["role_class"] == "google_infrastructure"
+
+    akamai_whoami = classify_domain(
+        "whoami.akamai.net", package_name="com.zhiliaoapp.musically", references=refs
+    )
+    assert akamai_whoami["owner_class"] == "third_party"
+    assert akamai_whoami["role_class"] == "network_diagnostics"
+
+    tiktok_oracle = classify_domain(
+        "config.mtp.sag.us-ashburn-1.oci.oraclecloud.com",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_oracle["owner_class"] == "third_party"
+    assert tiktok_oracle["role_class"] == "hosted_backend_infrastructure"
+    assert tiktok_oracle["match_type"] == "EXACT"
+
+    cnn_ngtv = classify_domain(
+        "freeview.ngtv.io", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert cnn_ngtv["owner_class"] == "first_party"
+    assert cnn_ngtv["role_class"] == "streaming_delivery"
+    assert cnn_ngtv["confidence"] == "medium"
+
+    cnn_audience = classify_domain(
+        "audience.cnn.com", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert cnn_audience["owner_class"] == "first_party"
+    assert cnn_audience["role_class"] == "publisher_collection"
+
+    cnn_smetrics = classify_domain(
+        "smetrics.cnn.com", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert cnn_smetrics["owner_class"] == "first_party"
+    assert cnn_smetrics["role_class"] == "publisher_collection"
+
+    cnn_discomax = classify_domain(
+        "default.any-any.prd.api.discomax.com",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_discomax["owner_class"] == "first_party"
+    assert cnn_discomax["role_class"] == "streaming_platform_api"
+
+    cnn_warnermedia = classify_domain(
+        "top.warnermediacdn.com",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_warnermedia["owner_class"] == "first_party"
+    assert cnn_warnermedia["role_class"] == "content_delivery"
+
+    freewheel = classify_domain(
+        "bea4.v.fwmrm.net", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert freewheel["owner_class"] == "third_party"
+    assert freewheel["role_class"] == "adtech_video_monetization"
+
+    mux = classify_domain(
+        "out053a3bejgh7t0phqa0csou.litix.io",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert mux["owner_class"] == "third_party"
+    assert mux["role_class"] == "video_analytics_measurement"
+
+    brightline = classify_domain(
+        "cdn-media.brightline.tv",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert brightline["owner_class"] == "third_party"
+    assert brightline["role_class"] == "interactive_ctv_advertising"
+
+    dianomi_worker = classify_domain(
+        "gpp-decoder.dianomi.workers.dev",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert dianomi_worker["owner_class"] == "third_party"
+    assert dianomi_worker["role_class"] == "adtech_monetization"
+
+    whatsapp_graph = classify_domain(
+        "graph.whatsapp.com", package_name="com.whatsapp", references=refs
+    )
+    assert whatsapp_graph["owner_class"] == "first_party"
+    assert whatsapp_graph["role_class"] == "messaging_platform_api"
+
+    whatsapp_call = classify_domain("v.whatsapp.net", package_name="com.whatsapp", references=refs)
+    assert whatsapp_call["owner_class"] == "first_party"
+    assert whatsapp_call["role_class"] == "realtime_call_transport"
+
+    whatsapp_cdn = classify_domain(
+        "media-ord5-2.cdn.whatsapp.net",
+        package_name="com.whatsapp",
+        references=refs,
+    )
+    assert whatsapp_cdn["owner_class"] == "first_party"
+    assert whatsapp_cdn["role_class"] == "content_delivery"
+
+    bbc_live = classify_domain(
+        "api.live.bbcx-internal.com",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_live["owner_class"] == "first_party"
+    assert bbc_live["role_class"] == "publisher_api"
+
+    bbc_home = classify_domain(
+        "www.bbc.com", package_name="bbc.mobile.news.ww", references=refs
+    )
+    assert bbc_home["owner_class"] == "first_party"
+    assert bbc_home["role_class"] == "publisher_content"
+
+    bbc_analytics = classify_domain(
+        "mybbc-analytics.files.bbci.co.uk",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_analytics["owner_class"] == "first_party"
+    assert bbc_analytics["role_class"] == "publisher_collection"
+
+    bbc_remote_config = classify_domain(
+        "map-remote-config.files.bbci.co.uk",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_remote_config["owner_class"] == "first_party"
+    assert bbc_remote_config["role_class"] == "sdk_configuration"
+
+    bbc_cmp = classify_domain(
+        "cdn.privacy-mgmt.com", package_name="bbc.mobile.news.ww", references=refs
+    )
+    assert bbc_cmp["owner_class"] == "third_party"
+    assert bbc_cmp["role_class"] == "consent_management"
+
+    bbc_piano = classify_domain(
+        "buy-eu.piano.io", package_name="bbc.mobile.news.ww", references=refs
+    )
+    assert bbc_piano["owner_class"] == "third_party"
+    assert bbc_piano["role_class"] == "subscription_paywall"
+    assert bbc_piano["confidence"] == "high"
+
+    guardian_braze = classify_domain(
+        "sdk.fra-01.braze.eu", package_name="com.guardian", references=refs
+    )
+    assert guardian_braze["owner_class"] == "third_party"
+    assert guardian_braze["role_class"] == "engagement_push"
+
+    guardian_confiant = classify_domain(
+        "cdn.confiant-integrations.net", package_name="com.guardian", references=refs
+    )
+    assert guardian_confiant["owner_class"] == "third_party"
+    assert guardian_confiant["role_class"] == "ad_security"
+
+    instagram_api = classify_domain(
+        "i.instagram.com", package_name="com.instagram.android", references=refs
+    )
+    assert instagram_api["owner_class"] == "first_party"
+    assert instagram_api["role_class"] == "social_graph_api"
+
+    instagram_cdn = classify_domain(
+        "scontent.cdninstagram.com", package_name="com.instagram.android", references=refs
+    )
+    assert instagram_cdn["owner_class"] == "first_party"
+    assert instagram_cdn["role_class"] == "content_delivery"
+
+    instagram_fbcdn = classify_domain(
+        "instagram.ffcm1-1.fna.fbcdn.net",
+        package_name="com.instagram.android",
+        references=refs,
+    )
+    assert instagram_fbcdn["owner_class"] == "first_party"
+    assert instagram_fbcdn["role_class"] == "content_delivery"
+
+    instagram_whatsapp = classify_domain(
+        "v.whatsapp.net", package_name="com.instagram.android", references=refs
+    )
+    assert instagram_whatsapp["owner_class"] == "first_party"
+    assert instagram_whatsapp["role_class"] == "realtime_call_transport"
+
+    messenger_privacy_gateway = classify_domain(
+        "meta.privacy-gateway.cloudflare.com",
+        package_name="com.facebook.orca",
+        references=refs,
+    )
+    assert messenger_privacy_gateway["owner_class"] == "third_party"
+    assert messenger_privacy_gateway["role_class"] == "privacy_gateway"
+
+    messenger_fbcdn = classify_domain(
+        "static.xx.fbcdn.net", package_name="com.facebook.orca", references=refs
+    )
+    assert messenger_fbcdn["owner_class"] == "first_party"
+    assert messenger_fbcdn["role_class"] == "content_delivery"
+
+    messenger_home = classify_domain(
+        "messenger.com", package_name="com.facebook.orca", references=refs
+    )
+    assert messenger_home["owner_class"] == "first_party"
+    assert messenger_home["role_class"] == "messaging_platform_api"
+    assert messenger_home["confidence"] == "high"
+
+    linkedin_home = classify_domain(
+        "www.linkedin.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_home["owner_class"] == "first_party"
+    assert linkedin_home["role_class"] == "social_graph_api"
+
+    linkedin_perf = classify_domain(
+        "rum6.perf.linkedin.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_perf["owner_class"] == "first_party"
+    assert linkedin_perf["role_class"] == "performance_telemetry"
+
+    linkedin_ei_perf = classify_domain(
+        "rum22.perf.linkedin-ei.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_ei_perf["owner_class"] == "first_party"
+    assert linkedin_ei_perf["role_class"] == "performance_telemetry"
+
+    linkedin_media = classify_domain(
+        "media.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_media["owner_class"] == "first_party"
+    assert linkedin_media["role_class"] == "media_delivery"
+
+    linkedin_static = classify_domain(
+        "static-akam.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_static["owner_class"] == "first_party"
+    assert linkedin_static["role_class"] == "static_asset_delivery"
+
+    linkedin_dms = classify_domain(
+        "dms.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_dms["owner_class"] == "first_party"
+    assert linkedin_dms["role_class"] == "document_media_delivery"
+
+    linkedin_dms_akam = classify_domain(
+        "dms-akam.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_dms_akam["owner_class"] == "first_party"
+    assert linkedin_dms_akam["role_class"] == "document_media_delivery"
+
+    linkedin_pop_edge = classify_domain(
+        "pop-ltx1-lx.www.linkedin.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_pop_edge["owner_class"] == "first_party"
+    assert linkedin_pop_edge["role_class"] == "content_delivery"
+
+    linkedin_static_cflr = classify_domain(
+        "static-cflr.licdn.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_static_cflr["owner_class"] == "first_party"
+    assert linkedin_static_cflr["role_class"] == "static_asset_delivery"
+
+    linkedin_dns = classify_domain(
+        "b.ns1p.net", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_dns["owner_class"] == "third_party"
+    assert linkedin_dns["role_class"] == "managed_dns_edge"
+
+    linkedin_bot_defense = classify_domain(
+        "collector-pxdojv695v.protechts.net",
+        package_name="com.linkedin.android",
+        references=refs,
+    )
+    assert linkedin_bot_defense["owner_class"] == "third_party"
+    assert linkedin_bot_defense["role_class"] == "bot_defense"
+
+    linkedin_human_xlgmedia = classify_domain(
+        "s.xlgmedia.com",
+        package_name="com.linkedin.android",
+        references=refs,
+    )
+    assert linkedin_human_xlgmedia["owner_class"] == "third_party"
+    assert linkedin_human_xlgmedia["role_class"] == "bot_defense"
+
+    pinterest_api = classify_domain(
+        "api.pinterest.com", package_name="com.pinterest", references=refs
+    )
+    assert pinterest_api["owner_class"] == "first_party"
+    assert pinterest_api["role_class"] == "visual_discovery_api"
+
+    pinterest_media = classify_domain("i.pinimg.com", package_name="com.pinterest", references=refs)
+    assert pinterest_media["owner_class"] == "first_party"
+    assert pinterest_media["role_class"] == "content_delivery"
+
+    pinterest_amazon_media = classify_domain(
+        "m.media-amazon.com",
+        package_name="com.pinterest",
+        references=refs,
+    )
+    assert pinterest_amazon_media["owner_class"] == "third_party"
+    assert pinterest_amazon_media["role_class"] == "content_delivery"
+
+    pinterest_recaptcha = classify_domain(
+        "www.recaptcha.net", package_name="com.pinterest", references=refs
+    )
+    assert pinterest_recaptcha["owner_class"] == "third_party"
+    assert pinterest_recaptcha["role_class"] == "bot_defense"
+
+    reddit_api = classify_domain(
+        "gql-fed.reddit.com", package_name="com.reddit.frontpage", references=refs
+    )
+    assert reddit_api["owner_class"] == "first_party"
+    assert reddit_api["role_class"] == "community_platform_api"
+
+    reddit_media = classify_domain(
+        "preview.redd.it", package_name="com.reddit.frontpage", references=refs
+    )
+    assert reddit_media["owner_class"] == "first_party"
+    assert reddit_media["role_class"] == "content_delivery"
+
+    appsflyer_onelink = classify_domain(
+        "i.sng.link", package_name="com.reddit.frontpage", references=refs
+    )
+    assert appsflyer_onelink["owner_class"] == "third_party"
+    assert appsflyer_onelink["role_class"] == "attribution_deep_link"
+
+    pinterest_appsflyer_inapps = classify_domain(
+        "jarlio.inapps.appsflyersdk.com",
+        package_name="com.pinterest",
+        references=refs,
+    )
+    assert pinterest_appsflyer_inapps["owner_class"] == "third_party"
+    assert pinterest_appsflyer_inapps["role_class"] == "attribution_measurement"
+
+    pinterest_appsflyer_launches = classify_domain(
+        "jarlio.launches.appsflyersdk.com",
+        package_name="com.pinterest",
+        references=refs,
+    )
+    assert pinterest_appsflyer_launches["owner_class"] == "third_party"
+    assert pinterest_appsflyer_launches["role_class"] == "attribution_measurement"
+
+    snapchat_api = classify_domain(
+        "gcp.api.snapchat.com", package_name="com.snapchat.android", references=refs
+    )
+    assert snapchat_api["owner_class"] == "first_party"
+    assert snapchat_api["role_class"] == "messaging_platform_api"
+
+    snapchat_cdn = classify_domain(
+        "cf-st.sc-cdn.net", package_name="com.snapchat.android", references=refs
+    )
+    assert snapchat_cdn["owner_class"] == "first_party"
+    assert snapchat_cdn["role_class"] == "content_delivery"
+
+    signal_chat = classify_domain(
+        "chat.signal.org", package_name="org.thoughtcrime.securesms", references=refs
+    )
+    assert signal_chat["owner_class"] == "first_party"
+    assert signal_chat["role_class"] == "encrypted_messaging_api"
+
+    signal_turn = classify_domain(
+        "turn.cloudflare.com", package_name="org.thoughtcrime.securesms", references=refs
+    )
+    assert signal_turn["owner_class"] == "third_party"
+    assert signal_turn["role_class"] == "turn_relay"
+
+    firebase_installations = classify_domain(
+        "firebaseinstallations.googleapis.com",
+        package_name="org.thoughtcrime.securesms",
+        references=refs,
+    )
+    assert firebase_installations["owner_class"] == "third_party"
+    assert firebase_installations["role_class"] == "installation_identity"
+
+    linkedin_google_stun = classify_domain(
+        "stun.l.google.com", package_name="com.linkedin.android", references=refs
+    )
+    assert linkedin_google_stun["owner_class"] == "third_party"
+    assert linkedin_google_stun["role_class"] == "stun_relay"
+
+    google_play_media = classify_domain(
+        "play-lh.googleusercontent.com",
+        package_name="com.reddit.frontpage",
+        references=refs,
+    )
+    assert google_play_media["owner_class"] == "third_party"
+    assert google_play_media["role_class"] == "content_delivery"
+
+    reddit_recaptcha = classify_domain(
+        "www.recaptcha.net", package_name="com.reddit.frontpage", references=refs
+    )
+    assert reddit_recaptcha["owner_class"] == "third_party"
+    assert reddit_recaptcha["role_class"] == "bot_defense"
+
+    reddit_appsflyer = classify_domain(
+        "impression.appsflyer.com", package_name="com.reddit.frontpage", references=refs
+    )
+    assert reddit_appsflyer["owner_class"] == "third_party"
+    assert reddit_appsflyer["role_class"] == "attribution_measurement"
+
+    linkedin_microsoft_fpt = classify_domain(
+        "fpt.dfp.microsoft.com",
+        package_name="com.linkedin.android",
+        references=refs,
+    )
+    assert linkedin_microsoft_fpt["owner_class"] == "third_party"
+    assert linkedin_microsoft_fpt["role_class"] == "device_fingerprinting"
+
+    messenger_whatsapp = classify_domain(
+        "v.whatsapp.net", package_name="com.facebook.orca", references=refs
+    )
+    assert messenger_whatsapp["owner_class"] == "first_party"
+    assert messenger_whatsapp["role_class"] == "realtime_call_transport"
+
+    tiktok_cdn = classify_domain(
+        "sf16-sg.tiktokcdn.com", package_name="com.zhiliaoapp.musically", references=refs
+    )
+    assert tiktok_cdn["owner_class"] == "first_party"
+    assert tiktok_cdn["role_class"] == "content_delivery"
+
+    tiktok_api = classify_domain(
+        "api16-normal-useast5.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_api["owner_class"] == "first_party"
+    assert tiktok_api["role_class"] == "social_graph_api"
+
+    tiktok_aggr = classify_domain(
+        "aggr16-normal.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_aggr["owner_class"] == "first_party"
+    assert tiktok_aggr["role_class"] == "performance_telemetry"
+
+    tiktok_tnc = classify_domain(
+        "tnc16-normal-useast5.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_tnc["owner_class"] == "first_party"
+    assert tiktok_tnc["role_class"] == "sdk_configuration"
+
+    tiktok_attribution = classify_domain(
+        "ug-attribution.tiktokv.us",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_attribution["owner_class"] == "first_party"
+    assert tiktok_attribution["role_class"] == "attribution_measurement"
+
+    tiktok_ads_measurement = classify_domain(
+        "tiktok.adsmeasurement.com",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_ads_measurement["owner_class"] == "first_party"
+    assert tiktok_ads_measurement["role_class"] == "ad_measurement"
+
+
+def test_index_dynamic_evidence_pack_to_db_includes_domain_context(
+    monkeypatch, tmp_path: Path
+) -> None:
+    run_dir = tmp_path / "run-1"
+    (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-1",
+                "target": {"package_name": "com.zhiliaoapp.musically"},
+                "dataset": {"valid_dataset_run": True, "countable": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps({"top_dns": [{"value": "v45.tiktokcdn-us.com", "count": 5}]}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        domain_context_index,
+        "load_domain_references_from_db",
+        lambda: domain_context_index.default_domain_references(),
+    )
+
+    upserts: list[dict[str, object]] = []
+    feature_rows: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.storage.index_from_evidence.upsert_dynamic_session_row",
+        lambda row: upserts.append(dict(row)),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.storage.index_from_evidence.build_dynamic_network_features_row_from_evidence_pack",
+        lambda _run_dir: None,
+    )
+    monkeypatch.setattr(
+        domain_context_index.core_q,
+        "run_sql_write",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        domain_context_index.core_q,
+        "run_sql_many",
+        lambda _sql, data, **_kwargs: feature_rows.extend(
+            {
+                "observed_domain": row[3],
+                "owner_class": row[7],
+                "role_class": row[8],
+            }
+            for row in data
+        ),
+    )
+
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    result = index_from_evidence.index_dynamic_evidence_pack_to_db(run_dir)
+
+    assert result["ok"] is True
+    assert result["domain_context_indexed"] == 1
+    assert upserts and upserts[0]["package_name"] == "com.zhiliaoapp.musically"
+    assert feature_rows == [
+        {
+            "observed_domain": "v45.tiktokcdn-us.com",
+            "owner_class": "first_party",
+            "role_class": "content_delivery",
+        }
+    ]
+
+
+def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
+    refs = default_domain_references()
+
+    mapbox = classify_domain(
+        "config.mapbox.com", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert mapbox["owner_class"] == "third_party"
+    assert mapbox["role_class"] == "sdk_configuration"
+
+    mapbox_api = classify_domain(
+        "api.mapbox.com", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert mapbox_api["owner_class"] == "third_party"
+    assert mapbox_api["role_class"] == "geospatial_api"
+
+    cloudflare = classify_domain(
+        "cdnjs.cloudflare.com", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert cloudflare["owner_class"] == "third_party"
+    assert cloudflare["role_class"] == "static_asset_delivery"
+
+    amp = classify_domain(
+        "cdn.ampproject.org", package_name="com.cnn.mobile.android.phone", references=refs
+    )
+    assert amp["owner_class"] == "third_party"
+    assert amp["role_class"] == "content_delivery"
+
+    smartadserver = classify_domain(
+        "ssbsync.smartadserver.com",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert smartadserver["owner_class"] == "third_party"
+    assert smartadserver["role_class"] == "identity_sync"
+
+    cdninstagram = classify_domain(
+        "scontent.cdninstagram.com", package_name="com.facebook.katana", references=refs
+    )
+    assert cdninstagram["owner_class"] == "first_party"
+    assert cdninstagram["role_class"] == "content_delivery"
+
+    giphy = classify_domain("media4.giphy.com", package_name="com.facebook.katana", references=refs)
+    assert giphy["owner_class"] == "third_party"
+    assert giphy["role_class"] == "content_delivery"
+
+    zoom = classify_domain("st1.zoom.us", package_name="com.facebook.katana", references=refs)
+    assert zoom["owner_class"] == "third_party"
+    assert zoom["role_class"] == "realtime_call_transport"
+
+    guardian_api = classify_domain(
+        "mobile.guardianapis.com", package_name="com.guardian", references=refs
+    )
+    assert guardian_api["owner_class"] == "first_party"
+    assert guardian_api["role_class"] == "publisher_api"
+
+    guardian_collection = classify_domain(
+        "ophan.theguardian.com", package_name="com.guardian", references=refs
+    )
+    assert guardian_collection["owner_class"] == "first_party"
+    assert guardian_collection["role_class"] == "publisher_collection"
+
+    guardian_collection_alias = classify_domain(
+        "j.ophan.co.uk", package_name="com.guardian", references=refs
+    )
+    assert guardian_collection_alias["owner_class"] == "first_party"
+    assert guardian_collection_alias["role_class"] == "publisher_collection"
+
+    guardian_cmp = classify_domain(
+        "cdn.privacy-mgmt.com", package_name="com.guardian", references=refs
+    )
+    assert guardian_cmp["owner_class"] == "third_party"
+    assert guardian_cmp["role_class"] == "consent_management"
+
+    guardian_crash = classify_domain(
+        "firebase-settings.crashlytics.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_crash["owner_class"] == "third_party"
+    assert guardian_crash["role_class"] == "crash_reporting"
+
+    guardian_adjust = classify_domain(
+        "app.adjust.com", package_name="com.guardian", references=refs
+    )
+    assert guardian_adjust["owner_class"] == "third_party"
+    assert guardian_adjust["role_class"] == "attribution_measurement"
+
+    guardian_nextgen = classify_domain(
+        "api.nextgen.guardianapps.co.uk",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_nextgen["owner_class"] == "first_party"
+    assert guardian_nextgen["role_class"] == "publisher_api"
+
+    guardian_amazon_media = classify_domain(
+        "m.media-amazon.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_amazon_media["owner_class"] == "third_party"
+    assert guardian_amazon_media["role_class"] == "ad_creative_delivery"
+
+    guardian_tungsten = classify_domain(
+        "www.btd-cmh.tq-tungsten.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_tungsten["owner_class"] == "third_party"
+    assert guardian_tungsten["role_class"] == "ad_measurement"
+
+    guardian_mainroll = classify_domain(
+        "stats.mainroll.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_mainroll["owner_class"] == "third_party"
+    assert guardian_mainroll["role_class"] == "ad_measurement"
+    assert guardian_mainroll["confidence"] == "medium"
+
+    unscoped_mainroll = classify_domain(
+        "stats.mainroll.com",
+        package_name="com.example.other",
+        references=refs,
+    )
+    assert unscoped_mainroll["owner_class"] == "unknown"
+    assert unscoped_mainroll["role_class"] == "unknown"
+
+    bbc_everest = classify_domain(
+        "creative-assets.everesttech.net",
+        package_name="bbc.mobile.news.ww",
+        references=refs,
+    )
+    assert bbc_everest["owner_class"] == "third_party"
+    assert bbc_everest["role_class"] == "ad_creative_delivery"
+
+    cnn_politics_tiles = classify_domain(
+        "politics-explorer-tiles-static.cnn.io",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_politics_tiles["owner_class"] == "first_party"
+    assert cnn_politics_tiles["role_class"] == "content_delivery"
+
+    cnn_ix = classify_domain(
+        "ix.cnn.io",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert cnn_ix["owner_class"] == "first_party"
+    assert cnn_ix["role_class"] == "content_delivery"
+
+    facebook_lookaside = classify_domain(
+        "lookaside.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_lookaside["owner_class"] == "first_party"
+    assert facebook_lookaside["role_class"] == "content_delivery"
+
+    facebook_bapi = classify_domain(
+        "b-api.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_bapi["owner_class"] == "first_party"
+    assert facebook_bapi["role_class"] == "social_graph_api"
+
+    facebook_mqtt = classify_domain(
+        "mqtt-mini.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_mqtt["owner_class"] == "first_party"
+    assert facebook_mqtt["role_class"] == "realtime_messaging"
+
+    facebook_edge_mqtt = classify_domain(
+        "edge-mqtt.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_edge_mqtt["owner_class"] == "first_party"
+    assert facebook_edge_mqtt["role_class"] == "realtime_messaging"
+
+    facebook_mobile = classify_domain(
+        "mobile.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_mobile["owner_class"] == "first_party"
+    assert facebook_mobile["role_class"] == "social_graph_api"
+
+    facebook_gateway = classify_domain(
+        "z-m-gateway.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_gateway["owner_class"] == "first_party"
+    assert facebook_gateway["role_class"] == "social_graph_api"
+
+    facebook_bwww = classify_domain(
+        "b-www.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_bwww["owner_class"] == "first_party"
+    assert facebook_bwww["role_class"] == "social_graph_api"
+
+    facebook_genai = classify_domain(
+        "genai-graph.facebook.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_genai["owner_class"] == "first_party"
+    assert facebook_genai["role_class"] == "social_graph_api"
+
+    facebook_infosec = classify_domain(
+        "www.infosecworldusa.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_infosec["owner_class"] == "third_party"
+    assert facebook_infosec["role_class"] == "conference_site_content"
+
+    facebook_swoogo = classify_domain(
+        "assets.swoogo.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_swoogo["owner_class"] == "third_party"
+    assert facebook_swoogo["role_class"] == "event_platform_assets"
+
+    facebook_steam = classify_domain(
+        "store.steampowered.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_steam["owner_class"] == "third_party"
+    assert facebook_steam["role_class"] == "external_storefront_content"
+
+    facebook_steam_static = classify_domain(
+        "store.fastly.steamstatic.com",
+        package_name="com.facebook.katana",
+        references=refs,
+    )
+    assert facebook_steam_static["owner_class"] == "third_party"
+    assert facebook_steam_static["role_class"] == "static_asset_delivery"
+
+    whatsapp_acs = classify_domain(
+        "acs.whatsapp.com",
+        package_name="com.whatsapp",
+        references=refs,
+    )
+    assert whatsapp_acs["owner_class"] == "first_party"
+    assert whatsapp_acs["role_class"] == "messaging_platform_api"

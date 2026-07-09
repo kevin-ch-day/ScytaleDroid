@@ -1,10 +1,31 @@
 from __future__ import annotations
 
+import importlib
+from pathlib import Path
+
 from scytaledroid.StaticAnalysis.cli.commands import COMMANDS, get_command, iter_commands
 from scytaledroid.StaticAnalysis.cli.commands.models import SelectionMode
-from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+from scytaledroid.StaticAnalysis.cli.core import run_prompts
+from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.menus import actions
 from scytaledroid.StaticAnalysis.core import repository
+from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
+
+
+def _group(package_name: str) -> ArtifactGroup:
+    artifact = RepositoryArtifact(
+        path=Path(f"/tmp/{package_name}.apk"),
+        display_path=f"{package_name}.apk",
+        metadata={"package_name": package_name},
+    )
+    return ArtifactGroup(
+        group_key=package_name,
+        package_name=package_name,
+        version_display="1.0.0",
+        session_stamp="20260427",
+        capture_id="20260427",
+        artifacts=(artifact,),
+    )
 
 
 # =============================================================================
@@ -34,6 +55,39 @@ def test_static_menu_command_layout_reflects_pruned_contract():
     assert get_command("6") is None
 
 
+def test_search_app_scope_prioritizes_exact_package_match(monkeypatch) -> None:
+    menu_module = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu")
+
+    kindle = _group("com.amazon.kindle")
+    shopping = _group("com.amazon.mshop.android.shopping")
+    groups = (kindle, shopping)
+
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.core.repository.list_packages",
+        lambda _groups: [
+            ("com.amazon.kindle", "1", 1, "Amazon Kindle"),
+            ("com.amazon.mshop.android.shopping", "1", 1, "Amazon Shopping"),
+        ],
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.flows.selection.select_latest_groups",
+        lambda selected: tuple(selected),
+    )
+    monkeypatch.setattr(
+        menu_module.prompt_utils,
+        "prompt_text",
+        lambda *_a, **_k: "com.amazon.mshop.android.shopping",
+    )
+    monkeypatch.setattr(menu_module.prompt_utils, "get_choice", lambda *_a, **_k: "1")
+
+    selection = menu_module._search_app_scope(groups)
+
+    assert isinstance(selection, ScopeSelection)
+    assert selection.scope == "app"
+    assert selection.label == "Amazon Shopping | com.amazon.mshop.android.shopping"
+    assert selection.groups == (shopping,)
+
+
 # =============================================================================
 # Former tests/static_analysis/test_run_controls_prompt.py
 # =============================================================================
@@ -49,6 +103,45 @@ def test_ask_run_controls_defaults_to_run(monkeypatch) -> None:
     monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *_a, **_k: "1")
 
     assert actions.ask_run_controls() == "run"
+
+
+def test_prompt_advanced_options_can_disable_split_scan(monkeypatch) -> None:
+    params = RunParameters(
+        profile="full",
+        scope="profile",
+        scope_label="Research Dataset Alpha",
+        scan_splits=True,
+    )
+
+    monkeypatch.setattr(run_prompts, "prompt_int", lambda _label, default, **_kwargs: default)
+    monkeypatch.setattr(run_prompts, "prompt_float", lambda _label, default, **_kwargs: default)
+    monkeypatch.setattr(run_prompts, "prompt_choice", lambda _label, _options, *, default: default)
+    monkeypatch.setattr(
+        run_prompts.prompt_utils,
+        "prompt_text",
+        lambda _label, default="", **_kwargs: default,
+    )
+
+    yes_no_answers = {
+        "Modify advanced options?": True,
+        "Reuse disk cache": params.reuse_cache,
+        "Verbose output": params.verbose_output,
+        "Artifact detail output": params.artifact_detail,
+        "Split APK scan (scan base + split APKs)": False,
+        "Dry-run (no persistence)": params.dry_run,
+        "Refresh permission snapshot after detector run": params.permission_snapshot_refresh,
+    }
+    monkeypatch.setattr(
+        run_prompts.prompt_utils,
+        "prompt_yes_no",
+        lambda label, default=False: yes_no_answers.get(label, default),
+    )
+
+    updated = run_prompts.prompt_advanced_options(params)
+
+    assert updated.scan_splits is False
+    summary = dict(run_prompts._summarise_params(updated))
+    assert summary["Split APK scan"] == "No"
 
 
 # =============================================================================

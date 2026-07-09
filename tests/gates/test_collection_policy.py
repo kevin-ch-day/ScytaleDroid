@@ -34,7 +34,7 @@ def test_collection_policy_marks_unit_and_integration_files() -> None:
 
 
 def test_collection_policy_marks_db_report_files() -> None:
-    assert derived_markers_for_path("tests/db/test_report_dynamic_deep_audit.py") == (
+    assert derived_markers_for_path("tests/database/test_report_dynamic_deep_audit.py") == (
         "report_contract",
     )
 

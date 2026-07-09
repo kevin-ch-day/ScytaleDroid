@@ -42,7 +42,10 @@ class ActiveCaptureConfig:
 
 
 def capture_controls_status_message() -> str:
-    return "Enter = stop & finalize | A = abort & discard | R = relaunch target | Ctrl+C = emergency abort"
+    return (
+        "Enter = stop & finalize | A = discard run (not countable) | "
+        "R = relaunch target | Ctrl+C = emergency abort"
+    )
 
 
 def capture_console_launch_message() -> str:
@@ -51,7 +54,7 @@ def capture_console_launch_message() -> str:
 
 def capture_console_exit_message(action: CaptureAction) -> str:
     if action == CaptureAction.ABORT:
-        return "Live capture console aborted; returning to run transcript."
+        return "Live capture console aborted; run marked discarded/not countable; returning to run transcript."
     return "Live capture console closed; returning to run transcript."
 
 
@@ -89,7 +92,10 @@ def extra_hold_timer_message(
     target = _format_duration(int(target_duration_s))
     hold_elapsed = _format_duration(max(int(elapsed_s) - int(target_duration_s), 0))
     detail = f" | {timer_detail}" if str(timer_detail or "").strip() else ""
-    return f"Target reached: {target} | extra hold: +{hold_elapsed} | press Enter to finalize{detail}{suffix}"
+    return (
+        f"Target reached: {target} | optional extra hold: +{hold_elapsed} | "
+        f"press Enter to finalize{detail}{suffix}"
+    )
 
 
 def capture_phase_label(*, run_profile: str | None, timer_detail: str = "") -> str:

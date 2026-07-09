@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = [pytest.mark.gate]
+
 
 def _iter_text_files(root: Path) -> list[Path]:
     out: list[Path] = []
@@ -51,3 +56,29 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
                 violations.append(str(rel))
 
     assert not violations, "paper-era naming leakage found outside allowlist: " + ", ".join(sorted(violations))
+
+
+def test_no_user_facing_paper_mode_phrase_regression() -> None:
+    """Prevent legacy user-facing wording from reappearing in the OSS UI.
+
+    Internal contract keys may retain 'paper*' for backward compatibility.
+    This gate only blocks the confusing UI/help/error phrase "paper mode".
+    """
+
+    roots = [
+        Path("scytaledroid/Reporting"),
+        Path("scytaledroid/DynamicAnalysis/controllers"),
+        Path("scytaledroid/DynamicAnalysis/pcap"),
+        Path("scytaledroid/DynamicAnalysis/run_summary.py"),
+    ]
+    haystack = ""
+    for root in roots:
+        if root.is_file():
+            haystack += root.read_text(encoding="utf-8", errors="replace").lower() + "\n"
+            continue
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            haystack += path.read_text(encoding="utf-8", errors="replace").lower() + "\n"
+
+    assert "paper mode" not in haystack

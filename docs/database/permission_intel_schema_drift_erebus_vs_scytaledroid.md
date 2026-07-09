@@ -60,7 +60,8 @@ Reference snapshot columns: `obs_id`, `sample_id`, `sha256`, `package_name`, `pe
 - **`run_id`** (`0044`) — inserted on new rows when present; **not** updated on `ON DUPLICATE KEY` in current `permission_record` upsert (classification/sha256 refresh path).  
 - **`sha256` / `bucket` / `rule_fired`:** feature-detected; some deployments use **NOT NULL** `sha256` (Erebus `obs_sample_schema_contract` warns).
 
-**Scytale:** No writer yet — S2 design doc remains authoritative.
+**Scytale:** No writer yet — see `permission_intel_contract.md` and the
+S2-P1A readiness doc for the active pre-write contract.
 
 ---
 
@@ -131,6 +132,6 @@ Erebus `permission_queue_apply.class_action_map` keys include **`aosp`** (maps t
 
 ## 8. Related ScytaleDroid docs
 
-- [permission_intel_scytaledroid_s1_read_path_audit.md](permission_intel_scytaledroid_s1_read_path_audit.md)  
-- [permission_intel_scytaledroid_s1_5_classifier_contract.md](permission_intel_scytaledroid_s1_5_classifier_contract.md)  
-- [permission_intel_scytaledroid_s2_observation_design.md](permission_intel_scytaledroid_s2_observation_design.md)
+- [permission_intel_contract.md](permission_intel_contract.md)
+- [permission_intel_scytaledroid_s2_p1a_operational_readiness.md](permission_intel_scytaledroid_s2_p1a_operational_readiness.md)
+- [archive/permission-intel-phase-notes/](archive/permission-intel-phase-notes/) — historical S1/S2 phase notes

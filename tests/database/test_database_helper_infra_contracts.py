@@ -12,6 +12,7 @@ import pytest
 
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils import menu_actions as ma
+from scytaledroid.Database.db_utils import reference_seed
 from scytaledroid.Database.db_utils.sql_exception_context import (
     extract_sql_exception_context,
     infer_failing_table,
@@ -115,3 +116,22 @@ def test_infer_failing_table_permission_risk() -> None:
     assert infer_failing_table(exception_message=msg, failure_stage="permission_risk.write") == (
         "static_permission_risk_vnext"
     )
+
+
+def test_reference_seed_executes_inserts(monkeypatch):
+    calls = []
+
+    def fake_run_sql(sql, params=None, **kwargs):
+        calls.append((sql, params, kwargs.get("query_name")))
+        return None
+
+    monkeypatch.setattr(reference_seed, "run_sql", fake_run_sql)
+    monkeypatch.setattr(reference_seed, "table_exists", lambda *_a, **_k: True)
+
+    reference_seed.ensure_default_reference_rows()
+
+    # We expect at least the publishers + profiles inserts to run.
+    assert any("android_app_publishers" in sql for sql, _p, _q in calls)
+    assert any("android_publisher_prefix_rules" in sql for sql, _p, _q in calls)
+    assert any("android_app_profiles" in sql for sql, _p, _q in calls)
+    assert any("SET display_name" in sql for sql, _p, _q in calls)

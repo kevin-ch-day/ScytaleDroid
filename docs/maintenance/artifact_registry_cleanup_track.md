@@ -225,9 +225,9 @@ array (pre-change exports); treat those as legacy when scripting parsers.
 
 ## 5. Tests (see repo)
 
-- `tests/db/test_report_artifact_registry_integrity.py` — formatting + `--help` contract.
-- `tests/db/test_report_artifact_registry_cleanup_candidates.py` — formatting + mocked SQL contract.
-- `tests/db/test_artifact_registry_prune.py` — cutoff math, receipt bundle, prune orchestration mocks.
+- `tests/database/test_report_artifact_registry_integrity.py` — formatting + `--help` contract.
+- `tests/database/test_report_artifact_registry_cleanup_candidates.py` — formatting + mocked SQL contract.
+- `tests/database/test_artifact_registry_prune.py` — cutoff math, receipt bundle, prune orchestration mocks.
 - Future: integration tests against a DB fixture for linked vs dangling classification mirror
   `v_artifact_registry_integrity` DDL in `tests/database/test_schema_manifest_static_handoff_view.py`
   style.

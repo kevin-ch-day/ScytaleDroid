@@ -272,10 +272,10 @@ contract docs above rather than a separate standalone note.
 
 ## Contributing
 
-We welcome bug reports, feature requests, and pull requests. Please review the
-[contribution guidelines](docs/CONTRIBUTING.md) for details on our development workflow, coding
-style, and testing expectations. Adherence to the [Code of Conduct](docs/CODE_OF_CONDUCT.md) is
-required for all community interactions.
+We welcome bug reports, feature requests, and pull requests. Please review
+[`AGENTS.md`](AGENTS.md) for repo-specific development workflow, coding style,
+testing expectations, and high-risk areas. Security-sensitive reports should
+follow [`SECURITY.md`](SECURITY.md).
 
 To run the test suite locally:
 

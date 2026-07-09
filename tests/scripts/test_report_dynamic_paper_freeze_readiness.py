@@ -216,3 +216,57 @@ def test_main_writes_manifest_plan_and_decision_board_exports(tmp_path: Path, mo
     alias_summary = json.loads(capsys.readouterr().out)
     assert alias_summary["paper_freeze_manifest_json"].endswith("paper_freeze_manifest.json")
     assert alias_summary["live_drift_checked"] is False
+
+
+def test_tier_summary_separates_live_drift_from_retained_prior_build(monkeypatch) -> None:
+    candidate = freeze.PaperFreezeBuildCandidate(
+        package_name="com.example.app",
+        version_code="100",
+        version_name="1.0",
+        static_run_id="10",
+        base_apk_sha256="a" * 64,
+        strict_idle_runs=3,
+        quiescent_fg_runs=0,
+        baseline_valid_runs=3,
+        interactive_valid_runs=4,
+        valid_pcap_count=7,
+        qa_valid_count=7,
+        first_capture_at="2026-07-09T00:00:00Z",
+        last_capture_at="2026-07-09T01:00:00Z",
+        relation_to_active_target="prior-build",
+        missing_baseline_runs=0,
+        missing_interactive_runs=0,
+        status="ready",
+        static_run_ids=("10",),
+        run_ids=("r1",),
+    )
+    recommendation = freeze.PaperFreezeRecommendation(
+        package_name="com.example.app",
+        installed_target_version_code="200",
+        installed_target_version_name="2.0",
+        installed_target_static_run_id="20",
+        installed_target_base_apk_sha256="b" * 64,
+        selected_build=candidate,
+        build_candidates=(candidate,),
+        refresh_candidate=True,
+        retained_prior_build_selected=True,
+    )
+
+    monkeypatch.setattr(freeze, "_load_tracker_payload", lambda cfg: ("ok", {"apps": {"com.example.app": {"runs": []}}}, {}))
+    monkeypatch.setattr(freeze, "active_research_cohort_packages", lambda: ("com.example.app",))
+    monkeypatch.setattr(freeze, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(freeze, "recommend_paper_freeze_for_runs", lambda package_name, runs, cfg: recommendation)
+
+    report_no_live_drift = freeze.build_paper_evidence_tier_report(live_drift_map={})
+    summary = report_no_live_drift["summary"]
+
+    assert summary["paper_usable"] == 1
+    assert summary["prior_build_paper_usable"] == 1
+    assert summary["non_strict_current_paper_usable"] == 1
+    assert summary["live_drift_detected_paper_usable"] == 0
+    assert summary["drifted_but_paper_usable"] == 1
+
+    report_with_live_drift = freeze.build_paper_evidence_tier_report(
+        live_drift_map={"com.example.app": {"observed_version_code": "300"}}
+    )
+    assert report_with_live_drift["summary"]["live_drift_detected_paper_usable"] == 1

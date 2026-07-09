@@ -97,7 +97,7 @@ Use **`bridge_posture.py`** and **[legacy_static_reader_dependency_map.md](legac
 | --- | --- |
 | Python legacy SQL grep | Same tight patterns as [legacy_static_reader_dependency_map.md](legacy_static_reader_dependency_map.md) “Re-verify command” |
 | Web grep | Same as Web deep dive |
-| Tests | `pytest tests/database tests/db tests/persistence tests/static_analysis -q` (expand as touched) |
+| Tests | `pytest tests/database tests/persistence tests/static_analysis -q` (expand as touched) |
 | Web smoke | `SCYTALEDROID_WEB_ROOT=… ./scripts/db/smoke_web_db.sh` when views/consumers change |
 | Operator | Spot-check DB menus + one session reconcile report |
 
@@ -234,7 +234,7 @@ See **`legacy_static_tables_web_deep_dive.md`** for view vs base-table structure
 ## Related docs
 
 - `legacy_static_reader_dependency_map.md` — **authoritative planning map** for legacy-five **readers** (this repo), false positives, `metrics.run_id` warning, Phase 2 retirement buckets, **§2.1.1** mirror-helper wiring (merged). **§8** records follow-up gaps: indirect `table_counts` over the whole catalog, `health_checks_permission` → `contributors`, `v_run_overview` smoke chain, CSV/matrix drift if it reappears, **`status_actions` vs `schema_gate`** (resolved — §8.5), and **`run_persistence_queries` reconcile bridge** shape (**fixed** — §8.6).
-- `legacy_static_phase2a_policy_alignment_plan.md` — **completed** Phase 2A record + verification commands (stub).
+- `archive/completed-plans/legacy_static_phase2a_policy_alignment_plan.md` — **completed** Phase 2A record + verification commands (stub).
 - `legacy_static_tables_consumer_audit.md` — **index**: tables in scope, INSERT grep, legend; points here for per-table readers. Relabel / UX sequencing: see **Appendix A** above.
 - `legacy_static_tables_web_deep_dive.md` — Web contract; single `runs` diagnostic.
 - `static_database_schema_audit_plan.md` — read-only inventory semantics.

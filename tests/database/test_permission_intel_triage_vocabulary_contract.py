@@ -1,7 +1,7 @@
 """S1.5: Pin Scytale Permission Intel triage/queue vocabulary vs documented PI contract.
 
 Documented PI triage superset (maintain when Erebus contract / operator SQL adds states):
-- ``docs/database/permission_intel_scytaledroid_s1_5_classifier_contract.md``
+- ``docs/database/permission_intel_contract.md``
 - Erebus ``docs/data/android_permissions_schema_contract.md``
 """
 

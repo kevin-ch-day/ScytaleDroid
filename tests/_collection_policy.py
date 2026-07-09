@@ -27,7 +27,7 @@ def derived_markers_for_path(rel_path: str | Path) -> tuple[str, ...]:
     elif bucket == "integration":
         markers.append("integration")
 
-    if bucket == "db" and filename.startswith("test_report_"):
+    if bucket == "database" and filename.startswith("test_report_"):
         markers.append("report_contract")
 
     seen: set[str] = set()

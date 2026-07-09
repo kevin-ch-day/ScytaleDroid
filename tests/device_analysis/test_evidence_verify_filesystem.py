@@ -111,3 +111,29 @@ def test_verify_fails_on_hash_mismatch() -> None:
 
     _issues, exit_code = verify_harvest_filesystem(harvest_root=harvest_base, data_root=data)
     assert exit_code == 1
+
+
+def test_iter_manifest_written_hashes_skips_invalid_hex_and_dedupes() -> None:
+    from scytaledroid.DeviceAnalysis.evidence_verify.filesystem import iter_manifest_written_hashes
+
+    data = Path.cwd() / "data"
+    harvest_base = data / "device_apks"
+    d = harvest_base / "Z" / "m"
+    d.mkdir(parents=True)
+    digest_ok = "c" * 64
+    doc = {
+        "package": {"package_name": "a.b"},
+        "execution": {
+            "observed_artifacts": [
+                {"pull_outcome": "written", "sha256": "not-64-hex"},
+                {"pull_outcome": "written", "sha256": digest_ok},
+                {"pull_outcome": "written", "sha256": digest_ok},
+                {"pull_outcome": "skipped", "sha256": digest_ok},
+            ]
+        },
+    }
+    (d / "harvest_package_manifest.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    rows = iter_manifest_written_hashes(harvest_root=harvest_base, data_root=data)
+    assert len(rows) == 1
+    assert rows[0][2] == digest_ok
