@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,18 @@ from typing import Any
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
+from scytaledroid.DynamicAnalysis.pcap.enrichment_outcome import (
+    COMPLETED,
+    COMPLETED_NO_OBSERVATIONS,
+    FAILED_INPUT_INVALID,
+    FAILED_INTERNAL,
+    FAILED_PARSER,
+    FAILED_TOOL_EXECUTION,
+    SKIPPED_NOT_APPLICABLE,
+    SKIPPED_TOOL_UNAVAILABLE,
+    EnrichmentOutcome,
+    make_outcome,
+)
 from scytaledroid.DynamicAnalysis.pcap.identity import ensure_features_capture_identity
 from scytaledroid.DynamicAnalysis.pcap.posture import summarize_traffic_posture
 from scytaledroid.DynamicAnalysis.pcap.timeseries import scan_pcap_timeseries_and_destinations
@@ -343,8 +356,13 @@ def _extract_features(
             "missing_tools": report.get("missing_tools") or [],
             "pcap_valid": bool(report.get("report_status") == "ok"),
             "pcap_enrichment": {
-                "status": "not_attempted",
-                "reason": None,
+                "status": "skipped_not_applicable",
+                "reason_code": "not_attempted",
+                "reason": "not_attempted",
+                "message": "PCAP enrichment has not been attempted.",
+                "usable": False,
+                "observation_count": 0,
+                "legacy_status": "skipped",
             },
             "feature_schema_version": "v1.3",
             "protocol": {
@@ -421,6 +439,32 @@ def _extract_features(
     }
 
 
+def _apply_enrichment_outcome(enrich: dict[str, Any], outcome: EnrichmentOutcome) -> None:
+    enrich.clear()
+    enrich.update(outcome)
+
+
+def _pcap_observation_count(stats: dict[str, Any]) -> int:
+    counts: list[int] = []
+    for key in ("unique_dst_ip_count", "unique_dst_port_count"):
+        value = _safe_int(stats.get(key))
+        if value is not None:
+            counts.append(value)
+    for section_key, count_key in (
+        ("direction_summary", "outbound_packets"),
+        ("direction_summary", "inbound_packets"),
+        ("direction_summary", "unknown_packets"),
+        ("flow_summary", "flow_count"),
+        ("burst_summary", "burst_count"),
+    ):
+        section = stats.get(section_key)
+        if isinstance(section, dict):
+            value = _safe_int(section.get(count_key))
+            if value is not None:
+                counts.append(value)
+    return sum(count for count in counts if count > 0)
+
+
 def _enrich_features_from_pcap(
     features: dict[str, Any],
     report: dict[str, Any],
@@ -443,98 +487,217 @@ def _enrich_features_from_pcap(
         features["quality"] = quality
     enrich = quality.get("pcap_enrichment")
     if not isinstance(enrich, dict):
-        enrich = {"status": "not_attempted", "reason": None}
+        enrich = {}
         quality["pcap_enrichment"] = enrich
+
+    source = report.get("pcap_path") if isinstance(report.get("pcap_path"), str) else None
+    if str(report.get("report_status") or "") not in {"", "ok"}:
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                FAILED_INPUT_INVALID,
+                "pcap_report_not_ok",
+                "PCAP report status is not usable for enrichment.",
+                usable=False,
+                source=source,
+            ),
+        )
+        return
 
     tshark_path = shutil.which("tshark")
     if not tshark_path:
-        enrich["status"] = "skipped"
-        enrich["reason"] = "tshark_missing"
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                SKIPPED_TOOL_UNAVAILABLE,
+                "tshark_missing",
+                "tshark is unavailable; packet-level enrichment was skipped.",
+                usable=False,
+                source=source,
+            ),
+        )
         return
     rel = report.get("pcap_path")
     if not isinstance(rel, str) or not rel.strip():
-        enrich["status"] = "skipped"
-        enrich["reason"] = "pcap_path_missing"
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                SKIPPED_NOT_APPLICABLE,
+                "pcap_path_missing",
+                "No PCAP path was recorded for this run.",
+                usable=False,
+                tool_path=tshark_path,
+                source=None,
+            ),
+        )
         return
     pcap_path = run_dir / rel
     if not pcap_path.exists():
-        enrich["status"] = "skipped"
-        enrich["reason"] = "pcap_file_missing"
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                SKIPPED_NOT_APPLICABLE,
+                "pcap_file_missing",
+                "Recorded PCAP path does not exist in the run directory.",
+                usable=False,
+                tool_path=tshark_path,
+                source=rel,
+            ),
+        )
         return
 
     try:
         stats = scan_pcap_timeseries_and_destinations(pcap_path, tshark_path=tshark_path)
+    except (subprocess.CalledProcessError, OSError) as exc:
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                FAILED_TOOL_EXECUTION,
+                "tshark_execution_failed",
+                f"tshark execution failed: {type(exc).__name__}",
+                usable=False,
+                tool_path=tshark_path,
+                source=rel,
+            ),
+        )
+        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "tshark_execution_failed", "error_type": type(exc).__name__})
+        return
+    except (json.JSONDecodeError, ValueError) as exc:
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                FAILED_PARSER,
+                "pcap_parser_failed",
+                f"PCAP parser failed: {type(exc).__name__}",
+                usable=False,
+                tool_path=tshark_path,
+                source=rel,
+            ),
+        )
+        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "pcap_parser_failed", "error_type": type(exc).__name__})
+        return
     except Exception as exc:  # noqa: BLE001
-        enrich["status"] = "failed"
-        enrich["reason"] = f"scan_failed:{exc}"
-        _log(event_logger, "pcap_features_enrich_failed", {"error": str(exc)})
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                FAILED_INTERNAL,
+                "pcap_enrichment_internal_error",
+                f"PCAP enrichment failed internally: {type(exc).__name__}",
+                usable=False,
+                tool_path=tshark_path,
+                source=rel,
+            ),
+        )
+        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "pcap_enrichment_internal_error", "error_type": type(exc).__name__})
+        return
+    if not isinstance(stats, dict):
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                FAILED_PARSER,
+                "pcap_parser_invalid_output",
+                "PCAP parser returned an invalid output shape.",
+                usable=False,
+                tool_path=tshark_path,
+                source=rel,
+            ),
+        )
         return
 
-    metrics = features.get("metrics")
-    if not isinstance(metrics, dict):
-        metrics = {}
-        features["metrics"] = metrics
-    proxies = features.get("proxies")
-    if not isinstance(proxies, dict):
-        proxies = {}
-        features["proxies"] = proxies
-    direction = features.get("direction")
-    if not isinstance(direction, dict):
-        direction = {"status": "not_attempted", "summary": {}}
-        features["direction"] = direction
-    flows = features.get("flows")
-    if not isinstance(flows, dict):
-        flows = {"status": "not_attempted", "summary": {}}
-        features["flows"] = flows
-    bursts = features.get("bursts")
-    if not isinstance(bursts, dict):
-        bursts = {"status": "not_attempted", "summary": {}}
-        features["bursts"] = bursts
-    visibility = features.get("visibility")
-    if not isinstance(visibility, dict):
-        visibility = {"status": "not_attempted", "summary": {}}
-        features["visibility"] = visibility
-    startup = features.get("startup_profile")
-    if not isinstance(startup, dict):
-        startup = {"status": "not_attempted", "summary": {}}
-        features["startup_profile"] = startup
-    window_metrics = features.get("window_metrics")
-    if not isinstance(window_metrics, dict):
-        window_metrics = {}
-        features["window_metrics"] = window_metrics
+    try:
+        metrics = features.get("metrics")
+        if not isinstance(metrics, dict):
+            metrics = {}
+            features["metrics"] = metrics
+        proxies = features.get("proxies")
+        if not isinstance(proxies, dict):
+            proxies = {}
+            features["proxies"] = proxies
+        direction = features.get("direction")
+        if not isinstance(direction, dict):
+            direction = {"status": "not_attempted", "summary": {}}
+            features["direction"] = direction
+        flows = features.get("flows")
+        if not isinstance(flows, dict):
+            flows = {"status": "not_attempted", "summary": {}}
+            features["flows"] = flows
+        bursts = features.get("bursts")
+        if not isinstance(bursts, dict):
+            bursts = {"status": "not_attempted", "summary": {}}
+            features["bursts"] = bursts
+        visibility = features.get("visibility")
+        if not isinstance(visibility, dict):
+            visibility = {"status": "not_attempted", "summary": {}}
+            features["visibility"] = visibility
+        startup = features.get("startup_profile")
+        if not isinstance(startup, dict):
+            startup = {"status": "not_attempted", "summary": {}}
+            features["startup_profile"] = startup
+        window_metrics = features.get("window_metrics")
+        if not isinstance(window_metrics, dict):
+            window_metrics = {}
+            features["window_metrics"] = window_metrics
 
-    metrics.update(
-        {
-            "bytes_per_second_p50": stats.get("bytes_per_second_p50"),
-            "bytes_per_second_p95": stats.get("bytes_per_second_p95"),
-            "bytes_per_second_max": stats.get("bytes_per_second_max"),
-            "packets_per_second_p50": stats.get("packets_per_second_p50"),
-            "packets_per_second_p95": stats.get("packets_per_second_p95"),
-            "packets_per_second_max": stats.get("packets_per_second_max"),
-            "burstiness_bytes_p95_over_p50": stats.get("burstiness_bytes_p95_over_p50"),
-            "burstiness_packets_p95_over_p50": stats.get("burstiness_packets_p95_over_p50"),
-        }
-    )
-    proxies.update(
-        {
-            "unique_dst_ip_count": stats.get("unique_dst_ip_count"),
-            "unique_dst_port_count": stats.get("unique_dst_port_count"),
-        }
-    )
-    direction["status"] = "ok"
-    direction["summary"] = stats.get("direction_summary") or {}
-    flows["status"] = "ok"
-    flows["summary"] = stats.get("flow_summary") or {}
-    bursts["status"] = "ok"
-    bursts["summary"] = stats.get("burst_summary") or {}
-    visibility["status"] = "ok"
-    visibility["summary"] = stats.get("tls_quic_visibility") or {}
-    startup["status"] = "ok"
-    startup["summary"] = stats.get("startup_profile") or {}
-    window_metrics.update(stats.get("window_metrics") or {})
-    enrich["status"] = "ok"
-    enrich["reason"] = None
+        metrics.update(
+            {
+                "bytes_per_second_p50": stats.get("bytes_per_second_p50"),
+                "bytes_per_second_p95": stats.get("bytes_per_second_p95"),
+                "bytes_per_second_max": stats.get("bytes_per_second_max"),
+                "packets_per_second_p50": stats.get("packets_per_second_p50"),
+                "packets_per_second_p95": stats.get("packets_per_second_p95"),
+                "packets_per_second_max": stats.get("packets_per_second_max"),
+                "burstiness_bytes_p95_over_p50": stats.get("burstiness_bytes_p95_over_p50"),
+                "burstiness_packets_p95_over_p50": stats.get("burstiness_packets_p95_over_p50"),
+            }
+        )
+        proxies.update(
+            {
+                "unique_dst_ip_count": stats.get("unique_dst_ip_count"),
+                "unique_dst_port_count": stats.get("unique_dst_port_count"),
+            }
+        )
+        direction["status"] = "ok"
+        direction["summary"] = stats.get("direction_summary") or {}
+        flows["status"] = "ok"
+        flows["summary"] = stats.get("flow_summary") or {}
+        bursts["status"] = "ok"
+        bursts["summary"] = stats.get("burst_summary") or {}
+        visibility["status"] = "ok"
+        visibility["summary"] = stats.get("tls_quic_visibility") or {}
+        startup["status"] = "ok"
+        startup["summary"] = stats.get("startup_profile") or {}
+        window_metrics.update(stats.get("window_metrics") or {})
+        observation_count = _pcap_observation_count(stats)
+    except Exception as exc:  # noqa: BLE001
+        _apply_enrichment_outcome(
+            enrich,
+            make_outcome(
+                FAILED_INTERNAL,
+                "pcap_enrichment_internal_error",
+                f"PCAP enrichment failed internally: {type(exc).__name__}",
+                usable=False,
+                tool_path=tshark_path,
+                source=rel,
+            ),
+        )
+        _log(event_logger, "pcap_features_enrich_failed", {"reason_code": "pcap_enrichment_internal_error", "error_type": type(exc).__name__})
+        return
 
+    status = COMPLETED if observation_count > 0 else COMPLETED_NO_OBSERVATIONS
+    reason_code = "pcap_enrichment_completed" if observation_count > 0 else "pcap_enrichment_no_observations"
+    message = "PCAP enrichment completed." if observation_count > 0 else "PCAP enrichment completed with no packet observations."
+    _apply_enrichment_outcome(
+        enrich,
+        make_outcome(
+            status,
+            reason_code,
+            message,
+            usable=True,
+            observation_count=observation_count,
+            tool_path=tshark_path,
+            source=rel,
+        ),
+    )
 
 def _refresh_traffic_posture(features: dict[str, Any]) -> None:
     posture = features.get("traffic_posture")

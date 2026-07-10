@@ -301,6 +301,13 @@ def test_guided_run_manual_messaging_activity_warns_when_mixed_selected(
     monkeypatch.setattr(guided_run.prompt_utils, "press_enter_to_continue", lambda *a, **k: None)
     monkeypatch.setattr(guided_run.prompt_utils, "get_choice", lambda *args, **kwargs: next(choices))
     monkeypatch.setattr(guided_run.prompt_utils, "prompt_yes_no", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        guided_run,
+        "ensure_plan_or_error",
+        lambda *args, **kwargs: {"plan_path": "/tmp/fake-plan.json", "static_run_id": 5065},
+    )
+    monkeypatch.setattr(guided_run, "print_plan_selection_banner", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(guided_run, "_pre_run_scientific_checks", lambda **_kwargs: True)
     monkeypatch.setattr(guided_run.time, "sleep", lambda *_args, **_kwargs: None)
 
     def _capture_spec(**kwargs):

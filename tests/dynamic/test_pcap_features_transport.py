@@ -224,6 +224,8 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
     from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
     from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: "/usr/bin/tshark" if name == "tshark" else None)
+
     run_dir = tmp_path / "run-1"
     (run_dir / "analysis").mkdir(parents=True)
     (run_dir / "analysis" / "pcap_report.json").write_text(
@@ -331,6 +333,9 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
     assert payload["quality"]["capture_identity"]["package_name"] == "bbc.mobile.news.ww"
     assert payload["quality"]["capture_identity"]["package_slug"] == "bbc_mobile_news_ww"
     assert payload["quality"]["capture_identity"]["pcap_capture_name"] == "app.pcap"
+    assert payload["quality"]["pcap_enrichment"]["status"] == "completed"
+    assert payload["quality"]["pcap_enrichment"]["legacy_status"] == "ok"
+    assert payload["quality"]["pcap_enrichment"]["usable"] is True
     assert payload["direction"]["status"] == "ok"
     assert payload["direction"]["summary"]["outbound_packets"] == 5
     assert payload["flows"]["summary"]["flow_count"] == 2
@@ -353,3 +358,147 @@ def test_pcap_feature_enrichment_appends_direction_flow_burst_and_visibility(mon
     assert payload["media_plane"]["status"] == "not_attempted"
     assert payload["service_context"]["status"] == "no_observations"
     assert payload["service_signals"]["status"] == "no_observations"
+
+
+def _base_enrichment_payload(tmp_path: Path) -> tuple[dict, dict, Path]:
+    run_dir = tmp_path / "run"
+    (run_dir / "artifacts").mkdir(parents=True)
+    (run_dir / "artifacts" / "app.pcap").write_bytes(b"pcap")
+    features = _extract_features(
+        {
+            "report_status": "ok",
+            "missing_tools": [],
+            "capinfos": {"parsed": {"packet_count": 1, "data_size_bytes": 1, "capture_duration_s": 1}},
+            "protocol_hierarchy": [],
+            "top_sni": [],
+            "top_dns": [],
+        },
+        PcapFeatureConfig(),
+        operator={},
+        target={},
+    )
+    report = {"report_status": "ok", "pcap_path": "artifacts/app.pcap"}
+    return features, report, run_dir
+
+
+def _enrich_status(features: dict) -> dict:
+    return features["quality"]["pcap_enrichment"]
+
+
+def test_pcap_enrichment_status_skipped_tool_unavailable(monkeypatch, tmp_path: Path) -> None:
+    from scytaledroid.DynamicAnalysis.pcap.features import _enrich_features_from_pcap
+
+    features, report, run_dir = _base_enrichment_payload(tmp_path)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: None)
+
+    _enrich_features_from_pcap(features, report, run_dir)
+
+    outcome = _enrich_status(features)
+    assert outcome["status"] == "skipped_tool_unavailable"
+    assert outcome["reason_code"] == "tshark_missing"
+    assert outcome["usable"] is False
+    assert outcome["legacy_status"] == "skipped"
+
+
+def test_pcap_enrichment_status_skipped_not_applicable(monkeypatch, tmp_path: Path) -> None:
+    from scytaledroid.DynamicAnalysis.pcap.features import _enrich_features_from_pcap
+
+    features, report, run_dir = _base_enrichment_payload(tmp_path)
+    report.pop("pcap_path")
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: "/usr/bin/tshark")
+
+    _enrich_features_from_pcap(features, report, run_dir)
+
+    assert _enrich_status(features)["status"] == "skipped_not_applicable"
+    assert _enrich_status(features)["reason_code"] == "pcap_path_missing"
+
+
+def test_pcap_enrichment_status_failed_input_invalid(monkeypatch, tmp_path: Path) -> None:
+    from scytaledroid.DynamicAnalysis.pcap.features import _enrich_features_from_pcap
+
+    features, report, run_dir = _base_enrichment_payload(tmp_path)
+    report["report_status"] = "failed"
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: "/usr/bin/tshark")
+
+    _enrich_features_from_pcap(features, report, run_dir)
+
+    assert _enrich_status(features)["status"] == "failed_input_invalid"
+    assert _enrich_status(features)["legacy_status"] == "failed"
+
+
+def test_pcap_enrichment_status_failed_tool_execution(monkeypatch, tmp_path: Path) -> None:
+    import subprocess
+
+    from scytaledroid.DynamicAnalysis.pcap.features import _enrich_features_from_pcap
+
+    features, report, run_dir = _base_enrichment_payload(tmp_path)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: "/usr/bin/tshark")
+
+    def boom(*args, **kwargs):
+        raise subprocess.CalledProcessError(2, "tshark")
+
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.scan_pcap_timeseries_and_destinations", boom)
+
+    _enrich_features_from_pcap(features, report, run_dir)
+
+    assert _enrich_status(features)["status"] == "failed_tool_execution"
+    assert _enrich_status(features)["reason_code"] == "tshark_execution_failed"
+
+
+def test_pcap_enrichment_status_failed_parser(monkeypatch, tmp_path: Path) -> None:
+    from scytaledroid.DynamicAnalysis.pcap.features import _enrich_features_from_pcap
+
+    features, report, run_dir = _base_enrichment_payload(tmp_path)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: "/usr/bin/tshark")
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.features.scan_pcap_timeseries_and_destinations",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("bad parse")),
+    )
+
+    _enrich_features_from_pcap(features, report, run_dir)
+
+    assert _enrich_status(features)["status"] == "failed_parser"
+    assert _enrich_status(features)["reason_code"] == "pcap_parser_failed"
+
+
+def test_pcap_enrichment_status_failed_internal(monkeypatch, tmp_path: Path) -> None:
+    from scytaledroid.DynamicAnalysis.pcap.features import _enrich_features_from_pcap
+
+    features, report, run_dir = _base_enrichment_payload(tmp_path)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: "/usr/bin/tshark")
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.features.scan_pcap_timeseries_and_destinations",
+        lambda *args, **kwargs: {"window_metrics": object()},
+    )
+
+    _enrich_features_from_pcap(features, report, run_dir)
+
+    assert _enrich_status(features)["status"] == "failed_internal"
+    assert _enrich_status(features)["reason_code"] == "pcap_enrichment_internal_error"
+
+
+def test_pcap_enrichment_status_completed_no_observations(monkeypatch, tmp_path: Path) -> None:
+    from scytaledroid.DynamicAnalysis.pcap.features import _enrich_features_from_pcap
+
+    features, report, run_dir = _base_enrichment_payload(tmp_path)
+    monkeypatch.setattr("scytaledroid.DynamicAnalysis.pcap.features.shutil.which", lambda name: "/usr/bin/tshark")
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.features.scan_pcap_timeseries_and_destinations",
+        lambda *args, **kwargs: {
+            "unique_dst_ip_count": 0,
+            "unique_dst_port_count": 0,
+            "direction_summary": {"outbound_packets": 0, "inbound_packets": 0, "unknown_packets": 0},
+            "flow_summary": {"flow_count": 0},
+            "burst_summary": {"burst_count": 0},
+            "tls_quic_visibility": {},
+            "startup_profile": {},
+            "window_metrics": {},
+        },
+    )
+
+    _enrich_features_from_pcap(features, report, run_dir)
+
+    outcome = _enrich_status(features)
+    assert outcome["status"] == "completed_no_observations"
+    assert outcome["usable"] is True
+    assert outcome["observation_count"] == 0

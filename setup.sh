@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REQ_FILE_DEFAULT="$ROOT_DIR/requirements.txt"
+REQ_FILE_DEFAULT="$ROOT_DIR/requirements.lock"
 REQ_FILE_PAPER="$ROOT_DIR/requirements-paper-toolchain.txt"
 REQ_FILE="${SCYTALEDROID_REQUIREMENTS_FILE:-$REQ_FILE_DEFAULT}"
 if [[ "${SCYTALEDROID_PAPER_TOOLCHAIN:-0}" == "1" ]] && [[ -f "$REQ_FILE_PAPER" ]]; then
@@ -115,13 +115,17 @@ requirements_changed() {
   [[ "$current" != "$previous" ]]
 }
 
-echo "[Setup] Upgrading pip to the latest version..."
-run_pip_install --upgrade pip >/dev/null
-echo "[Setup] pip is up to date."
+if [[ "${SCYTALEDROID_SETUP_UPGRADE_TOOLING:-0}" == "1" ]]; then
+  echo "[Setup] Upgrading pip to the latest version..."
+  run_pip_install --upgrade pip >/dev/null
+  echo "[Setup] pip is up to date."
 
-echo "[Setup] Upgrading build helpers (setuptools, wheel)..."
-run_pip_install --upgrade setuptools wheel >/dev/null
-echo "[Setup] Build helpers are up to date."
+  echo "[Setup] Upgrading build helpers (setuptools, wheel)..."
+  run_pip_install --upgrade setuptools wheel >/dev/null
+  echo "[Setup] Build helpers are up to date."
+else
+  echo "[Setup] Leaving pip/setuptools/wheel unchanged (set SCYTALEDROID_SETUP_UPGRADE_TOOLING=1 to upgrade)."
+fi
 
 if [[ -f "$REQ_FILE" && -s "$REQ_FILE" ]]; then
   mkdir -p "$SETUP_STATE_DIR"
@@ -134,7 +138,7 @@ if [[ -f "$REQ_FILE" && -s "$REQ_FILE" ]]; then
     echo "[Setup] Python requirements already satisfied."
   fi
 else
-  echo "[Setup] No requirements.txt found or file is empty. Skipping dependency installation."
+  echo "[Setup] No pinned requirements file found or file is empty. Skipping dependency installation."
 fi
 
 if command_exists dnf; then

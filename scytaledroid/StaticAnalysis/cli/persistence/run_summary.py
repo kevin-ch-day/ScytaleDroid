@@ -28,7 +28,6 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
 
 from ...core.findings import Badge, Finding
-from ...core.models import StaticAnalysisReport
 from ..core.cvss_v4 import apply_profiles
 from ..core.masvs_mapper import rule_to_area, rule_to_control, summarise_controls
 from ..core.rule_ids import derive_rule_id

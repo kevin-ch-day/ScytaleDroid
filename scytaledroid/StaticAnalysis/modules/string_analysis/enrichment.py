@@ -7,7 +7,7 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import replace
 import re
 
-from .constants import AUTH_KEYWORDS, DOCUMENTARY_ROOTS
+from .constants import DOCUMENTARY_ROOTS
 from .hit_record import StringHit
 from .verifiers import verification_status_for
 

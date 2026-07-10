@@ -18,8 +18,8 @@ from collections.abc import Mapping, Sequence
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.static_reconcile import reconcile_static_session
 
-type AuditSummary = dict[str, object]
-type Row = Sequence[object]
+AuditSummary = dict[str, object]
+Row = Sequence[object]
 
 
 def _summary_section(summary: AuditSummary, key: str) -> AuditSummary:

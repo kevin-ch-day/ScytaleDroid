@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -96,8 +97,6 @@ from .results_progress import (
 from .results_view_model import (
     RunResultsSessionMeta,
     RunResultsViewModel,
-    _first_int,
-    _first_text,
     _is_large_compact_batch,
     _load_json_mapping as _load_json_mapping_impl,
     build_run_results_view_model as _build_run_results_view_model_impl,

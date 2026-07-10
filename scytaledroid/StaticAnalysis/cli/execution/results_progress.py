@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 
 from scytaledroid.Utils.LoggingUtils import logging_engine
 
-from ..core.models import AppRunResult, RunOutcome, RunParameters
+from ..core.models import AppRunResult, RunParameters
 from .operator_display_label import resolve_operator_app_label
 
 

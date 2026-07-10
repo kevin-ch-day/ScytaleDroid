@@ -1,0 +1,7 @@
+# Direct development/test dependencies.
+-r requirements.in
+
+pytest>=8.0.0
+ruff>=0.15.0
+mypy>=1.20.0
+pip-tools>=7.5.0

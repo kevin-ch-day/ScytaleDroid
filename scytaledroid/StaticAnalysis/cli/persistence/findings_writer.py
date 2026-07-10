@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -17,7 +17,6 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.cvss_v4 import score_vector
-from .utils import require_canonical_schema
 
 _CVSS_BASE_ORDER = ("AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA")
 _LOGGED_MISSING_CONFIG = False
