@@ -214,8 +214,6 @@ def execute_scan(
     apps_completed = 0
     banner_last_emit = time.monotonic()
     last_activity_pulse = time.monotonic()
-    last_report_mono: float | None = None
-    last_report_package: str | None = None
     archive_reports_written = 0
     agg_checks: Counter[str] = Counter()
     recent_completions: deque[str] = deque(maxlen=3)
@@ -683,9 +681,6 @@ def execute_scan(
                 except Exception:
                     pass
                 now_mono = time.monotonic()
-                last_report_mono = now_mono
-                last_report_package = group.package_name
-                last_report_app_display = str(display_name or group.package_name or "").strip() or None
                 if summary.saved_path:
                     archive_reports_written += 1
                 if all_apps_compact_mode and total_artifacts > 0:

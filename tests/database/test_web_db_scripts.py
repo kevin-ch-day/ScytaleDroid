@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,9 +62,21 @@ def test_smoke_shell_script_readable() -> None:
     assert "sd_web_db_smoke.php" in text
 
 
+@pytest.mark.integration
 def test_web_smoke_script_exercises_app_detail_static_and_dynamic_reads() -> None:
-    smoke = Path("/var/www/html/ScytaleDroid-Web/scripts/sd_web_db_smoke.php")
-    assert smoke.exists()
+    web_root = Path(os.environ.get("SCYTALEDROID_WEB_ROOT", "")).expanduser()
+    run_integration = os.environ.get("SCYTALEDROID_RUN_WEB_INTEGRATION", "").strip() == "1"
+    if not web_root:
+        if run_integration:
+            pytest.fail("SCYTALEDROID_RUN_WEB_INTEGRATION=1 requires SCYTALEDROID_WEB_ROOT")
+        pytest.skip("Set SCYTALEDROID_WEB_ROOT and SCYTALEDROID_RUN_WEB_INTEGRATION=1 for Web integration checks.")
+
+    smoke = web_root / "scripts" / "sd_web_db_smoke.php"
+    if not smoke.exists():
+        if run_integration:
+            pytest.fail(f"Web smoke script not found: {smoke}")
+        pytest.skip(f"External Web smoke script not found: {smoke}")
+
     text = smoke.read_text(encoding="utf-8")
     assert "app_overview" in text
     assert "app_sessions" in text

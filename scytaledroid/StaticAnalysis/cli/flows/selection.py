@@ -346,7 +346,6 @@ def resolve_profile_scope(
     older_excluded = sum(count for _, _, count in skipped_details)
 
     if scoped:
-        display_map = load_display_name_map(scoped)
         print()
         menu_utils.print_header(
             "Static Analysis · Profile Workload",

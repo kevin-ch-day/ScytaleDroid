@@ -138,9 +138,11 @@ product model.
 
 Built-in presets currently include:
 
+- `scytale-dark` (default balanced dark theme)
 - `fedora-dark`
 - `fedora-light`
 - `high-contrast`
+- legacy/operator alternates: `blackhat-night`, `aurora`, and `ember`
 
 Primary environment hints:
 

@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 
 from . import colors
 from .summary_cards import SummaryCardItem, summary_item
+from .theme_roles import delta_role
 
 _SEVERITY_ORDER: tuple[tuple[str, str, str], ...] = (
     ("critical", "Critical", "severity_critical"),
@@ -146,21 +147,12 @@ def format_severity_strip(
 
 
 # Delta-specific helpers (new/removed/updated) for reuse across dashboards
-DELTA_STYLES = {
-    "new": "success",
-    "added": "success",
-    "removed": "error",
-    "deleted": "error",
-    "updated": "warning",
-    "changed": "warning",
-}
-
 
 def format_delta_token(kind: str, value: object) -> str:
     """Return a colourised inline token for change deltas."""
 
     canonical = kind.lower().strip()
-    style_name = DELTA_STYLES.get(canonical, "muted")
+    style_name = delta_role(canonical)
     numeric = str(value).strip()
     palette_style = colors.style(style_name)
     label = canonical.upper()

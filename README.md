@@ -140,6 +140,29 @@ The primary supported interface is the menu-driven CLI:
 The API server is not auto-started on CLI launch. Start or stop it explicitly
 from `Main Menu → API server`.
 
+#### API security and uploads
+
+The JSON API fails closed by default through both supported runtime startup and
+direct ASGI app construction. Set a unique `SCYTALEDROID_API_KEY` in your local
+`.env`; empty values and the documented placeholder value `change-me` are
+rejected. Clients may authenticate with either `Authorization: Bearer <key>` or
+`X-API-Key: <key>`.
+
+Unauthenticated API mode is only for local development and tests:
+
+```bash
+SCYTALEDROID_API_AUTH_DISABLED=1 SCYTALEDROID_ENV=test
+```
+
+That bypass is rejected unless the API binds to a loopback host. Do not use it
+for shared workstations or network-accessible API services.
+
+The `/upload` endpoint accepts only a single `.apk` filename. Uploaded bytes are
+streamed into the upload inbox first, validated as a ZIP-compatible APK with
+`AndroidManifest.xml`, and parsed for APK metadata before promotion to the
+canonical APK store. Rejected uploads return a stable `reason_code` and do not
+create normal canonical APK artifacts, sidecars, or upload receipts.
+
 ### Harvest devices
 
 1. Connect one or more Android devices with USB debugging enabled.
@@ -283,6 +306,23 @@ To run the test suite locally:
 pytest
 ```
 
+The default test suite is hermetic and does not require the separate Web
+repository. To opt into the external Web smoke contract, set both:
+
+```bash
+SCYTALEDROID_WEB_ROOT=/path/to/ScytaleDroid-Web \
+SCYTALEDROID_RUN_WEB_INTEGRATION=1 \
+python -m pytest tests/database/test_web_db_scripts.py -q
+```
+
+GitHub Actions enforces the currently clean developer-signal checks:
+
+```bash
+python -m compileall -q scytaledroid scripts main.py
+python -m pytest tests/gates -q
+python -m pytest -q
+```
+
 Linting is handled by Ruff:
 
 ```bash
@@ -293,3 +333,71 @@ ruff format --check .
 ## License
 
 ScytaleDroid is distributed under the terms of the [MIT License](LICENSE).
+
+## Dependency locks, Python support, and optional services
+
+### Supported Python policy
+
+ScytaleDroid supports Python 3.11, 3.12, and 3.13. The minimum supported runtime and syntax target is Python 3.11; tooling may run on newer interpreters, but project changes must not introduce Python 3.12/3.13-only syntax unless the support policy is deliberately revised.
+
+### Reproducible dependency installation
+
+Runtime dependencies are maintained in `requirements.in` and pinned in `requirements.lock`. Development and test dependencies are maintained in `requirements-dev.in` and pinned in `requirements-dev.lock`. `requirements.txt` remains a compatibility entry point for existing `pip install -r requirements.txt` users and delegates to the runtime lock.
+
+Recommended installs:
+
+```bash
+python -m pip install -r requirements.lock
+python -m pip install -r requirements-dev.lock
+```
+
+Regenerate locks only when dependency inputs intentionally change:
+
+```bash
+python -m pip install pip-tools
+python -m piptools compile --resolver=backtracking --upgrade --max-rounds 30 -o requirements.lock requirements.in
+python -m piptools compile --resolver=backtracking --upgrade --max-rounds 30 -o requirements-dev.lock requirements-dev.in
+```
+
+`setup.sh` installs from the pinned runtime lock by default and no longer upgrades `pip`, `setuptools`, or `wheel` unless explicitly requested with `SCYTALEDROID_SETUP_UPGRADE_TOOLING=1 ./setup.sh`.
+
+### Bounded typing check
+
+The repository is not yet type-clean end to end. The repeatable typing entry point for the currently maintained clean scope is:
+
+```bash
+python -m mypy --config-file mypy-bounded.ini scytaledroid/Database/db_core/optional.py scytaledroid/DynamicAnalysis/pcap/enrichment_outcome.py
+```
+
+Broader package discovery was inspected with both `python -m mypy -p scytaledroid` and `python -m mypy scytaledroid --namespace-packages --explicit-package-bases`; both expose pre-existing repository-wide typing debt, especially under DeviceAnalysis and StaticAnalysis. Those areas remain deferred rather than hidden behind a broad ignore-all gate.
+
+### Database-disabled behavior
+
+The operational database is optional for filesystem-only workflows. `db_enabled()` remains the configuration source of truth. New optional access helpers in `scytaledroid.Database.db_core.optional` make this boundary explicit:
+
+- `maybe_get_database()` returns `None` only when the database is deliberately disabled.
+- `require_database()` raises `DatabaseUnavailableError` for DB-required workflows when persistence is disabled or unavailable.
+- Configured connection failures are classified separately from disabled configuration and are not silently converted into filesystem-only operation.
+
+Filesystem-only API construction, APK upload validation/canonical artifact handling, static artifact file operations, dynamic evidence/PCAP feature inspection, and script help/dry informational commands are expected to remain usable without a live MariaDB service. Canonical persistence, DB posture checks, schema tools, and DB-backed read models still require an enabled and reachable database.
+
+### PCAP enrichment outcomes
+
+PCAP enrichment now records explicit structured states instead of collapsing failures into ambiguous empty output:
+
+| Status | Meaning | Usable output |
+| --- | --- | --- |
+| `completed` | Packet metadata enrichment completed with observations. | Yes |
+| `completed_no_observations` | Enrichment ran successfully but observed no packet-level data. | Yes, explicitly empty |
+| `skipped_tool_unavailable` | Required packet tool such as `tshark` was unavailable. | No |
+| `skipped_not_applicable` | The run did not include an applicable PCAP path/file. | No |
+| `failed_input_invalid` | The source PCAP report was already invalid. | No |
+| `failed_tool_execution` | The external tool failed to run successfully. | No |
+| `failed_parser` | Tool output could not be parsed into the expected structure. | No |
+| `failed_internal` | Internal enrichment application failed. | No |
+
+Each outcome includes a stable `reason_code`, operator-facing `message`, `usable` flag, observation count, safe source reference, and legacy status mapping for older consumers.
+
+### CI coverage
+
+CI installs pinned development dependencies from `requirements-dev.lock`. Python 3.11 runs source compilation, gate tests, the bounded mypy check, and the full pytest suite. Python 3.12 and 3.13 run source compilation, gate tests, and a fast compatibility slice (`tests/api`, the Web DB script gate, and PCAP feature tests). CI intentionally does not require MariaDB, Android devices, `tshark`, the separate Web checkout, or a production `.env`.

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import time
+from typing import Generic, TypeVar
 
 CacheKey = tuple[str, str]
 
 DEFAULT_TTL_SECONDS = 300.0
 
 
-class TTLCache[T]:
+T = TypeVar("T")
+
+
+class TTLCache(Generic[T]):
     """Simple TTL cache keyed by (serial, package)."""
 
     def __init__(self, ttl_seconds: float = DEFAULT_TTL_SECONDS) -> None:

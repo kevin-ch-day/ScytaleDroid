@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.11"
+            full_suite: true
+          - python-version: "3.12"
+            full_suite: false
+          - python-version: "3.13"
+            full_suite: false
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SCYTALEDROID_NO_DOTENV: "1"
+      SCYTALEDROID_API_AUTH_DISABLED: "1"
+      SCYTALEDROID_ENV: test
+      SCYTALEDROID_API_HOST: 127.0.0.1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.lock
+
+      - name: Compile Python sources
+        run: python -m compileall -q scytaledroid scripts main.py
+
+      - name: Run gate tests
+        run: python -m pytest tests/gates -q
+
+      - name: Run bounded mypy scope
+        if: matrix.full_suite
+        run: python -m mypy --config-file mypy-bounded.ini scytaledroid/Database/db_core/optional.py scytaledroid/DynamicAnalysis/pcap/enrichment_outcome.py
+
+      - name: Run full test suite
+        if: matrix.full_suite
+        run: python -m pytest -q
+
+      - name: Run fast compatibility slice
+        if: ${{ !matrix.full_suite }}
+        run: python -m pytest tests/api tests/database/test_web_db_scripts.py tests/dynamic/test_pcap_features_transport.py -q

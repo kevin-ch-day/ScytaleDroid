@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .service import build_api_app
+from .service import API_KEY_PLACEHOLDER, build_api_app, validate_api_auth_config
 
 
 @dataclass
@@ -46,9 +46,14 @@ def _resolve_port() -> int:
 
 
 def _require_api_key_configured() -> str:
+    if _env_flag("SCYTALEDROID_API_AUTH_DISABLED", "0"):
+        validate_api_auth_config(bind_host=_resolve_host())
+        return ""
     api_key = os.getenv("SCYTALEDROID_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("SCYTALEDROID_API_KEY is required; refusing to start JSON API without authentication.")
+    if api_key.lower() == API_KEY_PLACEHOLDER:
+        raise RuntimeError("SCYTALEDROID_API_KEY uses the documented placeholder value; generate a unique secret.")
     return api_key
 
 
@@ -104,8 +109,11 @@ def start_api_server(*, force: bool = False) -> ApiRuntimeState:
             detail="uvicorn not installed",
         )
 
+    _api_host = _resolve_host()
+    _api_port = _resolve_port()
+
     try:
-        app = build_api_app()
+        app = build_api_app(bind_host=_api_host)
     except Exception as exc:  # pragma: no cover - optional dependency
         _api_error = f"api init failed: {exc}"
         log.warning(
@@ -120,8 +128,6 @@ def start_api_server(*, force: bool = False) -> ApiRuntimeState:
             detail=str(exc),
         )
 
-    _api_host = _resolve_host()
-    _api_port = _resolve_port()
     _api_error = None
     config = uvicorn.Config(app, host=_api_host, port=_api_port, log_level="warning")
     server = uvicorn.Server(config)
