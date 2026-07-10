@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from . import colors
 from .terminal import get_terminal_width, use_ascii_ui
 from .text_blocks import divider
+from .theme_roles import SEVERITY_STYLE_ROLES
 
 
 @dataclass(frozen=True)
@@ -58,43 +59,17 @@ def _resolve_style(style: Sequence[str] | str | None, fallback: tuple[str, ...])
     raise TypeError(f"Unsupported style type: {type(style)!r}")
 
 
-_SEVERITY_STYLE_MAP = {
-    "critical": "severity_critical",
-    "criticality": "severity_critical",
-    "crit": "severity_critical",
-    "p0": "severity_critical",
-    "sev0": "severity_critical",
-    "high": "severity_high",
-    "p1": "severity_high",
-    "sev1": "severity_high",
-    "medium": "severity_medium",
-    "med": "severity_medium",
-    "p2": "severity_medium",
-    "sev2": "severity_medium",
-    "low": "severity_low",
-    "p3": "severity_low",
-    "sev3": "severity_low",
-    "info": "severity_info",
-    "information": "severity_info",
-    "note": "severity_info",
-    "notes": "severity_info",
-    "p4": "severity_info",
-    "sev4": "severity_info",
-}
-
-
 def _auto_value_style(label: str) -> tuple[str, ...] | None:
     text = re.sub(r"[^a-z0-9]+", " ", label.lower()).strip()
     if not text:
         return None
     for token in text.split():
-        style_name = _SEVERITY_STYLE_MAP.get(token)
+        style_name = SEVERITY_STYLE_ROLES.get(token)
         if style_name:
             return _style(style_name, "progress")
     # Support shorthand such as "H" or "M" on bare labels.
     if len(text) == 1:
-        mapping = {"c": "severity_critical", "h": "severity_high", "m": "severity_medium", "l": "severity_low", "i": "severity_info"}
-        style_name = mapping.get(text)
+        style_name = SEVERITY_STYLE_ROLES.get(text)
         if style_name:
             return _style(style_name, "progress")
     return None

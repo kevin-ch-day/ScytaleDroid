@@ -26,7 +26,7 @@ from ..core.models import AppRunResult, ArtifactOutcome, RunParameters, ScopeSel
 from .heartbeat_state import set_stage as _hb_set_stage
 from .run_health import merge_skipped_detectors, rollup_parse_fallback_signals
 
-type ResourceWarningLine = tuple[str, str]
+ResourceWarningLine = tuple[str, str]
 
 
 def _append_resource_warning(

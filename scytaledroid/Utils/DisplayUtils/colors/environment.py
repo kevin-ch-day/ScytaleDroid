@@ -39,7 +39,7 @@ def detect_palette_name(normaliser: Callable[[str], str]) -> str:
     gtk_theme = os.environ.get("GTK_THEME", "").lower()
     if gtk_theme:
         if "dark" in gtk_theme:
-            return normaliser("fedora-dark" if _host_looks_like_fedora() else "blackhat-night")
+            return normaliser("fedora-dark" if _host_looks_like_fedora() else "scytale-dark")
         if "light" in gtk_theme:
             return normaliser("fedora-light")
 
@@ -54,7 +54,7 @@ def detect_palette_name(normaliser: Callable[[str], str]) -> str:
 
     if _host_looks_like_fedora():
         return normaliser("fedora-dark")
-    return normaliser("blackhat-night")
+    return normaliser("scytale-dark")
 
 
 __all__ = ["detect_palette_name"]

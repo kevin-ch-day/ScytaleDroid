@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 from time import perf_counter
+from typing import TypeVar
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -51,6 +52,7 @@ class _DetectorRegistry:
 
 
 _REGISTRY = _DetectorRegistry()
+DetectorType = TypeVar("DetectorType", bound="BaseDetector")
 
 
 class BaseDetector(ABC):
@@ -73,9 +75,7 @@ class BaseDetector(ABC):
         """Execute the detector and return a result."""
 
 
-def register_detector[DetectorType: BaseDetector](
-    detector_cls: type[DetectorType],
-) -> type[DetectorType]:
+def register_detector(detector_cls: type[DetectorType]) -> type[DetectorType]:
     """Class decorator used to register detectors automatically."""
 
     return _REGISTRY.register(detector_cls)

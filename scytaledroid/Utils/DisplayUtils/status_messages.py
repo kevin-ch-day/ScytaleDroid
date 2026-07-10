@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 from . import colors, text_blocks
 from .terminal import use_ascii_ui
+from .theme_roles import STATUS_STYLE_ROLES, status_roles
 
 _STATUS_PREFIX = {
     "info": "[INFO]",
@@ -34,19 +35,6 @@ _STATUS_ICONS_ASCII = {
     "progress": ">",
 }
 
-_STATUS_STYLES = {
-    "info": ("info", "text"),
-    "warn": ("warning", "warning"),
-    "error": ("error", "error"),
-    "success": ("success", "success"),
-    "blocked": ("blocked", "blocked"),
-    "progress": ("progress", "text"),
-    "delta_new": ("success", "success"),
-    "delta_removed": ("error", "error"),
-    "delta_updated": ("warning", "warning"),
-    "evidence": ("accent", "highlight"),
-}
-
 
 def _style_for(name: str) -> tuple[str, ...]:
     palette = colors.get_palette()
@@ -67,7 +55,7 @@ def status(
     """Return a formatted status line."""
 
     prefix_text = _STATUS_PREFIX.get(level, "[INFO]")
-    styles = _STATUS_STYLES.get(level, ("info", "text"))
+    styles = status_roles(level)
     formatted_message = _apply(message, styles[1])
     if show_icon:
         icon = _STATUS_ICONS_ASCII.get(level) if use_ascii_ui() else _STATUS_ICONS.get(level)
@@ -130,7 +118,7 @@ def status_delta(kind: str, value: object) -> str:
 
     normalised = kind.lower().strip()
     level = f"delta_{normalised}"
-    if level not in _STATUS_STYLES:
+    if level not in STATUS_STYLE_ROLES:
         level = "info"
     return status(str(value), level=level, show_icon=False)
 

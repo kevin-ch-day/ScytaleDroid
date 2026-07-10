@@ -34,6 +34,21 @@ If you find a vulnerability or exposed credential:
 - Use redacted or runtime-built placeholders in tests when matching secret-shaped patterns.
 - Prefer evidence summaries and hashed/redacted derivatives over raw secret-bearing payloads in reports and fixtures.
 
+## API and Upload Boundaries
+
+- The JSON API requires `SCYTALEDROID_API_KEY` by default whether started from
+  the CLI runtime or by constructing the ASGI application directly.
+- Empty API keys and the documented placeholder value `change-me` are rejected.
+- `SCYTALEDROID_API_AUTH_DISABLED=1` is only for explicit development/test use
+  with `SCYTALEDROID_ENV=test` or `SCYTALEDROID_ENV=development`, and only on
+  loopback API bind hosts.
+- The API upload endpoint accepts only single `.apk` uploads. Files are
+  validated as ZIP-compatible APK containers with `AndroidManifest.xml` and
+  parsed for metadata before entering the canonical APK artifact store.
+- Rejected uploads must not be treated as canonical evidence. They return a
+  machine-readable reason code and do not create normal canonical APK sidecars
+  or upload receipts.
+
 ## Response Expectations
 
 Security triage in this repo usually follows:
@@ -44,3 +59,9 @@ Security triage in this repo usually follows:
 4. decide whether Git history rewrite is required for old committed dumps or secrets
 
 Historical research backups and deleted dump files may still require alert resolution even after they are removed from the working tree.
+
+## Optional services and evidence-quality states
+
+Database-backed persistence remains explicit: workflows that require canonical database writes must fail with a clear database-disabled, database-unavailable, or connection-failed state rather than silently dropping persistence. Filesystem-only workflows may use the optional database access boundary and continue without MariaDB when documented.
+
+Dynamic PCAP enrichment records structured outcomes (`completed`, `completed_no_observations`, `skipped_tool_unavailable`, `skipped_not_applicable`, `failed_input_invalid`, `failed_tool_execution`, `failed_parser`, and `failed_internal`) so operators can distinguish missing tools, invalid input, parser failures, and true no-observation captures without changing packet feature definitions or research thresholds.

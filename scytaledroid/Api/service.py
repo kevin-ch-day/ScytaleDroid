@@ -8,14 +8,16 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from ipaddress import ip_address
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Database.db_queries.sql_typed_reads import resolved_static_run_started_at_utc
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
 from scytaledroid.StaticAnalysis.persistence import list_reports
@@ -43,6 +45,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 MAX_LIST_LIMIT = 200
 MAX_JOB_HISTORY = 200
 DEFAULT_MAX_UPLOAD_MB = 200
+API_KEY_PLACEHOLDER = "change-me"
+API_AUTH_DISABLED_ENV = "SCYTALEDROID_API_AUTH_DISABLED"
+API_ENV_ENV = "SCYTALEDROID_ENV"
+API_AUTH_BYPASS_ENVS = {"test", "development"}
+APK_UPLOAD_SUFFIX = ".apk"
+APK_MANIFEST_NAME = "AndroidManifest.xml"
+UPLOAD_REJECT_EXTENSION = "invalid_extension"
+UPLOAD_REJECT_NOT_ZIP = "invalid_apk_zip"
+UPLOAD_REJECT_MANIFEST_MISSING = "android_manifest_missing"
+UPLOAD_REJECT_CORRUPT_ZIP = "corrupt_apk_zip"
+UPLOAD_REJECT_OVERSIZE = "upload_too_large"
+UPLOAD_REJECT_METADATA = "metadata_extraction_failed"
 
 
 @dataclass
@@ -65,6 +79,19 @@ class ScanRequest(BaseModel):
 
 _jobs: dict[str, JobRecord] = {}
 _jobs_lock = threading.Lock()
+
+
+class ApiAuthConfigError(RuntimeError):
+    """Raised when API authentication configuration is unsafe."""
+
+
+class UploadValidationError(ValueError):
+    """Stable API upload rejection with a machine-readable reason code."""
+
+    def __init__(self, reason_code: str, message: str, *, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.status_code = status_code
 
 
 def _record_job(job: JobRecord) -> None:
@@ -214,16 +241,83 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _normalise_upload_filename(filename: str | None) -> str:
+    """Return the client basename only; never trust client directory components."""
+
+    raw = str(filename or "upload.apk").replace("\\", "/")
+    name = Path(raw).name.strip()
+    return name or "upload.apk"
+
+
+def _validate_upload_filename(filename: str | None) -> str:
+    basename = _normalise_upload_filename(filename)
+    if Path(basename).suffix.lower() != APK_UPLOAD_SUFFIX:
+        raise UploadValidationError(
+            UPLOAD_REJECT_EXTENSION,
+            "Only single APK uploads with a .apk filename are accepted.",
+        )
+    return basename
+
+
+def _validate_apk_container(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            try:
+                bad_member = archive.testzip()
+            except RuntimeError as exc:
+                raise UploadValidationError(
+                    UPLOAD_REJECT_CORRUPT_ZIP,
+                    "APK ZIP structure is corrupt.",
+                ) from exc
+            if bad_member is not None:
+                raise UploadValidationError(
+                    UPLOAD_REJECT_CORRUPT_ZIP,
+                    "APK ZIP structure is corrupt.",
+                )
+            names = {name.lstrip("/") for name in archive.namelist()}
+    except zipfile.BadZipFile as exc:
+        raise UploadValidationError(
+            UPLOAD_REJECT_NOT_ZIP,
+            "Uploaded file is not a ZIP-compatible APK container.",
+        ) from exc
+    if APK_MANIFEST_NAME not in names:
+        raise UploadValidationError(
+            UPLOAD_REJECT_MANIFEST_MISSING,
+            "Uploaded APK is missing AndroidManifest.xml.",
+        )
+
+
+def _extract_upload_metadata(apk_path: Path) -> tuple[dict[str, Any], str]:
+    try:
+        group = _artifact_group_from_path(apk_path)
+        artifact = group.artifacts[0] if group.artifacts else None
+    except Exception as exc:
+        raise UploadValidationError(
+            UPLOAD_REJECT_METADATA,
+            "APK metadata extraction failed.",
+        ) from exc
+
+    metadata: dict[str, Any] = {}
+    if artifact is not None:
+        metadata.update(dict(artifact.metadata))
+    metadata.setdefault("package_name", group.package_name)
+    if artifact is not None:
+        metadata.setdefault("artifact", artifact.artifact_label)
+        metadata.setdefault("is_split_member", artifact.is_split_member)
+    return metadata, group.package_name
+
+
 def _write_upload_sidecar(
     apk_path: Path,
     *,
     upload_id: str,
     original_filename: str | None,
     digest: str,
+    extracted_metadata: dict[str, Any],
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "upload_id": upload_id,
-        "uploaded_filename": original_filename or apk_path.name,
+        "uploaded_filename": _normalise_upload_filename(original_filename),
         "sha256": digest,
         "artifact": "base",
         "artifact_kind": "apk",
@@ -231,20 +325,15 @@ def _write_upload_sidecar(
         "source_kind": "api_upload",
         "canonical_store_path": artifact_store.repo_relative_path(apk_path),
     }
-    try:
-        group = _artifact_group_from_path(apk_path)
-        artifact = group.artifacts[0] if group.artifacts else None
-        if artifact is not None:
-            payload.update(dict(artifact.metadata))
-        payload.setdefault("package_name", group.package_name)
-        if artifact is not None:
-            payload.setdefault("artifact", artifact.artifact_label)
-            payload.setdefault("is_split_member", artifact.is_split_member)
-    except Exception as exc:
-        log.warning(f"Upload metadata extraction failed for {apk_path.name}: {exc}", category="api")
+    payload.update(extracted_metadata)
     sidecar_path = apk_path.with_suffix(apk_path.suffix + ".meta.json")
     sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return payload
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    value = os.getenv(name, default).strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _resolve_api_key() -> str | None:
@@ -252,12 +341,68 @@ def _resolve_api_key() -> str | None:
     return api_key or None
 
 
-def _require_api_key(request: Any) -> None:
-    from fastapi import HTTPException
+def _is_placeholder_api_key(api_key: str | None) -> bool:
+    return str(api_key or "").strip().lower() == API_KEY_PLACEHOLDER
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    raw = str(host or os.getenv("SCYTALEDROID_API_HOST", "127.0.0.1")).strip().lower()
+    if raw in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ip_address(raw).is_loopback
+    except ValueError:
+        return False
+
+
+def _api_env_allows_auth_bypass() -> bool:
+    env = os.getenv(API_ENV_ENV, "").strip().lower()
+    if env in API_AUTH_BYPASS_ENVS:
+        return True
+    runtime_preset = os.getenv("SCYTALEDROID_RUNTIME_PRESET", "").strip().lower()
+    sys_test = os.getenv("SCYTALEDROID_SYS_TEST", "").strip().lower()
+    return runtime_preset == "validation" or sys_test in {"1", "true", "yes", "on"}
+
+
+def _api_auth_disabled() -> bool:
+    return _env_flag(API_AUTH_DISABLED_ENV)
+
+
+def validate_api_auth_config(*, bind_host: str | None = None) -> bool:
+    """Validate API authentication policy and return True when auth is disabled intentionally."""
+
+    if _api_auth_disabled():
+        if not _api_env_allows_auth_bypass():
+            raise ApiAuthConfigError(
+                "SCYTALEDROID_API_AUTH_DISABLED=1 requires SCYTALEDROID_ENV=test or "
+                "SCYTALEDROID_ENV=development."
+            )
+        if not _is_loopback_host(bind_host):
+            raise ApiAuthConfigError(
+                "Unauthenticated API mode is only allowed on loopback bind hosts."
+            )
+        return True
 
     api_key = _resolve_api_key()
     if not api_key:
+        raise ApiAuthConfigError(
+            "SCYTALEDROID_API_KEY is required; refusing to create JSON API without authentication."
+        )
+    if _is_placeholder_api_key(api_key):
+        raise ApiAuthConfigError(
+            "SCYTALEDROID_API_KEY uses the documented placeholder value; generate a unique secret."
+        )
+    return False
+
+
+def _require_api_key(request: Any, *, auth_disabled: bool = False) -> None:
+    from fastapi import HTTPException
+
+    if auth_disabled:
         return
+    api_key = _resolve_api_key()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="API authentication is not configured")
     auth_header = request.headers.get("Authorization", "")
     token = ""
     if auth_header.lower().startswith("bearer "):
@@ -324,16 +469,17 @@ def _collect_run_status(session_stamp: str) -> dict[str, Any]:
     }
 
 
-def build_api_app() -> FastAPI:
+def build_api_app(*, bind_host: str | None = None) -> FastAPI:
     if FastAPI is None or File is None or JSONResponse is None:
         raise RuntimeError("FastAPI dependencies are unavailable. Install API extras to use the server.")
+    auth_disabled = validate_api_auth_config(bind_host=bind_host)
 
     app = FastAPI(title="ScytaleDroid API", version=app_config.APP_VERSION)
 
     upload_file = File(...)
 
     def require_api_key(request: Request) -> None:
-        _require_api_key(request)
+        _require_api_key(request, auth_disabled=auth_disabled)
 
     @app.post("/upload")
     def upload_apk(
@@ -342,41 +488,53 @@ def build_api_app() -> FastAPI:
     ) -> dict[str, Any]:
         upload_dir = artifact_store.upload_inbox_root()
         upload_dir.mkdir(parents=True, exist_ok=True)
-        suffix = Path(file.filename or "upload.apk").suffix or ".apk"
         upload_id = uuid.uuid4().hex
-        filename = f"{upload_id}{suffix}"
+        filename = f"{upload_id}.upload{APK_UPLOAD_SUFFIX}"
         destination = upload_dir / filename
         max_bytes = _resolve_max_upload_bytes()
         written = 0
 
-        with destination.open("wb") as handle:
-            while True:
-                chunk = file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > max_bytes:
-                    handle.close()
-                    destination.unlink(missing_ok=True)
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"Upload exceeds max size ({max_bytes // (1024 * 1024)} MB).",
-                    )
-                handle.write(chunk)
+        try:
+            original_filename = _validate_upload_filename(file.filename)
+            with destination.open("wb") as handle:
+                while True:
+                    chunk = file.file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise UploadValidationError(
+                            UPLOAD_REJECT_OVERSIZE,
+                            f"Upload exceeds max size ({max_bytes // (1024 * 1024)} MB).",
+                            status_code=413,
+                        )
+                    handle.write(chunk)
 
-        digest = _hash_file(destination)
-        canonical_path = artifact_store.materialize_apk(
-            destination,
-            sha256_digest=digest,
-            suffix=suffix,
-            move=True,
-        )
-        metadata = _write_upload_sidecar(
-            canonical_path,
-            upload_id=upload_id,
-            original_filename=file.filename,
-            digest=digest,
-        )
+            _validate_apk_container(destination)
+            extracted_metadata, _package_name = _extract_upload_metadata(destination)
+            digest = _hash_file(destination)
+            canonical_path = artifact_store.materialize_apk(
+                destination,
+                sha256_digest=digest,
+                suffix=APK_UPLOAD_SUFFIX,
+                move=True,
+            )
+            metadata = _write_upload_sidecar(
+                canonical_path,
+                upload_id=upload_id,
+                original_filename=original_filename,
+                digest=digest,
+                extracted_metadata=extracted_metadata,
+            )
+        except UploadValidationError as exc:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"reason_code": exc.reason_code, "message": str(exc)},
+            ) from exc
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
         receipt_payload = {
             **metadata,
             "upload_id": upload_id,
@@ -397,6 +555,8 @@ def build_api_app() -> FastAPI:
             "version_name": metadata.get("version_name"),
             "receipt_path": artifact_store.repo_relative_path(receipt_path),
         }
+
+    app.state.scytaledroid_auth_disabled = auth_disabled
 
     @app.post("/scan")
     def scan_apk(
