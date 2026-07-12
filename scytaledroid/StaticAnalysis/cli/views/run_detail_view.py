@@ -133,7 +133,7 @@ def app_detail_loop(
     while True:
         detail_renderer(app_result, current_evidence, active, finding_limit)
         print("[f] Filter severity  [e] Evidence lines  [?] Help  [Enter/q] Back")
-        command = input("Command: ").strip().lower()
+        command = prompt_utils.prompt_text("Command:", required=False, show_arrow=False).strip().lower()
         if command in {"", "q"}:
             break
         if command == "f":

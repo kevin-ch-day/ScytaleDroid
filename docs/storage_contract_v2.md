@@ -66,6 +66,14 @@ data/
           baseline/
           dynamic_plan/
 
+  evidence/
+    dynamic/
+      <dynamic_run_id>/
+        run_manifest.json
+        artifacts/
+        analysis/
+        notes/
+
   audit/
     storage/
     selection/
@@ -73,10 +81,15 @@ data/
     dynamic/
 
 output/
+  audit/
+  paper/
   reports/
     static/
       latest/
       archive/
+  evidence/
+    dynamic/
+      <dynamic_run_id> -> ../../data/evidence/dynamic/<dynamic_run_id>  # transition symlink only
 
 evidence/
   frozen/
@@ -197,8 +210,8 @@ Implemented first:
 
 - dry-run retention auditor for the legacy `data/device_apks` tree
 - JSON/CSV audit outputs under `output/audit/storage`
-- static HTML reports now support `latest|archive|both` mode
-- default HTML output now writes to `output/reports/static/latest/...`
+- static HTML reports now support `off|latest|archive|both` mode
+- default HTML output is disabled; opt in with `SCYTALEDROID_STATIC_HTML_MODE=latest`
 - archive HTML output now writes to `output/reports/static/archive/<session>/...`
 - static JSON reports now support `latest|archive|both` mode
 - default JSON output now writes to `data/static_analysis/reports/latest/...`
@@ -208,12 +221,18 @@ Implemented first:
 - harvest now mirrors per-package receipts to `data/receipts/harvest/<session>/<package>.json`
 - API upload now lands in an inbox and materializes retained APKs into the canonical store
 - harvest sidecars/manifests now include `canonical_store_path` during the transition
+- dynamic evidence path resolver now uses `data/evidence/dynamic` as the canonical root
+- new dynamic runs create lightweight compatibility symlinks under `output/evidence/dynamic`
+- legacy dynamic evidence packs were migrated to `data/evidence/dynamic` with hash-verified receipts
+- DB direct path rows with existing canonical targets were normalized from `output/evidence/dynamic` to `data/evidence/dynamic`
+- `scripts/db/audit_dynamic_evidence_path_migration.py` provides dry-run/apply receipts for remaining path debt
+- missing dynamic evidence DB-only rows were retired with exact run-id receipts after confirming no local paper/archive/state references
 
 Still pending:
 
 - canonical artifact catalog tables
-- path resolver/indirection layer
 - destructive prune
 - migration/prune of legacy flat files already present under `data/static_analysis/reports`
 - migration/re-pull of legacy harvest payloads still rooted under `data/device_apks/...`
 - migration away from `data/device_apks/<device>/<date>/...` as canonical storage
+- continued monitoring for new legacy dynamic path rows via `scripts/db/audit_dynamic_evidence_path_migration.py`

@@ -32,6 +32,9 @@ class ProviderRecord:
     exported: bool
     exported_explicit: bool | None
     export_reason: str | None
+    enabled: bool
+    enabled_explicit: bool | None
+    application_enabled: bool
     read_permission: str | None
     write_permission: str | None
     general_permission: str | None
@@ -89,6 +92,11 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
     if application is None:
         return tuple()
 
+    target_sdk = _extract_target_sdk_int(manifest_root)
+    application_enabled = _manifest_bool(
+        application.get(f"{_ANDROID_NS}enabled"),
+        default=True,
+    )
     records: list[ProviderRecord] = []
 
     for element in application.findall("provider"):
@@ -96,6 +104,11 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
         if not name:
             continue
 
+        enabled_explicit = _manifest_bool_or_none(element.get(f"{_ANDROID_NS}enabled"))
+        provider_enabled = (
+            application_enabled
+            and _manifest_bool(element.get(f"{_ANDROID_NS}enabled"), default=True)
+        )
         exported_attr = element.get(f"{_ANDROID_NS}exported")
         exported_explicit: bool | None = None
         export_reason = None
@@ -104,8 +117,20 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
             exported = exported_explicit
             export_reason = "explicit_flag"
         else:
+            exported = _provider_default_exported(target_sdk)
+            export_reason = (
+                "provider_default_true_legacy_sdk"
+                if exported
+                else "provider_default_false"
+            )
+
+        if exported and not provider_enabled:
             exported = False
-            export_reason = "provider_default_false"
+            export_reason = (
+                "application_disabled"
+                if not application_enabled
+                else "component_disabled"
+            )
 
         read_perm = (element.get(f"{_ANDROID_NS}readPermission") or "").strip() or None
         write_perm = (element.get(f"{_ANDROID_NS}writePermission") or "").strip() or None
@@ -146,6 +171,9 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
                 exported=exported,
                 exported_explicit=exported_explicit,
                 export_reason=export_reason,
+                enabled=provider_enabled,
+                enabled_explicit=enabled_explicit,
+                application_enabled=application_enabled,
                 read_permission=read_perm or permission,
                 write_permission=write_perm or permission,
                 general_permission=permission,
@@ -165,6 +193,9 @@ def _build_provider_evidence(provider: ProviderRecord, *, apk_path) -> EvidenceP
         "exported": provider.exported,
         "exported_explicit": provider.exported_explicit,
         "export_reason": provider.export_reason,
+        "enabled": provider.enabled,
+        "enabled_explicit": provider.enabled_explicit,
+        "application_enabled": provider.application_enabled,
         "authorities": provider.authorities,
         "read_permission": provider.read_permission,
         "write_permission": provider.write_permission,
@@ -300,6 +331,9 @@ def _build_provider_snapshot(
         "exported": provider.exported,
         "exported_explicit": provider.exported_explicit,
         "export_reason": provider.export_reason,
+        "enabled": provider.enabled,
+        "enabled_explicit": provider.enabled_explicit,
+        "application_enabled": provider.application_enabled,
         "authorities": provider.authorities,
         "grant_uri_permissions": provider.grant_uri_permissions,
         "base_permission": provider.general_permission,
@@ -401,6 +435,34 @@ class ProviderAclDetector(BaseDetector):
             metrics=metrics,
             evidence=tuple(evidence[:5]),
         )
+
+
+def _extract_target_sdk_int(manifest_root: ElementTree.Element) -> int | None:
+    uses_sdk = manifest_root.find("uses-sdk")
+    if uses_sdk is None:
+        return None
+    raw_value = uses_sdk.get(f"{_ANDROID_NS}targetSdkVersion")
+    if not raw_value:
+        return None
+    try:
+        return int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _manifest_bool_or_none(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    return value.strip().lower() in {"true", "1"}
+
+
+def _manifest_bool(value: str | None, *, default: bool) -> bool:
+    parsed = _manifest_bool_or_none(value)
+    return default if parsed is None else parsed
+
+
+def _provider_default_exported(target_sdk: int | None) -> bool:
+    return target_sdk is None or target_sdk <= 16
 
 
 __all__ = ["ProviderAclDetector"]

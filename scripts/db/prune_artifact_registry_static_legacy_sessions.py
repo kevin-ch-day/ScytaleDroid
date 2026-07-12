@@ -39,6 +39,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory for JSON/CSV/SQL/txt receipts.",
     )
     parser.add_argument("--expected-count", type=int, default=None, help="Refuse apply if targeted row count differs.")
+    parser.add_argument(
+        "--allow-blocked-package-mismatch",
+        action="store_true",
+        help=(
+            "Allow sessions classified as blocked_package_mismatch_review when every present host file "
+            "has JSON package identity that mismatches legacy runs.package."
+        ),
+    )
     parser.add_argument("--apply", action="store_true", help="Actually delete targeted artifact_registry rows.")
     parser.add_argument("--json", action="store_true", help="Print proposal/apply summary JSON.")
     return parser
@@ -89,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             "candidate_actions": proposal.candidate_actions,
             "legacy_payload_total_rows": proposal.legacy_payload_total_rows,
             "file_present_count": proposal.file_present_count,
+            "file_present_json_package_mismatch_count": proposal.file_present_json_package_mismatch_count,
             "file_missing_count": proposal.file_missing_count,
             "canonical_db_residue_count": proposal.canonical_db_residue_count,
             "malformed_or_unknown_count": proposal.malformed_or_unknown_count,
@@ -98,7 +107,11 @@ def main(argv: list[str] | None = None) -> int:
 
         validation_error: str | None = None
         try:
-            validate_static_session_prune_proposal(proposal, expected_count=args.expected_count)
+            validate_static_session_prune_proposal(
+                proposal,
+                expected_count=args.expected_count,
+                allow_blocked_package_mismatch=args.allow_blocked_package_mismatch,
+            )
         except ValueError as exc:
             validation_error = str(exc)
             payload["validation_error"] = validation_error
@@ -114,7 +127,11 @@ def main(argv: list[str] | None = None) -> int:
                         session_stamps=args.session_stamps,
                         expected_count=args.expected_count,
                     )
-                    validate_static_session_prune_proposal(proposal_txn, expected_count=args.expected_count)
+                    validate_static_session_prune_proposal(
+                        proposal_txn,
+                        expected_count=args.expected_count,
+                        allow_blocked_package_mismatch=args.allow_blocked_package_mismatch,
+                    )
                     apply_result = apply_static_session_prune(core_q.run_sql, core_q.run_sql_rowcount, proposal=proposal_txn)
                     if apply_result.deleted_count != proposal_txn.targeted_row_count:
                         raise RuntimeError(

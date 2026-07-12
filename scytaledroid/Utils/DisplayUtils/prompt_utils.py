@@ -83,6 +83,26 @@ def get_choice(
         print(status_messages.status(invalid_message, level="warn"))
 
 
+def menu_choice(
+    valid: Iterable[str],
+    *,
+    default: str | None = "0",
+    casefold: bool = False,
+    invalid_message: str = "Invalid choice. Please try again.",
+    disabled: Iterable[str] | None = None,
+) -> str:
+    """Prompt for a menu selection using the standard menu prompt text."""
+
+    return get_choice(
+        valid,
+        prompt="\nEnter choice: ",
+        default=default,
+        casefold=casefold,
+        invalid_message=invalid_message,
+        disabled=disabled,
+    )
+
+
 def prompt_yes_no(prompt: str, *, default: bool = False) -> bool:
     """Ask a yes/no question and return ``True`` for yes."""
 
@@ -198,6 +218,7 @@ def prompt_text(
 
 __all__ = [
     "get_choice",
+    "menu_choice",
     "press_enter_to_continue",
     "press_any_key",
     "prompt_text",

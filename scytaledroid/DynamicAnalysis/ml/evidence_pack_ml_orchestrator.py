@@ -29,6 +29,11 @@ from scytaledroid.DynamicAnalysis.core.freeze_identity import (
     FREEZE_DATASET_IDENTITY_VERSION,
     compute_freeze_dataset_hash_from_path,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    legacy_archive_dir,
+    resolve_dataset_freeze_read_path,
+)
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from . import ml_parameters_profile as config
@@ -53,7 +58,10 @@ from .pcap_window_features import (
 from .seed_identity import derive_seed, salt_metadata
 from .telemetry_windowing import WindowSpec
 
-FREEZE_DIR = Path(app_config.DATA_DIR) / "archive"
+FREEZE_DIR = legacy_archive_dir()
+# Legacy import-compatibility constants. Runtime code should call
+# default_freeze_manifest_path() / paper_artifacts_path() so active cohort
+# archive paths are honored.
 DATASET_FREEZE_CANONICAL = FREEZE_DIR / config.FREEZE_CANONICAL_FILENAME
 PAPER_ARTIFACTS_PATH = FREEZE_DIR / "paper_artifacts.json"
 PAPER_EXCLUSION_REASON_CODES = {
@@ -91,6 +99,22 @@ class _ExemplarCandidate:
     ocsvm_flagged_pct: float
 
 
+def default_freeze_manifest_path() -> Path:
+    """Return the active cohort freeze if present, falling back to the legacy anchor."""
+    return resolve_dataset_freeze_read_path()
+
+
+def paper_artifacts_path(freeze_manifest_path: Path | None = None) -> Path:
+    """Dataset-adjacent lockfile for the paper-facing exemplar selection.
+
+    Older runs used `data/archive/paper_artifacts.json`. For cohort-aware freezes,
+    keeping the lockfile next to the freeze prevents multiple cohort freezes from
+    accidentally sharing one exemplar pin.
+    """
+    anchor = freeze_manifest_path or default_freeze_manifest_path()
+    return anchor.parent / "paper_artifacts.json"
+
+
 def run_ml_on_evidence_packs(
     *,
     output_root: Path | None = None,
@@ -108,11 +132,11 @@ def run_ml_on_evidence_packs(
     - No exploratory-mode fallback.
     """
 
-    root = output_root or (Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic")
+    root = output_root or dynamic_evidence_root()
     if not root.exists():
         return MlRunStats(0, 0, 0, 0, datetime.now(UTC).isoformat())
 
-    freeze_path = freeze_manifest_path or DATASET_FREEZE_CANONICAL
+    freeze_path = freeze_manifest_path or default_freeze_manifest_path()
     if not freeze_path.exists():
         _write_global_cohort_status(
             root,
@@ -219,7 +243,7 @@ def run_ml_on_evidence_packs(
 
             # Ensure the exemplar lock exists. If absent, we allow a lightweight selection
             # pass (windowing) because this is a paper-facing artifact.
-            if not PAPER_ARTIFACTS_PATH.exists():
+            if not paper_artifacts_path(freeze_path).exists():
                 exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
                     evidence_root=root,
                     freeze_apps=freeze_apps,
@@ -1502,7 +1526,7 @@ def _maybe_write_paper_artifacts_json(*, candidate: _ExemplarCandidate | None, f
 
     Controlled repinning (one-time) must be performed explicitly by an operator-facing action.
     """
-    path = PAPER_ARTIFACTS_PATH
+    path = paper_artifacts_path(freeze_manifest_path)
     if path.exists():
         return
     if not candidate:

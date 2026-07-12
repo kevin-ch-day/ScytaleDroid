@@ -14,6 +14,7 @@ from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 
 def export_pcap_features_csv(
@@ -21,7 +22,7 @@ def export_pcap_features_csv(
     freeze_path: Path | None = None,
     require_freeze: bool = False,
 ) -> Path | None:
-    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    output_root = dynamic_evidence_root()
     if not output_root.exists():
         return None
     if require_freeze and freeze_path is None:
@@ -92,7 +93,7 @@ def export_dynamic_run_summary_csv(
     freeze_path: Path | None = None,
     require_freeze: bool = False,
 ) -> Path | None:
-    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    output_root = dynamic_evidence_root()
     if not output_root.exists():
         return None
     if require_freeze and freeze_path is None:
@@ -134,7 +135,7 @@ def export_protocol_ledger_csv(
     freeze_path: Path | None = None,
     require_freeze: bool = False,
 ) -> Path | None:
-    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    output_root = dynamic_evidence_root()
     if not output_root.exists():
         return None
     if require_freeze and freeze_path is None:

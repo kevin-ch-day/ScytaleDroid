@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 
 def dynamic_run_log_candidates(
@@ -35,7 +36,7 @@ def summarize_dynamic_run_artifacts(
     evidence_root: Path | None = None,
     include_db_counts: bool = False,
 ) -> dict[str, object]:
-    root = (evidence_root or (Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic")).expanduser().resolve()
+    root = (evidence_root or dynamic_evidence_root()).expanduser().resolve()
     run_dir = root / dynamic_run_id
     text_log, json_log = dynamic_run_log_candidates(dynamic_run_id, logs_root=logs_root)
     events_path = run_dir / "notes" / "run_events.jsonl"

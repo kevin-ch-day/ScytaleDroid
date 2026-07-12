@@ -1058,7 +1058,7 @@ def _bootstrap_priority_stability(
 
     for _ in range(n_resamples):
         sampled_rows: list[Mapping[str, Any]] = []
-        for package_name, rows in grouped.items():
+        for rows in grouped.values():
             row_list = list(rows)
             sampled_rows.extend(row_list[rng.randrange(len(row_list))] for _ in range(len(row_list)))
         sampled_rollups = _build_fused_app_rollups(sampled_rows)

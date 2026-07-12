@@ -875,7 +875,6 @@ def _collect_permission_interfaces(run_sql) -> list[dict[str, Any]]:
 
 def _build_table_rows(inventory: dict[str, Any]) -> list[dict[str, Any]]:
     tables = inventory["tables"]
-    columns = inventory["columns"]
     stats = inventory["stats"]
     fks = inventory["fks"]
     primary_keys, unique_indexes = _index_maps(stats)

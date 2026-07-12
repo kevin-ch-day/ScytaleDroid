@@ -15,6 +15,7 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.DynamicAnalysis.core.freeze_identity import compute_freeze_dataset_hash_from_path
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 DB_VERIFY_RETRIES = 3
 DB_VERIFY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
@@ -272,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--evidence-root",
-        default=str(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"),
+        default=str(dynamic_evidence_root()),
         help="Dynamic evidence root directory.",
     )
     args = parser.parse_args(argv)

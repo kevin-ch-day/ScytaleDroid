@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Profile v3 capture status dashboard (Phase 2 operator aid).
 
-This script scans local dynamic evidence packs under output/evidence/dynamic and
+This script scans local dynamic evidence packs under data/evidence/dynamic and
 summarizes, per v3 catalog package:
 - idle + scripted run availability
 - minima compliance (min windows / min pcap bytes) using the same sources as strict manifest build
@@ -43,6 +43,7 @@ from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (  # noqa: E402
     effective_min_windows_per_run,
 )
 from scytaledroid.Publication.profile_v3_metrics import load_profile_v3_catalog  # noqa: E402
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root  # noqa: E402
 
 
 def _truthy_env(name: str, default: str = "0") -> bool:
@@ -268,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--evidence-root",
-        default=str(REPO_ROOT / "output" / "evidence" / "dynamic"),
+        default=str(dynamic_evidence_root()),
         help="Dynamic evidence root containing run dirs.",
     )
     p.add_argument(

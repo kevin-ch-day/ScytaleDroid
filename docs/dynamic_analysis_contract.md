@@ -71,14 +71,18 @@ different baseline, or cancel). No silent continuation.
 Evidence packs are stored under:
 
 ```
-output/evidence/dynamic/<dynamic_run_id>/
+data/evidence/dynamic/<dynamic_run_id>/
   run_manifest.json
   artifacts/
   analysis/
   notes/                # optional
 ```
 
-Each run produces a single, atomic folder. Future grouping (e.g.
+Each run produces a single, atomic folder. During the storage transition,
+`output/evidence/dynamic/<dynamic_run_id>/` may exist as a compatibility symlink
+to the canonical `data/evidence/dynamic/<dynamic_run_id>/` folder. New writers
+must target the data-root evidence path; output remains for derived reports,
+audits, paper assets, and compatibility links only. Future grouping (e.g.
 `session_<id>/run_<id>/`) is optional and must preserve the same internal layout.
 
 ## 3. Run Manifest (v1)
@@ -295,7 +299,7 @@ drafting.
 Freeze/profile ML writes derived outputs under the evidence pack:
 
 ```
-output/evidence/dynamic/<dynamic_run_id>/analysis/ml/v<ml_schema_version>/
+data/evidence/dynamic/<dynamic_run_id>/analysis/ml/v<ml_schema_version>/
   anomaly_scores_iforest.csv
   anomaly_scores_ocsvm.csv
   model_manifest.json

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import platform
@@ -164,7 +165,7 @@ def main() -> int:
     deps: dict[str, str] = {}
     for mod in ("numpy", "pandas", "scipy", "sklearn", "matplotlib"):
         try:
-            m = __import__(mod)  # noqa: WPS421
+            m = importlib.import_module(mod)
             deps[mod] = str(getattr(m, "__version__", "") or "")
         except Exception:
             continue

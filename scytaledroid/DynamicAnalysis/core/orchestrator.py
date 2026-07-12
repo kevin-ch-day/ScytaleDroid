@@ -77,6 +77,7 @@ from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
 from scytaledroid.DynamicAnalysis.utils.pcap_minima import (
     effective_min_pcap_bytes_for_run_profile,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, ensure_legacy_dynamic_symlink
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.version_utils import get_git_commit
@@ -98,10 +99,11 @@ class DynamicRunOrchestrator:
 
     def run(self) -> tuple[RunManifest, Path, dict[str, object]]:
         dynamic_run_id = str(uuid.uuid4())
-        output_root = Path(self.config.output_root or "output/evidence/dynamic")
+        output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
+        ensure_legacy_dynamic_symlink(run_dir)
         # Protect active runs from being pruned as "incomplete" before the final
         # run_manifest.json is sealed.
         in_progress_marker = writer.notes_dir / ".scytaledroid_in_progress"
@@ -895,7 +897,7 @@ class DynamicRunOrchestrator:
 
                             # Best-effort retry: PCAP file finalization can lag by a moment after
                             # observers stop. Retry avoids spurious "missing_window_scores_csv".
-                            output_root = Path(self.config.output_root or "output/evidence/dynamic")
+                            output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
                             last_exc: Exception | None = None
                             derive_result = None
                             for _i in range(2):

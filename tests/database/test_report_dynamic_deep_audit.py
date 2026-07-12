@@ -259,6 +259,35 @@ def test_static_enrichment_gap_ignores_zero_actionable_static_domains() -> None:
     assert rows == []
 
 
+def test_static_bridge_and_enrichment_gaps_skip_packages_without_valid_runs() -> None:
+    runs = [
+        _run(
+            run_id="invalid-1",
+            package="com.example.invalid",
+            app_label="Invalid",
+            run_profile="baseline_idle",
+            interaction_mode="baseline",
+            valid_pack=False,
+            pcap_present=False,
+            pcap_size_bytes=0,
+            enriched_domains=False,
+            actionable_domains=0,
+            corroborated_actionable_domains=0,
+        )
+    ]
+
+    assert report._static_enrichment_gap_rows({"com.example.invalid": runs}, {}) == []
+    assert (
+        report._bridge_gaps_for_package(
+            package="com.example.invalid",
+            app_label="Invalid",
+            join_row={},
+            runs=runs,
+        )
+        == []
+    )
+
+
 def test_static_enrichment_overlay_impact_labels_resolved_and_open_rows() -> None:
     embedded_rows = [
         {
@@ -273,7 +302,7 @@ def test_static_enrichment_overlay_impact_labels_resolved_and_open_rows() -> Non
             "app_label": "Open",
             "static_run_id": "2",
             "gap_type": "actionable_corroboration_missing",
-            "recommended_action": "repair_static_enrichment",
+            "recommended_action": "extend_static_dynamic_corroboration_model",
         },
     ]
     active_rows = [
@@ -282,14 +311,14 @@ def test_static_enrichment_overlay_impact_labels_resolved_and_open_rows() -> Non
             "app_label": "Open",
             "static_run_id": "2",
             "gap_type": "actionable_corroboration_missing",
-            "recommended_action": "repair_static_enrichment",
+            "recommended_action": "extend_static_dynamic_corroboration_model",
         },
         {
             "package": "com.example.new",
             "app_label": "New",
             "static_run_id": "3",
             "gap_type": "actionable_corroboration_missing",
-            "recommended_action": "repair_static_enrichment",
+            "recommended_action": "extend_static_dynamic_corroboration_model",
         },
     ]
 

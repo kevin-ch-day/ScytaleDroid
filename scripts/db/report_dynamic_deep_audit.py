@@ -185,9 +185,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _dynamic_root() -> Path:
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -1392,11 +1392,12 @@ def _bridge_gaps_for_package(
     runs: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    has_valid_runs = any(bool(run.get("valid_pack")) for run in runs)
     static_run_id = ""
     if isinstance(join_row, Mapping):
         static_run_id = str(join_row.get("static_run_id") or "")
     endpoint_status = _static_endpoint_inventory_status(join_row, runs)
-    if endpoint_status in {"missing", "unknown"}:
+    if has_valid_runs and endpoint_status in {"missing", "unknown"}:
         rows.append(
             {
                 "package": package,
@@ -1411,7 +1412,7 @@ def _bridge_gaps_for_package(
                 "recommended_followup": "repair_static_enrichment",
             }
         )
-    if not any(bool((run.get("corroboration") or {}).get("enriched_domain_metadata_present")) for run in runs):
+    if has_valid_runs and not any(bool((run.get("corroboration") or {}).get("enriched_domain_metadata_present")) for run in runs):
         rows.append(
             {
                 "package": package,
@@ -1426,7 +1427,7 @@ def _bridge_gaps_for_package(
                 "recommended_followup": "repair_static_enrichment",
             }
         )
-    if any(_safe_int((run.get("corroboration") or {}).get("actionable_static_domain_rows")) > 0 for run in runs) and not any(
+    if has_valid_runs and any(_safe_int((run.get("corroboration") or {}).get("actionable_static_domain_rows")) > 0 for run in runs) and not any(
         _safe_int((run.get("corroboration") or {}).get("corroborated_actionable_domains")) > 0 for run in runs
     ):
         rows.append(
@@ -1440,7 +1441,7 @@ def _bridge_gaps_for_package(
                 "current_value": "0 corroborated actionable domains",
                 "expected_value": ">=1 corroborated actionable domain when actionable static domains exist",
                 "source_surface": "static_dynamic_overlap",
-                "recommended_followup": "repair_static_enrichment",
+                "recommended_followup": "extend_static_dynamic_corroboration_model",
             }
         )
     provider_status = _provider_authority_status(join_row)
@@ -1659,10 +1660,19 @@ def _service_mapping_gap_rows(runs: Sequence[Mapping[str, Any]]) -> list[dict[st
 def _static_enrichment_gap_rows(
     package_runs: dict[str, list[dict[str, Any]]],
     join_rows: Mapping[str, Mapping[str, Any]],
+    *,
+    include_diagnostic_captures: bool = False,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for package in sorted(package_runs):
         runs = package_runs[package]
+        has_eligible_run = any(
+            bool(run.get("valid_pack"))
+            or (include_diagnostic_captures and bool((run.get("pcap_info") or {}).get("pcap_present")))
+            for run in runs
+        )
+        if not has_eligible_run:
+            continue
         app_label = str(runs[0]["app_label"])
         join_row = join_rows.get(package) if isinstance(join_rows, Mapping) else None
         static_run_id = str((join_row or {}).get("static_run_id") or "")
@@ -1688,7 +1698,7 @@ def _static_enrichment_gap_rows(
             action = "repair_static_enrichment"
         else:
             gap_type = "actionable_corroboration_missing"
-            action = "repair_static_enrichment"
+            action = "extend_static_dynamic_corroboration_model"
         rows.append(
             {
                 "package": package,
@@ -2397,7 +2407,6 @@ def _paper_pattern_rows(
         dynamic_activation_delta = _safe_int(stability.get("dynamic_activation_delta_score"))
         ratio = stability.get("third_party_first_party_hit_ratio")
         third_party_ratio = _safe_float(ratio, default=-1.0) if ratio not in ("", None) else None
-        service_resolution_rate = _safe_float(readiness.get("service_resolution_rate"), default=-1.0)
         signal_resolution_rate = _safe_float(readiness.get("signal_resolution_rate"), default=-1.0)
 
         baseline_instability_flag = (
@@ -2575,7 +2584,11 @@ def generate_report(
     service_gap_rows = _service_mapping_gap_rows(run_rows)
     static_enrichment_rows = _static_enrichment_gap_rows(package_runs, join_rows)
     embedded_static_enrichment_rows = (
-        _static_enrichment_gap_rows(_package_runs_with_embedded_corroboration(package_runs), join_rows)
+        _static_enrichment_gap_rows(
+            _package_runs_with_embedded_corroboration(package_runs),
+            join_rows,
+            include_diagnostic_captures=True,
+        )
         if overlay_enabled
         else []
     )

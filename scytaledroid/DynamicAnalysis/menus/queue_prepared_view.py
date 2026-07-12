@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from scytaledroid.DynamicAnalysis.app_queue_state import queue_state_label
 

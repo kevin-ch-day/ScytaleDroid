@@ -494,7 +494,9 @@ def _security_stratification_from_run(run: RunInputs) -> dict[str, Any]:
         except Exception:
             mismatch_class = None
     if mismatch_class is None and isinstance(run.plan, dict) and isinstance(run.pcap_report, dict):
-        from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
+        from scytaledroid.DynamicAnalysis.pcap.security_surface import (
+            compute_static_dynamic_cleartext_posture,
+        )
 
         mismatch_class = compute_static_dynamic_cleartext_posture(run.plan, run.pcap_report).get("mismatch_class")
     return {

@@ -69,11 +69,11 @@ class BundleResult:
 
 
 def write_bundle(snapshot_dir: Path) -> BundleResult:
-    from scytaledroid.Config import app_config
     from scytaledroid.DynamicAnalysis.ml.operational_lint import lint_operational_snapshot
     from scytaledroid.DynamicAnalysis.ml.snapshot_freeze import write_snapshot_freeze_manifest
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    evidence_root = dynamic_evidence_root()
     snapshot_dir.mkdir(parents=True, exist_ok=True)
 
     # Freeze manifest (checksummed). Best-effort: smoke snapshots may reference temp

@@ -26,6 +26,10 @@ import numpy as np  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Alignment, Font  # noqa: E402
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    resolve_dynamic_run_dir,
+)
 
 from . import ml_parameters_profile as config
 from .deliverable_bundle_paths import (
@@ -69,6 +73,11 @@ _PROHIBITED_PHRASES = (
     "network requests",
     "strict app isolation",
 )
+
+
+def _dynamic_run_dir(run_id: str | int | None) -> Path:
+    rid = str(run_id or "").strip()
+    return resolve_dynamic_run_dir(rid) or dynamic_evidence_root() / rid
 
 
 def _apply_ieee_figure_style() -> None:
@@ -175,9 +184,10 @@ def write_phase_e_deliverables_bundle(
     _copy_required(freeze_anchor_path(), output_phase_e_bundle_freeze_copy_path(), overwrite=True)
 
     # Copy the exemplar pin lockfile for audit convenience.
-    from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
+    from .evidence_pack_ml_orchestrator import paper_artifacts_path
 
-    _copy_required(PAPER_ARTIFACTS_PATH, output_phase_e_bundle_manifest_dir() / "paper_artifacts.json", overwrite=True)
+    paper_artifacts = paper_artifacts_path(freeze_anchor_path())
+    _copy_required(paper_artifacts, output_phase_e_bundle_manifest_dir() / "paper_artifacts.json", overwrite=True)
 
     # Figures (PM locked): Fig B1 + B2 + B4.
     fig_b1_png, fig_b1_pdf = _write_fig_b1(fig_b1_run_id, figs_dir, interaction_tag=interaction_tag, overwrite=True)
@@ -298,7 +308,7 @@ def _write_fig_b1(
     if not overwrite and png.exists() and pdf.exists():
         return png, pdf
 
-    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / fig_run_id
+    run_dir = _dynamic_run_dir(fig_run_id)
     inputs = load_run_inputs(run_dir)
     if not inputs:
         raise RuntimeError(f"Fig B1 run missing run_manifest.json: {fig_run_id}")
@@ -750,7 +760,8 @@ def _render_bundle_readme(fig_run_id: str) -> str:
         "# Paper #2 Phase E Deliverables Bundle\n\n"
         "This folder is operator/paper-facing. It is intended to be zipped and shared.\n\n"
         "Authoritative inputs:\n"
-        "- Evidence packs under `output/evidence/dynamic/<run_id>/...`\n"
+        "- Evidence packs under `data/evidence/dynamic/<run_id>/...` "
+        "(with `output/evidence/dynamic` compatibility symlinks during migration)\n"
         f"- Freeze anchor (canonical): `{freeze_anchor_path()}`\n"
         "- Copy of freeze anchor is included under `manifest/dataset_freeze.json` for convenience.\n\n"
         "Contents:\n"
@@ -907,7 +918,9 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
     """
     from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
 
-    from .evidence_pack_ml_orchestrator import PAPER_ARTIFACTS_PATH
+    from .evidence_pack_ml_orchestrator import paper_artifacts_path
+
+    paper_artifacts = paper_artifacts_path(freeze_anchor_path())
 
     payload = {
         "bundle_manifest_path": str(bundle_manifest_path),
@@ -918,8 +931,8 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
         "freeze_anchor": str(freeze_anchor_path()),
         "freeze_sha256": _sha256_stream(freeze_anchor_path()),
         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
-        "paper_artifacts_path": str(PAPER_ARTIFACTS_PATH),
-        "paper_artifacts_sha256": _sha256_stream(PAPER_ARTIFACTS_PATH),
+        "paper_artifacts_path": str(paper_artifacts),
+        "paper_artifacts_sha256": _sha256_stream(paper_artifacts),
         "report_schema_version": int(config.REPORT_SCHEMA_VERSION),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1373,8 +1386,6 @@ def _write_table_4_signature_deltas(tables_dir: Path, *, provenance: dict[str, s
     """Compute per-app descriptive deltas from window features (idle vs interactive concat)."""
     freeze = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
     apps = freeze.get("apps") or {}
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-
     out: list[dict[str, Any]] = []
     for pkg, ent in sorted(apps.items()):
         if not isinstance(ent, dict):
@@ -1388,7 +1399,7 @@ def _write_table_4_signature_deltas(tables_dir: Path, *, provenance: dict[str, s
         interactive_ids = inter_ids[:2]  # frozen
 
         def load_series(rid: str) -> tuple[list[float], list[float], list[float]]:
-            run_dir = evidence_root / rid
+            run_dir = _dynamic_run_dir(rid)
             inputs = load_run_inputs(run_dir)
             if not inputs or not inputs.pcap_path or not inputs.pcap_path.exists():
                 return [], [], []
@@ -1476,7 +1487,6 @@ def _compute_static_posture_scores() -> dict[str, tuple[float, list[str]]]:
     """
     freeze = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
     apps = freeze.get("apps") or {}
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     raw: list[tuple[str, int, int, int, float, list[str]]] = []
     for pkg, ent in sorted(apps.items()):
         if not isinstance(ent, dict):
@@ -1484,7 +1494,7 @@ def _compute_static_posture_scores() -> dict[str, tuple[float, list[str]]]:
         bid = (ent.get("baseline_run_ids") or [None])[0]
         if not bid:
             continue
-        plan_path = evidence_root / str(bid) / "inputs" / "static_dynamic_plan.json"
+        plan_path = _dynamic_run_dir(bid) / "inputs" / "static_dynamic_plan.json"
         if not plan_path.exists():
             raw.append((pkg, 0, 0, 0, 0.0, ["missing_plan"]))
             continue
@@ -1661,8 +1671,6 @@ def _write_table_5_masvs_coverage(
 
     freeze = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
     apps = freeze.get("apps") or {}
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-
     cats = ("PLATFORM", "NETWORK", "PRIVACY", "STORAGE", "CRYPTO", "RESILIENCE", "OTHER")
     out: list[dict[str, Any]] = []
     masvs_inputs: list[dict[str, str]] = []
@@ -1673,7 +1681,7 @@ def _write_table_5_masvs_coverage(
         bid = (ent.get("baseline_run_ids") or [None])[0]
         if not bid:
             continue
-        plan_path = evidence_root / str(bid) / "inputs" / "static_dynamic_plan.json"
+        plan_path = _dynamic_run_dir(bid) / "inputs" / "static_dynamic_plan.json"
         if not plan_path.exists():
             continue
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
@@ -1774,8 +1782,6 @@ def _write_table_6_static_posture_scores(
     """Table 6: Static posture components and score (context-only, Fig B4 auditable)."""
     freeze = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
     apps = freeze.get("apps") or {}
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-
     raw: list[dict[str, Any]] = []
     for pkg, ent in sorted(apps.items()):
         if not isinstance(ent, dict):
@@ -1783,7 +1789,7 @@ def _write_table_6_static_posture_scores(
         bid = (ent.get("baseline_run_ids") or [None])[0]
         if not bid:
             continue
-        plan_path = evidence_root / str(bid) / "inputs" / "static_dynamic_plan.json"
+        plan_path = _dynamic_run_dir(bid) / "inputs" / "static_dynamic_plan.json"
         notes: list[str] = []
         if not plan_path.exists():
             raw.append(
@@ -2276,12 +2282,10 @@ def _write_determinism_checksums(*, manifest_dir: Path) -> Path:
     """Write deterministic hash anchors for paper-facing reproducibility checks."""
     freeze_payload = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
     included_run_ids = [str(x) for x in (freeze_payload.get("included_run_ids") or []) if str(x).strip()]
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-
     per_run: dict[str, Any] = {}
     spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
     for rid in included_run_ids:
-        run_dir = evidence_root / rid
+        run_dir = _dynamic_run_dir(rid)
         model_manifest = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "model_manifest.json"
         if_scores = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "anomaly_scores_iforest.csv"
         oc_scores = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "anomaly_scores_ocsvm.csv"

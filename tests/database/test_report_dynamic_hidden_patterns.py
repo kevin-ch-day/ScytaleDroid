@@ -6,6 +6,54 @@ from pathlib import Path
 from scripts.db import report_dynamic_hidden_patterns as report
 
 
+def test_static_run_id_from_plan_accepts_legacy_and_run_identity_shapes() -> None:
+    assert report._static_run_id_from_plan({"static_run_id": 101}) == 101
+    assert report._static_run_id_from_plan({"run_identity": {"static_run_id": 202}}) == 202
+    assert report._static_run_id_from_plan({"static_run_id": "", "run_identity": {"static_run_id": "303"}}) == 303
+    assert report._static_run_id_from_plan({}) is None
+
+
+def test_build_static_rows_uses_latest_static_run_fallback_when_plan_id_missing(monkeypatch) -> None:
+    run = _make_run(
+        package="com.example.fallback",
+        app_label="Fallback",
+        run_id="run-fallback",
+        interaction_mode="baseline",
+        valid_pack=True,
+        static_run_id=0,
+        permissions_total=5,
+        high_value_permission_count=0,
+        uses_cleartext=False,
+        network_security_config_present=True,
+    )
+    static_plan = dict(run["static_plan"])
+    static_plan.pop("static_run_id", None)
+    run["static_plan"] = static_plan
+
+    monkeypatch.setattr(report, "_load_latest_static_run_ids", lambda packages: {"com.example.fallback": 707})
+    monkeypatch.setattr(report, "_load_static_finding_features", lambda run_ids: {})
+    monkeypatch.setattr(report, "_load_permission_features", lambda run_ids: {})
+    monkeypatch.setattr(report, "_load_provider_features", lambda packages: {})
+    monkeypatch.setattr(
+        report,
+        "_load_string_endpoint_features",
+        lambda run_ids: {
+            707: {
+                "summary_endpoint_count": 1,
+                "summary_http_count": 0,
+                "sample_endpoint_roots": ["api.example.com"],
+                "sample_http_roots": [],
+            }
+        },
+    )
+
+    join_rows, _, _ = report._build_static_rows({"com.example.fallback": [run]})
+
+    assert join_rows[0]["static_run_id"] == 707
+    assert join_rows[0]["static_endpoint_inventory_status"] == "present"
+    assert join_rows[0]["static_endpoint_source"] == "string_samples_fallback"
+
+
 def _make_run(
     *,
     package: str,

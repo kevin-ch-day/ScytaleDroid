@@ -6,6 +6,8 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from scytaledroid.Config import app_config
+
 from scytaledroid.Database.db_utils.menus.static_session_diagnostics_menu import (
     post_run_db_checks_submenu,
 )
@@ -433,7 +435,11 @@ def render_export_all_tables_section(session_stamp: str | None) -> None:
         print(f"Persistence audit       : {persistence_audit}")
     if permission_snapshot is not None:
         print(f"Permission snapshot     : {permission_snapshot}")
-    print(f"Static HTML reports     : {report_latest}")
+    html_mode = str(getattr(app_config, "STATIC_HTML_MODE", "off") or "off")
+    if html_mode == "off":
+        print("Static HTML reports     : disabled (SCYTALEDROID_STATIC_HTML_MODE=latest|archive|both to enable)")
+    else:
+        print(f"Static HTML reports     : {report_latest} (mode={html_mode})")
 
 
 def _print_post_run_diagnostics_header(outcome: RunOutcome, params: RunParameters, *, persist_enabled: bool) -> None:

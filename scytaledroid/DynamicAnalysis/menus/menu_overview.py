@@ -139,10 +139,7 @@ def render_dynamic_menu_overview() -> None:
     if quota_valid <= 0:
         quota_valid = int(getattr(summary, "quota_runs_counted", 0) or 0)
     expected_valid = int(getattr(summary, "expected_valid_runs", 0) or 0)
-    extra_retained = int(quota_summary.get("extra_eligible_runs", 0) or 0)
-    baseline_ml_pool = int(quota_summary.get("baseline_ml_pool_runs", 0) or 0)
     freeze_text = "ready" if summary.can_freeze else "blocked"
-    reason_text = _quota_reason_text(summary, quota_valid=quota_valid)
     cohort_label = active_research_cohort_label()
     try:
         selected_device = device_manager.describe_active_device()
@@ -151,7 +148,6 @@ def render_dynamic_menu_overview() -> None:
     device_text = (
         selected_device if selected_device and selected_device != "None" else "none selected"
     )
-    subtitle = f"Current Device: {device_text}"
     state_items = [
         summary_cards.summary_item("Device", device_text, value_style="muted"),
         summary_cards.summary_item("Cohort", cohort_label, value_style="muted"),

@@ -13,7 +13,6 @@ import argparse
 import csv
 import json
 import sys
-from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping

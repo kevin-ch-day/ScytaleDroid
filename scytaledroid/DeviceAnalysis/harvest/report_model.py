@@ -105,6 +105,7 @@ class HarvestRunMetrics:
     replanned_packages: int = 0
     replan_success_packages: int = 0
     replan_failed_packages: int = 0
+    replan_recovered_packages: int = 0
     write_db_requested: bool = False
     write_db_effective: bool = True
 
@@ -258,6 +259,14 @@ class HarvestRunMetrics:
                 _result_text(result, "stale_replan_outcome")
             )
         )
+        replan_recovered_packages = sum(
+            1
+            for result in results
+            if stale_replan.is_recovered_stale_replan_result(
+                _result_text(result, "stale_replan_outcome"),
+                _result_text(result, "capture_status"),
+            )
+        )
 
         return cls(
             total_packages=total_packages,
@@ -284,6 +293,7 @@ class HarvestRunMetrics:
             replanned_packages=replanned_packages,
             replan_success_packages=replan_success_packages,
             replan_failed_packages=replan_failed_packages,
+            replan_recovered_packages=replan_recovered_packages,
         )
 
 
@@ -523,6 +533,7 @@ def _build_summary_card_lines(
         [
             (metrics.path_stale_packages, "path stale"),
             (metrics.replanned_packages, "replanned"),
+            (metrics.replan_recovered_packages, "recovered"),
             (metrics.replan_success_packages, "replan ok"),
             (metrics.replan_failed_packages, "replan failed"),
         ]
@@ -636,6 +647,7 @@ def _derive_harvest_status(
         replanned_count=metrics.replanned_packages,
         replan_success_count=metrics.replan_success_packages,
         replan_failed_count=metrics.replan_failed_packages,
+        replan_recovered_count=metrics.replan_recovered_packages,
         device_unavailable=any(
             error.reason == "device_unavailable"
             for result in results

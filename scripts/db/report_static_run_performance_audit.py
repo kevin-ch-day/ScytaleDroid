@@ -18,7 +18,7 @@ import json
 import os
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -1234,7 +1234,6 @@ def main(argv: list[str] | None = None) -> int:
     _log(args.verbose, f"Loading report archive: {archive_dir}")
     report_rows, extras = _load_report_rows(archive_dir)
     detector_stage_rows = extras["detector_stage_rows"]
-    parse_rows_artifact = extras["parse_rows"]
     finding_failure_rows = extras["finding_failure_rows"]
     warnings = list(extras["warnings"])
 

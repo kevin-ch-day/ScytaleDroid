@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import harvest, inventory
+from scytaledroid.DeviceAnalysis.harvest import stale_replan
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.apk import delta, planner, ui
@@ -33,6 +34,28 @@ def _harvest_result_context_counts(results: Sequence[harvest.PullResult]) -> dic
     resolved = sum(1 for result in results if result.ok)
     blocked_preflight = sum(1 for result in results if result.preflight_reason)
     replanned = sum(1 for result in results if getattr(result, "stale_replan_outcome", None))
+    replan_success = sum(
+        1
+        for result in results
+        if stale_replan.is_successful_stale_replan_outcome(
+            getattr(result, "stale_replan_outcome", None)
+        )
+    )
+    replan_failed = sum(
+        1
+        for result in results
+        if stale_replan.is_failed_stale_replan_outcome(
+            getattr(result, "stale_replan_outcome", None)
+        )
+    )
+    replan_recovered = sum(
+        1
+        for result in results
+        if stale_replan.is_recovered_stale_replan_result(
+            getattr(result, "stale_replan_outcome", None),
+            getattr(result, "capture_status", None),
+        )
+    )
     artifacts_written = sum(
         1 for result in results for artifact in result.ok if artifact.status == "written"
     )
@@ -43,6 +66,9 @@ def _harvest_result_context_counts(results: Sequence[harvest.PullResult]) -> dic
         "packages_harvested": resolved,
         "packages_blocked_preflight": blocked_preflight,
         "packages_replanned": replanned,
+        "packages_replan_success": replan_success,
+        "packages_replan_failed": replan_failed,
+        "packages_replan_recovered": replan_recovered,
         "artifacts_written": artifacts_written,
         "artifacts_failed": sum(len(result.errors) for result in results),
     }

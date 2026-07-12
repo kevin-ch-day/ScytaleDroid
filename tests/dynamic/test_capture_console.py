@@ -6,7 +6,7 @@ import sys
 import pytest
 
 from scytaledroid.DynamicAnalysis.capture.console import CbreakTerminal, LiveCaptureConsole
-from scytaledroid.DynamicAnalysis.capture.state import CaptureAction, CaptureState, ObserverStatus
+from scytaledroid.DynamicAnalysis.capture.state import CaptureAction, CaptureState
 
 
 class _FakeClock:

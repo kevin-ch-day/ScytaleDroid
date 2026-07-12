@@ -97,6 +97,7 @@ def test_validate_static_session_prune_proposal_rejects_blocked_session() -> Non
         path_family_counts={"static_reports_latest": 1},
         legacy_payload_total_rows=738,
         file_present_count=1,
+        file_present_json_package_mismatch_count=0,
         file_missing_count=0,
         canonical_db_residue_count=0,
         malformed_or_unknown_count=0,
@@ -110,6 +111,42 @@ def test_validate_static_session_prune_proposal_rejects_blocked_session() -> Non
     )
     with pytest.raises(ValueError, match="not candidate retirement sessions"):
         prune.validate_static_session_prune_proposal(proposal)
+
+
+def test_validate_static_session_prune_proposal_allows_blocked_package_mismatch() -> None:
+    proposal = prune.StaticSessionPruneProposal(
+        total_rows_before=100,
+        static_dangling_before=10,
+        dynamic_dangling_before=5,
+        targeted_row_count=2,
+        targeted_session_count=1,
+        targeted_run_count=1,
+        targeted_artifact_ids=(1, 2),
+        targeted_static_run_ids=(971,),
+        targeted_session_stamps=("20260428-all-full",),
+        candidate_actions={"20260428-all-full": "blocked_package_mismatch_review"},
+        reason_counts={"legacy_mirror_only_file_missing": 1, "legacy_mirror_only_with_file": 1},
+        artifact_type_counts={"static_report": 1, "dep_snapshot": 1},
+        path_family_counts={"static_reports_latest": 1, "dep_snapshot": 1},
+        legacy_payload_total_rows=738,
+        file_present_count=1,
+        file_present_json_package_mismatch_count=1,
+        file_missing_count=1,
+        canonical_db_residue_count=0,
+        malformed_or_unknown_count=0,
+        oldest_created_at_utc=None,
+        newest_created_at_utc=None,
+        target_rows=(),
+        sample_rows=(),
+        exact_sql_predicate="x",
+        apply_delete_sql="y",
+        expected_count_match=True,
+    )
+    prune.validate_static_session_prune_proposal(
+        proposal,
+        expected_count=2,
+        allow_blocked_package_mismatch=True,
+    )
 
 
 def test_write_static_session_prune_receipts(tmp_path: Path) -> None:
@@ -129,6 +166,7 @@ def test_write_static_session_prune_receipts(tmp_path: Path) -> None:
         path_family_counts={"static_reports_latest": 1},
         legacy_payload_total_rows=35,
         file_present_count=0,
+        file_present_json_package_mismatch_count=0,
         file_missing_count=1,
         canonical_db_residue_count=0,
         malformed_or_unknown_count=0,

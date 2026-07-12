@@ -4,10 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
-
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as config
 from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import run_ml_on_evidence_packs
 from scytaledroid.DynamicAnalysis.ml.io.ml_output_paths import MLOutputPaths
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as config
 
 
 def _write_minimal_v1_outputs(run_dir: Path) -> None:

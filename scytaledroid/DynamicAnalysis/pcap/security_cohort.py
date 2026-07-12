@@ -9,11 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.pcap.security_surface import (
     compute_static_dynamic_cleartext_posture,
     rehydrate_security_surface,
     render_security_review_md,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 
 @dataclass(frozen=True)
@@ -331,9 +333,7 @@ def generate_cohort_security_report(
     refresh_derived: bool = False,
     apply_refresh: bool = False,
 ) -> dict:
-    from scytaledroid.Config import app_config
-
-    root = evidence_root or (Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic")
+    root = evidence_root or dynamic_evidence_root()
     out = output_dir or (
         Path(app_config.OUTPUT_DIR) / "audit" / "dynamic_pcap_security_cohort" / datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     )

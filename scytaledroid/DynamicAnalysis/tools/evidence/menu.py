@@ -17,11 +17,12 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
 )
 from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import messaging_activity_label
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, iter_dynamic_run_dirs
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
 
 
 def _dynamic_evidence_root() -> Path:
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 def _canonical_profile_v2_freeze_anchor_path() -> Path:
     """Return the canonical Profile v2 freeze anchor path.
@@ -64,6 +65,8 @@ def _load_app_labels(packages: set[str]) -> dict[str, str]:
 
 
 def _list_run_manifests(root: Path) -> list[Path]:
+    if root == dynamic_evidence_root():
+        return sorted(path / "run_manifest.json" for path in iter_dynamic_run_dirs() if (path / "run_manifest.json").exists())
     if not root.exists():
         return []
     return sorted(root.glob("*/run_manifest.json"))
@@ -172,7 +175,7 @@ def evidence_cleanup_workspace(*, pause: bool = True) -> None:
         print(status_messages.status("Cleanup of out-of-dataset valid runs is blocked (need freeze included_run_ids).", level="info"))
 
     items = [
-        menu_utils.MenuOption("1", "Delete ghost dirs", description="dirs under output/evidence/dynamic without run_manifest.json"),
+        menu_utils.MenuOption("1", "Delete ghost dirs", description="dirs under data/evidence/dynamic without run_manifest.json"),
         menu_utils.MenuOption("2", "Delete invalid dataset runs", description="valid_dataset_run=false (never in frozen dataset)"),
         menu_utils.MenuOption("3", "Delete out-of-dataset valid runs", description="valid_dataset_run=true but not in freeze included_run_ids"),
         menu_utils.MenuOption("4", "Purge old dynamic batch reports", description="delete output/batches/dynamic/* (derived)"),

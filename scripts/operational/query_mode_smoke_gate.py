@@ -124,18 +124,18 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--keep-temp-evidence", action="store_true", help="Do not delete the temporary evidence root.")
     args = ap.parse_args(argv)
 
-    from scytaledroid.Config import app_config
     from scytaledroid.DynamicAnalysis.ml.query_mode_runner import run_ml_query_mode
     from scytaledroid.DynamicAnalysis.ml.selectors import QueryParams
     from scytaledroid.DynamicAnalysis.ml.selectors.query_selector import QuerySelector
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    src_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    src_root = dynamic_evidence_root()
     if not src_root.exists():
-        print("[query_mode_smoke_gate] FAIL: no evidence root at output/evidence/dynamic")
+        print(f"[query_mode_smoke_gate] FAIL: no evidence root at {src_root}")
         return 2
 
     picked = _pick_one_app_runs(src_root)
-    temp_root = Path(app_config.OUTPUT_DIR) / "tmp" / f"query_smoke_evidence_{uuid.uuid4().hex[:8]}"
+    temp_root = REPO_ROOT / "output" / "tmp" / f"query_smoke_evidence_{uuid.uuid4().hex[:8]}"
     temp_root.mkdir(parents=True, exist_ok=True)
 
     try:

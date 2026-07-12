@@ -25,9 +25,15 @@ import os  # noqa: E402
 
 from scytaledroid.Utils.System.runtime_mode import resolve_runtime_mode  # noqa: E402
 
-STATIC_HTML_MODE = str(os.getenv("SCYTALEDROID_STATIC_HTML_MODE", "latest")).strip().lower()
-if STATIC_HTML_MODE not in {"latest", "archive", "both"}:
-    STATIC_HTML_MODE = "latest"
+DYNAMIC_EVIDENCE_ROOT = str(
+    os.getenv("SCYTALEDROID_DYNAMIC_EVIDENCE_ROOT", f"{DATA_DIR}/evidence/dynamic")
+).strip() or f"{DATA_DIR}/evidence/dynamic"
+
+STATIC_HTML_MODE = str(os.getenv("SCYTALEDROID_STATIC_HTML_MODE", "off")).strip().lower()
+if STATIC_HTML_MODE in {"none", "disabled", "false", "0", "no"}:
+    STATIC_HTML_MODE = "off"
+if STATIC_HTML_MODE not in {"off", "latest", "archive", "both"}:
+    STATIC_HTML_MODE = "off"
 STATIC_REPORT_JSON_MODE = str(
     os.getenv("SCYTALEDROID_STATIC_REPORT_JSON_MODE", "both")
 ).strip().lower()

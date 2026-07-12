@@ -5,7 +5,7 @@ Evidence-pack hunting utilities for dynamic collection.
 Goals:
 - Make it easy to understand why runs are excluded (and which run IDs).
 - Detect tracker drift vs recomputed evidence-derived eligibility.
-- Provide a safe quarantine workflow (move excluded packs out of output/evidence/dynamic).
+- Provide a safe quarantine workflow (move excluded packs out of data/evidence/dynamic).
 """
 
 from __future__ import annotations
@@ -258,10 +258,10 @@ def cmd_drift(args: argparse.Namespace) -> int:
 
 def cmd_quarantine(args: argparse.Namespace) -> int:
     """
-    Move excluded evidence packs out of output/evidence/dynamic into a quarantine root.
+    Move excluded evidence packs out of data/evidence/dynamic into a quarantine root.
 
     This is non-destructive (move, not delete). It will change what ScytaleDroid sees,
-    because many tools scan output/evidence/dynamic directly.
+    because many tools scan data/evidence/dynamic directly.
     """
     from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
 
@@ -461,7 +461,7 @@ def cmd_per_app(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
-    p.add_argument("--evidence-root", default="output/evidence/dynamic")
+    p.add_argument("--evidence-root", default="data/evidence/dynamic")
     p.add_argument("--tracker-path", default="data/archive/dataset_plan.json")
     p.add_argument("--min-windows", type=int, default=20)
     p.add_argument("--policy-version", type=int, default=0, help="0 means use tool default")
@@ -482,7 +482,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     q = sub.add_parser("quarantine")
     q.add_argument("--reason", action="append", default=[], help="only move these exclusion reason(s)")
-    q.add_argument("--quarantine-root", default="output/evidence/dynamic_excluded")
+    q.add_argument("--quarantine-root", default="data/evidence/dynamic_excluded")
     q.add_argument("--dry-run", action="store_true", default=False)
     q.add_argument("--reindex-tracker", action="store_true", default=False)
     q.set_defaults(fn=cmd_quarantine)
@@ -490,7 +490,7 @@ def _build_parser() -> argparse.ArgumentParser:
     qa = sub.add_parser("quarantine-audit")
     qa.add_argument("--report-path", required=True, help="paper_readiness_audit_*.json path")
     qa.add_argument("--issue-key", action="append", default=[], help="issues key to quarantine (repeatable)")
-    qa.add_argument("--quarantine-root", default="output/evidence/dynamic_excluded")
+    qa.add_argument("--quarantine-root", default="data/evidence/dynamic_excluded")
     qa.add_argument("--dry-run", action="store_true", default=False)
     qa.add_argument("--reindex-tracker", action="store_true", default=False)
     qa.set_defaults(fn=cmd_quarantine_audit)

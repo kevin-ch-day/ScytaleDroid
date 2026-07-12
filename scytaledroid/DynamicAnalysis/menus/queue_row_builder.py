@@ -200,7 +200,6 @@ def build_package_selection_row(
         build_state = build_label
         prep_label = build_label
         historical_valid_runs_count = legacy_valid
-        retained_prior_build_runs = legacy_valid
         historical_build_count = legacy_builds
         historical_pcap_count = int(scoped.get("legacy_pcap_available") or 0)
         technical_valid_active = int(scoped.get("technical_valid_active") or 0)

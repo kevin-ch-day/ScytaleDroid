@@ -24,7 +24,10 @@ import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -52,9 +55,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def _dynamic_root(output_root: str | None = None) -> Path:
     if output_root:
         return Path(output_root)
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -300,7 +303,6 @@ def refresh_summaries(
         }
         rows.append(row)
 
-        summary_changed = old_summary != new_summary
         if new_dest_count != old_dest_count:
             changed_destinations += 1
         if row["old_network_capture_present"] != row["new_network_capture_present"]:

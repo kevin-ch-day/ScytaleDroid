@@ -1619,7 +1619,6 @@ def build_artifact_map_report(
     archive_stems = {p.stem for p in archive_paths}
 
     log_events, log_source = _collect_report_saved_events(session, jsonl_path=static_jsonl, log_path=static_log)
-    log_n = len(log_events)
     log_path_rollup = _rollup_report_saved_archive_paths(log_events, repo=repo)
 
     logged_archive_resolved: set[str] = set()
@@ -1919,7 +1918,7 @@ def build_artifact_map_report(
             ],
             "separate_workflow": [
                 "output/audit/dynamic/* (dynamic/paper-readiness — not static scanner session evidence)",
-                "output/evidence/dynamic/…",
+                "data/evidence/dynamic/…",
             ],
             "operator_state": ["data/locks/static_analysis.lock", "DB session rollups / linkage rows"],
             "stale_or_orphaned": [

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 from scytaledroid.DynamicAnalysis.ml.seed_identity import derive_seed
 
 
@@ -18,7 +19,7 @@ def _freeze_path() -> Path:
 
 
 def _evidence_root() -> Path:
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _publication_root() -> Path:

@@ -12,7 +12,7 @@ from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
     baseline_not_idle_next_step as _guidance_baseline_not_idle_next_step,
 )
 from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import messaging_activity_label
-from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_dynamic_run_dir, resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.time_utils import format_seconds
 from scytaledroid.Utils.DisplayUtils import prompt_utils, status_messages
 
@@ -751,7 +751,8 @@ def _countability_detail(package_name: str | None, dynamic_run_id: str | None) -
         if run.get("baseline_not_idle") is False
         else None
     )
-    run_manifest = _load_manifest(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / str(dynamic_run_id))
+    run_dir = resolve_dynamic_run_dir(str(dynamic_run_id))
+    run_manifest = _load_manifest(run_dir) if run_dir else None
     if isinstance(run_manifest, dict):
         ds = run_manifest.get("dataset") if isinstance(run_manifest.get("dataset"), dict) else {}
         if isinstance(ds, dict) and low_signal is None and ds.get("low_signal") is not None:

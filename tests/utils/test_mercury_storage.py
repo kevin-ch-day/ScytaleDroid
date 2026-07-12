@@ -85,3 +85,13 @@ def test_checker_blocked_status_stays_blocked() -> None:
 
     assert level == "blocked"
     assert message == "Quick APK store checker status: BLOCKED"
+
+
+def test_workspace_dynamic_index_root_uses_canonical_data_root(monkeypatch, tmp_path: Path) -> None:
+    data_root = tmp_path / "data"
+    output_root = tmp_path / "output"
+    monkeypatch.setattr(workspace_maintenance_menu.app_config, "DATA_DIR", str(data_root))
+    monkeypatch.setattr(workspace_maintenance_menu.app_config, "OUTPUT_DIR", str(output_root))
+    monkeypatch.setattr(workspace_maintenance_menu.app_config, "DYNAMIC_EVIDENCE_ROOT", "data/evidence/dynamic")
+
+    assert workspace_maintenance_menu._dynamic_evidence_index_root() == data_root / "evidence" / "dynamic"

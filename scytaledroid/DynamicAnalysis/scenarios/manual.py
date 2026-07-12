@@ -5,14 +5,12 @@ from __future__ import annotations
 import hashlib
 import os
 import random
-import re
 import select
 import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.capture.console import CbreakTerminal, LiveCaptureConsole, SelectInputReader
@@ -21,19 +19,10 @@ from scytaledroid.DynamicAnalysis.capture.surface_probe import (
     infer_runtime_surface as _infer_runtime_surface,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    ensure_target_foreground_before_capture as _guided_ensure_target_foreground_before_capture,
-)
-from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     launch_package_to_foreground as _guided_launch_package_to_foreground,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    make_runtime_foreground_provider as _guided_make_runtime_foreground_provider,
-)
-from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     make_runtime_pcap_bytes_provider as _guided_make_runtime_pcap_bytes_provider,
-)
-from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    make_runtime_relaunch_callback as _guided_make_runtime_relaunch_callback,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     read_device_foreground_target as _guided_read_device_foreground_target,
@@ -65,7 +54,6 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
     SCRIPT_PROTOCOL_VERSION,
     build_template_hash as _build_template_hash,
     json_dumps_canonical,
-    json_dumps_sorted,
     news_branch_skip_reason as _news_branch_skip_reason,
     normalize_limitation_reason as _normalize_limitation_reason,
     preview_script_template_for_package,
@@ -143,9 +131,6 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     clear_status_line as _timing_clear_status_line,
-)
-from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
-    countdown_action_prompt_line as _timing_countdown_action_prompt_line,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     format_duration as _timing_format_duration,

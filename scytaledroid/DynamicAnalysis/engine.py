@@ -32,7 +32,11 @@ from scytaledroid.DynamicAnalysis.plans import (
 )
 from scytaledroid.DynamicAnalysis.probes.registry import run_probe_set
 from scytaledroid.DynamicAnalysis.storage.persistence import persist_dynamic_summary
-from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    ensure_legacy_dynamic_symlink,
+    resolve_evidence_path,
+)
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.version_utils import get_git_commit
@@ -212,10 +216,11 @@ class DynamicAnalysisEngine:
 
     def _write_blocked_event(self, validation) -> tuple[str | None, str | None]:
         dynamic_run_id = str(uuid.uuid4())
-        output_root = Path(self.config.output_root or "output/evidence/dynamic")
+        output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
+        ensure_legacy_dynamic_symlink(run_dir)
         dynamic_logger = logging_engine.create_dynamic_run_logger(
             dynamic_run_id,
             context={
@@ -307,10 +312,11 @@ class DynamicAnalysisEngine:
     ) -> tuple[str | None, str | None]:
         """Write a blocked evidence pack for missing host tools (dataset tier)."""
         dynamic_run_id = str(uuid.uuid4())
-        output_root = Path(self.config.output_root or "output/evidence/dynamic")
+        output_root = Path(self.config.output_root) if self.config.output_root else dynamic_evidence_root()
         run_dir = output_root / dynamic_run_id
         writer = EvidencePackWriter(run_dir)
         writer.ensure_layout()
+        ensure_legacy_dynamic_symlink(run_dir)
         dynamic_logger = logging_engine.create_dynamic_run_logger(
             dynamic_run_id,
             context={
@@ -506,7 +512,9 @@ class DynamicAnalysisEngine:
                 extra={"dynamic_run_id": session_result.dynamic_run_id},
             )
             return
-        run_dir = Path(session_result.evidence_path)
+        run_dir = resolve_evidence_path(session_result.evidence_path)
+        if not run_dir:
+            return
         writer = EvidencePackWriter(run_dir)
 
         # Engine outputs are derived artifacts. Do not mutate run_manifest.json post-seal

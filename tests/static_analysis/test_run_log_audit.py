@@ -93,7 +93,7 @@ def test_summarize_persistence_audit_prints_outcome(
 def test_static_session_logger_writes_dedicated_files_and_run_context(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(logging_engine, "LOG_DIR", tmp_path)
 
-    adapter = logging_engine.create_static_session_logger(
+    logging_engine.create_static_session_logger(
         "20260628-all-full",
         context={"subsystem": "static", "scope_label": "All harvested apps"},
     )

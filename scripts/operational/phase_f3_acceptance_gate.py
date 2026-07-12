@@ -35,11 +35,11 @@ def main(argv: list[str]) -> int:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
 
-    from scytaledroid.Config import app_config
     from scytaledroid.DynamicAnalysis.ml.query_mode_runner import run_ml_query_mode
     from scytaledroid.DynamicAnalysis.ml.selectors import QueryParams, QuerySelector
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    evidence_root = dynamic_evidence_root()
     if not evidence_root.exists():
         return _fail(f"missing evidence root: {evidence_root}")
 
@@ -74,4 +74,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

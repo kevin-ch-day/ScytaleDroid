@@ -32,6 +32,15 @@ def _sample_report(*, session_stamp: str = "20260328-rda-full") -> StaticAnalysi
     )
 
 
+def test_save_html_report_defaults_to_off_mode(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "off")
+
+    path = save_html_report(_sample_report(), output_root=tmp_path)
+
+    assert path is None
+    assert not (tmp_path / "reports" / "static").exists()
+
+
 def test_save_html_report_defaults_to_latest_mode(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
 

@@ -20,9 +20,12 @@ from .validation import validate_dynamic_plan
 
 
 __all__ = [
+    "DatabaseError",
     "PlanValidationError",
     "PlanValidationOutcome",
+    "SUPPORTED_PLAN_SCHEMA_VERSIONS",
     "SUPPORTED_SIGNATURE_VERSIONS",
+    "core_q",
     "extract_plan_identity",
     "build_plan_validation_event",
     "enrich_dynamic_plan",

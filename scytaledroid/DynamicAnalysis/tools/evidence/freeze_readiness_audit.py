@@ -25,6 +25,7 @@ from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
     inspect_canonical_freeze,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, resolve_dynamic_run_dir
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
 
 
@@ -151,7 +152,7 @@ def run_freeze_readiness_audit(
     evidence_root: Path | None = None,
     out_dir: Path | None = None,
 ) -> AuditSummary:
-    default_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    default_root = dynamic_evidence_root()
     root = evidence_root if evidence_root is not None else default_root
     out = out_dir or (Path(app_config.OUTPUT_DIR) / "audit" / "dynamic")
     out.mkdir(parents=True, exist_ok=True)
@@ -488,7 +489,7 @@ def _classify_freeze_run_id_presence(*, archive_dir: Path, evidence_root: Path) 
         },
     }
     for run_id in ids:
-        run_dir = evidence_root / run_id
+        run_dir = resolve_dynamic_run_dir(run_id) if evidence_root == dynamic_evidence_root() else evidence_root / run_id
         if not run_dir.exists():
             summary["missing_run_dirs"] = int(summary["missing_run_dirs"]) + 1
             if len(summary["sample_by_reason"]["missing_run_dirs"]) < 5:

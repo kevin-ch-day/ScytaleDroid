@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
+from scytaledroid.DynamicAnalysis.utils.path_utils import iter_dynamic_run_dirs
 
 
 def run_profile_bucket(run_profile: str) -> str:
@@ -52,12 +50,12 @@ def compute_tracker_vs_evidence_deltas(
     tracker = load_dataset_tracker()
     tracker_apps = tracker.get("apps") if isinstance(tracker.get("apps"), dict) else {}
     dataset_pkgs = {str(pkg).strip().lower() for pkg in active_research_cohort_packages() if str(pkg).strip()}
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     per_pkg: dict[str, dict[str, int]] = {
         pkg: {"base_eligible": 0, "inter_eligible": 0, "excluded": 0} for pkg in dataset_pkgs
     }
-    if root.exists():
-        for run_dir in sorted([path for path in root.iterdir() if path.is_dir()], key=lambda path: path.name):
+    run_dirs = iter_dynamic_run_dirs()
+    if run_dirs:
+        for run_dir in run_dirs:
             manifest = read_json(run_dir / "run_manifest.json")
             if not isinstance(manifest, dict):
                 continue

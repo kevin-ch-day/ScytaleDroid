@@ -5,4 +5,4 @@ stable import surface for existing callers and tests.
 """
 
 from .script_template_catalog import *  # noqa: F401,F403
-from .script_template_catalog import __all__
+from .script_template_catalog import __all__ as __all__

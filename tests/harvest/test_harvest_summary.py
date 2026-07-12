@@ -148,6 +148,10 @@ def test_build_harvest_run_report_exposes_authoritative_status_summary():
     assert report.status_summary.path_stale_count == 1
     assert report.status_summary.replanned_count == 1
     assert report.status_summary.replan_failed_count == 1
+    context = report.status_summary.to_context_dict()
+    assert context["packages_replan_success"] == 0
+    assert context["packages_replan_failed"] == 1
+    assert context["packages_replan_recovered"] == 0
     assert report.status_summary.operator_summary.startswith("reviewed 1/1")
 
 
@@ -168,6 +172,7 @@ def test_build_harvest_run_status_from_runtime_stats_enforces_count_invariants()
             "packages_replanned": 2,
             "packages_replan_success": 1,
             "packages_replan_failed": 1,
+            "packages_replan_recovered": 1,
         },
         run_error=None,
         write_db_requested=False,
@@ -179,6 +184,10 @@ def test_build_harvest_run_status_from_runtime_stats_enforces_count_invariants()
     assert status.harvested_count <= status.attempted_count
     assert status.replan_success_count + status.replan_failed_count <= status.replanned_count
     assert status.path_stale_count >= status.replanned_count
+    context = status.to_context_dict()
+    assert context["packages_replan_success"] == 1
+    assert context["packages_replan_failed"] == 1
+    assert context["packages_replan_recovered"] == 1
 
 
 def test_build_harvest_run_report_runtime_note_summary():
@@ -312,6 +321,7 @@ def test_build_harvest_run_report_counts_path_stale_replan_outcomes():
     assert report.metrics.replanned_packages == 1
     assert report.metrics.replan_success_packages == 1
     assert report.metrics.replan_failed_packages == 0
+    assert report.metrics.replan_recovered_packages == 0
 
 
 def test_build_harvest_run_report_counts_path_set_change_as_successful_replan():
@@ -331,6 +341,8 @@ def test_build_harvest_run_report_counts_path_set_change_as_successful_replan():
     assert report.metrics.replanned_packages == 1
     assert report.metrics.replan_success_packages == 1
     assert report.metrics.replan_failed_packages == 0
+    assert report.metrics.replan_recovered_packages == 1
+    assert report.status_summary.replan_recovered_count == 1
 
 
 def test_build_harvest_run_report_tolerates_legacy_pull_result_without_replan_fields():

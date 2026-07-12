@@ -59,6 +59,9 @@ def _harvest_run_context_detail_lines(context: Mapping[str, object] | None) -> l
         ("packages_blocked_preflight", "Packages blocked before pull"),
         ("packages_path_stale", "Packages with path drift"),
         ("packages_replanned", "Packages replanned"),
+        ("packages_replan_recovered", "Packages replan recovered"),
+        ("packages_replan_success", "Packages replan OK"),
+        ("packages_replan_failed", "Packages replan failed"),
         ("artifacts_written", "Artifacts written"),
         ("artifacts_failed", "Artifacts failed"),
         ("artifacts_root", "Artifacts root"),
@@ -413,7 +416,7 @@ def _run_inventory_sync(active_device: dict[str, str | None | None]) -> None:
             ):
                 return
         print()
-        result = inventory_workflow.run_inventory_sync(
+        inventory_workflow.run_inventory_sync(
             serial,
             ui_prefs=None,
             progress_sink="cli",

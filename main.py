@@ -9,7 +9,13 @@ from collections.abc import Callable
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core.db_engine import ensure_db_ready
-from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, summary_cards
+from scytaledroid.Utils.DisplayUtils import (
+    colors,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    summary_cards,
+)
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.System.world_clock.display import (
@@ -183,13 +189,14 @@ def main_menu() -> None:
         ("3", "Static Analysis Pipeline", handle_static),
         ("4", "Dynamic Analysis", handle_dynamic),
         ("5", "API server", handle_api),
-        ("6", "Reporting & Exports", handle_reporting),
+        ("6", "Reporting", handle_reporting),
         ("7", "Database tools", handle_database),
         ("8", "Governance & Readiness", handle_data_workspace),
         ("9", "Evidence & Workspace", handle_workspace),
         ("10", "APK library", handle_browse_apks),
         ("11", "Mercury APK storage mount", handle_mercury_storage),
-        ("12", "About ScytaleDroid", handle_about),
+        ("12", "Machine Learning", handle_machine_learning),
+        ("13", "About ScytaleDroid", handle_about),
     ]
 
     handlers = {key: (label, callback) for key, label, callback in menu_actions}
@@ -544,6 +551,13 @@ def handle_mercury_storage() -> None:
 
     _start_screen_transition()
     mercury_apk_storage_menu()
+
+
+def handle_machine_learning() -> None:
+    from scytaledroid.DynamicAnalysis.ml.menu import machine_learning_menu
+
+    _start_screen_transition()
+    machine_learning_menu()
 
 
 def handle_browse_apks() -> None:

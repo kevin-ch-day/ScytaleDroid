@@ -25,7 +25,7 @@ def refresh_inventory_for_harvest_menu(serial: str) -> tuple[bool, InventoryStat
     from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
 
     try:
-        result = inventory_workflow.run_inventory_sync(
+        inventory_workflow.run_inventory_sync(
             serial=serial,
             ui_prefs=text_blocks.UI_PREFS,
             mode="bulk",

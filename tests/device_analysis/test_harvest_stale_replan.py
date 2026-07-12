@@ -7,6 +7,8 @@ from scytaledroid.DeviceAnalysis.harvest.stale_replan import (
     build_stale_replan_details,
     classify_stale_replan_outcome,
     is_failed_stale_replan_outcome,
+    is_known_stale_replan_outcome,
+    is_recovered_stale_replan_result,
     is_successful_stale_replan_outcome,
 )
 
@@ -63,9 +65,25 @@ def test_stale_replan_outcome_sets_are_classified_consistently() -> None:
     for outcome in STALE_REPLAN_SUCCESS_OUTCOMES:
         assert is_successful_stale_replan_outcome(outcome) is True
         assert is_failed_stale_replan_outcome(outcome) is False
+        assert is_known_stale_replan_outcome(outcome) is True
     for outcome in STALE_REPLAN_FAILURE_OUTCOMES:
         assert is_successful_stale_replan_outcome(outcome) is False
         assert is_failed_stale_replan_outcome(outcome) is True
+        assert is_known_stale_replan_outcome(outcome) is True
+
+
+def test_stale_replan_recovered_requires_success_and_clean_status() -> None:
+    assert is_recovered_stale_replan_result("path_stale_refreshed_and_retried", "clean") is True
+    assert (
+        is_recovered_stale_replan_result(
+            "path_stale_package_updated_since_inventory",
+            "clean",
+        )
+        is True
+    )
+    assert is_recovered_stale_replan_result("path_stale_refreshed_and_retried", "drifted") is False
+    assert is_recovered_stale_replan_result("path_stale_blocked_before_pull", "clean") is False
+    assert is_recovered_stale_replan_result("path_stale_replan_failed", "clean") is False
 
 
 def test_build_stale_replan_details_uses_refreshed_inventory_fields() -> None:

@@ -22,7 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--evidence-root", default=None, help="Dynamic evidence root; defaults to output/evidence/dynamic.")
+    parser.add_argument("--evidence-root", default=None, help="Dynamic evidence root; defaults to data/evidence/dynamic.")
     parser.add_argument("--output-dir", default=None, help="Directory for the combined repair receipt bundle.")
     parser.add_argument("--run-id", action="append", default=[], help="Restrict manifest repair stages to one or more run IDs.")
     parser.add_argument("--apply", action="store_true", help="Apply safe manifest repairs and reindex current evidence into DB.")
@@ -36,9 +36,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _default_evidence_root() -> Path:
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _default_output_dir() -> Path:

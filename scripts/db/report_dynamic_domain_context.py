@@ -149,9 +149,9 @@ def _context_for_ip_destination(value: str, *, package_name: str) -> dict[str, s
 
 
 def _dynamic_root() -> Path:
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _iter_run_dirs(*, packages: set[str]) -> list[Path]:

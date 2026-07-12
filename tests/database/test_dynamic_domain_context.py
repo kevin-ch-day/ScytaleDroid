@@ -488,6 +488,14 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert b_graph["owner_class"] == "first_party"
     assert b_graph["role_class"] == "social_graph_api"
 
+    fb_shortlink = classify_domain("fb.com", package_name="com.facebook.katana", references=refs)
+    assert fb_shortlink["owner_class"] == "first_party"
+    assert fb_shortlink["role_class"] == "platform_shortlink_or_deep_link"
+
+    instagram_meta = classify_domain("meta.com", package_name="com.instagram.android", references=refs)
+    assert instagram_meta["owner_class"] == "first_party"
+    assert instagram_meta["role_class"] == "platform_corporate_or_account_surface"
+
     x_probe = classify_domain(
         "probe.twitter.com", package_name="com.twitter.android", references=refs
     )
@@ -507,6 +515,10 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert x_analytics["owner_class"] == "first_party"
     assert x_analytics["role_class"] == "analytics_measurement"
     assert x_analytics["confidence"] == "high"
+
+    x_root = classify_domain("twitter.com", package_name="com.twitter.android", references=refs)
+    assert x_root["owner_class"] == "first_party"
+    assert x_root["role_class"] == "social_graph_api"
 
     x_chat = classify_domain("chat-ws.x.com", package_name="com.twitter.android", references=refs)
     assert x_chat["owner_class"] == "first_party"
@@ -1194,6 +1206,48 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     )
     assert unscoped_mainroll["owner_class"] == "unknown"
     assert unscoped_mainroll["role_class"] == "unknown"
+
+    guardian_triplelift = classify_domain(
+        "eb2.3lift.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_triplelift["owner_class"] == "third_party"
+    assert guardian_triplelift["role_class"] == "programmatic_advertising"
+    assert guardian_triplelift["confidence"] == "medium"
+
+    guardian_adtheorent = classify_domain(
+        "rtb.adentifi.com",
+        package_name="com.guardian",
+        references=refs,
+    )
+    assert guardian_adtheorent["owner_class"] == "third_party"
+    assert guardian_adtheorent["role_class"] == "real_time_bidding"
+
+    pinterest_moloco = classify_domain(
+        "cdn-f.adsmoloco.com",
+        package_name="com.pinterest",
+        references=refs,
+    )
+    assert pinterest_moloco["owner_class"] == "third_party"
+    assert pinterest_moloco["role_class"] == "ad_creative_delivery"
+
+    reddit_community = classify_domain(
+        "redditforcommunity.com",
+        package_name="com.reddit.frontpage",
+        references=refs,
+    )
+    assert reddit_community["owner_class"] == "first_party"
+    assert reddit_community["role_class"] == "community_moderator_resources"
+
+    tiktok_root = classify_domain(
+        "www.tiktok.com",
+        package_name="com.zhiliaoapp.musically",
+        references=refs,
+    )
+    assert tiktok_root["owner_class"] == "first_party"
+    assert tiktok_root["role_class"] == "social_video_platform"
+    assert tiktok_root["confidence"] == "high"
 
     bbc_everest = classify_domain(
         "creative-assets.everesttech.net",

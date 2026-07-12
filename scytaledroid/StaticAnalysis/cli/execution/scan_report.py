@@ -69,10 +69,16 @@ def _append_resource_warning(
     count_hint = f" counts={sorted(set(counts))}" if counts else ""
     summary = _summarize_bounds_warnings(list(lines))
     level = str(summary.get("render_level") or "warn")
+    parser_provenance = metadata.get("parser_provenance")
+    parser_map = parser_provenance if isinstance(parser_provenance, Mapping) else {}
     resource_string_count = metadata.get("string_index_resource_strings")
     parse_error_resources = bool(metadata.get("parse_error_resources"))
     resource_fallback_used = bool(metadata.get("resource_fallback_used"))
-    resource_string_fallback_count = int(metadata.get("resource_string_fallback_count") or 0)
+    resource_parse_partial = bool(metadata.get("resource_parse_partial") or parser_map.get("resource_parse_partial"))
+    resource_parse_state = str(metadata.get("resource_parse_state") or parser_map.get("resource_parse_state") or "")
+    resource_string_fallback_count = int(
+        metadata.get("resource_string_fallback_count") or parser_map.get("resource_string_fallback_count") or 0
+    )
     if level == "info":
         warnings.append(
             "Resource table parser emitted a minor complex-entry bounds note "
@@ -105,6 +111,10 @@ def _append_resource_warning(
                 f"(package={package_name}, artifact={artifact_label}{count_hint}). "
                 "String/resource results were recovered with fallback parsing; re-run only if manual resource review needs confirmation."
             )
+            if resource_parse_state == "fallback_recovered" or (
+                resource_string_fallback_count > 0 and not resource_parse_partial
+            ):
+                return []
             headline = "Resource table bounds warning with fallback recovery."
             guidance = (
                 "String/resource results include fallback-recovered resource strings; re-run only if manual resource review needs confirmation."

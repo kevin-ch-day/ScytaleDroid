@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 from .evidence_pack_ml_preflight import compute_ml_preflight, is_valid_dataset_run, load_run_inputs
 
@@ -15,7 +16,7 @@ from .evidence_pack_ml_preflight import compute_ml_preflight, is_valid_dataset_r
 def write_ml_preflight_report(*, output_path: Path | None = None) -> Path:
     """Scan evidence packs and write a single CSV summarizing ML readiness."""
 
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    root = dynamic_evidence_root()
     out_dir = Path(app_config.DATA_DIR) / "archive" / "ml"
     out_dir.mkdir(parents=True, exist_ok=True)
 

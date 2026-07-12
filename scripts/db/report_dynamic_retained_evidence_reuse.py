@@ -59,9 +59,9 @@ def _default_output_dir() -> Path:
 
 
 def _dynamic_root() -> Path:
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _norm_text(value: Any) -> str:

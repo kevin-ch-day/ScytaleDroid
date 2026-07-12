@@ -635,6 +635,13 @@ def format_text_report(data: Mapping[str, Any]) -> str:
         "see docs/maintenance/artifact_registry_cleanup_track.md."
     )
     lines.append(
+        "  For static rows blocked because host files still exist, stage review with "
+        "scripts/db/report_artifact_registry_static_file_present_detached.py and "
+        "scripts/db/report_artifact_registry_static_blocked_file_presence.py before any prune decision. "
+        "Exact-hash file-present rows can then use "
+        "scripts/db/prune_artifact_registry_static_file_present_resolved.py with --expected-count."
+    )
+    lines.append(
         "  Workspace maintenance → prune artifact_registry remains a blunt instrument: it deletes **all** "
         "non-linked rows after prompts — avoid for catalog-wide debt."
     )

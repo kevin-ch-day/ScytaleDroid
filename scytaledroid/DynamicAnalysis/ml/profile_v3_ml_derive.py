@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as config
 from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import (
     anomaly_scores,
@@ -49,6 +48,7 @@ from scytaledroid.DynamicAnalysis.run_profile_norm import (
     normalize_run_profile,
     phase_from_normalized_profile,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 
 @dataclass(frozen=True)
@@ -191,7 +191,7 @@ def _write_baseline_threshold(path: Path, *, thresholds: dict[str, float]) -> No
 def derive_profile_v3_ml_for_package(*, package: str, evidence_root: Path | None = None) -> V3MlDeriveResult:
     """Derive ML artifacts for the latest baseline+scripted runs of a package."""
 
-    root = evidence_root or (Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic")
+    root = evidence_root or dynamic_evidence_root()
     pkg = str(package).strip()
     errors: list[str] = []
     baseline_rid, scripted_rid = _find_latest_runs_for_package(evidence_root=root, package=pkg)

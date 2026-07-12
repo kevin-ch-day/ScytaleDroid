@@ -30,7 +30,7 @@ def ensure_dynamic_tier_column(*, db_config, diagnostics, core_q, prompt_utils, 
     print(status_messages.status("Missing dynamic_sessions.tier column.", level="warn"))
     if prompt_user and not prompt_utils.prompt_yes_no(
         "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN tier)",
-        default=True,
+        default=False,
     ):
         return False
 
@@ -70,7 +70,7 @@ def ensure_dynamic_network_quality_column(
     print(status_messages.status("Missing dynamic_sessions.network_signal_quality column.", level="warn"))
     if prompt_user and not prompt_utils.prompt_yes_no(
         "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN network_signal_quality)",
-        default=True,
+        default=False,
     ):
         return False
 
@@ -113,7 +113,7 @@ def ensure_dynamic_pcap_columns(
     print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
     if prompt_user and not prompt_utils.prompt_yes_no(
         "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN pcap metadata)",
-        default=True,
+        default=False,
     ):
         return False
 
@@ -183,7 +183,7 @@ def ensure_dynamic_netstats_rows_columns(
     print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
     if prompt_user and not prompt_utils.prompt_yes_no(
         "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN netstats rows)",
-        default=True,
+        default=False,
     ):
         return False
 
@@ -235,7 +235,7 @@ def ensure_dynamic_sampling_duration_columns(
     print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
     if prompt_user and not prompt_utils.prompt_yes_no(
         "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN sampling duration)",
-        default=True,
+        default=False,
     ):
         return False
 
@@ -287,7 +287,7 @@ def ensure_dynamic_gap_columns(
     print(status_messages.status(f"Missing dynamic_sessions columns: {', '.join(missing)}.", level="warn"))
     if prompt_user and not prompt_utils.prompt_yes_no(
         "Apply migration now? (ALTER TABLE dynamic_sessions ADD COLUMN warm-up gap)",
-        default=True,
+        default=False,
     ):
         return False
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from scytaledroid.Database.db_core import DatabaseError, db_queries as core_q
 
 
@@ -94,4 +92,3 @@ def cross_check_session_link(
     except (TypeError, ValueError):
         return "static_run_id invalid in session link"
     return None
-

@@ -12,7 +12,6 @@ Exit code: 0 OK, 1 EXPERIMENTAL/misconfiguration, 2 ERROR (paper-grade strict fa
 from __future__ import annotations
 
 import argparse
-import sys
 
 
 def main() -> int:

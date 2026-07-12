@@ -30,6 +30,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.DynamicAnalysis.domain_context import normalize_domain
+from scytaledroid.DynamicAnalysis.service_context import (
+    default_service_catalog_seed_rows,
+    default_service_domain_map_seed_rows,
+    resolve_service_for_domain,
+)
+
 COMMON_TWO_PART_SUFFIXES = {
     "co.uk",
     "org.uk",
@@ -63,6 +70,44 @@ GENERIC_INFRASTRUCTURE_ROOTS = {
     "doubleclick.net",
     "gstatic.com",
     "googleapis.com",
+}
+STATIC_LIBRARY_OR_STANDARD_ROOTS = {
+    "angularjs.org",
+    "apache.org",
+    "eclipse.org",
+    "fsf.org",
+    "gnu.org",
+    "hamcrest.org",
+    "ietf.org",
+    "iptc.org",
+    "java.com",
+    "jsoup.org",
+    "mozilla.org",
+    "nist.gov",
+    "opensource.org",
+    "purl.org",
+    "reactive-streams.org",
+    "tensorflow.org",
+    "uu.nl",
+    "w3.org",
+    "webrtc.org",
+    "xml.org",
+    "xmlsoap.org",
+}
+GENERIC_CONTENT_OR_PLATFORM_ROOTS = {
+    "about.google",
+    "amazon.com",
+    "apple.com",
+    "appspot.com",
+    "blogspot.com.au",
+    "g.co",
+    "github.io",
+    "googlecode.com",
+    "gstatic.cn",
+    "gvt1.com",
+    "microsoft.com",
+    "windows.net",
+    "youtube.com",
 }
 
 
@@ -245,6 +290,18 @@ def _approx_root_domain(host: str) -> str:
     return tail
 
 
+def _root_domain_quality(root_domain: str) -> tuple[str, str]:
+    root = _norm_text(root_domain).lower()
+    normalized = normalize_domain(root)
+    if not normalized:
+        return "noisy", "not_a_valid_domain"
+    if "." not in normalized:
+        return "noisy", "not_registrable_domain"
+    if len(normalized) > 160:
+        return "noisy", "implausibly_long_domain_token"
+    return "valid", ""
+
+
 def _extract_domain_tokens(network_signature: Any) -> list[str]:
     tokens: set[str] = set()
     for raw in str(network_signature or "").split("|"):
@@ -366,10 +423,21 @@ def _build_overlap_rows(
     runs: Sequence[RunPackage],
     package_domains: Sequence[Mapping[str, Any]],
     tracker_rows: Sequence[Mapping[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     run_by_id = {run.static_run_id: run for run in runs}
     token_to_trackers: dict[str, list[dict[str, Any]]] = defaultdict(list)
     tracker_inventory_rows: list[dict[str, Any]] = []
+    service_rows = tuple(default_service_catalog_seed_rows())
+    service_map_rows = tuple(default_service_domain_map_seed_rows())
+
+    def service_context_for(root: str, package_name: str) -> dict[str, Any]:
+        return resolve_service_for_domain(
+            root,
+            package_name=package_name,
+            service_rows=service_rows,
+            map_rows=service_map_rows,
+        )
+
     for tracker in tracker_rows:
         tokens = tracker.get("domain_tokens") or []
         if not isinstance(tokens, list):
@@ -405,20 +473,31 @@ def _build_overlap_rows(
 
     overlap_rows: list[dict[str, Any]] = []
     unmatched_rows: list[dict[str, Any]] = []
+    noisy_rows: list[dict[str, Any]] = []
     for row in package_domains:
         run_id = int(row.get("static_run_id") or 0)
         run = run_by_id.get(run_id)
         if run is None:
             continue
         root_domain = _norm_text(row.get("root_domain")).lower()
+        quality, quality_reason = _root_domain_quality(root_domain)
+        svc = service_context_for(root_domain, run.package_name)
         matched = token_to_trackers.get(root_domain) or []
         if not matched:
-            unmatched_rows.append(
+            target_rows = noisy_rows if quality == "noisy" else unmatched_rows
+            target_rows.append(
                 {
                     "static_run_id": run.static_run_id,
                     "package_name": run.package_name,
                     "display_name": run.display_name,
                     "root_domain": root_domain,
+                    "root_domain_quality": quality,
+                    "root_domain_quality_reason": quality_reason,
+                    "curated_service_key": svc.get("service_key"),
+                    "curated_service_display_name": svc.get("service_display_name"),
+                    "curated_service_category": svc.get("service_category"),
+                    "curated_service_role_class": svc.get("role_class"),
+                    "curated_service_confidence": svc.get("confidence"),
                     "sample_count": int(row.get("sample_count") or 0),
                     "http_sample_count": int(row.get("http_sample_count") or 0),
                     "https_sample_count": int(row.get("https_sample_count") or 0),
@@ -436,6 +515,8 @@ def _build_overlap_rows(
                     "session_label": run.session_label,
                     "scope_label": run.scope_label,
                     "root_domain": root_domain,
+                    "root_domain_quality": quality,
+                    "root_domain_quality_reason": quality_reason,
                     "sample_count": int(row.get("sample_count") or 0),
                     "http_sample_count": int(row.get("http_sample_count") or 0),
                     "https_sample_count": int(row.get("https_sample_count") or 0),
@@ -446,9 +527,15 @@ def _build_overlap_rows(
                     "tracker_categories": ", ".join(tracker.get("categories") or []),
                     "tracker_website": tracker.get("website"),
                     "code_signature_present": bool(tracker.get("code_signature")),
+                    "curated_service_key": svc.get("service_key"),
+                    "curated_service_display_name": svc.get("service_display_name"),
+                    "curated_service_category": svc.get("service_category"),
+                    "curated_service_role_class": svc.get("role_class"),
+                    "curated_service_confidence": svc.get("confidence"),
+                    "curated_service_source_url": svc.get("source_url"),
                 }
             )
-    return overlap_rows, unmatched_rows, tracker_inventory_rows
+    return overlap_rows, unmatched_rows, noisy_rows, tracker_inventory_rows
 
 
 def _summarize_overlap_rows(overlap_rows: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -535,29 +622,131 @@ def _summarize_unmatched_domains(unmatched_rows: Sequence[Mapping[str, Any]]) ->
             domain,
             {
                 "root_domain": domain,
+                "root_domain_quality": row.get("root_domain_quality"),
+                "root_domain_quality_reason": row.get("root_domain_quality_reason"),
                 "package_names": set(),
                 "sample_rows": 0,
                 "http_sample_count": 0,
                 "https_sample_count": 0,
+                "curated_service_keys": set(),
+                "curated_service_confidences": set(),
             },
         )
         entry["package_names"].add(_norm_text(row.get("package_name")).lower())
         entry["sample_rows"] += int(row.get("sample_count") or 0)
         entry["http_sample_count"] += int(row.get("http_sample_count") or 0)
         entry["https_sample_count"] += int(row.get("https_sample_count") or 0)
+        if row.get("curated_service_key"):
+            entry["curated_service_keys"].add(_norm_text(row.get("curated_service_key")))
+        if row.get("curated_service_confidence"):
+            entry["curated_service_confidences"].add(_norm_text(row.get("curated_service_confidence")))
     rows: list[dict[str, Any]] = []
     for entry in rollup.values():
         rows.append(
             {
                 "root_domain": entry["root_domain"],
+                "root_domain_quality": entry["root_domain_quality"],
+                "root_domain_quality_reason": entry["root_domain_quality_reason"],
                 "package_count": len(entry["package_names"]),
                 "sample_rows": entry["sample_rows"],
                 "http_sample_count": entry["http_sample_count"],
                 "https_sample_count": entry["https_sample_count"],
                 "example_packages": ", ".join(sorted(list(entry["package_names"]))[:10]),
+                "curated_service_keys": ", ".join(sorted(entry["curated_service_keys"])),
+                "curated_service_confidences": ", ".join(sorted(entry["curated_service_confidences"])),
             }
         )
     rows.sort(key=lambda row: (-int(row["package_count"]), -int(row["sample_rows"]), str(row["root_domain"])))
+    return rows
+
+
+def _brand_token(root_domain: str) -> str:
+    root = _norm_text(root_domain).lower()
+    if not root or "." not in root:
+        return root
+    return root.split(".", 1)[0].replace("-", "")
+
+
+def _classify_domain_research_candidate(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    root = _norm_text(row.get("root_domain")).lower()
+    curated_keys = _norm_text(row.get("curated_service_keys"))
+    package_count = int(row.get("package_count") or 0)
+    sample_rows = int(row.get("sample_rows") or 0)
+    example_packages = _norm_text(row.get("example_packages")).lower()
+    brand = _brand_token(root)
+
+    if curated_keys:
+        return (
+            "already_curated_context",
+            "no_research_needed",
+            "Domain has repo-owned curated service/domain context but no external tracker-intel overlap.",
+        )
+    if root in STATIC_LIBRARY_OR_STANDARD_ROOTS:
+        return (
+            "static_library_or_standard_reference",
+            "do_not_map_as_runtime_service",
+            "Likely static string reference to library, license, standard, schema, or documentation material.",
+        )
+    if root in GENERIC_CONTENT_OR_PLATFORM_ROOTS:
+        return (
+            "generic_platform_or_content_reference",
+            "review_only_if_runtime_observed",
+            "Generic platform/content/CDN root is too broad for static-only tracker or service attribution.",
+        )
+    if brand and brand in example_packages:
+        return (
+            "likely_first_party_or_brand_reference",
+            "review_only_if_cross_app_or_third_party_behavior_matters",
+            "Domain brand token appears in one or more example package names, suggesting first-party or app-family context.",
+        )
+    if package_count >= 2 or sample_rows >= 3:
+        return (
+            "research_candidate_shared_or_repeated",
+            "research_for_possible_service_context",
+            "Domain appears in multiple packages or repeated selected static endpoint samples.",
+        )
+    return (
+        "low_priority_static_only_candidate",
+        "defer_until_runtime_observed",
+        "Single-package low-frequency static endpoint evidence without curated or external tracker-intel context.",
+    )
+
+
+def _build_domain_research_candidates(unmatched_domain_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in unmatched_domain_rows:
+        candidate_class, suggested_action, reason = _classify_domain_research_candidate(row)
+        rows.append(
+            {
+                "root_domain": row.get("root_domain"),
+                "candidate_class": candidate_class,
+                "suggested_action": suggested_action,
+                "reason": reason,
+                "package_count": row.get("package_count"),
+                "sample_rows": row.get("sample_rows"),
+                "http_sample_count": row.get("http_sample_count"),
+                "https_sample_count": row.get("https_sample_count"),
+                "example_packages": row.get("example_packages"),
+                "curated_service_keys": row.get("curated_service_keys"),
+                "curated_service_confidences": row.get("curated_service_confidences"),
+            }
+        )
+    priority = {
+        "research_candidate_shared_or_repeated": 0,
+        "likely_first_party_or_brand_reference": 1,
+        "low_priority_static_only_candidate": 2,
+        "generic_platform_or_content_reference": 3,
+        "static_library_or_standard_reference": 4,
+        "already_curated_context": 5,
+    }
+    rows.sort(
+        key=lambda item: (
+            priority.get(_norm_text(item.get("candidate_class")), 99),
+            -int(item.get("package_count") or 0),
+            -int(item.get("sample_rows") or 0),
+            str(item.get("root_domain") or ""),
+        )
+    )
     return rows
 
 
@@ -580,11 +769,15 @@ def main(argv: list[str] | None = None) -> int:
 
     package_domains = _load_package_domains(core_q, run_ids)
     tracker_rows, warnings, snapshot_date = _load_external_tracker_domains(core_q)
-    overlap_rows, unmatched_rows, tracker_inventory_rows = _build_overlap_rows(runs, package_domains, tracker_rows)
+    overlap_rows, unmatched_rows, noisy_rows, tracker_inventory_rows = _build_overlap_rows(runs, package_domains, tracker_rows)
     package_rollup_rows, tracker_rollup_rows = _summarize_overlap_rows(overlap_rows)
     unmatched_domain_rows = _summarize_unmatched_domains(unmatched_rows)
+    noisy_domain_rows = _summarize_unmatched_domains(noisy_rows)
+    domain_research_candidate_rows = _build_domain_research_candidates(unmatched_domain_rows)
 
     confidence_counts = Counter(_norm_text(row.get("overlap_confidence")) for row in overlap_rows if row.get("overlap_confidence"))
+    curated_counts = Counter(_norm_text(row.get("curated_service_confidence")) for row in overlap_rows if row.get("curated_service_confidence"))
+    candidate_class_counts = Counter(_norm_text(row.get("candidate_class")) for row in domain_research_candidate_rows)
     tracker_domain_token_count = sum(len(row.get("domain_tokens") or []) for row in tracker_rows)
 
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -606,12 +799,21 @@ def main(argv: list[str] | None = None) -> int:
         "package_with_low_overlap_count": sum(1 for row in package_rollup_rows if "low" in _norm_text(row.get("confidence_levels")).split(", ")),
         "overlap_row_count": len(overlap_rows),
         "overlap_confidence_counts": dict(sorted(confidence_counts.items())),
+        "overlap_curated_service_confidence_counts": dict(sorted(curated_counts.items())),
+        "unmatched_root_domain_count": len(unmatched_domain_rows),
+        "unmatched_with_curated_context_count": sum(1 for row in unmatched_domain_rows if row.get("curated_service_keys")),
+        "unmatched_without_curated_context_count": sum(1 for row in unmatched_domain_rows if not row.get("curated_service_keys")),
+        "noisy_static_root_domain_count": len(noisy_domain_rows),
+        "domain_research_candidate_count": len(domain_research_candidate_rows),
+        "domain_research_candidate_class_counts": dict(sorted(candidate_class_counts.items())),
         "top_trackers": tracker_rollup_rows[:15],
         "warnings": sorted(set(warnings)),
         "assumptions": [
             "Matches are contextual overlays derived from selected static endpoint root domains.",
             "Current selected endpoint evidence stores root domains, not full hostnames or URLs.",
             "Generic-root and infrastructure-root overlaps are intentionally labeled low confidence.",
+            "Noisy static string tokens are separated from true unmatched root domains.",
+            "Curated service context is included as interpretation context; it does not prove SDK embedding.",
             "No DB writes were performed by this report.",
         ],
         "no_db_writes": True,
@@ -622,6 +824,8 @@ def main(argv: list[str] | None = None) -> int:
             "tracker_context_rollup.csv",
             "tracker_context_overlaps.csv",
             "unmatched_root_domains.csv",
+            "domain_research_candidates.csv",
+            "noisy_static_root_domains.csv",
             "tracker_domain_inventory.csv",
         ],
     }
@@ -631,6 +835,8 @@ def main(argv: list[str] | None = None) -> int:
     _write_csv(out_dir / "tracker_context_rollup.csv", tracker_rollup_rows)
     _write_csv(out_dir / "tracker_context_overlaps.csv", overlap_rows)
     _write_csv(out_dir / "unmatched_root_domains.csv", unmatched_domain_rows)
+    _write_csv(out_dir / "domain_research_candidates.csv", domain_research_candidate_rows)
+    _write_csv(out_dir / "noisy_static_root_domains.csv", noisy_domain_rows)
     _write_csv(out_dir / "tracker_domain_inventory.csv", tracker_inventory_rows)
 
     print("# external tracker context")
@@ -643,6 +849,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"package_with_medium_overlap_count: {summary['package_with_medium_overlap_count']}")
     print(f"package_with_low_overlap_count: {summary['package_with_low_overlap_count']}")
     print(f"overlap_confidence_counts: {json.dumps(summary['overlap_confidence_counts'], sort_keys=True)}")
+    print(f"unmatched_root_domain_count: {summary['unmatched_root_domain_count']}")
+    print(f"unmatched_without_curated_context_count: {summary['unmatched_without_curated_context_count']}")
+    print(f"domain_research_candidate_class_counts: {json.dumps(summary['domain_research_candidate_class_counts'], sort_keys=True)}")
+    print(f"noisy_static_root_domain_count: {summary['noisy_static_root_domain_count']}")
     print(f"output_dir: {out_dir}")
     return 0
 

@@ -21,6 +21,16 @@ STALE_REPLAN_FAILURE_OUTCOMES = frozenset(
         "path_stale_replan_failed",
     }
 )
+STALE_REPLAN_LEGACY_OUTCOME = "legacy_or_unknown_path_stale"
+STALE_REPLAN_OUTCOMES = (
+    "path_stale_refreshed_and_retried",
+    "path_stale_package_updated_since_inventory",
+    "path_stale_package_paths_changed_since_inventory",
+    "path_stale_blocked_before_pull",
+    "path_stale_package_no_longer_accessible",
+    "path_stale_replan_failed",
+    STALE_REPLAN_LEGACY_OUTCOME,
+)
 
 
 def classify_stale_replan_outcome(
@@ -96,12 +106,34 @@ def is_failed_stale_replan_outcome(outcome: str | None) -> bool:
     return str(outcome or "").strip() in STALE_REPLAN_FAILURE_OUTCOMES
 
 
+def is_known_stale_replan_outcome(outcome: str | None) -> bool:
+    return str(outcome or "").strip() in STALE_REPLAN_OUTCOMES
+
+
+def is_recovered_stale_replan_result(
+    outcome: str | None,
+    capture_status: str | None,
+) -> bool:
+    """True when stale-path recovery produced a clean package result."""
+
+    normalized = str(outcome or "").strip()
+    return (
+        normalized in STALE_REPLAN_SUCCESS_OUTCOMES
+        and normalized != "path_stale_blocked_before_pull"
+        and str(capture_status or "").strip() == "clean"
+    )
+
+
 __all__ = [
     "STALE_REPLAN_FAILURE_OUTCOMES",
+    "STALE_REPLAN_LEGACY_OUTCOME",
+    "STALE_REPLAN_OUTCOMES",
     "STALE_REPLAN_SUCCESS_OUTCOMES",
     "build_stale_replan_details",
     "classify_stale_replan_outcome",
     "is_failed_stale_replan_outcome",
+    "is_known_stale_replan_outcome",
+    "is_recovered_stale_replan_result",
     "is_successful_stale_replan_outcome",
     "stale_replan_outcome_text",
 ]

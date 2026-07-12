@@ -20,9 +20,6 @@ from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     format_duration as _format_duration,
 )
-from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
-    format_duration_precise as _format_duration_precise,
-)
 
 
 @dataclass(frozen=True)

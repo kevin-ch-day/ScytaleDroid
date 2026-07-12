@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution, SnapshotContext
 from scytaledroid.DeviceAnalysis.apk.workflow import run_apk_pull
-from scytaledroid.DeviceAnalysis.harvest.models import HarvestPlan, InventoryRow, PackagePlan, ScopeSelection
+from scytaledroid.DeviceAnalysis.harvest.models import HarvestPlan, InventoryRow, PackagePlan, PullResult, ScopeSelection
 from scytaledroid.DeviceAnalysis.harvest.status import HarvestRunStatus
 
 
@@ -59,6 +59,32 @@ def _snapshot() -> SnapshotContext:
     )
 
 
+def test_harvest_result_context_counts_include_replan_recovery() -> None:
+    from scytaledroid.DeviceAnalysis.apk.workflow import _harvest_result_context_counts
+
+    plan = _resolution().plan.packages[0]
+    recovered = PullResult(
+        plan=plan,
+        ok=[SimpleNamespace(status="written")],
+        capture_status="clean",
+        stale_replan_required=True,
+        stale_replan_outcome="path_stale_refreshed_and_retried",
+    )
+    failed = PullResult(
+        plan=plan,
+        capture_status="drifted",
+        stale_replan_required=True,
+        stale_replan_outcome="path_stale_replan_failed",
+    )
+
+    counts = _harvest_result_context_counts([recovered, failed])
+
+    assert counts["packages_replanned"] == 2
+    assert counts["packages_replan_success"] == 1
+    assert counts["packages_replan_failed"] == 1
+    assert counts["packages_replan_recovered"] == 1
+
+
 def _status_summary(
     *,
     status: str,
@@ -69,6 +95,7 @@ def _status_summary(
     packages_harvested: int,
     packages_blocked_preflight: int,
     packages_replanned: int,
+    packages_replan_recovered: int = 0,
     packages_path_stale: int = 0,
     packages_failed: int = 0,
     packages_partial: int = 0,
@@ -90,6 +117,7 @@ def _status_summary(
         replanned_count=packages_replanned,
         replan_success_count=max(packages_replanned - packages_failed, 0),
         replan_failed_count=packages_failed,
+        replan_recovered_count=packages_replan_recovered,
         status=status,
         status_reason=status_reason,
         status_level=level,
@@ -278,6 +306,7 @@ def test_run_apk_pull_prefers_authoritative_status_summary_for_package_counts(
                 packages_harvested=6,
                 packages_blocked_preflight=4,
                 packages_replanned=2,
+                packages_replan_recovered=1,
                 packages_path_stale=2,
                 level="warn",
             ),
@@ -303,6 +332,9 @@ def test_run_apk_pull_prefers_authoritative_status_summary_for_package_counts(
     assert result.context["packages_blocked_preflight"] == 4
     assert result.context["packages_replanned"] == 2
     assert result.context["packages_path_stale"] == 2
+    assert result.context["packages_replan_success"] == 2
+    assert result.context["packages_replan_failed"] == 0
+    assert result.context["packages_replan_recovered"] == 1
     assert result.context["artifacts_written"] == 11
     assert result.context["artifacts_failed"] == 2
 
@@ -368,6 +400,9 @@ def test_harvest_run_context_detail_lines_include_status_and_counts() -> None:
             "packages_blocked_preflight": 1,
             "packages_path_stale": 1,
             "packages_replanned": 1,
+            "packages_replan_recovered": 1,
+            "packages_replan_success": 1,
+            "packages_replan_failed": 0,
             "artifacts_written": 0,
             "artifacts_failed": 1,
             "run_id": "RUN123",
@@ -384,6 +419,9 @@ def test_harvest_run_context_detail_lines_include_status_and_counts() -> None:
     assert "Packages blocked before pull: 1" in lines
     assert "Packages with path drift: 1" in lines
     assert "Packages replanned: 1" in lines
+    assert "Packages replan recovered: 1" in lines
+    assert "Packages replan OK: 1" in lines
+    assert "Packages replan failed: 0" in lines
     assert "Artifacts written: 0" in lines
     assert "Artifacts failed: 1" in lines
 

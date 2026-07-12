@@ -9,6 +9,8 @@ Examples:
 
   PYTHONPATH=. python scripts/db/report_harvest_path_stale_audit.py
   PYTHONPATH=. python scripts/db/report_harvest_path_stale_audit.py --verbose
+  PYTHONPATH=. python scripts/db/report_harvest_path_stale_audit.py \
+    --receipt-root data/receipts/harvest/ZY22JK89DR-20260712-054649-919612
 """
 
 from __future__ import annotations
@@ -26,27 +28,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-OUTCOME_CATEGORIES: tuple[str, ...] = (
-    "path_stale_refreshed_and_retried",
-    "path_stale_package_updated_since_inventory",
-    "path_stale_package_paths_changed_since_inventory",
-    "path_stale_blocked_before_pull",
-    "path_stale_package_no_longer_accessible",
-    "path_stale_replan_failed",
-    "legacy_or_unknown_path_stale",
-)
+from scytaledroid.DeviceAnalysis.harvest import stale_replan
 
-REPLAN_SUCCESS_OUTCOMES = {
-    "path_stale_refreshed_and_retried",
-    "path_stale_package_updated_since_inventory",
-    "path_stale_package_paths_changed_since_inventory",
-    "path_stale_blocked_before_pull",
-}
-PACKAGE_RECOVERED_OUTCOMES = {"path_stale_refreshed_and_retried"}
-REPLAN_FAILED_OUTCOMES = {
-    "path_stale_package_no_longer_accessible",
-    "path_stale_replan_failed",
-}
+OUTCOME_CATEGORIES = stale_replan.STALE_REPLAN_OUTCOMES
+REPLAN_FAILED_OUTCOMES = stale_replan.STALE_REPLAN_FAILURE_OUTCOMES
+LEGACY_PATH_STALE_OUTCOME = stale_replan.STALE_REPLAN_LEGACY_OUTCOME
+
+REPLAN_SUCCESS_OUTCOMES = stale_replan.STALE_REPLAN_SUCCESS_OUTCOMES
 SNAPSHOT_AGE_BUCKETS: tuple[str, ...] = (
     "unknown",
     "0-15m",
@@ -63,6 +51,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=None,
         help="Write outputs to this directory instead of output/audit/harvest_path_stale/<stamp>/.",
+    )
+    parser.add_argument(
+        "--receipt-root",
+        action="append",
+        default=[],
+        help=(
+            "Receipt file or directory to scan. May be repeated. "
+            "Defaults to data/receipts/harvest."
+        ),
+    )
+    parser.add_argument(
+        "--manifest-root",
+        action="append",
+        default=[],
+        help=(
+            "Harvest package manifest file or directory to scan. May be repeated. "
+            "Defaults to data/device_apks."
+        ),
     )
     parser.add_argument(
         "--verbose",
@@ -155,12 +161,33 @@ def _resolve_repo_path(value: Any) -> Path | None:
     return _REPO_ROOT / text
 
 
-def _receipt_paths(data_dir: Path) -> list[Path]:
-    return sorted((data_dir / "receipts" / "harvest").rglob("*.json"))
+def _json_paths_from_roots(roots: Sequence[Path], *, default_root: Path, pattern: str) -> list[Path]:
+    scan_roots = list(roots) or [default_root]
+    paths: list[Path] = []
+    for root in scan_roots:
+        if root.is_file():
+            if root.name.endswith(".json"):
+                paths.append(root)
+            continue
+        if root.exists():
+            paths.extend(root.rglob(pattern))
+    return sorted(set(paths))
 
 
-def _manifest_paths(data_dir: Path) -> list[Path]:
-    return sorted((data_dir / "device_apks").rglob("harvest_package_manifest.json"))
+def _receipt_paths(data_dir: Path, roots: Sequence[Path] = ()) -> list[Path]:
+    return _json_paths_from_roots(
+        roots,
+        default_root=data_dir / "receipts" / "harvest",
+        pattern="*.json",
+    )
+
+
+def _manifest_paths(data_dir: Path, roots: Sequence[Path] = ()) -> list[Path]:
+    return _json_paths_from_roots(
+        roots,
+        default_root=data_dir / "device_apks",
+        pattern="harvest_package_manifest.json",
+    )
 
 
 def _inventory_snapshot_index(data_dir: Path) -> dict[tuple[str, int], str]:
@@ -210,23 +237,23 @@ def _has_path_stale_text(payload: Mapping[str, Any]) -> bool:
 def _path_stale_outcome(payload: Mapping[str, Any]) -> str | None:
     execution = payload.get("execution")
     if isinstance(execution, Mapping):
-        stale_replan = execution.get("stale_replan")
-        if isinstance(stale_replan, Mapping):
-            outcome = _norm_text(stale_replan.get("outcome"))
-            if outcome in OUTCOME_CATEGORIES:
+        stale_replan_payload = execution.get("stale_replan")
+        if isinstance(stale_replan_payload, Mapping):
+            outcome = _norm_text(stale_replan_payload.get("outcome"))
+            if stale_replan.is_known_stale_replan_outcome(outcome):
                 return outcome
-            if stale_replan.get("required") or stale_replan.get("details"):
-                return "legacy_or_unknown_path_stale"
+            if stale_replan_payload.get("required") or stale_replan_payload.get("details"):
+                return LEGACY_PATH_STALE_OUTCOME
         for item in execution.get("errors") or []:
             if isinstance(item, Mapping):
                 reason = _norm_text(item.get("reason"))
                 if reason == "path_stale":
-                    return "legacy_or_unknown_path_stale"
+                    return LEGACY_PATH_STALE_OUTCOME
         for item in execution.get("runtime_skips") or []:
             if _norm_text(item) in {"path_stale", "path stale"}:
-                return "legacy_or_unknown_path_stale"
+                return LEGACY_PATH_STALE_OUTCOME
     if _has_path_stale_text(payload):
-        return "legacy_or_unknown_path_stale"
+        return LEGACY_PATH_STALE_OUTCOME
     return None
 
 
@@ -390,6 +417,11 @@ def _event_row(
     inventory_snapshot_path = None
     if device_serial and snapshot_id is not None:
         inventory_snapshot_path = inventory_index.get((device_serial, snapshot_id))
+    final_package_status = _norm_text_or_none(status_block.get("capture_status"))
+    package_recovered_after_replan = stale_replan.is_recovered_stale_replan_result(
+        outcome,
+        final_package_status,
+    )
 
     return {
         "harvest_session_id": session_id,
@@ -418,8 +450,8 @@ def _event_row(
         "replan_attempted": 1,
         "replan_success": int(outcome in REPLAN_SUCCESS_OUTCOMES),
         "replan_failed": int(outcome in REPLAN_FAILED_OUTCOMES),
-        "package_recovered_after_replan": int(outcome in PACKAGE_RECOVERED_OUTCOMES),
-        "final_package_status": _norm_text_or_none(status_block.get("capture_status")),
+        "package_recovered_after_replan": int(package_recovered_after_replan),
+        "final_package_status": final_package_status,
     }
 
 
@@ -464,11 +496,31 @@ def _record_summary_row(
     }
 
 
-def _load_source_payloads(data_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
+def _resolve_scan_roots(values: Sequence[str]) -> list[Path]:
+    roots: list[Path] = []
+    for value in values:
+        text = _norm_text(value)
+        if not text:
+            continue
+        path = Path(text).expanduser()
+        roots.append(path if path.is_absolute() else _REPO_ROOT / path)
+    return roots
+
+
+def _load_source_payloads(
+    data_dir: Path,
+    *,
+    receipt_roots: Sequence[Path] = (),
+    manifest_roots: Sequence[Path] = (),
+) -> tuple[list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
     payloads: dict[tuple[str, str], dict[str, Any]] = {}
+    scoped_scan = bool(receipt_roots or manifest_roots)
 
-    for receipt_path in _receipt_paths(data_dir):
+    receipt_paths = _receipt_paths(data_dir, receipt_roots) if receipt_roots or not scoped_scan else []
+    manifest_paths = _manifest_paths(data_dir, manifest_roots) if manifest_roots or not scoped_scan else []
+
+    for receipt_path in receipt_paths:
         payload = _read_json(receipt_path)
         if payload is None:
             warnings.append(f"malformed_receipt:{_repo_rel(receipt_path)}")
@@ -482,7 +534,7 @@ def _load_source_payloads(data_dir: Path) -> tuple[list[dict[str, Any]], list[st
             "summary": row,
         }
 
-    for manifest_path in _manifest_paths(data_dir):
+    for manifest_path in manifest_paths:
         payload = _read_json(manifest_path)
         if payload is None:
             warnings.append(f"malformed_manifest:{_repo_rel(manifest_path)}")
@@ -530,7 +582,6 @@ def _build_recommendation(
     old_bucket = bucket_map.get("24h+") or {}
     fresh_bucket = bucket_map.get("0-15m") or {}
     old_events = int(old_bucket.get("path_stale_events") or 0)
-    fresh_events = int(fresh_bucket.get("path_stale_events") or 0)
     old_rate = float(old_bucket.get("path_stale_rate") or 0.0)
     fresh_rate = float(fresh_bucket.get("path_stale_rate") or 0.0)
 
@@ -575,12 +626,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     data_dir = _REPO_ROOT / "data"
     output_root = _REPO_ROOT / "output"
+    receipt_roots = _resolve_scan_roots(args.receipt_root)
+    manifest_roots = _resolve_scan_roots(args.manifest_root)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     audit_output_dir = Path(args.output_dir) if args.output_dir else output_root / "audit" / "harvest_path_stale" / stamp
     audit_output_dir.mkdir(parents=True, exist_ok=True)
 
-    _log(args.verbose, f"[harvest-path-stale] scanning receipts under {data_dir / 'receipts' / 'harvest'}")
-    source_payloads, warnings = _load_source_payloads(data_dir)
+    _log(
+        args.verbose,
+        "[harvest-path-stale] scanning receipts under "
+        + ", ".join(_repo_rel(path) or str(path) for path in (receipt_roots or [data_dir / "receipts" / "harvest"])),
+    )
+    source_payloads, warnings = _load_source_payloads(
+        data_dir,
+        receipt_roots=receipt_roots,
+        manifest_roots=manifest_roots,
+    )
     inventory_index = _inventory_snapshot_index(data_dir)
     _log(args.verbose, f"[harvest-path-stale] package_records={len(source_payloads)}")
 
@@ -608,7 +669,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         package_name = _norm_text(row.get("package_name")).lower()
         if not package_name:
             continue
-        outcome = _norm_text(row.get("stale_replan_outcome")) or "legacy_or_unknown_path_stale"
+        outcome = _norm_text(row.get("stale_replan_outcome")) or LEGACY_PATH_STALE_OUTCOME
         package_counter[package_name][outcome] += 1
         package_sessions[package_name].add(_norm_text(row.get("harvest_session_id")))
         package_display.setdefault(package_name, _norm_text_or_none(row.get("display_name")))
@@ -674,10 +735,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     outcome_rows = []
-    outcome_counter = Counter(_norm_text(row.get("stale_replan_outcome")) or "legacy_or_unknown_path_stale" for row in event_rows)
+    outcome_counter = Counter(_norm_text(row.get("stale_replan_outcome")) or LEGACY_PATH_STALE_OUTCOME for row in event_rows)
     for outcome in OUTCOME_CATEGORIES:
         count = outcome_counter.get(outcome, 0)
-        if outcome in PACKAGE_RECOVERED_OUTCOMES:
+        if outcome == "path_stale_refreshed_and_retried":
             follow = "keep lazy replan and watch frequency"
             interp = "artifact pull recovered after targeted refresh"
         elif outcome in REPLAN_FAILED_OUTCOMES:
@@ -686,7 +747,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif outcome == "path_stale_blocked_before_pull":
             follow = "check policy vs refreshed package location"
             interp = "refresh succeeded but package became blocked before pull"
-        elif outcome == "legacy_or_unknown_path_stale":
+        elif outcome == LEGACY_PATH_STALE_OUTCOME:
             follow = "collect newer artifacts before behavior changes"
             interp = "older or incomplete evidence cannot classify the exact outcome"
         else:
@@ -764,6 +825,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "repo_root": str(_REPO_ROOT),
         "data_root": str(data_dir),
         "output_dir": str(audit_output_dir),
+        "receipt_roots": [_repo_rel(path) or str(path) for path in receipt_roots],
+        "manifest_roots": [_repo_rel(path) or str(path) for path in manifest_roots],
+        "scan_scope": "scoped" if receipt_roots or manifest_roots else "default",
         "harvest_session_count": len(session_groups),
         "package_record_count": len(record_rows),
         "path_stale_event_count": len(event_rows),

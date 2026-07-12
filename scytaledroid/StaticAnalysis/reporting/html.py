@@ -230,8 +230,16 @@ def save_html_report(
     *,
     output_root: Path | None = None,
     mode: str | None = None,
-) -> Path:
-    """Persist a rendered HTML report for *report* and return the file path."""
+) -> Path | None:
+    """Persist a rendered HTML report for *report* and return the file path.
+
+    ``mode="off"`` intentionally skips the human-readable mirror. The JSON
+    report remains the machine-readable evidence artifact.
+    """
+
+    resolved_mode = _normalize_html_mode(mode or getattr(app_config, "STATIC_HTML_MODE", "off"))
+    if resolved_mode == "off":
+        return None
 
     if view is None:
         view = build_report_view(report)
@@ -249,7 +257,6 @@ def save_html_report(
     )
     artifact = _artifact_slug(metadata.get("artifact") or report.file_name)
     artifact = _resolve_html_artifact_name(report, artifact)
-    resolved_mode = _normalize_html_mode(mode or getattr(app_config, "STATIC_HTML_MODE", "latest"))
     latest_path, archive_path = _resolve_output_paths(
         report,
         package=package,
@@ -351,8 +358,10 @@ def _coerce_timestamp(timestamp: str | None) -> str:
 
 
 def _normalize_html_mode(mode: str) -> str:
-    normalized = str(mode or "latest").strip().lower()
-    return normalized if normalized in {"latest", "archive", "both"} else "latest"
+    normalized = str(mode or "off").strip().lower()
+    if normalized in {"none", "disabled", "false", "0", "no"}:
+        normalized = "off"
+    return normalized if normalized in {"off", "latest", "archive", "both"} else "off"
 
 
 def _resolve_output_paths(

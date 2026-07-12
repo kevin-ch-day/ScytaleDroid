@@ -518,14 +518,6 @@ def select_package_scope(
 
         profile_scopes = _load_active_profile_scopes(rows, device_serial=device_serial)
         profile_scope_count = len(profile_scopes)
-        profile_scope_packages = len(
-            {
-                row.package_name.strip().lower()
-                for scope in profile_scopes
-                for row in scope.get("rows", [])
-                if getattr(row, "package_name", None)
-            }
-        )
         inv_total = len(rows)
         default_pkg = context["default_counts"].get("packages")
         default_files = context["default_counts"].get("files")
@@ -579,7 +571,11 @@ def select_package_scope(
             pullable=len(pullable_full),
             files=full_pullable_files,
             note=full_note,
-            handler=lambda: ScopeSelection(
+            handler=lambda rows=rows,
+            full_pullable_files=full_pullable_files,
+            pullable_full=pullable_full,
+            blocked_full=blocked_full,
+            is_rooted=is_rooted: ScopeSelection(
                 label=FULL_INVENTORY_POLICY_FILTERED_LABEL,
                 packages=list(rows),
                 kind="everything",

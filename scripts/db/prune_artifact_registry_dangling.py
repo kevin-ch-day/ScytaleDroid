@@ -153,7 +153,6 @@ def _policy_guard_for_apply(
         "total_rows": int(summary.get("total_rows") or 0),
     }
     safe_rows = policy_counts["safe_prune_candidate_rows"]
-    review_rows = policy_counts["review_or_blocked_rows"]
     if candidate_count <= safe_rows:
         return True, None, policy_counts
     if allow_review_category_prune:

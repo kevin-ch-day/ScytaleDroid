@@ -31,9 +31,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _default_evidence_root() -> Path:
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _default_output_dir() -> Path:

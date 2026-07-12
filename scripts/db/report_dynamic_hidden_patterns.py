@@ -10,7 +10,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -24,9 +24,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _dynamic_root() -> Path:
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -416,6 +416,67 @@ def _service_owner_breakdown(service_rows: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def _static_run_id_from_plan(plan: Mapping[str, Any] | None) -> int | None:
+    if not isinstance(plan, Mapping):
+        return None
+    candidates: list[Any] = [plan.get("static_run_id")]
+    run_identity = plan.get("run_identity")
+    if isinstance(run_identity, Mapping):
+        candidates.append(run_identity.get("static_run_id"))
+    for candidate in candidates:
+        try:
+            value = int(candidate or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    return None
+
+
+def _load_latest_static_run_ids(packages: set[str]) -> dict[str, int]:
+    normalized = sorted({_norm_text(package).lower() for package in packages if _norm_text(package)})
+    if not normalized:
+        return {}
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+    except Exception:
+        return {}
+    placeholders = ", ".join(["%s"] * len(normalized))
+    try:
+        rows = core_q.run_sql(
+            f"""
+            SELECT
+              LOWER(TRIM(a.package_name)) AS package_name,
+              MAX(sar.id) AS static_run_id
+            FROM static_analysis_runs sar
+            JOIN app_versions av ON av.id = sar.app_version_id
+            JOIN apps a ON a.id = av.app_id
+            WHERE LOWER(TRIM(a.package_name)) IN ({placeholders})
+              AND UPPER(COALESCE(sar.status, '')) = 'COMPLETED'
+              AND UPPER(COALESCE(sar.run_class, '')) = 'CANONICAL'
+            GROUP BY LOWER(TRIM(a.package_name))
+            """,
+            tuple(normalized),
+            fetch="all",
+            dictionary=True,
+            query_name="dynamic.hidden_patterns.latest_static_run_ids",
+        ) or []
+    except Exception:
+        return {}
+    out: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        package = _norm_text(row.get("package_name")).lower()
+        try:
+            static_run_id = int(row.get("static_run_id") or 0)
+        except (TypeError, ValueError):
+            static_run_id = 0
+        if package and static_run_id > 0:
+            out[package] = static_run_id
+    return out
+
+
 def _iter_dynamic_runs() -> list[dict[str, Any]]:
     from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
     from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import verify_dynamic_evidence_packs
@@ -479,16 +540,22 @@ def _build_static_rows(package_runs: dict[str, list[dict[str, Any]]]) -> tuple[l
     authoritative_runs: dict[str, dict[str, Any]] = {}
     run_ids: set[int] = set()
     packages: set[str] = set()
+    packages_missing_plan_static_id: set[str] = set()
     for package, runs in package_runs.items():
         valid_runs = [row for row in runs if row["valid_pack"]]
         if not valid_runs:
             continue
         latest = max(valid_runs, key=lambda row: (_norm_text(row["run_id"]),))
         authoritative_runs[package] = latest
-        static_run_id = latest["static_plan"].get("static_run_id")
+        static_run_id = _static_run_id_from_plan(latest.get("static_plan"))
         if static_run_id is not None:
             run_ids.add(int(static_run_id))
+        else:
+            packages_missing_plan_static_id.add(package)
         packages.add(package)
+
+    fallback_static_run_ids = _load_latest_static_run_ids(packages_missing_plan_static_id)
+    run_ids.update(int(value) for value in fallback_static_run_ids.values())
 
     finding_features = _load_static_finding_features(run_ids)
     permission_features = _load_permission_features(run_ids)
@@ -503,7 +570,7 @@ def _build_static_rows(package_runs: dict[str, list[dict[str, Any]]]) -> tuple[l
         ref = authoritative_runs[package]
         app_label = ref["app_label"]
         plan = ref["static_plan"]
-        static_run_id = int(plan.get("static_run_id") or 0) or None
+        static_run_id = _static_run_id_from_plan(plan) or fallback_static_run_ids.get(package)
         static_features = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
         risk_flags = plan.get("risk_flags") if isinstance(plan.get("risk_flags"), dict) else {}
         exported = plan.get("exported_components") if isinstance(plan.get("exported_components"), dict) else {}

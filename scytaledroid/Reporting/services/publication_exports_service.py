@@ -12,7 +12,7 @@ Inputs:
 - data/archive/dataset_freeze.json (canonical freeze anchor)
 - output/_internal/publication/baseline/tables/table_1_rdi_prevalence.csv (RDI prevalence by app/phase)
 - output/_internal/publication/baseline/tables/table_7_exposure_deviation_summary.csv (static-vs-dynamic)
-- output/evidence/dynamic/<run_id>/run_manifest.json (window_count + run_profile)
+- data/evidence/dynamic/<run_id>/run_manifest.json (window_count + run_profile)
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (  # noqa: E402
 from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import (  # noqa: E402
     messaging_activity_label,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, resolve_dynamic_run_dir  # noqa: E402
 from scytaledroid.Utils.IO.csv_with_provenance import read_csv_with_provenance  # noqa: E402
 from scytaledroid.Utils.LatexUtils import (  # noqa: E402
     LatexTableSpec,
@@ -51,7 +52,7 @@ from scytaledroid.Utils.LatexUtils import (  # noqa: E402
     render_tabular_only,
 )
 
-EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
+EVIDENCE_ROOT = dynamic_evidence_root()
 
 PUB_ROOT = REPO_ROOT / "output" / "publication"
 PUB_TABLES = PUB_ROOT / "tables"
@@ -170,7 +171,8 @@ def _q(values: list[float], q: float) -> float:
 
 
 def _read_run_manifest(run_id: str) -> dict[str, object]:
-    p = EVIDENCE_ROOT / run_id / "run_manifest.json"
+    run_dir = resolve_dynamic_run_dir(run_id) or EVIDENCE_ROOT / run_id
+    p = run_dir / "run_manifest.json"
     return json.loads(p.read_text(encoding="utf-8"))
 
 
@@ -193,7 +195,8 @@ def _run_profile_bucket(run_manifest: dict[str, object]) -> str:
 
 def _read_rdi_from_anomaly_scores(run_id: str, *, model_label: str) -> tuple[float | None, int | None]:
     """Return (RDI, windows) from per-window anomaly score CSV written by Phase E."""
-    p = EVIDENCE_ROOT / run_id / "analysis" / "ml" / "v1" / f"anomaly_scores_{model_label}.csv"
+    run_dir = resolve_dynamic_run_dir(run_id) or EVIDENCE_ROOT / run_id
+    p = run_dir / "analysis" / "ml" / "v1" / f"anomaly_scores_{model_label}.csv"
     if not p.exists():
         return None, None
     try:

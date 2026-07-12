@@ -23,6 +23,19 @@ def test_get_choice_returns_default_on_eof_without_back_option(monkeypatch):
     assert prompt_utils.get_choice(["1", "2"], default="1") == "1"
 
 
+def test_menu_choice_uses_standard_prompt_and_defaults_back(monkeypatch):
+    prompts: list[str] = []
+
+    def fake_input(prompt: str) -> str:
+        prompts.append(prompt)
+        return ""
+
+    monkeypatch.setattr(builtins, "input", fake_input)
+
+    assert prompt_utils.menu_choice(["1", "0"]) == "0"
+    assert prompts == ["\nEnter choice: "]
+
+
 def test_prompt_text_returns_default_on_eof(monkeypatch):
     monkeypatch.setattr(builtins, "input", lambda *_a, **_k: (_ for _ in ()).throw(EOFError()))
 

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 
 def _utcnow_iso() -> str:
@@ -35,7 +36,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _dynamic_evidence_root() -> Path:
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _batches_root() -> Path:

@@ -56,7 +56,7 @@ APKs can land via **`data/inbox/uploads/`** and receipts under **`data/receipts/
 3. **Analysis working directory:** The static pipeline uses **`base_dir = artifact_store.analysis_apk_root()`**, which resolves to **`data/store/apk/`** (parent of the `sha256/` tree). This is passed into `execute_scan` / `generate_report` as **`storage_root`**: it anchors **relative paths** inside reports (`pipeline.py` / `context_builders.py`), not necessarily where every APK byte lives.
 4. **Per-artifact scan:** For each APK in scope, `generate_report` runs `analyze_apk` then, when allowed, **`save_report`**:
    - **JSON:** `data/static_analysis/reports/archive/<session>/<report_sha>.json` and/or `data/static_analysis/reports/latest/<report_sha>.json` (`reports.py`).
-   - **HTML:** `output/reports/static/latest/<package>/<artifact>.html` and optionally `output/reports/static/archive/<session>/...` (`html.py`).
+   - **HTML:** optional human-readable mirrors under `output/reports/static/latest/<package>/<artifact>.html` and optionally `output/reports/static/archive/<session>/...` (`html.py`).
 5. **Per-app persistence:** After all artifacts for a package are scanned, post-processing calls **`persist_run_summary` once per app** using **`AppRunResult.base_report()`** (the **base** split’s report, or first artifact if no “base” role). That creates/updates **`static_analysis_runs`** and child tables. **Splits** still have their own JSON on disk if `save_report` ran for them; they do **not** each get their own `static_analysis_runs` row.
 6. **Handoff / evidence (repo root):** Static handoff and related files go under **`evidence/static_runs/<static_run_id>/`** (relative to **current working directory** when the CLI runs — usually repo root). See `static_handoff.py`. This is **not** under `data/` or `output/` by default.
 7. **Baselines and dynamic plans (data):** Successful publication-style steps can write:
@@ -91,6 +91,7 @@ APKs can land via **`data/inbox/uploads/`** and receipts under **`data/receipts/
 | **`data/sessions/<session_label>/`** | Various session helpers | Session-scoped metadata (see purge tools in `reset_static.py`). |
 | **`data/locks/static_analysis.lock`** | Static run coordination | Lock file when enabled. |
 | **`data/archive/`** | Dynamic / dataset tooling | Freeze and archive payloads (e.g. canonical freeze); overlaps **research** workflows more than day-to-day static. |
+| **`data/evidence/dynamic/<run_id>/`** | Dynamic analysis orchestrator | Canonical runtime/dynamic evidence packs (PCAP, manifests, logs, per-run analysis). |
 
 Not every tree exists on every machine; missing dirs usually mean that workflow has not run yet.
 
@@ -105,7 +106,7 @@ Not every tree exists on every machine; missing dirs usually mean that workflow 
 | **`output/audit/dynamic/`** | `run_freeze_readiness_audit` | `paper_readiness_audit_<timestamp>.json` — **dynamic** freeze readiness, not static scan output. |
 | **`output/reports/static/latest/<package>/`** | `save_html_report` | **Overwriting** HTML mirror per package + artifact slug. |
 | **`output/reports/static/archive/<session>/<package>/`** | `save_html_report` (archive/both mode) | Session-scoped HTML. |
-| **`output/evidence/dynamic/<run_id>/`** | Dynamic analysis orchestrator | Runtime/dynamic evidence packs (PCAP, manifests, etc.). Separate domain from static JSON reports. |
+| **`output/evidence/dynamic/<run_id>/`** | Dynamic compatibility layer | Transition symlink to `data/evidence/dynamic/<run_id>/`; do not store primary dynamic evidence bytes here. |
 | **`output/evidence/...`** (other) | Reporting / exports | Publication or experimental exports depending on menu/script (see `Reporting/` services). |
 
 Static **JSON reports are not stored under `output/`** by default — they go under **`data/static_analysis/reports/`**.
@@ -152,7 +153,7 @@ There is **no single file** that is “the” run. For paper-grade and cross-ses
 | **DB (`static_analysis_runs` + canonical child tables)** | Durable, queryable **per-package** outcome for a session: status, `static_run_id`, linkage to `app_versions` / `apps`, persisted findings, permission matrix/risk, strings, handoff hashes, session rollups, etc. |
 | **Session-scoped JSON under `data/static_analysis/reports/archive/<session>/`** | **Immutable-by-convention** per-report snapshot on disk (filename stem = report content SHA-256). Best filesystem anchor for “what the scanner emitted” when DB is unavailable or disputed. |
 | **Selection manifest `output/audit/selection/<session>_selected_artifacts.json`** | Authoritative for **what was in scope** (paths, counts, `artifact_manifest_sha256`). Does not prove scan or DB success. |
-| **Archived HTML** (`output/reports/static/archive/...` when enabled) | Human-readable mirror for that session; optional. |
+| **Archived HTML** (`output/reports/static/archive/...` when enabled) | Human-readable mirror for that session; optional and disabled by default. |
 | **Run health JSON** (`*_run_health.json`) | **Diagnostics**: aggregates execution + persistence signals; not a substitute for DB or archive JSON. |
 | **Persistence audit JSON** | **Diagnostics**: per-app persistence classification, paths, stages; use to explain gaps, not as primary evidence. |
 | **`data/static_analysis/reports/latest/<sha>.json`** | **Content-addressed mirror**: one file per distinct report **content** hash; **not session-scoped**; older hashes remain until manually pruned. |
@@ -167,10 +168,10 @@ There is **no single file** that is “the” run. For paper-grade and cross-ses
 | Phase | What is produced |
 | --- | --- |
 | **Harvest / scope / selection** | `ScopeSelection` drives the run. **`_emit_selection_manifest`** writes `output/audit/selection/<session_stamp>_selected_artifacts.json` (apps, artifact paths, counts, digest). |
-| **Per-APK / per-split scan** | For each artifact: `analyze_apk` → `StaticAnalysisReport`. If not dry-run and `persistence_ready`, **`save_report`** writes JSON (and renders HTML). Each successful artifact gets its own report JSON (base + each split). |
+| **Per-APK / per-split scan** | For each artifact: `analyze_apk` → `StaticAnalysisReport`. If not dry-run and `persistence_ready`, **`save_report`** writes JSON and can render optional HTML when enabled. Each successful artifact gets its own report JSON (base + each split). |
 | **Latest JSON mirror** | `data/static_analysis/reports/latest/<report_sha256>.json` when `STATIC_REPORT_JSON_MODE` is `latest` or `both` (default **both**). Stem is **`report.hashes["sha256"]`** (content hash), not session. |
 | **Archive JSON** | `data/static_analysis/reports/archive/<session_stamp>/<sha256>.json` when mode is `archive` or `both`. |
-| **HTML** | `save_html_report`: default **`output/reports/static/latest/<package>/<artifact>.html`** (`STATIC_HTML_MODE` default **latest**). Optional **`output/reports/static/archive/<session>/<package>/...`** when mode is `archive` or `both`. |
+| **HTML** | `save_html_report`: disabled by default (`STATIC_HTML_MODE=off`). Optional **`output/reports/static/latest/<package>/<artifact>.html`** when mode is `latest` or `both`; optional **`output/reports/static/archive/<session>/<package>/...`** when mode is `archive` or `both`. |
 | **DB persistence** | After the scan, **`persist_run_summary`** runs **once per app** using the **base** artifact’s report (`AppRunResult.base_report()`), creating/updating **`static_analysis_runs`** and related tables. **`ingest_baseline_payload`** then attaches provider ACL snapshots from `detector_metrics` when a matching run row exists. |
 | **Persistence audit** | **`emit_persistence_audit_artifact`** → `output/audit/persistence/<session>_persistence_audit.json` (or `_missing_run_ids.json` when appropriate). May also emit **`_db_lock_health.json`**. |
 | **Permission snapshot / parity** | Permission audit accumulator writes **`data/audit/<slug(snapshot_id)>/snapshot.json`** with `snapshot_id = perm-audit:app:<session>` → directory `perm-audit_app_<session>/` (colon → `_`). Also persists **`permission_audit_snapshots` / `permission_audit_apps`** when configured. |
@@ -178,7 +179,7 @@ There is **no single file** that is “the” run. For paper-grade and cross-ses
 | **DB verification digest** | **Printed** by `db_verification` / results footer (counts, status). There is **no separate mandatory “verification JSON”** artifact in the static path; capture logs if you need a durable audit trail. |
 | **Logs** | `logs/static_analysis.log` (+ `.jsonl`): scanner, `REPORT_SAVED`, persistence events. `logs/db.log` (+ `.jsonl`): **`database`** logger channel (SQL / DB tooling), not the same stream as static. |
 
-Environment knobs (see `scytaledroid/Config/app_config.py`): **`SCYTALEDROID_STATIC_REPORT_JSON_MODE`**, **`SCYTALEDROID_STATIC_HTML_MODE`** (`latest` \| `archive` \| `both`).
+Environment knobs (see `scytaledroid/Config/app_config.py`): **`SCYTALEDROID_STATIC_REPORT_JSON_MODE`**, **`SCYTALEDROID_STATIC_HTML_MODE`** (`off` \| `latest` \| `archive` \| `both`).
 
 ---
 
@@ -220,7 +221,7 @@ Use these labels when building retention policy or UX:
 
 ## 5. Is `output/reports/static/latest` intentionally not session-scoped?
 
-**Yes.** HTML is written to **`output/reports/static/latest/<package>/<artifact>.html`** by design so operators can open the **current** HTML for a package without knowing `session_stamp`. Session-scoped HTML exists only when **`SCYTALEDROID_STATIC_HTML_MODE`** is **`archive`** or **`both`**.
+**Only when enabled.** HTML can be written to **`output/reports/static/latest/<package>/<artifact>.html`** so operators can open the **current** HTML for a package without knowing `session_stamp`, but this mirror is disabled by default to avoid thousands of derived files during split-heavy full scans. Session-scoped HTML exists only when **`SCYTALEDROID_STATIC_HTML_MODE`** is **`archive`** or **`both`**.
 
 ---
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from scytaledroid.DynamicAnalysis.menus.queue_selection import (
     PreparedPackageSelectionRow,
     PreparedPackageSelectionView,

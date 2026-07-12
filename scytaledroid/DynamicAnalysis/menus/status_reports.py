@@ -35,7 +35,6 @@ from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rende
 from scytaledroid.DynamicAnalysis import app_queue_state
 from scytaledroid.DynamicAnalysis.run_qualification import (
     bucket_evidence_label,
-    format_quota_progress_label,
     qualification_summary_from_row,
     qualification_table_cells,
     sum_qualification_summaries,
@@ -109,7 +108,8 @@ def _latest_paper_freeze_export_path() -> str:
         return ""
     candidates = [
         path
-        for path in paper_root.glob("dynamic_paper_freeze_*")
+        for pattern in ("dynamic_paper_cutoff_final_*", "dynamic_paper_freeze_*")
+        for path in paper_root.glob(pattern)
         if path.is_dir()
     ]
     if not candidates:

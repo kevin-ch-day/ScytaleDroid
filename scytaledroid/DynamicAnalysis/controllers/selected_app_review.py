@@ -6,10 +6,11 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from scytaledroid.Config import app_config
+from scytaledroid.Config import app_config  # noqa: F401 - existing tests monkeypatch this module seam
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.services.dynamic_target_state import derive_dynamic_target_state
 from scytaledroid.DynamicAnalysis.tracker_scope import default_resolve_tracker_run_identity, scope_tracker_runs_to_active_identity
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_dynamic_run_dir
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 
 
@@ -95,7 +96,9 @@ def _load_json(path: Path) -> dict[str, Any]:
 def _latest_run_media_plane_rows(run_id: str) -> list[list[str]]:
     if not run_id:
         return []
-    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+    run_dir = resolve_dynamic_run_dir(run_id)
+    if run_dir is None:
+        return []
     report = _load_json(run_dir / "analysis" / "pcap_report.json")
     media_plane = report.get("media_plane") if isinstance(report.get("media_plane"), dict) else {}
     summary = media_plane.get("summary") if isinstance(media_plane.get("summary"), dict) else {}
@@ -171,7 +174,9 @@ def _rtc_protocol_mix_label(summary: dict[str, Any]) -> str | None:
 def _latest_run_runtime_surface_rows(run_id: str) -> list[list[str]]:
     if not run_id:
         return []
-    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+    run_dir = resolve_dynamic_run_dir(run_id)
+    if run_dir is None:
+        return []
     summary = _load_json(run_dir / "analysis" / "summary.json")
     indicators = summary.get("indicators") if isinstance(summary.get("indicators"), dict) else {}
     runtime_surfaces = (
@@ -363,7 +368,9 @@ def _non_idle_baseline_detail_rows(package_name: str, state: Any) -> list[list[s
         run_id = str(row.get("run_id") or "").strip()
         if not run_id:
             continue
-        run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+        run_dir = resolve_dynamic_run_dir(run_id)
+        if run_dir is None:
+            continue
         report = _load_json(run_dir / "analysis" / "pcap_report.json")
         features = _load_json(run_dir / "analysis" / "pcap_features.json")
         cap = (report.get("capinfos") or {}).get("parsed") if isinstance(report.get("capinfos"), dict) else {}

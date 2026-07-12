@@ -64,3 +64,28 @@ def test_large_bounds_warning_stays_warn(capsys) -> None:
     assert "[WARN]" in output
     assert "String/resource results may be materially incomplete" in output
     assert "Detector coverage warning only" in output
+
+
+def test_fallback_recovered_bounds_warning_is_audit_only() -> None:
+    warnings: list[str] = []
+    report = _report_with_bounds_warning("We are out of bound with this complex entry. Count: 65536")
+    report.metadata.update(
+        {
+            "parser_provenance": {
+                "resource_parse_state": "fallback_recovered",
+                "resource_parse_partial": False,
+                "resource_string_fallback_count": 2600,
+            },
+            "resource_string_fallback_count": 2600,
+            "string_index_resource_strings": 2633,
+        }
+    )
+
+    lines = _append_resource_warning(warnings, report, "com.example.app", "artifact.apk")
+
+    assert lines == []
+    assert warnings == [
+        "Resource table parser emitted bounds warnings "
+        "(package=com.example.app, artifact=artifact.apk counts=[65536]). "
+        "String/resource results were recovered with fallback parsing; re-run only if manual resource review needs confirmation."
+    ]

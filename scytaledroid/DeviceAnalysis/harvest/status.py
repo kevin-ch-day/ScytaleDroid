@@ -28,6 +28,7 @@ class HarvestRunStatus:
     status_reason: str
     status_level: str
     operator_summary: str
+    replan_recovered_count: int = 0
 
     def to_context_dict(self) -> dict[str, object]:
         """Serialize the stable status/count surface for operation results."""
@@ -49,6 +50,9 @@ class HarvestRunStatus:
             "packages_failed": self.failed_count,
             "packages_drifted": self.drifted_count,
             "packages_replanned": self.replanned_count,
+            "packages_replan_success": self.replan_success_count,
+            "packages_replan_failed": self.replan_failed_count,
+            "packages_replan_recovered": self.replan_recovered_count,
             "packages_path_stale": self.path_stale_count,
         }
 
@@ -69,6 +73,7 @@ def build_harvest_run_status(
     replanned_count: int,
     replan_success_count: int,
     replan_failed_count: int,
+    replan_recovered_count: int = 0,
     device_unavailable: bool = False,
     mirror_failed_count: int = 0,
     write_db_requested: bool = False,
@@ -115,6 +120,7 @@ def build_harvest_run_status(
         partial_count=partial_count,
         drifted_count=drifted_count,
         replanned_count=replanned_count,
+        replan_recovered_count=replan_recovered_count,
         replan_failed_count=replan_failed_count,
         status=status,
     )
@@ -134,6 +140,7 @@ def build_harvest_run_status(
         replanned_count=replanned_count,
         replan_success_count=replan_success_count,
         replan_failed_count=replan_failed_count,
+        replan_recovered_count=replan_recovered_count,
         status=status,
         status_reason=status_reason,
         status_level=status_level,
@@ -168,6 +175,7 @@ def build_harvest_run_status_from_runtime_stats(
         replanned_count=int(stats.get("packages_replanned", 0)),
         replan_success_count=int(stats.get("packages_replan_success", 0)),
         replan_failed_count=int(stats.get("packages_replan_failed", 0)),
+        replan_recovered_count=int(stats.get("packages_replan_recovered", 0)),
         device_unavailable=run_error == "device_unavailable",
         mirror_failed_count=int(stats.get("packages_mirror_failed", 0)),
         write_db_requested=write_db_requested,
@@ -188,6 +196,7 @@ def _build_operator_summary(
     partial_count: int,
     drifted_count: int,
     replanned_count: int,
+    replan_recovered_count: int,
     replan_failed_count: int,
     status: str,
 ) -> str:
@@ -203,8 +212,13 @@ def _build_operator_summary(
         line += f" · skipped {skipped_count}"
     if replanned_count > 0:
         line += f" · replanned {replanned_count}"
+        replan_notes = []
+        if replan_recovered_count > 0:
+            replan_notes.append(f"recovered {replan_recovered_count}")
         if replan_failed_count > 0:
-            line += f" (failed {replan_failed_count})"
+            replan_notes.append(f"failed {replan_failed_count}")
+        if replan_notes:
+            line += f" ({', '.join(replan_notes)})"
     if failed_count or partial_count or drifted_count:
         line += (
             " · issues "

@@ -56,6 +56,43 @@ def _sanitize_receipt_stem(stem: str) -> str:
     return _STEM_SAFE.sub("_", s)[:200]
 
 
+def _read_json_package_name(path_value: Any) -> str | None:
+    path_text = _norm_text_or_none(path_value)
+    if not path_text:
+        return None
+    path = Path(path_text)
+    if path.suffix.lower() != ".json" or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    app = payload.get("app") if isinstance(payload.get("app"), Mapping) else {}
+    for value in (
+        payload.get("package_name"),
+        payload.get("package"),
+        metadata.get("package_name"),
+        metadata.get("normalized_package_name"),
+        metadata.get("manifest_package_name"),
+        app.get("package"),
+    ):
+        text = _norm_text_or_none(value)
+        if text:
+            return text
+    return None
+
+
+def _json_package_mismatch(row: Mapping[str, Any]) -> bool:
+    if row.get("host_path_exists") is not True:
+        return False
+    package_name = _norm_text(row.get("package")).lower()
+    json_package = _norm_text(_read_json_package_name(row.get("host_path"))).lower()
+    return bool(package_name and json_package and package_name != json_package)
+
+
 def _delete_artifact_ids(run_sql_rowcount: RunSqlRowcount, artifact_ids: Sequence[int], *, chunk_size: int = 200) -> int:
     deleted = 0
     ids = [int(x) for x in artifact_ids]
@@ -89,6 +126,7 @@ class StaticSessionPruneProposal:
     path_family_counts: dict[str, int]
     legacy_payload_total_rows: int
     file_present_count: int
+    file_present_json_package_mismatch_count: int
     file_missing_count: int
     canonical_db_residue_count: int
     malformed_or_unknown_count: int
@@ -175,6 +213,7 @@ def build_static_session_prune_proposal(
         for session in selected_sessions
     )
     file_present_count = sum(1 for row in detailed_rows if row.get("host_path_exists") is True)
+    file_present_json_package_mismatch_count = sum(1 for row in detailed_rows if _json_package_mismatch(row))
     file_missing_count = sum(1 for row in detailed_rows if row.get("host_path_exists") is False)
     canonical_db_residue_count = sum(1 for row in detailed_rows if _norm_bool(row.get("canonical_db_reference_present")))
     malformed_or_unknown_count = sum(
@@ -217,6 +256,7 @@ def build_static_session_prune_proposal(
         path_family_counts=dict(sorted(path_family_counts.items())),
         legacy_payload_total_rows=legacy_payload_total_rows,
         file_present_count=file_present_count,
+        file_present_json_package_mismatch_count=file_present_json_package_mismatch_count,
         file_missing_count=file_missing_count,
         canonical_db_residue_count=canonical_db_residue_count,
         malformed_or_unknown_count=malformed_or_unknown_count,
@@ -230,20 +270,33 @@ def build_static_session_prune_proposal(
     )
 
 
-def validate_static_session_prune_proposal(proposal: StaticSessionPruneProposal, *, expected_count: int | None = None) -> None:
+def validate_static_session_prune_proposal(
+    proposal: StaticSessionPruneProposal,
+    *,
+    expected_count: int | None = None,
+    allow_blocked_package_mismatch: bool = False,
+) -> None:
     if expected_count is not None and proposal.targeted_row_count != int(expected_count):
         raise ValueError(
             f"static session prune proposal refused: expected {expected_count} targeted rows, found {proposal.targeted_row_count}"
         )
-    invalid_sessions = sorted(
-        session for session, action in proposal.candidate_actions.items() if not action.startswith("candidate_")
-    )
+    invalid_sessions = []
+    for session, action in proposal.candidate_actions.items():
+        if action.startswith("candidate_"):
+            continue
+        if allow_blocked_package_mismatch and action == "blocked_package_mismatch_review":
+            continue
+        invalid_sessions.append(session)
+    invalid_sessions = sorted(invalid_sessions)
     if invalid_sessions:
         raise ValueError(
             "static session prune proposal refused: selected session(s) are not candidate retirement sessions: "
             + ", ".join(invalid_sessions)
         )
-    if proposal.file_present_count:
+    if proposal.file_present_count and not (
+        allow_blocked_package_mismatch
+        and proposal.file_present_count == proposal.file_present_json_package_mismatch_count
+    ):
         raise ValueError("static session prune proposal refused: target set includes host files still present on disk")
     if proposal.canonical_db_residue_count:
         raise ValueError("static session prune proposal refused: target set still overlaps canonical static DB references")
@@ -336,6 +389,7 @@ def write_static_session_prune_receipts(
             "path_family_counts": proposal.path_family_counts,
             "legacy_payload_total_rows": proposal.legacy_payload_total_rows,
             "file_present_count": proposal.file_present_count,
+            "file_present_json_package_mismatch_count": proposal.file_present_json_package_mismatch_count,
             "file_missing_count": proposal.file_missing_count,
             "canonical_db_residue_count": proposal.canonical_db_residue_count,
             "malformed_or_unknown_count": proposal.malformed_or_unknown_count,

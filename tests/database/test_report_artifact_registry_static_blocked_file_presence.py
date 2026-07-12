@@ -32,6 +32,12 @@ def test_collect_static_blocked_file_presence_report(monkeypatch, tmp_path: Path
                     "overlap_registry_rows": 5,
                     "file_missing_registry_rows": 5,
                 },
+                {
+                    "session_stamp": "20260430-all-full",
+                    "recommended_action": "blocked_package_mismatch_review",
+                    "overlap_registry_rows": 6,
+                    "file_missing_registry_rows": 5,
+                },
             ],
             "_dangling_rows": [
                 {
@@ -74,6 +80,16 @@ def test_collect_static_blocked_file_presence_report(monkeypatch, tmp_path: Path
                     "host_path_exists": True,
                     "host_path": str(tmp_path / "skip.json"),
                 },
+                {
+                    "session_stamp": "20260430-all-full",
+                    "package": "com.example.mismatch",
+                    "run_id": 103,
+                    "artifact_id": 5,
+                    "artifact_type": "static_report",
+                    "host_path_family": "static_reports_latest",
+                    "host_path_exists": True,
+                    "host_path": str(tmp_path / "mismatch.json"),
+                },
             ],
         },
     )
@@ -82,10 +98,10 @@ def test_collect_static_blocked_file_presence_report(monkeypatch, tmp_path: Path
         lambda *args, **kwargs: None, repo_root=tmp_path
     )
     summary = report["summary"]
-    assert summary["blocked_session_count"] == 1
-    assert summary["blocked_file_present_row_count"] == 2
-    assert summary["blocked_sessions"] == ["20260428-all-full"]
-    assert len(report["blocked_package_rollup"]) == 1
+    assert summary["blocked_session_count"] == 2
+    assert summary["blocked_file_present_row_count"] == 3
+    assert summary["blocked_sessions"] == ["20260428-all-full", "20260430-all-full"]
+    assert len(report["blocked_package_rollup"]) == 2
     assert report["blocked_package_rollup"][0]["package"] == "com.example.alpha"
 
 

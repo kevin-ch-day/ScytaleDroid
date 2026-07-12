@@ -16,6 +16,7 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.pcap.diagnostics import security_surface_issue_codes
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
 
 REQUIRED_FILES = [
@@ -465,7 +466,7 @@ def run_dynamic_evidence_verify(
 
     Returns the JSON report payload (also written to disk by default).
     """
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    root = dynamic_evidence_root()
     started_at = datetime.now(UTC).isoformat()
 
     ghost_dirs: list[str] = []
@@ -760,7 +761,7 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
         verify_dynamic_evidence_packs,
     )
 
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    root = dynamic_evidence_root()
     report = verify_dynamic_evidence_packs(root, dataset_only=False)
 
     runs = report.get("runs") or []
@@ -955,7 +956,7 @@ def run_dynamic_evidence_deep_checks(
       compare to pcap_features proxies.
     - Indicator quality: compute junk rate and top1 dominance from top_dns/top_sni.
     """
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    root = dynamic_evidence_root()
     started_at = datetime.now(UTC).isoformat()
 
     manifests = sorted(root.glob("*/run_manifest.json")) if root.exists() else []

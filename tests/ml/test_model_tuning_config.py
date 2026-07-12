@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
 from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import fixed_model_specs

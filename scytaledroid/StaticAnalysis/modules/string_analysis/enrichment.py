@@ -328,7 +328,7 @@ def apply_pair_enrichment(
             }
         )
 
-    for bucket_name, hits in bucket_hits.items():
+    for hits in bucket_hits.values():
         for idx, hit in enumerate(hits):
             if hit.pair_group or hit.posture == "actionable":
                 continue

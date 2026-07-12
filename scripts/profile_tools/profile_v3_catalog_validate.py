@@ -3,7 +3,7 @@
 
 This helper does not modify any artifacts. It reads:
 - data/archive/profile_v3_manifest.json (included_run_ids)
-- output/evidence/dynamic/<run_id>/run_manifest.json (package_name)
+- data/evidence/dynamic/<run_id>/run_manifest.json (package_name)
 - profiles/profile_v3_app_catalog.json (package -> app/category)
 
 It prints a report and exits non-zero if any included run's package is missing
@@ -27,6 +27,7 @@ from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
     load_profile_v3_catalog,
     load_profile_v3_manifest,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root  # noqa: E402
 
 
 def _rjson(path: Path) -> dict:
@@ -64,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--evidence-root",
-        default=str(REPO_ROOT / "output" / "evidence" / "dynamic"),
+        default=str(dynamic_evidence_root()),
         help="Dynamic evidence root.",
     )
     p.add_argument(
@@ -157,4 +158,4 @@ if __name__ == "__main__":
             sys.stdout.close()
         except Exception:
             pass
-        raise SystemExit(0)
+        raise SystemExit(0) from None

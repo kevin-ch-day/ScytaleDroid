@@ -21,8 +21,7 @@ import os
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-
-from . import ml_parameters_profile as profile_config
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 
 
 def freeze_anchor_path() -> Path:
@@ -30,7 +29,7 @@ def freeze_anchor_path() -> Path:
     override = str(os.environ.get("SCYTALEDROID_FREEZE_ANCHOR_PATH") or "").strip()
     if override:
         return Path(override)
-    return Path(app_config.DATA_DIR) / "archive" / profile_config.FREEZE_CANONICAL_FILENAME
+    return resolve_dataset_freeze_read_path()
 
 
 def dataset_tables_dir() -> Path:
@@ -57,6 +56,7 @@ def output_publication_appendix_dir() -> Path:
 
 def output_publication_manifests_dir() -> Path:
     return output_publication_root() / "manifests"
+
 
 def output_publication_qa_dir() -> Path:
     return output_publication_root() / "qa"

@@ -63,7 +63,9 @@ def collect_static_blocked_file_presence_report(
         if isinstance(row, Mapping)
     ]
     blocked_sessions = [
-        row for row in session_rows if _norm_text(row.get("recommended_action")) == "blocked_file_present_review"
+        row
+        for row in session_rows
+        if _norm_text(row.get("recommended_action")).startswith("blocked_")
     ]
     blocked_session_names = {_norm_text(row.get("session_stamp")) for row in blocked_sessions}
 

@@ -21,6 +21,7 @@ def test_recent_tracker_runs_derives_missing_pcap_detail_from_local_evidence(
     tmp_path: Path,
 ) -> None:
     output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
 
     run_id = "4d3def16-83a9-43f6-8dad-0d1dd295d795"
@@ -96,6 +97,7 @@ def test_find_incomplete_dynamic_run_dirs_skips_active_pid_marker(
     tmp_path: Path,
 ) -> None:
     output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
     run_dir = output_root / "evidence" / "dynamic" / "active-run"
     marker_path = run_dir / "notes" / ".scytaledroid_in_progress"
@@ -120,6 +122,7 @@ def test_find_incomplete_dynamic_run_dirs_includes_dead_pid_marker(
     tmp_path: Path,
 ) -> None:
     output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
     run_dir = output_root / "evidence" / "dynamic" / "dead-run"
     marker_path = run_dir / "notes" / ".scytaledroid_in_progress"
@@ -144,6 +147,7 @@ def test_find_incomplete_dynamic_run_dirs_includes_stale_legacy_marker(
     tmp_path: Path,
 ) -> None:
     output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
     run_dir = output_root / "evidence" / "dynamic" / "legacy-run"
     marker_path = run_dir / "notes" / ".scytaledroid_in_progress"

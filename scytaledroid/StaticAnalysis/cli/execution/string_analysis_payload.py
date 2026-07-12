@@ -121,7 +121,7 @@ def _sample_groups(payloads: Sequence[Mapping[str, object]]) -> dict[str, list[d
                     continue
                 seen.add(key)
                 bucket_out.append(_normalize_sample(entry))
-    for bucket_name, entries in merged.items():
+    for entries in merged.values():
         entries.sort(
             key=lambda item: (
                 str(item.get("value") or ""),

@@ -96,6 +96,9 @@ def test_format_text_report_includes_sections() -> None:
     assert "prune_artifact_registry_dangling.py" in text
     assert "report_artifact_registry_static_detached.py" in text
     assert "prune_artifact_registry_static_detached.py" in text
+    assert "report_artifact_registry_static_file_present_detached.py" in text
+    assert "report_artifact_registry_static_blocked_file_presence.py" in text
+    assert "prune_artifact_registry_static_file_present_resolved.py" in text
 
 
 def test_collect_cleanup_candidate_report_queries(monkeypatch: pytest.MonkeyPatch) -> None:

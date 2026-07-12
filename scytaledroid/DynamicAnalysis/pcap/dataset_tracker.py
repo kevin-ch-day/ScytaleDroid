@@ -26,6 +26,10 @@ from scytaledroid.DynamicAnalysis.tracker_scope import (
 from scytaledroid.DynamicAnalysis.utils.pcap_minima import (
     effective_min_pcap_bytes_for_run_profile,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    iter_dynamic_run_dirs,
+    resolve_dynamic_run_dir,
+)
 
 MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
 MIN_WINDOWS_PER_RUN = 20
@@ -397,7 +401,9 @@ def _refresh_paper_eligibility_in_place(r: dict[str, Any]) -> bool:
     run_id = str(r.get("run_id") or "").strip()
     if not run_id:
         return False
-    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+    run_dir = resolve_dynamic_run_dir(run_id)
+    if run_dir is None:
+        return False
     manifest_path = run_dir / "run_manifest.json"
     if not manifest_path.exists():
         return False
@@ -628,8 +634,8 @@ def peek_next_run_protocol(
 def recompute_dataset_tracker(*, config: DatasetTrackerConfig | None = None) -> Path | None:
     """Recompute dataset tracker entries from evidence packs (backfill/QA refresh)."""
     cfg = config or DatasetTrackerConfig()
-    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    if not output_root.exists():
+    run_dirs = iter_dynamic_run_dirs()
+    if not run_dirs:
         return None
     tracker_path = resolve_dataset_plan_read_path()
     tracker_path.parent.mkdir(parents=True, exist_ok=True)
@@ -639,7 +645,7 @@ def recompute_dataset_tracker(*, config: DatasetTrackerConfig | None = None) -> 
     tracker_path = write_dataset_plan_payload({"apps": {}, "updated_at": datetime.now(UTC).isoformat()})
 
     # Iterate all evidence packs and re-run the tracker update.
-    for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
+    for run_dir in run_dirs:
         manifest_path = run_dir / "run_manifest.json"
         if not manifest_path.exists():
             continue
@@ -1482,7 +1488,9 @@ def _compute_overlap_stats(runs: list[dict[str, Any]]) -> dict[str, Any]:
         run_id = entry.get("run_id")
         if not run_id:
             continue
-        run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / str(run_id)
+        run_dir = resolve_dynamic_run_dir(str(run_id))
+        if run_dir is None:
+            continue
         overlap_path = run_dir / "analysis" / "static_dynamic_overlap.json"
         features_path = run_dir / "analysis" / "pcap_features.json"
         if not overlap_path.exists():

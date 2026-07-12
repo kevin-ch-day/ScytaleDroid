@@ -30,6 +30,7 @@ class _ProviderRecord:
     name: str
     authorities: tuple[str, ...]
     exported: bool
+    enabled: bool
     read_permission: str | None
     write_permission: str | None
     base_permission: str | None
@@ -170,11 +171,25 @@ def _collect_providers(manifest_root) -> Sequence[_ProviderRecord]:
     if application is None:
         return tuple()
 
+    target_sdk = _extract_target_sdk_int(manifest_root)
+    application_enabled = _manifest_bool(
+        application.get(f"{_ANDROID_NS}enabled"),
+        default=True,
+    )
     providers: list[_ProviderRecord] = []
     for element in application.findall("provider"):
         name = element.get(f"{_ANDROID_NS}name") or ""
         exported_attr = element.get(f"{_ANDROID_NS}exported")
-        exported = (exported_attr or "").strip().lower() == "true"
+        provider_enabled = application_enabled and _manifest_bool(
+            element.get(f"{_ANDROID_NS}enabled"),
+            default=True,
+        )
+        if exported_attr is not None:
+            exported = exported_attr.strip().lower() == "true"
+        else:
+            exported = _provider_default_exported(target_sdk)
+        if exported and not provider_enabled:
+            exported = False
         grant_uri = (element.get(f"{_ANDROID_NS}grantUriPermissions") or "").strip().lower() in {"true", "1"}
         read_perm = (element.get(f"{_ANDROID_NS}readPermission") or "").strip() or None
         write_perm = (element.get(f"{_ANDROID_NS}writePermission") or "").strip() or None
@@ -217,6 +232,7 @@ def _collect_providers(manifest_root) -> Sequence[_ProviderRecord]:
                 name=name,
                 authorities=authorities,
                 exported=exported,
+                enabled=provider_enabled,
                 read_permission=read_perm or base_perm,
                 write_permission=write_perm or base_perm,
                 base_permission=base_perm,
@@ -227,6 +243,34 @@ def _collect_providers(manifest_root) -> Sequence[_ProviderRecord]:
         )
 
     return tuple(providers)
+
+
+def _extract_target_sdk_int(manifest_root: ElementTree.Element) -> int | None:
+    uses_sdk = manifest_root.find("uses-sdk")
+    if uses_sdk is None:
+        return None
+    raw_value = uses_sdk.get(f"{_ANDROID_NS}targetSdkVersion")
+    if not raw_value:
+        return None
+    try:
+        return int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _manifest_bool(value: str | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+    lowered = value.strip().lower()
+    if lowered in {"true", "1", "yes"}:
+        return True
+    if lowered in {"false", "0", "no"}:
+        return False
+    return default
+
+
+def _provider_default_exported(target_sdk: int | None) -> bool:
+    return target_sdk is None or target_sdk <= 16
 
 
 def _normalise_resource_reference(value: str | None) -> str | None:

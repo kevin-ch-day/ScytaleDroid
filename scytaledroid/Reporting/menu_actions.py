@@ -2,27 +2,31 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import shutil
-from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_utils.menus import health_checks
-from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pack
+from scytaledroid.Database.db_core import db_queries as core_q  # noqa: F401 - public monkeypatch seam in tests
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
 )
-from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
-    index_dynamic_evidence_packs_to_db,
-)
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, resolve_dynamic_run_dir
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
+from .dynamic_export_menu import (
+    fetch_tier1_status,
+    handle_tier1_audit_report,
+    handle_tier1_end_to_end,
+    handle_tier1_export_pack,
+    handle_tier1_quick_fix,
+)
 from .menu_actions_cross_analysis_helpers import compact_gap, compact_regime, compact_runtime_state
+from .publication_status_menu import fetch_publication_status
+from .saved_reports_menu import classify_report, preview_report_file, summarise_severity, view_saved_reports
+from .static_exposure_menu import handle_generate_static_exposure_privacy_report
 
 
 def _choose_reporting_research_cohort() -> dict[str, object]:
@@ -61,10 +65,9 @@ def _choose_reporting_research_cohort() -> dict[str, object]:
             break
     print()
     print(f"Research cohorts: {len(rows)}")
-    choice = prompt_utils.get_choice(
+    choice = prompt_utils.menu_choice(
         [str(index) for index in range(1, len(rows) + 1)] + ["0"],
         default=default_choice,
-        prompt="Select research cohort #",
     )
     if choice == "0":
         return {}
@@ -397,7 +400,9 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         return s
 
     def _pin_is_valid(run_id: str) -> tuple[bool, str]:
-        run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+        run_dir = resolve_dynamic_run_dir(run_id)
+        if run_dir is None:
+            return False, "evidence_missing"
         manifest_path = run_dir / "run_manifest.json"
         if not manifest_path.exists():
             return False, "evidence_missing"
@@ -443,7 +448,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         )
 
         exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
-            evidence_root=Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic",
+            evidence_root=dynamic_evidence_root(),
             freeze_apps=freeze.get("apps") or {},
             checksums=freeze.get("included_run_checksums") or {},
         )
@@ -517,588 +522,6 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         print(status_messages.status("Freeze contract: DOWNGRADED -> EXPERIMENTAL (missing: validation state)", level="warn"))
     # Keep output short; deep audit paths live in the bundle manifest + pipeline audit.
     return True
-
-
-def view_saved_reports() -> None:
-    """Browse and preview generated markdown reports."""
-
-    base_dir = Path(app_config.OUTPUT_DIR) / "reports"
-    if not base_dir.exists():
-        print(status_messages.status("No reports have been generated yet.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    files = sorted(base_dir.rglob("*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
-    if not files:
-        print(status_messages.status("No markdown reports found in the output directory.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    visible = files[:20]
-    print()
-    menu_utils.print_header("Saved reports", f"Showing {len(visible)} of {len(files)}")
-
-    rows: list[list[str]] = []
-    for index, path in enumerate(visible, start=1):
-        report_type = classify_report(path, base_dir)
-        modified = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-        rows.append([str(index), report_type, path.name, modified])
-
-    table_utils.render_table(["#", "Type", "File", "Modified"], rows)
-    if len(files) > len(visible):
-        remaining = len(files) - len(visible)
-        print(status_messages.status(f"+ {remaining} more report(s) available.", level="info"))
-
-    print()
-    choice = prompt_utils.get_choice(
-        [str(index) for index in range(1, len(visible) + 1)] + ["0"],
-        prompt="Preview report #: ",
-        default="0",
-    )
-    if choice == "0":
-        return
-
-    selected = visible[int(choice) - 1]
-    preview_report_file(selected)
-
-
-def summarise_severity(findings: Iterable[object]) -> str:
-    """Summarise static-analysis findings by severity level."""
-
-    from scytaledroid.StaticAnalysis.core import Finding, SeverityLevel
-
-    counts = {level: 0 for level in (SeverityLevel.P0, SeverityLevel.P1, SeverityLevel.P2)}
-    total_notes = 0
-    for entry in findings:
-        if isinstance(entry, Finding):
-            if entry.severity_gate in counts:
-                counts[entry.severity_gate] += 1
-            else:
-                total_notes += 1
-
-    parts = [f"{level.value}:{count}" for level, count in counts.items() if count]
-    if total_notes:
-        parts.append(f"NOTE:{total_notes}")
-    return ", ".join(parts) if parts else "None"
-
-
-def classify_report(path: Path, base_dir: Path) -> str:
-    """Classify a report based on its location and name."""
-
-    try:
-        relative = path.relative_to(base_dir)
-    except ValueError:  # pragma: no cover - defensive
-        return "Report"
-
-    parts = list(relative.parts)
-    if parts and parts[0] == "static_analysis":
-        return "Static analysis"
-    if path.name.startswith("device_report_"):
-        return "Device"
-    return "Report"
-
-
-def preview_report_file(path: Path) -> None:
-    """Display a short preview of a markdown report."""
-
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:  # pragma: no cover - filesystem errors
-        print(status_messages.status(f"Unable to read {path.name}: {exc}", level="fail"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Report preview", path.name)
-    preview_limit = 40
-    for line in lines[:preview_limit]:
-        print(line)
-    if len(lines) > preview_limit:
-        print(f"... (+{len(lines) - preview_limit} more lines)")
-
-    print()
-    resolved = relative_path(path)
-    print(status_messages.status(f"Full report available at {resolved}", level="info"))
-    prompt_utils.press_enter_to_continue()
-
-
-def handle_tier1_export_pack() -> None:
-    """Export the Baseline dataset pack (manifest + telemetry + summary)."""
-
-    from scytaledroid.Database.db_utils import schema_gate
-
-    ok, message, detail = schema_gate.dynamic_schema_gate()
-    if not ok:
-        status_messages.print_status(f"[ERROR] {message}", level="error")
-        if detail:
-            status_messages.print_status(detail, level="error")
-        status_messages.print_status(
-            "Fix: Database Tools → Apply Baseline schema migrations (or import canonical DB export), then retry.",
-            level="error",
-        )
-        return
-
-    default_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
-    print(status_messages.status(f"Export directory: {default_dir}", level="info"))
-    if not prompt_utils.prompt_yes_no("Generate Baseline export pack now?", default=True):
-        return
-    outputs = export_tier1_pack(default_dir)
-    print(status_messages.status(f"Manifest written: {outputs['manifest']}", level="success"))
-    print(status_messages.status(f"Summary written: {outputs['summary']}", level="success"))
-    print(status_messages.status(f"Rollup written: {outputs['rollup']}", level="success"))
-    print(status_messages.status(f"Telemetry dir: {outputs['telemetry_dir']}", level="success"))
-    feature_health = outputs.get("feature_health") or {}
-    if feature_health:
-        print(
-            status_messages.status(
-                f"Feature health ({feature_health.get('status')}): {feature_health.get('json_path')}",
-                level="success",
-            )
-        )
-    _print_export_validation(outputs)
-    prompt_utils.press_enter_to_continue()
-
-
-def _print_export_validation(outputs: dict) -> None:
-    manifest_path = outputs.get("manifest")
-    telemetry_dir = outputs.get("telemetry_dir")
-    if not manifest_path:
-        return
-    total_rows = 0
-    included_rows = 0
-    net_included = 0
-    try:
-        with open(manifest_path, newline="", encoding="utf-8") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
-                total_rows += 1
-                inclusion = (row.get("inclusion_status") or "").strip().lower()
-                if inclusion == "include":
-                    included_rows += 1
-                net_status = (row.get("network_inclusion_status") or "").strip().lower()
-                if net_status in {"netstats_ok", "netstats_partial"}:
-                    net_included += 1
-    except OSError:
-        return
-
-    network_files = 0
-    if telemetry_dir:
-        try:
-            network_files = sum(1 for _ in Path(telemetry_dir).glob("*-network.csv"))
-        except OSError:
-            network_files = 0
-
-    print(
-        status_messages.status(
-            f"Export validation: runs={total_rows}, included={included_rows}, "
-            f"network_eligible={net_included}, network_files={network_files}",
-            level="info",
-        )
-    )
-
-
-def handle_tier1_audit_report() -> None:
-    """Run Baseline dataset readiness audit."""
-
-    health_checks.run_tier1_audit_report()
-
-
-def _rebuild_dynamic_db_index_from_evidence(root: Path) -> dict[str, object]:
-    """Return indexer results for a dynamic evidence-pack root."""
-
-    result = index_dynamic_evidence_packs_to_db(root)
-    # Normalize keys we print repeatedly.
-    return {
-        "raw": result,
-        "scanned": int(result.get("scanned") or 0),
-        "ok": int(result.get("ok") or 0),
-        "network_features_upserted": int(result.get("network_features_upserted") or 0),
-        "indicators_indexed": int(result.get("indicators_indexed") or 0),
-        "errors": result.get("errors") or [],
-    }
-
-
-def handle_tier1_quick_fix() -> None:
-    """One-shot helper: rebuild DB index from evidence packs and rerun Baseline checks."""
-
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    if not root.exists():
-        print(status_messages.status("Dynamic evidence root not found.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Baseline quick fix")
-    print(status_messages.status("This does not modify evidence packs; it rebuilds derived DB tables.", level="info"))
-    print(status_messages.status(f"Root: {root}", level="info"))
-    if not prompt_utils.prompt_yes_no("Rebuild DB index now?", default=True):
-        return
-
-    outcome = _rebuild_dynamic_db_index_from_evidence(root)
-    scanned = int(outcome.get("scanned") or 0)
-    ok = int(outcome.get("ok") or 0)
-    features = int(outcome.get("network_features_upserted") or 0)
-    indexed = int(outcome.get("indicators_indexed") or 0)
-    errors = outcome.get("errors") or []
-    print(
-        status_messages.status(
-            f"Reindex complete: scanned={scanned} ok={ok} network_features_upserted={features} indicators_indexed={indexed}",
-            level="success" if scanned and scanned == ok else "warn",
-        )
-    )
-    if errors:
-        print(status_messages.status(f"Errors (sample): {', '.join(str(e) for e in errors[:5])}", level="warn"))
-
-    print()
-    if prompt_utils.prompt_yes_no("Run Baseline audit report now?", default=True):
-        health_checks.run_tier1_audit_report()
-
-    print()
-    if prompt_utils.prompt_yes_no(
-        "Generate Baseline export pack now? (populates Feature Health)", default=False
-    ):
-        handle_tier1_export_pack()
-
-    prompt_utils.press_enter_to_continue()
-
-
-def handle_tier1_end_to_end() -> None:
-    """One-button Baseline run: rebuild DB index + audit + export."""
-
-    from scytaledroid.Database.db_utils import schema_gate
-
-    ok, message, detail = schema_gate.dynamic_schema_gate()
-    if not ok:
-        status_messages.print_status(f"[ERROR] {message}", level="error")
-        if detail:
-            status_messages.print_status(detail, level="error")
-        status_messages.print_status(
-            "Fix: Database Tools → Apply Baseline schema migrations (or import canonical DB export), then retry.",
-            level="error",
-        )
-        return
-
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    if not root.exists():
-        print(status_messages.status("Dynamic evidence root not found.", level="warn"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print()
-    menu_utils.print_header("Baseline end-to-end")
-    print(status_messages.status("Rebuild DB index from evidence packs → audit → export pack.", level="info"))
-    result = index_dynamic_evidence_packs_to_db(root)
-    scanned = int(result.get("scanned") or 0)
-    ok_n = int(result.get("ok") or 0)
-    print(
-        status_messages.status(
-            f"Reindex: scanned={scanned} ok={ok_n}",
-            level="success" if scanned and scanned == ok_n else "warn",
-        )
-    )
-    health_checks.run_tier1_audit_report()
-    default_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
-    outputs = export_tier1_pack(default_dir)
-    print(status_messages.status(f"Export written: {outputs.get('manifest')}", level="success"))
-    prompt_utils.press_enter_to_continue()
-
-
-def fetch_tier1_status() -> dict[str, object]:
-    """Return a compact Baseline readiness snapshot for the reporting menu."""
-
-    from scytaledroid.Database.db_utils.schema_migration_registry import latest_registered_schema_version
-
-    status: dict[str, object] = {
-        "schema_version": None,
-        "expected_schema": latest_registered_schema_version() or "0.2.6",
-        "tier1_ready_runs": 0,
-        "last_export_path": None,
-        "last_export_at": None,
-        "pcap_valid_runs": 0,
-        "pcap_total_runs": 0,
-        # DB tracking state (some workflows are evidence-pack-first).
-        "db_dynamic_sessions_total": 0,
-        "db_dynamic_sessions_dataset_tier": 0,
-        "db_dynamic_sessions_dataset": 0,  # compatibility alias
-        # Evidence-pack-derived counts (DB-free; aligns with research baseline contract).
-        "evidence_packs_total": 0,
-        "evidence_quota_eligible_packs": 0,
-        "evidence_quota_valid_packs": 0,
-        "evidence_dataset_packs": 0,  # compatibility alias
-        "evidence_dataset_valid": 0,  # compatibility alias
-        # Export-derived health signals (post-export).
-        "feature_health_status": None,
-        "feature_health_at": None,
-    }
-    try:
-        row = core_q.run_sql(
-            "SELECT version FROM schema_version ORDER BY applied_at_utc DESC LIMIT 1",
-            fetch="one",
-            dictionary=True,
-        )
-        if row:
-            status["schema_version"] = row.get("version")
-    except Exception:
-        status["schema_version"] = None
-
-    # Dynamic DB row counts (used to detect when the DB isn't tracking runs).
-    try:
-        row = core_q.run_sql(
-            "SELECT COUNT(*) AS cnt FROM dynamic_sessions",
-            fetch="one",
-            dictionary=True,
-        )
-        if row:
-            status["db_dynamic_sessions_total"] = int(row.get("cnt") or 0)
-    except Exception:
-        status["db_dynamic_sessions_total"] = 0
-
-    try:
-        row = core_q.run_sql(
-            "SELECT COUNT(*) AS cnt FROM dynamic_sessions WHERE tier='dataset'",
-            fetch="one",
-            dictionary=True,
-        )
-        if row:
-            status["db_dynamic_sessions_dataset_tier"] = int(row.get("cnt") or 0)
-            status["db_dynamic_sessions_dataset"] = status["db_dynamic_sessions_dataset_tier"]
-    except Exception:
-        status["db_dynamic_sessions_dataset_tier"] = 0
-        status["db_dynamic_sessions_dataset"] = 0
-
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT COUNT(*) AS cnt
-            FROM dynamic_sessions ds
-            WHERE ds.tier='dataset'
-              AND ds.status='success'
-              AND ds.captured_samples / NULLIF(ds.expected_samples,0) >= 0.90
-              AND ds.sample_max_gap_s <= (ds.sampling_rate_s * 2)
-              AND NOT EXISTS (
-                SELECT 1
-                FROM dynamic_session_issues i
-                WHERE i.dynamic_run_id = ds.dynamic_run_id
-                  AND i.issue_code = 'telemetry_partial_samples'
-              )
-            """,
-            fetch="one",
-            dictionary=True,
-        )
-        if row:
-            status["tier1_ready_runs"] = int(row.get("cnt") or 0)
-    except Exception:
-        status["tier1_ready_runs"] = 0
-
-    try:
-        row = core_q.run_sql(
-            """
-            SELECT
-              SUM(CASE WHEN pcap_valid = 1 THEN 1 ELSE 0 END) AS valid_count,
-              SUM(CASE WHEN pcap_relpath IS NOT NULL THEN 1 ELSE 0 END) AS linked_count
-            FROM dynamic_sessions
-            WHERE tier='dataset'
-            """,
-            fetch="one",
-            dictionary=True,
-        )
-        if row:
-            status["pcap_valid_runs"] = int(row.get("valid_count") or 0)
-            status["pcap_total_runs"] = int(row.get("linked_count") or 0)
-    except Exception:
-        status["pcap_valid_runs"] = 0
-        status["pcap_total_runs"] = 0
-
-    # Evidence-pack-derived counts (authoritative for research baseline / ML).
-    try:
-        import json
-        from pathlib import Path
-
-        root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-        total = quota_eligible_total = quota_valid_total = 0
-        if root.exists():
-            for mf in root.glob("*/run_manifest.json"):
-                total += 1
-                try:
-                    payload = json.loads(mf.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                if not isinstance(payload, dict):
-                    continue
-                ds = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
-                tier = ds.get("tier")
-                if str(tier or "").lower() != "dataset":
-                    continue
-                if ds.get("countable") is False:
-                    continue
-                quota_eligible_total += 1
-                if ds.get("valid_dataset_run") is True:
-                    quota_valid_total += 1
-        status["evidence_packs_total"] = total
-        status["evidence_quota_eligible_packs"] = quota_eligible_total
-        status["evidence_quota_valid_packs"] = quota_valid_total
-        status["evidence_dataset_packs"] = quota_eligible_total
-        status["evidence_dataset_valid"] = quota_valid_total
-    except Exception:
-        status["evidence_packs_total"] = 0
-        status["evidence_quota_eligible_packs"] = 0
-        status["evidence_quota_valid_packs"] = 0
-        status["evidence_dataset_packs"] = 0
-        status["evidence_dataset_valid"] = 0
-
-    try:
-        export_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1"
-        manifest_path = export_dir / "scytaledroid_dyn_v1_manifest.csv"
-        if manifest_path.exists():
-            status["last_export_path"] = relative_path(manifest_path)
-            status["last_export_at"] = datetime.fromtimestamp(
-                manifest_path.stat().st_mtime
-            ).strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        status["last_export_path"] = None
-        status["last_export_at"] = None
-
-    # Feature health status (only exists after export).
-    try:
-        export_analysis_dir = Path(app_config.OUTPUT_DIR) / "exports" / "scytaledroid_dyn_v1" / "analysis"
-        fh_path = export_analysis_dir / "feature_health.json"
-        if fh_path.exists():
-            import json
-
-            payload = json.loads(fh_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                status["feature_health_status"] = payload.get("status")
-            status["feature_health_at"] = datetime.fromtimestamp(fh_path.stat().st_mtime).strftime(
-                "%Y-%m-%d %H:%M"
-            )
-    except Exception:
-        status["feature_health_status"] = None
-        status["feature_health_at"] = None
-
-    return status
-
-
-def fetch_publication_status() -> dict[str, object]:
-    """Return a compact publication status snapshot.
-
-    Files remain authoritative for evidence/bundle artifacts, but derived cohort
-    readiness should prefer the existing analysis DB tables when available.
-    """
-
-    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
-        run_freeze_readiness_audit,
-    )
-    from scytaledroid.Reporting.services.publication_status import (
-        fetch_latest_analysis_snapshot,
-    )
-
-    status: dict[str, object] = {
-        "freeze_audit_result": "unknown",
-        "paper_audit_result": "unknown",  # compatibility alias
-        "can_freeze": False,
-        "evidence_quota_counted": None,
-        "evidence_quota_expected": None,
-        "freeze_dataset_hash": None,
-        "publication_ready": False,
-        "publication_root_label": "output/publication",
-        "publication_tables_label": "0",
-        "publication_figures_label": "0",
-        "results_numbers_label": "missing",
-        "exports_label": "missing",
-        "qa_label": "missing",
-        "analysis_ready": False,
-        "analysis_label": "missing",
-        "analysis_cohort_label": None,
-        "footer": "",
-    }
-
-    # Freeze readiness audit (authoritative).
-    try:
-        audit = run_freeze_readiness_audit()
-        status["freeze_audit_result"] = str(audit.result)
-        status["paper_audit_result"] = str(audit.result)
-        status["can_freeze"] = bool(audit.can_freeze)
-        # The audit module knows expected counts; surface them for the UI.
-        try:
-            status["evidence_quota_expected"] = int(audit.expected_valid_runs)
-        except Exception:
-            status["evidence_quota_expected"] = None
-        # Countable quota is tracked in the freeze manifest (if present) or by exports.
-    except Exception:
-        audit = None
-
-    try:
-        analysis_snapshot = fetch_latest_analysis_snapshot()
-    except Exception:
-        analysis_snapshot = None
-    if analysis_snapshot:
-        status["analysis_ready"] = bool(analysis_snapshot.get("ready"))
-        status["analysis_label"] = str(analysis_snapshot.get("summary_label") or "missing")
-        status["analysis_cohort_label"] = str(analysis_snapshot.get("cohort_id") or "").strip() or None
-
-    # Freeze anchor (canonical for publication exports).
-    freeze_path = resolve_dataset_freeze_read_path()
-    if freeze_path.exists():
-        try:
-            payload = json.loads(freeze_path.read_text(encoding="utf-8"))
-            status["freeze_dataset_hash"] = payload.get("freeze_dataset_hash")
-            included = payload.get("included_run_ids") or []
-            status["evidence_quota_counted"] = int(len(included)) if isinstance(included, list) else None
-        except Exception:
-            status["freeze_dataset_hash"] = None
-
-    # Publication bundle surface.
-    pub_root = Path(app_config.OUTPUT_DIR) / "publication"
-    status["publication_root_label"] = str(relative_path(pub_root))
-    from scytaledroid.Publication.publication_contract import lint_publication_bundle
-    lint = lint_publication_bundle(pub_root)
-    tables_dir = pub_root / "tables"
-    figs_dir = pub_root / "figures"
-    results_numbers = pub_root / "appendix" / "results_section_V.md"
-    paste_blocks = pub_root / "appendix" / "publication_paste_blocks.md"
-    paste_blocks_legacy = pub_root / "appendix" / "paper2_ieee_paste_blocks.md"
-    qa_dir = pub_root / "qa"
-    exports = [
-        Path(app_config.DATA_DIR) / "archive" / "dynamic_run_summary.csv",
-        Path(app_config.DATA_DIR) / "archive" / "pcap_features.csv",
-        Path(app_config.DATA_DIR) / "archive" / "protocol_ledger.csv",
-    ]
-
-    if tables_dir.exists():
-        # Paper assembly needs all surfaced CSVs (not only `table_*.csv`).
-        status["publication_tables_label"] = str(len(list(tables_dir.glob("*.csv"))))
-    if figs_dir.exists():
-        # Paper-facing figures live under output/publication/figures. Exploratory/post-paper
-        # figures should live under output/publication/explore/ and must not inflate the
-        # paper status snapshot.
-        paper_figs = []
-        for p in figs_dir.glob("*.png"):
-            stem = p.stem.lower()
-            if stem.startswith(("fig_b1", "fig_b2", "fig_b3", "fig_b4")):
-                paper_figs.append(p)
-        status["publication_figures_label"] = str(len(paper_figs))
-    # Legacy paste blocks remain readable for older runs, but new runs should not
-    # write them unless explicitly enabled.
-    if results_numbers.exists() or paste_blocks.exists() or paste_blocks_legacy.exists():
-        status["results_numbers_label"] = "present"
-    if all(p.exists() for p in exports):
-        status["exports_label"] = "present"
-    if qa_dir.exists() and (qa_dir / "qa_stats_validation.json").exists():
-        status["qa_label"] = "present"
-
-    status["publication_ready"] = bool(lint.ok)
-
-    if not status["publication_ready"]:
-        # Keep it short; detailed reasons exist in saved reports / audits.
-        first = lint.errors[0] if lint.errors else "unknown"
-        status["footer"] = f"Publication bundle NOT READY ({first}). Run: 1) Regenerate artifacts, then 5) Write bundle."
-    else:
-        status["footer"] = ""
-    if status.get("analysis_cohort_label"):
-        db_hint = f"DB cohort: {status['analysis_cohort_label']}"
-        status["footer"] = f"{status['footer']} {db_hint}".strip()
-
-    return status
 
 
 def handle_export_freeze_anchored_csvs() -> None:
@@ -1373,7 +796,9 @@ def handle_refresh_phase_e_bundle() -> None:
     def _pin_ok(run_id: str | None) -> bool:
         if not run_id:
             return False
-        run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id
+        run_dir = resolve_dynamic_run_dir(run_id)
+        if run_dir is None:
+            return False
         if not (run_dir / "run_manifest.json").exists():
             return False
         out_dir = run_dir / "analysis" / "ml" / "v1"
@@ -1381,7 +806,7 @@ def handle_refresh_phase_e_bundle() -> None:
 
     if not _pin_ok(rid):
         exemplar = _select_fig_b1_exemplar_from_existing_or_inputs(
-            evidence_root=Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic",
+            evidence_root=dynamic_evidence_root(),
             freeze_apps=freeze.get("apps") or {},
             checksums=freeze.get("included_run_checksums") or {},
         )
@@ -1447,8 +872,10 @@ __all__ = [
     "summarise_severity",
     "view_saved_reports",
     "fetch_publication_status",
+    "fetch_tier1_status",
     "handle_cross_analysis_summary",
     "handle_export_freeze_anchored_csvs",
+    "handle_generate_static_exposure_privacy_report",
     "handle_generate_publication_results_numbers",
     "handle_generate_publication_scientific_qa",
     "handle_generate_publication_pipeline_audit",
@@ -1456,4 +883,8 @@ __all__ = [
     "handle_generate_profile_v3_exports",
     "handle_profile_v3_integrity_gates",
     "handle_refresh_phase_e_bundle",
+    "handle_tier1_audit_report",
+    "handle_tier1_end_to_end",
+    "handle_tier1_export_pack",
+    "handle_tier1_quick_fix",
 ]

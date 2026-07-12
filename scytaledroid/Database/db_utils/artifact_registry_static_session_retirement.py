@@ -263,7 +263,7 @@ def collect_static_session_retirement_report(
         )
 
     sessions_out: list[dict[str, Any]] = []
-    for session_stamp, row in session_rows.items():
+    for _, row in session_rows.items():
         run_ids = row.pop("_run_ids", set())
         package_counts = row.pop("_packages", Counter())
         reason_counts = row.pop("_reason_counts", Counter())
@@ -299,7 +299,7 @@ def collect_static_session_retirement_report(
         row["candidate_rank"] = index
 
     runs_out: list[dict[str, Any]] = []
-    for run_id, row in run_rows.items():
+    for _, row in run_rows.items():
         reason_counts = row.pop("_reason_counts", Counter())
         path_counts = row.pop("_path_counts", Counter())
         row["primary_reason_counts_json"] = json.dumps(dict(sorted(reason_counts.items())), sort_keys=True)

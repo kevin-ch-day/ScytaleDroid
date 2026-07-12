@@ -105,6 +105,7 @@ def test_print_progress_line_separates_reviewed_eligible_attempted_and_blocked(
             "packages_skipped": 89,
             "packages_runtime_skipped": 3,
             "packages_replanned": 2,
+            "packages_replan_recovered": 1,
             "packages_replan_failed": 1,
             "packages_partial": 0,
             "packages_failed": 0,
@@ -120,7 +121,7 @@ def test_print_progress_line_separates_reviewed_eligible_attempted_and_blocked(
     assert "attempted 31" in out
     assert "resolved 28" in out
     assert "blocked before pull 89" in out
-    assert "replanned 2 (failed 1)" in out
+    assert "replanned 2 (recovered 1, failed 1)" in out
     assert "blocked reviewed" not in out
 
 
@@ -154,6 +155,7 @@ def test_update_package_outcome_tolerates_legacy_pull_result_without_replan_fiel
         "packages_replanned": 0,
         "packages_replan_success": 0,
         "packages_replan_failed": 0,
+        "packages_replan_recovered": 0,
         "packages_drifted": 0,
         "packages_partial": 0,
         "packages_failed": 0,
@@ -168,3 +170,4 @@ def test_update_package_outcome_tolerates_legacy_pull_result_without_replan_fiel
     assert stats["packages_clean"] == 1
     assert stats["packages_path_stale"] == 0
     assert stats["packages_replanned"] == 0
+    assert stats["packages_replan_recovered"] == 0

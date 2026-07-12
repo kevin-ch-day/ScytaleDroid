@@ -18,6 +18,7 @@ from scytaledroid.DynamicAnalysis.menus.summary_support import (
     min_windows_per_run,
 )
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, resolve_dynamic_run_dir
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
@@ -147,7 +148,7 @@ def repair_reindex_tracker(*, callbacks: DynamicMaintenanceCallbacks) -> None:
         for v in before_apps.values()
         if isinstance(v, dict) and isinstance(v.get("runs"), list)
     ) if isinstance(before_apps, dict) else 0
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    evidence_root = dynamic_evidence_root()
 
     if not evidence_root.exists():
         print(status_messages.status("No dynamic evidence root found.", level="info"))
@@ -227,8 +228,11 @@ def repair_reindex_tracker(*, callbacks: DynamicMaintenanceCallbacks) -> None:
             if not run_id:
                 missing_paper_identity_count += 1
                 continue
-            manifest = callbacks.read_json(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id / "run_manifest.json") or {}
-            plan = callbacks.read_json(Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id / "inputs" / "static_dynamic_plan.json") or {}
+            run_dir = resolve_dynamic_run_dir(run_id)
+            manifest = callbacks.read_json(run_dir / "run_manifest.json") if run_dir else {}
+            plan = callbacks.read_json(run_dir / "inputs" / "static_dynamic_plan.json") if run_dir else {}
+            manifest = manifest or {}
+            plan = plan or {}
             eligibility = derive_freeze_eligibility(
                 manifest=manifest,
                 plan=plan,

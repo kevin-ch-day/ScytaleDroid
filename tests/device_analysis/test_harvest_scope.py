@@ -4,19 +4,19 @@ from scytaledroid.DeviceAnalysis.harvest import scope
 from scytaledroid.DeviceAnalysis.harvest.models import InventoryRow, ScopeSelection
 
 
-def _row(package_name: str, label: str = "Example App") -> InventoryRow:
+def _row(package_name: str, label: str = "Example App", *, primary_path: str = "/data/app/example/base.apk") -> InventoryRow:
     return InventoryRow(
         raw={"package_name": package_name},
         package_name=package_name,
         app_label=label,
         installer="com.android.vending",
         category=None,
-        primary_path="/data/app/example/base.apk",
+        primary_path=primary_path,
         profile_key=None,
         profile=None,
         version_name="1.0",
         version_code="1",
-        apk_paths=["/data/app/example/base.apk"],
+        apk_paths=[primary_path],
         split_count=1,
     )
 
@@ -210,6 +210,29 @@ def test_select_package_scope_menu_shortens_full_inventory_label(monkeypatch) ->
     assert "Full inventory pullable" in labels
     assert "All pullable packages (full inventory)" not in labels
     assert selection.label == "All pullable packages (full inventory)"
+
+
+def test_select_package_scope_full_inventory_handler_binds_metadata(monkeypatch) -> None:
+    alpha = _row("com.example.alpha", "Alpha")
+    beta = _row("com.example.beta", "Beta", primary_path="/system/app/Beta/base.apk")
+
+    monkeypatch.setattr(scope, "_LAST_SCOPE", None)
+    monkeypatch.setattr(scope, "_load_active_profile_scopes", lambda rows, device_serial: [])
+    monkeypatch.setattr(scope.prompt_utils, "get_choice", lambda *args, **kwargs: "4")
+
+    selection = scope.select_package_scope(
+        [alpha, beta],
+        device_serial="SERIAL123",
+        is_rooted=False,
+    )
+
+    assert selection is not None
+    assert selection.kind == "everything"
+    assert selection.metadata["candidate_count"] == 2
+    assert selection.metadata["selected_count"] == 2
+    assert selection.metadata["pullable_count"] == 1
+    assert selection.metadata["policy_blocked_inventory"] == 1
+    assert selection.metadata["estimated_files"] == 1
 
 
 def test_select_package_scope_menu_marks_default_scope_recommended(monkeypatch) -> None:

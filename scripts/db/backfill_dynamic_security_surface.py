@@ -21,7 +21,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--evidence-root", default=None, help="Dynamic evidence root (default: output/evidence/dynamic).")
+    parser.add_argument("--evidence-root", default=None, help="Dynamic evidence root (default: data/evidence/dynamic).")
     parser.add_argument("--output-dir", default=None, help="Directory for cohort summary JSON receipt.")
     parser.add_argument("--run-id", action="append", default=[], help="Restrict to one or more dynamic run IDs.")
     parser.add_argument("--timeout", type=int, default=45, help="Per-run tshark timeout in seconds.")
@@ -36,9 +36,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _default_evidence_root() -> Path:
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
-    return Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    return dynamic_evidence_root()
 
 
 def _default_output_dir() -> Path:

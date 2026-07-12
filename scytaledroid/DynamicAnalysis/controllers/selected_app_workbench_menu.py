@@ -21,9 +21,6 @@ def build_selected_app_protocol_options(
     queue_action_review_qa: str,
     queue_action_restore_local: str,
 ) -> list[Any]:
-    counts = app.counts
-    cfg = app.cfg
-    baseline_complete = int(counts.baseline_valid_runs) >= int(cfg.baseline_required)
     suggested_default_key = app.suggested_default_key
     can_reset = app.can_reset
     is_messaging = is_messaging_package_or_category_fn(app.package_name)

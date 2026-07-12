@@ -265,7 +265,7 @@ These are primary evidence or irreplaceable local bytes:
 
 - APK payloads under `data/store/apk/sha256`
 - current harvest APK payloads under `data/device_apks/.../runs`
-- dynamic evidence packs under `output/evidence/dynamic`
+- dynamic evidence packs under `data/evidence/dynamic`
 - raw PCAPs, logs, run events
 - finding evidence payloads
 - harvest receipts and package manifests

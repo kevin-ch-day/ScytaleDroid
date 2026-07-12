@@ -15,7 +15,7 @@ from scytaledroid.Utils.LoggingUtils import logging_events as log_events
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_context import RunContext, get_run_logger
 
-from . import artifact_execution, common, package_contract, package_execution, package_refresh, stale_replan
+from . import artifact_execution, common, package_contract, package_execution, stale_replan
 from .common import (
     DedupeTracker,
     HarvestOptions,
@@ -176,6 +176,7 @@ def execute_harvest(
         "packages_replanned": 0,
         "packages_replan_success": 0,
         "packages_replan_failed": 0,
+        "packages_replan_recovered": 0,
         "artifacts_planned": sum(len(plan.artifacts) for plan in plans),
         "artifacts_written": 0,
         "artifacts_failed": 0,
@@ -400,6 +401,7 @@ def execute_harvest(
             "packages_replanned": stats["packages_replanned"],
             "packages_replan_success": stats["packages_replan_success"],
             "packages_replan_failed": stats["packages_replan_failed"],
+            "packages_replan_recovered": stats["packages_replan_recovered"],
             "packages_processed": len(results),
             "packages_remaining": max(stats["packages_total"] - len(results), 0),
             "packages_clean": stats["packages_clean"],
@@ -785,6 +787,11 @@ def _update_package_outcome(stats: dict[str, int], result: PullResult) -> None:
         stats["packages_replanned"] += 1
         if stale_replan.is_successful_stale_replan_outcome(stale_replan_outcome):
             stats["packages_replan_success"] += 1
+            if stale_replan.is_recovered_stale_replan_result(
+                stale_replan_outcome,
+                result.capture_status,
+            ):
+                stats["packages_replan_recovered"] += 1
         elif stale_replan.is_failed_stale_replan_outcome(stale_replan_outcome):
             stats["packages_replan_failed"] += 1
     if result.capture_status == "drifted":

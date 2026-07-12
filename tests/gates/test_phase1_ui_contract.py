@@ -3,13 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import main as app_main
+import pytest
 from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.DeviceAnalysis.device_menu import dashboard
 from scytaledroid.Utils.DisplayUtils import status_messages
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.ui_contract, pytest.mark.gate]
 
@@ -44,12 +42,13 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
                     "Static Analysis Pipeline",
                     "Dynamic Analysis",
                     "API server",
-                    "Reporting & Exports",
+                    "Reporting",
                     "Database tools",
                     "Governance & Readiness",
                     "Evidence & Workspace",
                     "APK library",
                     "Mercury APK storage mount",
+                    "Machine Learning",
                     "About ScytaleDroid",
                 ],
             {
@@ -178,6 +177,24 @@ def test_handle_database_starts_menu_on_new_line(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert menu_calls["count"] == 1
     assert out.startswith("\nDATABASE HEADER\n")
+
+
+def test_handle_machine_learning_starts_menu_on_new_line(monkeypatch, capsys) -> None:
+    menu_calls = {"count": 0}
+
+    def _fake_ml_menu():
+        menu_calls["count"] += 1
+        print("ML HEADER")
+
+    import scytaledroid.DynamicAnalysis.ml.menu as ml_menu_module
+
+    monkeypatch.setattr(ml_menu_module, "machine_learning_menu", _fake_ml_menu)
+
+    app_main.handle_machine_learning()
+
+    out = capsys.readouterr().out
+    assert menu_calls["count"] == 1
+    assert out.startswith("\nML HEADER\n")
 
 
 def test_main_menu_db_status_suppression_consumes_once() -> None:

@@ -12,7 +12,6 @@ import argparse
 import csv
 import hashlib
 import json
-import os
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path

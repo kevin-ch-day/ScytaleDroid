@@ -8,10 +8,25 @@ Read-only reporting:
 - `scripts/db/report_artifact_registry_static_legacy_overlap.py` — static dangling rows that still overlap legacy `runs`.
 - `scripts/db/report_artifact_registry_static_session_retirement.py` — session-scoped retirement queue for the remaining legacy-overlap static rows.
 - `scripts/db/report_artifact_registry_static_blocked_file_presence.py` — file-presence correlation for blocked static legacy sessions.
+- `scripts/db/report_artifact_registry_static_file_present_detached.py` — file-present detached static row review queue with canonical coverage and staged action classes.
 
 **Write-capable prune (implemented):** `scripts/db/prune_artifact_registry_dangling.py` — age-gated
 dangling rows only, lightweight JSON/CSV/SQL receipt, ``DELETE`` only with ``--apply`` (never
 deletes host files).
+
+**Static exact-hash resolution prune (implemented):**
+`scripts/db/prune_artifact_registry_static_file_present_resolved.py` — targets only
+file-present detached static registry rows already classified as
+`STAGE_EXACT_HASH_REGISTRY_RESOLUTION_REVIEW`, meaning the file-backed row is covered by a
+canonical static run with the same base APK SHA-256. Dry-run is default; `--apply` requires
+`--expected-count`; deletes `artifact_registry` rows only.
+
+**Static reviewed file-present stale prune (implemented):**
+`scripts/db/prune_artifact_registry_static_file_present_reviewed.py` — targets only
+file-present detached static registry rows after an explicit operator decision to retire
+historical registry pointers while keeping the files. Dry-run is default; `--apply` requires
+`--expected-count`, an age cutoff, and at least one explicit review-class flag. Deletes
+`artifact_registry` rows only.
 
 ## 0. Operator policy (research / test installs)
 
@@ -110,6 +125,47 @@ still-present host files. For the blocked cohort, use
 `report_artifact_registry_static_blocked_file_presence.py` before any further
 delete planning.
 
+**Static file-present closeout triage:** use
+`report_artifact_registry_static_file_present_detached.py` to split file-present detached rows into:
+
+- `STAGE_EXACT_HASH_REGISTRY_RESOLUTION_REVIEW` — same base APK hash already has canonical static evidence; eligible for the receipt-first exact-hash resolution prune after review.
+- `STAGE_PRIOR_VERSION_RETENTION_REVIEW` — prior app version evidence; retain or explicitly retire as historical evidence, not with exact-hash cleanup.
+- `STAGE_IDENTITY_GAP_OR_HISTORICAL_REVIEW` — sparse evidence with missing version/hash identity; manual review before any registry cleanup.
+
+For exact-hash rows only, dry-run:
+
+```bash
+PYTHONPATH=. python scripts/db/prune_artifact_registry_static_file_present_resolved.py --expected-count <count>
+```
+
+Apply, only after reviewing the receipt and confirming the count:
+
+```bash
+PYTHONPATH=. python scripts/db/prune_artifact_registry_static_file_present_resolved.py --expected-count <count> --apply
+```
+
+For reviewed historical rows where the files should remain but stale registry pointers should be
+retired, dry-run with explicit classes and an age cutoff:
+
+```bash
+PYTHONPATH=. python scripts/db/prune_artifact_registry_static_file_present_reviewed.py \
+  --allow-prior-version-retention-review \
+  --allow-identity-gap-or-historical-review \
+  --min-age-days <days> \
+  --expected-count <count>
+```
+
+Apply, only after reviewing the receipt and confirming the count:
+
+```bash
+PYTHONPATH=. python scripts/db/prune_artifact_registry_static_file_present_reviewed.py \
+  --allow-prior-version-retention-review \
+  --allow-identity-gap-or-historical-review \
+  --min-age-days <days> \
+  --expected-count <count> \
+  --apply
+```
+
 **Scoped prune (preferred for bulk debt):** `PYTHONPATH=. python scripts/db/prune_artifact_registry_dangling.py` — see §4.
 
 **Session-scoped static legacy prune (candidate sessions only):**
@@ -142,6 +198,8 @@ Use these **labels** in runbooks and future tooling; they are not DB enums yet.
 | `static_numeric_missing_sar_candidate` | Mid-age (between recent and old thresholds) static numeric `run_id` with no SAR and **blank** `host_path` — export then registry delete candidate. |
 | `static_truly_detached_candidate` | Static missing-SAR row, host file missing, no legacy/canonical overlap — use `prune_artifact_registry_static_detached.py` (receipt-first). |
 | `static_file_present_detached_review` | Static missing-SAR row with host file still present and no canonical overlap — review evidence value before delete. |
+| `static_file_present_exact_hash_resolution` | Static file-present detached row covered by a canonical static run with the same base APK SHA-256 — use `prune_artifact_registry_static_file_present_resolved.py` after staged review. |
+| `static_file_present_reviewed_stale_registry` | Static file-present detached row retained as filesystem evidence but intentionally removed from the derived registry ledger after explicit staged review — use `prune_artifact_registry_static_file_present_reviewed.py`. |
 | `static_legacy_overlap_missing_file` | Static host file is missing, but legacy `runs` overlap still exists — retire legacy session debt first. |
 | `static_legacy_overlap_file_present_review` | Static row still overlaps legacy `runs` and the host file still exists — blocked pending legacy session + file review. |
 | `static_canonical_residue_review` | Static dangling row still overlaps canonical static tables — investigate residue before any cleanup. |

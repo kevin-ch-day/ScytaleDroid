@@ -14,10 +14,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_plan_read_path,
     write_dataset_plan_payload,
+)
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    iter_dynamic_run_dirs,
+    resolve_dynamic_run_dir,
 )
 
 _LEGACY_IN_PROGRESS_GRACE_S = 60 * 60
@@ -192,8 +195,8 @@ def _derive_local_pcap_failure_detail(run_id: str) -> str | None:
     run_id_text = str(run_id or "").strip()
     if not run_id_text:
         return None
-    run_dir = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / run_id_text
-    if not run_dir.exists():
+    run_dir = resolve_dynamic_run_dir(run_id_text)
+    if run_dir is None or not run_dir.exists():
         return None
     try:
         from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
@@ -205,11 +208,8 @@ def _derive_local_pcap_failure_detail(run_id: str) -> str | None:
 
 def find_dynamic_run_dirs(package_name: str) -> list[Path]:
     """Find local evidence pack dirs whose run_manifest.json targets package_name."""
-    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    if not output_root.exists():
-        return []
     matches: list[Path] = []
-    for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
+    for run_dir in iter_dynamic_run_dirs():
         manifest_path = run_dir / "run_manifest.json"
         if not manifest_path.exists():
             continue
@@ -223,11 +223,8 @@ def find_dynamic_run_dirs(package_name: str) -> list[Path]:
 
 def find_incomplete_dynamic_run_dirs() -> list[Path]:
     """Return local dynamic run dirs missing run_manifest.json (orphan/incomplete)."""
-    output_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
-    if not output_root.exists():
-        return []
     out: list[Path] = []
-    for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
+    for run_dir in iter_dynamic_run_dirs():
         manifest_path = run_dir / "run_manifest.json"
         if manifest_path.exists():
             continue

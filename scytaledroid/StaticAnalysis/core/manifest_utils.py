@@ -76,13 +76,25 @@ def collect_exported_components(manifest_root: ElementTree.Element) -> Component
     """Derive exported component lists by inspecting manifest nodes."""
 
     target_sdk = _extract_target_sdk_int(manifest_root)
+    application = manifest_root.find("application")
+    application_enabled = (
+        _manifest_bool(application.get(f"{_ANDROID_NS}enabled"), default=True)
+        if application is not None
+        else True
+    )
 
-    def exported_names(tags: tuple[str, ...], *, default_exported: bool = False) -> tuple[str, ...]:
+    def exported_names(tags: tuple[str, ...]) -> tuple[str, ...]:
         names: set[str] = set()
         for tag in tags:
             for element in manifest_root.iter(tag):
                 name = element.get(f"{_ANDROID_NS}name")
                 if not name:
+                    continue
+                component_enabled = application_enabled and _manifest_bool(
+                    element.get(f"{_ANDROID_NS}enabled"),
+                    default=True,
+                )
+                if not component_enabled:
                     continue
                 exported_attr = element.get(f"{_ANDROID_NS}exported")
                 if exported_attr is not None:
@@ -91,12 +103,10 @@ def collect_exported_components(manifest_root: ElementTree.Element) -> Component
                     has_intent_filter = _element_has_intent_filter(element)
                     if target_sdk is not None and target_sdk >= 31 and has_intent_filter:
                         is_exported = False
+                    elif tag == "provider":
+                        is_exported = _provider_default_exported(target_sdk)
                     else:
-                        is_exported = (
-                            default_exported
-                            if tag == "provider"
-                            else has_intent_filter
-                        )
+                        is_exported = has_intent_filter
                 if is_exported:
                     names.add(name)
         return tuple(sorted(names))
@@ -105,7 +115,7 @@ def collect_exported_components(manifest_root: ElementTree.Element) -> Component
         activities=exported_names(("activity", "activity-alias")),
         services=exported_names(("service",)),
         receivers=exported_names(("receiver",)),
-        providers=exported_names(("provider",), default_exported=False),
+        providers=exported_names(("provider",)),
     )
 
 
@@ -122,6 +132,10 @@ def build_manifest_evidence(
         return []
 
     target_sdk = _extract_target_sdk_int(manifest_root)
+    application_enabled = _manifest_bool(
+        application.get(f"{_ANDROID_NS}enabled"),
+        default=True,
+    )
 
     records: list[dict[str, object]] = []
     component_tags = {
@@ -140,6 +154,11 @@ def build_manifest_evidence(
         if not name:
             continue
 
+        enabled_explicit = coerce_bool(element.get(f"{_ANDROID_NS}enabled"))
+        component_enabled = application_enabled and _manifest_bool(
+            element.get(f"{_ANDROID_NS}enabled"),
+            default=True,
+        )
         exported_attr = element.get(f"{_ANDROID_NS}exported")
         exported_explicit: bool | None = None
         exported_state = "absent"
@@ -155,15 +174,30 @@ def build_manifest_evidence(
                 exported_effective = False
                 export_reason = "sdk31_requires_explicit"
             elif tag == "provider":
-                exported_effective = False
-                export_reason = "provider_default_false"
+                exported_effective = _provider_default_exported(target_sdk)
+                export_reason = (
+                    "provider_default_true_legacy_sdk"
+                    if exported_effective
+                    else "provider_default_false"
+                )
             else:
                 exported_effective = bool(has_intent_filter)
                 export_reason = "intent_filter_present" if has_intent_filter else "default_false"
 
+        if exported_effective and not component_enabled:
+            exported_effective = False
+            export_reason = (
+                "application_disabled"
+                if not application_enabled
+                else "component_disabled"
+            )
+
         record: dict[str, object] = {
             "component_type": tag,
             "name": name,
+            "enabled": component_enabled,
+            "enabled_explicit": enabled_explicit,
+            "application_enabled": application_enabled,
             "exported_explicit": exported_explicit,
             "exported_explicit_state": exported_state,
             "exported_effective": exported_effective,
@@ -219,6 +253,15 @@ def _element_has_intent_filter(element: ElementTree.Element) -> bool:
         if tag == "intent-filter":
             return True
     return False
+
+
+def _manifest_bool(value: str | None, *, default: bool) -> bool:
+    parsed = coerce_bool(value)
+    return default if parsed is None else parsed
+
+
+def _provider_default_exported(target_sdk: int | None) -> bool:
+    return target_sdk is None or target_sdk <= 16
 
 
 def _extract_target_sdk_int(manifest_root: ElementTree.Element) -> int | None:

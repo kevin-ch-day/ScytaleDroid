@@ -39,6 +39,11 @@ class ComponentRecord:
     name: str
     exported: bool
     permission: str | None
+    enabled: bool = True
+    enabled_explicit: bool | None = None
+    application_enabled: bool = True
+    read_permission: str | None = None
+    write_permission: str | None = None
     exported_explicit: bool | None = None
     export_reason: str | None = None
     authorities: tuple[str, ...] = ()
@@ -54,6 +59,10 @@ def iter_manifest_components(
         return tuple()
 
     target_sdk = _extract_target_sdk_int(manifest_root)
+    application_enabled = _manifest_bool(
+        application.get(f"{_ANDROID_NS}enabled"),
+        default=True,
+    )
 
     records: list[ComponentRecord] = []
 
@@ -65,6 +74,11 @@ def iter_manifest_components(
         if not name:
             continue
 
+        enabled_explicit = _manifest_bool_or_none(element.get(f"{_ANDROID_NS}enabled"))
+        component_enabled = (
+            application_enabled
+            and _manifest_bool(element.get(f"{_ANDROID_NS}enabled"), default=True)
+        )
         exported_attr = element.get(f"{_ANDROID_NS}exported")
         exported_explicit: bool | None = None
         export_reason = None
@@ -83,13 +97,27 @@ def iter_manifest_components(
                 exported = False
                 export_reason = "sdk31_requires_explicit"
             elif tag == "provider":
-                exported = False
-                export_reason = "provider_default_false"
+                exported = _provider_default_exported(target_sdk)
+                export_reason = (
+                    "provider_default_true_legacy_sdk"
+                    if exported
+                    else "provider_default_false"
+                )
             else:
                 exported = bool(has_intent_filter)
                 export_reason = "intent_filter_present" if has_intent_filter else "default_false"
 
+        if exported and not component_enabled:
+            exported = False
+            export_reason = (
+                "application_disabled"
+                if not application_enabled
+                else "component_disabled"
+            )
+
         permission = element.get(f"{_ANDROID_NS}permission")
+        read_permission = element.get(f"{_ANDROID_NS}readPermission")
+        write_permission = element.get(f"{_ANDROID_NS}writePermission")
         authorities: list[str] = []
         if tag == "provider":
             auth_value = element.get(f"{_ANDROID_NS}authorities") or ""
@@ -109,9 +137,14 @@ def iter_manifest_components(
                 component_type=tag,
                 name=name,
                 exported=exported,
+                enabled=component_enabled,
+                enabled_explicit=enabled_explicit,
+                application_enabled=application_enabled,
                 exported_explicit=exported_explicit,
                 export_reason=export_reason,
                 permission=permission,
+                read_permission=read_permission,
+                write_permission=write_permission,
                 authorities=tuple(authorities),
                 grant_uri_permissions=grant_uri,
                 process=process_name,
@@ -134,6 +167,23 @@ def _extract_target_sdk_int(manifest_root: ElementTree.Element) -> int | None:
         return None
 
 
+def _manifest_bool_or_none(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    return value.strip().lower() in {"true", "1"}
+
+
+def _manifest_bool(value: str | None, *, default: bool) -> bool:
+    parsed = _manifest_bool_or_none(value)
+    return default if parsed is None else parsed
+
+
+def _provider_default_exported(target_sdk: int | None) -> bool:
+    # Provider exported defaults changed at targetSdkVersion 17.
+    # Unknown target SDK is treated conservatively as legacy-exposed.
+    return target_sdk is None or target_sdk <= 16
+
+
 def _build_evidence(component: ComponentRecord, *, apk_path) -> EvidencePointer:
     location = f"{apk_path.resolve().as_posix()}!AndroidManifest.xml::{component.component_type}:{component.name}"
     description = f"{component.component_type} {component.name}"
@@ -141,7 +191,12 @@ def _build_evidence(component: ComponentRecord, *, apk_path) -> EvidencePointer:
         "exported": component.exported,
         "exported_explicit": component.exported_explicit,
         "export_reason": component.export_reason,
+        "enabled": component.enabled,
+        "enabled_explicit": component.enabled_explicit,
+        "application_enabled": component.application_enabled,
         "permission": component.permission,
+        "read_permission": component.read_permission,
+        "write_permission": component.write_permission,
         "authorities": component.authorities,
         "grant_uri_permissions": component.grant_uri_permissions,
         "process": component.process,
@@ -173,6 +228,49 @@ def _permission_strength(
     return strength, tuple(levels)
 
 
+def _component_permissions(component: ComponentRecord) -> tuple[str, ...]:
+    if component.component_type == "provider":
+        values = (
+            component.read_permission or "",
+            component.write_permission or "",
+            component.permission or "",
+        )
+    else:
+        values = (component.permission or "",)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        permission = value.strip()
+        if permission and permission not in seen:
+            deduped.append(permission)
+            seen.add(permission)
+    return tuple(deduped)
+
+
+def _provider_permission_guard(
+    permissions: Sequence[str],
+    *,
+    protection_levels: Mapping[str, Sequence[str]],
+    catalog,
+) -> tuple[str, str]:
+    strengths: list[str] = []
+    display: list[str] = []
+    for permission in permissions:
+        strength, levels = _permission_strength(
+            permission,
+            protection_levels=protection_levels,
+            catalog=catalog,
+        )
+        level_display = "/".join(levels) if levels else "unspecified"
+        strengths.append(strength)
+        display.append(f"{permission} (protectionLevel={level_display})")
+    if strengths and all(strength == "strong" for strength in strengths):
+        return "strong", "; ".join(display)
+    if any(strength == "weak" for strength in strengths):
+        return "weak", "; ".join(display)
+    return "custom", "; ".join(display)
+
+
 def _classify_component(
     component: ComponentRecord,
     *,
@@ -187,7 +285,16 @@ def _classify_component(
     component_label = component.component_type.replace("-", " ")
 
     if component.component_type == "provider":
-        if not permission:
+        provider_permissions = tuple(
+            perm
+            for perm in (
+                (component.read_permission or "").strip(),
+                (component.write_permission or "").strip(),
+                permission,
+            )
+            if perm
+        )
+        if not provider_permissions:
             return Finding(
                 finding_id=f"ipc_provider_world_{base_id}",
                 title=f"Exported provider without permission — {component.name}",
@@ -204,30 +311,29 @@ def _classify_component(
                 ),
             )
 
-        strength, levels = _permission_strength(
-            permission,
+        provider_guard, permission_display = _provider_permission_guard(
+            provider_permissions,
             protection_levels=protection_levels,
             catalog=catalog,
         )
-        level_display = "/".join(levels) if levels else "unspecified"
-        if strength == "strong":
+        if provider_guard == "strong":
             return Finding(
                 finding_id=f"ipc_provider_permission_{base_id}",
-                title=f"Exported provider gated by {permission}",
+                title=f"Exported provider gated by {permission_display}",
                 severity_gate=SeverityLevel.P2,
                 category_masvs=MasvsCategory.PLATFORM,
                 status=Badge.INFO,
                 because=(
-                    f"Provider {component.name} is exported and guarded by {permission}"
-                    f" (protectionLevel={level_display})."
+                    f"Provider {component.name} is exported and guarded by"
+                    f" {permission_display}."
                 ),
                 remediate=(
                     "Keep custom provider permissions scoped to signature-level callers"
                     " and document expected consumers."
                 ),
-                metrics={"protection_level": level_display},
+                metrics={"protection_level": provider_guard},
             )
-        if strength == "weak":
+        if provider_guard == "weak":
             return Finding(
                 finding_id=f"ipc_provider_permission_weak_{base_id}",
                 title=f"Weak guard on exported provider — {component.name}",
@@ -235,31 +341,30 @@ def _classify_component(
                 category_masvs=MasvsCategory.PLATFORM,
                 status=Badge.FAIL,
                 because=(
-                    f"Provider {component.name} is exported but guarded by {permission}"
-                    f" with protectionLevel={level_display}, allowing broad callers."
+                    f"Provider {component.name} is exported but guarded by"
+                    f" {permission_display}, allowing broad callers."
                 ),
                 remediate=(
                     "Switch the provider permission to signature or signatureOrSystem"
                     " or make the component private."
                 ),
-                metrics={"protection_level": level_display},
+                metrics={"protection_level": provider_guard},
             )
         return Finding(
             finding_id=f"ipc_provider_permission_custom_{base_id}",
-            title=f"Exported provider guarded by {permission}",
+            title=f"Exported provider guarded by {permission_display}",
             severity_gate=SeverityLevel.P2,
             category_masvs=MasvsCategory.PLATFORM,
             status=Badge.WARN,
             because=(
-                f"Provider {component.name} relies on {permission}"
-                f" (protectionLevel={level_display}). Review that only trusted callers"
-                " can obtain the permission."
+                f"Provider {component.name} relies on {permission_display}."
+                " Review that only trusted callers can obtain the permission."
             ),
             remediate=(
                 "Confirm the custom permission is distributed only to trusted"
                 " packages and consider signature-level enforcement."
             ),
-            metrics={"protection_level": level_display},
+            metrics={"protection_level": provider_guard},
         )
 
     if not permission:
@@ -435,34 +540,50 @@ def _build_metrics(
 ) -> Mapping[str, object]:
     total = len(components)
     exported = sum(1 for comp in components if comp.exported)
-    permissioned = sum(1 for comp in components if comp.permission)
+    permissioned = sum(1 for comp in components if _component_permissions(comp))
     exported_with_permission = sum(
-        1 for comp in components if comp.exported and comp.permission
+        1 for comp in components if comp.exported and _component_permissions(comp)
     )
     exported_without_permission = sum(
-        1 for comp in components if comp.exported and not comp.permission
+        1 for comp in components if comp.exported and not _component_permissions(comp)
     )
     providers = [comp for comp in components if comp.component_type == "provider"]
     guard_strengths: Counter[str] = Counter()
     for component in components:
-        if not component.permission:
+        permissions = _component_permissions(component)
+        if not permissions:
             continue
-        strength, _ = _permission_strength(
-            component.permission,
-            protection_levels=protection_levels,
-            catalog=catalog,
-        )
+        if component.component_type == "provider":
+            strength, _ = _provider_permission_guard(
+                permissions,
+                protection_levels=protection_levels,
+                catalog=catalog,
+            )
+        else:
+            strength, _ = _permission_strength(
+                permissions[0],
+                protection_levels=protection_levels,
+                catalog=catalog,
+            )
         guard_strengths[strength] += 1
 
     type_map: dict[str, Counter[str]] = {}
     for component in components:
-        if not component.permission:
+        permissions = _component_permissions(component)
+        if not permissions:
             continue
-        bucket, _ = _permission_strength(
-            component.permission,
-            protection_levels=protection_levels,
-            catalog=catalog,
-        )
+        if component.component_type == "provider":
+            bucket, _ = _provider_permission_guard(
+                permissions,
+                protection_levels=protection_levels,
+                catalog=catalog,
+            )
+        else:
+            bucket, _ = _permission_strength(
+                permissions[0],
+                protection_levels=protection_levels,
+                catalog=catalog,
+            )
         counter = type_map.setdefault(component.component_type, Counter())
         counter[bucket] += 1
     by_type = {

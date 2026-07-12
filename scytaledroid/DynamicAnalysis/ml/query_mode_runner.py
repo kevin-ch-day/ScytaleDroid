@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
 from . import ml_parameters_operational as config
 from . import ml_parameters_profile as paper_config
@@ -454,7 +455,7 @@ def run_ml_query_mode(
 ) -> QueryMlRunStats:
     """Run ML in query mode and write operational snapshot outputs."""
 
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    evidence_root = dynamic_evidence_root()
     if not evidence_root.exists():
         raise RuntimeError(f"Evidence root missing: {evidence_root}")
 

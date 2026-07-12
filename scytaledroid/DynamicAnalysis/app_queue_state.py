@@ -20,7 +20,6 @@ from scytaledroid.DynamicAnalysis.run_qualification import (
     format_quota_progress_label,
     format_supplemental_column_label,
     format_supplemental_suffix,
-    row_baseline_ml_pool_size,
     supplemental_baseline_queue_action,
 )
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package

@@ -81,7 +81,7 @@ def export_protocol_ledger_csv(*, resolve_dataset_freeze_read_path_fn) -> None:
 
 def run_cohort_security_audit_export(*, include_hidden_patterns: bool = False) -> None:
     """Export cohort PCAP security-surface audit CSVs from live evidence packs."""
-    from scytaledroid.Config import app_config
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
     print()
     menu_utils.print_header("Cohort Security Audit Export")
@@ -99,7 +99,7 @@ def run_cohort_security_audit_export(*, include_hidden_patterns: bool = False) -
     runs_scanned = summary.get("runs_scanned")
     print(
         status_messages.status(
-            f"Scanned {runs_scanned} evidence pack(s) under {app_config.OUTPUT_DIR}/evidence/dynamic",
+            f"Scanned {runs_scanned} evidence pack(s) under {dynamic_evidence_root()}",
             level="info",
         )
     )

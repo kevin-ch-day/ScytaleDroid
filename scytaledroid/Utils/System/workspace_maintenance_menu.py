@@ -59,6 +59,14 @@ def _count_dirs(path: Path) -> int:
         return 0
 
 
+def _dynamic_evidence_index_root() -> Path:
+    """Canonical dynamic evidence root used for derived DB indexing."""
+
+    from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
+
+    return dynamic_evidence_root()
+
+
 def _show_summary() -> None:
     data_dir = Path("data")
     apks_dir = artifact_store.analysis_apk_root()
@@ -385,10 +393,10 @@ def workspace_menu() -> None:
                 index_dynamic_evidence_packs_to_db,
             )
 
-            root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+            root = _dynamic_evidence_index_root()
             print()
             menu_utils.print_header("Rebuild DB Index From Evidence Packs")
-            print(status_messages.status("DB is a derived index. Evidence packs remain authoritative.", level="info"))
+            print(status_messages.status(f"DB is a derived index. Evidence packs remain authoritative under {root}.", level="info"))
             if not prompt_utils.prompt_yes_no("Rebuild DB index now?", default=True):
                 prompt_utils.press_enter_to_continue()
                 continue

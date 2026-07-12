@@ -5,9 +5,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
-from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
 
 
@@ -37,7 +36,7 @@ def capture_environment_summary() -> dict[str, object]:
         except Exception:
             adb_devices = []
 
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    evidence_root = dynamic_evidence_root()
     nearest_existing = evidence_root
     while not nearest_existing.exists() and nearest_existing != nearest_existing.parent:
         nearest_existing = nearest_existing.parent

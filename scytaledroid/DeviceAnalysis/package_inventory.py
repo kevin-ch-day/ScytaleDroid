@@ -36,7 +36,6 @@ def list_packages_with_versions(
     """
 
     try:
-        completed = None
         for command in adb_package_manager.list_packages_commands("--show-versioncode"):
             candidate = adb_client.run_shell_command(serial, command, timeout=20)
             if candidate.returncode != 0 or adb_package_manager.completed_indicates_unsupported(candidate):
@@ -44,9 +43,8 @@ def list_packages_with_versions(
             parsed = _parse_package_listing(candidate.stdout)
             if parsed:
                 return parsed
-            completed = candidate
     except RuntimeError:
-        completed = None
+        pass
 
     # Fallback to basic package names if versionCode listing is unsupported.
     if not allow_fallbacks:

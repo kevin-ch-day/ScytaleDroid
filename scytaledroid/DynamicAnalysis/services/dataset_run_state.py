@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.datasets.research_dataset_alpha import MESSAGING_PACKAGES
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
@@ -28,6 +27,7 @@ from scytaledroid.DynamicAnalysis.templates.category_map import (
     category_for_package,
     resolved_template_for_package,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import PackageRunCounts, find_dynamic_run_dirs
 
 
@@ -380,7 +380,7 @@ def _local_rollups(runs: list[dict[str, object]]) -> tuple[int, int, tuple[tuple
 
 
 def _evidence_state(package_name: str) -> tuple[str, int]:
-    evidence_root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    evidence_root = dynamic_evidence_root()
     if not evidence_root.exists():
         return "missing", 0
     try:

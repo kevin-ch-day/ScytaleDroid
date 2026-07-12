@@ -24,6 +24,7 @@ from .menu_actions import (
     handle_generate_publication_pipeline_audit,
     handle_generate_publication_results_numbers,
     handle_generate_publication_scientific_qa,
+    handle_generate_static_exposure_privacy_report,
     handle_lint_profile_v2_bundle,
     handle_print_manuscript_snapshot,
     handle_profile_v3_integrity_gates,
@@ -44,38 +45,145 @@ def reporting_menu() -> None:
         menu_utils.print_header("Reporting")
         print(
             summary_cards.format_summary_card(
-                "Reporting Workspace",
+                "Study-Oriented Reporting",
                 [
-                    summary_cards.summary_item("Frozen archive", "validated exports and bundle generation", value_style="accent"),
-                    summary_cards.summary_item("Structural archive", "integrity gates and structural exports", value_style="accent"),
-                    summary_cards.summary_item("Exploratory", "saved reports and non-canonical analysis", value_style="info"),
+                    summary_cards.summary_item("Study", "choose what you want to analyze", value_style="accent"),
+                    summary_cards.summary_item("Scope", "dataset, category, single app, or eligible apps", value_style="accent"),
+                    summary_cards.summary_item("Evidence", "current analysis window or app history", value_style="accent"),
+                    summary_cards.summary_item("Output", "report bundle with tables, figures, and source data", value_style="info"),
                 ],
-                footer="Choose the archive profile that matches the evidence contract you are working with.",
+                footer="Advanced archive and reproduction tools remain available under Legacy Archive Tools.",
             )
         )
         options = [
-            MenuOption("1", "Frozen cohort archive tools"),
-            MenuOption("2", "Structural cohort archive tools"),
-            MenuOption("3", "Exploratory / saved reports"),
+            MenuOption(
+                "1",
+                "Static Exposure & Privacy Assessment",
+                "Manifest, permissions, components, network/storage, MASVS",
+            ),
+            MenuOption(
+                "2",
+                "Runtime Network Behavior Analysis",
+                "Idle, QFG, interactive, PCAP, time-series, RDI",
+                disabled=True,
+                badge="COMING NEXT",
+            ),
+            MenuOption(
+                "3",
+                "Integrated Static-Runtime Privacy & Security Analysis",
+                "Build-aligned static and runtime evidence",
+                disabled=True,
+                badge="COMING NEXT",
+            ),
+            MenuOption("4", "General cohort and app analysis"),
+            MenuOption("5", "Evidence and provenance exports"),
+            MenuOption("6", "Saved report bundles"),
+            MenuOption("7", "Experimental analyses"),
+            MenuOption("8", "Legacy archive tools"),
         ]
-        menu_utils.print_hint("Frozen archive is the canonical export path; exploratory remains separate by design.")
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
-        top_choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        top_choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if top_choice == "0":
             break
 
         if top_choice == "1":
-            _reporting_menu_v2_frozen()
-        elif top_choice == "2":
-            _reporting_menu_v3_structural()
-        elif top_choice == "3":
+            handle_generate_static_exposure_privacy_report()
+        elif top_choice == "4":
+            _general_analysis_menu()
+        elif top_choice == "5":
+            _evidence_exports_menu()
+        elif top_choice == "6":
+            _saved_report_bundles_menu()
+        elif top_choice == "7":
             _reporting_menu_exploratory()
+        elif top_choice == "8":
+            _legacy_archive_tools_menu()
         else:
             print(status_messages.status("Invalid selection.", level="warn"))
             prompt_utils.press_enter_to_continue()
 
 
 __all__ = ["reporting_menu"]
+
+
+def _general_analysis_menu() -> None:
+    actions = {
+        "1": handle_cross_analysis_summary,
+    }
+    options = [
+        MenuOption("1", "Cross-analysis summary (static + dynamic + regime)"),
+        MenuOption("2", "Cohort/app descriptive report builder (COMING NEXT)", disabled=True),
+    ]
+    while True:
+        print()
+        menu_utils.print_header("General Cohort and App Analysis")
+        menu_utils.print_menu(options, show_exit=True, exit_label="Back", compact=True)
+        choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        if choice == "0":
+            return
+        action = actions.get(choice)
+        if action:
+            action()
+
+
+def _evidence_exports_menu() -> None:
+    options = [
+        MenuOption("1", "Static/dynamic provenance export builder (COMING NEXT)", disabled=True),
+        MenuOption("2", "Open legacy archive exports", "Use Legacy Archive Tools for older archive export formats."),
+    ]
+    while True:
+        print()
+        menu_utils.print_header("Evidence and Provenance Exports")
+        menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=True, compact=False)
+        choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        if choice == "0":
+            return
+        if choice == "2":
+            _legacy_archive_tools_menu()
+
+
+def _saved_report_bundles_menu() -> None:
+    options = [
+        MenuOption("1", "View generated report bundles"),
+        MenuOption("2", "Filter by study profile, scope, or timestamp (COMING NEXT)", disabled=True),
+    ]
+    while True:
+        print()
+        menu_utils.print_header("Saved Report Bundles")
+        menu_utils.print_menu(options, show_exit=True, exit_label="Back", compact=True)
+        choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        if choice == "0":
+            return
+        if choice == "1":
+            view_saved_reports()
+
+
+def _legacy_archive_tools_menu() -> None:
+    options = [
+        MenuOption("1", "Frozen cohort archive tools"),
+        MenuOption("2", "Structural cohort archive tools"),
+    ]
+    while True:
+        print()
+        menu_utils.print_header("Legacy Archive Tools")
+        print(
+            summary_cards.format_summary_card(
+                "Legacy Archive Boundary",
+                [
+                    summary_cards.summary_item("Purpose", "preserve earlier archive/export workflows", value_style="warning"),
+                    summary_cards.summary_item("New reports", "use study, scope, and evidence-window selections", value_style="accent"),
+                ],
+                footer="Legacy archive profiles preserve earlier archive workflows. New reports use the study-oriented reporting path.",
+            )
+        )
+        menu_utils.print_menu(options, show_exit=True, exit_label="Back", compact=True)
+        choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        if choice == "0":
+            return
+        if choice == "1":
+            _reporting_menu_v2_frozen()
+        elif choice == "2":
+            _reporting_menu_v3_structural()
 
 
 def _reporting_menu_v2_frozen() -> None:
@@ -145,7 +253,7 @@ def _reporting_menu_v2_frozen() -> None:
         )
 
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
-        choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True, disabled=[o.key for o in options if o.disabled]), default="0")
+        choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True, disabled=[o.key for o in options if o.disabled]), default="0")
         if choice == "0":
             return
         action = actions.get(choice)
@@ -202,7 +310,7 @@ def _reporting_menu_v3_structural() -> None:
         if lint.warnings:
             menu_utils.print_hint(f"Warnings: {len(lint.warnings)}")
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
-        choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if choice == "0":
             return
         action = actions.get(choice)
@@ -246,7 +354,7 @@ def _reporting_menu_exploratory() -> None:
             )
         )
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
-        choice = prompt_utils.get_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
+        choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if choice == "0":
             return
         action = actions.get(choice)

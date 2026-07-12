@@ -307,7 +307,7 @@ def _load_archive_reports(
                 }
             )
 
-    for package_name, bucket in package_index.items():
+    for bucket in package_index.values():
         base_reports: list[Path] = list(bucket.get("base_reports") or [])
         if not base_reports:
             continue

@@ -89,6 +89,7 @@ def test_help_is_safe_without_pythonpath() -> None:
     out = (proc.stdout or "").lower()
     assert out.startswith("usage:")
     assert "--output-dir" in out
+    assert "--receipt-root" in out
     assert "harvest path-stale" in out
 
 
@@ -180,6 +181,69 @@ def test_event_row_classifies_package_updated_since_inventory() -> None:
     assert row["version_name_changed"] == 1
     assert row["split_apk_package"] == 1
     assert row["package_shape"] == "base_plus_splits"
+    assert row["package_recovered_after_replan"] == 0
+
+
+def test_event_row_counts_clean_package_updated_replan_as_recovered() -> None:
+    payload = _receipt_payload(
+        package_name="com.example.updatedclean",
+        session_label="RUN2",
+        stale_replan={
+            "required": True,
+            "outcome": "path_stale_package_updated_since_inventory",
+            "details": {
+                "drift_reasons": ["version_code_changed", "artifact_set_changed"],
+                "refreshed_version_code": "2",
+                "refreshed_version_name": "2.0",
+                "refreshed_primary_path": "/data/app/base.apk",
+                "refreshed_apk_paths": ["/data/app/base.apk", "/data/app/split.apk"],
+                "refreshed_split_count": 2,
+            },
+        },
+        split_count=2,
+        apk_paths=["/data/app/base_old.apk", "/data/app/split_old.apk"],
+        capture_status="clean",
+    )
+
+    row = report._event_row(
+        payload=payload,
+        source_kind="receipt",
+        source_path=Path("/repo/data/receipts/harvest/RUN2/com.example.updatedclean.json"),
+        inventory_index={},
+    )
+    assert row is not None
+    assert row["replan_success"] == 1
+    assert row["package_recovered_after_replan"] == 1
+    assert row["final_package_status"] == "clean"
+
+
+def test_event_row_does_not_count_blocked_replan_as_recovered() -> None:
+    payload = _receipt_payload(
+        package_name="com.example.blocked",
+        session_label="RUN2",
+        stale_replan={
+            "required": True,
+            "outcome": "path_stale_blocked_before_pull",
+            "details": {
+                "refreshed_skip_reason": "policy_non_root",
+                "refreshed_primary_path": "/system/app/Blocked/base.apk",
+                "refreshed_apk_paths": ["/system/app/Blocked/base.apk"],
+                "refreshed_split_count": 1,
+            },
+        },
+        capture_status="clean",
+    )
+
+    row = report._event_row(
+        payload=payload,
+        source_kind="receipt",
+        source_path=Path("/repo/data/receipts/harvest/RUN2/com.example.blocked.json"),
+        inventory_index={},
+    )
+
+    assert row is not None
+    assert row["replan_success"] == 1
+    assert row["package_recovered_after_replan"] == 0
 
 
 def test_recommendation_prefers_more_evidence_for_low_event_volume() -> None:
@@ -303,3 +367,65 @@ def test_main_generates_expected_output_files_and_counts(tmp_path: Path, monkeyp
         (out_dir / "recommended_next_action.json").read_text(encoding="utf-8")
     )
     assert recommendation["recommended_action"] == "collect_more_live_harvest_evidence"
+
+
+def test_main_can_scope_to_one_receipt_root(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    data_root = repo_root / "data"
+    receipts_root = data_root / "receipts" / "harvest"
+    session_a = receipts_root / "RUN-A"
+    session_b = receipts_root / "RUN-B"
+    default_manifest_dir = data_root / "device_apks" / "SER123" / "runs" / "RUN-C" / "com.example.manifest"
+    session_a.mkdir(parents=True)
+    session_b.mkdir(parents=True)
+    default_manifest_dir.mkdir(parents=True)
+
+    stale_payload = _receipt_payload(
+        package_name="com.example.one",
+        session_label="RUN-A",
+        stale_replan={
+            "required": True,
+            "outcome": "path_stale_refreshed_and_retried",
+            "details": {
+                "refreshed_primary_path": "/data/app/base.apk",
+                "refreshed_apk_paths": ["/data/app/base.apk"],
+                "refreshed_split_count": 1,
+            },
+        },
+    )
+    other_payload = _receipt_payload(
+        package_name="com.example.two",
+        session_label="RUN-B",
+        errors=[{"source_path": "/data/app/base.apk", "reason": "path_stale"}],
+    )
+    manifest_payload = _receipt_payload(
+        package_name="com.example.manifest",
+        session_label="RUN-C",
+        errors=[{"source_path": "/data/app/base.apk", "reason": "path_stale"}],
+    )
+    (session_a / "com.example.one.json").write_text(json.dumps(stale_payload), encoding="utf-8")
+    (session_b / "com.example.two.json").write_text(json.dumps(other_payload), encoding="utf-8")
+    (default_manifest_dir / "harvest_package_manifest.json").write_text(
+        json.dumps(manifest_payload),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(report, "_REPO_ROOT", repo_root)
+    out_dir = repo_root / "output" / "audit" / "harvest_path_stale" / "scoped"
+    rc = report.main(
+        [
+            "--receipt-root",
+            str(session_a),
+            "--output-dir",
+            str(out_dir),
+        ]
+    )
+
+    assert rc == 0
+    summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["scan_scope"] == "scoped"
+    assert summary["receipt_roots"] == ["data/receipts/harvest/RUN-A"]
+    assert summary["package_record_count"] == 1
+    assert summary["path_stale_event_count"] == 1
+    event_rows = list(csv.DictReader((out_dir / "path_stale_events.csv").open(encoding="utf-8")))
+    assert [row["package_name"] for row in event_rows] == ["com.example.one"]

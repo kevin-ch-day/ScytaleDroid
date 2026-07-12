@@ -106,7 +106,7 @@ def execute_package_plan(
     if library_hit is not None:
         package_stats = library_hit
     else:
-        package_stats = _run_artifact_loop(
+        package_stats, package_dir = _run_artifact_loop(
             request=request,
             deps=deps,
             result=result,
@@ -334,7 +334,7 @@ def _run_artifact_loop(
     app_id: int | None,
     group_id: int | None,
     package_name: str,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], Path]:
     active_plan = request.plan
     stale_replan_attempted = False
     artifact_total = len(active_plan.artifacts)
@@ -384,6 +384,10 @@ def _run_artifact_loop(
             )
             if handled == "continue":
                 active_plan = next_plan or active_plan
+                if next_plan is not None and not result.ok:
+                    package_dir = package_evidence_dir(request.dest_root, next_plan.inventory)
+                    package_dir.mkdir(parents=True, exist_ok=True)
+                    result.package_manifest_path = package_contract.package_manifest_path(package_dir)
                 artifact_total = next_total
                 artifact_index = next_index
                 continue
@@ -411,7 +415,7 @@ def _run_artifact_loop(
             package_stats["errors"] += 1
             request.stats["artifacts_failed"] += 1
         artifact_index += 1
-    return package_stats
+    return package_stats, package_dir
 
 
 def _handle_stale_replan(
@@ -472,10 +476,12 @@ def _handle_stale_replan(
             artifact_total,
             result.stale_replan_outcome,
         )
-        recoverable_inventory_drift = (
-            not refreshed_plan.skip_reason
-            and "version_code_changed" not in drift_reasons
-            and package_refresh.written_artifacts_fit_plan(refreshed_plan, result.ok)
+        recoverable_inventory_drift = not refreshed_plan.skip_reason and (
+            not result.ok
+            or (
+                "version_code_changed" not in drift_reasons
+                and package_refresh.written_artifacts_fit_plan(refreshed_plan, result.ok)
+            )
         )
         if recoverable_inventory_drift:
             result.stale_replan_details["recovered_inventory_drift"] = True

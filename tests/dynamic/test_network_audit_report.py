@@ -20,9 +20,10 @@ def test_network_audit_report_smoke(tmp_path, monkeypatch):
     )
 
     # app_config is loaded at import time, so patch it directly for isolation.
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"), raising=False)
     monkeypatch.setattr(app_config, "OUTPUT_DIR", str(tmp_path / "output"), raising=False)
 
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic" / "run123"
+    root = Path(app_config.DATA_DIR) / "evidence" / "dynamic" / "run123"
     _write_json(
         root / "run_manifest.json",
         {

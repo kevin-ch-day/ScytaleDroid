@@ -229,6 +229,81 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert guardian_amazon_media["service_key"] == "amazon_ads"
     assert guardian_amazon_media["role_class"] == "ad_creative_delivery"
 
+    guardian_triplelift = service_context.resolve_service_for_domain(
+        "eb2.3lift.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_triplelift["service_key"] == "triplelift"
+    assert guardian_triplelift["service_category"] == "adtech"
+    assert guardian_triplelift["role_class"] == "programmatic_advertising"
+
+    consent = service_context.resolve_service_for_domain(
+        "cdn.cookielaw.onetrust.com",
+        package_name="com.example.app",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert consent["service_key"] == "onetrust_cmp"
+    assert consent["service_category"] == "consent_and_privacy"
+    assert consent["role_class"] == "consent_management"
+
+    stripe = service_context.resolve_service_for_domain(
+        "api.stripe.com",
+        package_name="com.example.app",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert stripe["service_key"] == "stripe_payments"
+    assert stripe["service_category"] == "payments"
+    assert stripe["role_class"] == "payment_processing"
+
+    paypal = service_context.resolve_service_for_domain(
+        "www.paypal.com",
+        package_name="com.venmo",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert paypal["service_key"] == "paypal_payments"
+    assert paypal["service_category"] == "payments"
+
+    scene7 = service_context.resolve_service_for_domain(
+        "assets.scene7.com",
+        package_name="com.target.ui",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert scene7["service_key"] == "adobe_dynamic_media"
+    assert scene7["role_class"] == "rich_media_delivery"
+
+    typekit = service_context.resolve_service_for_domain(
+        "use.typekit.net",
+        package_name="com.adobe.reader",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert typekit["service_key"] == "adobe_fonts"
+    assert typekit["role_class"] == "web_font_delivery"
+
+    guardian_adtheorent = service_context.resolve_service_for_domain(
+        "rtb.adentifi.com",
+        package_name="com.guardian",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert guardian_adtheorent["service_key"] == "adtheorent"
+    assert guardian_adtheorent["role_class"] == "real_time_bidding"
+
+    pinterest_moloco = service_context.resolve_service_for_domain(
+        "cdn-f.adsmoloco.com",
+        package_name="com.pinterest",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert pinterest_moloco["service_key"] == "moloco_ads"
+    assert pinterest_moloco["role_class"] == "ad_creative_delivery"
+
     unknown = service_context.resolve_service_for_domain(
         "unknown.example.org",
         package_name="bbc.mobile.news.ww",
@@ -455,6 +530,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert x_analytics["service_key"] == "x_platform"
     assert x_analytics["role_class"] == "analytics_measurement"
+
+    x_root = service_context.resolve_service_for_domain(
+        "twitter.com",
+        package_name="com.twitter.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert x_root["service_key"] == "x_platform"
+    assert x_root["role_class"] == "social_graph_api"
 
     x_chat = service_context.resolve_service_for_domain(
         "chat-ws.x.com",
@@ -736,6 +820,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert reddit_recaptcha["service_key"] == "google_recaptcha"
 
+    reddit_community = service_context.resolve_service_for_domain(
+        "redditforcommunity.com",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert reddit_community["service_key"] == "reddit_platform"
+    assert reddit_community["role_class"] == "community_moderator_resources"
+
     linkedin_microsoft_fpt = service_context.resolve_service_for_domain(
         "fpt.dfp.microsoft.com",
         package_name="com.linkedin.android",
@@ -763,6 +856,15 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert tiktok_cdn["service_key"] == "tiktok_platform"
     assert tiktok_cdn["role_class"] == "content_delivery"
 
+    tiktok_root = service_context.resolve_service_for_domain(
+        "tiktok.com",
+        package_name="com.zhiliaoapp.musically",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert tiktok_root["service_key"] == "tiktok_platform"
+    assert tiktok_root["role_class"] == "social_video_platform"
+
     giphy_media = service_context.resolve_service_for_domain(
         "media4.giphy.com",
         package_name="com.facebook.katana",
@@ -772,6 +874,24 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert giphy_media["service_key"] == "giphy_media"
     assert giphy_media["owner_class"] == "third_party"
     assert giphy_media["role_class"] == "content_delivery"
+
+    facebook_shortlink = service_context.resolve_service_for_domain(
+        "fb.com",
+        package_name="com.facebook.katana",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert facebook_shortlink["service_key"] == "facebook_platform"
+    assert facebook_shortlink["role_class"] == "platform_shortlink_or_deep_link"
+
+    instagram_meta = service_context.resolve_service_for_domain(
+        "meta.com",
+        package_name="com.instagram.android",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert instagram_meta["service_key"] == "facebook_platform"
+    assert instagram_meta["role_class"] == "platform_corporate_or_account_surface"
 
     tiktok_api = service_context.resolve_service_for_domain(
         "api16-normal-useast5.tiktokv.us",

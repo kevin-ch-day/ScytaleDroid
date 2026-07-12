@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
-
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import _compute_dars_v1
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import _build_topk_and_zscores
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
+    _build_topk_and_zscores,
+    _compute_dars_v1,
+)
 
 
 def test_compute_dars_v1_basic() -> None:

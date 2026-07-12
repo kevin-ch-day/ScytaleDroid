@@ -28,6 +28,7 @@ from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
 )
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, iter_dynamic_run_dirs
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -165,7 +166,7 @@ def build_static_handoff_plan_summary() -> dict[str, Any]:
 def build_repeatability_summary() -> dict[str, Any]:
     """Summarize evidence-pack repeatability/readiness using on-disk contracts only."""
 
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
+    root = dynamic_evidence_root()
     archive_dir = resolve_dataset_freeze_read_path().parent
     publication_manifests = Path(app_config.OUTPUT_DIR) / "publication" / "manifests"
     canonical_freeze = inspect_canonical_freeze(archive_dir=archive_dir, evidence_root=root)
@@ -190,13 +191,14 @@ def build_repeatability_summary() -> dict[str, Any]:
         "publication_manifest_files": int(len(list(publication_manifests.glob("*.json"))) if publication_manifests.exists() else 0),
         "freeze_role": str(canonical_freeze.get("freeze_role") or "none"),
     }
-    if not root.exists():
+    run_dirs = iter_dynamic_run_dirs()
+    if not run_dirs:
         return summary
 
     issue_counts: dict[str, int] = {}
     blocker_samples: dict[str, list[str]] = {}
 
-    for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+    for run_dir in run_dirs:
         summary["runs_total"] = int(summary["runs_total"]) + 1
         manifest = _read_json(run_dir / "run_manifest.json")
         if not isinstance(manifest, dict):
@@ -386,18 +388,18 @@ def _identity_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
 
 
 def _baseline_signal_summary() -> dict[str, Any]:
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     out: dict[str, Any] = {
         "baseline_idle_failures_by_category": {},
         "baseline_connected_successes": 0,
         "baseline_connected_successes_by_category": {},
     }
-    if not root.exists():
+    run_dirs = iter_dynamic_run_dirs()
+    if not run_dirs:
         return out
     fail_by_cat: dict[str, int] = {}
     connected_ok_by_cat: dict[str, int] = {}
     connected_ok_total = 0
-    for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+    for run_dir in run_dirs:
         manifest = _read_json(run_dir / "run_manifest.json")
         if not isinstance(manifest, dict):
             continue
@@ -426,12 +428,12 @@ def _tracker_vs_evidence_per_app() -> list[dict[str, Any]]:
     tracker = load_dataset_tracker()
     tracker_apps = tracker.get("apps") if isinstance(tracker.get("apps"), dict) else {}
     dataset_pkgs = {str(pkg).strip().lower() for pkg in active_research_cohort_packages() if str(pkg).strip()}
-    root = Path(app_config.OUTPUT_DIR) / "evidence" / "dynamic"
     per_pkg: dict[str, dict[str, int]] = {}
     for pkg in dataset_pkgs:
         per_pkg[pkg] = {"base_eligible": 0, "inter_eligible": 0, "excluded": 0}
-    if root.exists():
-        for run_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+    run_dirs = iter_dynamic_run_dirs()
+    if run_dirs:
+        for run_dir in run_dirs:
             manifest = _read_json(run_dir / "run_manifest.json")
             if not isinstance(manifest, dict):
                 continue

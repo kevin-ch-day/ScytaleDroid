@@ -17,12 +17,11 @@ from __future__ import annotations
 import csv
 import json
 import math
+import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-
-import os
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -32,8 +31,8 @@ from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2  # n
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (  # noqa: E402
     resolve_dataset_freeze_read_path,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root  # noqa: E402
 
-EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
 OUT_DIR = REPO_ROOT / "output" / "publication" / "qa"
 OUT_JSON = OUT_DIR / "ml_audit_report_v1.json"
 OUT_CSV = OUT_DIR / "ml_audit_report_v1.csv"
@@ -41,6 +40,10 @@ OUT_CSV = OUT_DIR / "ml_audit_report_v1.csv"
 
 def _freeze_path() -> Path:
     return resolve_dataset_freeze_read_path()
+
+
+def _evidence_root() -> Path:
+    return dynamic_evidence_root()
 
 
 def _print_help() -> None:
@@ -54,7 +57,7 @@ def _print_help() -> None:
 
 def _write_legacy_aliases() -> bool:
     # Opt-in only: reduces bundle clutter for OSS users.
-    return str((os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "")).strip().lower() in {
+    return str(os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -151,7 +154,11 @@ class RunAuditRow:
 def main() -> int:
     freeze_path = _freeze_path()
     if not freeze_path.exists():
-        raise SystemExit(f"Missing freeze anchor: {freeze_path}")
+        raise SystemExit(
+            "Missing freeze anchor: "
+            f"{freeze_path}. Generate or restore the Paper 2 dataset freeze before running the ML audit. "
+            f"Current dynamic evidence root: {_evidence_root()}"
+        )
     freeze = _rjson(freeze_path) or {}
     included = [str(x) for x in (freeze.get("included_run_ids") or [])]
     if not included:
@@ -171,9 +178,10 @@ def main() -> int:
     rows: list[RunAuditRow] = []
     errors: list[str] = []
     warnings: list[str] = []
+    evidence_root = _evidence_root()
 
     for rid in included:
-        run_dir = EVIDENCE_ROOT / rid
+        run_dir = evidence_root / rid
         man = _rjson(run_dir / "run_manifest.json")
         if not isinstance(man, dict):
             errors.append(f"MISSING_RUN_MANIFEST:{rid}")

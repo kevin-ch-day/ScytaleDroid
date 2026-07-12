@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from scytaledroid.DeviceAnalysis.harvest import package_execution
 from tests.device_analysis._harvest_runner_support import (
     isolate_storage_contract,
     make_artifact_plan,
@@ -60,7 +61,7 @@ def test_execute_harvest_replans_stale_package_and_recovers_cleanly(
         total_paths=1,
     )
     monkeypatch.setattr(
-        runner.package_refresh,
+        package_execution.package_refresh,
         "replan_package_after_stale_path",
         lambda **_kwargs: (plan, tuple()),
     )
@@ -91,6 +92,114 @@ def test_execute_harvest_replans_stale_package_and_recovers_cleanly(
     assert '"stale_replan": {' in payload
     assert '"required": true' in payload
     assert '"outcome": "path_stale_refreshed_and_retried"' in payload
+
+
+def test_execute_harvest_recovers_cleanly_when_version_changes_before_any_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scytaledroid.Database.db_utils import diagnostics
+    from scytaledroid.DeviceAnalysis.harvest import runner
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError
+
+    patch_runner_common(monkeypatch, runner=runner, diagnostics=diagnostics, tmp_path=tmp_path)
+    calls: list[str] = []
+
+    def _fake_pull(**kwargs):
+        source_path = kwargs["source_path"]
+        dest_path = kwargs["dest_path"]
+        calls.append(source_path)
+        if source_path.endswith("/old/base.apk"):
+            return ArtifactError(source_path=source_path, reason="path_stale")
+        dest_path.write_bytes(source_path.encode("utf-8"))
+        return True
+
+    monkeypatch.setattr(runner, "adb_pull", _fake_pull)
+
+    original_plan = make_package_plan(
+        inventory=make_inventory_row(
+            package_name="com.example.updated",
+            app_label="Updated App",
+            version_name="1.0",
+            version_code="100",
+            primary_path="/data/app/com.example.updated/old/base.apk",
+            apk_paths=["/data/app/com.example.updated/old/base.apk"],
+        ),
+        artifacts=[
+            make_artifact_plan(
+                source_path="/data/app/com.example.updated/old/base.apk",
+                artifact="base",
+                file_name="com_example_updated_100__base.apk",
+            )
+        ],
+        total_paths=1,
+    )
+    refreshed_plan = make_package_plan(
+        inventory=make_inventory_row(
+            package_name="com.example.updated",
+            app_label="Updated App",
+            version_name="1.1",
+            version_code="101",
+            primary_path="/data/app/com.example.updated/new/base.apk",
+            apk_paths=[
+                "/data/app/com.example.updated/new/base.apk",
+                "/data/app/com.example.updated/new/split_config.en.apk",
+            ],
+            split_count=2,
+        ),
+        artifacts=[
+            make_artifact_plan(
+                source_path="/data/app/com.example.updated/new/base.apk",
+                artifact="base",
+                file_name="com_example_updated_101__base.apk",
+            ),
+            make_artifact_plan(
+                source_path="/data/app/com.example.updated/new/split_config.en.apk",
+                artifact="split_config.en",
+                file_name="com_example_updated_101__split_config.en.apk",
+                is_split_member=True,
+            ),
+        ],
+        total_paths=2,
+    )
+    monkeypatch.setattr(
+        package_execution.package_refresh,
+        "replan_package_after_stale_path",
+        lambda **_kwargs: (refreshed_plan, ("artifact_set_changed", "version_code_changed")),
+    )
+
+    results = runner.execute_harvest(
+        serial="SERIAL123",
+        adb_path="adb",
+        dest_root=tmp_path / "SERIAL123" / "20260328",
+        session_stamp="20260328",
+        plans=[original_plan],
+        config=object(),
+        pull_mode="inventory",
+    )
+
+    result = results[0]
+    assert calls == [
+        "/data/app/com.example.updated/old/base.apk",
+        "/data/app/com.example.updated/new/base.apk",
+        "/data/app/com.example.updated/new/split_config.en.apk",
+    ]
+    assert result.capture_status == "clean"
+    assert result.research_status == "pending_audit"
+    assert result.drift_reasons == []
+    assert result.errors == []
+    assert result.stale_replan_outcome == "path_stale_package_updated_since_inventory"
+    assert result.stale_replan_details["recovered_inventory_drift"] is True
+    assert result.stale_replan_details["blocking_inventory_drift"] is False
+    assert result.plan.inventory.version_code == "101"
+    assert len(result.ok) == 2
+    assert "Updated-App_v101_1.1" in result.package_manifest_path.as_posix()
+    assert result.package_manifest_path.exists()
+    payload = result.package_manifest_path.read_text(encoding="utf-8")
+    assert '"capture_status": "clean"' in payload
+    assert '"version_code": "101"' in payload
+    assert '"package_dir": ' in payload
+    assert 'Updated-App_v101_1.1' in payload
 
 
 def test_pull_and_record_marks_stale_path_as_retryable_warning(
@@ -251,7 +360,7 @@ def test_execute_harvest_marks_package_drifted_after_partial_pull_replan(
         total_paths=2,
     )
     monkeypatch.setattr(
-        runner.package_refresh,
+        package_execution.package_refresh,
         "replan_package_after_stale_path",
         lambda **_kwargs: (drifted_plan, ("version_code_changed", "artifact_set_changed")),
     )
@@ -333,7 +442,7 @@ def test_execute_harvest_surfaces_refreshed_skip_reason_after_stale_path_replan(
         skip_reason="policy_non_root",
     )
     monkeypatch.setattr(
-        runner.package_refresh,
+        package_execution.package_refresh,
         "replan_package_after_stale_path",
         lambda **_kwargs: (refreshed_plan, ("refreshed_skip:policy_non_root",)),
     )
@@ -419,7 +528,7 @@ def test_execute_harvest_classifies_path_set_change_without_version_drift(
         total_paths=1,
     )
     monkeypatch.setattr(
-        runner.package_refresh,
+        package_execution.package_refresh,
         "replan_package_after_stale_path",
         lambda **_kwargs: (refreshed_plan, ("artifact_set_changed",)),
     )
@@ -521,7 +630,7 @@ def test_execute_harvest_recovers_cleanly_when_split_membership_changes_after_ba
         total_paths=2,
     )
     monkeypatch.setattr(
-        runner.package_refresh,
+        package_execution.package_refresh,
         "replan_package_after_stale_path",
         lambda **_kwargs: (refreshed_plan, ("artifact_set_changed",)),
     )
@@ -561,7 +670,7 @@ def test_execute_harvest_marks_stale_replan_failure_explicitly(
         lambda **kwargs: ArtifactError(source_path=kwargs["source_path"], reason="path_stale"),
     )
     monkeypatch.setattr(
-        runner.package_refresh,
+        package_execution.package_refresh,
         "replan_package_after_stale_path",
         lambda **_kwargs: (None, ("package_refresh_failed",)),
     )
@@ -681,7 +790,7 @@ def test_execute_harvest_replans_split_package_without_retrying_written_base(
         total_paths=2,
     )
     monkeypatch.setattr(
-        runner.package_refresh,
+        package_execution.package_refresh,
         "replan_package_after_stale_path",
         lambda **_kwargs: (refreshed_plan, tuple()),
     )

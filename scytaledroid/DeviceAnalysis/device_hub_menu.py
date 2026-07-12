@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from scytaledroid.DeviceAnalysis.device_menu.formatters import format_timestamp_utc
 from scytaledroid.DeviceAnalysis.services import device_service
+from scytaledroid.DeviceAnalysis.services.models import InventoryStatus
 from scytaledroid.Utils.DisplayUtils import (
     colors,
     display_settings,

@@ -45,6 +45,7 @@ _LAZY_EXPORTS = {
     "STALE_REPLAN_FAILURE_OUTCOMES": (".stale_replan", "STALE_REPLAN_FAILURE_OUTCOMES"),
     "classify_stale_replan_outcome": (".stale_replan", "classify_stale_replan_outcome"),
     "build_stale_replan_details": (".stale_replan", "build_stale_replan_details"),
+    "is_recovered_stale_replan_result": (".stale_replan", "is_recovered_stale_replan_result"),
 }
 
 
@@ -90,4 +91,5 @@ __all__ = [
     "STALE_REPLAN_FAILURE_OUTCOMES",
     "classify_stale_replan_outcome",
     "build_stale_replan_details",
+    "is_recovered_stale_replan_result",
 ]
