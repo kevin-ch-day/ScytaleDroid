@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards, table_utils
@@ -353,7 +355,45 @@ def handle_generate_static_exposure_privacy_report() -> None:
         return
     result = generate_static_exposure_privacy_report(request)
     print(status_messages.status(f"Wrote report: {result['output_dir']}", level="success"))
+    _print_paper1_foundation_summary(result)
     prompt_utils.press_enter_to_continue()
+
+
+def _print_paper1_foundation_summary(result: dict[str, object]) -> None:
+    output_dir = Path(str(result.get("output_dir") or ""))
+    reproduction_map = output_dir / "report" / "paper1_reproduction_map.csv"
+    score_status = output_dir / "tables" / "paper1_score_status.csv"
+    rows = _read_csv_rows(reproduction_map)
+    exact = sum(1 for row in rows if str(row.get("status") or "").startswith("reproducible"))
+    partial = sum(1 for row in rows if str(row.get("status") or "") == "partial")
+    blocked = sum(1 for row in rows if str(row.get("status") or "").startswith("blocked"))
+    blocked_metrics = _read_csv_rows(score_status)
+    blocked_labels = [
+        str(row.get("paper1_output") or "").strip()
+        for row in blocked_metrics
+        if str(row.get("current_status") or "").startswith("blocked")
+    ]
+    print(
+        summary_cards.format_summary_card(
+            "Paper #1 Foundation Compatibility",
+            [
+                summary_cards.summary_item("Exact/reproducible items", exact, value_style="success"),
+                summary_cards.summary_item("Partial items", partial, value_style="warning"),
+                summary_cards.summary_item("Blocked historical metrics", blocked, value_style="error" if blocked else "muted"),
+                summary_cards.summary_item("Blocked metric detail", "; ".join(blocked_labels) or "none", value_style="muted"),
+                summary_cards.summary_item("Reproduction map", str(reproduction_map), value_style="info"),
+            ],
+            footer="Compatibility outputs support Paper #1-style auditing only; they do not rewrite the published Paper #1 manuscript.",
+        )
+    )
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    try:
+        with path.open(newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+    except Exception:
+        return []
 
 
 __all__ = [

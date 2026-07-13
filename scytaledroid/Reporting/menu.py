@@ -49,6 +49,9 @@ def reporting_menu() -> None:
                     summary_cards.summary_item("Scope", "dataset, category, single app, or eligible apps", value_style="accent"),
                     summary_cards.summary_item("Evidence", "current analysis window or app history", value_style="accent"),
                     summary_cards.summary_item("Output", "report bundle with tables, figures, and source data", value_style="info"),
+                    summary_cards.summary_item("Paper #1", "published static predecessor", value_style="muted"),
+                    summary_cards.summary_item("Paper #2", "published runtime predecessor", value_style="muted"),
+                    summary_cards.summary_item("Integrated analysis", "current Paper #3 study", value_style="accent"),
                 ],
                 footer="Advanced archive and reproduction tools remain available under Legacy Archive Tools.",
             )
@@ -57,17 +60,17 @@ def reporting_menu() -> None:
             MenuOption(
                 "1",
                 "Static Exposure & Privacy Assessment",
-                "Manifest, permissions, components, network/storage, MASVS",
+                "Current build-backed static analysis; Paper #1 compatibility audit; Paper #3 foundation evidence",
             ),
             MenuOption(
                 "2",
                 "Runtime Network Behavior Analysis",
-                "Idle, QFG, interactive, PCAP, windowed features, RDI",
+                "Current locked runtime analysis; Paper #2 method-regeneration package; Paper #3 foundation evidence",
             ),
             MenuOption(
                 "3",
                 "Integrated Static-Runtime Privacy & Security Analysis",
-                "Build-aligned static and runtime evidence",
+                "Integrated Paper #3 study",
                 disabled=True,
                 badge="COMING NEXT",
             ),
@@ -77,7 +80,7 @@ def reporting_menu() -> None:
             MenuOption("7", "Experimental analyses"),
             MenuOption("8", "Legacy archive tools"),
         ]
-        menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=False, compact=True)
+        menu_utils.print_menu(options, show_exit=True, exit_label="Back", show_descriptions=True, compact=False)
         top_choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if top_choice == "0":
             break
@@ -170,6 +173,7 @@ def _legacy_archive_tools_menu() -> None:
                 [
                     summary_cards.summary_item("Purpose", "preserve earlier archive/export workflows", value_style="warning"),
                     summary_cards.summary_item("New reports", "use study, scope, and evidence-window selections", value_style="accent"),
+                    summary_cards.summary_item("Published Paper #2", "historical snapshots and artifacts stay here", value_style="muted"),
                 ],
                 footer="Legacy archive profiles preserve earlier archive workflows. New reports use the study-oriented reporting path.",
             )
@@ -194,7 +198,7 @@ def _reporting_menu_v2_frozen() -> None:
     }
     options = [
         MenuOption("1", "Refresh frozen archive artifacts"),
-        MenuOption("2", "Generate Paper 2 v2 results package"),
+        MenuOption("2", "Generate legacy frozen runtime results package"),
         MenuOption("3", "Archived scientific QA (retired)", disabled=True),
         MenuOption("4", "Archived pipeline audit (retired)", disabled=True),
         MenuOption("5", "Write frozen-cohort archive bundle (retired)", disabled=True),

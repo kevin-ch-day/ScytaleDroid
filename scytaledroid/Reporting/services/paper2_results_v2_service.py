@@ -1,8 +1,9 @@
-"""Paper 2 v2 runtime ML results package writer.
+"""Paper 2 method-regeneration runtime ML results package writer.
 
-This writer is the current Paper 2 runtime-ML publication path.  The v2 package
-is built from the locked dataset freeze and per-window ML score files so
-statistical results are not derived from rounded publication tables.
+This writer builds the current-data regeneration package for the published
+Paper #2 runtime-ML method.  The package is built from the locked dataset
+freeze and per-window ML score files so statistical results are not derived
+from rounded publication tables.
 """
 
 from __future__ import annotations

@@ -20,6 +20,8 @@ from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
 )
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards
 
+PAPER2_FOUNDATION_LABEL = "Current-data regeneration of the published Paper #2 analysis method"
+
 
 def handle_runtime_network_behavior_analysis() -> None:
     """Report-only runtime network behavior launcher.
@@ -37,6 +39,7 @@ def handle_runtime_network_behavior_analysis() -> None:
                 "Report Generation",
                 [
                     summary_cards.summary_item("Evidence", str(status.get("locked_dataset") or "unknown"), value_style="accent"),
+                    summary_cards.summary_item("Package", PAPER2_FOUNDATION_LABEL, value_style="info"),
                     summary_cards.summary_item("QA", str(status.get("qa") or "unknown"), value_style="accent"),
                     summary_cards.summary_item("Bundle", str(status.get("bundle") or "unknown"), value_style="info"),
                     summary_cards.summary_item("Next", _recommended_runtime_next_step(status), value_style="hint"),
@@ -45,22 +48,25 @@ def handle_runtime_network_behavior_analysis() -> None:
             )
         )
         options = [
-            menu_utils.MenuOption("1", "Generate locked runtime report bundle"),
-            menu_utils.MenuOption("2", "Generate runtime behavior report"),
-            menu_utils.MenuOption("3", "Run report QA check"),
-            menu_utils.MenuOption("4", "Show output map"),
+            menu_utils.MenuOption("1", "Generate validated Paper #2 foundation package"),
+            menu_utils.MenuOption("2", "Generate locked runtime report bundle"),
+            menu_utils.MenuOption("3", "Generate runtime behavior report"),
+            menu_utils.MenuOption("4", "Run report QA check"),
+            menu_utils.MenuOption("5", "Show output map"),
         ]
         menu_utils.print_menu(options, show_exit=True, exit_label="Back", compact=True)
         choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if choice == "0":
             return
         if choice == "1":
-            _generate_locked_runtime_bundle()
+            _generate_paper2_foundation_package()
         elif choice == "2":
-            _generate_runtime_behavior_report()
+            _generate_locked_runtime_bundle()
         elif choice == "3":
-            _run_report_qa_check()
+            _generate_runtime_behavior_report()
         elif choice == "4":
+            _run_report_qa_check()
+        elif choice == "5":
             _show_runtime_output_map()
 
 
@@ -89,9 +95,9 @@ def _recommended_runtime_next_step(status: dict[str, object]) -> str:
     if lockfile_state != "ready" or not bool(status.get("ml_tables_ready")):
         return "Use Machine Learning to score the locked dataset"
     if qa.startswith(("missing", "stale", "blocked")):
-        return "3) Run report QA check"
+        return "4) Run report QA check"
     if bundle.startswith(("missing", "stale")):
-        return "1) Generate locked runtime report bundle"
+        return "2) Generate locked runtime report bundle"
     return "Ready for writing"
 
 
@@ -100,9 +106,54 @@ def _runtime_outputs_ready_for_bundle() -> tuple[bool, str]:
     next_step = _recommended_runtime_next_step(status)
     if next_step.startswith("Use Machine Learning"):
         return False, next_step
-    if next_step.startswith("3)"):
+    if next_step.startswith("4)"):
         return False, "Run report QA check first"
     return True, ""
+
+
+def _generate_paper2_foundation_package(*, writer=None) -> None:
+    print()
+    menu_utils.print_section("Validated Paper #2 Foundation Package")
+    menu_utils.print_metrics(
+        [
+            ("Label", PAPER2_FOUNDATION_LABEL),
+            ("Input", default_freeze_manifest_path()),
+            ("Output", Path(app_config.OUTPUT_DIR) / "_internal" / "publication" / "paper2_v2"),
+            ("Includes", "locked cohort; pooled/equal-run/standard-only results; QA; manifests"),
+            ("Validation", "held-out baseline; feature ablation; bytes/sec control; seed stability; temporal-order"),
+            ("Boundary", "method regeneration from current data; published outputs stay unchanged"),
+        ]
+    )
+    if not prompt_utils.prompt_yes_no("Generate validated Paper #2 foundation package now?", default=True):
+        print(status_messages.status("Paper #2 foundation package generation canceled.", level="info"))
+        return
+    try:
+        if writer is None:
+            from scytaledroid.Reporting.services.paper2_results_v2_service import generate_paper2_results_v2
+
+            writer = generate_paper2_results_v2
+        result = writer()
+    except Exception as exc:  # noqa: BLE001
+        print(status_messages.status(f"Paper #2 foundation package generation failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
+        return
+
+    print(status_messages.status("Wrote current-data method-regeneration package.", level="success"))
+    print(
+        summary_cards.format_summary_card(
+            "Paper #2 Foundation Outputs",
+            [
+                summary_cards.summary_item("Output root", str(result.get("output_root") or "unknown"), value_style="accent"),
+                summary_cards.summary_item("Locked cohort", f"{result.get('apps', 'unknown')} apps · {result.get('runs', 'unknown')} runs", value_style="accent"),
+                summary_cards.summary_item("Statistics", str(result.get("publication_results_v2") or "missing"), value_style="info"),
+                summary_cards.summary_item("QA", f"{result.get('qa_status', 'unknown')} · warnings {result.get('warnings', 'unknown')}", value_style="warning"),
+                summary_cards.summary_item("QA path", str(result.get("paper2_qa_v2") or "missing"), value_style="info"),
+                summary_cards.summary_item("Manifest", str(result.get("hash_manifest") or "missing"), value_style="info"),
+            ],
+            footer="Use this as a current-data regeneration of the published Paper #2 analysis method; the published manuscript and original 12-app result snapshot are not rewritten.",
+        )
+    )
+    prompt_utils.press_enter_to_continue()
 
 
 def _generate_locked_runtime_bundle() -> None:

@@ -6,23 +6,28 @@ from scytaledroid.Reporting import static_exposure_menu
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, selectable_keys
 
 
-def test_reporting_menu_source_uses_study_categories_without_paper_labels() -> None:
+def test_reporting_menu_source_explains_study_lineage_without_replacement_claims() -> None:
     source = menu.reporting_menu.__code__.co_consts
     text = "\n".join(str(item) for item in source)
     assert "Static Exposure & Privacy Assessment" in text
     assert "Runtime Network Behavior Analysis" in text
-    assert "windowed features" in text
+    assert "Paper #1 compatibility audit" in text
+    assert "Paper #2 method-regeneration package" in text
+    assert "Integrated analysis" in text
     assert "Integrated Static-Runtime Privacy & Security Analysis" in text
     assert "General cohort and app analysis" in text
     assert "Legacy archive tools" in text
     assert "current analysis window or app history" in text
+    assert "published static predecessor" in text
+    assert "published runtime predecessor" in text
+    assert "current Paper #3 study" in text
     assert "publication candidate" not in text
     assert "Contract" not in text
     assert "freeze, session, manifest, or as-of basis" not in text
     assert "Publication study reports" not in text
-    assert "Paper 1" not in text
-    assert "Paper 2" not in text
-    assert "Paper 3" not in text
+    assert "replacement Paper #2" not in text
+    assert "revised published paper" not in text
+    assert "exact reproduction of the original 12-app results" not in text
     assert "time-series" not in text
 
 
@@ -64,7 +69,7 @@ def test_runtime_reporting_next_step_generates_bundle_after_qa_ready() -> None:
     }
 
     assert runtime_network_menu._recommended_runtime_next_step(status) == (
-        "1) Generate locked runtime report bundle"
+        "2) Generate locked runtime report bundle"
     )
 
 
@@ -122,6 +127,82 @@ def test_runtime_reporting_bundle_generation_waits_for_qa(monkeypatch) -> None:
     assert runtime_network_menu._runtime_outputs_ready_for_bundle() == (
         False,
         "Run report QA check first",
+    )
+
+
+def test_runtime_reporting_exposes_validated_paper2_foundation_package(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(runtime_network_menu.prompt_utils, "prompt_yes_no", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(runtime_network_menu.prompt_utils, "press_enter_to_continue", lambda: None)
+
+    def fake_writer():
+        calls.append("writer")
+        return {
+            "output_root": "output/_internal/publication/paper2_v2",
+            "apps": 15,
+            "runs": 112,
+            "publication_results_v2": "output/_internal/publication/paper2_v2/publication_results_v2.json",
+            "paper2_qa_v2": "output/_internal/publication/paper2_v2/paper2_qa_v2.json",
+            "hash_manifest": "output/_internal/publication/paper2_v2/manifest/paper2_results_v2_manifest.json",
+            "qa_status": "OK",
+            "warnings": 0,
+        }
+
+    runtime_network_menu._generate_paper2_foundation_package(writer=fake_writer)
+    out = capsys.readouterr().out
+
+    assert calls == ["writer"]
+    menu_text = "\n".join(str(item) for item in runtime_network_menu.handle_runtime_network_behavior_analysis.__code__.co_consts)
+    assert "Generate validated Paper #2 foundation package" in menu_text
+    assert runtime_network_menu.PAPER2_FOUNDATION_LABEL in out
+    assert "held-out baseline" in out
+    assert "feature ablation" in out
+    assert "bytes/sec control" in out
+    assert "seed stability" in out
+    assert "temporal-order" in out
+    assert "replacement Paper #2" not in out
+    assert "revised published paper" not in out
+    assert "exact reproduction of the original 12-app results" not in out
+
+
+def test_static_completion_summary_exposes_paper1_foundation_outputs(tmp_path, capsys) -> None:
+    report_dir = tmp_path / "static_report"
+    (report_dir / "report").mkdir(parents=True)
+    (report_dir / "tables").mkdir(parents=True)
+    (report_dir / "report" / "paper1_reproduction_map.csv").write_text(
+        "paper1_item,status,current_artifact,gap\n"
+        "Table II,reproducible_with_current_schema,tables/paper1_permission_usage_matrix.csv,\n"
+        "Table I,partial,tables/paper1_manifest_component_parity.csv,intent filters archive-derived\n"
+        "Table V,blocked,tables/paper1_score_model_inputs.csv,score formula not verified\n",
+        encoding="utf-8",
+    )
+    (report_dir / "tables" / "paper1_score_status.csv").write_text(
+        "paper1_output,current_status,current_source,reason,safe_current_substitute\n"
+        "Table V Overall Static Risk Scores,blocked,tables/paper1_score_model_inputs.csv,not verified,input ledger\n",
+        encoding="utf-8",
+    )
+
+    static_exposure_menu._print_paper1_foundation_summary({"output_dir": str(report_dir)})
+    out = capsys.readouterr().out
+
+    assert "Paper #1 Foundation Compatibility" in out
+    assert "Exact/reproducible items" in out
+    assert "Partial items" in out
+    assert "Blocked historical metrics" in out
+    assert "paper1_reproduction_map.csv" in out
+    assert "rewrite the published Paper #1 manuscript" in out
+
+
+def test_legacy_archive_tools_keep_historical_published_artifact_boundary() -> None:
+    source = menu._legacy_archive_tools_menu.__code__.co_consts
+    text = "\n".join(str(item) for item in source)
+
+    assert "Published Paper #2" in text
+    assert "historical snapshots and artifacts stay here" in text
+    assert "Legacy archive profiles preserve earlier archive workflows" in text
+    assert "Generate legacy frozen runtime results package" in "\n".join(
+        str(item) for item in menu._reporting_menu_v2_frozen.__code__.co_consts
     )
 
 
