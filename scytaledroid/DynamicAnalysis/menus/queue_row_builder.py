@@ -8,6 +8,56 @@ from scytaledroid.DynamicAnalysis.controllers.selected_app_state import (
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
 
 
+def _latest_active_identity_summary(
+    *,
+    package: str,
+    runs: list[dict],
+    active_version_code: object,
+    active_base_sha: object,
+    recent_tracker_runs,
+    resolve_tracker_run_identity_fn,
+):
+    """Return the newest recent-run summary that belongs to the active build.
+
+    The tracker can contain very recent invalid rows from aborted captures whose
+    manifest identity could not be resolved. Those rows should still be retained
+    in history, but they must not override an otherwise complete current-build
+    row in the main app queue.
+    """
+    summaries = recent_tracker_runs(package, limit=max(len(runs), 1))
+    if not summaries:
+        return None
+
+    active_ident = (
+        str(active_version_code or "").strip() or None,
+        str(active_base_sha or "").strip().lower() or None,
+    )
+    if not (active_ident[0] or active_ident[1]):
+        return summaries[0]
+
+    by_run_id = {
+        str(row.get("run_id") or "").strip(): row
+        for row in runs
+        if isinstance(row, dict) and str(row.get("run_id") or "").strip()
+    }
+    for summary in summaries:
+        run_id = str(getattr(summary, "run_id", "") or "").strip()
+        raw = by_run_id.get(run_id)
+        if not isinstance(raw, dict):
+            continue
+        try:
+            ident = resolve_tracker_run_identity_fn(package, raw)
+        except Exception:
+            ident = (None, None)
+        normalized_ident = (
+            str(ident[0] or "").strip() or None,
+            str(ident[1] or "").strip().lower() or None,
+        )
+        if normalized_ident == active_ident:
+            return summary
+    return None
+
+
 def _call_progress_label(
     label_fn,
     count: int,
@@ -211,9 +261,16 @@ def build_package_selection_row(
         latest_valid: bool | None = None
         latest_invalid_reason: str | None = None
         latest_pcap_failure_detail: str | None = None
-        recent = recent_tracker_runs(package, limit=1)
-        if recent:
-            r = recent[0]
+        recent_summary = _latest_active_identity_summary(
+            package=package,
+            runs=runs if isinstance(runs, list) else [],
+            active_version_code=scoped.get("active_version_code"),
+            active_base_sha=scoped.get("active_base_sha"),
+            recent_tracker_runs=recent_tracker_runs,
+            resolve_tracker_run_identity_fn=resolve_tracker_run_identity_fn,
+        )
+        if recent_summary is not None:
+            r = recent_summary
             latest_valid = r.valid
             if r.valid is False:
                 latest_invalid_reason = str(getattr(r, "invalid_reason_code", "") or "").strip() or None

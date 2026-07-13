@@ -1930,3 +1930,286 @@ def test_build_package_selection_row_accepts_live_build_drift_for_refresh_action
     assert row.full_row[5] == "refresh"
     assert row.next_label == "refresh static"
     assert row.prep_label == "stale"
+
+
+def _build_active_qa_row(
+    *,
+    runs: list[dict[str, object]],
+    summaries: list[SimpleNamespace],
+    scoped: dict[str, object],
+):
+    return menu_selection.build_package_selection_row(
+        idx=14,
+        package="com.whatsapp",
+        app_label="WhatsApp",
+        collisions=set(),
+        dataset_pkgs={"com.whatsapp"},
+        tracker_apps={"com.whatsapp": {"runs": runs}},
+        cfg=_CfgFourInteractive(),
+        recent_tracker_runs=lambda _package, limit=1: summaries[:limit],
+        live_build_drift=None,
+        db_lineage_context={
+            "db_active_sessions": 0,
+            "db_historical_sessions": 0,
+            "db_total_sessions": 0,
+        },
+        truncate_visible_fn=lambda value, _limit: value,
+        bucket_progress_label_fn=lambda count, required, extra_count=0, low_signal=0, need=0: (
+            f"{count + extra_count + low_signal}/{required}" + (f" need {need}" if need else "")
+        ),
+        quota_progress_label_fn=lambda count, required, extra_count=0, low_signal=0: (
+            f"{count}/{required}"
+            + (f" +{extra_count + low_signal}" if (extra_count + low_signal) else "")
+        ),
+        static_build_label_fn=lambda active_runs, legacy_valid: (
+            "current" if active_runs or not legacy_valid else "legacy"
+        ),
+        next_action_from_need_fn=lambda need: need,
+        build_scoped_dataset_counts_fn=lambda _package, _runs, cfg: {
+            "baseline_countable": 3,
+            "baseline_extra": 0,
+            "baseline_not_idle_supplemental": 0,
+            "baseline_low_signal_supplemental": 0,
+            "interactive_countable": 4,
+            "interactive_extra": 0,
+            "interactive_low_signal_supplemental": 0,
+            "legacy_valid": 17,
+            "legacy_builds": 2,
+            "legacy_pcap_available": 17,
+            "active_version_code": "262607310",
+            "active_base_sha": "active-sha",
+            "technical_valid_active": 7,
+        }
+        | scoped,
+        resolve_tracker_run_identity_fn=lambda _package, run: (
+            str(run.get("version_code") or "") or None,
+            str(run.get("base_sha256") or "") or None,
+        ),
+    )
+
+
+def test_build_package_selection_row_uses_latest_active_identity_for_qa() -> None:
+    row = _build_active_qa_row(
+        runs=[
+            {
+                "run_id": "latest-parse-error",
+                "valid_dataset_run": False,
+                "run_profile": "interaction_manual",
+                "ended_at": "2026-07-13T17:50:10+00:00",
+            },
+            {
+                "run_id": "current-interactive",
+                "valid_dataset_run": True,
+                "countable": True,
+                "run_profile": "interaction_manual",
+                "version_code": "262607310",
+                "base_sha256": "active-sha",
+                "ended_at": "2026-07-13T17:17:59+00:00",
+            },
+        ],
+        summaries=[
+            SimpleNamespace(
+                valid=False,
+                run_id="latest-parse-error",
+                invalid_reason_code="PCAP_PARSE_ERROR",
+                pcap_failure_detail="PCAP_PARSE_ERROR",
+            ),
+            SimpleNamespace(valid=True, run_id="current-interactive"),
+        ],
+        scoped={},
+    )
+
+    assert row.qa_label == "valid (L)"
+    assert row.next_label == "supplemental baseline"
+    assert menu_selection._app_queue_state.queue_table_qa_label(row) == "valid"
+
+
+def test_build_package_selection_row_keeps_active_identified_invalid_as_review() -> None:
+    row = _build_active_qa_row(
+        runs=[
+            {
+                "run_id": "active-invalid",
+                "valid_dataset_run": False,
+                "run_profile": "interaction_manual",
+                "version_code": "262607310",
+                "base_sha256": "active-sha",
+                "ended_at": "2026-07-13T18:00:00+00:00",
+            }
+        ],
+        summaries=[
+            SimpleNamespace(
+                valid=False,
+                run_id="active-invalid",
+                invalid_reason_code="PCAP_PARSE_ERROR",
+                pcap_failure_detail="PCAP_PARSE_ERROR",
+            )
+        ],
+        scoped={
+            "baseline_countable": 3,
+            "interactive_countable": 4,
+            "technical_valid_active": 7,
+            "legacy_valid": 0,
+            "legacy_builds": 0,
+        },
+    )
+
+    assert row.qa_label == "invalid"
+    assert row.next_label == "review QA"
+    assert menu_selection._app_queue_state.queue_table_qa_label(row) == "invalid"
+
+
+def test_build_package_selection_row_ignores_prior_build_invalid_for_current_queue() -> None:
+    row = _build_active_qa_row(
+        runs=[
+            {
+                "run_id": "prior-invalid",
+                "valid_dataset_run": False,
+                "run_profile": "interaction_manual",
+                "version_code": "262508000",
+                "base_sha256": "prior-sha",
+                "ended_at": "2026-07-13T18:00:00+00:00",
+            }
+        ],
+        summaries=[
+            SimpleNamespace(
+                valid=False,
+                run_id="prior-invalid",
+                invalid_reason_code="PCAP_PARSE_ERROR",
+                pcap_failure_detail="PCAP_PARSE_ERROR",
+            )
+        ],
+        scoped={
+            "baseline_countable": 0,
+            "interactive_countable": 0,
+            "technical_valid_active": 0,
+            "legacy_valid": 0,
+            "legacy_builds": 0,
+        },
+    )
+
+    assert row.qa_label == "—"
+    assert row.next_label == "baseline"
+    assert menu_selection._app_queue_state.queue_table_qa_label(row) == "—"
+
+
+def test_build_package_selection_row_active_valid_quota_with_retained_extra_stays_valid() -> None:
+    row = _build_active_qa_row(
+        runs=[
+            {
+                "run_id": "active-extra",
+                "valid_dataset_run": True,
+                "countable": False,
+                "extra_run": 1,
+                "run_profile": "interaction_manual",
+                "version_code": "262607310",
+                "base_sha256": "active-sha",
+                "ended_at": "2026-07-13T18:00:00+00:00",
+            }
+        ],
+        summaries=[SimpleNamespace(valid=True, run_id="active-extra")],
+        scoped={"interactive_extra": 1, "technical_valid_active": 8},
+    )
+
+    assert row.qa_label == "valid (L)"
+    assert row.next_label == "supplemental baseline"
+    assert row.interactive_extra == 1
+
+
+def test_build_package_selection_row_no_active_build_qa_uses_unknown_badge() -> None:
+    row = _build_active_qa_row(
+        runs=[],
+        summaries=[],
+        scoped={
+            "baseline_countable": 0,
+            "interactive_countable": 0,
+            "technical_valid_active": 0,
+            "legacy_valid": 0,
+            "legacy_builds": 0,
+            "active_version_code": "262607310",
+            "active_base_sha": "active-sha",
+        },
+    )
+
+    assert row.qa_label == "—"
+    assert row.next_label == "baseline"
+
+
+def test_build_package_selection_row_chooses_newest_matching_active_candidate() -> None:
+    row = _build_active_qa_row(
+        runs=[
+            {
+                "run_id": "active-invalid-newer",
+                "valid_dataset_run": False,
+                "run_profile": "interaction_manual",
+                "version_code": "262607310",
+                "base_sha256": "active-sha",
+                "ended_at": "2026-07-13T18:00:00+00:00",
+            },
+            {
+                "run_id": "active-valid-older",
+                "valid_dataset_run": True,
+                "run_profile": "interaction_manual",
+                "version_code": "262607310",
+                "base_sha256": "active-sha",
+                "ended_at": "2026-07-13T17:00:00+00:00",
+            },
+        ],
+        summaries=[
+            SimpleNamespace(
+                valid=False,
+                run_id="active-invalid-newer",
+                invalid_reason_code="PCAP_PARSE_ERROR",
+                pcap_failure_detail="PCAP_PARSE_ERROR",
+            ),
+            SimpleNamespace(valid=True, run_id="active-valid-older"),
+        ],
+        scoped={
+            "baseline_countable": 3,
+            "interactive_countable": 4,
+            "technical_valid_active": 7,
+            "legacy_valid": 0,
+            "legacy_builds": 0,
+        },
+    )
+
+    assert row.qa_label == "invalid"
+    assert row.next_label == "review QA"
+
+
+def test_identity_less_recent_row_remains_visible_to_history_source() -> None:
+    calls: list[int] = []
+
+    row = _build_active_qa_row(
+        runs=[
+            {
+                "run_id": "identity-less",
+                "valid_dataset_run": False,
+                "run_profile": "interaction_manual",
+            },
+            {
+                "run_id": "active-valid",
+                "valid_dataset_run": True,
+                "run_profile": "interaction_manual",
+                "version_code": "262607310",
+                "base_sha256": "active-sha",
+            },
+        ],
+        summaries=[
+            SimpleNamespace(valid=False, run_id="identity-less"),
+            SimpleNamespace(valid=True, run_id="active-valid"),
+        ],
+        scoped={},
+    )
+
+    def _history_source(_package: str, *, limit: int = 1):
+        calls.append(limit)
+        return [
+            SimpleNamespace(valid=False, run_id="identity-less"),
+            SimpleNamespace(valid=True, run_id="active-valid"),
+        ][:limit]
+
+    history = _history_source("com.whatsapp", limit=2)
+
+    assert row.qa_label == "valid (L)"
+    assert [item.run_id for item in history] == ["identity-less", "active-valid"]
+    assert calls == [2]
