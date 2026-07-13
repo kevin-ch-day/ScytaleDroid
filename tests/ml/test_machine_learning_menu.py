@@ -23,10 +23,10 @@ def test_machine_learning_menu_exposes_freeze_operational_and_static_dynamic_wor
 
     assert rendered == [
         [
-            "Readiness and paths",
-            "Build locked dataset anchor",
-            "Score locked dataset",
-            "Generate locked dataset bundle",
+            "Details and output paths",
+            "Rebuild locked dataset anchor",
+            "Refresh ML scoring",
+            "Refresh locked dataset bundle",
             "QA audit",
         ],
         [
@@ -216,7 +216,7 @@ def test_recommended_next_step_points_to_bundle_after_current_qa(tmp_path: Path)
             "qa_status": "ready - primary OK · secondary caveats (12 warning(s))",
             "bundle_status": "missing",
         }
-    ) == "5) Generate locked dataset bundle"
+    ) == "5) Refresh locked dataset bundle"
 
 
 def test_recommended_next_step_reports_ready_after_current_bundle(tmp_path: Path) -> None:

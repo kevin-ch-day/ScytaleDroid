@@ -54,12 +54,14 @@ def machine_learning_menu() -> None:
                     summary_cards.summary_item("Dataset", _dataset_readiness_line(status), value_style="accent"),
                     summary_cards.summary_item("Models", "Isolation Forest + One-Class SVM", value_style="accent"),
                     summary_cards.summary_item("Inputs", "PCAP windows + static context", value_style="info"),
-                    summary_cards.summary_item("Next", _recommended_next_step(status), value_style="hint"),
+                    *[
+                        summary_cards.summary_item(label, str(value), value_style="info")
+                        for label, value in _compact_status_metrics_from_snapshot(status)
+                    ],
                 ],
-                footer="Locked dataset mode is for publication sets; operational snapshots are for current evidence review.",
             )
         )
-        _print_ml_status(compact=True, snapshot=status)
+        print()
         options = _menu_options()
         _print_ml_action_menu(options)
         choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
@@ -75,11 +77,11 @@ def machine_learning_menu() -> None:
 
 def _menu_options() -> list[menu_utils.MenuOption]:
     return [
-        menu_utils.MenuOption("1", "Readiness and paths"),
-        menu_utils.MenuOption("2", "Build locked dataset anchor"),
-        menu_utils.MenuOption("3", "Score locked dataset"),
+        menu_utils.MenuOption("1", "Details and output paths"),
+        menu_utils.MenuOption("2", "Rebuild locked dataset anchor"),
+        menu_utils.MenuOption("3", "Refresh ML scoring"),
         menu_utils.MenuOption("4", "Run operational snapshot"),
-        menu_utils.MenuOption("5", "Generate locked dataset bundle"),
+        menu_utils.MenuOption("5", "Refresh locked dataset bundle"),
         menu_utils.MenuOption("6", "QA audit"),
         menu_utils.MenuOption("7", "Runtime behavior report"),
         menu_utils.MenuOption("8", "Static + dynamic score report"),
@@ -100,11 +102,12 @@ def _print_ml_action_menu(options: list[menu_utils.MenuOption]) -> None:
     menu_utils.print_section("Operational Review")
     menu_utils.print_menu(
         [by_key[key] for key in ("4", "7", "8", "9")],
-        show_exit=True,
-        exit_label="Back",
+        show_exit=False,
         show_descriptions=False,
         compact=True,
     )
+    print()
+    print("0) Back")
 
 
 def _print_ml_status(*, compact: bool = False, snapshot: dict[str, object] | None = None) -> None:
@@ -225,17 +228,17 @@ def _recommended_next_step(status: dict[str, object]) -> str:
     bundle_status = str(status.get("bundle_status") or "")
     freeze_summary = _freeze_status_summary(str(status.get("freeze_status") or ""))
     if not isinstance(freeze_path, Path) or not freeze_path.exists():
-        return "2) Build locked dataset anchor"
+        return "2) Rebuild locked dataset anchor"
     if not freeze_summary.startswith("ready"):
-        return "1) Review readiness blockers"
+        return "1) Review details and blockers"
     if not isinstance(artifacts_path, Path) or lockfile_state != "ready":
-        return "3) Score locked dataset"
+        return "3) Refresh ML scoring"
     if required_tables and (existing_tables < required_tables or stale_tables):
-        return "3) Score locked dataset"
+        return "3) Refresh ML scoring"
     if qa_status.startswith(("missing", "stale", "blocked")):
         return "6) QA audit"
     if bundle_status.startswith(("missing", "stale")):
-        return "5) Generate locked dataset bundle"
+        return "5) Refresh locked dataset bundle"
     if qa_status.startswith("ready"):
         return "Ready for review"
     return "6) QA audit"
@@ -450,10 +453,10 @@ def _show_command_map() -> None:
     print()
     menu_utils.print_header("Machine Learning Commands")
     rows = [
-        ("Build locked dataset anchor", "Machine Learning -> 2"),
-        ("Locked dataset scoring", "Machine Learning -> 3"),
+        ("Rebuild locked dataset anchor", "Machine Learning -> 2"),
+        ("Refresh ML scoring", "Machine Learning -> 3"),
         ("Operational snapshot", "Machine Learning -> 4"),
-        ("Locked dataset bundle", "Machine Learning -> 5"),
+        ("Refresh locked dataset bundle", "Machine Learning -> 5"),
         ("ML QA audit", "PYTHONPATH=. python scripts/publication/publication_ml_audit_report.py"),
         ("Runtime behavior ML", "PYTHONPATH=. python scripts/db/report_dynamic_pcap_behavior_ml.py"),
         ("Static + dynamic ML", "PYTHONPATH=. python scripts/db/report_multimodal_static_dynamic_ml.py"),
@@ -557,16 +560,35 @@ def _compact_status_metrics(
     bundle_status: str | None = None,
 ) -> list[tuple[str, object]]:
     return [
-        ("Dataset anchor", _present_or_missing(freeze_path)),
-        ("Inputs", f"plan {_present_or_missing(plan_path)} · evidence {_present_or_missing(evidence_root)}"),
-        ("Locked dataset", _freeze_status_summary(freeze_status)),
         ("Run lengths", duration_status),
-        ("Operational", _operational_snapshot_status(compact=True)),
-        ("ML lockfile", str(lockfile_state or _current_file_state(artifacts_path, anchor_path=freeze_path))),
-        ("ML tables", _table_state_label(existing_tables, required_tables, stale_tables)),
+        (
+            "ML outputs",
+            (
+                f"lockfile {str(lockfile_state or _current_file_state(artifacts_path, anchor_path=freeze_path))}"
+                f" · tables {_table_state_label(existing_tables, required_tables, stale_tables)}"
+            ),
+        ),
         ("QA", str(qa_status or "unknown")),
         ("Bundle", str(bundle_status or "unknown")),
+        ("Operational", _operational_snapshot_status(compact=True)),
     ]
+
+
+def _compact_status_metrics_from_snapshot(status: dict[str, object]) -> list[tuple[str, object]]:
+    return _compact_status_metrics(
+        freeze_path=status["freeze_path"],
+        plan_path=status["plan_path"],
+        evidence_root=status["evidence_root"],
+        freeze_status=str(status["freeze_status"]),
+        duration_status=str(status["duration_status"]),
+        artifacts_path=status["artifacts_path"],
+        existing_tables=int(status["existing_tables"]),
+        required_tables=int(status["required_tables"]),
+        stale_tables=int(status["stale_tables"]),
+        lockfile_state=str(status["lockfile_state"]),
+        qa_status=str(status["qa_status"]),
+        bundle_status=str(status["bundle_status"]),
+    )
 
 
 def _present_or_missing(path: Path) -> str:
