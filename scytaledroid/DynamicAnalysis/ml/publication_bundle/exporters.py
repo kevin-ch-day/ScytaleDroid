@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import csv
+import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
@@ -75,6 +78,11 @@ def write_xlsx(
     """Write an XLSX with a provenance sheet and one table sheet."""
     path.parent.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
+    stable_timestamp = datetime(2000, 1, 1, tzinfo=UTC)
+    wb.properties.creator = "ScytaleDroid"
+    wb.properties.lastModifiedBy = "ScytaleDroid"
+    wb.properties.created = stable_timestamp
+    wb.properties.modified = stable_timestamp
     ws0 = wb.active
     ws0.title = "provenance"
     ws0["A1"] = "key"
@@ -99,6 +107,27 @@ def write_xlsx(
     for row in rows:
         ws.append([row.get(k) for k in keys])
     wb.save(path)
+    _normalize_xlsx_zip_metadata(path)
+
+
+def _normalize_xlsx_zip_metadata(path: Path) -> None:
+    """Rewrite the XLSX container with stable ZIP timestamps and permissions."""
+
+    fixed_date = (2000, 1, 1, 0, 0, 0)
+    with ZipFile(path, "r") as zin:
+        entries = [(info, zin.read(info.filename)) for info in zin.infolist()]
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as zout:
+        for old_info, data in entries:
+            if old_info.filename == "docProps/core.xml":
+                data = re.sub(
+                    rb"<dcterms:modified([^>]*)>.*?</dcterms:modified>",
+                    rb"<dcterms:modified\1>2000-01-01T00:00:00Z</dcterms:modified>",
+                    data,
+                )
+            info = ZipInfo(old_info.filename, fixed_date)
+            info.compress_type = ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            zout.writestr(info, data)
 
 
 __all__ = [

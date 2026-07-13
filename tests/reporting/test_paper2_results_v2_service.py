@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
 from pathlib import Path
 
@@ -145,3 +146,50 @@ def test_hash_manifest_is_deterministic_and_relative(tmp_path: Path) -> None:
     assert first == second
     assert "generated_at_utc" not in first
     assert '"path": "paper2_statistics_v2.csv"' in first
+
+
+def test_minimum_validation_status_accepts_complete_package(tmp_path: Path) -> None:
+    validation_dir = tmp_path / "minimum_validation"
+    validation_dir.mkdir()
+    summary = {
+        "status": "OK",
+        "apps": 15,
+        "heldout_eligible_apps": 15,
+        "heldout_fold_count": 56,
+        "seed_count": 20,
+        "bytes_control_positive_apps": 15,
+        "feature_ablation_profiles": 5,
+    }
+    (validation_dir / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    for name in (
+        "heldout_baseline_folds_v2.csv",
+        "heldout_baseline_by_app_v2.csv",
+        "feature_ablation_v2.csv",
+        "bytes_p95_control_by_app_v2.csv",
+        "bytes_p95_control_summary_v2.csv",
+        "seed_stability_by_app_v2.csv",
+        "seed_stability_by_seed_v2.csv",
+        "manifest.sha256.json",
+    ):
+        (validation_dir / name).write_text("x\n", encoding="utf-8")
+
+    status = svc._read_minimum_validation_status(output_root=tmp_path, expected_apps=15)
+
+    assert status["status"] == "OK"
+    assert status["checks"]["heldout_apps_match"] is True
+    assert status["checks"]["seed_count_at_least_20"] is True
+
+
+def test_minimum_validation_status_blocks_missing_required_file(tmp_path: Path) -> None:
+    validation_dir = tmp_path / "minimum_validation"
+    validation_dir.mkdir()
+    (validation_dir / "summary.json").write_text(
+        json.dumps({"status": "OK", "apps": 15, "heldout_eligible_apps": 15, "seed_count": 20}),
+        encoding="utf-8",
+    )
+
+    status = svc._read_minimum_validation_status(output_root=tmp_path, expected_apps=15)
+
+    assert status["status"] == "BLOCKED"
+    assert status["checks"]["required_files_present"] is False
+    assert "heldout_baseline_folds_v2.csv" in status["missing_files"]

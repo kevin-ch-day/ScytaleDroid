@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from zipfile import ZipFile
 
 from openpyxl import load_workbook
 
@@ -11,6 +12,7 @@ from scytaledroid.DynamicAnalysis.ml.publication_bundle.exporters import (
     write_tex_table,
     write_xlsx,
 )
+from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import _paper_provenance
 
 
 def test_write_csv_with_provenance_comment_header(tmp_path: Path) -> None:
@@ -65,3 +67,30 @@ def test_write_xlsx_has_provenance_and_table_sheets(tmp_path: Path) -> None:
     assert wb["provenance"]["B2"].value == "abc123"
     assert wb["table_1"]["A1"].value == "Package"
     assert wb["table_1"]["B2"].value == 2
+
+
+def test_write_xlsx_is_byte_stable_for_same_content(tmp_path: Path) -> None:
+    kwargs = {
+        "sheet_name": "table_1",
+        "columns": [("package_name", "Package"), ("score", "Score")],
+        "rows": [{"package_name": "com.example", "score": 2}],
+        "provenance": {"freeze_sha256": "abc123"},
+    }
+    first = tmp_path / "first.xlsx"
+    second = tmp_path / "second.xlsx"
+
+    write_xlsx(first, **kwargs)
+    write_xlsx(second, **kwargs)
+
+    assert first.read_bytes() == second.read_bytes()
+    with ZipFile(first) as workbook:
+        assert {info.date_time for info in workbook.infolist()} == {(2000, 1, 1, 0, 0, 0)}
+        assert b"<dcterms:modified" in workbook.read("docProps/core.xml")
+        assert b">2000-01-01T00:00:00Z</dcterms:modified>" in workbook.read("docProps/core.xml")
+
+
+def test_paper_table_provenance_excludes_generation_timestamp() -> None:
+    provenance = _paper_provenance(freeze_sha256="abc123")
+
+    assert provenance["freeze_sha256"] == "abc123"
+    assert "generated_at_utc" not in provenance

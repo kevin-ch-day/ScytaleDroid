@@ -120,7 +120,7 @@ def generate_paper2_results_v2(
 
     freeze = _read_json(freeze_path)
     dataset_plan = _read_json(dataset_plan_path) if dataset_plan_path.exists() else {}
-    static_scores = _read_static_scores()
+    static_scores = _read_static_scores(freeze=freeze, evidence_root=evidence_root)
     run_records, qa_warnings = _build_run_metrics(
         freeze=freeze,
         dataset_plan=dataset_plan,
@@ -162,6 +162,7 @@ def generate_paper2_results_v2(
     ocsvm_warning_rows = _read_ocsvm_calibration_warnings()
 
     qa = _build_qa(
+        output_root=output_root,
         freeze=freeze,
         run_records=run_records,
         per_app_primary=per_app_primary,
@@ -457,7 +458,7 @@ def _build_static_alignment_rows(
 ) -> list[dict[str, Any]]:
     plan_runs = _index_plan_runs(dataset_plan)
     rows: list[dict[str, Any]] = []
-    static_score_source = REPO_ROOT / "output" / "_internal" / "publication" / "baseline" / "tables" / "table_6_static_posture_scores.csv"
+    static_score_source = "locked freeze static_dynamic_plan.json inputs"
     for package_name, app in sorted((freeze.get("apps") or {}).items()):
         included = [str(run_id) for run_id in app.get("included_run_ids") or []]
         selected_run = plan_runs.get(included[0], {}) if included else {}
@@ -738,7 +739,7 @@ def _static_spearman(rows: Sequence[Mapping[str, Any]], static_scores: Mapping[s
         "ci_low": ci_low,
         "ci_high": ci_high,
         "ci_method": f"paired app bootstrap, {BOOTSTRAP_N} resamples, seed={BOOTSTRAP_SEED}",
-        "static_score_source": "output/_internal/publication/baseline/tables/table_6_static_posture_scores.csv",
+        "static_score_source": "locked freeze static_dynamic_plan.json inputs",
     }
 
 
@@ -851,6 +852,7 @@ def _summary_to_statistics_rows(summary: Mapping[str, Any], *, primary: bool) ->
 
 def _build_qa(
     *,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
     freeze: Mapping[str, Any],
     run_records: Sequence[RunMetric],
     per_app_primary: Mapping[str, Mapping[str, Any]],
@@ -876,9 +878,41 @@ def _build_qa(
     missing_static_runs = sorted({r.package_name for r in run_records if not r.static_run_id})
     package_integrity_status = "OK" if exclusion_accounting.get("status") == "OK" and not missing_static_runs else "BLOCKED"
     provenance_status = "OK" if not static_mismatches and not missing_static_runs and not [k for k in window_status_counts if k not in {"OK", "DIFF_EXPLAINED"}] else "WARN"
-    scientific_validation_status = "INCOMPLETE"
-    manuscript_readiness_status = "NOT_READY"
-    status = "NOT_READY" if scientific_validation_status == "INCOMPLETE" else package_integrity_status
+    minimum_validation = _read_minimum_validation_status(output_root=output_root, expected_apps=app_count)
+    scientific_validation_status = "MINIMUM_COMPLETE" if minimum_validation["status"] == "OK" else "INCOMPLETE"
+    manuscript_readiness_status = (
+        "RESULTS_PACKAGE_READY"
+        if scientific_validation_status == "MINIMUM_COMPLETE" and package_integrity_status == "OK"
+        else "NOT_READY"
+    )
+    status = package_integrity_status if scientific_validation_status == "MINIMUM_COMPLETE" else "NOT_READY"
+    completed_validation = [
+        "full-precision per-window RDI aggregation",
+        "paired Wilcoxon exact two-sided test",
+        "equal-run and standard-duration sensitivity rows",
+        "independent results/statistics recomputation from score files",
+    ]
+    incomplete_validation = [
+        "temporal-order controls",
+        "baseline-to-baseline controls",
+        "phase-label permutation controls",
+    ]
+    if minimum_validation["status"] == "OK":
+        completed_validation.extend(
+            [
+                "leave-one-baseline-run-out held-out baseline validation",
+                "compact feature ablation",
+                "simple bytes/sec P95 control",
+                "20-seed Isolation Forest stability check",
+            ]
+        )
+    else:
+        incomplete_validation[:0] = [
+            "held-out baseline validation",
+            "feature ablation",
+            "simple-volume controls",
+            "multi-seed stability",
+        ]
     return {
         "schema_version": "paper2_qa_v2",
         "status": status,
@@ -912,21 +946,9 @@ def _build_qa(
             "status": "OK" if not static_mismatches and not missing_static_runs else "WARN",
         },
         "scientific_validation_scope": {
-            "completed": [
-                "full-precision per-window RDI aggregation",
-                "paired Wilcoxon exact two-sided test",
-                "equal-run and standard-duration sensitivity rows",
-                "independent results/statistics recomputation from score files",
-            ],
-            "incomplete": [
-                "held-out baseline validation",
-                "feature ablation",
-                "simple-volume controls",
-                "temporal-order controls",
-                "multi-seed stability",
-                "baseline-to-baseline controls",
-                "phase-label permutation controls",
-            ],
+            "completed": completed_validation,
+            "incomplete": incomplete_validation,
+            "minimum_validation": minimum_validation,
         },
         "score_source_policy": {
             "rdi_source": "per-run analysis/ml/v1/anomaly_scores_*.csv full-precision window rows",
@@ -934,9 +956,14 @@ def _build_qa(
         },
         "baseline_interpretation": {
             "idle_rdi_claim": "in-sample calibration prevalence, not independent baseline stability proof",
-            "held_out_baseline_outputs_present": False,
+            "held_out_baseline_outputs_present": minimum_validation["status"] == "OK",
             "held_out_baseline_possible_by_app": heldout_possible,
-            "held_out_baseline_note": "Multiple baseline runs make held-out evaluation possible for some apps, but the current canonical output scores use baseline-only training/calibration and do not include leave-one-run-out held-out baseline tables.",
+            "held_out_baseline_note": (
+                "Leave-one-baseline-run-out validation is reported in the minimum_validation package; "
+                "canonical primary RDI remains baseline-calibrated and should not be described as independent baseline proof."
+                if minimum_validation["status"] == "OK"
+                else "Multiple baseline runs make held-out evaluation possible for some apps, but the current canonical output scores use baseline-only training/calibration and do not include leave-one-run-out held-out baseline tables."
+            ),
         },
         "interaction_label_policy": {
             "label_counts": dict(label_counts),
@@ -951,6 +978,58 @@ def _build_qa(
             "path": "paper2_ocsvm_calibration_warnings_v2.csv",
             "interpretation": "OC-SVM is retained only as a secondary robustness appendix because baseline calibration warnings are present.",
         },
+    }
+
+
+def _read_minimum_validation_status(*, output_root: Path, expected_apps: int) -> dict[str, Any]:
+    validation_dir = Path(output_root) / "minimum_validation"
+    summary_path = validation_dir / "summary.json"
+    required_files = [
+        "heldout_baseline_folds_v2.csv",
+        "heldout_baseline_by_app_v2.csv",
+        "feature_ablation_v2.csv",
+        "bytes_p95_control_by_app_v2.csv",
+        "bytes_p95_control_summary_v2.csv",
+        "seed_stability_by_app_v2.csv",
+        "seed_stability_by_seed_v2.csv",
+        "manifest.sha256.json",
+    ]
+    if not summary_path.exists():
+        return {
+            "status": "MISSING",
+            "path": str(summary_path),
+            "reason": "minimum validation package has not been generated",
+            "required_files": required_files,
+        }
+    try:
+        summary = _read_json(summary_path)
+    except Exception as exc:  # pragma: no cover - defensive corruption path
+        return {
+            "status": "BLOCKED",
+            "path": str(summary_path),
+            "reason": f"minimum validation summary is unreadable: {exc}",
+            "required_files": required_files,
+        }
+    missing_files = [name for name in required_files if not (validation_dir / name).exists()]
+    checks = {
+        "summary_status_ok": str(summary.get("status") or "").upper() == "OK",
+        "apps_match": int(summary.get("apps") or 0) == int(expected_apps),
+        "heldout_apps_match": int(summary.get("heldout_eligible_apps") or 0) == int(expected_apps),
+        "seed_count_at_least_20": int(summary.get("seed_count") or 0) >= 20,
+        "required_files_present": not missing_files,
+    }
+    status = "OK" if all(checks.values()) else "BLOCKED"
+    return {
+        "status": status,
+        "path": str(summary_path),
+        "checks": checks,
+        "missing_files": missing_files,
+        "apps": summary.get("apps"),
+        "heldout_eligible_apps": summary.get("heldout_eligible_apps"),
+        "heldout_fold_count": summary.get("heldout_fold_count"),
+        "seed_count": summary.get("seed_count"),
+        "bytes_control_positive_apps": summary.get("bytes_control_positive_apps"),
+        "feature_ablation_profiles": summary.get("feature_ablation_profiles"),
     }
 
 
@@ -1011,9 +1090,7 @@ def _deterministic_manifest_fields(
         if manifest.get("feature_schema_version"):
             feature_schema_versions.add(str(manifest.get("feature_schema_version")))
     static_source_hashes = {
-        "static_posture_scores": _sha256_optional(
-            REPO_ROOT / "output" / "_internal" / "publication" / "baseline" / "tables" / "table_6_static_posture_scores.csv"
-        ),
+        "static_posture_scores": _hash_jsonable(_compute_static_posture_score_rows(freeze=freeze, evidence_root=evidence_root)),
         "static_alignment_rows_hash": _hash_jsonable(static_alignment_rows),
     }
     return {
@@ -1071,17 +1148,99 @@ def _index_plan_runs(dataset_plan: Mapping[str, Any]) -> dict[str, Mapping[str, 
     return out
 
 
-def _read_static_scores() -> dict[str, float]:
-    path = REPO_ROOT / "output" / "_internal" / "publication" / "baseline" / "tables" / "table_6_static_posture_scores.csv"
+def _read_static_scores(*, freeze: Mapping[str, Any], evidence_root: Path) -> dict[str, float]:
     scores: dict[str, float] = {}
-    if not path.exists():
-        return scores
-    for row in _read_csv_rows(path):
-        pkg = str(row.get("package_name") or "")
+    for row in _compute_static_posture_score_rows(freeze=freeze, evidence_root=evidence_root):
         value = _float_or_none(row.get("static_posture_score"))
-        if pkg and value is not None:
-            scores[pkg] = value
+        if row["package_name"] and value is not None and "missing_plan" not in str(row.get("notes") or ""):
+            scores[str(row["package_name"])] = value
     return scores
+
+
+def _compute_static_posture_score_rows(*, freeze: Mapping[str, Any], evidence_root: Path) -> list[dict[str, Any]]:
+    """Compute context-only static posture scores from locked freeze inputs."""
+
+    raw: list[tuple[str, int, int, int, float, list[str]]] = []
+    for package_name, app in sorted((freeze.get("apps") or {}).items()):
+        baseline_run_ids = [str(run_id) for run_id in app.get("baseline_run_ids") or []]
+        baseline_run_id = baseline_run_ids[0] if baseline_run_ids else ""
+        if not baseline_run_id:
+            raw.append((str(package_name), 0, 0, 0, 0.0, ["missing_baseline_run"]))
+            continue
+        plan_path = evidence_root / baseline_run_id / "inputs" / "static_dynamic_plan.json"
+        if not plan_path.exists():
+            raw.append((str(package_name), 0, 0, 0, 0.0, ["missing_plan"]))
+            continue
+        obj = _read_json_or_empty(plan_path)
+        notes: list[str] = []
+
+        exported_components = obj.get("exported_components") if isinstance(obj.get("exported_components"), dict) else {}
+        exported_total = exported_components.get("total")
+        if exported_total is None:
+            exported_total = sum(len(exported_components.get(key) or []) for key in ("activities", "services", "receivers", "providers"))
+            notes.append("exported_missing")
+
+        permissions = obj.get("permissions") if isinstance(obj.get("permissions"), dict) else {}
+        dangerous_permissions = permissions.get("dangerous")
+        if isinstance(dangerous_permissions, list):
+            dangerous_count = len(dangerous_permissions)
+        else:
+            dangerous_count = 0
+            notes.append("dangerous_perms_missing")
+
+        risk_flags = obj.get("risk_flags") if isinstance(obj.get("risk_flags"), dict) else {}
+        cleartext_flag = 1 if risk_flags.get("uses_cleartext_traffic") is True else 0
+
+        sdk_score = 0.0
+        sdk_indicators = obj.get("sdk_indicators") if isinstance(obj.get("sdk_indicators"), dict) else None
+        if isinstance(sdk_indicators, dict) and sdk_indicators.get("score") is not None:
+            try:
+                sdk_score = float(sdk_indicators.get("score") or 0.0)
+            except Exception:
+                sdk_score = 0.0
+                notes.append("sdk_indicators_invalid")
+        else:
+            notes.append("sdk_indicators_missing")
+
+        raw.append((str(package_name), int(exported_total or 0), int(dangerous_count or 0), cleartext_flag, sdk_score, notes))
+
+    exported_values = [row[1] for row in raw]
+    dangerous_values = [row[2] for row in raw]
+    exported_min, exported_max = (min(exported_values), max(exported_values)) if exported_values else (0, 0)
+    dangerous_min, dangerous_max = (min(dangerous_values), max(dangerous_values)) if dangerous_values else (0, 0)
+
+    rows: list[dict[str, Any]] = []
+    for package_name, exported_total, dangerous_count, cleartext_flag, sdk_score, notes in raw:
+        exported_norm = (
+            float(exported_total - exported_min) / float(exported_max - exported_min)
+            if exported_max > exported_min
+            else 0.0
+        )
+        dangerous_norm = (
+            float(dangerous_count - dangerous_min) / float(dangerous_max - dangerous_min)
+            if dangerous_max > dangerous_min
+            else 0.0
+        )
+        static_posture_score = 100.0 * (
+            0.25 * exported_norm
+            + 0.25 * dangerous_norm
+            + 0.25 * float(cleartext_flag)
+            + 0.25 * float(sdk_score)
+        )
+        rows.append(
+            {
+                "package_name": package_name,
+                "exported_components": exported_total,
+                "dangerous_permissions": dangerous_count,
+                "cleartext_flag": cleartext_flag,
+                "sdk_score": sdk_score,
+                "exported_norm": exported_norm,
+                "dangerous_norm": dangerous_norm,
+                "static_posture_score": static_posture_score,
+                "notes": ";".join(notes),
+            }
+        )
+    return rows
 
 
 def _read_ocsvm_calibration_warnings() -> list[dict[str, Any]]:

@@ -79,6 +79,18 @@ _LEGACY_LABEL_VARIANTS: dict[str, list[str]] = {
     "com.facebook.orca": ["Facebook Messenger", "Messenger"],
 }
 
+_STABLE_PDF_METADATA = {
+    "Creator": "ScytaleDroid",
+    "Producer": "ScytaleDroid",
+    "CreationDate": None,
+    "ModDate": None,
+}
+
+
+def _save_png_pdf(fig: Any, png: Path, pdf: Path) -> None:
+    fig.savefig(png, dpi=300)
+    fig.savefig(pdf, metadata=_STABLE_PDF_METADATA)
+
 def _dynamic_run_dir(run_id: str | int | None) -> Path:
     rid = str(run_id or "").strip()
     return resolve_dynamic_run_dir(rid) or dynamic_evidence_root() / rid
@@ -168,6 +180,7 @@ def write_phase_e_deliverables_bundle(
 
     freeze_sha256 = _sha256_stream(freeze_anchor_path())
     provenance = _paper_provenance(freeze_sha256=freeze_sha256)
+    _validate_against_canonical_paper2_v2_package()
 
     # Tables (locked): emit csv + xlsx + tex under output/_internal/* (regression/provenance surface).
     table_1_csv, table_1_xlsx, table_1_tex = _write_table_1_rdi_prevalence(tables_dir, provenance=provenance)
@@ -309,6 +322,22 @@ def write_phase_e_deliverables_bundle(
     )
 
 
+def _validate_against_canonical_paper2_v2_package() -> None:
+    """Block supplemental bundle generation if the canonical v2 package is stale."""
+    from scytaledroid.Publication.paper2_v2_contract import validate_paper2_v2_results_contract
+
+    result = validate_paper2_v2_results_contract(freeze_path=freeze_anchor_path())
+    if result.ok:
+        return
+    sample = "; ".join(result.errors[:5])
+    if len(result.errors) > 5:
+        sample += f"; ... ({len(result.errors)} total)"
+    raise RuntimeError(
+        "Supplemental runtime bundle is not aligned with the canonical Paper 2 v2 results package: "
+        + sample
+    )
+
+
 def write_locked_runtime_deliverables_bundle(
     *,
     fig_b1_run_id: str,
@@ -403,8 +432,7 @@ def _write_fig_b1(
     ax2.text(0.01, 0.02, note, transform=ax2.transAxes, fontsize=8, alpha=0.8)
 
     fig.tight_layout(rect=[0, 0.02, 1, 0.95])
-    fig.savefig(png, dpi=300)
-    fig.savefig(pdf)
+    _save_png_pdf(fig, png, pdf)
     plt.close(fig)
     return png, pdf
 
@@ -478,8 +506,7 @@ def _write_fig_b2(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     axes[-1].set_xlabel("App")
     fig.suptitle("Fig B2: Runtime Deviation Index (RDI) by App (Idle vs Interactive)", fontsize=12)
     fig.tight_layout(rect=[0, 0.02, 1, 0.95])
-    fig.savefig(png, dpi=300)
-    fig.savefig(pdf)
+    _save_png_pdf(fig, png, pdf)
     plt.close(fig)
     return png, pdf
 
@@ -556,8 +583,7 @@ def _write_fig_b2_subset(
     axes[-1].set_xlabel("App")
     fig.suptitle(title, fontsize=12)
     fig.tight_layout(rect=[0, 0.02, 1, 0.95])
-    fig.savefig(png, dpi=300)
-    fig.savefig(pdf)
+    _save_png_pdf(fig, png, pdf)
     plt.close(fig)
     return png, pdf
 
@@ -666,8 +692,7 @@ def _write_fig_b4(figs_dir: Path, *, provenance: dict[str, str], overwrite: bool
     ax.set_title("Fig B4: Static Posture vs Runtime Deviation (Discordance)", fontsize=12)
     ax.text(0.01, 0.02, subtitle, transform=ax.transAxes, fontsize=9, alpha=0.85)
     fig.tight_layout()
-    fig.savefig(png, dpi=300)
-    fig.savefig(pdf)
+    _save_png_pdf(fig, png, pdf)
     plt.close(fig)
     return png, pdf
 
@@ -716,8 +741,7 @@ def _write_fig_b4_subset(
     ax.set_title(title, fontsize=12)
     ax.text(0.01, 0.02, subtitle, transform=ax.transAxes, fontsize=9, alpha=0.85)
     fig.tight_layout()
-    fig.savefig(png, dpi=300)
-    fig.savefig(pdf)
+    _save_png_pdf(fig, png, pdf)
     plt.close(fig)
     return png, pdf
 
@@ -1011,7 +1035,6 @@ def _paper_provenance(*, freeze_sha256: str) -> dict[str, str]:
         "min_windows_baseline": str(config.MIN_WINDOWS_BASELINE),
         "min_pcap_bytes_fallback": str(config.MIN_PCAP_BYTES_FALLBACK),
         "np_percentile_method": str(config.NP_PERCENTILE_METHOD),
-        "generated_at_utc": datetime.now(UTC).isoformat(),
     }
 
 
