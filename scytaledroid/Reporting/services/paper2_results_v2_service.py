@@ -1,9 +1,8 @@
 """Paper 2 v2 runtime ML results package writer.
 
-This writer is intentionally separate from the older publication export path,
-which encoded the original 12-app/36-run contract.  The v2 package is built
-from the locked dataset freeze and per-window ML score files so statistical
-results are not derived from rounded publication tables.
+This writer is the current Paper 2 runtime-ML publication path.  The v2 package
+is built from the locked dataset freeze and per-window ML score files so
+statistical results are not derived from rounded publication tables.
 """
 
 from __future__ import annotations
@@ -14,14 +13,14 @@ import json
 import math
 import statistics
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 import numpy as np
 from scipy import stats
-
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.run_duration_tiers import classify_duration_tier
 
@@ -29,9 +28,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_EVIDENCE_ROOT = REPO_ROOT / "data" / "evidence" / "dynamic"
 DEFAULT_DATASET_PLAN = REPO_ROOT / "data" / "archive" / "research_cohorts" / "research_dataset_beta" / "dataset_plan.json"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output" / "_internal" / "publication" / "paper2_v2"
-LEGACY_EXPORT_SERVICE = REPO_ROOT / "scytaledroid" / "Reporting" / "services" / "publication_exports_service.py"
-LEGACY_QA_SERVICE = REPO_ROOT / "scytaledroid" / "Reporting" / "services" / "publication_scientific_qa_service.py"
-
 PRIMARY_MODEL = "iforest"
 SECONDARY_MODEL = "ocsvm"
 BOOTSTRAP_SEED = 20260713
@@ -130,7 +126,22 @@ def generate_paper2_results_v2(
         dataset_plan=dataset_plan,
         evidence_root=evidence_root,
     )
-    per_app_rows = _build_per_app_rows(freeze=freeze, run_records=run_records, static_scores=static_scores)
+    excluded_run_rows = _build_excluded_run_rows(freeze=freeze, dataset_plan=dataset_plan)
+    exclusion_accounting = _build_exclusion_accounting(
+        freeze=freeze,
+        dataset_plan=dataset_plan,
+        excluded_run_rows=excluded_run_rows,
+    )
+    window_reconciliation_rows = _build_window_reconciliation_rows(
+        freeze=freeze,
+        dataset_plan=dataset_plan,
+        evidence_root=evidence_root,
+    )
+    static_alignment_rows = _build_static_alignment_rows(
+        freeze=freeze,
+        dataset_plan=dataset_plan,
+        evidence_root=evidence_root,
+    )
     cohort_rows = _build_cohort_rows(freeze=freeze, run_records=run_records, dataset_plan=dataset_plan)
 
     primary_policy = "pooled_window_weighted"
@@ -150,18 +161,22 @@ def generate_paper2_results_v2(
     per_app_rdi_rows = _build_per_app_rdi_rows(per_app_primary, per_app_secondary, static_scores)
     ocsvm_warning_rows = _read_ocsvm_calibration_warnings()
 
-    legacy_contract = _audit_legacy_contract()
     qa = _build_qa(
         freeze=freeze,
         run_records=run_records,
         per_app_primary=per_app_primary,
         ocsvm_warning_rows=ocsvm_warning_rows,
         qa_warnings=qa_warnings,
-        legacy_contract=legacy_contract,
+        exclusion_accounting=exclusion_accounting,
+        window_reconciliation_rows=window_reconciliation_rows,
+        static_alignment_rows=static_alignment_rows,
     )
 
     files: list[Path] = []
     files.append(_write_csv(output_root / "paper2_cohort_v2.csv", cohort_rows))
+    files.append(_write_csv(output_root / "paper2_excluded_runs_v2.csv", excluded_run_rows))
+    files.append(_write_csv(output_root / "paper2_window_reconciliation_v2.csv", window_reconciliation_rows))
+    files.append(_write_csv(output_root / "paper2_static_alignment_v2.csv", static_alignment_rows))
     files.append(_write_csv(output_root / "paper2_per_app_rdi_v2.csv", per_app_rdi_rows))
     files.append(_write_csv(output_root / "paper2_statistics_v2.csv", statistics_rows))
     files.append(_write_csv(output_root / "paper2_run_sensitivity_v2.csv", sensitivity_rows))
@@ -171,7 +186,6 @@ def generate_paper2_results_v2(
 
     publication_results = {
         "schema_version": "paper2_results_v2",
-        "generated_at_utc": datetime.now(UTC).isoformat(),
         "freeze_path": str(freeze_path),
         "freeze_sha256": _sha256(freeze_path),
         "dataset_plan_path": str(dataset_plan_path),
@@ -181,13 +195,21 @@ def generate_paper2_results_v2(
         "dataset": {
             "apps": len(freeze.get("apps") or {}),
             "included_runs": len(freeze.get("included_run_ids") or []),
+            "excluded_runs": len(excluded_run_rows),
             "window": "14-day selected build groups",
             "run_duration_tiers": dict(Counter(r.duration_tier_label for r in run_records)),
         },
         "aggregation_policy": _aggregation_policy_text(),
+        "selection_flow": _selection_flow_summary(freeze=freeze, excluded_run_rows=excluded_run_rows),
+        "deterministic_manifest": _deterministic_manifest_fields(
+            freeze=freeze,
+            dataset_plan=dataset_plan,
+            evidence_root=evidence_root,
+            excluded_run_rows=excluded_run_rows,
+            static_alignment_rows=static_alignment_rows,
+        ),
         "primary_result": results_by_policy.get(f"{PRIMARY_MODEL}:{primary_policy}"),
         "sensitivity": results_by_policy,
-        "legacy_pipeline_reconciliation": legacy_contract,
         "generated_files": [],
     }
     results_path = output_root / "publication_results_v2.json"
@@ -198,17 +220,26 @@ def generate_paper2_results_v2(
     qa_path.write_text(json.dumps(qa, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     files.append(qa_path)
 
-    hash_manifest = _write_hash_manifest(manifest_dir / "paper2_results_v2_manifest.json", files)
     publication_results["generated_files"] = [str(p.relative_to(output_root)) for p in files]
-    publication_results["hash_manifest"] = str(hash_manifest.relative_to(output_root))
+    publication_results["hash_manifest"] = "manifest/paper2_results_v2_manifest.json"
     results_path.write_text(json.dumps(publication_results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    _write_hash_manifest(manifest_dir / "paper2_results_v2_manifest.json", files)
+    hash_manifest = _write_hash_manifest(manifest_dir / "paper2_results_v2_manifest.json", files, base_dir=output_root)
+    receipt_path = _write_generation_receipt(
+        manifest_dir / "generation_receipt_v2.json",
+        freeze_path=freeze_path,
+        dataset_plan_path=dataset_plan_path,
+        evidence_root=evidence_root,
+        output_root=output_root,
+        hash_manifest=hash_manifest,
+        qa=qa,
+    )
 
     return {
         "output_root": str(output_root),
         "publication_results_v2": str(results_path),
         "paper2_qa_v2": str(qa_path),
         "hash_manifest": str(hash_manifest),
+        "generation_receipt": str(receipt_path),
         "apps": len(freeze.get("apps") or {}),
         "runs": len(run_records),
         "qa_status": qa["status"],
@@ -270,6 +301,198 @@ def _build_run_metrics(
                 )
             )
     return records, warnings
+
+
+def _build_excluded_run_rows(
+    *,
+    freeze: Mapping[str, Any],
+    dataset_plan: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    included = {str(run_id) for run_id in freeze.get("included_run_ids") or []}
+    apps = dataset_plan.get("apps") or {}
+    rows: list[dict[str, Any]] = []
+    if not isinstance(apps, Mapping):
+        return rows
+    for package_name, app in apps.items():
+        for run in app.get("runs") or []:
+            run_id = str(run.get("run_id") or "")
+            if not run_id or run_id in included:
+                continue
+            primary_reason = str(run.get("paper_exclusion_primary_reason_code") or "").strip()
+            all_reasons = run.get("paper_exclusion_all_reason_codes") or []
+            if not primary_reason and not all_reasons:
+                if not bool(run.get("paper_eligible")):
+                    primary_reason = "not_paper_eligible"
+                elif not bool(run.get("valid_dataset_run")):
+                    primary_reason = "not_valid_dataset_run"
+                else:
+                    primary_reason = "not_selected_for_locked_build_group"
+            rows.append(
+                {
+                    "display_name": APP_LABELS.get(str(package_name), str(package_name)),
+                    "package_name": str(package_name),
+                    "run_id": run_id,
+                    "version_code": run.get("version_code", ""),
+                    "version_name": run.get("version_name", ""),
+                    "artifact_set_hash": run.get("artifact_set_hash", ""),
+                    "base_apk_sha256": run.get("base_apk_sha256", ""),
+                    "run_profile": run.get("run_profile", ""),
+                    "interaction_level": run.get("interaction_level", ""),
+                    "duration_tier": classify_duration_tier(_float_or_none(run.get("actual_sampling_seconds") or run.get("pcap_capture_duration_s"))).label,
+                    "pcap_size_bytes": run.get("pcap_size_bytes", ""),
+                    "window_count": run.get("window_count_final") or run.get("window_count") or "",
+                    "paper_eligible": run.get("paper_eligible", ""),
+                    "valid_dataset_run": run.get("valid_dataset_run", ""),
+                    "inclusion_status": "excluded_from_locked_dataset",
+                    "exclusion_reason": primary_reason,
+                    "all_exclusion_reasons": ";".join(str(reason) for reason in all_reasons),
+                }
+            )
+    return sorted(rows, key=lambda row: (str(row["package_name"]), str(row["run_id"])))
+
+
+def _build_exclusion_accounting(
+    *,
+    freeze: Mapping[str, Any],
+    dataset_plan: Mapping[str, Any],
+    excluded_run_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    included = {str(run_id) for run_id in freeze.get("included_run_ids") or []}
+    candidate = set(_index_plan_runs(dataset_plan).keys())
+    excluded = {str(row.get("run_id") or "") for row in excluded_run_rows if row.get("run_id")}
+    overlap = sorted(included & excluded)
+    missing_from_accounting = sorted(candidate - included - excluded)
+    extra_accounted = sorted((included | excluded) - candidate)
+    duplicate_exclusion_rows = [
+        run_id for run_id, count in Counter(str(row.get("run_id") or "") for row in excluded_run_rows).items() if run_id and count > 1
+    ]
+    exact = not overlap and not missing_from_accounting and not extra_accounted and not duplicate_exclusion_rows
+    primary_reasons = Counter(str(row.get("exclusion_reason") or "unknown") for row in excluded_run_rows)
+    supplemental_reasons: Counter[str] = Counter()
+    for row in excluded_run_rows:
+        for reason in str(row.get("all_exclusion_reasons") or "").split(";"):
+            reason = reason.strip()
+            if reason:
+                supplemental_reasons[reason] += 1
+    return {
+        "status": "OK" if exact else "BLOCKED",
+        "total_unique_candidate_run_ids": len(candidate),
+        "total_unique_included_run_ids": len(included),
+        "total_unique_excluded_run_ids": len(excluded),
+        "total_exclusion_rows": len(excluded_run_rows),
+        "runs_can_have_multiple_exclusion_rows": False,
+        "included_and_excluded_overlap_count": len(overlap),
+        "included_and_excluded_overlap_run_ids": overlap,
+        "missing_from_accounting_count": len(missing_from_accounting),
+        "missing_from_accounting_run_ids": missing_from_accounting,
+        "extra_accounted_count": len(extra_accounted),
+        "extra_accounted_run_ids": extra_accounted,
+        "duplicate_exclusion_row_run_ids": sorted(duplicate_exclusion_rows),
+        "primary_exclusion_reason_counts": dict(sorted(primary_reasons.items())),
+        "supplemental_exclusion_reason_counts": dict(sorted(supplemental_reasons.items())),
+    }
+
+
+def _build_window_reconciliation_rows(
+    *,
+    freeze: Mapping[str, Any],
+    dataset_plan: Mapping[str, Any],
+    evidence_root: Path,
+) -> list[dict[str, Any]]:
+    plan_runs = _index_plan_runs(dataset_plan)
+    rows: list[dict[str, Any]] = []
+    for run_id in [str(run_id) for run_id in freeze.get("included_run_ids") or []]:
+        plan_run = plan_runs.get(run_id, {})
+        ml_dir = evidence_root / run_id / "analysis" / "ml" / "v1"
+        preflight = _read_json_or_empty(ml_dir / "ml_preflight.json")
+        ml_summary = _read_json_or_empty(ml_dir / "ml_summary.json")
+        planned = _int_or_none(plan_run.get("window_count_final") or plan_run.get("window_count"))
+        raw_extracted = _int_or_none(plan_run.get("window_count_original") or plan_run.get("window_count"))
+        eligible = _int_or_none(preflight.get("windows_total_expected") or ml_summary.get("windows_total"))
+        scored = _count_csv_rows(ml_dir / "anomaly_scores_iforest.csv")
+        expected_drop_from_metadata = _int_or_none(preflight.get("dropped_partial_windows_expected") or ml_summary.get("dropped_partial_windows"))
+        expected_drop = (
+            raw_extracted - eligible
+            if raw_extracted is not None and eligible is not None
+            else expected_drop_from_metadata or 0
+        )
+        observed_difference = (planned - scored) if planned is not None and scored is not None else None
+        additional_removed = (eligible - scored) if eligible is not None and scored is not None else None
+        if scored is None:
+            status = "MISSING_SCORE_FILE"
+            reason = "Isolation Forest score file is missing."
+        elif eligible is not None and scored == eligible:
+            status = "OK"
+            reason = "Scored windows match ML-eligible windows."
+        elif raw_extracted is None:
+            status = "UNKNOWN_RAW_COUNT"
+            reason = "Raw extracted window count was not persisted separately."
+        else:
+            status = "DIFF_EXPLAINED" if additional_removed in (0, None) else "DIFF_REVIEW"
+            reason = "Difference equals expected partial-window drop." if status == "DIFF_EXPLAINED" else "Difference exceeds expected partial-window drop."
+        rows.append(
+            {
+                "run_id": run_id,
+                "package_name": plan_run.get("package_name") or _package_for_run(freeze, run_id),
+                "planned_window_count": planned if planned is not None else "",
+                "raw_extracted_count": raw_extracted if raw_extracted is not None else "",
+                "ml_eligible_count": eligible if eligible is not None else "",
+                "scored_count": scored if scored is not None else "",
+                "expected_partial_window_drop": expected_drop,
+                "expected_partial_window_drop_metadata": expected_drop_from_metadata if expected_drop_from_metadata is not None else "",
+                "additional_removed_windows": additional_removed if additional_removed is not None else "",
+                "observed_difference": observed_difference if observed_difference is not None else "",
+                "reconciliation_status": status,
+                "reason": reason,
+            }
+        )
+    return rows
+
+
+def _build_static_alignment_rows(
+    *,
+    freeze: Mapping[str, Any],
+    dataset_plan: Mapping[str, Any],
+    evidence_root: Path,
+) -> list[dict[str, Any]]:
+    plan_runs = _index_plan_runs(dataset_plan)
+    rows: list[dict[str, Any]] = []
+    static_score_source = REPO_ROOT / "output" / "_internal" / "publication" / "baseline" / "tables" / "table_6_static_posture_scores.csv"
+    for package_name, app in sorted((freeze.get("apps") or {}).items()):
+        included = [str(run_id) for run_id in app.get("included_run_ids") or []]
+        selected_run = plan_runs.get(included[0], {}) if included else {}
+        static_plan = _read_json_or_empty(evidence_root / included[0] / "inputs" / "static_dynamic_plan.json") if included else {}
+        dynamic_version = str(app.get("selected_version_code") or selected_run.get("version_code") or "")
+        dynamic_sha = str(app.get("selected_base_apk_sha256") or selected_run.get("base_apk_sha256") or "")
+        static_version = str(static_plan.get("version_code") or "")
+        static_sha = str((static_plan.get("hashes") or {}).get("sha256") or "")
+        exact = bool(dynamic_version and static_version and dynamic_sha and static_sha and dynamic_version == static_version and dynamic_sha == static_sha)
+        if exact:
+            mismatch_reason = ""
+        elif not static_plan:
+            mismatch_reason = "missing_static_dynamic_plan"
+        elif dynamic_version != static_version:
+            mismatch_reason = "version_code_mismatch"
+        elif dynamic_sha != static_sha:
+            mismatch_reason = "base_apk_sha256_mismatch"
+        else:
+            mismatch_reason = "metadata_incomplete"
+        rows.append(
+            {
+                "display_name": APP_LABELS.get(str(package_name), str(package_name)),
+                "package_name": str(package_name),
+                "selected_dynamic_version_code": dynamic_version,
+                "dynamic_apk_sha256": dynamic_sha,
+                "static_run_id": static_plan.get("static_run_id") or selected_run.get("static_run_id") or "",
+                "static_session": "",
+                "static_version_code": static_version,
+                "static_apk_sha256": static_sha,
+                "exact_match": str(exact).lower(),
+                "static_score_source": str(static_score_source),
+                "mismatch_reason": mismatch_reason,
+            }
+        )
+    return rows
 
 
 def _build_cohort_rows(
@@ -633,7 +856,9 @@ def _build_qa(
     per_app_primary: Mapping[str, Mapping[str, Any]],
     ocsvm_warning_rows: Sequence[Mapping[str, Any]],
     qa_warnings: Sequence[str],
-    legacy_contract: Mapping[str, Any],
+    exclusion_accounting: Mapping[str, Any],
+    window_reconciliation_rows: Sequence[Mapping[str, Any]],
+    static_alignment_rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     app_count = len(freeze.get("apps") or {})
     run_count = len(run_records)
@@ -643,22 +868,65 @@ def _build_qa(
         for pkg, vals in per_app_primary.items()
     }
     warnings = list(qa_warnings)
-    if legacy_contract.get("contains_36_run_guard"):
-        warnings.append("legacy publication_exports_service contains 36-run guard and is retired for Paper 2 v2")
     if label_counts.get("unknown", 0):
         warnings.append("scripted/manual primary table omitted because interaction labels include unknown values")
-    status = "OK" if not [w for w in warnings if not w.startswith("scripted/manual")] else "OK_WITH_WARNINGS"
+    window_status_counts = Counter(str(row.get("reconciliation_status") or "UNKNOWN") for row in window_reconciliation_rows)
+    static_mismatches = [row for row in static_alignment_rows if str(row.get("exact_match") or "").lower() != "true"]
+    static_run_ids = [r.static_run_id for r in run_records if r.static_run_id]
+    missing_static_runs = sorted({r.package_name for r in run_records if not r.static_run_id})
+    package_integrity_status = "OK" if exclusion_accounting.get("status") == "OK" and not missing_static_runs else "BLOCKED"
+    provenance_status = "OK" if not static_mismatches and not missing_static_runs and not [k for k in window_status_counts if k not in {"OK", "DIFF_EXPLAINED"}] else "WARN"
+    scientific_validation_status = "INCOMPLETE"
+    manuscript_readiness_status = "NOT_READY"
+    status = "NOT_READY" if scientific_validation_status == "INCOMPLETE" else package_integrity_status
     return {
         "schema_version": "paper2_qa_v2",
         "status": status,
+        "package_integrity_status": package_integrity_status,
+        "provenance_status": provenance_status,
+        "scientific_validation_status": scientific_validation_status,
+        "manuscript_readiness_status": manuscript_readiness_status,
         "warning_count": len(warnings),
         "warnings": warnings,
         "cohort": {
             "apps": app_count,
             "included_runs": run_count,
             "expected_apps": 15,
-            "expected_runs_current_lock": 112,
+            "expected_runs_from_anchor": len(freeze.get("included_run_ids") or []),
             "apps_with_primary_rdi_pairs": len(per_app_primary),
+        },
+        "exclusion_accounting": dict(exclusion_accounting),
+        "window_reconciliation": {
+            "rows": len(window_reconciliation_rows),
+            "status_counts": dict(sorted(window_status_counts.items())),
+            "path": "paper2_window_reconciliation_v2.csv",
+        },
+        "static_alignment": {
+            "run_records_with_static_run_id": len(static_run_ids),
+            "unique_static_run_ids": len(set(static_run_ids)),
+            "packages_missing_static_run_id": missing_static_runs,
+            "app_rows": len(static_alignment_rows),
+            "mismatch_count": len(static_mismatches),
+            "mismatched_packages": [str(row.get("package_name") or "") for row in static_mismatches],
+            "path": "paper2_static_alignment_v2.csv",
+            "status": "OK" if not static_mismatches and not missing_static_runs else "WARN",
+        },
+        "scientific_validation_scope": {
+            "completed": [
+                "full-precision per-window RDI aggregation",
+                "paired Wilcoxon exact two-sided test",
+                "equal-run and standard-duration sensitivity rows",
+                "independent results/statistics recomputation from score files",
+            ],
+            "incomplete": [
+                "held-out baseline validation",
+                "feature ablation",
+                "simple-volume controls",
+                "temporal-order controls",
+                "multi-seed stability",
+                "baseline-to-baseline controls",
+                "phase-label permutation controls",
+            ],
         },
         "score_source_policy": {
             "rdi_source": "per-run analysis/ml/v1/anomaly_scores_*.csv full-precision window rows",
@@ -683,7 +951,6 @@ def _build_qa(
             "path": "paper2_ocsvm_calibration_warnings_v2.csv",
             "interpretation": "OC-SVM is retained only as a secondary robustness appendix because baseline calibration warnings are present.",
         },
-        "legacy_pipeline_reconciliation": legacy_contract,
     }
 
 
@@ -694,6 +961,79 @@ def _aggregation_policy_text() -> dict[str, str]:
         "equal_run_sensitivity": "Averages each run's RDI equally before app-level pairing so long runs do not dominate.",
         "standard_duration_only_sensitivity": "Restricts to 4 to under 8 minute runs to check whether extended, long observation, or soak runs drive the result.",
         "long_run_policy": "Standard, extended, long observation, and soak runs are included in the primary locked-dataset analysis and disclosed through run-tier sensitivity tables.",
+    }
+
+
+def _selection_flow_summary(*, freeze: Mapping[str, Any], excluded_run_rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    reason_counts = Counter(str(row.get("exclusion_reason") or "unknown") for row in excluded_run_rows)
+    selected_contracts = freeze.get("selected_run_contracts") or {}
+    return {
+        "anchor": "locked 14-day selected build groups",
+        "source_dataset_plan": freeze.get("source_dataset_plan"),
+        "included_run_ids": len(freeze.get("included_run_ids") or []),
+        "excluded_run_rows": len(excluded_run_rows),
+        "excluded_reason_counts": dict(sorted(reason_counts.items())),
+        "selected_run_contract_count": len(selected_contracts) if isinstance(selected_contracts, Mapping) else 0,
+        "selected_build_group_policy": "do not mix baseline and interactive runs across app builds",
+    }
+
+
+def _deterministic_manifest_fields(
+    *,
+    freeze: Mapping[str, Any],
+    dataset_plan: Mapping[str, Any],
+    evidence_root: Path,
+    excluded_run_rows: Sequence[Mapping[str, Any]],
+    static_alignment_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    included_run_ids = sorted(str(run_id) for run_id in freeze.get("included_run_ids") or [])
+    plan_runs = _index_plan_runs(dataset_plan)
+    included_plan_runs = [plan_runs.get(run_id, {}) for run_id in included_run_ids]
+    starts = sorted(str(run.get("started_at") or "") for run in included_plan_runs if run.get("started_at"))
+    ends = sorted(str(run.get("ended_at") or "") for run in included_plan_runs if run.get("ended_at"))
+    score_hashes: dict[str, dict[str, str | None]] = {}
+    feature_hashes: dict[str, str | None] = {}
+    model_manifest_hashes: dict[str, str | None] = {}
+    ml_config_fingerprints: dict[str, str] = {}
+    feature_schema_versions: set[str] = set()
+    for run_id in included_run_ids:
+        ml_dir = evidence_root / run_id / "analysis" / "ml" / "v1"
+        score_hashes[run_id] = {
+            "iforest": _sha256_optional(ml_dir / "anomaly_scores_iforest.csv"),
+            "ocsvm": _sha256_optional(ml_dir / "anomaly_scores_ocsvm.csv"),
+        }
+        feature_hashes[run_id] = _sha256_optional(evidence_root / run_id / "analysis" / "pcap_features.json")
+        model_manifest_path = ml_dir / "model_manifest.json"
+        model_manifest_hashes[run_id] = _sha256_optional(model_manifest_path)
+        manifest = _read_json_or_empty(model_manifest_path)
+        if manifest.get("ml_config_fingerprint"):
+            ml_config_fingerprints[run_id] = str(manifest.get("ml_config_fingerprint"))
+        if manifest.get("feature_schema_version"):
+            feature_schema_versions.add(str(manifest.get("feature_schema_version")))
+    static_source_hashes = {
+        "static_posture_scores": _sha256_optional(
+            REPO_ROOT / "output" / "_internal" / "publication" / "baseline" / "tables" / "table_6_static_posture_scores.csv"
+        ),
+        "static_alignment_rows_hash": _hash_jsonable(static_alignment_rows),
+    }
+    return {
+        "dataset_lock_id": str(freeze.get("freeze_dataset_hash") or ""),
+        "dataset_lock_sha256": str(freeze.get("freeze_dataset_hash") or ""),
+        "lock_window_started_at": starts[0] if starts else "",
+        "lock_window_ended_at": ends[-1] if ends else "",
+        "selected_build_policy_version": str(freeze.get("freeze_contract_version") or freeze.get("freeze_dataset_identity_version") or ""),
+        "ml_scoring_run_id": _hash_jsonable({"score_hashes": score_hashes, "model_manifest_hashes": model_manifest_hashes}),
+        "feature_contract_hash": _hash_jsonable(
+            {
+                "feature_schema_versions": sorted(feature_schema_versions),
+                "feature_hashes": feature_hashes,
+            }
+        ),
+        "model_parameter_hash": _hash_jsonable(ml_config_fingerprints),
+        "score_file_hashes": score_hashes,
+        "included_run_set_hash": _hash_jsonable(included_run_ids),
+        "exclusion_set_hash": _hash_jsonable(excluded_run_rows),
+        "static_source_hashes": static_source_hashes,
     }
 
 
@@ -772,23 +1112,6 @@ def _read_ocsvm_calibration_warnings() -> list[dict[str, Any]]:
     return rows
 
 
-def _audit_legacy_contract() -> dict[str, Any]:
-    findings = {}
-    for name, path in (("publication_exports_service", LEGACY_EXPORT_SERVICE), ("publication_scientific_qa_service", LEGACY_QA_SERVICE)):
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        findings[name] = {
-            "path": str(path),
-            "exists": path.exists(),
-            "contains_36_run_guard": "expected 36" in text or "len(included_run_ids) != 36" in text,
-        }
-    return {
-        "status": "retired_for_paper2_v2" if any(v["contains_36_run_guard"] for v in findings.values()) else "generalized_or_absent",
-        "contains_36_run_guard": any(v["contains_36_run_guard"] for v in findings.values()),
-        "services": findings,
-        "canonical_v2_writer": "scytaledroid.Reporting.services.paper2_results_v2_service.generate_paper2_results_v2",
-    }
-
-
 def _write_figures(figures_dir: Path, per_app_rows: Sequence[Mapping[str, Any]]) -> list[Path]:
     import matplotlib
 
@@ -847,12 +1170,46 @@ def _write_latex_statistics(path: Path, statistics_rows: Sequence[Mapping[str, A
     return path
 
 
-def _write_hash_manifest(path: Path, files: Sequence[Path]) -> Path:
+def _write_hash_manifest(path: Path, files: Sequence[Path], *, base_dir: Path | None = None) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
+    base = Path(base_dir) if base_dir is not None else None
     for file in files:
         if file.exists():
-            rows.append({"path": str(file), "sha256": _sha256(file), "bytes": file.stat().st_size})
-    path.write_text(json.dumps({"generated_at_utc": datetime.now(UTC).isoformat(), "files": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            try:
+                display_path = str(file.relative_to(base)) if base is not None else str(file)
+            except ValueError:
+                display_path = str(file)
+            rows.append({"path": display_path, "sha256": _sha256(file), "bytes": file.stat().st_size})
+    path.write_text(json.dumps({"schema_version": "paper2_results_v2_hash_manifest", "files": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_generation_receipt(
+    path: Path,
+    *,
+    freeze_path: Path,
+    dataset_plan_path: Path,
+    evidence_root: Path,
+    output_root: Path,
+    hash_manifest: Path,
+    qa: Mapping[str, Any],
+) -> Path:
+    payload = {
+        "schema_version": "paper2_results_v2_generation_receipt",
+        "generated_at_utc": datetime.now(UTC).isoformat(),
+        "freeze_path": str(freeze_path),
+        "freeze_sha256": _sha256(freeze_path),
+        "dataset_plan_path": str(dataset_plan_path),
+        "dataset_plan_sha256": _sha256(dataset_plan_path) if dataset_plan_path.exists() else None,
+        "evidence_root": str(evidence_root),
+        "output_root": str(output_root),
+        "hash_manifest": str(hash_manifest),
+        "hash_manifest_sha256": _sha256(hash_manifest),
+        "qa_status": qa.get("status"),
+        "qa_warning_count": qa.get("warning_count"),
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
@@ -880,12 +1237,31 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _read_json_or_empty(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _sha256_optional(path: Path) -> str | None:
+    return _sha256(path) if path.exists() else None
+
+
+def _hash_jsonable(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -895,6 +1271,34 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _count_csv_rows(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.reader(handle)
+        try:
+            next(reader)
+        except StopIteration:
+            return 0
+        return sum(1 for row in reader if any(str(cell).strip() for cell in row))
+
+
+def _package_for_run(freeze: Mapping[str, Any], run_id: str) -> str:
+    for package_name, app in (freeze.get("apps") or {}).items():
+        if run_id in {str(rid) for rid in app.get("included_run_ids") or []}:
+            return str(package_name)
+    return ""
 
 
 def _truthy(value: Any) -> bool:

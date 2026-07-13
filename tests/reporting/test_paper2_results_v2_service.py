@@ -126,8 +126,22 @@ def test_standard_duration_only_policy_filters_extended_runs() -> None:
     assert standard["com.example"]["interactive_rdi"] == 0.9
 
 
-def test_legacy_contract_detects_old_36_run_writer() -> None:
-    legacy = svc._audit_legacy_contract()
+def test_hash_manifest_is_deterministic_and_relative(tmp_path: Path) -> None:
+    output_root = tmp_path / "out"
+    table = output_root / "paper2_statistics_v2.csv"
+    table.parent.mkdir(parents=True)
+    table.write_text("metric,value\nx,1\n", encoding="utf-8")
 
-    assert legacy["canonical_v2_writer"].endswith("generate_paper2_results_v2")
-    assert legacy["contains_36_run_guard"] is True
+    manifest = svc._write_hash_manifest(
+        output_root / "manifest" / "paper2_results_v2_manifest.json",
+        [table],
+        base_dir=output_root,
+    )
+
+    first = manifest.read_text(encoding="utf-8")
+    second_path = svc._write_hash_manifest(manifest, [table], base_dir=output_root)
+    second = second_path.read_text(encoding="utf-8")
+
+    assert first == second
+    assert "generated_at_utc" not in first
+    assert '"path": "paper2_statistics_v2.csv"' in first

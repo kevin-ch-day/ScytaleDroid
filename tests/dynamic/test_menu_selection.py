@@ -299,7 +299,7 @@ def test_run_package_selection_menu_uses_operator_friendly_progress_labels(
         "complete",
         "valid",
         "current",
-        "3/3",
+        "4/3",
         "0",
         "2/2",
         "0",
@@ -788,9 +788,10 @@ def test_render_package_table_uses_manual_column_and_extra_counts(monkeypatch, c
     ]
 
 
-def test_main_progress_label_prefers_extra_suffix_over_rolled_fraction() -> None:
-    assert menu_selection._main_progress_label(3, 1, required=3) == "3/3 (+1 extra)"
-    assert menu_selection._main_progress_label(5, 1, required=5) == "5/5 (+1 extra)"
+def test_main_progress_label_rolls_extra_evidence_into_fraction() -> None:
+    assert menu_selection._main_progress_label(3, 1, required=3) == "4/3 complete"
+    assert menu_selection._main_progress_label(5, 1, required=5) == "6/5 complete"
+    assert menu_selection._main_progress_label(3, 1, required=5, missing=2) == "4/5 need 2"
     assert menu_selection._main_progress_label(0, 0, required=2, missing=2) == "0/2 need 2"
 
 
@@ -910,7 +911,7 @@ def test_render_queue_section_table_preserves_mixed_validl_and_invalid_states(mo
         "interactive",
         "valid",
         "current",
-        "3/3",
+        "4/3",
         "0",
         "0/2",
         "0",
@@ -1010,7 +1011,7 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
         "complete",
         "valid",
         "current",
-        "3/3",
+        "4/3",
         "0",
         "2/2",
         "0",
@@ -1022,7 +1023,7 @@ def test_compact_queue_table_shows_all_apps_together_and_script_labels(monkeypat
         "interactive",
         "valid",
         "current",
-        "3/3",
+        "4/3",
         "0",
         "0/2",
         "0",
@@ -1088,7 +1089,7 @@ def test_compact_queue_table_marks_live_build_drift_as_refresh(monkeypatch) -> N
         "refresh",
         "valid",
         "drift",
-        "3/3",
+        "4/3",
         "0",
         "0/2",
         "1",
@@ -1447,7 +1448,7 @@ def test_compact_queue_table_uses_standard_layout_at_80_columns(monkeypatch) -> 
         "interactive",
         "valid",
         "current",
-        "3/3",
+        "4/3",
         "0",
         "0/2",
         "0",

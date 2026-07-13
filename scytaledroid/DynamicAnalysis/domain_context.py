@@ -900,6 +900,17 @@ def default_domain_references() -> tuple[DomainReference, ...]:
             source_url="https://www.mux.com/docs/core/content-security-policy",
         ),
         DomainReference(
+            "",
+            "mediamelon.com",
+            "SUFFIX",
+            "third_party",
+            "video_qoe_analytics",
+            "high",
+            "curated_suffix",
+            source_url="https://docs.mediamelon.com/mediamelon",
+            notes="Observed as register.mediamelon.com during CNN video playback; MediaMelon SmartSight is a streaming analytics/QoE platform.",
+        ),
+        DomainReference(
             "", "appsflyersdk.com", "SUFFIX", "third_party", "attribution_measurement", "high", "curated_suffix"
         ),
         DomainReference(

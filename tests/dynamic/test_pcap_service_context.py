@@ -12,6 +12,7 @@ def test_summarize_pcap_service_context_resolves_services_and_signals() -> None:
         "top_sni": [
             {"value": "pagead2.googlesyndication.com", "count": 5},
             {"value": "media.cnn.com", "count": 3},
+            {"value": "register.mediamelon.com", "count": 2},
         ],
     }
 
@@ -28,12 +29,14 @@ def test_summarize_pcap_service_context_resolves_services_and_signals() -> None:
     assert "cnn_first_party" in service_keys
     assert "urbanairship" in service_keys
     assert "google_ads" in service_keys
+    assert "mediamelon" in service_keys
 
     assert service_signals["status"] == "ok"
     signal_keys = [row["signal_key"] for row in service_signals["signals"]]
     assert "first_party_publisher_api" in signal_keys
     assert "push_or_engagement_platform" in signal_keys
     assert "third_party_advertising" in signal_keys
+    assert "third_party_analytics_measurement" in signal_keys
     assert service_signals["focus_area_hit_counts"]["privacy"] >= 9
 
 

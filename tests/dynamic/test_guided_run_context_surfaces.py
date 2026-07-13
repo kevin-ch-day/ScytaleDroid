@@ -194,7 +194,7 @@ def test_guided_run_reports_historical_and_retained_extra_context(monkeypatch, c
     assert "Qualification" in out
     assert "Strict idle  3/3" in out
     assert "Quiescent FG  0" in out
-    assert "Interactive  0/4 (+1 extra)" in out
+    assert "Interactive  1/4" in out
 
 
 def test_guided_run_reports_low_signal_retained_extra_current_build_context(
@@ -242,7 +242,7 @@ def test_guided_run_reports_low_signal_retained_extra_current_build_context(
     assert select_package_calls["count"] == 2
     assert "Retained extra baseline: 2 low-signal idle run(s) retained outside quota." not in out
     assert "Qualification" in out
-    assert "Strict idle  2/3 (+2 low)" in out
+    assert "Strict idle  2/3" in out
     assert "Quiescent FG  0" in out
 
 

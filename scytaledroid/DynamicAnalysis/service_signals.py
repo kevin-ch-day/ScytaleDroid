@@ -248,6 +248,12 @@ def default_service_signal_map_entries() -> tuple[ServiceSignalMapEntry, ...]:
         ServiceSignalMapEntry("freewheel", "third_party_advertising"),
         ServiceSignalMapEntry("freewheel", "ad_measurement_or_verification", signal_strength="secondary", confidence="medium"),
         ServiceSignalMapEntry("mux_data", "third_party_analytics_measurement", confidence="medium"),
+        ServiceSignalMapEntry(
+            "mediamelon",
+            "third_party_analytics_measurement",
+            confidence="high",
+            rationale="Streaming QoE/player telemetry observed during CNN video playback.",
+        ),
         ServiceSignalMapEntry("brightline_ctv", "third_party_advertising"),
         ServiceSignalMapEntry("confiant_ad_security", "ad_measurement_or_verification", confidence="medium"),
         ServiceSignalMapEntry("confiant_ad_security", "bot_or_abuse_prevention", signal_strength="secondary", confidence="medium"),

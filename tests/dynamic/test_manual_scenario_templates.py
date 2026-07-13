@@ -17,6 +17,10 @@ from scytaledroid.DynamicAnalysis.scenarios.manual import (
 )
 from scytaledroid.DynamicAnalysis.scenarios import interactive_guidance
 from scytaledroid.DynamicAnalysis.scenarios.manual_templates import template_steps_for_id
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    NEWS_BEHAVIOR_V2,
+    news_step_metadata,
+)
 from tests.dynamic._manual_protocol_support import _ctx
 
 
@@ -142,6 +146,29 @@ def test_facebook_behavior_v3_has_consolidated_step_count() -> None:
     steps = template_steps_for_id("facebook_behavior_v3")
     assert steps is not None
     assert len(steps) == 44
+
+
+def test_news_behavior_v2_emits_runtime_phase_metadata() -> None:
+    article = news_step_metadata(
+        template_id=NEWS_BEHAVIOR_V2,
+        step_id="open_article",
+        article_branch="article_opened",
+    )
+    media = news_step_metadata(
+        template_id=NEWS_BEHAVIOR_V2,
+        step_id="video_or_media_optional",
+        article_branch="article_opened",
+    )
+    gate = news_step_metadata(
+        template_id=NEWS_BEHAVIOR_V2,
+        step_id="subscription_wall_observe",
+        article_branch="subscription_required",
+    )
+
+    assert article["traffic_phase"] == "article_open_or_gate"
+    assert media["traffic_phase"] == "media_surface_optional"
+    assert gate["traffic_phase"] == "subscription_gate_observe"
+    assert gate["subscription_wall_observed"] is True
 
 
 def test_facebook_behavior_v3_merged_open_hold_pairs_use_view_pattern() -> None:

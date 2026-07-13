@@ -107,7 +107,7 @@ Use **`information_schema.TABLES`** (`TABLE_SCHEMA = DATABASE()`) to list every 
 
 | Table | Why it exists | Code refs | Recommended action |
 | --- | --- | --- | --- |
-| `ml_feature_windows`, `ml_scores` | Publication / ML scoring schema (`canonical/schema.py`) | `publication_pipeline_audit_service.py` | **future_empty** — keep; verify 0-row OK in prod until ML pipeline runs |
+| `ml_feature_windows`, `ml_scores` | Publication / ML scoring schema (`canonical/schema.py`) | ML QA and Paper 2 v2 results services | **future_empty** — keep; verify 0-row OK in prod until ML pipeline runs |
 | `perm_groups` | Permission taxonomy / grouping (`schema_manifest` + `permissions/taxonomy.py`) | `reset_static` list, taxonomy module | **future_empty** or seed later — **do not drop** without taxonomy review |
 | `static_dynload_events`, `static_reflection_calls` | Static dynamic-load harvest feature (`harvest/dynamic_loading.py`) | `views_static.py` (`vw_dynload_hotspots`), `static_schema_audit.py` `SPARSE_ZERO_OK_TABLES` | **future_empty** if feature unused — classify **read-only**; clear only in dev after backup |
 | `analysis_dynamic_cohort_status` | Analysis registry (`analysis/schema.py`) | `health_checks/analysis_integrity.py` REQUIRED list, `bootstrap.py` | **future_empty** until analysis jobs populate — **do not drop** (posture check expects BASE TABLE) |

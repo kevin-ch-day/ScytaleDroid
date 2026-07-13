@@ -337,7 +337,7 @@ def test_refresh_summaries_apply_rewrites_summary_even_when_summary_json_is_unch
         "counts_toward_quota": False,
         "quota_detail": {
             "countable": False,
-            "countability_label": "NO (extra run)",
+            "countability_label": "NO (retained evidence)",
             "cohort_eligibility": "EXTRA",
             "invalid_reason_code": None,
         },
@@ -402,7 +402,7 @@ def test_refresh_summaries_apply_rewrites_summary_even_when_summary_json_is_unch
 
     assert summary["runs_updated"] == 1
     rendered = (run_dir / "analysis" / "summary.md").read_text(encoding="utf-8")
-    assert "Counts toward quota: NO (extra run)." in rendered
+    assert "Counts toward quota: NO (retained evidence)." in rendered
     assert "Invalid reason: —." in rendered
 
 

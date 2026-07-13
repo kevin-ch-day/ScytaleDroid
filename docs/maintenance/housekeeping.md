@@ -97,7 +97,7 @@ After Tier 1 patterns are stable:
 - `scytaledroid/StaticAnalysis/cli/execution/results.py`
 - `scytaledroid/StaticAnalysis/cli/persistence/run_summary.py`
 - `scytaledroid/StaticAnalysis/cli/flows/run_dispatch.py`
-- `scytaledroid/Reporting/services/publication_exports_service.py`
+- `scytaledroid/Reporting/services/paper2_results_v2_service.py`
 - `scytaledroid/Database/db_queries/views_web.py`
 
 Rationale: closer to persistence/report contracts, DB read models, and output semantics; requires bounded, compatibility-preserving refactors.

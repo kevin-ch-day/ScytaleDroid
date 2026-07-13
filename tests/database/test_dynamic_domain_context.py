@@ -648,6 +648,14 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert mux["owner_class"] == "third_party"
     assert mux["role_class"] == "video_analytics_measurement"
 
+    mediamelon = classify_domain(
+        "register.mediamelon.com",
+        package_name="com.cnn.mobile.android.phone",
+        references=refs,
+    )
+    assert mediamelon["owner_class"] == "third_party"
+    assert mediamelon["role_class"] == "video_qoe_analytics"
+
     brightline = classify_domain(
         "cdn-media.brightline.tv",
         package_name="com.cnn.mobile.android.phone",

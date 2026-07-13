@@ -508,9 +508,9 @@ class DynamicRunSummarizer:
         if exclusion_reason == "EXCLUDED_MANUAL_NON_COHORT":
             return "NO (manual exploratory)"
         if cohort_eligibility == "EXTRA":
-            return "NO (extra run)"
+            return "NO (retained evidence)"
         if dataset.get("countable") is False:
-            return "NO (extra run)"
+            return "NO (retained evidence)"
         return "UNKNOWN"
 
     def _countability_reason(

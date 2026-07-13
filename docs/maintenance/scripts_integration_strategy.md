@@ -291,11 +291,13 @@ All other paths still need a **per-environment** decision before removal.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `export_profile.py` | supported_operator | MIX | opt | yes | supported_entrypoints | Publication entry | keep |
 | `export_manifest_gate.py` | ci_or_gate | RO | none | yes | export_manifest_contract.md; legacy term gate | publication CI | keep |
-| `ingest_publication_bundle.py` | demo_transitional | MIX | core | yes | supported_entrypoints; legacy term gate | DB maintenance (ingest) | keep |
+| `generate_paper2_results_v2.py` | supported_operator | RO | none | yes | supported_entrypoints | Paper 2 v2 results package | keep |
+| `validate_paper2_results_v2.py` | supported_operator | RO | none | yes | supported_entrypoints | independent Paper 2 v2 validation | keep |
+| `ingest_publication_bundle.py` | retired | MIX | core | n/a | retired v1 publication bundle ingest | DB maintenance (legacy ingest) | remove |
 | `publication_exports.py` | demo_transitional | RO | none | partial | supported_entrypoints | thin service wrapper | keep |
 | `publication_results_numbers.py` | demo_transitional | RO | none | partial | supported_entrypoints | thin wrapper | keep |
 | `publication_scientific_qa.py` | demo_transitional | RO | none | partial | supported_entrypoints | thin wrapper | keep |
-| `publication_pipeline_audit.py` | demo_transitional | RO | none | partial | supported_entrypoints | thin wrapper | keep |
+| `publication_pipeline_audit.py` | retired | RO | none | n/a | retired v1 36-run audit contract | thin wrapper | remove |
 | `publication_ml_audit_report.py` | demo_transitional | RO | none | partial | supported_entrypoints; legacy term gate | thin wrapper | keep |
 | `profile_v3_exports.py` | demo_transitional | RO | none | partial | supported_entrypoints | thin wrapper | keep |
 

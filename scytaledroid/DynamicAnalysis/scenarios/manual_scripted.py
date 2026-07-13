@@ -281,6 +281,27 @@ def facebook_traffic_phase_for_step(step_id: str) -> str:
     return "foreground_hold"
 
 
+def news_traffic_phase_for_step(step_id: str) -> str:
+    sid = str(step_id or "").strip()
+    if sid == "open_home":
+        return "news_home_feed"
+    if sid == "scroll_headlines":
+        return "news_feed_scroll"
+    if sid == "open_article":
+        return "article_open_or_gate"
+    if sid == "article_scroll":
+        return "article_scroll"
+    if sid in {"article_return_home", "subscription_return_home"}:
+        return "return_home"
+    if sid == "subscription_wall_observe":
+        return "subscription_gate_observe"
+    if sid == "subscription_options_observe":
+        return "subscription_options_observe"
+    if sid == "video_or_media_optional":
+        return "media_surface_optional"
+    return "foreground_hold"
+
+
 def scripted_step_metadata(
     *,
     template_id: str,
@@ -348,6 +369,7 @@ def news_step_metadata(
             and str(step_outcome or "completed") != "skipped_branch_not_taken"
         ),
         "return_home_performed": return_home_performed,
+        "traffic_phase": news_traffic_phase_for_step(step_id),
         "protocol_fit": "limited_but_compliant" if branch in {"subscription_required", "login_required"} else None,
     }
 
@@ -591,6 +613,7 @@ __all__ = [
     "repeat_metadata_for_step",
     "whatsapp_text_behavior_metadata",
     "facebook_traffic_phase_for_step",
+    "news_traffic_phase_for_step",
     "scripted_step_metadata",
     "news_step_metadata",
     "prompt_news_subscription_branch",

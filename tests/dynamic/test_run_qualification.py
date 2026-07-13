@@ -283,8 +283,12 @@ def test_queue_labels_use_evidence_and_detail_columns() -> None:
         interactive_countable = 2
         interactive_extra = 1
         interactive_low_signal_supplemental = 1
+        need_baseline = 0
+        need_interactive = 0
 
     row = _Row()
+    assert app_queue_state.queue_idle_baseline_label(row, baseline_required=3) == "4/3"
+    assert app_queue_state.queue_runs_label(row, total_required=7) == "8/7"
     assert app_queue_state.queue_baseline_runs_label(row, baseline_required=3) == "4/3"
     assert app_queue_state.queue_baseline_quota_label(row, baseline_required=3) == "3/3"
     assert app_queue_state.queue_baseline_supplemental_label(row, baseline_required=3) == "+1 extra"

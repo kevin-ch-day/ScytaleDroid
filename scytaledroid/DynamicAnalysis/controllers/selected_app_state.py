@@ -272,11 +272,10 @@ def selected_app_quota_label(
     missing = max(0, int(baseline_required) - int(baseline_valid_runs)) + max(
         0, int(interactive_required) - int(interactive_valid_runs)
     )
+    evidence_total = countable + max(0, int(extra_valid_runs))
     if missing <= 0:
-        if int(extra_valid_runs) > 0:
-            return f"{countable}/{required}+{int(extra_valid_runs)}"
-        return f"{countable}/{required}"
-    return f"{countable}/{required} n{missing}"
+        return f"{evidence_total}/{required}"
+    return f"{evidence_total}/{required} n{missing}"
 
 
 def selected_app_state_snapshot(

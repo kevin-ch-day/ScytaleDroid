@@ -180,9 +180,9 @@ def test_workbench_shows_cnn_style_qualification() -> None:
     )
 
     assert "Current build evidence" in out
-    assert "Strict idle  3/3 (+1 extra)" in out
+    assert "Strict idle  4/3" in out
     assert "Quiescent FG  0" in out
-    assert "Interactive  3/4 (+1 extra)" in out
+    assert "Interactive  4/4" in out
     assert "Qualification" in out
     assert "Quota-counted valid     : 6" in out
     assert "Extra valid             : 2" in out
@@ -219,7 +219,7 @@ def test_workbench_shows_x_style_qualification() -> None:
         )
     )
 
-    assert "Strict idle  2/3 (+1 low)" in out
+    assert "Strict idle  2/3" in out
     assert "Quiescent FG  0" in out
     assert "Interactive  0/4" in out
     assert "Quota-counted valid     : 2" in out
@@ -260,7 +260,7 @@ def test_workbench_shows_whatsapp_style_qualification() -> None:
 
     assert "Strict idle  3/3" in out
     assert "Quiescent FG  0" in out
-    assert "Interactive  2/4 (+1 extra, +1 low)" in out
+    assert "Interactive  3/4" in out
     assert "Quota-counted valid     : 5" in out
     assert "Extra valid             : 1" in out
     assert "Low-signal retained     : 1" in out

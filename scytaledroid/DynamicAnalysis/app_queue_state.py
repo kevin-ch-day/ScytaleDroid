@@ -259,10 +259,10 @@ def queue_table_build_label(row: Any) -> str:
 
 
 def queue_idle_baseline_label(row: Any, *, baseline_required: int) -> str:
-    return bucket_quota_label(
-        countable=int(row.baseline_countable),
-        required=int(baseline_required),
+    strict_idle_total = int(row.baseline_countable) + int(
+        getattr(row, "baseline_extra", 0) or 0
     )
+    return f"{max(0, strict_idle_total)}/{max(0, int(baseline_required))}"
 
 
 def queue_non_idle_baseline_label(row: Any) -> str:
@@ -350,11 +350,10 @@ def queue_runs_label(row: Any, *, total_required: int) -> str:
         + int(getattr(row, "interactive_low_signal_supplemental", 0) or 0)
     )
     missing = int(row.need_baseline) + int(row.need_interactive)
+    evidence_total = max(0, countable + extra)
     if missing <= 0:
-        if extra > 0:
-            return f"{countable}/{int(total_required)} +{extra}"
-        return f"{countable}/{int(total_required)}"
-    return f"{countable}/{int(total_required)} need {missing}"
+        return f"{evidence_total}/{int(total_required)}"
+    return f"{evidence_total}/{int(total_required)} need {missing}"
 
 
 def queue_baseline_evidence_label(row: Any, *, baseline_required: int) -> str:
@@ -674,11 +673,10 @@ def main_progress_label(
     extra_i = max(0, int(extra))
     required_i = max(0, int(required))
     missing_i = max(0, int(missing if missing is not None else max(required_i - count_i, 0)))
+    evidence_total = count_i + extra_i
     if missing_i == 0:
-        if extra_i > 0:
-            return f"{count_i}/{required_i}{format_supplemental_suffix(extra=extra_i)}"
-        return f"{count_i}/{required_i} complete"
-    return f"{count_i}/{required_i} need {missing_i}"
+        return f"{evidence_total}/{required_i} complete"
+    return f"{evidence_total}/{required_i} need {missing_i}"
 
 
 def manual_progress_label(row: Any, *, interactive_required: int) -> str:

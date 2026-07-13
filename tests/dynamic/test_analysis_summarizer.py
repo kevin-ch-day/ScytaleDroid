@@ -680,9 +680,9 @@ def test_summarizer_uses_paper_exclusion_reason_for_valid_supplemental_run(tmp_p
 
     assert summary["dataset_verdict"] == "VALID"
     assert summary["counts_toward_quota"] is False
-    assert summary["quota_detail"]["countability_label"] == "NO (extra run)"
+    assert summary["quota_detail"]["countability_label"] == "NO (retained evidence)"
     assert summary["quota_detail"]["invalid_reason_code"] == "EXCLUDED_SCRIPT_ABORT"
-    assert "Counts toward quota: NO (extra run)." in rendered
+    assert "Counts toward quota: NO (retained evidence)." in rendered
     assert "Invalid reason: EXCLUDED_SCRIPT_ABORT." in rendered
 
 
@@ -747,14 +747,14 @@ def test_summarizer_keeps_baseline_not_idle_as_activity_tag_not_exclusion(tmp_pa
     assert summary["countability_reason"] == "EXTRA_RUN"
     assert summary["exploratory_class"] == "BASELINE_NOT_IDLE"
     assert summary["capture_duration_s"] == 301.2
-    assert summary["quota_detail"]["countability_label"] == "NO (extra run)"
+    assert summary["quota_detail"]["countability_label"] == "NO (retained evidence)"
     assert summary["quota_detail"]["exploratory_class"] == "BASELINE_NOT_IDLE"
     assert summary["quota_detail"]["baseline_not_idle"] is True
     assert summary["quota_detail"]["baseline_not_idle_reasons"] == [
         "BASELINE_BYTES_HIGH",
         "BASELINE_QUIC_MEDIA_HEAVY",
     ]
-    assert "Counts toward quota: NO (extra run)." in rendered
+    assert "Counts toward quota: NO (retained evidence)." in rendered
 
 
 def test_summarizer_surfaces_quota_window_metrics_from_pcap_features(tmp_path: Path) -> None:

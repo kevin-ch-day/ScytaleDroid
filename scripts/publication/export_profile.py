@@ -2,7 +2,7 @@
 """Dispatch publication exports by explicit profile selection.
 
 This script exists to make the supported OSS surface unambiguous:
-- Profile v2 (frozen cohort): exports under output/publication/ (legacy-compatible surface).
+- Profile v2 (locked runtime): exports the canonical Paper 2 v2 results package.
 - Profile v3 (structural): exports under output/publication/profile_v3/.
 
 No "auto" mode: callers must choose a profile explicitly.
@@ -20,18 +20,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.Reporting.services.profile_v3_exports_service import main as run_profile_v3_exports
-from scytaledroid.Reporting.services.publication_exports_service import generate_publication_exports
-from scytaledroid.Reporting.services.publication_results_numbers_service import generate_results_numbers
+from scytaledroid.Reporting.services.paper2_results_v2_service import generate_paper2_results_v2
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Dispatch publication exports by profile (explicit)")
     p.add_argument("--profile", required=True, choices=["v2", "v3"], help="Export profile to run.")
-    p.add_argument(
-        "--v2-include-results-numbers",
-        action="store_true",
-        help="Also generate v2 manuscript numbers/blocks (publication_results_numbers.py).",
-    )
+    p.add_argument("--output-root", type=Path, default=None, help="Override the v2 results package output directory.")
     p.add_argument(
         "--strict",
         action="store_true",
@@ -40,9 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     if args.profile == "v2":
-        generate_publication_exports()
-        if args.v2_include_results_numbers:
-            generate_results_numbers()
+        kwargs = {"output_root": args.output_root} if args.output_root else {}
+        generate_paper2_results_v2(**kwargs)
         return 0
 
     if args.profile == "v3":

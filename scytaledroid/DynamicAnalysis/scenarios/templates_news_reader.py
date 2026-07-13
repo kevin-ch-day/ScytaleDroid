@@ -32,7 +32,11 @@ SCRIPT_STEPS_NEWS_READER_BEHAVIOR_V2: tuple[tuple[str, str, int], ...] = (
     ("subscription_wall_observe", "Subscription branch: observe subscription wall.", 30),
     ("subscription_options_observe", "Subscription branch: open subscription options, hold, then return.", 30),
     ("subscription_return_home", "Subscription branch: return Home and hold briefly.", 15),
-    ("video_or_media_optional", "Optional: open a visible video/media item, watch/hold, then return Home.", 30),
+    (
+        "video_or_media_optional",
+        "Optional: open a visible video, Shorts, Watch, Audio, or podcast surface, watch/hold briefly, then return Home. Avoid external share, sign-in, or payment flows.",
+        30,
+    ),
     ("final_hold", "Remain on the main feed until target duration completes.", 0),
 )
 
@@ -105,6 +109,7 @@ V3_SCRIPTED_REPRO_TIPS_NEWS: dict[str, tuple[str, ...]] = {
         "Use public/home feed surfaces; avoid login, comments, or sharing.",
         "If an article is blocked by subscription/login, follow the matching branch instead of scrolling blocked content.",
         "Subscription walls are useful runtime phases; observe them rather than treating them as failed article reads.",
+        "CNN-like apps may expose separate Shorts, Watch, Audio, podcast, or interactive surfaces; record gated previews and subscription-required states as media/subscription phases rather than failures.",
     ),
     "bbc_news_behavior_v1": (
         "Prefer calm BBC section surfaces such as News, Business, Technology, or More; avoid Video, Live, and Audio playback unless media behavior is the goal.",

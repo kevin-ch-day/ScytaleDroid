@@ -98,6 +98,70 @@ def test_summarize_security_surface_builds_ethical_hacking_bundle(
     assert any(item.get("category") == "cleartext" for item in surface["findings"])
 
 
+def test_summarize_security_surface_contextualizes_dns_anomaly_samples(
+    monkeypatch, tmp_path: Path
+) -> None:
+    pcap_path = tmp_path / "sample.pcap"
+    pcap_path.write_bytes(b"pcap")
+
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.security_surface._protocol_hierarchy",
+        lambda *args, **kwargs: [{"protocol": "tls", "frames": 4, "bytes": 900}],
+    )
+
+    def _fake_run_tshark(cmd, timeout):
+        joined = " ".join(cmd)
+        if "http.request || http.response" in joined:
+            return 0, "", ""
+        if "dns.qry.name" in joined and "dns.flags.response == 0" in joined:
+            return (
+                0,
+                "\n".join(
+                    [
+                        "out053a3bejgh7t0phqa0csou.litix.io",
+                        "register.mediamelon.com",
+                        "a.b.c.d.e.cnn.com",
+                        "audience.cnn.com",
+                        "smetrics.cnn.com",
+                        "www.cnn.com",
+                        "media.cnn.com",
+                        "default.any-any.prd.api.discomax.com",
+                    ]
+                ),
+                "",
+            )
+        if "dns.qry.type" in joined:
+            return 0, "1\n1\n1\n1\n", ""
+        if "tls.alert_message" in joined:
+            return 0, "", ""
+        if "tls.handshake.type == 11" in joined:
+            return 0, "", ""
+        if "frame.number" in joined:
+            return 0, "", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(
+        "scytaledroid.DynamicAnalysis.pcap.security_surface._run_tshark",
+        _fake_run_tshark,
+    )
+
+    surface = summarize_security_surface(
+        pcap_path,
+        tshark_path="tshark",
+        package_name="com.cnn.mobile.android.phone",
+    )
+
+    dns = surface["dns_anomalies"]
+    assert "high_entropy_dns_labels" in dns["risk_flags"]
+    assert "deep_subdomain_queries" in dns["risk_flags"]
+    known_domains = {row["domain"]: row for row in dns["known_context_samples"]}
+    assert known_domains["out053a3bejgh7t0phqa0csou.litix.io"]["role_class"] == "video_analytics_measurement"
+    assert known_domains["a.b.c.d.e.cnn.com"]["owner_class"] == "first_party"
+    dns_findings = [row for row in surface["findings"] if row.get("category") == "dns"]
+    assert dns_findings
+    assert any(row["evidence"]["known_context_samples"] for row in dns_findings)
+
+
 def test_http_observed_from_report_prefers_security_surface() -> None:
     assert http_observed_from_report(
         {
@@ -486,3 +550,35 @@ def test_render_security_review_md_includes_findings() -> None:
     assert "# PCAP Security Review (metadata)" in md
     assert "HTTP metadata observed" in md
     assert "Cleartext HTTP" not in md or "HTTP metadata observed: yes" in md
+
+
+def test_render_security_review_md_includes_dns_context_samples() -> None:
+    md = render_security_review_md(
+        {
+            "status": "ok",
+            "finding_count": 1,
+            "risk_flags": ["high_entropy_dns_labels"],
+            "findings": [],
+            "cleartext": {"http_observed": False, "visibility_class": "encrypted_or_opaque_dominant"},
+            "dns_anomalies": {
+                "unique_qnames": 8,
+                "nxdomain_responses": 0,
+                "txt_queries": 0,
+                "max_label_entropy": 4.23,
+                "known_context_samples": [
+                    {
+                        "domain": "out053a3bejgh7t0phqa0csou.litix.io",
+                        "role_class": "video_analytics_measurement",
+                        "owner_class": "third_party",
+                    }
+                ],
+            },
+            "tls_surface": {},
+            "domain_inventory": {},
+        },
+        package_name="com.cnn.mobile.android.phone",
+        dynamic_run_id="run-1",
+    )
+
+    assert "Known context samples" in md
+    assert "video_analytics_measurement" in md

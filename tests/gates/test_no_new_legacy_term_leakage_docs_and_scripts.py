@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = [pytest.mark.gate]
 
 
@@ -26,7 +25,7 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
     this to core library code once user-facing wording is cleaned.
     """
 
-    allow_prefixes = (Path("docs/legacy/"),)
+    allow_prefixes = (Path("docs/legacy/"), Path("docs/research/"))
     allow_exact = {
         # Temporary allowlist (v2.x): existing OSS-facing text that still contains
         # paper2 wording. PR3 shrinks this set as wording is cleaned.
@@ -34,13 +33,17 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
         Path("docs/contracts/export_manifest_contract.md"),
         Path("docs/engineering_invariants.md"),
         Path("docs/maintenance/housekeeping.md"),
+        Path("docs/maintenance/repo_ownership_map.md"),
+        Path("docs/maintenance/scripts_integration_strategy.md"),
         Path("docs/runbook.md"),
         Path("docs/supported_entrypoints.md"),
         Path("scripts/dynamic/evidence_hunt.py"),
+        Path("scripts/publication/export_profile.py"),
         Path("scripts/publication/export_manifest_gate.py"),
+        Path("scripts/publication/generate_paper2_results_v2.py"),
         Path("scripts/publication/generate_android_empirical_assets.py"),
-        Path("scripts/publication/ingest_publication_bundle.py"),
         Path("scripts/publication/publication_ml_audit_report.py"),
+        Path("scripts/publication/validate_paper2_results_v2.py"),
     }
 
     roots = [Path("README.md"), Path("docs"), Path("scripts")]

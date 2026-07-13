@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from scytaledroid.DynamicAnalysis.domain_context import classify_domain, normalize_domain, root_domain
+
 _PLAINTEXT_PROTOCOLS = frozenset(
     {"http", "ftp", "ftp-data", "smtp", "imap", "pop", "irc", "telnet", "xmpp"}
 )
@@ -36,6 +38,7 @@ def summarize_security_surface(
     pcap_path: Path,
     *,
     tshark_path: str,
+    package_name: str | None = None,
     protocol_hierarchy: list[dict[str, Any]] | None = None,
     flow_summary: dict[str, Any] | None = None,
     burst_summary: dict[str, Any] | None = None,
@@ -58,7 +61,12 @@ def summarize_security_surface(
         max_http_rows=cfg.max_http_rows,
         max_decoded_streams=cfg.max_decoded_streams,
     )
-    dns = _analyze_dns_anomalies(pcap_path, tshark_path, timeout=cfg.timeout_s)
+    dns = _analyze_dns_anomalies(
+        pcap_path,
+        tshark_path,
+        timeout=cfg.timeout_s,
+        package_name=package_name,
+    )
     tls = _analyze_tls_surface(pcap_path, tshark_path, timeout=cfg.timeout_s)
     inventory = _build_domain_inventory(
         pcap_path,
@@ -452,7 +460,13 @@ def _extract_http_metadata(
     return rows, "ok"
 
 
-def _analyze_dns_anomalies(pcap_path: Path, tshark_path: str, *, timeout: int) -> dict[str, Any]:
+def _analyze_dns_anomalies(
+    pcap_path: Path,
+    tshark_path: str,
+    *,
+    timeout: int,
+    package_name: str | None = None,
+) -> dict[str, Any]:
     qnames, qname_status = _collect_field_values(
         pcap_path,
         tshark_path,
@@ -498,6 +512,27 @@ def _analyze_dns_anomalies(pcap_path: Path, tshark_path: str, *, timeout: int) -
         risk_flags.append("deep_subdomain_queries")
     if long_labels >= 3:
         risk_flags.append("long_dns_label_queries")
+    high_entropy_samples = sorted(
+        [name for name in qnames if _label_entropy(name) >= 4.0],
+        key=_label_entropy,
+        reverse=True,
+    )[:10]
+    deep_samples = sorted(
+        [name for name in qnames if _subdomain_depth(name) >= 5],
+        key=lambda name: (_subdomain_depth(name), len(name)),
+        reverse=True,
+    )[:10]
+    long_label_samples = sorted(
+        [name for name in qnames if len(name) >= 48],
+        key=len,
+        reverse=True,
+    )[:10]
+    contextualized = _contextualize_dns_anomaly_samples(
+        high_entropy_samples=high_entropy_samples,
+        deep_subdomain_samples=deep_samples,
+        long_label_samples=long_label_samples,
+        package_name=package_name,
+    )
     return {
         "status": qname_status,
         "unique_qnames": len(qnames),
@@ -509,12 +544,62 @@ def _analyze_dns_anomalies(pcap_path: Path, tshark_path: str, *, timeout: int) -
         "max_label_entropy": max_entropy,
         "max_subdomain_depth": max_depth,
         "long_label_count": long_labels,
-        "high_entropy_samples": sorted(
-            [name for name in qnames if _label_entropy(name) >= 4.0],
-            key=_label_entropy,
-            reverse=True,
-        )[:10],
+        "high_entropy_samples": high_entropy_samples,
+        "deep_subdomain_samples": deep_samples,
+        "long_label_samples": long_label_samples,
+        "known_context_samples": contextualized["known_context_samples"],
+        "unknown_anomaly_samples": contextualized["unknown_anomaly_samples"],
         "risk_flags": risk_flags,
+    }
+
+
+def _contextualize_dns_anomaly_samples(
+    *,
+    high_entropy_samples: list[str],
+    deep_subdomain_samples: list[str],
+    long_label_samples: list[str],
+    package_name: str | None,
+) -> dict[str, list[dict[str, Any]]]:
+    sample_reasons: dict[str, set[str]] = {}
+    for reason, values in (
+        ("high_entropy", high_entropy_samples),
+        ("deep_subdomain", deep_subdomain_samples),
+        ("long_label", long_label_samples),
+    ):
+        for value in values:
+            domain = normalize_domain(value)
+            if not domain:
+                continue
+            sample_reasons.setdefault(domain, set()).add(reason)
+
+    known: list[dict[str, Any]] = []
+    unknown: list[dict[str, Any]] = []
+    package_key = str(package_name or "").strip().lower()
+    for domain, reasons in sorted(sample_reasons.items()):
+        classified = classify_domain(domain, package_name=package_key)
+        row = {
+            "domain": domain,
+            "root_domain": str(classified.get("root_domain") or root_domain(domain)),
+            "reason_classes": sorted(reasons),
+            "owner_class": classified.get("owner_class"),
+            "role_class": classified.get("role_class"),
+            "confidence": classified.get("confidence"),
+            "basis": classified.get("basis"),
+            "match_type": classified.get("match_type"),
+        }
+        if classified.get("owner_class") and classified.get("owner_class") != "unknown":
+            known.append(row)
+        else:
+            unknown.append(row)
+    return {
+        "known_context_samples": sorted(
+            known,
+            key=lambda row: (str(row.get("owner_class")), str(row.get("root_domain")), str(row.get("domain"))),
+        ),
+        "unknown_anomaly_samples": sorted(
+            unknown,
+            key=lambda row: (str(row.get("root_domain")), str(row.get("domain"))),
+        ),
     }
 
 
@@ -767,6 +852,9 @@ def _build_security_findings(
                 "txt_queries": dns.get("txt_queries"),
                 "nxdomain_responses": dns.get("nxdomain_responses"),
                 "max_label_entropy": dns.get("max_label_entropy"),
+                "max_subdomain_depth": dns.get("max_subdomain_depth"),
+                "known_context_samples": (dns.get("known_context_samples") or [])[:5],
+                "unknown_anomaly_sample_count": len(dns.get("unknown_anomaly_samples") or []),
             },
         )
     for flag in tls.get("risk_flags") or []:
@@ -1215,6 +1303,32 @@ def render_security_review_md(
             f"- NXDOMAIN responses: {dns.get('nxdomain_responses') or 0}",
             f"- TXT queries: {dns.get('txt_queries') or 0}",
             f"- Max label entropy: {dns.get('max_label_entropy') if dns.get('max_label_entropy') is not None else 'n/a'}",
+        ]
+    )
+    known_context_samples = [
+        row for row in (dns.get("known_context_samples") or []) if isinstance(row, dict)
+    ]
+    if known_context_samples:
+        known_text = "; ".join(
+            f"{row.get('domain')} -> {row.get('role_class')} ({row.get('owner_class')})"
+            for row in known_context_samples[:5]
+            if row.get("domain")
+        )
+        if known_text:
+            lines.append(f"- Known context samples: {known_text}")
+    unknown_anomaly_samples = [
+        row for row in (dns.get("unknown_anomaly_samples") or []) if isinstance(row, dict)
+    ]
+    if unknown_anomaly_samples:
+        unknown_text = "; ".join(
+            str(row.get("domain"))
+            for row in unknown_anomaly_samples[:5]
+            if row.get("domain")
+        )
+        if unknown_text:
+            lines.append(f"- Unknown anomaly samples: {unknown_text}")
+    lines.extend(
+        [
             "",
             "## TLS surface",
             f"- TLS alerts: {tls.get('tls_alert_count') or 0}",

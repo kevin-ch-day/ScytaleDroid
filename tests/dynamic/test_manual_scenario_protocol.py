@@ -81,9 +81,10 @@ def test_x_manual_interactive_run_shows_surface_guidance(monkeypatch, tmp_path: 
     assert "Interaction: normal" in out
     assert "Keep X in the foreground and generate real navigation" in out
     assert "Open one post detail or replies view briefly, then return" in out
-    assert "Visit Search and Explore; prefer Trending or News" in out
-    assert "Optionally open Notifications or Chat" in out
-    assert "Avoid compose/posting, likes, follows, DMs" in out
+    assert "Visit Search and Explore with a neutral topic" in out
+    assert "Open Grok, Notifications, and Chat landing surfaces" in out
+    assert "Compose is draft-only by default" in out
+    assert "Avoid likes, follows, purchases, account settings changes" in out
 
 
 def test_x_manual_interactive_run_wires_checkpoint_messages(monkeypatch, tmp_path: Path) -> None:
@@ -118,6 +119,6 @@ def test_x_manual_interactive_run_wires_checkpoint_messages(monkeypatch, tmp_pat
 
     assert seen["checkpoint_messages"] == {
         60: "60s checkpoint: if you are still only on the X home feed, open one post or profile briefly, then return.",
-        120: "120s checkpoint: visit Search and Explore or another distinct X surface such as Trending, News, Notifications, or Chat if available.",
-        180: "180s checkpoint: aim to finish with 2-4 distinct in-app X surfaces captured; avoid compose/posting, DMs, follows, and external links.",
+        120: "120s checkpoint: visit Search/Explore with a neutral query, Grok, Notifications, or Chat landing if available.",
+        180: "180s checkpoint: finish with distinct X surfaces captured; compose/test-post and DM thread actions require a controlled test account.",
     }

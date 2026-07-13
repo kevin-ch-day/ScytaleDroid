@@ -63,7 +63,7 @@ is a navigation aid for maintenance work, not a contract for refactoring.
 | Common tasks that should start here | Publication/export bugs, readiness/status summaries, profile export issues, scientific QA outputs, reporting layer consistency. |
 | Common tasks that should not start here | Core static persistence, ADB collection, raw dynamic telemetry storage, Web route/controller fixes. |
 | Related tests / smoke checks | `tests/analysis/*`, `tests/ml/*`, publication scripts under `scripts/publication/`, `scripts/operator/run_profile_v3_demo.sh`; docs in `docs/contracts/` and `docs/maintenance/`. |
-| High-risk / large files | `Reporting/services/publication_exports_service.py`, `Reporting/menu_actions.py`, `Publication/canonical_bundle_writer.py`. These are long, high-fanout export surfaces. |
+| High-risk / large files | `Reporting/menu_actions.py`, `Publication/canonical_bundle_writer.py`, `Reporting/services/paper2_results_v2_service.py`. These are long, high-fanout export surfaces. |
 
 ### `scripts`
 

@@ -131,7 +131,17 @@ def test_run_automation_actions_recovers_foreground_before_action() -> None:
         sleep=lambda _seconds: None,
     )
 
-    assert executed == [["input", "keyevent", "BACK"], ["input", "tap", "50", "100"]]
+    assert executed == [
+        [
+            "monkey",
+            "-p",
+            "com.twitter.android",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+        ],
+        ["input", "tap", "50", "100"],
+    ]
     assert counts["executed"] == 1
     assert counts["foreground_recoveries"] == 1
     assert counts["blocked_foreground"] == 0
@@ -151,8 +161,6 @@ def test_run_automation_actions_blocks_action_when_foreground_cannot_recover() -
     )
 
     assert executed == [
-        ["input", "keyevent", "BACK"],
-        ["input", "keyevent", "BACK"],
         [
             "monkey",
             "-p",
@@ -163,8 +171,29 @@ def test_run_automation_actions_blocks_action_when_foreground_cannot_recover() -
         ],
     ]
     assert counts["executed"] == 0
-    assert counts["foreground_recoveries"] == 3
+    assert counts["foreground_recoveries"] == 1
     assert counts["blocked_foreground"] == 1
+
+
+def test_run_automation_actions_supports_back_then_launch_recovery() -> None:
+    executed: list[list[str]] = []
+    foreground = iter(["com.android.chrome", "com.android.chrome", "com.twitter.android", "com.twitter.android"])
+
+    counts = run_automation_actions(
+        serial="SERIAL",
+        actions=[AutomationAction("tap", "tap", (0.5, 0.5), 0.0)],
+        geometry=DeviceGeometry(width=100, height=200),
+        expected_package="com.twitter.android",
+        foreground_recovery="back_then_launch",
+        run_shell=lambda _serial, command: executed.append(command) or "",
+        foreground_reader=lambda _serial: next(foreground),
+        sleep=lambda _seconds: None,
+    )
+
+    assert executed == [["input", "keyevent", "BACK"], ["input", "keyevent", "BACK"], ["input", "tap", "50", "100"]]
+    assert counts["executed"] == 1
+    assert counts["foreground_recoveries"] == 2
+    assert counts["blocked_foreground"] == 0
 
 
 def test_run_automation_actions_dry_run_skips_foreground_checks() -> None:

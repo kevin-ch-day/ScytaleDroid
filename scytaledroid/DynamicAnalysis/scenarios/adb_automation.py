@@ -257,12 +257,16 @@ def run_automation_actions(
     expected_package: str | None = None,
     package_lock: bool = True,
     foreground_reader: Callable[[str], str | None] | None = None,
+    foreground_recovery: str = "launch",
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, int]:
     geometry = geometry or read_device_geometry(serial)
     executor = run_shell or (lambda device_serial, command: adb_shell.run_shell(device_serial, command))
     target_package = str(expected_package or "").strip().lower()
     read_foreground = foreground_reader or read_foreground_package
+    recovery_strategy = str(foreground_recovery or "launch").strip().lower().replace("-", "_")
+    if recovery_strategy not in {"launch", "back_then_launch"}:
+        raise ValueError("foreground_recovery must be 'launch' or 'back_then_launch'")
     counts = {
         "planned": 0,
         "executed": 0,
@@ -279,16 +283,7 @@ def run_automation_actions(
         counts["foreground_checks"] += 1
         return str(read_foreground(serial) or "").strip().lower() == target_package
 
-    def _recover_target_foreground() -> bool:
-        if not package_lock or not target_package:
-            return True
-        if _is_target_foreground():
-            return True
-        for _idx in range(2):
-            executor(serial, ["input", "keyevent", "BACK"])
-            counts["foreground_recoveries"] += 1
-            if _is_target_foreground():
-                return True
+    def _launch_target_foreground() -> bool:
         executor(
             serial,
             [
@@ -302,6 +297,20 @@ def run_automation_actions(
         )
         counts["foreground_recoveries"] += 1
         return _is_target_foreground()
+
+    def _recover_target_foreground() -> bool:
+        if not package_lock or not target_package:
+            return True
+        if _is_target_foreground():
+            return True
+        if recovery_strategy == "launch":
+            return _launch_target_foreground()
+        for _idx in range(2):
+            executor(serial, ["input", "keyevent", "BACK"])
+            counts["foreground_recoveries"] += 1
+            if _is_target_foreground():
+                return True
+        return _launch_target_foreground()
 
     for action in actions:
         counts["planned"] += 1

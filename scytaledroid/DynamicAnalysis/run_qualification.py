@@ -489,10 +489,9 @@ def format_bucket_evidence_line(
     label: str,
     bucket: BucketQualification,
 ) -> str:
-    progress = format_quota_progress_label(
+    progress = bucket_evidence_label(
         countable=bucket.quota_counted_valid,
         extra=bucket.extra_valid,
-        low_signal=bucket.low_signal_retained,
         required=bucket.required,
     )
     return f"{label:<13}{progress}"

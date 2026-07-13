@@ -93,7 +93,7 @@ def test_guided_run_blocks_early_when_static_plan_identity_drift_exists(
     assert "Static Plan / Device Drift" not in out
     assert "installed build drift" in out
     assert "tracked-build evidence (local+db)" in out
-    assert "3/7 n4" in out
+    assert "4/7 n4" in out
     assert "Installed build 472224766 · tracked static-plan build 472143276" in out
     assert "Newest harvested APK in workspace: 472143276" in out
     assert "No harvested APK for installed build 472224766 is present in this workspace yet." in out
@@ -162,6 +162,25 @@ def test_selected_app_state_snapshot_supports_refresh_action() -> None:
     assert snapshot.need == "refresh"
     assert snapshot.action == "refresh"
     assert snapshot.quota == "0/7 n7"
+
+
+def test_selected_app_state_snapshot_rolls_extra_runs_into_quota_display() -> None:
+    snapshot = guided_run._selected_app_state_snapshot(
+        lineage_state="current_build_observed",
+        active_valid_runs=8,
+        legacy_valid_runs=0,
+        db_active_sessions=0,
+        db_historical_sessions=0,
+        latest_valid=True,
+        queue_action="—",
+        baseline_valid_runs=3,
+        interactive_valid_runs=4,
+        baseline_required=3,
+        interactive_required=4,
+        extra_valid_runs=1,
+    )
+
+    assert snapshot.quota == "8/7"
 
 
 def test_selected_app_state_snapshot_masks_valid_qa_without_current_local_evidence() -> None:

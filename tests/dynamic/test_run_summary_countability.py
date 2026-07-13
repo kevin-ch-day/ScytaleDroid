@@ -546,7 +546,7 @@ def test_countability_label_treats_manual_extra_run_as_extra_not_exploratory() -
         "interaction_manual",
     )
 
-    assert label == "NO (extra run)"
+    assert label == "NO (retained evidence)"
 
 
 def test_countability_label_keeps_manual_non_cohort_reason_when_explicit() -> None:

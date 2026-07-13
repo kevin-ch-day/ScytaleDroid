@@ -237,6 +237,7 @@ def write_pcap_report(
             report["security_surface"] = summarize_security_surface(
                 pcap_path,
                 tshark_path=tshark_path,
+                package_name=package_name_raw or package_name or None,
                 protocol_hierarchy=report.get("protocol_hierarchy") or [],
                 flow_summary=report.get("flow_summary") or {},
                 burst_summary=report.get("burst_summary") or {},

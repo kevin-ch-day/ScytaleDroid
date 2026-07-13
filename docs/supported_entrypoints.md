@@ -18,12 +18,8 @@ These are the preferred non-interactive boundaries for reporting/output logic.
 Scripts may call these services, but menu code should not depend on script
 implementation details.
 
-- `scytaledroid.Reporting.services.publication_exports_service`
-- `scytaledroid.Reporting.services.publication_results_numbers_service`
-- `scytaledroid.Reporting.services.publication_scientific_qa_service`
-- `scytaledroid.Reporting.services.publication_pipeline_audit_service`
+- `scytaledroid.Reporting.services.paper2_results_v2_service`
 - `scytaledroid.Reporting.services.publication_status`
-- `scytaledroid.Reporting.services.risk_scoring_artifacts_service`
 - `scytaledroid.Reporting.services.profile_v3_integrity_gates_service`
 - `scytaledroid.Reporting.services.profile_v3_phase2_exports_service`
 - `scytaledroid.Reporting.services.profile_v3_exports_service`
@@ -36,12 +32,9 @@ These remain callable for automation compatibility, but they are wrappers or
 operator conveniences rather than application-owned logic:
 
 - `scripts/publication/export_profile.py` (preferred dispatcher; requires `--profile v2|v3`)
-- `scripts/publication/publication_exports.py`
-- `scripts/publication/publication_results_numbers.py`
-- `scripts/publication/publication_scientific_qa.py`
-- `scripts/publication/publication_pipeline_audit.py`
+- `scripts/publication/generate_paper2_results_v2.py`
+- `scripts/publication/validate_paper2_results_v2.py`
 - `scripts/publication/publication_ml_audit_report.py`
-- `scripts/publication/ingest_publication_bundle.py` (optional; DB mirror ingest)
 - `scripts/publication/profile_v3_exports.py`
 - `scripts/operator/run_profile_v2_demo.sh` (prints `EXPORT PASS` / `LINT PASS`)
 - `scripts/operator/run_profile_v3_demo.sh` (prints `EXPORT PASS` / `LINT PASS`)

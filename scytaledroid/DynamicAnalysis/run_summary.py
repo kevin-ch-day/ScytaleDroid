@@ -1112,8 +1112,8 @@ def _countability_label(validity: dict[str, object], run_profile: str | None) ->
         if exclusion_reason == "EXCLUDED_MANUAL_NON_COHORT":
             return "NO (manual exploratory)"
         if cohort_eligibility == "EXTRA":
-            return "NO (extra run)"
-        return "NO (extra run)"
+            return "NO (retained evidence)"
+        return "NO (retained evidence)"
     return "UNKNOWN"
 
 

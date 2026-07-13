@@ -9,11 +9,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.Database.db_core import db_queries as core_q  # noqa: F401 - public monkeypatch seam in tests
+from scytaledroid.Database.db_core import (
+    db_queries as core_q,  # noqa: F401 - public monkeypatch seam in tests
+)
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
 )
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, resolve_dynamic_run_dir
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    resolve_dynamic_run_dir,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
 from .dynamic_export_menu import (
@@ -25,15 +30,20 @@ from .dynamic_export_menu import (
 )
 from .menu_actions_cross_analysis_helpers import compact_gap, compact_regime, compact_runtime_state
 from .publication_status_menu import fetch_publication_status
-from .saved_reports_menu import classify_report, preview_report_file, summarise_severity, view_saved_reports
+from .saved_reports_menu import (
+    classify_report,
+    preview_report_file,
+    summarise_severity,
+    view_saved_reports,
+)
 from .static_exposure_menu import handle_generate_static_exposure_privacy_report
 
 
 def _choose_reporting_research_cohort() -> dict[str, object]:
     from scytaledroid.Database.db_func.research_cohorts import (
         list_active_research_cohorts,
-        resolve_research_cohort_context,
         resolve_preferred_research_cohort_key,
+        resolve_research_cohort_context,
     )
 
     cohorts = list_active_research_cohorts()
@@ -237,78 +247,22 @@ def handle_cross_analysis_summary() -> None:
 
 
 def handle_write_canonical_publication_bundle() -> None:
-    """Write a canonical `output/publication/` research bundle directory."""
-
-    from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import output_phase_e_bundle_root
-    from scytaledroid.Publication.canonical_bundle_writer import (
-        write_canonical_publication_directory,
-    )
-
-    baseline_root = output_phase_e_bundle_root()
-    if not baseline_root.exists():
-        print(status_messages.status("Internal baseline deliverables bundle missing; generating it first.", level="warn"))
-        ok = _write_phase_e_deliverables_bundle_from_pin()
-        if not ok:
-            prompt_utils.press_enter_to_continue()
-            return
-
-    # Choose snapshot to surface (optional).
-    snaps_root = Path(app_config.OUTPUT_DIR) / "operational"
-    snaps: list[Path] = []
-    if snaps_root.exists():
-        snaps = sorted([p for p in snaps_root.iterdir() if p.is_dir()])
-
-    snapshot_dir: Path | None = None
-    snapshot_id: str | None = None
-    if snaps:
-        use_latest = prompt_utils.prompt_yes_no(
-            f"Surface latest operational snapshot into the research bundle path (output/publication)? ({snaps[-1].name})",
-            default=True,
-        )
-        if use_latest:
-            snapshot_dir = snaps[-1]
-            snapshot_id = snapshot_dir.name
-        else:
-            sid = prompt_utils.prompt_text("Snapshot id under output/operational (blank=skip)", required=False, show_arrow=False).strip()
-            if sid:
-                cand = snaps_root / sid
-                if not cand.exists():
-                    print(status_messages.status(f"Snapshot not found: {cand}", level="warn"))
-                else:
-                    snapshot_dir = cand
-                    snapshot_id = cand.name
-    else:
-        print(status_messages.status("No operational snapshots found under output/operational; exporting baseline only.", level="info"))
+    """Retired v1 archive bundle writer."""
 
     print()
-    menu_utils.print_header("Write Canonical Research Bundle")
+    menu_utils.print_header("Canonical Research Bundle (Retired)")
     print(
         status_messages.status(
-            "This surfaces the baseline bundle + (optional) snapshot into the research bundle path (output/publication/) with stable paths.",
+            "The legacy output/publication bundle writer is retired for Paper 2 v2 work.",
+            level="warn",
+        )
+    )
+    print(
+        status_messages.status(
+            "Use Generate Paper 2 v2 results package for the current locked-runtime result set.",
             level="info",
         )
     )
-
-    try:
-        res = write_canonical_publication_directory(
-            baseline_bundle_root=baseline_root,
-            snapshot_dir=snapshot_dir,
-            snapshot_id=snapshot_id,
-            overwrite=True,
-        )
-    except Exception as exc:  # pragma: no cover
-        print(status_messages.status(f"Canonical export failed: {exc}", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    print(status_messages.status(f"Wrote: {relative_path(res.publication_root)}", level="success"))
-    if getattr(res, "warnings_count", 0):
-        print(
-            status_messages.status(
-                f"Warnings: {res.warnings_count} (see logs; optional provenance artifacts may be missing)",
-                level="warn",
-            )
-        )
     prompt_utils.press_enter_to_continue()
 
 
@@ -550,67 +504,32 @@ def handle_export_freeze_anchored_csvs() -> None:
             print(status_messages.status(f"Export missing: {label}", level="warn"))
 
 
-def handle_generate_publication_results_numbers() -> None:
-    """Generate archived CSV/JSON exports plus frozen-cohort results numbers.
+def handle_generate_paper2_results_v2_package() -> None:
+    """Generate the canonical Paper 2 v2 locked-runtime results package."""
 
-    This is intentionally deterministic and freeze-anchored. The goal is to give
-    the manuscript a single source of truth:
-    - output/publication/tables/*_summary*.csv
-    - output/publication/manifests/publication_results_v1.json
-    - output/publication/manifests/publication_results_numbers.json
-    - output/publication/appendix/results_section_V.md
-    """
-
-    from scytaledroid.Reporting.services.publication_exports_service import (
-        generate_publication_exports,
-    )
-    from scytaledroid.Reporting.services.publication_results_numbers_service import (
-        generate_results_numbers,
+    from scytaledroid.Reporting.services.paper2_results_v2_service import (
+        generate_paper2_results_v2,
     )
 
     print()
-    menu_utils.print_header("Generate Frozen Archive Results Numbers")
+    menu_utils.print_header("Generate Paper 2 v2 Results Package")
     try:
-        generate_publication_exports()
-        generate_results_numbers()
-    except SystemExit as exc:
-        if int(getattr(exc, "code", 1) or 0) != 0:
-            print(status_messages.status(f"Generation failed: exit={exc.code}", level="error"))
-            return
+        result = generate_paper2_results_v2()
     except Exception as exc:
         print(status_messages.status(f"Generation failed: {exc}", level="error"))
+        prompt_utils.press_enter_to_continue()
         return
-    out_tables = Path(app_config.OUTPUT_DIR) / "publication" / "tables"
-    out_results_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "publication_results_v1.json"
-    out_md = Path(app_config.OUTPUT_DIR) / "publication" / "appendix" / "results_section_V.md"
-    out_json = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "publication_results_numbers.json"
-    out_json_legacy = Path(app_config.OUTPUT_DIR) / "publication" / "manifests" / "paper2_results_numbers.json"
-    for name in (
-        "publication_cohort_summary_v1.csv",
-        "baseline_stability_summary.csv",
-        "interaction_delta_summary.csv",
-        "static_dynamic_correlation.csv",
-    ):
-        p = out_tables / name
-        if p.exists():
-            print(status_messages.status(f"Wrote: {relative_path(p)}", level="success"))
-    if out_results_json.exists():
-        print(status_messages.status(f"Wrote: {relative_path(out_results_json)}", level="success"))
-    if out_md.exists():
-        print(status_messages.status(f"Wrote: {relative_path(out_md)}", level="success"))
-    if out_json.exists():
-        print(status_messages.status(f"Wrote: {relative_path(out_json)}", level="success"))
-    # Legacy alias is opt-in; do not advertise it unless it was explicitly written.
-    import os
-
-    legacy_enabled = str(os.environ.get("SCYTALEDROID_WRITE_LEGACY_ALIASES") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if legacy_enabled and out_json_legacy.exists():
-        print(status_messages.status(f"Wrote: {relative_path(out_json_legacy)} (legacy alias)", level="info"))
+    for key in ("publication_results_v2", "paper2_qa_v2", "hash_manifest"):
+        path = result.get(key)
+        if path:
+            print(status_messages.status(f"Wrote: {relative_path(Path(path))}", level="success"))
+    print(
+        status_messages.status(
+            f"Apps: {result.get('apps')} · runs: {result.get('runs')} · QA: {result.get('qa_status')}",
+            level="info",
+        )
+    )
+    prompt_utils.press_enter_to_continue()
 
 
 def handle_generate_profile_v3_exports() -> None:
@@ -687,52 +606,10 @@ def handle_generate_exploratory_risk_scoring() -> None:
     )
     print(
         status_messages.status(
-            "Use publication-scientific QA and pipeline audit flows for supported outputs.",
+            "Use the Paper 2 v2 results package and ML QA outputs for supported review artifacts.",
             level="info",
         )
     )
-    prompt_utils.press_enter_to_continue()
-
-def handle_generate_publication_scientific_qa() -> None:
-    """Generate scientific QA reports for the frozen archive."""
-    from scytaledroid.Reporting.services.publication_scientific_qa_service import (
-        generate_scientific_qa,
-    )
-
-    print()
-    menu_utils.print_header("Generate Scientific QA (Frozen Archive)")
-    try:
-        generate_scientific_qa()
-    except Exception as exc:
-        print(status_messages.status(f"QA generation failed: {exc}", level="error"))
-        return
-    out_dir = Path(app_config.OUTPUT_DIR) / "publication" / "qa"
-    if out_dir.exists():
-        print(status_messages.status(f"Wrote QA reports under: {relative_path(out_dir)}", level="success"))
-    prompt_utils.press_enter_to_continue()
-
-def handle_generate_publication_pipeline_audit() -> None:
-    """Generate a deep ML+dynamic pipeline audit for the frozen archive."""
-    from scytaledroid.Reporting.services.publication_pipeline_audit_service import (
-        generate_pipeline_audit,
-    )
-
-    print()
-    menu_utils.print_header("Pipeline Audit (ML + Dynamic)")
-    try:
-        _out, ok = generate_pipeline_audit()
-    except Exception as exc:
-        print(status_messages.status(f"Audit generation failed: {exc}", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-    if not ok:
-        print(status_messages.status("Audit completed with errors.", level="error"))
-        prompt_utils.press_enter_to_continue()
-        return
-
-    out = Path(app_config.OUTPUT_DIR) / "publication" / "qa" / "pipeline_audit_v1.json"
-    if out.exists():
-        print(status_messages.status(f"Wrote: {relative_path(out)}", level="success"))
     prompt_utils.press_enter_to_continue()
 
 def handle_print_manuscript_snapshot() -> None:
@@ -876,9 +753,7 @@ __all__ = [
     "handle_cross_analysis_summary",
     "handle_export_freeze_anchored_csvs",
     "handle_generate_static_exposure_privacy_report",
-    "handle_generate_publication_results_numbers",
-    "handle_generate_publication_scientific_qa",
-    "handle_generate_publication_pipeline_audit",
+    "handle_generate_paper2_results_v2_package",
     "handle_generate_exploratory_risk_scoring",
     "handle_generate_profile_v3_exports",
     "handle_profile_v3_integrity_gates",
