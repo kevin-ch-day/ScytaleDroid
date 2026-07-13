@@ -353,6 +353,58 @@ def test_generate_report_overlays_missing_seed_signal_maps(tmp_path: Path, monke
     assert "third_party_advertising" in signal_rows
 
 
+def test_generate_report_resolves_reddit_runtime_hosts_from_seed_overlay(
+    tmp_path: Path, monkeypatch
+) -> None:
+    observations = [
+        {
+            "package_name": "com.reddit.frontpage",
+            "display_name": "Reddit",
+            "domain": "w3-reporting.reddit.com",
+            "root_domain": "reddit.com",
+            "observed_owner_class": "first_party",
+            "observed_role_class": "first_party_telemetry_reporting",
+            "total_hits": 12,
+            "observed_run_count": 1,
+        },
+        {
+            "package_name": "com.reddit.frontpage",
+            "display_name": "Reddit",
+            "domain": "alb.reddit.com",
+            "root_domain": "reddit.com",
+            "observed_owner_class": "first_party",
+            "observed_role_class": "first_party_app_backend",
+            "total_hits": 5,
+            "observed_run_count": 1,
+        },
+    ]
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        mapping = {
+            "dynamic.service_signals.report.observations": observations,
+            "dynamic.service_signals.report.services": [],
+            "dynamic.service_signals.report.service_maps": [],
+            "dynamic.service_signals.report.signals": [],
+            "dynamic.service_signals.report.service_signal_maps": [],
+        }
+        if query_name in mapping:
+            return mapping[query_name]
+        raise AssertionError(f"unexpected query_name={query_name!r} sql={sql[:80]!r}")
+
+    monkeypatch.setattr("scytaledroid.Database.db_core.db_queries.run_sql", fake_run_sql)
+
+    out_dir = tmp_path / "audit"
+    summary = report.generate_report(output_dir=out_dir)
+
+    assert summary["services_without_signal_mappings"] == 0
+    assert summary["unresolved_service_signal_rows"] == 0
+    signal_rows = (out_dir / "package_signal_rows.csv").read_text(encoding="utf-8")
+    assert "w3-reporting.reddit.com" in signal_rows
+    assert "alb.reddit.com" in signal_rows
+    assert "reddit_platform" in signal_rows
+    assert "first_party_social_platform" in signal_rows
+
+
 def test_generate_report_uses_clear_metric_name_for_services_without_signal_mappings(
     tmp_path: Path, monkeypatch
 ) -> None:

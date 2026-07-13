@@ -35,6 +35,7 @@ from .menu_actions import (
 from .menu_actions import (
     fetch_tier1_status as fetch_tier1_status,
 )
+from .runtime_network_menu import handle_runtime_network_behavior_analysis
 
 
 def reporting_menu() -> None:
@@ -65,8 +66,6 @@ def reporting_menu() -> None:
                 "2",
                 "Runtime Network Behavior Analysis",
                 "Idle, QFG, interactive, PCAP, time-series, RDI",
-                disabled=True,
-                badge="COMING NEXT",
             ),
             MenuOption(
                 "3",
@@ -88,6 +87,8 @@ def reporting_menu() -> None:
 
         if top_choice == "1":
             handle_generate_static_exposure_privacy_report()
+        elif top_choice == "2":
+            handle_runtime_network_behavior_analysis()
         elif top_choice == "4":
             _general_analysis_menu()
         elif top_choice == "5":

@@ -125,6 +125,72 @@ def test_prepare_view_counts_invalid_continuation_as_in_progress(monkeypatch) ->
     assert prepared.current_build_in_progress_count == 1
 
 
+def test_prepare_view_loads_dataset_tracker_once_for_multiple_rows(monkeypatch) -> None:
+    from scytaledroid.DynamicAnalysis.pcap import dataset_tracker
+
+    calls = {"tracker": 0}
+
+    def fake_load_dataset_tracker():
+        calls["tracker"] += 1
+        return {
+            "apps": {
+                "com.instagram.android": {
+                    "runs": [
+                        {
+                            "run_id": "ig-run",
+                            "ended_at": "2026-07-02T12:00:00+00:00",
+                            "valid_dataset_run": True,
+                        }
+                    ]
+                },
+                "com.reddit.frontpage": {
+                    "runs": [
+                        {
+                            "run_id": "reddit-run",
+                            "ended_at": "2026-07-02T13:00:00+00:00",
+                            "valid_dataset_run": True,
+                        }
+                    ]
+                },
+            }
+        }
+
+    def build_row(**kwargs):
+        recent = kwargs["recent_tracker_runs"](kwargs["package"], limit=1)
+        assert len(recent) == 1
+        return menu_selection.PreparedPackageSelectionRow(
+            full_row=["1"],
+            op_row=[],
+            build_row=None,
+            dataset_app_count=1,
+            dataset_complete_count=0,
+            dataset_valid_runs_count=1,
+            package_name=kwargs["package"],
+            display_name=kwargs["app_label"] or kwargs["package"],
+            lineage_state="current_build_observed",
+        )
+
+    monkeypatch.setattr(dataset_tracker, "load_dataset_tracker", fake_load_dataset_tracker)
+
+    prepared = prepare_package_selection_view(
+        object(),
+        load_dataset_packages=lambda: ["com.instagram.android", "com.reddit.frontpage"],
+        list_packages_fn=lambda _groups: [
+            ("com.instagram.android", None, None, "Instagram"),
+            ("com.reddit.frontpage", None, None, "Reddit"),
+        ],
+        summarize_evidence_quota_fn=lambda *_args, **_kwargs: {},
+        build_package_selection_row_fn=build_row,
+        resolve_live_build_drift_map_fn=lambda *_args, **_kwargs: {},
+        resolve_db_dynamic_lineage_context_map_fn=lambda *_args, **_kwargs: {},
+        device_serial="ZY22JK89DR",
+    )
+
+    assert prepared is not None
+    assert len(prepared.row_models or []) == 2
+    assert calls["tracker"] == 1
+
+
 def test_next_recommended_row_prioritizes_review_over_manual_and_refresh() -> None:
     manual_row = menu_selection.PreparedPackageSelectionRow(
         full_row=["1"],

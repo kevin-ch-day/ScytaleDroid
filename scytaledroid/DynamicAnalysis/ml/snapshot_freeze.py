@@ -2,10 +2,10 @@
 
 Goal:
 - Turn a query selection + evidence packs into a checksummed, immutable snapshot artifact.
-- Reuse the same included_run_checksums schema as Paper #2 freeze verification so we can
-  run the same immutability checker.
+- Reuse the same included_run_checksums schema as freeze verification so the
+  same immutability checker can validate operational snapshots.
 
-This is *operational* and does not change Phase E semantics or artifacts.
+This is *operational* and does not change freeze/profile semantics or artifacts.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ def build_snapshot_freeze_manifest(
 
     missing_inputs: dict[str, list[str]] = {}
     run_checksums: dict[str, dict[str, Any]] = {}
-    identity_index: dict[tuple[str, str, str, str, str], str] = {}
+    identity_index: dict[tuple[str, str, str, str, str], list[str]] = {}
     plan_schema_versions: set[str] = set()
     plan_paper_contract_versions: set[int] = set()
 
@@ -208,10 +208,7 @@ def build_snapshot_freeze_manifest(
         if not (pkg_lc and version_code and base_sha and artifact_set_hash and signer_set_hash):
             raise RuntimeError(f"FREEZE_BAD_IDENTITY:{rid}")
         identity_key = (pkg_lc, version_code, base_sha, artifact_set_hash, signer_set_hash)
-        existing = identity_index.get(identity_key)
-        if existing and existing != rid:
-            raise RuntimeError(f"FREEZE_DUPLICATE_IDENTITY:{existing},{rid}")
-        identity_index[identity_key] = rid
+        identity_index.setdefault(identity_key, []).append(rid)
         run_checksums[rid]["identity"] = {
             "package_name_lc": pkg_lc,
             "version_code": version_code,
@@ -237,6 +234,20 @@ def build_snapshot_freeze_manifest(
         int(next(iter(plan_paper_contract_versions))) if (paper_mode and plan_paper_contract_versions) else None
     )
     min_pcap_bytes = int(paper_config.MIN_PCAP_BYTES if paper_mode else operational_config.MIN_PCAP_BYTES_FALLBACK)
+    duplicate_identity_groups = [
+        {
+            "identity": {
+                "package_name_lc": key[0],
+                "version_code": key[1],
+                "base_apk_sha256": key[2],
+                "artifact_set_hash": key[3],
+                "signer_set_hash": key[4],
+            },
+            "run_ids": list(run_ids),
+        }
+        for key, run_ids in sorted(identity_index.items())
+        if len(run_ids) > 1
+    ]
     payload = {
         "artifact_type": "snapshot_freeze",
         "freeze_contract_version": int(paper_config.FREEZE_CONTRACT_VERSION if paper_mode else 1),
@@ -256,6 +267,7 @@ def build_snapshot_freeze_manifest(
         "frozen_inputs_per_run": list(_REQUIRED_RELATIVE_INPUTS) + ["<pcap from manifest artifact:pcapdroid_capture>"],
         "included_run_ids": included_run_ids,
         "included_run_checksums": run_checksums,
+        "duplicate_identity_groups": duplicate_identity_groups,
     }
     if required_plan_schema_version is not None:
         payload["plan_schema_version_required"] = required_plan_schema_version

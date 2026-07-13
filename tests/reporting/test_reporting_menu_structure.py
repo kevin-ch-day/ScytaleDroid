@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from scytaledroid.Reporting import menu
+from scytaledroid.Reporting import runtime_network_menu
 from scytaledroid.Reporting import static_exposure_menu
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, selectable_keys
 
@@ -26,7 +27,7 @@ def test_reporting_menu_source_uses_study_categories_without_paper_labels() -> N
 def test_top_reporting_study_options_are_flat_and_disabled_future_studies_are_not_selectable() -> None:
     options = [
         MenuOption("1", "Static Exposure & Privacy Assessment"),
-        MenuOption("2", "Runtime Network Behavior Analysis", disabled=True),
+        MenuOption("2", "Runtime Network Behavior Analysis"),
         MenuOption("3", "Integrated Static-Runtime Privacy & Security Analysis", disabled=True),
         MenuOption("4", "General cohort and app analysis"),
         MenuOption("5", "Evidence and provenance exports"),
@@ -34,7 +35,92 @@ def test_top_reporting_study_options_are_flat_and_disabled_future_studies_are_no
         MenuOption("7", "Experimental analyses"),
         MenuOption("8", "Legacy archive tools"),
     ]
-    assert selectable_keys(options, include_exit=True) == ["1", "4", "5", "6", "7", "8", "0"]
+    assert selectable_keys(options, include_exit=True) == ["1", "2", "4", "5", "6", "7", "8", "0"]
+
+
+def test_runtime_reporting_next_step_keeps_training_in_machine_learning() -> None:
+    status = {
+        "locked_dataset": "blocked - dataset plan missing",
+        "lockfile_state": "missing",
+        "ml_tables_ready": False,
+        "qa": "missing",
+        "bundle": "missing",
+    }
+
+    assert runtime_network_menu._recommended_runtime_next_step(status) == (
+        "Use Machine Learning to build the locked dataset"
+    )
+
+
+def test_runtime_reporting_next_step_generates_bundle_after_qa_ready() -> None:
+    status = {
+        "locked_dataset": "ready - 15 apps · 112 runs · selected build groups",
+        "lockfile_state": "ready",
+        "ml_tables_ready": True,
+        "qa": "ready - primary OK · secondary caveats (12 warning(s))",
+        "bundle": "missing",
+    }
+
+    assert runtime_network_menu._recommended_runtime_next_step(status) == (
+        "1) Generate locked runtime report bundle"
+    )
+
+
+def test_runtime_reporting_next_step_ready_for_writing_after_bundle() -> None:
+    status = {
+        "locked_dataset": "ready - 15 apps · 112 runs · selected build groups",
+        "lockfile_state": "ready",
+        "ml_tables_ready": True,
+        "qa": "ready - primary OK · secondary caveats (12 warning(s))",
+        "bundle": "ready - 8 table CSV(s) · 6 figure PNG(s)",
+    }
+
+    assert runtime_network_menu._recommended_runtime_next_step(status) == "Ready for writing"
+
+
+def test_runtime_reporting_status_uses_shared_ml_status(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_network_menu.ml_status,
+        "runtime_ml_status_snapshot",
+        lambda: {
+            "freeze_status": "ready - 15 apps · 112 runs · selected build groups",
+            "qa_status": "ready",
+            "bundle_status": "missing",
+            "lockfile_state": "ready",
+            "required_tables": 7,
+            "existing_tables": 7,
+            "stale_tables": 0,
+        },
+    )
+
+    status = runtime_network_menu._runtime_status_snapshot()
+
+    assert status == {
+        "locked_dataset": "ready - 15 apps · 112 runs · selected build groups",
+        "qa": "ready",
+        "bundle": "missing",
+        "lockfile_state": "ready",
+        "ml_tables_ready": True,
+    }
+
+
+def test_runtime_reporting_bundle_generation_waits_for_qa(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_network_menu,
+        "_runtime_status_snapshot",
+        lambda: {
+            "locked_dataset": "ready - 15 apps · 112 runs · selected build groups",
+            "lockfile_state": "ready",
+            "ml_tables_ready": True,
+            "qa": "missing",
+            "bundle": "missing",
+        },
+    )
+
+    assert runtime_network_menu._runtime_outputs_ready_for_bundle() == (
+        False,
+        "Run report QA check first",
+    )
 
 
 def test_static_evidence_window_defaults_to_recent_current_window(monkeypatch) -> None:

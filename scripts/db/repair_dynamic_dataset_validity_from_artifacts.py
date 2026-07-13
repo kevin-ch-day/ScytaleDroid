@@ -99,7 +99,9 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequence[str]) -> None:
@@ -413,6 +415,11 @@ def _apply_repairs(
                 reindex_run_ids.append(normalized)
                 seen.add(normalized)
     reindexed_db_rows = _reindex_run_ids(evidence_root, reindex_run_ids)
+    if reindex_run_ids:
+        # Per-run DB indexing updates the shared tracker incrementally. Finish
+        # with a full recompute so reports generated after the receipt see a
+        # cohort-complete derived tracker rather than the final per-run update.
+        recompute_dataset_tracker(config=DatasetTrackerConfig())
     return updated_manifests, synced_manifests, reindexed_db_rows
 
 
@@ -432,6 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     applied_rows = 0
     synced_rows = 0
     reindexed_db_rows = 0
+    tracker_refreshed_after_apply = False
     if args.apply and rows:
         applied_rows, synced_rows, reindexed_db_rows = _apply_repairs(
             evidence_root,
@@ -439,8 +447,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             rows,
             explicit_run_ids=sorted(run_ids),
         )
+        tracker_refreshed_after_apply = True
     elif args.apply and run_ids:
         reindexed_db_rows = _reindex_run_ids(evidence_root, sorted(run_ids))
+        _refresh_tracker_truth()
+        tracker_refreshed_after_apply = True
 
     fields = (
         "repair_type",
@@ -469,6 +480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "evidence_root": str(evidence_root.resolve()),
         "apply": bool(args.apply),
         "tracker_refreshed_before_candidate_selection": tracker_refreshed_before_candidate_selection,
+        "tracker_refreshed_after_apply": tracker_refreshed_after_apply,
         "candidate_rows": len(public_rows),
         "applied_rows": int(applied_rows),
         "synced_manifest_rows": int(synced_rows),

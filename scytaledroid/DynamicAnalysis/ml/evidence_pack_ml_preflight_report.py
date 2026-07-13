@@ -1,4 +1,4 @@
-"""ML preflight reporting over evidence packs (Paper #2, DB-free)."""
+"""ML preflight reporting over evidence packs (DB-free)."""
 
 from __future__ import annotations
 

@@ -1667,6 +1667,7 @@ def test_run_package_selection_menu_guides_non_drift_capture_before_redoing_drif
 
 
 def test_resolve_live_build_drift_map_uses_identity_static_run_id_fallback(monkeypatch) -> None:
+    queue_data_sources._LIVE_DRIFT_CACHE.clear()
     monkeypatch.setattr(
         queue_data_sources,
         "load_plan_candidates",
@@ -1704,6 +1705,158 @@ def test_resolve_live_build_drift_map_uses_identity_static_run_id_fallback(monke
             "static_run_id": "5207",
         }
     }
+
+
+def test_resolve_live_build_drift_map_caches_repeated_package_set(monkeypatch) -> None:
+    queue_data_sources._LIVE_DRIFT_CACHE.clear()
+    calls = {"plans": 0, "adb": 0}
+
+    def _plans(_package_name):
+        calls["plans"] += 1
+        return (
+            [
+                {
+                    "generated_at": "2026-06-30T00:00:00Z",
+                    "version_name": "1.0",
+                    "version_code": "100",
+                    "identity": {"version_code": "100", "static_run_id": "1"},
+                }
+            ],
+            None,
+        )
+
+    def _observed(*_args, **_kwargs):
+        calls["adb"] += 1
+        return {"version_code": "200"}
+
+    monkeypatch.setattr(queue_data_sources, "load_plan_candidates", _plans)
+    monkeypatch.setattr(queue_data_sources, "read_observed_version_code_details", _observed)
+
+    first = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
+    second = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
+
+    assert first == second
+    assert calls == {"plans": 1, "adb": 1}
+
+
+def test_resolve_live_build_drift_map_returns_cache_copy(monkeypatch) -> None:
+    queue_data_sources._LIVE_DRIFT_CACHE.clear()
+    monkeypatch.setattr(
+        queue_data_sources,
+        "load_plan_candidates",
+        lambda _package_name: (
+            [
+                {
+                    "generated_at": "2026-06-30T00:00:00Z",
+                    "version_name": "1.0",
+                    "version_code": "100",
+                    "identity": {"version_code": "100", "static_run_id": "1"},
+                }
+            ],
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        queue_data_sources,
+        "read_observed_version_code_details",
+        lambda *_args, **_kwargs: {"version_code": "200"},
+    )
+
+    first = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
+    first["com.example.app"]["observed_version_code"] = "mutated"
+    second = queue_data_sources.resolve_live_build_drift_map(["com.example.app"], device_serial="ZY22")
+
+    assert second["com.example.app"]["observed_version_code"] == "200"
+
+
+def test_resolve_db_dynamic_lineage_context_map_caches_repeated_package_set(monkeypatch) -> None:
+    from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
+    from scytaledroid.DynamicAnalysis import tracker_scope
+
+    queue_data_sources._DB_LINEAGE_CACHE.clear()
+    calls = {"base": 0, "coverage": 0, "identity": 0}
+
+    def fake_fetch_base_rows(_core_q, package_name=None):
+        calls["base"] += 1
+        assert package_name is None
+        return [
+            {
+                "package_name": "com.instagram.android",
+                "base_apk_sha256": "abc123",
+                "version_code": "100",
+            },
+            {
+                "package_name": "com.other.app",
+                "base_apk_sha256": "ignored",
+                "version_code": "1",
+            },
+        ]
+
+    def fake_fetch_dynamic_coverage(_core_q):
+        calls["coverage"] += 1
+        return {"abc123": {"dynamic_sessions": 3}}
+
+    def fake_resolve_active_package_identity(package_name):
+        calls["identity"] += 1
+        assert package_name == "com.instagram.android"
+        return "100", "abc123"
+
+    monkeypatch.setattr(lineage, "fetch_base_rows", fake_fetch_base_rows)
+    monkeypatch.setattr(lineage, "fetch_dynamic_coverage", fake_fetch_dynamic_coverage)
+    monkeypatch.setattr(
+        tracker_scope,
+        "resolve_active_package_identity",
+        fake_resolve_active_package_identity,
+    )
+
+    first = queue_data_sources.resolve_db_dynamic_lineage_context_map(
+        ["com.instagram.android"]
+    )
+    second = queue_data_sources.resolve_db_dynamic_lineage_context_map(
+        ["com.instagram.android"]
+    )
+
+    assert first == second
+    assert first["com.instagram.android"]["db_active_sessions"] == 3
+    assert calls == {"base": 1, "coverage": 1, "identity": 1}
+
+
+def test_resolve_db_dynamic_lineage_context_map_returns_cache_copy(monkeypatch) -> None:
+    from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
+    from scytaledroid.DynamicAnalysis import tracker_scope
+
+    queue_data_sources._DB_LINEAGE_CACHE.clear()
+    monkeypatch.setattr(
+        lineage,
+        "fetch_base_rows",
+        lambda _core_q, package_name=None: [
+            {
+                "package_name": "com.instagram.android",
+                "base_apk_sha256": "abc123",
+                "version_code": "100",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        lineage,
+        "fetch_dynamic_coverage",
+        lambda _core_q: {"abc123": {"dynamic_sessions": 3}},
+    )
+    monkeypatch.setattr(
+        tracker_scope,
+        "resolve_active_package_identity",
+        lambda _package_name: ("100", "abc123"),
+    )
+
+    first = queue_data_sources.resolve_db_dynamic_lineage_context_map(
+        ["com.instagram.android"]
+    )
+    first["com.instagram.android"]["db_active_sessions"] = 999
+    second = queue_data_sources.resolve_db_dynamic_lineage_context_map(
+        ["com.instagram.android"]
+    )
+
+    assert second["com.instagram.android"]["db_active_sessions"] == 3
 
 
 def test_build_package_selection_row_accepts_live_build_drift_for_refresh_action() -> None:

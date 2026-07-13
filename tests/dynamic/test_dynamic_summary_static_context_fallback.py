@@ -9,7 +9,15 @@ from scytaledroid.DynamicAnalysis.pcap.aggregate import _build_run_summary_row
 
 def test_compute_static_context_basic_tags() -> None:
     plan = {
-        "permissions": {"declared": ["a"], "dangerous": ["b"], "high_value": ["CAMERA"]},
+        "permissions": {
+            "declared": [
+                "android.permission.ACCESS_FINE_LOCATION",
+                "android.permission.READ_MEDIA_IMAGES",
+                "android.permission.ACCESS_ADSERVICES_AD_ID",
+            ],
+            "dangerous": ["android.permission.RECORD_AUDIO"],
+            "high_value": ["CAMERA"],
+        },
         "exported_components": {"total": 25},
         "risk_flags": {
             "uses_cleartext_traffic": True,
@@ -26,6 +34,10 @@ def test_compute_static_context_basic_tags() -> None:
     tags = ctx.get("tags")
     assert isinstance(tags, list)
     assert "PRIVACY_SENSITIVE" in tags
+    assert "LOCATION_CAPABLE" in tags
+    assert "MEDIA_CAPTURE_CAPABLE" in tags
+    assert "MEDIA_LIBRARY_ACCESS" in tags
+    assert "AD_ID_ACCESS" in tags
     assert "EXPORT_HEAVY" in tags
     assert "NETWORK_CLEARTEXT_ALLOWED" in tags
     assert "LEGACY_STORAGE" in tags

@@ -1,6 +1,6 @@
 """Operational (Phase F2) triage scoring and grading.
 
-Important: this is not a Paper #2 claim. It is an operational, heuristic layer
+Important: this is not a freeze/profile claim. It is an operational, heuristic layer
 intended to help practitioners prioritise review.
 
 Terminology:

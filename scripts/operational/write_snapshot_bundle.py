@@ -70,6 +70,7 @@ class BundleResult:
 
 def write_bundle(snapshot_dir: Path) -> BundleResult:
     from scytaledroid.DynamicAnalysis.ml.operational_lint import lint_operational_snapshot
+    from scytaledroid.DynamicAnalysis.ml.method_basis import runtime_ml_method_basis
     from scytaledroid.DynamicAnalysis.ml.snapshot_freeze import write_snapshot_freeze_manifest
     from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 
@@ -89,7 +90,10 @@ def write_bundle(snapshot_dir: Path) -> BundleResult:
     # Lint report.
     lint = lint_operational_snapshot(snapshot_dir)
     lint_path = snapshot_dir / "operational_lint.json"
-    lint_path.write_text(json.dumps({"ok": lint.ok, "issues": lint.issues}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lint_path.write_text(
+        json.dumps({"ok": lint.ok, "issues": lint.issues, "warnings": lint.warnings}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     # Bundle manifest: sha256 for all JSON/CSV/TEX/PNG under snapshot dir.
     manifest: dict[str, object] = {
@@ -98,6 +102,7 @@ def write_bundle(snapshot_dir: Path) -> BundleResult:
         "snapshot_dir": str(snapshot_dir),
         "freeze_manifest": str(freeze_res.freeze_path) if freeze_res else "",
         "freeze_ok": bool(freeze_ok),
+        "method_basis": runtime_ml_method_basis(context="operational_snapshot_bundle"),
         "operational_lint": str(lint_path),
         "files": {},
     }

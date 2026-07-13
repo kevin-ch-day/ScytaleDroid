@@ -25,10 +25,78 @@ def choose_index(
 
 def prompt_custom_package() -> str:
     return prompt_utils.prompt_text(
-        "Package name",
+        "App name or package",
         required=True,
-        error_message="Please provide a package name.",
+        error_message="Please provide an app name or package.",
     )
+
+
+def _resolve_app_query_to_package(query: str, dataset_pkgs: set[str]) -> str | None:
+    raw = str(query or "").strip()
+    if not raw:
+        return raw
+    raw_lc = raw.lower()
+    if "." in raw_lc:
+        return raw
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+    except Exception:
+        return raw
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT package_name, display_name
+            FROM apps
+            WHERE LOWER(TRIM(display_name)) = %s
+               OR LOWER(TRIM(package_name)) = %s
+               OR LOWER(TRIM(display_name)) LIKE %s
+            ORDER BY
+                CASE
+                    WHEN LOWER(TRIM(display_name)) = %s THEN 0
+                    WHEN LOWER(TRIM(package_name)) = %s THEN 1
+                    ELSE 2
+                END,
+                package_name
+            LIMIT 10
+            """,
+            (raw_lc, raw_lc, f"%{raw_lc}%", raw_lc, raw_lc),
+            fetch="all",
+            dictionary=True,
+            query_name="dynamic.single_app.resolve_app_name",
+        ) or []
+    except Exception:
+        return raw
+    candidates: list[tuple[str, str]] = []
+    dataset_pkgs_lc = {
+        str(pkg or "").strip().lower() for pkg in dataset_pkgs if str(pkg or "").strip()
+    }
+    for row in rows:
+        package = str(row.get("package_name") or "").strip()
+        if not package:
+            continue
+        if dataset_pkgs_lc and package.lower() not in dataset_pkgs_lc:
+            continue
+        label = str(row.get("display_name") or "").strip() or package
+        candidates.append((package, label))
+    unique = sorted({package: label for package, label in candidates}.items())
+    if len(unique) == 1:
+        return unique[0][0]
+    if len(unique) > 1:
+        print()
+        menu_utils.print_header("Select Application")
+        options = [
+            MenuOption(str(idx), f"{label} ({package})")
+            for idx, (package, label) in enumerate(unique, start=1)
+        ]
+        menu_utils.render_menu(MenuSpec(items=options, exit_label="Cancel", show_exit=True))
+        choice = prompt_utils.get_choice(
+            menu_utils.selectable_keys(options, include_exit=True),
+            default="0",
+        )
+        if choice == "0":
+            return None
+        return unique[int(choice) - 1][0]
+    return raw
 
 
 def resolve_custom_tier(
@@ -36,7 +104,11 @@ def resolve_custom_tier(
     dataset_pkgs: set[str],
     *,
     active_research_cohort_label_fn: Callable[[], str],
-) -> tuple[str, str]:
+) -> tuple[str, str] | None:
+    resolved_package = _resolve_app_query_to_package(package_name, dataset_pkgs)
+    if not resolved_package:
+        return None
+    package_name = resolved_package
     if package_name.lower() in dataset_pkgs:
         cohort_label = active_research_cohort_label_fn()
         run_as_dataset = prompt_utils.prompt_yes_no(
@@ -129,7 +201,7 @@ def select_profile_package(
         if not scoped_groups:
             print(
                 status_messages.status(
-                    "No APK artifacts available yet for that profile. Execute Harvest or use Custom package name.",
+                    "No APK artifacts available yet for that profile. Execute Harvest or use app name/package.",
                     level="warn",
                 )
             )
@@ -199,9 +271,9 @@ def select_dynamic_target(
     print()
     menu_utils.print_header("Dynamic Run Target")
     target_options = [
-        MenuOption("1", "App (select from available artifacts)"),
-        MenuOption("2", "Profile (select app from profile)"),
-        MenuOption("3", "Custom package name"),
+        MenuOption("1", "App name or package (fast path)"),
+        MenuOption("2", "Select from available artifacts"),
+        MenuOption("3", "Profile"),
     ]
     target_spec = MenuSpec(items=target_options, exit_label="Cancel", show_exit=True)
     menu_utils.render_menu(target_spec)
@@ -213,13 +285,19 @@ def select_dynamic_target(
     if choice == "0":
         return None
 
-    groups = group_artifacts_fn()
     try:
         dataset_pkgs = {pkg.lower() for pkg in active_research_cohort_packages_fn()}
     except Exception:
         dataset_pkgs = set()
 
     if choice == "1":
+        package_name = prompt_custom_package_fn()
+        if package_name:
+            return resolve_custom_tier_fn(package_name, dataset_pkgs)
+        return None
+
+    if choice == "2":
+        groups = group_artifacts_fn()
         package_name = select_package_from_groups_fn(groups, title="App selection")
         if package_name:
             if package_name.lower() in dataset_pkgs:
@@ -235,7 +313,8 @@ def select_dynamic_target(
             return resolve_custom_tier_fn(package_name, dataset_pkgs)
         return None
 
-    if choice == "2":
+    if choice == "3":
+        groups = group_artifacts_fn()
         profile_selection = select_profile_package_fn(groups)
         if profile_selection:
             package_name, profile_key = profile_selection
@@ -245,8 +324,4 @@ def select_dynamic_target(
         if package_name:
             return resolve_custom_tier_fn(package_name, dataset_pkgs)
         return None
-
-    package_name = prompt_custom_package_fn()
-    if package_name:
-        return resolve_custom_tier_fn(package_name, dataset_pkgs)
     return None

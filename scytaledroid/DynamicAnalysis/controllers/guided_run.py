@@ -2031,7 +2031,7 @@ def _run_guided_dataset_iteration(
     if not scoped_groups:
         print(
             status_messages.status(
-                f"No APK artifacts available for {cohort_label}. Execute Harvest or use Custom package name.",
+                f"No APK artifacts available for {cohort_label}. Execute Harvest or use app name/package.",
                 level="warn",
             )
         )

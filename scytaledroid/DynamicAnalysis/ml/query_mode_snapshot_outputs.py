@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .method_basis import runtime_ml_method_basis
+
 
 @dataclass(frozen=True)
 class SnapshotOutputResult:
@@ -39,7 +41,6 @@ def finalize_query_snapshot_outputs(
     lint_operational_snapshot: Callable[[Path], Any],
     write_snapshot_bundle_manifest: Callable[[Path], Path],
     write_snapshot_summary: Callable[[Path, dict[str, Any]], None],
-    output_dir: str,
     per_run_rows: list[dict[str, Any]],
     per_group_mode_rows: list[dict[str, Any]],
     persistence_rows: list[dict[str, Any]],
@@ -50,6 +51,7 @@ def finalize_query_snapshot_outputs(
     overlap_rows: list[dict[str, Any]],
     transport_rows: list[dict[str, Any]],
     transport_group_mode_rows: list[dict[str, Any]],
+    evidence_root: Path,
 ) -> SnapshotOutputResult:
     write_tables(
         snapshot_dir,
@@ -65,19 +67,22 @@ def finalize_query_snapshot_outputs(
         transport_group_mode_rows=transport_group_mode_rows,
     )
 
-    evidence_root_fs = Path(output_dir) / "evidence" / "dynamic"
     freeze_ok = True
     freeze_err: str | None = None
     try:
-        write_snapshot_freeze_manifest(snapshot_dir=snapshot_dir, evidence_root=evidence_root_fs, overwrite=True)
+        write_snapshot_freeze_manifest(snapshot_dir=snapshot_dir, evidence_root=evidence_root, overwrite=True)
     except Exception as exc:  # noqa: BLE001
         freeze_ok = False
         freeze_err = str(exc)
         (snapshot_dir / "freeze_manifest_error.txt").write_text(freeze_err + "\n", encoding="utf-8")
 
     lint = lint_operational_snapshot(snapshot_dir)
+    lint_warnings = list(getattr(lint, "warnings", []) or [])
     lint_path = snapshot_dir / "operational_lint.json"
-    lint_path.write_text(json.dumps({"ok": lint.ok, "issues": lint.issues}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lint_path.write_text(
+        json.dumps({"ok": lint.ok, "issues": lint.issues, "warnings": lint_warnings}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     reg_path = snapshot_dir / "model_registry.json"
     generated_at_utc = datetime.now(UTC).isoformat()
@@ -86,6 +91,7 @@ def finalize_query_snapshot_outputs(
             {
                 "artifact_type": "operational_model_registry",
                 "created_at_utc": generated_at_utc,
+                "method_basis": runtime_ml_method_basis(context="operational_model_registry"),
                 "snapshot_id": sid,
                 "models": model_registry_rows,
             },
@@ -104,6 +110,7 @@ def finalize_query_snapshot_outputs(
             "snapshot_id": sid,
             "selector_type": selection.selector_type,
             "generated_at_utc": generated_at_utc,
+            "method_basis": runtime_ml_method_basis(context="operational_snapshot_summary"),
             "groups_seen": int(groups_seen),
             "groups_trained": int(groups_trained),
             "groups_skipped_no_baseline": int(groups_skipped_no_baseline),
@@ -126,6 +133,7 @@ def finalize_query_snapshot_outputs(
             "freeze_ok": bool(freeze_ok),
             "freeze_error": freeze_err,
             "lint_ok": bool(lint.ok),
+            "lint_warnings": lint_warnings,
         },
     )
 

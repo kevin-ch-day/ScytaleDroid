@@ -1,10 +1,10 @@
 """Profile v3 per-package ML artifact derivation (Phase 2 enabler).
 
-Profile v3 publication metrics are computed from per-run ML artifacts under:
+Profile v3 metrics are computed from per-run ML artifacts under:
   <run_dir>/analysis/ml/v1/{window_scores.csv, baseline_threshold.json}
 
-Paper #2 generates these via freeze-anchored batch ML. Profile v3 needs the
-same artifact contract, but the cohort is populated operationally during Phase 2.
+Freeze-anchored batch ML and Profile v3 use the same artifact contract, but
+Profile v3 can populate the cohort operationally during capture.
 
 This module derives the required artifacts for the *latest* baseline_idle and
 interaction_scripted runs for a given package by:
@@ -37,6 +37,7 @@ from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
     get_sampling_duration_seconds,
     load_run_inputs,
 )
+from scytaledroid.DynamicAnalysis.ml.feature_matrix import rows_to_basic_matrix
 from scytaledroid.DynamicAnalysis.ml.io.ml_output_paths import MLOutputPaths
 from scytaledroid.DynamicAnalysis.ml.numpy_percentile import percentile as np_percentile
 from scytaledroid.DynamicAnalysis.ml.pcap_window_features import (
@@ -64,31 +65,13 @@ class V3MlDeriveResult:
 
 
 def _rows_to_matrix_v3(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -> tuple[np.ndarray, list[str]]:
-    """Feature matrix for v3 per-window scoring (aligned with query_mode_runner semantics)."""
+    """Feature matrix for Profile v3 per-window scoring."""
 
-    denom = float(window_spec.window_size_s) if float(window_spec.window_size_s) > 0 else 1.0
-    feature_names = ["bytes_per_sec", "packets_per_sec", "avg_packet_size_bytes"]
-    data: list[list[float]] = []
-
-    def _f(value: Any) -> float:
-        try:
-            return float(value or 0.0)
-        except Exception:
-            return 0.0
-
-    for row in rows:
-        byte_count = _f(row.get("byte_count"))
-        pkt_count = _f(row.get("packet_count"))
-        avg_pkt = _f(row.get("avg_packet_size_bytes"))
-        bytes_per_sec = byte_count / denom
-        packets_per_sec = pkt_count / denom
-        if bool(getattr(config, "FEATURE_LOG1P", False)):
-            bytes_per_sec = float(np.log1p(bytes_per_sec))
-            packets_per_sec = float(np.log1p(packets_per_sec))
-        data.append([bytes_per_sec, packets_per_sec, avg_pkt])
-    if not data:
-        return np.zeros((0, len(feature_names)), dtype=float), feature_names
-    return np.asarray(data, dtype=float), feature_names
+    return rows_to_basic_matrix(
+        rows,
+        window_spec=window_spec,
+        feature_log1p=bool(getattr(config, "FEATURE_LOG1P", False)),
+    )
 
 
 def _find_latest_runs_for_package(*, evidence_root: Path, package: str) -> tuple[str | None, str | None]:

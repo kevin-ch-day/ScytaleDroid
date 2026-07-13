@@ -92,7 +92,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[5]
 
 def _cfg_for_selector(selector_type: SelectorType):
-    # Freeze selector fingerprints Paper #2 config; query selector fingerprints operational config.
+    # Freeze selector fingerprints profile config; query selector fingerprints operational config.
     return operational_config if selector_type == "query" else paper_config
 
 

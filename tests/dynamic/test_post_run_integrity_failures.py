@@ -44,6 +44,51 @@ def test_post_run_integrity_end_to_end_valid_row(capsys, tmp_path: Path) -> None
     out = capsys.readouterr().out
     assert "Post-Run Integrity" in out
     assert "VALID" in out
+    assert "250.0 KB" in out
+    assert "1 min 00 sec" in out
+
+
+def test_post_run_integrity_valid_summary_uses_readable_size_and_duration(
+    capsys, tmp_path: Path
+) -> None:
+    run_dir = tmp_path / "evidence" / "dynamic" / "run-readable"
+    write_json(
+        run_dir / "run_manifest.json",
+        {
+            "dataset": {
+                "valid_dataset_run": True,
+                "invalid_reason_code": None,
+                "pcap_size_bytes": 180143938,
+                "window_count": 144,
+            }
+        },
+    )
+    write_json(
+        run_dir / "analysis" / "pcap_report.json",
+        {
+            "report_status": "ok",
+            "pcap_size_bytes": 180143938,
+            "capinfos": {"parsed": {"packet_count": 100, "capture_duration_s": 727.357203}},
+        },
+    )
+    write_json(
+        run_dir / "analysis" / "pcap_features.json",
+        {
+            "metrics": {},
+            "proxies": {},
+            "quality": {"report_status": "ok", "pcap_enrichment": {"status": "ok"}},
+            "timeseries": {"windowing": {"window_count": 144}},
+        },
+    )
+
+    _post_run_integrity_check(
+        SimpleNamespace(dynamic_run_id="run-readable", evidence_path=str(run_dir))
+    )
+    out = capsys.readouterr().out
+    assert "180.1 MB" in out
+    assert "12 min 07 sec" in out
+    assert "180143938 bytes" not in out
+    assert "727.357203s" not in out
 
 
 def test_post_run_integrity_fails_when_window_count_missing(capsys, tmp_path: Path) -> None:

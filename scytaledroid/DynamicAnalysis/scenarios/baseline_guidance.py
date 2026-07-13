@@ -30,7 +30,7 @@ def linkedin_stable_screen_guidance() -> str:
 
 
 def pinterest_stable_screen_guidance() -> str:
-    return "profile, settings, saved items, a static board page, or another non-video/non-promoted surface"
+    return "profile, settings, saved items, a static board page, or another non-search/non-video/non-promoted surface"
 
 
 def instagram_stable_screen_guidance() -> str:
@@ -109,22 +109,24 @@ def linkedin_baseline_warning_line() -> str:
 
 def pinterest_baseline_tip_line() -> str:
     return (
-        "  - Pinterest baseline tip: Home can keep surfacing promoted pins, media cards, and video-capable content; "
-        "prefer profile, saved items, a static board page, settings, or another calm non-feed screen"
+        "  - Pinterest baseline tip: Home and search grids can keep surfacing promoted pins, Visit Site cards, "
+        "native pin modals, publisher pages, media, and video-capable content; prefer profile, saved items, "
+        "a static board page, settings, or another calm non-feed screen"
     )
 
 
 def pinterest_launch_surface_tip_line() -> str:
     return (
         "  - If Pinterest launches to Home, switch once to profile, saved items, a static board page, "
-        "settings, or another non-video/non-promoted surface before the timer starts"
+        "settings, or another non-search/non-video/non-promoted surface before the timer starts"
     )
 
 
 def pinterest_baseline_warning_line() -> str:
     return (
-        "Quota baseline requires a calm Pinterest foreground surface. Home feed, promoted pins, and video-capable pins can "
-        "keep generating app-driven traffic even when the operator is hands-off."
+        "Quota baseline requires a calm Pinterest foreground surface. Home feed, search grids, promoted pins, Visit Site cards, "
+        "native pin-detail modals, publisher/custom-tab flows, and video-capable pins can keep generating app-driven traffic "
+        "even when the operator is hands-off."
     )
 
 
@@ -271,7 +273,8 @@ def baseline_idle_ready_note(package_name: str) -> str | None:
     if pkg == "com.pinterest":
         return (
             "Pinterest often reopens on Home after relaunch. Before pressing Enter, switch once to "
-            "profile, saved items, a static board page, settings, or another non-video/non-promoted surface if Home is still selected."
+            "profile, saved items, a static board page, settings, or another non-search/non-video/non-promoted surface "
+            "if Home, Search, or a pin detail is still selected."
         )
     if pkg == "com.instagram.android":
         return (
@@ -310,12 +313,12 @@ def baseline_idle_checkpoint_messages(package_name: str) -> dict[int, str]:
         if pkg == "com.pinterest":
             return {
                 60: (
-                    "60s checkpoint: if Pinterest is still on Home, a promoted pin, or a video-capable pin surface, "
+                    "60s checkpoint: if Pinterest is still on Home, Search, a promoted card, Visit Site card, pin detail, or video-capable pin surface, "
                     "switch once to profile, saved items, a static board page, settings, or another calm non-feed screen, then hold idle."
                 ),
                 120: (
-                    "120s checkpoint: keep Pinterest off Home feed refresh, promoted pins, and video/media cards; "
-                    "avoid search, opening pins, scrolling, or switching back into feed discovery."
+                    "120s checkpoint: keep Pinterest off Home/Search feed refresh, promoted pins, Visit Site cards, native pin modals, "
+                    "publisher/custom-tab pages, and video/media cards; avoid search, opening pins, scrolling, or switching back into discovery."
                 ),
             }
         if pkg == "com.instagram.android":
@@ -402,7 +405,7 @@ def baseline_not_idle_next_step(package_name: str | None) -> str:
             )
         if pkg == "com.pinterest":
             return (
-                "Retry on profile, saved items, a static board page, settings, or another non-video/non-promoted Pinterest screen if quota progress is needed."
+                "Retry on profile, saved items, a static board page, settings, or another non-search/non-video/non-promoted Pinterest screen if quota progress is needed."
             )
         if pkg == "com.instagram.android":
             return (

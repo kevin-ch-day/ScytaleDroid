@@ -1,4 +1,4 @@
-"""Generate Phase E (Paper #2) deliverable bundle under output/.
+"""Generate freeze/profile ML deliverable bundle under output/.
 
 This does NOT mutate evidence packs and does NOT change the freeze anchor.
 It packages already-derived tables and generates paper-facing figures/tables,
@@ -8,7 +8,6 @@ plus a reproducibility appendix snippet and a manifest with hashes.
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 from dataclasses import dataclass
@@ -23,8 +22,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from openpyxl import Workbook  # noqa: E402
-from openpyxl.styles import Alignment, Font  # noqa: E402
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
     dynamic_evidence_root,
@@ -45,7 +42,23 @@ from .deliverable_bundle_paths import (
     output_phase_e_bundle_tables_dir,
 )
 from .evidence_pack_ml_preflight import get_sampling_duration_seconds, load_run_inputs
+from .method_basis import runtime_ml_method_basis
 from .pcap_window_features import build_window_features, extract_packet_timeline
+from .publication_bundle.exporters import (
+    tex_escape as _tex_escape,
+    write_csv_with_provenance as _write_csv_with_provenance,
+    write_tex_table as _write_tex_table,
+    write_xlsx as _write_xlsx,
+)
+from .publication_bundle.manifest_utils import (
+    copy_required as _copy_required,
+    sha256_stream as _sha256_stream,
+)
+from .publication_bundle.validation import (
+    write_determinism_checksums as _write_determinism_checksums,
+    write_phrase_lint_report as _write_phrase_lint_report,
+    write_required_fields_validation_report as _write_required_fields_validation_report,
+)
 from .telemetry_windowing import WindowSpec
 
 OKABE_ITO = {
@@ -65,15 +78,6 @@ _LEGACY_LABEL_VARIANTS: dict[str, list[str]] = {
     # Phase G: allow reading legacy labels from older derived CSVs, but do not emit them.
     "com.facebook.orca": ["Facebook Messenger", "Messenger"],
 }
-
-_PROHIBITED_PHRASES = (
-    "outbound traffic",
-    "payload bytes",
-    "application-only traffic",
-    "network requests",
-    "strict app isolation",
-)
-
 
 def _dynamic_run_dir(run_id: str | int | None) -> Path:
     rid = str(run_id or "").strip()
@@ -132,6 +136,9 @@ class PhaseEArtifacts:
     required_fields_validation_json: Path
     report_contract_lint_json: Path
     generated_at: str
+
+
+LockedRuntimeBundleArtifacts = PhaseEArtifacts
 
 
 def write_phase_e_deliverables_bundle(
@@ -260,6 +267,10 @@ def write_phase_e_deliverables_bundle(
         repro_appendix_md=repro_appendix_md,
         fig_b2_png=fig_b2_png,
         fig_b2_pdf=fig_b2_pdf,
+        fig_b2_social_png=_fig_b2_social_png,
+        fig_b2_social_pdf=_fig_b2_social_pdf,
+        fig_b2_messaging_png=_fig_b2_msg_png,
+        fig_b2_messaging_pdf=_fig_b2_msg_pdf,
         fig_b4_social_png=_fig_b4_social_png,
         fig_b4_social_pdf=_fig_b4_social_pdf,
         fig_b4_messaging_png=_fig_b4_msg_png,
@@ -295,6 +306,23 @@ def write_phase_e_deliverables_bundle(
         required_fields_validation_json=required_fields_report,
         report_contract_lint_json=phrase_lint_report,
         generated_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def write_locked_runtime_deliverables_bundle(
+    *,
+    fig_b1_run_id: str,
+    interaction_tag: str | None = None,
+) -> LockedRuntimeBundleArtifacts:
+    """Write the locked runtime ML deliverable bundle.
+
+    This neutral public name preserves the existing artifact layout while moving
+    new callers away from the historical phase-specific function name.
+    """
+
+    return write_phase_e_deliverables_bundle(
+        fig_b1_run_id=fig_b1_run_id,
+        interaction_tag=interaction_tag,
     )
 
 
@@ -739,7 +767,7 @@ def _render_repro_appendix() -> str:
     freeze = freeze_anchor_path()
     sha = _sha256_stream(freeze)
     return (
-        "# Phase E Reproducibility (Generated)\n\n"
+        "# Locked Runtime ML Reproducibility (Generated)\n\n"
         f"- Freeze anchor: `{freeze}`\n"
         f"- Freeze sha256: `{sha}`\n"
         "- Capture semantics: PCAPdroid-filtered capture restricted to the target package.\n"
@@ -757,8 +785,8 @@ def _render_repro_appendix() -> str:
 
 def _render_bundle_readme(fig_run_id: str) -> str:
     return (
-        "# Paper #2 Phase E Deliverables Bundle\n\n"
-        "This folder is operator/paper-facing. It is intended to be zipped and shared.\n\n"
+        "# Freeze ML Deliverables Bundle\n\n"
+        "This folder is operator-facing. It is intended to be zipped and shared.\n\n"
         "Authoritative inputs:\n"
         "- Evidence packs under `data/evidence/dynamic/<run_id>/...` "
         "(with `output/evidence/dynamic` compatibility symlinks during migration)\n"
@@ -813,6 +841,10 @@ def _write_bundle_manifest(
     repro_appendix_md: Path,
     fig_b2_png: Path,
     fig_b2_pdf: Path,
+    fig_b2_social_png: Path,
+    fig_b2_social_pdf: Path,
+    fig_b2_messaging_png: Path,
+    fig_b2_messaging_pdf: Path,
     fig_b4_social_png: Path,
     fig_b4_social_pdf: Path,
     fig_b4_messaging_png: Path,
@@ -827,6 +859,7 @@ def _write_bundle_manifest(
         "freeze_anchor": str(freeze_anchor_path()),
         "freeze_sha256": _sha256_stream(freeze_anchor_path()),
         "fig_b1_run_id": fig_b1_run_id,
+        "method_basis": runtime_ml_method_basis(context="publication_bundle_manifest"),
         "ml_schema_version": config.ML_SCHEMA_VERSION,
         "report_schema_version": config.REPORT_SCHEMA_VERSION,
         # Table 5 is derived from static reports (Phase B) using the plan's base_apk_sha256.
@@ -837,6 +870,22 @@ def _write_bundle_manifest(
             "fig_b1_pdf": {"path": str(fig_b1_pdf), "sha256": _sha256_stream(fig_b1_pdf)},
             "fig_b2_png": {"path": str(fig_b2_png), "sha256": _sha256_stream(fig_b2_png)},
             "fig_b2_pdf": {"path": str(fig_b2_pdf), "sha256": _sha256_stream(fig_b2_pdf)},
+            "fig_b2_social_png": {
+                "path": str(fig_b2_social_png),
+                "sha256": _sha256_stream(fig_b2_social_png),
+            },
+            "fig_b2_social_pdf": {
+                "path": str(fig_b2_social_pdf),
+                "sha256": _sha256_stream(fig_b2_social_pdf),
+            },
+            "fig_b2_messaging_png": {
+                "path": str(fig_b2_messaging_png),
+                "sha256": _sha256_stream(fig_b2_messaging_png),
+            },
+            "fig_b2_messaging_pdf": {
+                "path": str(fig_b2_messaging_pdf),
+                "sha256": _sha256_stream(fig_b2_messaging_pdf),
+            },
             "fig_b4_social_png": {"path": str(fig_b4_social_png), "sha256": _sha256_stream(fig_b4_social_png)},
             "fig_b4_social_pdf": {"path": str(fig_b4_social_pdf), "sha256": _sha256_stream(fig_b4_social_pdf)},
             "fig_b4_messaging_png": {
@@ -901,20 +950,11 @@ def _write_bundle_manifest(
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _copy_required(src: Path, dest: Path, *, overwrite: bool) -> None:
-    if not src.exists():
-        raise RuntimeError(f"Missing required input for bundle: {src}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists() and not overwrite:
-        return
-    dest.write_bytes(src.read_bytes())
-
-
 def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> None:
     """Write a close-out receipt for the current bundle contents.
 
-    This file exists so a zipped `output/paper/internal/baseline/` bundle can be verified
-    later without depending on any DB state or rerunning generation.
+    This file exists so a zipped locked runtime-ML bundle can be verified later
+    without depending on any DB state or rerunning generation.
     """
     from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
 
@@ -930,6 +970,7 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
         "toolchain": gather_toolchain_versions(),
         "freeze_anchor": str(freeze_anchor_path()),
         "freeze_sha256": _sha256_stream(freeze_anchor_path()),
+        "method_basis": runtime_ml_method_basis(context="publication_bundle_closure_record"),
         "ml_schema_version": int(config.ML_SCHEMA_VERSION),
         "paper_artifacts_path": str(paper_artifacts),
         "paper_artifacts_sha256": _sha256_stream(paper_artifacts),
@@ -937,14 +978,6 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _sha256_stream(p: Path) -> str:
-    h = hashlib.sha256()
-    with p.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _interaction_tag(manifest: dict[str, Any]) -> str | None:
@@ -1053,97 +1086,6 @@ def _clean_bundle_dirs(*, tables_dir: Path, figs_dir: Path, fig_b1_run_id: str) 
                         p.unlink()
                     except Exception:
                         pass
-
-
-def _write_csv_with_provenance(
-    path: Path, fieldnames: list[str], rows: list[dict[str, Any]], *, provenance: dict[str, str]
-) -> None:
-    """Write a CSV with a provenance comment header (paper-grade)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        for k, v in provenance.items():
-            handle.write(f"# {k}: {v}\n")
-        handle.write("#\n")
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({k: row.get(k) for k in fieldnames})
-
-
-def _tex_escape(s: str) -> str:
-    return s.replace("\\", "\\textbackslash{}").replace("_", "\\_")
-
-
-def _write_tex_table(
-    path: Path,
-    *,
-    columns: list[tuple[str, str]],
-    rows: list[dict[str, Any]],
-    provenance: dict[str, str],
-    caption_comment: str,
-) -> None:
-    """Write a standalone LaTeX tabular (no preamble, no table env)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    keys = [k for k, _ in columns]
-    headers = [_tex_escape(h) for _, h in columns]
-    spec = "l" + ("r" * (len(columns) - 1))
-    with path.open("w", encoding="utf-8") as handle:
-        for k, v in provenance.items():
-            handle.write(f"% {k}: {v}\n")
-        handle.write("%\n")
-        handle.write(f"% {caption_comment}\n")
-        handle.write(f"\\begin{{tabular}}{{{spec}}}\n")
-        handle.write("\\hline\n")
-        handle.write(" & ".join(headers) + " \\\\\n")
-        handle.write("\\hline\n")
-        for r in rows:
-            vals: list[str] = []
-            for k in keys:
-                v = r.get(k)
-                if v is None:
-                    vals.append("-")
-                else:
-                    vals.append(_tex_escape(str(v)))
-            handle.write(" & ".join(vals) + " \\\\\n")
-        handle.write("\\hline\n")
-        handle.write("\\end{tabular}\n")
-
-
-def _write_xlsx(
-    path: Path,
-    *,
-    sheet_name: str,
-    columns: list[tuple[str, str]],
-    rows: list[dict[str, Any]],
-    provenance: dict[str, str],
-) -> None:
-    """Write an XLSX with a provenance sheet + a table sheet."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wb = Workbook()
-    ws0 = wb.active
-    ws0.title = "provenance"
-    ws0["A1"] = "key"
-    ws0["B1"] = "value"
-    ws0["A1"].font = Font(bold=True)
-    ws0["B1"].font = Font(bold=True)
-    i = 2
-    for k, v in provenance.items():
-        ws0[f"A{i}"] = k
-        ws0[f"B{i}"] = v
-        i += 1
-    ws0.column_dimensions["A"].width = 28
-    ws0.column_dimensions["B"].width = 80
-
-    ws = wb.create_sheet(title=sheet_name)
-    headers = [h for _, h in columns]
-    keys = [k for k, _ in columns]
-    ws.append(headers)
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center")
-    for r in rows:
-        ws.append([r.get(k) for k in keys])
-    wb.save(path)
 
 
 def _write_table_1_rdi_prevalence(tables_dir: Path, *, provenance: dict[str, str]) -> tuple[Path, Path, Path]:
@@ -1483,7 +1425,7 @@ def _write_table_4_signature_deltas(tables_dir: Path, *, provenance: dict[str, s
 def _compute_static_posture_scores() -> dict[str, tuple[float, list[str]]]:
     """Compute Static Posture Score (0-100) per frozen app from baseline static_dynamic_plan.json.
 
-    Context-only for Paper #2; never used as ML features.
+    Context-only for freeze/profile ML; never used as ML features.
     """
     freeze = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
     apps = freeze.get("apps") or {}
@@ -1521,7 +1463,7 @@ def _compute_static_posture_scores() -> dict[str, tuple[float, list[str]]]:
         rf = obj.get("risk_flags") if isinstance(obj.get("risk_flags"), dict) else {}
         c = 1 if rf.get("uses_cleartext_traffic") is True else 0
 
-        # SDK indicators are context-only. For frozen Paper #2 plans this is typically missing.
+        # SDK indicators are context-only. For frozen plans this is typically missing.
         s = 0.0
         sdk = obj.get("sdk_indicators") if isinstance(obj.get("sdk_indicators"), dict) else None
         if isinstance(sdk, dict) and sdk.get("score") is not None:
@@ -1582,7 +1524,7 @@ def _rank_tertiles_4_4_4(
     if n <= 0:
         return grade, missing
 
-    # Paper #2 expects n=12. Keep a defensive fallback for partial data.
+    # The locked profile expected n=12. Keep a defensive fallback for partial data.
     if n == 12:
         cuts = (4, 8)
     else:
@@ -2189,152 +2131,3 @@ def _write_table_8_model_comparison_metrics(tables_dir: Path, *, provenance: dic
         caption_comment="Table 8: IF vs OC-SVM comparison metrics (spearman, abs delta, joint agreement).",
     )
     return csv_path, xlsx_path, tex_path
-
-
-def _write_required_fields_validation_report(*, manifest_dir: Path) -> Path:
-    """Required-field validation for paper-grade model manifests."""
-    freeze_payload = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
-    included_run_ids = [str(x) for x in (freeze_payload.get("included_run_ids") or []) if str(x).strip()]
-    required_paths = {
-        "seed": ("seed",),
-        "window_size_s": ("windowing", "window_size_s"),
-        "window_stride_s": ("windowing", "stride_s"),
-        "threshold_percentile": ("models", config.MODEL_IFOREST, "threshold_percentile"),
-        "np_percentile_method": ("models", config.MODEL_IFOREST, "np_percentile_method"),
-        "feature_names": ("models", config.MODEL_IFOREST, "feature_names"),
-        "model_params": ("models", config.MODEL_IFOREST, "params"),
-        "training_mode": ("models", config.MODEL_IFOREST, "training_mode"),
-        "numpy_version": ("environment", "deps", "numpy"),
-        "sklearn_version": ("environment", "deps", "sklearn"),
-        "tshark_version": ("environment", "host_tools", "tshark", "version"),
-    }
-
-    missing_by_run: dict[str, list[str]] = {}
-    for rid in included_run_ids:
-        path = (
-            Path(app_config.OUTPUT_DIR)
-            / "evidence"
-            / "dynamic"
-            / rid
-            / "analysis"
-            / "ml"
-            / config.ML_SCHEMA_LABEL
-            / "model_manifest.json"
-        )
-        if not path.exists():
-            missing_by_run[rid] = sorted(required_paths.keys())
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            missing_by_run[rid] = sorted(required_paths.keys())
-            continue
-        missing: list[str] = []
-        for field_name, token_path in required_paths.items():
-            cur: Any = payload
-            for token in token_path:
-                if isinstance(cur, dict) and token in cur:
-                    cur = cur[token]
-                else:
-                    cur = None
-                    break
-            if cur in (None, "", []):
-                missing.append(field_name)
-        if missing:
-            missing_by_run[rid] = sorted(missing)
-
-    checked_runs = len(included_run_ids)
-    failed_runs = len(missing_by_run)
-    payload = {
-        "checked_runs": checked_runs,
-        "failed_runs": failed_runs,
-        "passed_runs": checked_runs - failed_runs,
-        "paper_grade_ready": failed_runs == 0,
-        "status": "PAPER_GRADE" if failed_runs == 0 else "EXPERIMENTAL",
-        "missing_by_run": missing_by_run,
-    }
-    out_path = manifest_dir / "required_fields_validation.json"
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return out_path
-
-
-def _write_phrase_lint_report(*, target_paths: tuple[Path, ...], out_path: Path) -> Path:
-    violations: list[dict[str, str]] = []
-    for path in target_paths:
-        if not path.exists() or not path.is_file():
-            continue
-        text = path.read_text(encoding="utf-8")
-        lower = text.lower()
-        for phrase in _PROHIBITED_PHRASES:
-            if phrase in lower:
-                violations.append({"path": str(path), "phrase": phrase})
-    payload = {
-        "checked_files": [str(p) for p in target_paths if p.exists()],
-        "prohibited_phrases": list(_PROHIBITED_PHRASES),
-        "ok": len(violations) == 0,
-        "violations": violations,
-    }
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return out_path
-
-
-def _write_determinism_checksums(*, manifest_dir: Path) -> Path:
-    """Write deterministic hash anchors for paper-facing reproducibility checks."""
-    freeze_payload = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
-    included_run_ids = [str(x) for x in (freeze_payload.get("included_run_ids") or []) if str(x).strip()]
-    per_run: dict[str, Any] = {}
-    spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
-    for rid in included_run_ids:
-        run_dir = _dynamic_run_dir(rid)
-        model_manifest = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "model_manifest.json"
-        if_scores = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "anomaly_scores_iforest.csv"
-        oc_scores = run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL / "anomaly_scores_ocsvm.csv"
-        record: dict[str, Any] = {
-            "model_manifest_sha256": _sha256_stream(model_manifest) if model_manifest.exists() else None,
-            "iforest_scores_sha256": _sha256_stream(if_scores) if if_scores.exists() else None,
-            "ocsvm_scores_sha256": _sha256_stream(oc_scores) if oc_scores.exists() else None,
-            "feature_matrix_sha256": None,
-        }
-        try:
-            inputs = load_run_inputs(run_dir)
-            if inputs and inputs.pcap_path and inputs.pcap_path.exists():
-                duration_s = get_sampling_duration_seconds(inputs)
-                if duration_s and duration_s > 0:
-                    rows, _ = build_window_features(
-                        extract_packet_timeline(inputs.pcap_path),
-                        duration_s=float(duration_s),
-                        spec=spec,
-                    )
-                    h = hashlib.sha256()
-                    for row in rows:
-                        # Stable, canonical per-window representation.
-                        line = (
-                            f"{float(row.get('window_start_s') or 0.0):.6f},"
-                            f"{float(row.get('window_end_s') or 0.0):.6f},"
-                            f"{int(row.get('packet_count') or 0)},"
-                            f"{int(row.get('byte_count') or 0)},"
-                            f"{float(row.get('avg_packet_size_bytes') or 0.0):.6f}\n"
-                        )
-                        h.update(line.encode("utf-8"))
-                    record["feature_matrix_sha256"] = h.hexdigest()
-        except Exception as exc:  # noqa: BLE001
-            record["feature_matrix_error"] = str(exc)
-        per_run[rid] = record
-
-    table_1 = output_phase_e_bundle_tables_dir() / "table_1_rdi_prevalence.csv"
-    table_8 = output_phase_e_bundle_tables_dir() / "table_8_model_comparison_metrics.csv"
-    payload = {
-        "freeze_anchor": str(freeze_anchor_path()),
-        "freeze_sha256": _sha256_stream(freeze_anchor_path()),
-        "ml_schema_version": int(config.ML_SCHEMA_VERSION),
-        "report_schema_version": int(config.REPORT_SCHEMA_VERSION),
-        "window_spec": {"window_size_s": float(config.WINDOW_SIZE_S), "window_stride_s": float(config.WINDOW_STRIDE_S)},
-        "table_hashes": {
-            "table_1_rdi_prevalence_csv": _sha256_stream(table_1) if table_1.exists() else None,
-            "table_8_model_comparison_metrics_csv": _sha256_stream(table_8) if table_8.exists() else None,
-        },
-        "per_run": per_run,
-    }
-    out_path = manifest_dir / "determinism_checksums.json"
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return out_path

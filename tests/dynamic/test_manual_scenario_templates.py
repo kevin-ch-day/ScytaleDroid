@@ -376,21 +376,56 @@ def test_pinterest_manual_interactive_guidance_covers_high_value_surfaces() -> N
     text = "\n".join(lines)
 
     assert "Home feed scroll" in text
-    assert "non-sponsored pin/detail view" in text
+    assert "non-sponsored native pin/detail view" in text
     assert "Search with a neutral topic" in text
+    assert "sponsored cards and Visit site buttons" in text
+    assert "intentional outbound-web branches" in text
+    assert "Native pin-detail modals may initialize media, WebView, camera, or image-processing components" in text
+    assert "close them without More/Save actions" in text
+    assert "publisher page or Chrome Custom Tab" in text
+    assert "label it as outbound web behavior" in text
     assert "pinterest.com or pin.it link" in text
     assert "resolves back into Pinterest" in text
     assert "Avoid Create, Save, Follow" in text
-    assert "outbound shopping/ad links" in text
+    assert "outbound shopping/ad links, ad overlays" in text
     assert "external share targets" in text
+
+
+def test_instagram_manual_interactive_guidance_covers_high_value_surfaces() -> None:
+    lines = interactive_guidance.manual_interaction_behavior_lines(
+        "com.instagram.android",
+        target_label="4 mins 0 sec (240s)",
+    )
+    text = "\n".join(lines)
+
+    assert "Home feed scrolling" in text
+    assert "View Stories briefly" in text
+    assert "Visit Reels" in text
+    assert "Explore/Search with a neutral topic" in text
+    assert "Profile and switch among grid, reels, repost/tagged tabs" in text
+    assert "create/camera preview" in text
+    assert "like/unlike or save/unsave" in text
+    assert "Avoid public comments, DMs to human accounts" in text
+    assert "Public instagram.com deeplinks may resolve back to feed/ad surfaces" in text
+
+
+def test_instagram_manual_interactive_checkpoint_messages_are_specific() -> None:
+    messages = interactive_guidance.manual_interaction_checkpoint_messages("com.instagram.android")
+
+    assert "Stories or Reels" in messages[60]
+    assert "Explore/Search with a neutral topic" in messages[120]
+    assert "avoid ad click-throughs unless intentional" in messages[120]
+    assert "Profile tabs and optional create-camera preview" in messages[180]
+    assert "back out before publishing, commenting, DM sending" in messages[180]
 
 
 def test_pinterest_manual_interactive_checkpoint_messages_are_specific() -> None:
     messages = interactive_guidance.manual_interaction_checkpoint_messages("com.pinterest")
 
-    assert "non-sponsored pin/detail view" in messages[60]
+    assert "non-sponsored native pin/detail view" in messages[60]
     assert "Pinterest Search with a neutral topic" in messages[120]
-    assert "verified app-link behavior" in messages[180]
+    assert "avoid Visit site unless outbound-web behavior is intentional" in messages[120]
+    assert "verified app-link/outbound-web behavior" in messages[180]
     assert "avoid Save, Follow, Create" in messages[180]
 
 
@@ -441,6 +476,49 @@ def test_twitter_uses_x_template_override(tmp_path: Path) -> None:
     )
     template_id, _steps = _resolve_script_template(ctx)
     assert template_id == "x_twitter_full_session_v1"
+
+
+def test_x_v1_template_stays_legacy_for_existing_script_hashes() -> None:
+    steps = template_steps_for_id("x_twitter_full_session_v1")
+    assert steps is not None
+    step_ids = [step_id for step_id, _description, _seconds in steps]
+
+    assert "open_dm_thread" in step_ids
+    assert "grok_ai_prompt" in step_ids
+    assert "compose_draft_or_test_post" not in step_ids
+
+
+def test_x_v2_template_covers_observed_high_value_surfaces() -> None:
+    steps = template_steps_for_id("x_twitter_full_session_v2")
+    assert steps is not None
+    text = "\n".join(f"{step_id}: {description}" for step_id, description, _seconds in steps).lower()
+
+    assert "home / for you" in text
+    assert "video post" in text
+    assert "post detail or replies" in text
+    assert "android privacy security" in text
+    assert "grok" in text
+    assert "notifications" in text
+    assert "chat/messages landing" in text
+    assert "controlled test account" in text
+    assert "draft-only by default" in text
+    assert "follow" in text
+
+
+def test_x_manual_interactive_guidance_allows_controlled_test_account_branch() -> None:
+    lines = interactive_guidance.manual_interaction_behavior_lines(
+        "com.twitter.android",
+        target_label="4 mins 0 sec (240s)",
+    )
+    text = "\n".join(lines)
+
+    assert "Home / For You" in text
+    assert "android privacy security" in text
+    assert "Grok" in text
+    assert "Chat landing" in text
+    assert "controlled test account" in text
+    assert "controlled test thread" in text
+    assert "ad click-throughs" in text
 
 
 def test_whatsapp_uses_whatsapp_template_override(tmp_path: Path) -> None:

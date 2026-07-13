@@ -113,11 +113,15 @@ def prepare_package_selection_view(
         DatasetTrackerConfig,
         load_dataset_tracker,
     )
-    from scytaledroid.DynamicAnalysis.utils.run_cleanup import recent_tracker_runs
+    from scytaledroid.DynamicAnalysis.utils.run_cleanup import recent_tracker_runs_from_payload
 
     cfg = DatasetTrackerConfig()
     tracker = load_dataset_tracker()
     tracker_apps = tracker.get("apps") if isinstance(tracker, dict) else {}
+
+    def recent_tracker_runs(package_name: str, *, limit: int = 5):
+        return recent_tracker_runs_from_payload(tracker, package_name, limit=limit)
+
     labels = [((app_label or package).strip() or package) for package, _v, _c, app_label in packages]
     collisions = {label for label in labels if labels.count(label) > 1}
 

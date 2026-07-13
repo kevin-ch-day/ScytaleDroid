@@ -9,11 +9,11 @@ def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypat
     sections = menu_views.build_dynamic_menu_sections()
 
     assert sections.primary_actions[0].key == "1"
-    assert sections.primary_actions[0].label == "Current-build collection queue"
+    assert sections.primary_actions[0].label == "Single app run"
     assert sections.primary_actions[1].key == "2"
-    assert sections.primary_actions[1].label == "Paper-freeze readiness"
+    assert sections.primary_actions[1].label == "Current-build collection queue"
     assert sections.primary_actions[2].key == "3"
-    assert sections.primary_actions[2].label == "Focused app workbench"
+    assert sections.primary_actions[2].label == "Paper-freeze readiness"
     assert sections.validation[0].key == "4"
     assert sections.validation[0].label == "Verify capture environment"
     assert sections.validation[1].key == "5"
@@ -29,7 +29,16 @@ def test_build_dynamic_menu_sections_uses_active_research_cohort_label(monkeypat
 def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus(
     monkeypatch, capsys
 ) -> None:
+    summary_items: list[object] = []
+    original_summary_item = menu_views.summary_cards.summary_item
+
+    def capture_summary_item(*args, **kwargs):
+        item = original_summary_item(*args, **kwargs)
+        summary_items.append(item)
+        return item
+
     monkeypatch.setattr(menu_views, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    monkeypatch.setattr(menu_views.summary_cards, "summary_item", capture_summary_item)
     monkeypatch.setattr(
         menu_views.device_manager,
         "describe_active_device",
@@ -77,6 +86,9 @@ def test_render_dynamic_menu_overview_shows_quota_progress_without_dataset_focus
     assert "Evidence" in out
     assert "1 packs / 1 valid" in out
     assert "Next:" not in out
+    static_prep = next(item for item in summary_items if item.label == "Static prep")
+    assert static_prep.value == "ready (12/12 plans)"
+    assert static_prep.value_style == "success"
 
 
 def test_render_dynamic_menu_overview_surfaces_retained_extra_valid_runs(

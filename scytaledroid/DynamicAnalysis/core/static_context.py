@@ -17,7 +17,31 @@ class StaticContextPolicy:
     export_heavy_threshold: int = 20
 
 
-def compute_static_context(plan_payload: dict[str, Any] | None, *, policy: StaticContextPolicy | None = None) -> dict[str, Any]:
+def _permission_values(*groups: Any) -> set[str]:
+    values: set[str] = set()
+    for group in groups:
+        if not isinstance(group, list):
+            continue
+        for item in group:
+            norm = str(item or "").strip().upper()
+            if norm:
+                values.add(norm)
+    return values
+
+
+def _has_permission_suffix(values: set[str], suffixes: set[str]) -> bool:
+    for value in values:
+        short = value.rsplit(".", 1)[-1]
+        if short in suffixes:
+            return True
+    return False
+
+
+def compute_static_context(
+    plan_payload: dict[str, Any] | None,
+    *,
+    policy: StaticContextPolicy | None = None,
+) -> dict[str, Any]:
     """Compute stable, paper-safe context signals from a static plan payload."""
 
     pol = policy or StaticContextPolicy()
@@ -31,6 +55,7 @@ def compute_static_context(plan_payload: dict[str, Any] | None, *, policy: Stati
     high_value = permissions.get("high_value") if isinstance(permissions.get("high_value"), list) else []
     declared = permissions.get("declared") if isinstance(permissions.get("declared"), list) else []
     dangerous = permissions.get("dangerous") if isinstance(permissions.get("dangerous"), list) else []
+    permission_values = _permission_values(declared, dangerous, high_value)
 
     exported_total = exported.get("total")
     try:
@@ -42,6 +67,27 @@ def compute_static_context(plan_payload: dict[str, Any] | None, *, policy: Stati
 
     if high_value:
         tags.append("PRIVACY_SENSITIVE")
+    if _has_permission_suffix(
+        permission_values,
+        {"ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION"},
+    ):
+        tags.append("LOCATION_CAPABLE")
+    if _has_permission_suffix(permission_values, {"CAMERA", "RECORD_AUDIO", "CAPTURE_AUDIO_OUTPUT"}):
+        tags.append("MEDIA_CAPTURE_CAPABLE")
+    if _has_permission_suffix(
+        permission_values,
+        {
+            "READ_EXTERNAL_STORAGE",
+            "WRITE_EXTERNAL_STORAGE",
+            "READ_MEDIA_IMAGES",
+            "READ_MEDIA_VIDEO",
+            "READ_MEDIA_AUDIO",
+            "READ_MEDIA_VISUAL_USER_SELECTED",
+        },
+    ):
+        tags.append("MEDIA_LIBRARY_ACCESS")
+    if _has_permission_suffix(permission_values, {"AD_ID", "ACCESS_ADSERVICES_AD_ID"}):
+        tags.append("AD_ID_ACCESS")
     if exported_total_int is not None and exported_total_int >= pol.export_heavy_threshold:
         tags.append("EXPORT_HEAVY")
     if risk_flags.get("uses_cleartext_traffic") is True:
@@ -124,7 +170,13 @@ def build_operator_guidance(plan_payload: dict[str, Any] | None, *, run_profile:
         return lines
 
     # Advisory suggestions only; do not imply requirements or label behavior.
-    if "PRIVACY_SENSITIVE" in tags:
+    capability_tags = {
+        "PRIVACY_SENSITIVE",
+        "LOCATION_CAPABLE",
+        "MEDIA_CAPTURE_CAPABLE",
+        "MEDIA_LIBRARY_ACCESS",
+    }
+    if capability_tags.intersection(tags):
         hv = ((ctx.get("permissions") or {}).get("high_value_sample") or []) if isinstance(ctx, dict) else []
         if hv:
             lines.append(

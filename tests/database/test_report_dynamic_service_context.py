@@ -200,6 +200,56 @@ def test_generate_report_overlays_missing_repo_seed_service_maps(
     assert unresolved_rows == ""
 
 
+def test_generate_report_resolves_new_reddit_runtime_hosts_from_seed_overlay(
+    tmp_path: Path, monkeypatch
+) -> None:
+    observation_rows = [
+        {
+            "package_name": "com.reddit.frontpage",
+            "display_name": "Reddit",
+            "domain": "w3-reporting.reddit.com",
+            "root_domain": "reddit.com",
+            "owner_class": "first_party",
+            "role_class": "first_party_telemetry_reporting",
+            "total_hits": 12,
+            "observed_run_count": 1,
+        },
+        {
+            "package_name": "com.reddit.frontpage",
+            "display_name": "Reddit",
+            "domain": "alb.reddit.com",
+            "root_domain": "reddit.com",
+            "owner_class": "first_party",
+            "role_class": "first_party_app_backend",
+            "total_hits": 5,
+            "observed_run_count": 1,
+        },
+    ]
+
+    def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
+        if query_name in {
+            "dynamic.service_context.report.services",
+            "dynamic.service_context.report.maps",
+        }:
+            return []
+        if query_name == "dynamic.service_context.report.observations":
+            return observation_rows
+        raise AssertionError(f"unexpected query_name={query_name!r} sql={sql[:80]!r}")
+
+    monkeypatch.setattr("scytaledroid.Database.db_core.db_queries.run_sql", fake_run_sql)
+    monkeypatch.setattr(report, "_load_network_context_coverage", lambda packages=None: [])
+
+    out_dir = tmp_path / "audit"
+    summary = report.generate_report(output_dir=out_dir)
+
+    assert summary["unresolved_domain_rows"] == 0
+    package_rows = (out_dir / "package_service_context.csv").read_text(encoding="utf-8")
+    assert "w3-reporting.reddit.com" in package_rows
+    assert "first_party_telemetry_reporting" in package_rows
+    assert "alb.reddit.com" in package_rows
+    assert "first_party_app_backend" in package_rows
+
+
 def test_generate_report_resolves_telegram_ip_context_from_observed_classification(
     tmp_path: Path, monkeypatch
 ) -> None:

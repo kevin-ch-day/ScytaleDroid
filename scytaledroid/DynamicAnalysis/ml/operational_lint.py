@@ -7,7 +7,8 @@ This is a DB-free, deterministic consistency check for query-mode snapshots unde
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -50,10 +51,12 @@ class OperationalLintResult:
     snapshot_dir: str
     ok: bool
     issues: list[str]
+    warnings: list[str] = field(default_factory=list)
 
 
 def lint_operational_snapshot(snapshot_dir: Path, *, tol_pct: float = 1e-6) -> OperationalLintResult:
     issues: list[str] = []
+    warnings: list[str] = []
     tables = snapshot_dir / "tables"
     if not tables.exists():
         return OperationalLintResult(snapshot_dir=str(snapshot_dir), ok=False, issues=[f"missing_tables_dir:{tables}"])
@@ -76,6 +79,56 @@ def lint_operational_snapshot(snapshot_dir: Path, *, tol_pct: float = 1e-6) -> O
     audit = _read_csv(tables / "dynamic_math_audit_per_group_model.csv")
     risk = _read_csv(tables / "risk_summary_per_group.csv")
     prev_gm = _read_csv(tables / "anomaly_prevalence_per_group_mode.csv")
+    coverage = _read_csv(tables / "coverage_confidence_per_group.csv")
+
+    summary_path = snapshot_dir / "snapshot_summary.json"
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            summary = {}
+        if isinstance(summary, dict) and summary.get("freeze_ok") is False:
+            warnings.append(f"snapshot_freeze_not_ok:{summary.get('freeze_error') or 'unknown'}")
+
+    freeze_path = snapshot_dir / "freeze_manifest.json"
+    if freeze_path.exists():
+        try:
+            freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+        except Exception:
+            freeze = {}
+        dup_groups = freeze.get("duplicate_identity_groups") if isinstance(freeze, dict) else None
+        if isinstance(dup_groups, list) and dup_groups:
+            warnings.append(f"duplicate_build_observations:{len(dup_groups)}")
+
+    for row in coverage:
+        group_key = row.get("group_key") or row.get("package_name") or "unknown"
+        training_mode = str(row.get("training_mode") or "").strip()
+        confidence_level = str(row.get("confidence_level") or "").strip()
+        baseline_runs = _as_int(row.get("baseline_runs"))
+        if training_mode and training_mode != "baseline_only":
+            warnings.append(f"fallback_training:{group_key}:{training_mode}")
+        if confidence_level == "low":
+            notes = str(row.get("confidence_notes") or "").strip() or "none"
+            warnings.append(f"low_confidence_group:{group_key}:{notes}")
+        if baseline_runs is not None and baseline_runs < 2:
+            warnings.append(f"thin_baseline:{group_key}:baseline_runs={baseline_runs}")
+
+    model_registry_path = snapshot_dir / "model_registry.json"
+    if model_registry_path.exists():
+        try:
+            registry = json.loads(model_registry_path.read_text(encoding="utf-8"))
+        except Exception:
+            registry = {}
+        models = registry.get("models") if isinstance(registry, dict) else None
+        if isinstance(models, list):
+            for row in models:
+                if not isinstance(row, dict):
+                    continue
+                model = str(row.get("model") or "").strip()
+                training_mode = str(row.get("training_mode") or "").strip()
+                if model == "one_class_svm" and training_mode and training_mode != "baseline_only":
+                    group_key = row.get("group_key") or row.get("package_name") or "unknown"
+                    warnings.append(f"ocsvm_fallback_training:{group_key}:{training_mode}")
 
     # Prevalence ratio checks.
     for r in prev_gm:
@@ -151,8 +204,12 @@ def lint_operational_snapshot(snapshot_dir: Path, *, tol_pct: float = 1e-6) -> O
             if not (0.0 <= v <= 100.0 + 1e-6):
                 issues.append(f"score_out_of_range:{r.get('group_key')}:{k}")
 
-    return OperationalLintResult(snapshot_dir=str(snapshot_dir), ok=(len(issues) == 0), issues=issues)
+    return OperationalLintResult(
+        snapshot_dir=str(snapshot_dir),
+        ok=(len(issues) == 0),
+        issues=issues,
+        warnings=sorted(set(warnings)),
+    )
 
 
 __all__ = ["OperationalLintResult", "lint_operational_snapshot"]
-

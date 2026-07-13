@@ -4,8 +4,8 @@ This package is organized to keep freeze/profile-mode ML work modular and
 extensible. The current batch runner (`evidence_pack_ml_orchestrator.py`) remains
 the source of truth for freeze-anchored outputs.
 
-Important: pipeline-oriented scaffolding exists, but is intentionally isolated
-under `experimental/` so it cannot accidentally drift locked semantics.
+Literature/design alignment for runtime ML, provenance, app churn, and static
+context is tracked in `docs/design/runtime_ml_literature_alignment.md`.
 
 ## Authoritative modules (freeze/profile mode)
 
@@ -15,6 +15,9 @@ under `experimental/` so it cannot accidentally drift locked semantics.
   - Frozen-input validation and deterministic window expectations.
 - `pcap_window_features.py`
   - Windowing + metadata-only feature extraction from PCAP via tshark.
+- `feature_matrix.py`
+  - Shared v1 window-to-feature matrix contract used by freeze/profile,
+    operational query mode, and Profile v3 derivation.
 - `anomaly_model_training.py`
   - Fixed-model training + score normalization (higher = more anomalous).
   - Supports config-bound model specs so operational mode can tune without
@@ -34,8 +37,3 @@ under `experimental/` so it cannot accidentally drift locked semantics.
 - `query_mode_runner.py`
   - Applies operational preprocessing in a deterministic order:
     matrix build -> winsorization -> robust scaling -> model fit/score.
-
-## Experimental (NOT used for freeze/profile mode)
-
-`experimental/` contains early pipeline abstractions that may be used in future
-work. Do not import or use them for freeze/profile runs.

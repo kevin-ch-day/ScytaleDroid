@@ -112,7 +112,7 @@ def resolve_custom_tier(
     *,
     resolve_custom_tier_fn,
     active_research_cohort_label_fn,
-) -> tuple[str, str]:
+) -> tuple[str, str] | None:
     return resolve_custom_tier_fn(
         package_name,
         dataset_pkgs,

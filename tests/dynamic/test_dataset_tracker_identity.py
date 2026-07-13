@@ -75,6 +75,33 @@ def test_recompute_dataset_tracker_preserves_manifest_dataset_fields(
     }
 
 
+def test_update_dataset_tracker_skips_dataset_run_outside_active_cohort(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    tracker_path = tmp_path / "dataset_plan.json"
+    monkeypatch.setattr(tracker, "active_research_cohort_packages", lambda: ("com.example.keep",))
+
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-outside",
+        created_at="2026-07-12T00:00:00Z",
+        status="success",
+        target={"package_name": "com.espn.score_center"},
+        operator={"tier": "dataset", "run_profile": "interaction_manual"},
+        scenario={"id": "basic_usage"},
+    )
+
+    result = update_dataset_tracker(
+        manifest,
+        tmp_path / "output" / "evidence" / "dynamic" / "run-outside",
+        config=DatasetTrackerConfig(),
+    )
+
+    assert result is None
+    assert not tracker_path.exists()
+
+
 def test_normalize_tracker_refreshes_stale_script_template_mismatch(monkeypatch) -> None:
     def fake_refresh(row: dict[str, object]) -> bool:
         row["paper_eligible"] = True
@@ -402,6 +429,7 @@ def test_update_dataset_tracker_reclassifies_repaired_quota_baseline_from_extra_
         "scytaledroid.DynamicAnalysis.pcap.dataset_tracker.scope_tracker_runs_to_active_identity",
         lambda _pkg, runs, resolve_tracker_run_identity_fn=None: {"active_runs": list(runs)},
     )
+    monkeypatch.setattr(tracker, "active_research_cohort_packages", lambda: ())
 
     manifest = RunManifest(
         run_manifest_version=1,
@@ -596,6 +624,7 @@ def test_update_dataset_tracker_reclassifies_rich_social_idle_baseline_from_low_
         "scytaledroid.DynamicAnalysis.pcap.dataset_tracker._apply_quota_marking",
         _apply_without_identity_lock,
     )
+    monkeypatch.setattr(tracker, "active_research_cohort_packages", lambda: ())
 
     manifest = RunManifest(
         run_manifest_version=1,

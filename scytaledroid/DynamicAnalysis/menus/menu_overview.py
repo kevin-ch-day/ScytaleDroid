@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+from typing import Any
 
 from scytaledroid.DeviceAnalysis import device_manager
 from scytaledroid.DynamicAnalysis.menus.queue_metrics import (
@@ -17,6 +19,12 @@ from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import (
 )
 from scytaledroid.Utils.DisplayUtils import status_messages, summary_cards
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
+
+_OVERVIEW_CACHE_TTL_SECONDS = 5.0
+_OVERVIEW_CACHE: dict[
+    tuple[str, object, object, object],
+    tuple[float, Any, dict[str, object], dict[str, object]],
+] = {}
 
 
 @dataclass(frozen=True)
@@ -58,19 +66,19 @@ def build_dynamic_menu_sections() -> DynamicMenuSections:
         primary_actions=[
             MenuOption(
                 "1",
-                "Current-build collection queue",
-                description="open the live cohort queue for current-build collection",
+                "Single app run",
+                description="start a focused dynamic run for one app by name or package",
                 badge="primary",
             ),
             MenuOption(
                 "2",
-                "Paper-freeze readiness",
-                description="review build-selected paper target readiness and latest freeze export",
+                "Current-build collection queue",
+                description="open the full live cohort queue for current-build collection",
             ),
             MenuOption(
                 "3",
-                "Focused app workbench",
-                description="open one app for run options, QA, history, and diagnostics",
+                "Paper-freeze readiness",
+                description="review build-selected paper target readiness and latest freeze export",
             ),
         ],
         validation=[
@@ -105,17 +113,41 @@ def _humanize_code(value: str | None, *, hyphenate_go: bool = False) -> str:
     return lowered
 
 
-def render_dynamic_menu_overview() -> None:
-    try:
-        summary = run_freeze_readiness_audit()
-    except Exception:
-        print(status_messages.status("Dynamic state overview unavailable.", level="warn"))
-        return
+def _cached_overview_state(cohort_label: str) -> tuple[Any, dict[str, object], dict[str, object]]:
+    now = time.monotonic()
+    cache_key = (
+        str(cohort_label),
+        run_freeze_readiness_audit,
+        build_static_handoff_plan_summary,
+        resolve_active_cohort_evidence_quota_summary,
+    )
+    cached = _OVERVIEW_CACHE.get(cache_key)
+    if cached is not None:
+        cached_at, summary, handoff, quota_summary = cached
+        if now - cached_at <= _OVERVIEW_CACHE_TTL_SECONDS:
+            return summary, dict(handoff), dict(quota_summary)
 
+    summary = run_freeze_readiness_audit()
     try:
         handoff = build_static_handoff_plan_summary()
     except Exception:
         handoff = {}
+    try:
+        quota_summary = resolve_active_cohort_evidence_quota_summary()
+    except Exception:
+        quota_summary = {}
+    _OVERVIEW_CACHE[cache_key] = (now, summary, dict(handoff or {}), dict(quota_summary or {}))
+    return summary, dict(handoff or {}), dict(quota_summary or {})
+
+
+def render_dynamic_menu_overview() -> None:
+    cohort_label = active_research_cohort_label()
+    try:
+        summary, handoff, quota_summary = _cached_overview_state(cohort_label)
+    except Exception:
+        print(status_messages.status("Dynamic state overview unavailable.", level="warn"))
+        return
+
     handoff_ready = 0
     handoff_total = 0
     handoff_status = "unknown"
@@ -131,16 +163,11 @@ def render_dynamic_menu_overview() -> None:
         if int(summary.total_runs) == 0
         else f"{summary.total_runs} packs / {summary.valid_runs} valid"
     )
-    try:
-        quota_summary = resolve_active_cohort_evidence_quota_summary()
-    except Exception:
-        quota_summary = {}
     quota_valid = int(quota_summary.get("quota_runs_counted", 0) or 0)
     if quota_valid <= 0:
         quota_valid = int(getattr(summary, "quota_runs_counted", 0) or 0)
     expected_valid = int(getattr(summary, "expected_valid_runs", 0) or 0)
     freeze_text = "ready" if summary.can_freeze else "blocked"
-    cohort_label = active_research_cohort_label()
     try:
         selected_device = device_manager.describe_active_device()
     except Exception:
@@ -155,7 +182,7 @@ def render_dynamic_menu_overview() -> None:
         summary_cards.summary_item(
             "Static prep",
             handoff_status,
-            value_style="success" if handoff_status == "ready" else "warning",
+            value_style="success" if handoff_status.startswith("ready") else "warning",
         ),
         summary_cards.summary_item(
             "Archive",

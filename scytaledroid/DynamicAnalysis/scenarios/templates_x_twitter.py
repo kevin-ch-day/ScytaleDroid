@@ -14,4 +14,17 @@ SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1: tuple[tuple[str, str, int], ...] = (
     ("hold_foreground", "Remain on foreground until timer completes.", 0),
 )
 
-__all__ = ["SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1"]
+SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V2: tuple[tuple[str, str, int], ...] = (
+    ("launch_home", "Launch X and settle on Home / For You timeline.", 20),
+    ("home_scroll_media_pause", "Scroll Home timeline and pause on one media or video post long enough for autoplay/media fetch.", 40),
+    ("open_post_detail_engagement", "Open one post detail or replies view, view engagement briefly, then return.", 25),
+    ("open_profile_page", "Open one profile page briefly, then return without following or editing account state.", 20),
+    ("search_static_keyword", "Open Search/Explore, search fixed keyword 'android privacy security', scroll results, then return.", 30),
+    ("open_grok_surface", "Open Grok tab and observe landing/results surface; optional fixed non-sensitive research prompt only on test accounts.", 20),
+    ("open_notifications", "Open Notifications tab, scroll slightly, then return.", 15),
+    ("open_chat_surface", "Open Chat/Messages landing surface briefly; open a thread only if it is a controlled test thread.", 15),
+    ("compose_draft_or_test_post", "Open compose; use draft-only by default, or submit one clearly labeled benign test post only when the account is a controlled test account.", 25),
+    ("hold_foreground", "Remain on foreground until timer completes.", 0),
+)
+
+__all__ = ["SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1", "SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V2"]

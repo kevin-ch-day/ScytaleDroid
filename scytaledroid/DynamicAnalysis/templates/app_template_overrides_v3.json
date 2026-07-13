@@ -9,6 +9,7 @@
     "com.google.android.apps.docs.editors.docs": "docs_open_edit_comment_refresh_v1",
     "com.google.android.apps.docs.editors.sheets": "sheets_open_edit_sort_row_refresh_v1",
     "com.google.android.apps.tachyon": "meet_join_mic_on_cam_off_v1",
+    "com.twitter.android": "x_twitter_full_session_v2",
     "us.zoom.videomeetings": "zoom_join_audio_only_v1",
     "com.zhiliaoapp.musically": "tiktok_basic_v2"
   }

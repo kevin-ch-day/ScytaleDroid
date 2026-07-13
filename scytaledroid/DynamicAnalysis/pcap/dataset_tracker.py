@@ -19,16 +19,19 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_plan_read_path,
     write_dataset_plan_payload,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
+    active_research_cohort_packages,
+)
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     default_resolve_tracker_run_identity,
     scope_tracker_runs_to_active_identity,
 )
-from scytaledroid.DynamicAnalysis.utils.pcap_minima import (
-    effective_min_pcap_bytes_for_run_profile,
-)
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
     iter_dynamic_run_dirs,
     resolve_dynamic_run_dir,
+)
+from scytaledroid.DynamicAnalysis.utils.pcap_minima import (
+    effective_min_pcap_bytes_for_run_profile,
 )
 
 MIN_PCAP_BYTES = int(getattr(profile_config, "MIN_PCAP_BYTES", 50000))
@@ -121,6 +124,17 @@ def update_dataset_tracker(
     package = (manifest.target.get("package_name") or "_unknown").strip()
     if not package:
         package = "_unknown"
+    active_packages = _active_dataset_package_set()
+    if active_packages and package.lower() not in active_packages:
+        _log(
+            event_logger,
+            "dataset_tracker_skip",
+            {
+                "package_name": package,
+                "reason": "not_in_active_research_cohort",
+            },
+        )
+        return None
     tracker_path = resolve_dataset_plan_read_path()
     tracker_path.parent.mkdir(parents=True, exist_ok=True)
     payload = _load(tracker_path)
@@ -700,6 +714,20 @@ def recompute_dataset_tracker(*, config: DatasetTrackerConfig | None = None) -> 
         update_dataset_tracker(manifest, run_dir, config=cfg, event_logger=None)
 
     return tracker_path if tracker_path.exists() else None
+
+
+def _active_dataset_package_set() -> set[str]:
+    """Return active research cohort packages for tracker scoping.
+
+    The dataset tracker is the active cohort plan, not a global sink for every
+    dataset-tagged evidence pack on disk. If cohort lookup is unavailable, keep
+    legacy behavior and avoid blocking local/test workflows.
+    """
+    try:
+        packages = active_research_cohort_packages()
+    except Exception:
+        return set()
+    return {str(pkg).strip().lower() for pkg in packages if str(pkg).strip()}
 
 
 def _load(path: Path) -> dict[str, Any]:

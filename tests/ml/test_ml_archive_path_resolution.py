@@ -25,3 +25,15 @@ def test_ml_paper_artifacts_lockfile_is_dataset_adjacent(tmp_path: Path) -> None
     freeze = tmp_path / "archive" / "research_cohorts" / "research_dataset_beta" / "dataset_freeze.json"
 
     assert evidence_pack_ml_orchestrator.paper_artifacts_path(freeze) == freeze.parent / "paper_artifacts.json"
+
+
+def test_locked_runtime_bundle_paths_preserve_legacy_aliases() -> None:
+    assert deliverable_bundle_paths.output_locked_runtime_bundle_root() == (
+        deliverable_bundle_paths.output_phase_e_bundle_root()
+    )
+    assert deliverable_bundle_paths.output_locked_runtime_bundle_tables_dir() == (
+        deliverable_bundle_paths.output_phase_e_bundle_tables_dir()
+    )
+    assert deliverable_bundle_paths.output_locked_runtime_bundle_artifacts_manifest_path() == (
+        deliverable_bundle_paths.output_phase_e_bundle_artifacts_manifest_path()
+    )

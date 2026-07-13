@@ -117,6 +117,24 @@ def test_context_for_domain_resolves_new_curated_provider_suffixes_and_exact_hos
     assert nielsen["role_class"] == "audience_measurement"
 
 
+def test_context_for_domain_resolves_reddit_runtime_hosts_exactly() -> None:
+    reporting = report._context_for_domain(
+        "w3-reporting.reddit.com",
+        package_name="com.reddit.frontpage",
+    )
+    assert reporting["owner_class"] == "first_party"
+    assert reporting["role_class"] == "first_party_telemetry_reporting"
+    assert reporting["basis"] == "curated_exact"
+
+    app_backend = report._context_for_domain(
+        "alb.reddit.com",
+        package_name="com.reddit.frontpage",
+    )
+    assert app_backend["owner_class"] == "first_party"
+    assert app_backend["role_class"] == "first_party_app_backend"
+    assert app_backend["basis"] == "curated_exact"
+
+
 def test_top_ip_destinations_resolves_telegram_direct_ip_flows() -> None:
     top = report._top_ip_destinations(
         {

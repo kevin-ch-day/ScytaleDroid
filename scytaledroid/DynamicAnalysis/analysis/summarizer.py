@@ -61,6 +61,7 @@ class DynamicRunSummarizer:
         runtime_surfaces = self._load_runtime_surfaces()
         fingerprint_summary = self._fingerprint_summary(pcap_report, pcap_features)
         cleartext_flag = self._detect_cleartext(destinations, pcap_report)
+        cleartext_protocol_flag = self._detect_cleartext_protocol(pcap_report)
         security_surface = (
             pcap_report.get("security_surface")
             if isinstance(pcap_report.get("security_surface"), dict)
@@ -301,6 +302,7 @@ class DynamicRunSummarizer:
             "flags": {
                 "network_capture_present": network_present,
                 "cleartext_http_detected": cleartext_flag,
+                "cleartext_protocol_detected": cleartext_protocol_flag,
                 "tls_mitm_suspected": tls_mitm,
                 "notable_log_signals": notable_logs,
                 "static_watchlist_used": bool(static_plan),
@@ -352,6 +354,7 @@ class DynamicRunSummarizer:
         quota_detail = summary.get("quota_detail", {}) or {}
         indicators = summary.get("indicators", {}) or {}
         cleartext_http_text = self._bool_text(summary.get("flags", {}).get("cleartext_http_detected"))
+        cleartext_protocol_text = self._bool_text(summary.get("flags", {}).get("cleartext_protocol_detected"))
         network_capture_text = self._bool_text(summary.get("flags", {}).get("network_capture_present"))
         static_watchlist_text = self._bool_text(summary.get("flags", {}).get("static_watchlist_used"))
         invalid_reason_text = self._display_text(quota_detail.get("invalid_reason_code"))
@@ -397,6 +400,7 @@ class DynamicRunSummarizer:
             "## Observations",
             f"- Destinations observed: {destinations_text}.",
             f"- Cleartext HTTP detected: {cleartext_http_text}.",
+            f"- Non-HTTP cleartext protocol metadata detected: {cleartext_protocol_text}.",
             f"- Network capture present: {network_capture_text}.",
             f"- Network capture sources: {capture_sources_text} ({capture_bytes_text}).",
             f"- Capture mode: {capture_mode}.",
@@ -908,12 +912,30 @@ class DynamicRunSummarizer:
             return None
         if cleartext.get("http_observed"):
             return "true"
-        if _safe_int(cleartext.get("plaintext_protocol_frames")):
-            return "true"
+        if (
+            cleartext.get("cleartext_protocol_observed")
+            or _safe_int(cleartext.get("plaintext_protocol_frames"))
+            or _safe_int(cleartext.get("decoded_stream_count"))
+        ):
+            return "false"
         visibility = str(cleartext.get("visibility_class") or "").strip()
         if visibility == "encrypted_or_opaque_dominant":
             return "false"
         return None
+
+    def _detect_cleartext_protocol(self, report: dict[str, Any]) -> str:
+        surface = report.get("security_surface") if isinstance(report, dict) else None
+        if not isinstance(surface, dict) or surface.get("status") != "ok":
+            return "unknown"
+        cleartext = surface.get("cleartext")
+        if not isinstance(cleartext, dict):
+            return "unknown"
+        observed = bool(
+            cleartext.get("cleartext_protocol_observed")
+            or _safe_int(cleartext.get("plaintext_protocol_frames"))
+            or _safe_int(cleartext.get("decoded_stream_count"))
+        )
+        return "true" if observed else "false"
 
     @staticmethod
     def _security_findings_text(findings: list[dict[str, Any]]) -> str:

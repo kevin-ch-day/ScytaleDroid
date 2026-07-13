@@ -57,6 +57,12 @@ def main(argv: list[str]) -> int:
             print(f"- {issue}")
         return 2
     _ok(f"Operational semantic lint passed: {snap}")
+    if res.warnings:
+        print("[WARN] Design caveats:")
+        for warning in res.warnings[:30]:
+            print(f"- {warning}")
+        if len(res.warnings) > 30:
+            print(f"- ... {len(res.warnings) - 30} more")
     return 0
 
 

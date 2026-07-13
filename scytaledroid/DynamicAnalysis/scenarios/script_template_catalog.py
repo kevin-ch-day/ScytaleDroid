@@ -59,6 +59,7 @@ from scytaledroid.DynamicAnalysis.scenarios.templates_whatsapp import (
 )
 from scytaledroid.DynamicAnalysis.scenarios.templates_x_twitter import (
     SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1,
+    SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V2,
 )
 from scytaledroid.DynamicAnalysis.templates.category_map import resolved_template_for_package
 
@@ -95,6 +96,7 @@ _TEMPLATE_DEFINITIONS: dict[str, tuple[tuple[str, str, int], ...]] = {
     "facebook_behavior_v3": SCRIPT_STEPS_FACEBOOK_BEHAVIOR_V3,
     "snapchat_basic_v1": SCRIPT_STEPS_SNAPCHAT_BASIC_V1,
     "x_twitter_full_session_v1": SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V1,
+    "x_twitter_full_session_v2": SCRIPT_STEPS_X_TWITTER_FULL_SESSION_V2,
     "social_messaging_basic_v1": SCRIPT_STEPS_SOCIAL_MESSAGING_BASIC_V1,
     "discord_basic_v1": SCRIPT_STEPS_DISCORD_BASIC_V1,
     "tiktok_basic_v1": SCRIPT_STEPS_TIKTOK_BASIC_V1,

@@ -92,6 +92,53 @@ def test_recent_tracker_runs_preserves_existing_pcap_detail(
     assert recent[0].pcap_failure_detail == "PCAP_LOCAL_FILE_EMPTY"
 
 
+def test_recent_tracker_runs_from_payload_uses_existing_tracker_data(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
+
+    payload = {
+        "apps": {
+            "com.instagram.android": {
+                "runs": [
+                    {
+                        "run_id": "older",
+                        "ended_at": "2026-07-01T12:00:00+00:00",
+                        "run_profile": "baseline_idle",
+                        "valid_dataset_run": True,
+                    },
+                    {
+                        "run_id": "newer",
+                        "ended_at": "2026-07-02T12:00:00+00:00",
+                        "run_profile": "interaction_manual",
+                        "interaction_level": "interactive",
+                        "messaging_activity": "mixed",
+                        "valid_dataset_run": False,
+                        "invalid_reason_code": "PCAP_MISSING",
+                        "pcap_failure_detail": "PCAP_LOCAL_FILE_EMPTY",
+                    },
+                ]
+            }
+        }
+    }
+
+    recent = run_cleanup.recent_tracker_runs_from_payload(
+        payload,
+        "com.instagram.android",
+        limit=2,
+    )
+
+    assert [row.run_id for row in recent] == ["newer", "older"]
+    assert recent[0].valid is False
+    assert recent[0].invalid_reason_code == "PCAP_MISSING"
+    assert recent[0].pcap_failure_detail == "PCAP_LOCAL_FILE_EMPTY"
+    assert recent[0].interaction_level == "interactive"
+    assert recent[0].messaging_activity == "mixed"
+    assert recent[1].valid is True
+
+
 def test_find_incomplete_dynamic_run_dirs_skips_active_pid_marker(
     monkeypatch,
     tmp_path: Path,

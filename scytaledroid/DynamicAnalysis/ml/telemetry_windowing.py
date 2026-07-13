@@ -1,4 +1,4 @@
-"""Windowing utilities for deterministic per-window outputs (Paper #2)."""
+"""Windowing utilities for deterministic per-window ML outputs."""
 
 from __future__ import annotations
 

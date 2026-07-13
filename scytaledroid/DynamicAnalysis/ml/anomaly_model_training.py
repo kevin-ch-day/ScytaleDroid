@@ -1,4 +1,4 @@
-"""Model wrappers for Paper #2 ML (fixed params, deterministic)."""
+"""Model wrappers for deterministic ML scoring."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class ModelSpec:
 def fixed_model_specs(seed: int, *, ml_config=config) -> list[ModelSpec]:
     """Return model specs for the active ML config.
 
-    Paper mode keeps locked defaults; operational mode can override via
+    Freeze/profile mode keeps locked defaults; operational mode can override via
     ml_parameters_operational without changing call sites.
     """
     iforest_name = str(getattr(ml_config, "MODEL_IFOREST", config.MODEL_IFOREST))

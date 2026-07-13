@@ -221,6 +221,7 @@ def default_service_signal_map_entries() -> tuple[ServiceSignalMapEntry, ...]:
         ServiceSignalMapEntry("chartbeat", "third_party_analytics_measurement"),
         ServiceSignalMapEntry("scorecardresearch", "third_party_analytics_measurement"),
         ServiceSignalMapEntry("new_relic", "third_party_analytics_measurement", confidence="medium"),
+        ServiceSignalMapEntry("bugsnag", "third_party_analytics_measurement", confidence="medium"),
         ServiceSignalMapEntry("nielsen_dcr", "third_party_analytics_measurement", confidence="medium"),
         ServiceSignalMapEntry("firebase_crashlytics", "third_party_analytics_measurement", confidence="medium"),
         ServiceSignalMapEntry("firebase_installations", "identity_or_tag_management", confidence="medium"),

@@ -18,6 +18,7 @@ if str(_REPO_ROOT) not in sys.path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence-root", default=None)
+    parser.add_argument("--package", action="append", default=[], help="Restrict to package name; may be repeated.")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--stdout-json", action="store_true")
     return parser
@@ -56,28 +57,39 @@ def main(argv: list[str] | None = None) -> int:
         render_cohort_understanding_md,
     )
 
-    summary = build_cohort_understanding(evidence_root)
+    packages = {str(package).strip() for package in args.package if str(package).strip()}
+    summary = build_cohort_understanding(evidence_root, packages=packages or None)
     per_run_rows = [row.__dict__ for row in summary.rows]
     review_md = render_cohort_understanding_md(summary)
 
     per_run_path = output_dir / "per_run_understanding.csv"
     app_path = output_dir / "app_understanding_rollup.csv"
+    domain_context_path = output_dir / "domain_context_rollup.csv"
     review_path = output_dir / "cohort_pcap_understanding.md"
     summary_path = output_dir / "summary.json"
 
     run_fields = list(per_run_rows[0].keys()) if per_run_rows else ["run_id", "package_name"]
     app_fields = list(summary.app_rollups[0].keys()) if summary.app_rollups else ["package", "app_label"]
+    domain_fields = (
+        list(summary.domain_context_rollups[0].keys())
+        if summary.domain_context_rollups
+        else ["domain", "package_name", "dns_run_hits", "sni_run_hits", "owner_class", "role_class"]
+    )
     _write_csv(per_run_path, per_run_rows, run_fields)
     _write_csv(app_path, summary.app_rollups, app_fields)
+    _write_csv(domain_context_path, summary.domain_context_rollups, domain_fields)
     review_path.write_text(review_md, encoding="utf-8")
 
     payload = summary.to_dict()
     payload["output_files"] = {
         "per_run_understanding_csv": str(per_run_path.resolve()),
         "app_understanding_rollup_csv": str(app_path.resolve()),
+        "domain_context_rollup_csv": str(domain_context_path.resolve()),
         "cohort_pcap_understanding_md": str(review_path.resolve()),
         "summary_json": str(summary_path.resolve()),
     }
+    if packages:
+        payload["package_filter"] = sorted(packages)
     summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     if args.stdout_json:

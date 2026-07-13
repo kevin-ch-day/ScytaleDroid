@@ -712,6 +712,36 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     assert reddit_api["service_key"] == "reddit_platform"
     assert reddit_api["role_class"] == "community_platform_api"
 
+    reddit_reporting = service_context.resolve_service_for_domain(
+        "w3-reporting.reddit.com",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert reddit_reporting["service_key"] == "reddit_platform"
+    assert reddit_reporting["owner_class"] == "first_party"
+    assert reddit_reporting["role_class"] == "first_party_telemetry_reporting"
+    assert reddit_reporting["match_type"] == "EXACT"
+
+    reddit_alb = service_context.resolve_service_for_domain(
+        "alb.reddit.com",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert reddit_alb["service_key"] == "reddit_platform"
+    assert reddit_alb["owner_class"] == "first_party"
+    assert reddit_alb["role_class"] == "first_party_app_backend"
+    assert reddit_alb["match_type"] == "EXACT"
+
+    unscoped_reddit_reporting = service_context.resolve_service_for_domain(
+        "w3-reporting.reddit.com",
+        package_name="com.example.other",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert unscoped_reddit_reporting["service_key"] is None
+
     reddit_media = service_context.resolve_service_for_domain(
         "preview.redd.it",
         package_name="com.reddit.frontpage",
@@ -729,6 +759,42 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert appsflyer_onelink["service_key"] == "appsflyer"
     assert appsflyer_onelink["role_class"] == "attribution_deep_link"
+
+    reddit_devvit = service_context.resolve_service_for_domain(
+        "webview.devvit.net",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert reddit_devvit["service_key"] == "reddit_platform"
+    assert reddit_devvit["role_class"] == "reddit_developer_platform_webview"
+
+    branch_click = service_context.resolve_service_for_domain(
+        "depop.app.link",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert branch_click["service_key"] == "branch_attribution"
+    assert branch_click["role_class"] == "attribution_deep_link"
+
+    branch_impression = service_context.resolve_service_for_domain(
+        "impression.link",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert branch_impression["service_key"] == "branch_attribution"
+    assert branch_impression["role_class"] == "attribution_impression_tracking"
+
+    boehringer_landing = service_context.resolve_service_for_domain(
+        "patient.boehringer-ingelheim.com",
+        package_name="com.reddit.frontpage",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert boehringer_landing["service_key"] == "boehringer_ingelheim"
+    assert boehringer_landing["role_class"] == "advertiser_landing_page"
 
     pinterest_appsflyer_inapps = service_context.resolve_service_for_domain(
         "jarlio.inapps.appsflyersdk.com",
@@ -1065,6 +1131,16 @@ def test_resolve_service_for_domain_prefers_package_specific_scope() -> None:
     )
     assert crashlytics["service_key"] == "firebase_crashlytics"
     assert crashlytics["role_class"] == "crash_reporting"
+
+    bugsnag_sessions = service_context.resolve_service_for_domain(
+        "sessions.bugsnag.com",
+        package_name="com.pinterest",
+        service_rows=services,
+        map_rows=maps,
+    )
+    assert bugsnag_sessions["service_key"] == "bugsnag"
+    assert bugsnag_sessions["owner_name"] == "SmartBear"
+    assert bugsnag_sessions["role_class"] == "crash_reporting"
 
     adjust = service_context.resolve_service_for_domain(
         "app.adjust.com",

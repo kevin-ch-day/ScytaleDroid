@@ -137,19 +137,19 @@ def run_dynamic_analysis_menu(callbacks: DynamicAnalysisMenuCallbacks) -> None:
         if choice == "0":
             return
         if choice == "1":
+            callbacks.warn_if_code_changed()
+            callbacks.run_focused_app_run(ui_defaults)
+            _pause_if_verbose()
+            continue
+        if choice == "2":
             selected = callbacks.resolve_active_cohort_for_run()
             if isinstance(selected, dict):
                 callbacks.warn_if_code_changed()
                 callbacks.run_guided_dataset_run(ui_defaults)
             _pause_if_verbose()
             continue
-        if choice == "2":
-            callbacks.run_paper_freeze_readiness()
-            _pause_if_verbose()
-            continue
         if choice == "3":
-            callbacks.warn_if_code_changed()
-            callbacks.run_focused_app_run(ui_defaults)
+            callbacks.run_paper_freeze_readiness()
             _pause_if_verbose()
             continue
         if choice == "4":

@@ -1,4 +1,4 @@
-"""ML module for Paper #2 (unsupervised, offline, evidence-pack driven).
+"""ML module for unsupervised, offline, evidence-pack-driven analysis.
 
 Keep imports lazy because sklearn/scipy are optional for some operator flows.
 """

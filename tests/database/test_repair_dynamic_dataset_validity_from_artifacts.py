@@ -229,9 +229,10 @@ def test_apply_repairs_refreshes_all_derived_artifacts_for_repaired_runs(
         "_read_json",
         lambda path: json.loads(path.read_text(encoding="utf-8")) if path.exists() else None,
     )
+    recompute_calls: list[object] = []
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.dataset_tracker.recompute_dataset_tracker",
-        lambda config: None,
+        lambda config: recompute_calls.append(config),
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.research_cohort_archive.resolve_dataset_plan_read_path",
@@ -292,6 +293,7 @@ def test_apply_repairs_refreshes_all_derived_artifacts_for_repaired_runs(
     assert refresh_calls[0]["refresh_pcap_features"] is True
     assert refresh_calls[0]["refresh_overlap"] is True
     assert refresh_calls[0]["run_ids"] == {"run-1"}
+    assert len(recompute_calls) == 2
 
 
 def test_apply_repairs_reindexes_explicit_run_id_even_when_no_manifest_candidate(
@@ -311,9 +313,10 @@ def test_apply_repairs_reindexes_explicit_run_id_even_when_no_manifest_candidate
         },
     )
 
+    recompute_calls: list[object] = []
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.pcap.dataset_tracker.recompute_dataset_tracker",
-        lambda config: None,
+        lambda config: recompute_calls.append(config),
     )
     monkeypatch.setattr(
         "scytaledroid.DynamicAnalysis.research_cohort_archive.resolve_dataset_plan_read_path",
@@ -347,6 +350,7 @@ def test_apply_repairs_reindexes_explicit_run_id_even_when_no_manifest_candidate
     assert synced == 0
     assert reindexed == 1
     assert reindex_calls == [run_dir]
+    assert len(recompute_calls) == 1
 
 
 def test_main_dry_run_does_not_refresh_tracker_by_default(
@@ -467,6 +471,7 @@ def test_main_apply_refreshes_tracker_before_candidate_selection(
     assert calls == ["refresh", "candidates", "apply"]
     summary = json.loads((tmp_path / "audit" / "summary.json").read_text(encoding="utf-8"))
     assert summary["tracker_refreshed_before_candidate_selection"] is True
+    assert summary["tracker_refreshed_after_apply"] is True
     assert summary["candidate_rows"] == 1
     assert summary["synced_manifest_rows"] == 1
     assert summary["reindexed_db_rows"] == 1

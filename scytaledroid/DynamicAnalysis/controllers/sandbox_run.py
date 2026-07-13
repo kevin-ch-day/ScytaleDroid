@@ -13,6 +13,56 @@ from scytaledroid.DynamicAnalysis.run_summary import print_run_summary
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 
+def _choose_single_app_capture_type(package_name: str) -> str | None:
+    print()
+    menu_utils.print_header("Single App Capture Type")
+    print(
+        status_messages.status(
+            f"Target app: {package_name}",
+            level="info",
+        )
+    )
+    print(
+        "Choose the kind of runtime evidence to collect. This labels the run and sets guidance; "
+        "it does not automate taps."
+    )
+    scenario_options = [
+        menu_utils.MenuOption(
+            "1",
+            "Cold start",
+            description="launch/open behavior with minimal interaction",
+        ),
+        menu_utils.MenuOption(
+            "2",
+            "Basic usage [recommended]",
+            description="manual app use for validation or general behavior coverage",
+        ),
+        menu_utils.MenuOption(
+            "3",
+            "Permission trigger",
+            description="exercise a permission/capability such as camera, microphone, location, media, or contacts",
+        ),
+    ]
+    scenario_spec = menu_utils.MenuSpec(
+        items=scenario_options,
+        exit_label="Back",
+        show_exit=True,
+        show_descriptions=True,
+    )
+    menu_utils.render_menu(scenario_spec)
+    scenario_choice = prompt_utils.get_choice(
+        menu_utils.selectable_keys(scenario_options, include_exit=True),
+        default="2",
+        disabled=[option.key for option in scenario_options if option.disabled],
+    )
+    if scenario_choice == "0":
+        return None
+    return {"1": "cold_start", "2": "basic_usage", "3": "permission_trigger"}.get(
+        scenario_choice,
+        "basic_usage",
+    )
+
+
 def run_sandbox_dynamic_run(
     *,
     select_dynamic_target: Callable[[], tuple[str, str] | None],
@@ -29,41 +79,22 @@ def run_sandbox_dynamic_run(
     device_serial, _device_label = selected
     print_root_status(device_serial)
     print_network_status(device_serial)
-    print()
-    scenario_id = "basic_usage"
     duration_seconds = 0
     label = "Manual"
-    menu_utils.print_header("Dynamic Run Scenario")
-    print(status_messages.status("Tip: Basic usage is recommended for validation runs.", level="info"))
-    scenario_options = [
-        menu_utils.MenuOption("1", "Cold start"),
-        menu_utils.MenuOption("2", "Basic usage"),
-        menu_utils.MenuOption("3", "Permission trigger"),
-    ]
-    scenario_spec = menu_utils.MenuSpec(items=scenario_options, exit_label="Cancel", show_exit=True)
-    menu_utils.render_menu(scenario_spec)
-    scenario_choice = prompt_utils.get_choice(
-        menu_utils.selectable_keys(scenario_options, include_exit=True),
-        default="2",
-        disabled=[option.key for option in scenario_options if option.disabled],
-    )
-    if scenario_choice == "0":
-        return
-    scenario_id = {"1": "cold_start", "2": "basic_usage", "3": "permission_trigger"}.get(
-        scenario_choice,
-        "basic_usage",
-    )
     selection = select_dynamic_target()
     package_name = selection[0] if selection else None
     tier = selection[1] if selection else "exploration"
+    if not package_name:
+        return
+    scenario_id = _choose_single_app_capture_type(package_name)
+    if not scenario_id:
+        return
     if tier == "dataset":
         if prompt_utils.prompt_yes_no("Run as exploration instead of dataset?", default=False):
             tier = "exploration"
     elif package_name == "com.zhiliaoapp.musically":
         if prompt_utils.prompt_yes_no("Mark this run as calibration?", default=True):
             tier = "calibration"
-    if not package_name:
-        return
     print()
     menu_utils.print_header("Dynamic Run Observers")
     observer_ids = select_observers(device_serial, mode="sandbox")

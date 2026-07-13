@@ -1,6 +1,8 @@
 """Freeze selector (Phase E reproduction) as a first-class selector.
 
-This must reproduce the Phase E "1 baseline + 2 interactive" selection exactly.
+This reproduces the locked freeze manifest selection exactly. The freeze
+manifest may include more than the minimum 1 baseline + 2 interactive runs per
+app when a richer ML evidence window is available.
 """
 
 from __future__ import annotations
@@ -37,6 +39,16 @@ def _parse_iso_to_epoch(value: object) -> float | None:
         return None
 
 
+def _ordered_run_ids(values: object, *, checksums: dict[str, Any]) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    ids = [str(x).strip() for x in values if str(x).strip()]
+    return sorted(
+        dict.fromkeys(ids),
+        key=lambda rid: (_parse_iso_to_epoch((checksums.get(rid) or {}).get("ended_at")) or float("inf"), rid),
+    )
+
+
 @dataclass(frozen=True)
 class FreezeSelector:
     evidence_root: Path
@@ -68,13 +80,9 @@ class FreezeSelector:
             if len(base_ids) < 1 or len(inter_ids) < 2:
                 continue
 
-            baseline_id = str(base_ids[0])
-            interactive_ids = [str(x) for x in inter_ids[:2]]
-            interactive_ids = sorted(
-                interactive_ids,
-                key=lambda rid: (_parse_iso_to_epoch((checksums.get(rid) or {}).get("ended_at")), rid),
-            )
-            run_ids = [baseline_id] + interactive_ids
+            baseline_ids = _ordered_run_ids(base_ids, checksums=checksums)
+            interactive_ids = _ordered_run_ids(inter_ids, checksums=checksums)
+            run_ids = baseline_ids + interactive_ids
 
             for rid in run_ids:
                 if rid not in included_set:
@@ -128,4 +136,3 @@ class FreezeSelector:
 
 
 __all__ = ["FreezeSelector"]
-

@@ -1,7 +1,7 @@
 """Query-mode ML execution (Phase F2).
 
 Goals:
-- Keep Phase E (paper) semantics intact and reproducible.
+- Keep freeze/profile semantics intact and reproducible.
 - In operational snapshots, add stability + persistence metrics and (optional) feature stabilisation.
 - Selection is explicit and provenance is written to output/operational/<snapshot_id>/selection_manifest.json.
 - Per-run outputs are written under the operational snapshot:
@@ -30,6 +30,7 @@ from .evidence_pack_ml_preflight import (
     RunInputs,
     derive_run_mode,
 )
+from .feature_matrix import rows_to_basic_matrix
 from .numpy_percentile import percentile as np_percentile
 from .operational_lint import lint_operational_snapshot
 from .operational_metrics import (
@@ -81,27 +82,7 @@ def _mode_rank(mode: str) -> int:
 
 
 def _rows_to_matrix(rows: list[dict[str, Any]], *, window_spec: WindowSpec) -> tuple[np.ndarray, list[str]]:
-    denom = float(window_spec.window_size_s) if window_spec.window_size_s > 0 else 1.0
-    feature_names = ["bytes_per_sec", "packets_per_sec", "avg_packet_size_bytes"]
-    data: list[list[float]] = []
-    def _f(value: Any) -> float:
-        try:
-            return float(value or 0.0)
-        except Exception:
-            return 0.0
-    for row in rows:
-        byte_count = _f(row.get("byte_count"))
-        pkt_count = _f(row.get("packet_count"))
-        avg_pkt = _f(row.get("avg_packet_size_bytes"))
-        bytes_per_sec = byte_count / denom
-        packets_per_sec = pkt_count / denom
-        if config.FEATURE_LOG1P:
-            bytes_per_sec = float(np.log1p(bytes_per_sec))
-            packets_per_sec = float(np.log1p(packets_per_sec))
-        data.append([bytes_per_sec, packets_per_sec, avg_pkt])
-    if not data:
-        return np.zeros((0, len(feature_names)), dtype=float), feature_names
-    return np.asarray(data, dtype=float), feature_names
+    return rows_to_basic_matrix(rows, window_spec=window_spec, feature_log1p=bool(config.FEATURE_LOG1P))
 
 
 def _apply_robust_scaling(
@@ -1177,7 +1158,7 @@ def run_ml_query_mode(
         lint_operational_snapshot=lint_operational_snapshot,
         write_snapshot_bundle_manifest=_write_snapshot_bundle_manifest,
         write_snapshot_summary=_write_snapshot_summary,
-        output_dir=app_config.OUTPUT_DIR,
+        evidence_root=evidence_root,
         per_run_rows=per_run_prevalence,
         per_group_mode_rows=per_group_mode_prevalence,
         persistence_rows=per_run_persistence,

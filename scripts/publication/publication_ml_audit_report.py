@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2  # noqa: E402
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config  # noqa: E402
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (  # noqa: E402
     resolve_dataset_freeze_read_path,
 )
@@ -123,6 +123,66 @@ def _finite(x: float) -> bool:
     return not (math.isnan(x) or math.isinf(x))
 
 
+def _summarize_baseline_calibration(
+    rows: list[dict[str, object]],
+    *,
+    hard_error_count: int,
+) -> dict[str, object]:
+    """Summarize model QA without hiding detailed per-app warnings."""
+
+    by_model: dict[str, dict[str, object]] = {}
+    for row in rows:
+        model = str(row.get("model") or "").strip()
+        if not model:
+            continue
+        summary = by_model.setdefault(
+            model,
+            {
+                "app_count": 0,
+                "ok_app_count": 0,
+                "warning_app_count": 0,
+                "max_baseline_exceedance_ratio": 0.0,
+                "max_baseline_exceedance_abs_error": 0.0,
+            },
+        )
+        summary["app_count"] = int(summary.get("app_count") or 0) + 1
+        ok = bool(row.get("baseline_exceedance_ok"))
+        if ok:
+            summary["ok_app_count"] = int(summary.get("ok_app_count") or 0) + 1
+        else:
+            summary["warning_app_count"] = int(summary.get("warning_app_count") or 0) + 1
+        ratio = float(row.get("baseline_exceedance_ratio") or 0.0)
+        abs_error = float(row.get("baseline_exceedance_abs_error") or 0.0)
+        summary["max_baseline_exceedance_ratio"] = max(
+            float(summary.get("max_baseline_exceedance_ratio") or 0.0),
+            ratio,
+        )
+        summary["max_baseline_exceedance_abs_error"] = max(
+            float(summary.get("max_baseline_exceedance_abs_error") or 0.0),
+            abs_error,
+        )
+
+    primary = by_model.get(profile_config.MODEL_IFOREST, {})
+    secondary = by_model.get(profile_config.MODEL_OCSVM, {})
+    primary_warnings = int(primary.get("warning_app_count") or 0)
+    secondary_warnings = int(secondary.get("warning_app_count") or 0)
+    blocked = hard_error_count > 0 or primary_warnings > 0
+    return {
+        "status": "BLOCKED" if blocked else ("OK_WITH_SECONDARY_CAVEATS" if secondary_warnings else "OK"),
+        "hard_error_count": int(hard_error_count),
+        "primary_model": profile_config.MODEL_IFOREST,
+        "primary_model_calibration": "OK" if primary_warnings == 0 else "WARN",
+        "secondary_model": profile_config.MODEL_OCSVM,
+        "secondary_model_calibration": "WARN" if secondary_warnings else "OK",
+        "secondary_model_caveat": (
+            "One-Class SVM is retained as a secondary robustness signal; do not use it as the sole publication gate."
+            if secondary_warnings
+            else ""
+        ),
+        "model_calibration": by_model,
+    }
+
+
 @dataclass(frozen=True)
 class RunAuditRow:
     run_id: str
@@ -156,7 +216,7 @@ def main() -> int:
     if not freeze_path.exists():
         raise SystemExit(
             "Missing freeze anchor: "
-            f"{freeze_path}. Generate or restore the Paper 2 dataset freeze before running the ML audit. "
+            f"{freeze_path}. Generate or restore the freeze anchor before running the ML audit. "
             f"Current dynamic evidence root: {_evidence_root()}"
         )
     freeze = _rjson(freeze_path) or {}
@@ -171,13 +231,14 @@ def main() -> int:
     # For publication QA, warn only when baseline training windows are meaningfully below the contract.
     # This reduces audit noise without changing any frozen scores/thresholds.
     warn_training_samples_below = max(
-        int(math.ceil(float(paper2.MIN_WINDOWS_BASELINE) * 1.2)),
-        int(paper2.MIN_WINDOWS_BASELINE) + 5,
+        int(math.ceil(float(profile_config.MIN_WINDOWS_BASELINE) * 1.2)),
+        int(profile_config.MIN_WINDOWS_BASELINE) + 5,
     )
 
     rows: list[RunAuditRow] = []
     errors: list[str] = []
     warnings: list[str] = []
+    baseline_calibration: dict[tuple[str, str], dict[str, float | int]] = {}
     evidence_root = _evidence_root()
 
     for rid in included:
@@ -194,7 +255,7 @@ def main() -> int:
         interaction_level = str(op.get("interaction_level") or ds.get("interaction_level") or "")
         bucket = _bucket(man)
 
-        ml_dir = run_dir / "analysis" / "ml" / paper2.ML_SCHEMA_LABEL
+        ml_dir = run_dir / "analysis" / "ml" / profile_config.ML_SCHEMA_LABEL
         mm = _rjson(ml_dir / "model_manifest.json") if ml_dir.exists() else None
         thr = _rjson(ml_dir / "baseline_threshold.json") if ml_dir.exists() else None
         pre = _rjson(ml_dir / "ml_preflight.json") if ml_dir.exists() else None
@@ -221,7 +282,7 @@ def main() -> int:
         model_meta = (mm.get("models") if isinstance(mm, dict) else {}) or {}
         thr_models = (thr.get("models") if isinstance(thr, dict) else {}) or {}
 
-        for model_name, csv_label in ((paper2.MODEL_IFOREST, "iforest"), (paper2.MODEL_OCSVM, "ocsvm")):
+        for model_name, csv_label in ((profile_config.MODEL_IFOREST, "iforest"), (profile_config.MODEL_OCSVM, "ocsvm")):
             scores_path = ml_dir / f"anomaly_scores_{csv_label}.csv"
             scores = _read_scores(scores_path)
             if scores is None:
@@ -234,7 +295,7 @@ def main() -> int:
 
             tmeta = thr_models.get(model_name) if isinstance(thr_models.get(model_name), dict) else {}
             tau = float(tmeta.get("threshold_value") or 0.0)
-            pctl = float(tmeta.get("threshold_percentile") or paper2.THRESHOLD_PERCENTILE)
+            pctl = float(tmeta.get("threshold_percentile") or profile_config.THRESHOLD_PERCENTILE)
             exceed_n = sum(1 for s in scores if float(s) >= tau)
             exceed_ratio = float(exceed_n) / float(scored_n) if scored_n else 0.0
             tie_ratio = (
@@ -247,10 +308,13 @@ def main() -> int:
             if bucket == "idle":
                 abs_err = abs(exceed_ratio - expected)
                 ok = abs_err <= tol
-                if not ok:
-                    warnings.append(
-                        f"BASELINE_EXCEEDANCE_OUT_OF_RANGE:{pkg}:{rid}:{model_name}:ratio={exceed_ratio:.4f}:tau={tau:.6g}"
-                    )
+                aggregate = baseline_calibration.setdefault(
+                    (pkg, model_name),
+                    {"exceed_n": 0, "scores_n": 0, "run_count": 0, "threshold_value": tau},
+                )
+                aggregate["exceed_n"] = int(aggregate.get("exceed_n") or 0) + int(exceed_n)
+                aggregate["scores_n"] = int(aggregate.get("scores_n") or 0) + int(scored_n)
+                aggregate["run_count"] = int(aggregate.get("run_count") or 0) + 1
 
             mmeta = model_meta.get(model_name) if isinstance(model_meta.get(model_name), dict) else {}
             training_samples = None
@@ -301,6 +365,38 @@ def main() -> int:
                 )
             )
 
+    baseline_calibration_rows: list[dict[str, object]] = []
+    for (pkg, model_name), aggregate in sorted(baseline_calibration.items()):
+        scores_n = int(aggregate.get("scores_n") or 0)
+        exceed_n = int(aggregate.get("exceed_n") or 0)
+        ratio = float(exceed_n) / float(scores_n) if scores_n else 0.0
+        abs_err = abs(ratio - expected)
+        ok = abs_err <= tol
+        run_count = int(aggregate.get("run_count") or 0)
+        baseline_calibration_rows.append(
+            {
+                "package_name": pkg,
+                "model": model_name,
+                "baseline_run_count": run_count,
+                "baseline_scores_n": scores_n,
+                "baseline_exceedance_ratio": ratio,
+                "baseline_expected_exceedance": expected,
+                "baseline_exceedance_abs_error": abs_err,
+                "baseline_exceedance_ok": ok,
+                "threshold_value": float(aggregate.get("threshold_value") or 0.0),
+            }
+        )
+        if not ok:
+            warnings.append(
+                f"BASELINE_AGGREGATE_EXCEEDANCE_OUT_OF_RANGE:{pkg}:{model_name}:"
+                f"ratio={ratio:.4f}:runs={run_count}:n={scores_n}"
+            )
+
+    readiness = _summarize_baseline_calibration(
+        baseline_calibration_rows,
+        hard_error_count=len(errors),
+    )
+
     # Write JSON + CSV (canonical). Legacy aliases are opt-in.
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     payload = (
@@ -309,11 +405,13 @@ def main() -> int:
                 "schema_version": 1,
                 "generated_at_utc": datetime.now(UTC).isoformat(),
                 "freeze_dataset_hash": freeze.get("freeze_dataset_hash"),
-                "ml_schema_label": paper2.ML_SCHEMA_LABEL,
-                "paper_contract_version": paper2.PAPER_CONTRACT_VERSION,
+                "ml_schema_label": profile_config.ML_SCHEMA_LABEL,
+                "paper_contract_version": profile_config.PAPER_CONTRACT_VERSION,
                 "expected_baseline_exceedance": expected,
                 "baseline_exceedance_tolerance_abs": tol,
                 "training_samples_warning_recommended_threshold": warn_training_samples_below,
+                "readiness": readiness,
+                "baseline_calibration": baseline_calibration_rows,
                 "rows": [asdict(r) for r in rows],
                 "errors": errors,
                 "warnings": warnings,

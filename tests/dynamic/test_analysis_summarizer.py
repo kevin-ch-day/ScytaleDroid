@@ -271,8 +271,52 @@ def test_summarizer_uses_security_surface_for_cleartext_detection(tmp_path: Path
     assert summary["flags"]["security_finding_count"] == 1
     assert summary["indicators"]["security_surface"]["finding_count"] == 1
     assert "Cleartext HTTP detected: yes." in rendered
+    assert "Non-HTTP cleartext protocol metadata detected: yes." in rendered
     assert "## Security (metadata)" in rendered
     assert "HTTP metadata observed [high]" in rendered
+
+
+def test_summarizer_distinguishes_non_http_cleartext_protocols(tmp_path: Path) -> None:
+    writer = EvidencePackWriter(tmp_path)
+    writer.ensure_layout()
+    report_path = tmp_path / "analysis" / "pcap_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "security_surface": {
+                    "status": "ok",
+                    "finding_count": 1,
+                    "risk_flags": ["decoded_cleartext_streams_observed"],
+                    "findings": [
+                        {
+                            "severity": "high",
+                            "category": "cleartext",
+                            "title": "XMPP cleartext dissector signal",
+                            "detail": "Decoded non-HTTP protocol metadata was observed.",
+                        }
+                    ],
+                    "cleartext": {
+                        "http_observed": False,
+                        "cleartext_protocol_observed": True,
+                        "decoded_stream_count": 2,
+                        "decoded_protocols_observed": ["xmpp"],
+                        "visibility_class": "cleartext_surface_present",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = _manifest(artifacts=[])
+
+    summary = DynamicRunSummarizer(writer)._build_summary(manifest)
+    rendered = DynamicRunSummarizer(writer)._render_summary_md(summary)
+
+    assert summary["flags"]["cleartext_http_detected"] == "false"
+    assert summary["flags"]["cleartext_protocol_detected"] == "true"
+    assert "Cleartext HTTP detected: no." in rendered
+    assert "Non-HTTP cleartext protocol metadata detected: yes." in rendered
 
 
 def test_summarizer_includes_media_plane_indicator(tmp_path: Path) -> None:

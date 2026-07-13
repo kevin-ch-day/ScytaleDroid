@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scripts.db import backfill_dynamic_domain_context
 from scytaledroid.Database.db_utils import dynamic_domain_context as catalog
 from scytaledroid.DynamicAnalysis.domain_context import (
     DomainReference,
@@ -14,6 +15,13 @@ from scytaledroid.DynamicAnalysis.storage import domain_context_index
 
 def test_backfill_dynamic_domain_context_help_is_safe(assert_safe_script_help) -> None:
     assert_safe_script_help("scripts/db/backfill_dynamic_domain_context.py")
+
+
+def test_backfill_dynamic_domain_context_defaults_to_data_evidence_root() -> None:
+    parser = backfill_dynamic_domain_context._build_parser()
+    args = parser.parse_args([])
+
+    assert args.evidence_root.parts[-3:] == ("data", "evidence", "dynamic")
 
 
 def test_apply_dynamic_domain_context_migration_records_schema_and_seeds(monkeypatch) -> None:
@@ -191,6 +199,16 @@ def test_build_domain_observation_rows_from_network_indicators() -> None:
                 "indicator_value": "gql-fed.reddit.com",
                 "indicator_count": 8,
             },
+            {
+                "indicator_type": "dns",
+                "indicator_value": "w3-reporting.reddit.com",
+                "indicator_count": 4,
+            },
+            {
+                "indicator_type": "dns",
+                "indicator_value": "alb.reddit.com",
+                "indicator_count": 2,
+            },
             {"indicator_type": "dns", "indicator_value": "cf-st.sc-cdn.net", "indicator_count": 5},
             {
                 "indicator_type": "dns",
@@ -206,6 +224,16 @@ def test_build_domain_observation_rows_from_network_indicators() -> None:
     reddit = next(row for row in rows if row["observed_domain"] == "gql-fed.reddit.com")
     assert reddit["owner_class"] == "first_party"
     assert reddit["role_class"] == "community_platform_api"
+
+    reddit_reporting = next(
+        row for row in rows if row["observed_domain"] == "w3-reporting.reddit.com"
+    )
+    assert reddit_reporting["owner_class"] == "first_party"
+    assert reddit_reporting["role_class"] == "first_party_telemetry_reporting"
+
+    reddit_alb = next(row for row in rows if row["observed_domain"] == "alb.reddit.com")
+    assert reddit_alb["owner_class"] == "first_party"
+    assert reddit_alb["role_class"] == "first_party_app_backend"
 
     firebase = next(
         row for row in rows if row["observed_domain"] == "firebaseinstallations.googleapis.com"
@@ -862,6 +890,18 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert reddit_api["owner_class"] == "first_party"
     assert reddit_api["role_class"] == "community_platform_api"
 
+    reddit_reporting = classify_domain(
+        "w3-reporting.reddit.com", package_name="com.reddit.frontpage", references=refs
+    )
+    assert reddit_reporting["owner_class"] == "first_party"
+    assert reddit_reporting["role_class"] == "first_party_telemetry_reporting"
+
+    reddit_alb = classify_domain(
+        "alb.reddit.com", package_name="com.reddit.frontpage", references=refs
+    )
+    assert reddit_alb["owner_class"] == "first_party"
+    assert reddit_alb["role_class"] == "first_party_app_backend"
+
     reddit_media = classify_domain(
         "preview.redd.it", package_name="com.reddit.frontpage", references=refs
     )
@@ -873,6 +913,34 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     )
     assert appsflyer_onelink["owner_class"] == "third_party"
     assert appsflyer_onelink["role_class"] == "attribution_deep_link"
+
+    reddit_devvit = classify_domain(
+        "ad-cd-template-24ourf-0-0-30-webview.devvit.net",
+        package_name="com.reddit.frontpage",
+        references=refs,
+    )
+    assert reddit_devvit["owner_class"] == "first_party"
+    assert reddit_devvit["role_class"] == "reddit_developer_platform_webview"
+
+    branch_click = classify_domain(
+        "depop.app.link", package_name="com.reddit.frontpage", references=refs
+    )
+    assert branch_click["owner_class"] == "third_party"
+    assert branch_click["role_class"] == "attribution_deep_link"
+
+    branch_impression = classify_domain(
+        "impression.link", package_name="com.reddit.frontpage", references=refs
+    )
+    assert branch_impression["owner_class"] == "third_party"
+    assert branch_impression["role_class"] == "attribution_impression_tracking"
+
+    boehringer_landing = classify_domain(
+        "patient.boehringer-ingelheim.com",
+        package_name="com.reddit.frontpage",
+        references=refs,
+    )
+    assert boehringer_landing["owner_class"] == "third_party"
+    assert boehringer_landing["role_class"] == "advertiser_landing_page"
 
     pinterest_appsflyer_inapps = classify_domain(
         "jarlio.inapps.appsflyersdk.com",
@@ -1159,6 +1227,15 @@ def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:
     )
     assert guardian_crash["owner_class"] == "third_party"
     assert guardian_crash["role_class"] == "crash_reporting"
+
+    bugsnag_sessions = classify_domain(
+        "sessions.bugsnag.com",
+        package_name="com.pinterest",
+        references=refs,
+    )
+    assert bugsnag_sessions["owner_class"] == "third_party"
+    assert bugsnag_sessions["role_class"] == "crash_reporting"
+    assert bugsnag_sessions["confidence"] == "high"
 
     guardian_adjust = classify_domain(
         "app.adjust.com", package_name="com.guardian", references=refs

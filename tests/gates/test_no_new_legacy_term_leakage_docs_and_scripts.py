@@ -38,6 +38,7 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
         Path("docs/supported_entrypoints.md"),
         Path("scripts/dynamic/evidence_hunt.py"),
         Path("scripts/publication/export_manifest_gate.py"),
+        Path("scripts/publication/generate_android_empirical_assets.py"),
         Path("scripts/publication/ingest_publication_bundle.py"),
         Path("scripts/publication/publication_ml_audit_report.py"),
     }

@@ -138,6 +138,17 @@ def recent_tracker_runs(package_name: str, *, limit: int = 5) -> list[RecentRun]
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 
     payload = load_dataset_tracker()
+    return recent_tracker_runs_from_payload(payload, package_name, limit=limit)
+
+
+def recent_tracker_runs_from_payload(
+    payload: dict[str, Any],
+    package_name: str,
+    *,
+    limit: int = 5,
+) -> list[RecentRun]:
+    """Return recent runs for a package from an already-loaded dataset tracker."""
+
     apps = payload.get("apps") if isinstance(payload, dict) else {}
     entry = apps.get(package_name) if isinstance(apps, dict) else None
     runs = entry.get("runs") if isinstance(entry, dict) else []
@@ -284,6 +295,7 @@ __all__ = [
     "RecentRun",
     "dataset_tracker_counts",
     "recent_tracker_runs",
+    "recent_tracker_runs_from_payload",
     "delete_dynamic_evidence_packs",
     "find_dynamic_run_dirs",
     "find_incomplete_dynamic_run_dirs",

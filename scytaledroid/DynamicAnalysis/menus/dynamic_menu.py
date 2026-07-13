@@ -424,7 +424,7 @@ def _print_tier1_qa_result(dynamic_run_id: str) -> None:
     )
 
 
-def _resolve_custom_tier(package_name: str, dataset_pkgs: set[str]) -> tuple[str, str]:
+def _resolve_custom_tier(package_name: str, dataset_pkgs: set[str]) -> tuple[str, str] | None:
     return _run_target_adapter.resolve_custom_tier(
         package_name,
         dataset_pkgs,

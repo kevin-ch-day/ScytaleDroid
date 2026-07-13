@@ -731,16 +731,18 @@ def _build_security_findings(
             {"protocols": protocols},
         )
         if "xmpp" in protocols:
+            xmpp_review = _classify_xmpp_dissector_signal(cleartext)
             _add(
-                "high",
+                xmpp_review["severity"],
                 "cleartext",
                 "XMPP cleartext dissector signal",
-                "XMPP frames were decoded as cleartext by tshark. Common on Meta-family stacks; "
-                "validate whether this is handshake/STARTTLS noise versus true cleartext messaging.",
+                xmpp_review["detail"],
                 {
                     "plaintext_protocol_frames": cleartext.get("plaintext_protocol_frames"),
                     "decoded_stream_count": cleartext.get("decoded_stream_count"),
                     "decoded_protocols_observed": cleartext.get("decoded_protocols_observed"),
+                    "classification": xmpp_review["classification"],
+                    "classification_reason": xmpp_review["reason"],
                 },
             )
     if cleartext.get("decoded_stream_count", 0) > 0:
@@ -803,6 +805,47 @@ def _build_security_findings(
             },
         )
     return findings
+
+
+def _classify_xmpp_dissector_signal(cleartext: dict[str, Any]) -> dict[str, str]:
+    decoded_streams = [row for row in cleartext.get("decoded_streams") or [] if isinstance(row, dict)]
+    xmpp_streams = [
+        row
+        for row in decoded_streams
+        if str(row.get("protocol") or "").strip().lower() == "xmpp"
+    ]
+    xmpp_frames = sum(_safe_int(row.get("frames")) for row in xmpp_streams)
+    xmpp_bytes = sum(_safe_int(row.get("bytes_total")) for row in xmpp_streams)
+    has_port_5222 = any(
+        str(row.get("src_port") or "") == "5222" or str(row.get("dst_port") or "") == "5222"
+        for row in xmpp_streams
+    )
+    if (
+        xmpp_streams
+        and has_port_5222
+        and not cleartext.get("http_observed")
+        and xmpp_frames <= 4
+        and xmpp_bytes <= 1024
+    ):
+        return {
+            "severity": "medium",
+            "classification": "xmpp_small_handshake_or_messaging_transport_probe",
+            "reason": "tiny_xmpp_port_5222_no_http",
+            "detail": (
+                "XMPP frames were decoded by tshark on port 5222, but the observed payload is tiny "
+                "and no HTTP metadata was present. Treat as a Meta-style realtime transport or "
+                "handshake probe unless a larger decoded stream appears."
+            ),
+        }
+    return {
+        "severity": "high",
+        "classification": "xmpp_cleartext_review_required",
+        "reason": "xmpp_decoded_stream_requires_manual_review",
+        "detail": (
+            "XMPP frames were decoded as cleartext by tshark. Common on Meta-family stacks; "
+            "validate whether this is handshake/STARTTLS noise versus true cleartext messaging."
+        ),
+    }
 
 
 def rehydrate_security_surface(surface: dict[str, Any]) -> dict[str, Any]:
@@ -934,16 +977,12 @@ def _safe_int(value: Any, default: int = 0) -> int:
 
 
 def http_observed_from_report(report: dict[str, Any]) -> bool:
-    """Prefer security_surface cleartext signals; fall back to protocol hierarchy."""
+    """Return whether HTTP metadata was observed, not all cleartext protocols."""
     surface = report.get("security_surface")
     if isinstance(surface, dict) and surface.get("status") == "ok":
         cleartext = surface.get("cleartext")
         if isinstance(cleartext, dict):
             if cleartext.get("http_observed"):
-                return True
-            if _safe_int(cleartext.get("plaintext_protocol_frames")) > 0:
-                return True
-            if _safe_int(cleartext.get("decoded_stream_count")) > 0:
                 return True
             visibility = str(cleartext.get("visibility_class") or "").strip()
             if visibility == "encrypted_or_opaque_dominant":
@@ -962,7 +1001,7 @@ def compute_static_dynamic_cleartext_posture(
     plan: dict[str, Any] | None,
     report: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Compare static cleartext permission vs dynamic HTTP/cleartext metadata."""
+    """Compare static cleartext permission vs dynamic cleartext observations."""
     plan = plan if isinstance(plan, dict) else {}
     report = report if isinstance(report, dict) else {}
     static_features = plan.get("static_features") if isinstance(plan.get("static_features"), dict) else {}
@@ -984,6 +1023,11 @@ def compute_static_dynamic_cleartext_posture(
     surface = report.get("security_surface") if isinstance(report.get("security_surface"), dict) else {}
     cleartext = surface.get("cleartext") if isinstance(surface.get("cleartext"), dict) else {}
     visibility = cleartext.get("visibility_class")
+    dynamic_cleartext_protocol = bool(
+        cleartext.get("cleartext_protocol_observed")
+        or _safe_int(cleartext.get("plaintext_protocol_frames")) > 0
+        or _safe_int(cleartext.get("decoded_stream_count")) > 0
+    )
     http_hosts = sorted(
         {
             str(item.get("value") or "").strip().lower()
@@ -993,6 +1037,8 @@ def compute_static_dynamic_cleartext_posture(
     )
     if static_allowed and dynamic_http:
         mismatch_class = "allowed_and_observed"
+    elif static_allowed and dynamic_cleartext_protocol:
+        mismatch_class = "allowed_cleartext_protocol_observed"
     elif static_allowed and not dynamic_http:
         mismatch_class = (
             "allowed_not_observed_encrypted"
@@ -1001,13 +1047,21 @@ def compute_static_dynamic_cleartext_posture(
         )
     elif not static_allowed and dynamic_http:
         mismatch_class = "denied_but_observed"
+    elif not static_allowed and dynamic_cleartext_protocol:
+        mismatch_class = "denied_but_cleartext_protocol"
     else:
         mismatch_class = "aligned_encrypted"
     summary_map = {
         "allowed_and_observed": "Static cleartext is permitted and HTTP/cleartext metadata was observed dynamically.",
+        "allowed_cleartext_protocol_observed": (
+            "Static cleartext is permitted and non-HTTP cleartext protocol metadata was observed dynamically."
+        ),
         "allowed_not_observed": "Static cleartext is permitted but no HTTP/cleartext metadata was observed in this capture.",
         "allowed_not_observed_encrypted": "Static cleartext is permitted; capture looks encrypted/opaque with no HTTP metadata.",
         "denied_but_observed": "Static posture denies cleartext, but HTTP/cleartext metadata was observed dynamically.",
+        "denied_but_cleartext_protocol": (
+            "Static posture denies cleartext, but non-HTTP cleartext protocol metadata was observed dynamically."
+        ),
         "aligned_encrypted": "Static posture denies cleartext and no HTTP/cleartext metadata was observed.",
         "unknown": "Cleartext posture could not be classified.",
     }
@@ -1016,6 +1070,7 @@ def compute_static_dynamic_cleartext_posture(
         "static_cleartext_domain_count": len(cleartext_domains),
         "static_cleartext_domains_sample": cleartext_domains[:10],
         "dynamic_http_observed": dynamic_http,
+        "dynamic_cleartext_protocol_observed": dynamic_cleartext_protocol,
         "cleartext_visibility_class": visibility,
         "dynamic_http_host_count": len(http_hosts),
         "dynamic_http_hosts_sample": http_hosts[:10],

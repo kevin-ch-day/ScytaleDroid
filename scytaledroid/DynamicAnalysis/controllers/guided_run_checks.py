@@ -38,6 +38,42 @@ def _validation_status_style(status: str) -> str:
     return "muted"
 
 
+def _format_post_run_bytes(value: int | float | str | None) -> str:
+    try:
+        size = float(value or 0)
+    except (TypeError, ValueError):
+        return "n/a"
+    if size <= 0:
+        return "0 B"
+    units = ("B", "KB", "MB", "GB")
+    unit_index = 0
+    while size >= 1000 and unit_index < len(units) - 1:
+        size /= 1000.0
+        unit_index += 1
+    if unit_index == 0:
+        return f"{int(size)} {units[unit_index]}"
+    return f"{size:.1f} {units[unit_index]}"
+
+
+def _format_post_run_duration(value: object) -> str:
+    if value in (None, "", "n/a"):
+        return "n/a"
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if seconds < 0:
+        return "n/a"
+    if seconds < 60:
+        return f"{seconds:.0f} sec"
+    total_seconds = int(round(seconds))
+    minutes, secs = divmod(total_seconds, 60)
+    if minutes < 60:
+        return f"{minutes} min {secs:02d} sec"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} hr {minutes:02d} min {secs:02d} sec"
+
+
 def _render_validation_report(
     *,
     title: str,
@@ -93,10 +129,10 @@ def _render_post_run_valid_summary(
     posture: dict,
     security: dict,
 ) -> None:
-    duration_value = f"{capture_duration_s}s" if capture_duration_s not in (None, "", "n/a") else "n/a"
+    duration_value = _format_post_run_duration(capture_duration_s)
     items = [
         summary_item("Verdict", "VALID", value_style="success"),
-        summary_item("PCAP", f"{pcap_size_int} bytes", value_style="accent"),
+        summary_item("PCAP", _format_post_run_bytes(pcap_size_int), value_style="accent"),
         summary_item(
             "Windows",
             str(window_count) if window_count is not None else "unavailable",

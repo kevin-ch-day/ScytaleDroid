@@ -75,7 +75,7 @@ MIN_PCAP_BYTES_FALLBACK = MIN_PCAP_BYTES
 # encrypted messaging baselines such as Signal foreground thread holds.
 MIN_PCAP_BYTES_BASELINE_CONNECTED = 10_000
 
-# Profile v3 (Paper #3) phase-specific PCAP bytes minima.
+# Profile v3 phase-specific PCAP bytes minima.
 #
 # Rationale:
 # - Some apps legitimately produce low traffic during baseline idle; requiring a large PCAP for

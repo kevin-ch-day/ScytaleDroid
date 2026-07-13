@@ -9,6 +9,7 @@ from scytaledroid.DynamicAnalysis.pcap.security_surface import (
     compute_static_dynamic_cleartext_posture,
     export_payload_audit_rows,
     http_observed_from_report,
+    rehydrate_security_surface,
     render_security_review_md,
     sanitize_http_path,
     summarize_security_surface,
@@ -129,6 +130,26 @@ def test_http_observed_from_report_prefers_security_surface() -> None:
     )
 
 
+def test_http_observed_from_report_does_not_treat_decoded_non_http_as_http() -> None:
+    assert (
+        http_observed_from_report(
+            {
+                "security_surface": {
+                    "status": "ok",
+                    "cleartext": {
+                        "http_observed": False,
+                        "cleartext_protocol_observed": True,
+                        "decoded_stream_count": 2,
+                        "decoded_protocols_observed": ["xmpp"],
+                        "visibility_class": "cleartext_surface_present",
+                    },
+                },
+            }
+        )
+        is False
+    )
+
+
 def test_compute_static_dynamic_cleartext_posture_denied_but_observed() -> None:
     posture = compute_static_dynamic_cleartext_posture(
         {
@@ -147,6 +168,31 @@ def test_compute_static_dynamic_cleartext_posture_denied_but_observed() -> None:
     )
     assert posture["mismatch_class"] == "denied_but_observed"
     assert posture["dynamic_http_observed"] is True
+
+
+def test_compute_static_dynamic_cleartext_posture_distinguishes_non_http_protocols() -> None:
+    posture = compute_static_dynamic_cleartext_posture(
+        {
+            "static_features": {"uses_cleartext_traffic": False},
+            "network_targets": {"cleartext_domains": []},
+        },
+        {
+            "security_surface": {
+                "status": "ok",
+                "cleartext": {
+                    "http_observed": False,
+                    "cleartext_protocol_observed": True,
+                    "decoded_stream_count": 2,
+                    "decoded_protocols_observed": ["xmpp"],
+                    "visibility_class": "cleartext_surface_present",
+                },
+            },
+        },
+    )
+
+    assert posture["mismatch_class"] == "denied_but_cleartext_protocol"
+    assert posture["dynamic_http_observed"] is False
+    assert posture["dynamic_cleartext_protocol_observed"] is True
 
 
 def test_compute_static_dynamic_cleartext_posture_allowed_not_observed_encrypted() -> None:
@@ -208,6 +254,87 @@ def test_summarize_security_surface_extracts_decoded_streams(monkeypatch, tmp_pa
     assert surface["cleartext"]["decoded_stream_count"] == 1
     assert surface["cleartext"]["decoded_streams"][0]["protocol"] == "ftp"
     assert "decoded_cleartext_streams_observed" in surface["risk_flags"]
+
+
+def test_rehydrate_security_surface_marks_tiny_xmpp_5222_as_medium_review() -> None:
+    surface = rehydrate_security_surface(
+        {
+            "status": "ok",
+            "cleartext": {
+                "http_observed": False,
+                "plaintext_protocol_frames": 2,
+                "plaintext_protocols_observed": ["xmpp"],
+                "decoded_stream_count": 2,
+                "decoded_protocols_observed": ["xmpp"],
+                "decoded_streams": [
+                    {
+                        "protocol": "xmpp",
+                        "transport": "tcp",
+                        "frames": 1,
+                        "bytes_total": 84,
+                        "src_port": "37272",
+                        "dst_port": "5222",
+                    },
+                    {
+                        "protocol": "xmpp",
+                        "transport": "tcp",
+                        "frames": 1,
+                        "bytes_total": 77,
+                        "src_port": "5222",
+                        "dst_port": "42116",
+                    },
+                ],
+                "risk_flags": ["decoded_cleartext_application_protocol_observed"],
+            },
+            "dns_anomalies": {"risk_flags": []},
+            "tls_surface": {"risk_flags": []},
+            "domain_inventory": {},
+            "threat_heuristics": {"risk_flags": []},
+        }
+    )
+
+    finding = next(
+        item for item in surface["findings"] if item["title"] == "XMPP cleartext dissector signal"
+    )
+    assert finding["severity"] == "medium"
+    assert finding["evidence"]["classification"] == "xmpp_small_handshake_or_messaging_transport_probe"
+    assert finding["evidence"]["classification_reason"] == "tiny_xmpp_port_5222_no_http"
+
+
+def test_rehydrate_security_surface_keeps_larger_xmpp_stream_high_review() -> None:
+    surface = rehydrate_security_surface(
+        {
+            "status": "ok",
+            "cleartext": {
+                "http_observed": False,
+                "plaintext_protocol_frames": 20,
+                "plaintext_protocols_observed": ["xmpp"],
+                "decoded_stream_count": 1,
+                "decoded_protocols_observed": ["xmpp"],
+                "decoded_streams": [
+                    {
+                        "protocol": "xmpp",
+                        "transport": "tcp",
+                        "frames": 20,
+                        "bytes_total": 8192,
+                        "src_port": "5222",
+                        "dst_port": "42116",
+                    }
+                ],
+                "risk_flags": ["decoded_cleartext_application_protocol_observed"],
+            },
+            "dns_anomalies": {"risk_flags": []},
+            "tls_surface": {"risk_flags": []},
+            "domain_inventory": {},
+            "threat_heuristics": {"risk_flags": []},
+        }
+    )
+
+    finding = next(
+        item for item in surface["findings"] if item["title"] == "XMPP cleartext dissector signal"
+    )
+    assert finding["severity"] == "high"
+    assert finding["evidence"]["classification"] == "xmpp_cleartext_review_required"
 
 
 def test_write_pcap_features_includes_security_surface_proxies(tmp_path: Path) -> None:

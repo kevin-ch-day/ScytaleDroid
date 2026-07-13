@@ -1,4 +1,4 @@
-"""ML preflight gates and frozen-input loading (Paper #2)."""
+"""ML preflight gates and frozen-input loading."""
 
 from __future__ import annotations
 
@@ -223,6 +223,6 @@ def derive_run_mode(inputs: RunInputs) -> tuple[str, str]:
     if prof:
         if prof.startswith(("baseline", "minimal", "idle")):
             return "baseline", "run_profile"
-        if prof.startswith(("interactive", "normal", "heavy")):
+        if prof.startswith(("interaction_", "interactive", "normal", "heavy")):
             return "interactive", "run_profile"
     return "unknown", "missing"

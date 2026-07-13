@@ -14,7 +14,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _DEFAULT_RECEIPT_DIR = _REPO_ROOT / "data" / "state" / "schema_migrations" / "dynamic_domain_context"
-_DEFAULT_EVIDENCE_ROOT = _REPO_ROOT / "output" / "evidence" / "dynamic"
+_DEFAULT_EVIDENCE_ROOT = _REPO_ROOT / "data" / "evidence" / "dynamic"
 
 
 def _build_parser() -> argparse.ArgumentParser:

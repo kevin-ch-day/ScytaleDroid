@@ -23,6 +23,16 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 
+DATASET_LEVEL_TABLE_NAMES: tuple[str, ...] = (
+    "anomaly_prevalence_per_app_phase.csv",
+    "model_overlap_per_run.csv",
+    "transport_mix_by_phase.csv",
+    "ml_audit_per_app_model.csv",
+    "dars_components_per_run.csv",
+    "baseline_score_stability_per_app_model.csv",
+    "static_dynamic_stratification_per_app.csv",
+)
+
 
 def freeze_anchor_path() -> Path:
     """Canonical checksummed freeze anchor (authoritative input)."""
@@ -35,6 +45,11 @@ def freeze_anchor_path() -> Path:
 def dataset_tables_dir() -> Path:
     """Dataset-level derived tables written by the publication runner (regenerable)."""
     return Path(app_config.DATA_DIR)
+
+
+def dataset_level_table_names() -> tuple[str, ...]:
+    """Required dataset-level CSV outputs for freeze/profile ML deliverables."""
+    return DATASET_LEVEL_TABLE_NAMES
 
 
 # Canonical publication directory (stable paths for manuscripts and humans).
@@ -89,7 +104,7 @@ def legacy_output_phase_e_bundle_root() -> Path:
 
 
 def existing_phase_e_bundle_root() -> Path:
-    canonical = output_phase_e_bundle_root()
+    canonical = output_locked_runtime_bundle_root()
     if canonical.exists():
         return canonical
     legacy = legacy_output_phase_e_bundle_root()
@@ -98,35 +113,69 @@ def existing_phase_e_bundle_root() -> Path:
     return canonical
 
 
-# Internal Phase E baseline bundle (deterministic, used for regression gates).
-def output_phase_e_bundle_root() -> Path:
-    # Keep deterministic Phase E artifacts outside the publication bundle.
+def output_locked_runtime_bundle_root() -> Path:
+    """Internal locked runtime bundle root used for deterministic report inputs."""
+
     return output_internal_root() / "publication" / "baseline"
 
 
+def output_locked_runtime_bundle_figures_dir() -> Path:
+    return output_locked_runtime_bundle_root() / "figures"
+
+
+def output_locked_runtime_bundle_tables_dir() -> Path:
+    return output_locked_runtime_bundle_root() / "tables"
+
+
+def output_locked_runtime_bundle_appendix_dir() -> Path:
+    return output_locked_runtime_bundle_root() / "appendix"
+
+
+def output_locked_runtime_bundle_manifest_dir() -> Path:
+    return output_locked_runtime_bundle_root() / "manifest"
+
+
+def output_locked_runtime_bundle_freeze_copy_path() -> Path:
+    return output_locked_runtime_bundle_manifest_dir() / "dataset_freeze.json"
+
+
+def output_locked_runtime_bundle_artifacts_manifest_path() -> Path:
+    return output_locked_runtime_bundle_manifest_dir() / "phase_e_artifacts_manifest.json"
+
+
+def output_locked_runtime_bundle_readme_path() -> Path:
+    return output_locked_runtime_bundle_root() / "README.md"
+
+
+# Backward-compatible helper aliases. Keep these until older scripts and tests are
+# migrated off the historical phase label.
+def output_phase_e_bundle_root() -> Path:
+    return output_locked_runtime_bundle_root()
+
+
 def output_phase_e_bundle_figures_dir() -> Path:
-    return output_phase_e_bundle_root() / "figures"
+    return output_locked_runtime_bundle_figures_dir()
 
 
 def output_phase_e_bundle_tables_dir() -> Path:
-    return output_phase_e_bundle_root() / "tables"
+    return output_locked_runtime_bundle_tables_dir()
 
 
 def output_phase_e_bundle_appendix_dir() -> Path:
-    return output_phase_e_bundle_root() / "appendix"
+    return output_locked_runtime_bundle_appendix_dir()
 
 
 def output_phase_e_bundle_manifest_dir() -> Path:
-    return output_phase_e_bundle_root() / "manifest"
+    return output_locked_runtime_bundle_manifest_dir()
 
 
 def output_phase_e_bundle_freeze_copy_path() -> Path:
-    return output_phase_e_bundle_manifest_dir() / "dataset_freeze.json"
+    return output_locked_runtime_bundle_freeze_copy_path()
 
 
 def output_phase_e_bundle_artifacts_manifest_path() -> Path:
-    return output_phase_e_bundle_manifest_dir() / "phase_e_artifacts_manifest.json"
+    return output_locked_runtime_bundle_artifacts_manifest_path()
 
 
 def output_phase_e_bundle_readme_path() -> Path:
-    return output_phase_e_bundle_root() / "README.md"
+    return output_locked_runtime_bundle_readme_path()

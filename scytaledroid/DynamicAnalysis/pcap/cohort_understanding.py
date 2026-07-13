@@ -76,6 +76,7 @@ class CohortUnderstanding:
     top_cohort_domains_dns: list[tuple[str, int]] = field(default_factory=list)
     top_cohort_domains_sni: list[tuple[str, int]] = field(default_factory=list)
     top_dynamic_only_domains: list[tuple[str, int]] = field(default_factory=list)
+    domain_context_rollups: list[dict[str, Any]] = field(default_factory=list)
     rows: list[RunUnderstandingRow] = field(default_factory=list)
     app_rollups: list[dict[str, Any]] = field(default_factory=list)
 
@@ -105,6 +106,7 @@ class CohortUnderstanding:
             "top_cohort_domains_dns": self.top_cohort_domains_dns,
             "top_cohort_domains_sni": self.top_cohort_domains_sni,
             "top_dynamic_only_domains": self.top_dynamic_only_domains,
+            "domain_context_rollups": self.domain_context_rollups,
             "rows": [row.__dict__ for row in self.rows],
             "app_rollups": self.app_rollups,
         }
@@ -164,7 +166,11 @@ def _phase_cleartext_steps(run_dir: Path) -> int:
     return count
 
 
-def build_cohort_understanding(evidence_root: Path) -> CohortUnderstanding:
+def build_cohort_understanding(
+    evidence_root: Path,
+    *,
+    packages: set[str] | None = None,
+) -> CohortUnderstanding:
     summary = CohortUnderstanding(
         generated_at=datetime.now(UTC).isoformat(),
         evidence_root=str(evidence_root.resolve()),
@@ -175,19 +181,23 @@ def build_cohort_understanding(evidence_root: Path) -> CohortUnderstanding:
     dns_domain_hits: Counter[str] = Counter()
     sni_domain_hits: Counter[str] = Counter()
     dynamic_only_hits: Counter[str] = Counter()
+    domain_package_hints: dict[str, str] = {}
     tls_ratios: list[float] = []
     quic_ratios: list[float] = []
     app_buckets: dict[str, list[RunUnderstandingRow]] = defaultdict(list)
+    package_filter = {str(package).strip().lower() for package in packages or set() if str(package).strip()}
 
     for run_dir in sorted([p for p in evidence_root.iterdir() if p.is_dir()], key=lambda p: p.name):
         manifest = _read_json(run_dir / "run_manifest.json")
         if not manifest:
             continue
-        summary.runs_scanned += 1
         target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
         operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
         dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
         package_name = str(target.get("package_name") or "").strip() or None
+        if package_filter and str(package_name or "").lower() not in package_filter:
+            continue
+        summary.runs_scanned += 1
         app_label = str(target.get("display_name") or target.get("app_label") or package_name or "").strip() or None
         run_id = str(manifest.get("dynamic_run_id") or run_dir.name)
         run_profile = str(operator.get("run_profile") or "").strip() or None
@@ -234,10 +244,16 @@ def build_cohort_understanding(evidence_root: Path) -> CohortUnderstanding:
                 summary.risk_flag_counts[text] = summary.risk_flag_counts.get(text, 0) + 1
             for name in inventory.get("dns_names") or []:
                 if name:
-                    dns_domain_hits[str(name).lower()] += 1
+                    domain = str(name).lower()
+                    dns_domain_hits[domain] += 1
+                    if package_name:
+                        domain_package_hints.setdefault(domain, package_name)
             for name in inventory.get("sni_names") or []:
                 if name:
-                    sni_domain_hits[str(name).lower()] += 1
+                    domain = str(name).lower()
+                    sni_domain_hits[domain] += 1
+                    if package_name:
+                        domain_package_hints.setdefault(domain, package_name)
             if _safe_int(tls.get("tls_alert_count")):
                 summary.tls_alert_runs += 1
             entropy = _safe_float(dns.get("max_label_entropy"))
@@ -321,6 +337,11 @@ def build_cohort_understanding(evidence_root: Path) -> CohortUnderstanding:
     summary.top_cohort_domains_dns = dns_domain_hits.most_common(25)
     summary.top_cohort_domains_sni = sni_domain_hits.most_common(25)
     summary.top_dynamic_only_domains = dynamic_only_hits.most_common(25)
+    summary.domain_context_rollups = _domain_context_rollups(
+        dns_domain_hits,
+        sni_domain_hits,
+        domain_package_hints,
+    )
 
     for package, rows in sorted(app_buckets.items()):
         app_label = next((r.app_label for r in rows if r.app_label), package)
@@ -358,6 +379,54 @@ def build_cohort_understanding(evidence_root: Path) -> CohortUnderstanding:
     return summary
 
 
+def _domain_context_rollups(
+    dns_hits: Counter[str],
+    sni_hits: Counter[str],
+    package_hints: dict[str, str],
+) -> list[dict[str, Any]]:
+    try:
+        from scytaledroid.DynamicAnalysis import domain_context, service_context
+
+        service_rows = tuple(service_context.default_service_catalog_seed_rows())
+        map_rows = tuple(service_context.default_service_domain_map_seed_rows())
+    except Exception:
+        service_rows = ()
+        map_rows = ()
+        domain_context = None
+        service_context = None
+
+    domains = sorted(set(dns_hits) | set(sni_hits), key=lambda d: (-(dns_hits[d] + sni_hits[d]), d))
+    rows: list[dict[str, Any]] = []
+    for domain in domains:
+        package_name = package_hints.get(domain) or ""
+        domain_row: dict[str, Any] = {}
+        service_row: dict[str, Any] = {}
+        if domain_context is not None and package_name:
+            domain_row = domain_context.classify_domain(domain, package_name=package_name)
+        if service_context is not None and package_name:
+            service_row = service_context.resolve_service_for_domain(
+                domain,
+                package_name=package_name,
+                service_rows=service_rows,
+                map_rows=map_rows,
+            )
+        rows.append(
+            {
+                "domain": domain,
+                "package_name": package_name,
+                "dns_run_hits": dns_hits.get(domain, 0),
+                "sni_run_hits": sni_hits.get(domain, 0),
+                "total_run_hits": dns_hits.get(domain, 0) + sni_hits.get(domain, 0),
+                "owner_class": domain_row.get("owner_class"),
+                "role_class": domain_row.get("role_class"),
+                "service_key": service_row.get("service_key"),
+                "service_category": service_row.get("service_category"),
+                "confidence": domain_row.get("confidence") or service_row.get("confidence"),
+            }
+        )
+    return rows
+
+
 def render_cohort_understanding_md(summary: CohortUnderstanding) -> str:
     gib = summary.total_pcap_bytes / (1024**3) if summary.total_pcap_bytes else 0
     lines = [
@@ -376,13 +445,19 @@ def render_cohort_understanding_md(summary: CohortUnderstanding) -> str:
         f"- Scripted interaction timelines: **{summary.scripted_runs}**",
         "",
         "## Cleartext interpretation",
-        "- No literal HTTP host/path metadata was observed cohort-wide.",
-        "- All cleartext-surface runs decode **XMPP** via tshark (Meta-family messaging stack).",
-        "- XMPP hits use standard port **5222** with **1–4 frames** per stream (handshake/STARTTLS staging pattern, not bulk cleartext messaging).",
-        "- Treat as dissector/STARTTLS staging until manually validated; policy mismatch vs static still actionable.",
-        "",
-        "## Plaintext protocol prevalence",
     ]
+    if summary.http_metadata_runs == 0:
+        lines.append("- No literal HTTP host/path metadata was observed in the selected evidence.")
+    else:
+        lines.append(f"- HTTP metadata was observed in **{summary.http_metadata_runs}** run(s).")
+    if summary.xmpp_runs:
+        lines.append("- XMPP-decoded cleartext-surface runs are present; validate handshake/STARTTLS staging before treating as payload exposure.")
+        lines.append("- XMPP hits commonly use standard port **5222** with sparse frame counts in this corpus.")
+    elif summary.cleartext_surface_runs:
+        lines.append("- Cleartext-surface runs are present, but no XMPP signals were observed.")
+    else:
+        lines.append("- No decoded plaintext protocol surface was observed in the selected evidence.")
+    lines.extend(["", "## Plaintext protocol prevalence"])
     if summary.plaintext_protocol_counts:
         for protocol, count in sorted(summary.plaintext_protocol_counts.items(), key=lambda kv: (-kv[1], kv[0])):
             lines.append(f"- `{protocol}`: {count} run(s)")
@@ -401,6 +476,15 @@ def render_cohort_understanding_md(summary: CohortUnderstanding) -> str:
     if summary.top_cohort_domains_sni:
         for domain, count in summary.top_cohort_domains_sni[:15]:
             lines.append(f"- `{domain}`: seen in {count} run(s)")
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Domain/service context"])
+    if summary.domain_context_rollups:
+        for row in summary.domain_context_rollups[:15]:
+            lines.append(
+                f"- `{row['domain']}`: DNS {row['dns_run_hits']}, SNI {row['sni_run_hits']} · "
+                f"{row.get('owner_class') or 'unknown'} / {row.get('role_class') or 'unknown'}"
+            )
     else:
         lines.append("- none")
     lines.extend(["", "## Frequent dynamic-only destinations (not in static plan)"])
@@ -422,10 +506,23 @@ def render_cohort_understanding_md(summary: CohortUnderstanding) -> str:
     for flag, count in sorted(summary.risk_flag_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:12]:
         lines.append(f"- `{flag}`: {count}")
     lines.extend(["", "## Manual follow-ups"])
-    lines.append("- Validate XMPP cleartext dissector hits on Meta-family runs (handshake vs payload exposure).")
-    lines.append("- Review TLS alert runs for pinning/mitm or benign close-notify patterns.")
-    lines.append("- Curate dynamic-only domains against Permission Intel / domain-context seeds.")
-    lines.append("- Cross-check scripted phases with `phase_packet_transport_summary` for step-local cleartext.")
+    if summary.xmpp_runs:
+        lines.append("- Validate XMPP cleartext dissector hits on affected runs (handshake vs payload exposure).")
+    if summary.tls_alert_runs:
+        lines.append("- Review TLS alert runs for pinning/mitm or benign close-notify patterns.")
+    if summary.top_dynamic_only_domains:
+        lines.append("- Curate dynamic-only domains against Permission Intel / domain-context seeds.")
+    unknown_context = [
+        row
+        for row in summary.domain_context_rollups
+        if not row.get("owner_class") or row.get("owner_class") == "unknown"
+    ]
+    if unknown_context:
+        lines.append("- Research unresolved domain/service context rows in `domain_context_rollup.csv`.")
+    if summary.scripted_runs:
+        lines.append("- Cross-check scripted phases with `phase_packet_transport_summary` for step-local cleartext.")
+    if not any([summary.xmpp_runs, summary.tls_alert_runs, summary.top_dynamic_only_domains, unknown_context, summary.scripted_runs]):
+        lines.append("- No immediate PCAP metadata follow-up was identified by this report.")
     lines.append("")
     return "\n".join(lines)
 

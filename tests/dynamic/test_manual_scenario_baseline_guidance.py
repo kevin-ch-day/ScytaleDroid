@@ -180,25 +180,31 @@ def test_pinterest_baseline_guidance_is_surface_specific() -> None:
     assert "profile, settings, saved items, a static board page" in text
     assert "If Pinterest launches to Home, switch once" in text
     assert "Pinterest baseline tip" in text
-    assert "promoted pins, media cards, and video-capable content" in text
+    assert "search grids can keep surfacing promoted pins, Visit Site cards" in text
+    assert "native pin modals, publisher pages" in text
 
 
-def test_pinterest_baseline_warning_mentions_promoted_and_video_pins() -> None:
+def test_pinterest_baseline_warning_mentions_search_visit_site_and_custom_tabs() -> None:
     warning = baseline_guidance.baseline_idle_quota_warning(
         "com.pinterest", profile="baseline_idle"
     )
 
     assert warning is not None
+    assert "search grids" in warning
     assert "promoted pins" in warning
+    assert "Visit Site cards" in warning
+    assert "native pin-detail modals" in warning
+    assert "publisher/custom-tab flows" in warning
     assert "video-capable pins" in warning
 
 
 def test_pinterest_checkpoint_messages_are_surface_specific() -> None:
     messages = baseline_guidance.baseline_idle_checkpoint_messages("com.pinterest")
 
-    assert "Home, a promoted pin, or a video-capable pin surface" in messages[60]
+    assert "Home, Search, a promoted card, Visit Site card, pin detail" in messages[60]
     assert "profile, saved items, a static board page, settings" in messages[60]
-    assert "promoted pins, and video/media cards" in messages[120]
+    assert "Home/Search feed refresh" in messages[120]
+    assert "publisher/custom-tab pages" in messages[120]
 
 
 def test_pinterest_ready_note_mentions_switch_before_timer() -> None:
@@ -207,13 +213,14 @@ def test_pinterest_ready_note_mentions_switch_before_timer() -> None:
     assert note is not None
     assert "Pinterest often reopens on Home after relaunch" in note
     assert "Before pressing Enter, switch once" in note
+    assert "Home, Search, or a pin detail" in note
 
 
 def test_pinterest_non_idle_next_step_mentions_stable_pinterest_surfaces() -> None:
     text = baseline_guidance.baseline_not_idle_next_step("com.pinterest")
 
     assert "static board page" in text
-    assert "non-video/non-promoted Pinterest screen" in text
+    assert "non-search/non-video/non-promoted Pinterest screen" in text
 
 
 def test_instagram_baseline_guidance_is_surface_specific() -> None:

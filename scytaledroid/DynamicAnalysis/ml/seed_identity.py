@@ -1,4 +1,4 @@
-"""Identity and deterministic seeding helpers for Paper #2 ML."""
+"""Identity and deterministic seeding helpers for ML runs."""
 
 from __future__ import annotations
 

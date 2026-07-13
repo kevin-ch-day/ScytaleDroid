@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
     extract_version_code_details_from_dump,
@@ -9,16 +11,41 @@ from scytaledroid.DynamicAnalysis.controllers.guided_run_checks import (
 )
 from scytaledroid.DynamicAnalysis.plan_selection import load_plan_candidates
 
+_LIVE_DRIFT_CACHE_TTL_SECONDS = 30.0
+_LIVE_DRIFT_CACHE: dict[tuple[object, ...], tuple[float, dict[str, dict[str, str]]]] = {}
+_DB_LINEAGE_CACHE_TTL_SECONDS = 30.0
+_DB_LINEAGE_CACHE: dict[tuple[object, ...], tuple[float, dict[str, dict[str, int]]]] = {}
+
 
 def resolve_live_build_drift_map(
     packages: list[str],
     *,
     device_serial: str | None,
 ) -> dict[str, dict[str, str]]:
-    if not str(device_serial or "").strip():
+    serial = str(device_serial or "").strip()
+    if not serial:
         return {}
+    normalized_packages = tuple(
+        sorted(
+            {str(package or "").strip() for package in packages if str(package or "").strip()}
+        )
+    )
+    if not normalized_packages:
+        return {}
+    cache_key: tuple[object, ...] = (
+        serial,
+        normalized_packages,
+        load_plan_candidates,
+        read_observed_version_code_details,
+    )
+    now = time.monotonic()
+    cached = _LIVE_DRIFT_CACHE.get(cache_key)
+    if cached is not None:
+        cached_at, cached_map = cached
+        if now - cached_at <= _LIVE_DRIFT_CACHE_TTL_SECONDS:
+            return {pkg: dict(row) for pkg, row in cached_map.items()}
     out: dict[str, dict[str, str]] = {}
-    for package_name in packages:
+    for package_name in normalized_packages:
         pkg = str(package_name or "").strip()
         if not pkg:
             continue
@@ -55,14 +82,23 @@ def resolve_live_build_drift_map(
             "observed_version_code": observed_vc,
             "static_run_id": static_run_id,
         }
+    _LIVE_DRIFT_CACHE[cache_key] = (now, {pkg: dict(row) for pkg, row in out.items()})
     return out
 
 
 def resolve_db_dynamic_lineage_context_map(
     packages: list[str],
 ) -> dict[str, dict[str, int]]:
-    normalized = sorted({str(package or "").strip().lower() for package in packages if str(package or "").strip()})
-    if not normalized:
+    normalized_packages = tuple(
+        sorted(
+            {
+                str(package or "").strip().lower()
+                for package in packages
+                if str(package or "").strip()
+            }
+        )
+    )
+    if not normalized_packages:
         return {}
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
@@ -71,7 +107,20 @@ def resolve_db_dynamic_lineage_context_map(
     except Exception:
         return {}
 
-    target_set = set(normalized)
+    now = time.monotonic()
+    cache_key: tuple[object, ...] = (
+        normalized_packages,
+        lineage.fetch_base_rows,
+        lineage.fetch_dynamic_coverage,
+        resolve_active_package_identity,
+    )
+    cached = _DB_LINEAGE_CACHE.get(cache_key)
+    if cached is not None:
+        cached_at, cached_map = cached
+        if now - cached_at <= _DB_LINEAGE_CACHE_TTL_SECONDS:
+            return {pkg: dict(row) for pkg, row in cached_map.items()}
+
+    target_set = set(normalized_packages)
     base_rows = [
         row
         for row in (lineage.fetch_base_rows(core_q, package_name=None) or [])
@@ -105,4 +154,5 @@ def resolve_db_dynamic_lineage_context_map(
             bucket["db_active_sessions"] += dynamic_sessions
         else:
             bucket["db_historical_sessions"] += dynamic_sessions
+    _DB_LINEAGE_CACHE[cache_key] = (now, {pkg: dict(row) for pkg, row in out.items()})
     return out

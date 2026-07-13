@@ -1,7 +1,7 @@
 """Operational (Phase F2) derived metrics.
 
 These metrics are *post-hoc* summaries computed from window-level outputs.
-They do not change Phase E (paper) semantics and are intended for:
+They do not change freeze/profile semantics and are intended for:
 - stability/confidence reporting as N runs grows
 - persistence vs. spiky deviation characterisation
 - lightweight interaction intensity inference (heuristic)

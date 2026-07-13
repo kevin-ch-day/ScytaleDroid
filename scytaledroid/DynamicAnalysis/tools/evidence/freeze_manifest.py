@@ -3,8 +3,8 @@
 PM-locked goals:
 - Evidence packs remain authoritative and immutable after freeze.
 - The freeze artifact is dataset-level (does not mutate evidence packs).
-- It lists the exact included run_ids (1 baseline + 2 interactive per app) and
-  records provenance (tool versions, thresholds, quota policy).
+- It lists the exact included run_ids for the locked ML dataset and records
+  provenance (tool versions, thresholds, quota policy).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import json
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -39,15 +39,15 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
 )
 from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
-    active_research_cohort_archive_dir,
     active_dataset_freeze_path,
+    active_research_cohort_archive_dir,
     resolve_dataset_plan_read_path,
     write_dataset_freeze_payload,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
 )
-from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,7 @@ class FreezeConfig:
     min_duration_s: int = int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120))
     min_pcap_bytes: int = int(paper_config.MIN_PCAP_BYTES)
     min_windows_baseline: int = int(paper_config.MIN_WINDOWS_BASELINE)
+    max_age_days: int | None = None
 
 
 _REQUIRED_RELATIVE_INPUTS = (
@@ -72,6 +73,8 @@ _REQUIRED_RELATIVE_INPUTS = (
 class _RunCandidate:
     run_id: str
     package_name_lc: str
+    version_code: str
+    base_apk_sha256: str
     bucket: str  # baseline|interactive
     window_count: int
     pcap_size_bytes: int
@@ -159,6 +162,54 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _parse_iso_datetime(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _duration_from_timestamps(start_value: object, end_value: object) -> float | None:
+    start = _parse_iso_datetime(start_value)
+    end = _parse_iso_datetime(end_value)
+    if start is None or end is None:
+        return None
+    seconds = (end - start).total_seconds()
+    return float(seconds) if seconds > 0 else None
+
+
+def _resolve_sampling_duration_seconds(manifest: dict[str, Any], ds: dict[str, Any]) -> float | None:
+    for value in (
+        ds.get("sampling_duration_seconds"),
+        ds.get("actual_duration_seconds"),
+        ds.get("duration_seconds"),
+    ):
+        duration = _safe_float(value)
+        if duration is not None and duration > 0:
+            return float(duration)
+    scenario = manifest.get("scenario") if isinstance(manifest.get("scenario"), dict) else {}
+    for value in (
+        scenario.get("sampling_duration_seconds"),
+        scenario.get("actual_duration_seconds"),
+        scenario.get("duration_seconds"),
+    ):
+        duration = _safe_float(value)
+        if duration is not None and duration > 0:
+            return float(duration)
+    duration = _duration_from_timestamps(scenario.get("started_at"), scenario.get("ended_at"))
+    if duration is not None:
+        return duration
+    return _duration_from_timestamps(manifest.get("started_at"), manifest.get("ended_at"))
+
+
 def _resolve_pcap_size_bytes(run_dir: Path, manifest: dict[str, Any], ds: dict[str, Any]) -> int | None:
     # Prefer manifest dataset value when present.
     pcap_size_bytes = _safe_int(ds.get("pcap_size_bytes"))
@@ -227,6 +278,15 @@ def build_dataset_freeze_manifest(
     dataset_pkgs = {str(pkg).strip().lower() for pkg in apps.keys() if str(pkg).strip()}
     candidates_by_pkg_bucket: dict[tuple[str, str], list[_RunCandidate]] = defaultdict(list)
 
+    cutoff_dt: datetime | None = None
+    if config.max_age_days is not None:
+        try:
+            max_age_days = int(config.max_age_days)
+        except Exception:
+            max_age_days = 0
+        if max_age_days > 0:
+            cutoff_dt = datetime.now(UTC) - timedelta(days=max_age_days)
+
     for run_dir in sorted([p for p in evidence_root.iterdir() if p.is_dir()], key=lambda p: p.name):
         rid = str(run_dir.name)
         mf = _read_json(run_dir / "run_manifest.json")
@@ -271,16 +331,35 @@ def build_dataset_freeze_manifest(
                 # + deterministic ranking. Keep the flag for auditability only.
         window_count = _safe_int(ds.get("window_count"))
         pcap_size_bytes = _resolve_pcap_size_bytes(run_dir, mf, ds)
-        actual_duration_s = _safe_float(ds.get("sampling_duration_seconds"))
+        actual_duration_s = _resolve_sampling_duration_seconds(mf, ds)
         capture_start_utc = str(mf.get("started_at") or (mf.get("scenario") or {}).get("started_at") or "").strip()
-        if window_count is None or pcap_size_bytes is None or actual_duration_s is None or not capture_start_utc:
+        run_identity = run_plan.get("run_identity") if isinstance(run_plan.get("run_identity"), dict) else {}
+        version_code = str(run_identity.get("version_code") or run_plan.get("version_code") or "").strip()
+        base_apk_sha256 = _normalize_hex(run_identity.get("base_apk_sha256"), n=64)
+        if (
+            window_count is None
+            or pcap_size_bytes is None
+            or actual_duration_s is None
+            or not capture_start_utc
+            or not version_code
+            or not base_apk_sha256
+        ):
             app_counts = excluded_reason_counts_by_app[pkg]
             app_counts["EXCLUDED_MISSING_QUALITY_KEYS"] = int(app_counts.get("EXCLUDED_MISSING_QUALITY_KEYS", 0)) + 1
+            continue
+        capture_start_dt = _parse_iso_datetime(capture_start_utc)
+        if cutoff_dt is not None and (capture_start_dt is None or capture_start_dt < cutoff_dt):
+            app_counts = excluded_reason_counts_by_app[pkg]
+            app_counts["EXCLUDED_OUTSIDE_MAX_AGE_WINDOW"] = int(
+                app_counts.get("EXCLUDED_OUTSIDE_MAX_AGE_WINDOW", 0)
+            ) + 1
             continue
         candidates_by_pkg_bucket[(pkg, bucket)].append(
             _RunCandidate(
                 run_id=rid,
                 package_name_lc=pkg,
+                version_code=version_code,
+                base_apk_sha256=base_apk_sha256,
                 bucket=bucket,
                 window_count=int(window_count),
                 pcap_size_bytes=int(pcap_size_bytes),
@@ -289,43 +368,76 @@ def build_dataset_freeze_manifest(
             )
         )
 
+    def _ranked_candidates(pkg: str, bucket: str) -> list[_RunCandidate]:
+        return sorted(
+            candidates_by_pkg_bucket.get((pkg, bucket), []),
+            key=lambda c: (-c.window_count, -c.pcap_size_bytes, -c.actual_duration_s, c.capture_start_utc, c.run_id),
+        )
+
+    insufficient: list[str] = []
+    selected_groups_by_pkg: dict[str, tuple[str, str]] = {}
     for pkg in sorted(dataset_pkgs):
-        base_cands = sorted(
-            candidates_by_pkg_bucket.get((pkg, "baseline"), []),
-            key=lambda c: (-c.window_count, -c.pcap_size_bytes, -c.actual_duration_s, c.capture_start_utc, c.run_id),
-        )
-        inter_cands = sorted(
-            candidates_by_pkg_bucket.get((pkg, "interactive"), []),
-            key=lambda c: (-c.window_count, -c.pcap_size_bytes, -c.actual_duration_s, c.capture_start_utc, c.run_id),
-        )
-        if len(base_cands) < int(config.baseline_required) or len(inter_cands) < int(config.interactive_required):
-            raise RuntimeError(
-                f"FREEZE_INSUFFICIENT_ELIGIBLE_RUNS:{pkg}:baseline={len(base_cands)}/{int(config.baseline_required)}:"
+        base_cands = _ranked_candidates(pkg, "baseline")
+        inter_cands = _ranked_candidates(pkg, "interactive")
+        grouped: dict[tuple[str, str], dict[str, list[_RunCandidate]]] = defaultdict(lambda: {"baseline": [], "interactive": []})
+        for candidate in base_cands + inter_cands:
+            grouped[(candidate.version_code, candidate.base_apk_sha256)][candidate.bucket].append(candidate)
+        complete_groups = [
+            (key, buckets)
+            for key, buckets in grouped.items()
+            if len(buckets["baseline"]) >= int(config.baseline_required)
+            and len(buckets["interactive"]) >= int(config.interactive_required)
+        ]
+        if not complete_groups:
+            insufficient.append(
+                f"{pkg}:baseline={len(base_cands)}/{int(config.baseline_required)}:"
                 f"interactive={len(inter_cands)}/{int(config.interactive_required)}"
             )
-        base = [c.run_id for c in base_cands[: int(config.baseline_required)]]
-        inter = [c.run_id for c in inter_cands[: int(config.interactive_required)]]
+            continue
+        selected_key, _selected_buckets = max(
+            complete_groups,
+            key=lambda item: (
+                max(c.capture_start_utc for c in item[1]["baseline"] + item[1]["interactive"]),
+                len(item[1]["baseline"]) + len(item[1]["interactive"]),
+                item[0][0],
+                item[0][1],
+            ),
+        )
+        selected_groups_by_pkg[pkg] = selected_key
+    if insufficient:
+        shown = ";".join(insufficient[:8])
+        suffix = f";...(+{len(insufficient) - 8} more)" if len(insufficient) > 8 else ""
+        raise RuntimeError(f"FREEZE_INSUFFICIENT_ELIGIBLE_RUNS:{len(insufficient)} app(s):{shown}{suffix}")
+
+    for pkg in sorted(dataset_pkgs):
+        selected_key = selected_groups_by_pkg[pkg]
+        base_cands = [
+            c
+            for c in _ranked_candidates(pkg, "baseline")
+            if (c.version_code, c.base_apk_sha256) == selected_key
+        ]
+        inter_cands = [
+            c
+            for c in _ranked_candidates(pkg, "interactive")
+            if (c.version_code, c.base_apk_sha256) == selected_key
+        ]
+        base = [c.run_id for c in base_cands]
+        inter = [c.run_id for c in inter_cands]
         included = base + inter
         included_by_app[pkg] = {
             "baseline_run_ids": base,
             "interactive_run_ids": inter,
             "included_run_ids": included,
+            "baseline_required": int(config.baseline_required),
+            "interactive_required": int(config.interactive_required),
+            "baseline_selected": len(base),
+            "interactive_selected": len(inter),
+            "selected_version_code": selected_key[0],
+            "selected_base_apk_sha256": selected_key[1],
         }
         included_run_ids.extend(included)
         expected_bucket_by_run_id = {rid: "baseline" for rid in base}
         expected_bucket_by_run_id.update({rid: "interactive" for rid in inter})
-
-        # Track paper-eligible extras not selected by deterministic rank.
-        for _c in base_cands[int(config.baseline_required):]:
-            app_counts = excluded_reason_counts_by_app[pkg]
-            app_counts["EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK"] = (
-                int(app_counts.get("EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK", 0)) + 1
-            )
-        for _c in inter_cands[int(config.interactive_required):]:
-            app_counts = excluded_reason_counts_by_app[pkg]
-            app_counts["EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK"] = (
-                int(app_counts.get("EXCLUDED_NOT_SELECTED_BY_DETERMINISTIC_RANK", 0)) + 1
-            )
 
         # Verify required frozen inputs and record checksums for included runs.
         for rid in included:
@@ -464,8 +576,11 @@ def build_dataset_freeze_manifest(
         raise RuntimeError(f"FREEZE_MIXED_PROTOCOL_VERSIONS:{sorted(interaction_protocol_versions)}")
     if len(baseline_protocol_versions) > 1:
         raise RuntimeError(f"FREEZE_MIXED_BASELINE_PROTOCOL_VERSIONS:{sorted(baseline_protocol_versions)}")
-    if len(baseline_protocol_hashes) > 1:
-        raise RuntimeError(f"FREEZE_MIXED_BASELINE_PROTOCOL_HASHES:{sorted(baseline_protocol_hashes)}")
+    # Baseline protocol hashes include category-specific protocol material. A
+    # heterogeneous cohort can therefore legitimately freeze multiple baseline
+    # hashes, for example news/social idle baselines and messaging connected-idle
+    # baselines. Keep the protocol version fail-closed, but preserve the selected
+    # hash set for audit instead of rejecting the dataset.
     # Back-compat: evidence packs may have missing/changed operator-level contract hashes
     # over the lifetime of a workspace. The canonical contract hash is computed
     # at freeze time (contract snapshot + contract hash) and is the
@@ -509,9 +624,12 @@ def build_dataset_freeze_manifest(
         "quota_policy": {
             "baseline_required": int(config.baseline_required),
             "interactive_required": int(config.interactive_required),
+            "max_age_days": int(config.max_age_days) if config.max_age_days is not None else None,
             "selection_rule": "include iff evidence-derived paper_eligible=true; rank within (package,bucket) by "
-            "window_count desc, pcap_bytes desc, actual_duration_s desc, capture_start_utc asc, run_id asc",
-            "extras_policy": "extra valid runs are retained but excluded deterministically (out-of-dataset)",
+            "window_count desc, pcap_bytes desc, actual_duration_s desc, capture_start_utc asc, run_id asc; "
+            "select the newest package/build group in the age window meeting baseline/interactive floors; "
+            "include all eligible runs in that selected build group",
+            "extras_policy": "extra runs from other build groups are retained in evidence but excluded from this ML freeze",
         },
         "qa_thresholds": {
             "min_duration_s": int(config.min_duration_s),
@@ -528,6 +646,7 @@ def build_dataset_freeze_manifest(
             "template_map_hashes": sorted(template_map_hashes),
             "baseline_protocol_versions": sorted(baseline_protocol_versions),
             "baseline_protocol_hashes": sorted(baseline_protocol_hashes),
+            "baseline_protocol_hash_policy": "category_specific_hashes_allowed",
         },
         "apps": included_by_app,
         "included_run_ids": sorted(set(included_run_ids)),
@@ -556,15 +675,17 @@ def write_dataset_freeze_manifest(
     evidence_root: Path,
     out_dir: Path,
     also_write_canonical: bool = True,
+    cfg: FreezeConfig | None = None,
 ) -> Path:
     """Write a timestamped freeze manifest under out_dir.
 
-    If also_write_canonical is True and out_dir/dataset_freeze.json does not exist,
-    create it as a copy. Never overwrite an existing canonical freeze file.
+    If also_write_canonical is True for the active cohort archive, write both a
+    timestamped anchor and the canonical dataset_freeze.json pointer. Older
+    timestamped anchors remain available for audit.
     """
 
     dataset_plan_path = resolve_dataset_plan_read_path()
-    payload = build_dataset_freeze_manifest(dataset_plan_path=dataset_plan_path, evidence_root=evidence_root)
+    payload = build_dataset_freeze_manifest(dataset_plan_path=dataset_plan_path, evidence_root=evidence_root, cfg=cfg)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
