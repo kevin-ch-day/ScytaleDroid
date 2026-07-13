@@ -34,7 +34,6 @@ from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import get_sampl
 from scytaledroid.DynamicAnalysis.ml.feature_matrix import BASIC_FEATURE_NAMES, rows_to_basic_matrix
 from scytaledroid.DynamicAnalysis.ml.pcap_window_features import build_window_features, extract_packet_timeline
 from scytaledroid.DynamicAnalysis.ml.telemetry_windowing import WindowSpec
-from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.Publication.paper2_v2_contract import validate_paper2_v2_results_contract
 
 
@@ -65,6 +64,12 @@ SEEDS = [
 ]
 
 
+def _default_freeze_path() -> str:
+    from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
+
+    return str(resolve_dataset_freeze_read_path())
+
+
 @dataclass(frozen=True)
 class RunWindows:
     run_id: str
@@ -75,14 +80,14 @@ class RunWindows:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--freeze", default=str(resolve_dataset_freeze_read_path()), help="Existing dataset freeze path.")
+    parser.add_argument("--freeze", default=None, help="Existing dataset freeze path.")
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT), help="Paper 2 v2 package root.")
     parser.add_argument("--evidence-root", default=str(DEFAULT_EVIDENCE_ROOT), help="Dynamic evidence root.")
     parser.add_argument("--out-dir", default=str(DEFAULT_VALIDATION_DIR), help="Validation output directory.")
     args = parser.parse_args(argv)
 
     result = generate(
-        freeze_path=Path(args.freeze),
+        freeze_path=Path(args.freeze or _default_freeze_path()),
         output_root=Path(args.output_root),
         evidence_root=Path(args.evidence_root),
         out_dir=Path(args.out_dir),
@@ -100,7 +105,8 @@ def generate(*, freeze_path: Path, output_root: Path, evidence_root: Path, out_d
     freeze = _read_json(freeze_path)
     run_windows = _load_locked_run_windows(freeze=freeze, evidence_root=evidence_root)
     heldout_rows, heldout_app_rows = _heldout_baseline_validation(freeze, run_windows)
-    heldout_summary_rows = _summary_table("heldout_baseline", {row["package_name"]: float(row["delta_mean"]) for row in heldout_app_rows})
+    heldout_deltas = {row["package_name"]: float(row["delta_mean"]) for row in heldout_app_rows}
+    heldout_summary_rows = _summary_table("heldout_baseline", heldout_deltas)
     ablation_rows, ablation_app_rows = _feature_ablation(freeze, run_windows)
     bytes_rows, bytes_summary_rows = _bytes_p95_control(freeze, run_windows)
     temporal_rows, temporal_summary = _temporal_order_control(freeze, run_windows)
@@ -123,7 +129,16 @@ def generate(*, freeze_path: Path, output_root: Path, evidence_root: Path, out_d
     temporal_json = out_dir / "paper2_temporal_order_control_v2.json"
     temporal_json.write_text(json.dumps(temporal_summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     files.append(temporal_json)
-    files.append(_write_latex_summary(out_dir / "paper2_minimum_validation_tables_v2.tex", heldout_summary_rows, ablation_rows, bytes_summary_rows, seed_cohort_rows, temporal_rows))
+    files.append(
+        _write_latex_summary(
+            out_dir / "paper2_minimum_validation_tables_v2.tex",
+            heldout_summary_rows,
+            ablation_rows,
+            bytes_summary_rows,
+            seed_cohort_rows,
+            temporal_rows,
+        )
+    )
     publication_results = _read_json(output_root / "publication_results_v2.json")
     deterministic_manifest = publication_results.get("deterministic_manifest") or {}
     summary = {
@@ -222,6 +237,7 @@ def _heldout_baseline_validation(
                     "delta": delta,
                 }
             )
+        paired_deltas = [i - b for i, b in zip(interactive_values, fold_values, strict=True)]
         app_rows.append(
             {
                 **meta,
@@ -236,11 +252,11 @@ def _heldout_baseline_validation(
                 "heldout_baseline_rdi_sd": _sd(fold_values),
                 "interactive_rdi_mean": _mean(interactive_values),
                 "interactive_rdi_median": median(interactive_values),
-                "delta_mean": _mean([i - b for i, b in zip(interactive_values, fold_values, strict=True)]),
-                "delta_median": median([i - b for i, b in zip(interactive_values, fold_values, strict=True)]),
-                "delta_min": min(i - b for i, b in zip(interactive_values, fold_values, strict=True)),
-                "delta_max": max(i - b for i, b in zip(interactive_values, fold_values, strict=True)),
-                "delta_range": max(i - b for i, b in zip(interactive_values, fold_values, strict=True)) - min(i - b for i, b in zip(interactive_values, fold_values, strict=True)),
+                "delta_mean": _mean(paired_deltas),
+                "delta_median": median(paired_deltas),
+                "delta_min": min(paired_deltas),
+                "delta_max": max(paired_deltas),
+                "delta_range": max(paired_deltas) - min(paired_deltas),
             }
         )
     return rows, app_rows
@@ -304,7 +320,10 @@ def _feature_ablation(
             continue
         deltas = deltas_by_profile[str(row["feature_profile"])]
         common = sorted(set(deltas) & set(full))
-        row["spearman_vs_full_model"] = stats.spearmanr([deltas[p] for p in common], [full[p] for p in common]).statistic
+        row["spearman_vs_full_model"] = stats.spearmanr(
+            [deltas[p] for p in common],
+            [full[p] for p in common],
+        ).statistic
     return rows, app_rows
 
 
@@ -462,18 +481,33 @@ def _temporal_order_control(
             base = original[package_name]
             vals = app_values[package_name]
             max_abs_delta_diff = max(max_abs_delta_diff, abs(float(vals["delta"]) - float(base["delta"])))
-            max_abs_baseline_diff = max(max_abs_baseline_diff, abs(float(vals["baseline_rdi"]) - float(base["baseline_rdi"])))
-            max_abs_interactive_diff = max(max_abs_interactive_diff, abs(float(vals["interactive_rdi"]) - float(base["interactive_rdi"])))
+            max_abs_baseline_diff = max(
+                max_abs_baseline_diff,
+                abs(float(vals["baseline_rdi"]) - float(base["baseline_rdi"])),
+            )
+            max_abs_interactive_diff = max(
+                max_abs_interactive_diff,
+                abs(float(vals["interactive_rdi"]) - float(base["interactive_rdi"])),
+            )
+        feature_multiset_matches = feature_hashes[variant] == feature_hashes["original_order"]
+        scores_match = (
+            max_abs_delta_diff <= 1e-12
+            and max_abs_baseline_diff <= 1e-12
+            and max_abs_interactive_diff <= 1e-12
+        )
         rows.append(
             {
                 "variant": variant,
                 "feature_multiset_hash": feature_hashes[variant],
-                "feature_multiset_matches_original": str(feature_hashes[variant] == feature_hashes["original_order"]).lower(),
+                "feature_multiset_matches_original": str(feature_multiset_matches).lower(),
                 "max_abs_baseline_rdi_diff_vs_original": max_abs_baseline_diff,
                 "max_abs_interactive_rdi_diff_vs_original": max_abs_interactive_diff,
                 "max_abs_delta_diff_vs_original": max_abs_delta_diff,
-                "scores_match_original": str(max_abs_delta_diff <= 1e-12 and max_abs_baseline_diff <= 1e-12 and max_abs_interactive_diff <= 1e-12).lower(),
-                "interpretation": "window order is not a model input; features are time-windowed vectors, not sequence states",
+                "scores_match_original": str(scores_match).lower(),
+                "interpretation": (
+                    "window order is not a model input; features are time-windowed vectors, "
+                    "not sequence states"
+                ),
             }
         )
     summary = {
@@ -483,7 +517,10 @@ def _temporal_order_control(
             "isolation_forest_sequence_model": False,
             "window_order_model_input": False,
             "timestamps_model_input": False,
-            "description": "The model analyzes time-windowed feature vectors. It does not model temporal dependencies or sequence transitions.",
+            "description": (
+                "The model analyzes time-windowed feature vectors. It does not model temporal "
+                "dependencies or sequence transitions."
+            ),
         },
         "variant_results": rows,
         "all_feature_multisets_match_original": all(row["feature_multiset_matches_original"] == "true" for row in rows),
@@ -702,7 +739,18 @@ def _write_latex_summary(
     ]
     for row in heldout_summary_rows:
         lines.append(
-            f"Held-out baseline & {row['n_apps']} & {row['positive_differences']} & {row['negative_differences']} & {row['zero_differences']} & {_fmt(row['median_delta'])} & {_fmt(row['wilcoxon_p_two_sided_exact'])} " + row_end
+            _latex_row(
+                [
+                    "Held-out baseline",
+                    row["n_apps"],
+                    row["positive_differences"],
+                    row["negative_differences"],
+                    row["zero_differences"],
+                    _fmt(row["median_delta"]),
+                    _fmt(row["wilcoxon_p_two_sided_exact"]),
+                ],
+                row_end=row_end,
+            )
         )
     lines.extend(["\\hline", "\\end{tabular}", "\\end{table}", ""])
 
@@ -719,7 +767,16 @@ def _write_latex_summary(
     )
     for row in ablation_rows:
         lines.append(
-            f"{_tex(row['feature_profile'])} & {row['n_apps']} & {_fmt(row['median_delta'])} & {_fmt(row['wilcoxon_p_two_sided_exact'])} & {_fmt(row['spearman_vs_full_model'])} " + row_end
+            _latex_row(
+                [
+                    _tex(row["feature_profile"]),
+                    row["n_apps"],
+                    _fmt(row["median_delta"]),
+                    _fmt(row["wilcoxon_p_two_sided_exact"]),
+                    _fmt(row["spearman_vs_full_model"]),
+                ],
+                row_end=row_end,
+            )
         )
     lines.extend(["\\hline", "\\end{tabular}", "\\end{table}", ""])
 
@@ -734,7 +791,16 @@ def _write_latex_summary(
                 "\\hline",
                 "Control & Apps & Median $\\Delta$ & $p$ & $\\rho$ vs. IF " + row_end,
                 "\\hline",
-                f"Bytes/sec P95 & {row['n_apps']} & {_fmt(row['median_delta'])} & {_fmt(row['wilcoxon_p_two_sided_exact'])} & {_fmt(row['spearman_vs_iforest_delta'])} " + row_end,
+                _latex_row(
+                    [
+                        "Bytes/sec P95",
+                        row["n_apps"],
+                        _fmt(row["median_delta"]),
+                        _fmt(row["wilcoxon_p_two_sided_exact"]),
+                        _fmt(row["spearman_vs_iforest_delta"]),
+                    ],
+                    row_end=row_end,
+                ),
                 "\\hline",
                 "\\end{tabular}",
                 "\\end{table}",
@@ -753,7 +819,16 @@ def _write_latex_summary(
                 "\\hline",
                 "Seeds & Median $\\Delta$ min & Median $\\Delta$ max & $d_z$ min & $d_z$ max " + row_end,
                 "\\hline",
-                f"{row['seed_count']} & {_fmt(row['median_delta_min'])} & {_fmt(row['median_delta_max'])} & {_fmt(row['cohens_dz_min'])} & {_fmt(row['cohens_dz_max'])} " + row_end,
+                _latex_row(
+                    [
+                        row["seed_count"],
+                        _fmt(row["median_delta_min"]),
+                        _fmt(row["median_delta_max"]),
+                        _fmt(row["cohens_dz_min"]),
+                        _fmt(row["cohens_dz_max"]),
+                    ],
+                    row_end=row_end,
+                ),
                 "\\hline",
                 "\\end{tabular}",
                 "\\end{table}",
@@ -774,7 +849,14 @@ def _write_latex_summary(
     )
     for row in temporal_rows:
         lines.append(
-            f"{_tex(row['variant'])} & {row['feature_multiset_matches_original']} & {row['scores_match_original']} " + row_end
+            _latex_row(
+                [
+                    _tex(row["variant"]),
+                    row["feature_multiset_matches_original"],
+                    row["scores_match_original"],
+                ],
+                row_end=row_end,
+            )
         )
     lines.extend(["\\hline", "\\end{tabular}", "\\end{table}", ""])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -786,6 +868,10 @@ def _fmt(value: Any) -> str:
         return f"{float(value):.4g}"
     except Exception:
         return str(value)
+
+
+def _latex_row(cells: Sequence[Any], *, row_end: str) -> str:
+    return " & ".join(str(cell) for cell in cells) + " " + row_end
 
 
 def _tex(value: Any) -> str:
