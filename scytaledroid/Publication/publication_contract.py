@@ -120,13 +120,13 @@ def _resolve_results_manifest(pub_root: Path) -> Path:
 
 
 def _cohort_enforcement_v2(pub_root: Path) -> list[str]:
-    """Fail-closed cohort enforcement for Profile v2 (Paper #2) publication bundle.
+    """Fail-closed cohort enforcement for the publication bundle.
 
     Contract:
-    - `manifests/dataset_freeze.json` is the source of truth for the v2 cohort packages.
+    - `manifests/dataset_freeze.json` is the source of truth for cohort packages.
     - The publication results manifest must describe exactly the same package set.
 
-    This prevents accidental "scope drift" (e.g., exporting results for >12 apps or mixing cohorts).
+    This prevents accidental scope drift without hard-coding an obsolete cohort size.
     """
 
     errs: list[str] = []
@@ -148,10 +148,6 @@ def _cohort_enforcement_v2(pub_root: Path) -> list[str]:
     freeze_pkgs = {str(k).strip().lower() for k in apps.keys() if str(k).strip()}
     if len(freeze_pkgs) != len(apps):
         errs.append("cohort_invalid_freeze_schema:empty_or_duplicate_package_keys")
-
-    # v2 frozen cohort is locked to 12 apps. Keep this explicit and fail-closed.
-    if len(freeze_pkgs) != 12:
-        errs.append(f"cohort_expected_n_packages_v2:12:got:{len(freeze_pkgs)}")
 
     per_app = results.get("per_app")
     if not isinstance(per_app, list) or not per_app:
@@ -175,8 +171,8 @@ def _cohort_enforcement_v2(pub_root: Path) -> list[str]:
             n = None
         if n is None:
             errs.append("cohort_invalid_results_schema:n_apps_not_int")
-        elif n != 12:
-            errs.append(f"cohort_expected_n_apps_v2:12:got:{n}")
+        elif n != len(freeze_pkgs):
+            errs.append(f"cohort_n_apps_mismatch:freeze:{len(freeze_pkgs)}:results:{n}")
 
     missing = sorted(freeze_pkgs - results_pkgs)
     extra = sorted(results_pkgs - freeze_pkgs)

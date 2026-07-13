@@ -1505,14 +1505,14 @@ def _load_interactive_rdi_iforest() -> dict[str, float]:
     return out
 
 
-def _rank_tertiles_4_4_4(
+def _rank_tertiles(
     values_by_pkg: dict[str, float | None],
     *,
     ascending: bool,
 ) -> tuple[dict[str, str], list[str]]:
-    """Assign exact 4/4/4 rank-based tertiles (n=12).
+    """Assign deterministic rank-based tertiles for the current cohort size.
 
-    Ties are broken deterministically by package_name to preserve equal bin sizes.
+    Ties are broken deterministically by package_name to preserve stable bins.
     Missing values are excluded from grading and returned separately.
     """
     missing = sorted([pkg for pkg, v in values_by_pkg.items() if v is None])
@@ -1524,12 +1524,7 @@ def _rank_tertiles_4_4_4(
     if n <= 0:
         return grade, missing
 
-    # The locked profile expected n=12. Keep a defensive fallback for partial data.
-    if n == 12:
-        cuts = (4, 8)
-    else:
-        k = max(1, n // 3)
-        cuts = (k, 2 * k)
+    cuts = ((n + 2) // 3, (2 * n + 2) // 3)
 
     for i, (pkg, _) in enumerate(present):
         if i < cuts[0]:
@@ -1882,8 +1877,9 @@ def _write_table_7_exposure_deviation_summary(
         elif model == config.MODEL_OCSVM:
             oc_rdi_by_pkg[pkg] = v
 
-    exposure_grade, exposure_missing = _rank_tertiles_4_4_4(exposure_by_pkg, ascending=True)
-    deviation_grade_if, deviation_missing = _rank_tertiles_4_4_4(if_rdi_by_pkg, ascending=True)
+    exposure_grade, exposure_missing = _rank_tertiles(exposure_by_pkg, ascending=True)
+    deviation_grade_if, deviation_missing = _rank_tertiles(if_rdi_by_pkg, ascending=True)
+    missing_count = len(set(exposure_missing) | set(deviation_missing))
 
     out: list[dict[str, Any]] = []
     for pkg in sorted(exposure_by_pkg.keys()):
@@ -1943,9 +1939,10 @@ def _write_table_7_exposure_deviation_summary(
         rows=out,
         provenance=provenance,
         caption_comment=(
-            "Table 7: Interpretive Exposure–Deviation Summary over the frozen 12-app dataset. "
-            "Exposure Grade and Deviation Grade are rank-based tertile bins (4/4/4) computed on full-precision values "
-            "with deterministic tie-breaking by package_name. "
+            f"Table 7: Interpretive Exposure–Deviation Summary over the frozen {len(exposure_by_pkg)}-app dataset. "
+            "Exposure Grade and Deviation Grade are cohort-size-aware rank-based tertile bins computed "
+            "on full-precision values with deterministic tie-breaking by package_name. "
+            f"Rows with missing exposure or deviation inputs are excluded from binning (missing={missing_count}). "
             "Grades and quadrant labels are interpretive overlays (not system outputs) and do not represent measured security risk."
         ),
     )

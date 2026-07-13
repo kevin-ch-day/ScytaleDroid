@@ -62,7 +62,7 @@ def reporting_menu() -> None:
             MenuOption(
                 "2",
                 "Runtime Network Behavior Analysis",
-                "Idle, QFG, interactive, PCAP, time-series, RDI",
+                "Idle, QFG, interactive, PCAP, windowed features, RDI",
             ),
             MenuOption(
                 "3",

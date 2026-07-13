@@ -11,6 +11,7 @@ def test_reporting_menu_source_uses_study_categories_without_paper_labels() -> N
     text = "\n".join(str(item) for item in source)
     assert "Static Exposure & Privacy Assessment" in text
     assert "Runtime Network Behavior Analysis" in text
+    assert "windowed features" in text
     assert "Integrated Static-Runtime Privacy & Security Analysis" in text
     assert "General cohort and app analysis" in text
     assert "Legacy archive tools" in text
@@ -22,6 +23,7 @@ def test_reporting_menu_source_uses_study_categories_without_paper_labels() -> N
     assert "Paper 1" not in text
     assert "Paper 2" not in text
     assert "Paper 3" not in text
+    assert "time-series" not in text
 
 
 def test_top_reporting_study_options_are_flat_and_disabled_future_studies_are_not_selectable() -> None:
