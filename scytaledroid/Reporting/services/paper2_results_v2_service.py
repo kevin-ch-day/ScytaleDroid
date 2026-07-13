@@ -893,7 +893,6 @@ def _build_qa(
         "independent results/statistics recomputation from score files",
     ]
     incomplete_validation = [
-        "temporal-order controls",
         "baseline-to-baseline controls",
         "phase-label permutation controls",
     ]
@@ -906,12 +905,17 @@ def _build_qa(
                 "20-seed Isolation Forest stability check",
             ]
         )
+        if minimum_validation.get("temporal_order_status") == "OK":
+            completed_validation.append("temporal-order control")
+        else:
+            incomplete_validation.append("temporal-order controls")
     else:
         incomplete_validation[:0] = [
             "held-out baseline validation",
             "feature ablation",
             "simple-volume controls",
             "multi-seed stability",
+            "temporal-order controls",
         ]
     return {
         "schema_version": "paper2_qa_v2",
@@ -987,11 +991,17 @@ def _read_minimum_validation_status(*, output_root: Path, expected_apps: int) ->
     required_files = [
         "heldout_baseline_folds_v2.csv",
         "heldout_baseline_by_app_v2.csv",
+        "heldout_baseline_summary_v2.csv",
         "feature_ablation_v2.csv",
+        "feature_ablation_by_app_v2.csv",
         "bytes_p95_control_by_app_v2.csv",
         "bytes_p95_control_summary_v2.csv",
         "seed_stability_by_app_v2.csv",
         "seed_stability_by_seed_v2.csv",
+        "seed_stability_summary_v2.csv",
+        "paper2_temporal_order_control_v2.csv",
+        "paper2_temporal_order_control_v2.json",
+        "paper2_minimum_validation_tables_v2.tex",
         "manifest.sha256.json",
     ]
     if not summary_path.exists():
@@ -1030,6 +1040,7 @@ def _read_minimum_validation_status(*, output_root: Path, expected_apps: int) ->
         "seed_count": summary.get("seed_count"),
         "bytes_control_positive_apps": summary.get("bytes_control_positive_apps"),
         "feature_ablation_profiles": summary.get("feature_ablation_profiles"),
+        "temporal_order_status": summary.get("temporal_order_status"),
     }
 
 

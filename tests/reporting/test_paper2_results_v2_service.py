@@ -164,11 +164,17 @@ def test_minimum_validation_status_accepts_complete_package(tmp_path: Path) -> N
     for name in (
         "heldout_baseline_folds_v2.csv",
         "heldout_baseline_by_app_v2.csv",
+        "heldout_baseline_summary_v2.csv",
         "feature_ablation_v2.csv",
+        "feature_ablation_by_app_v2.csv",
         "bytes_p95_control_by_app_v2.csv",
         "bytes_p95_control_summary_v2.csv",
         "seed_stability_by_app_v2.csv",
         "seed_stability_by_seed_v2.csv",
+        "seed_stability_summary_v2.csv",
+        "paper2_temporal_order_control_v2.csv",
+        "paper2_temporal_order_control_v2.json",
+        "paper2_minimum_validation_tables_v2.tex",
         "manifest.sha256.json",
     ):
         (validation_dir / name).write_text("x\n", encoding="utf-8")

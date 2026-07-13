@@ -1,75 +1,70 @@
 # Paper 2 v2 Decision Register
 
-Status: **NOT READY** for manuscript rewrite.
+Status: **READY WITH SPECIFIC QUALIFICATIONS** for the current 114-run checkpoint. This is not the final submission lock while optional collection continues.
 
 ## Research Question
 
-Do app-filtered runtime network windows from interactive Android app use show
-higher runtime deviation prevalence than baseline-idle windows within a locked
-15-app evidence set?
+Does controlled interactive use produce a consistent increase in baseline-relative network deviation compared with idle execution across Android applications?
 
-## Primary Hypothesis
+## Working Title
 
-Interactive windows have higher app-level RDI than baseline-idle windows under
-the locked Isolation Forest scoring contract.
+Unsupervised Baseline-Relative Analysis of Dynamic Network Behavior in Android Applications
+
+## Current Checkpoint
+
+- Canonical package: `output/_internal/publication/paper2_v2/`
+- Minimum validation: `output/_internal/publication/paper2_v2/minimum_validation/`
+- Locked checkpoint: 15 apps, 114 included runs, 14-day selected build groups
+- Run tiers: Standard 80, Extended 32, Long observation 1, Soak 1
+- QA status: `OK`
+- Scientific validation status: `MINIMUM_COMPLETE`
 
 ## Measurement Unit
 
-Primary measurement unit: PCAP-derived network windows.
+Primary measurement unit: PCAP-derived time-windowed network telemetry.
 
-Inference unit: application-level paired baseline versus interactive RDI values
-for 15 apps.
+Inference unit: app/build-group paired baseline versus interactive RDI values. Folds and windows are audit/estimation units, not inferential sample size.
 
 ## Primary Aggregation
 
 Primary aggregation: pooled/window-weighted app-level Isolation Forest RDI.
 
-Sensitivity checks currently exported:
+Sensitivity checks exported:
 - equal-run RDI
 - standard-duration-only RDI
-
-Sensitivity checks still required:
-- standard plus extended
-- excluding long and soak
-- duration-matched sampling
-- equal-window sampling
-- equal-run sampling with resampling policy documented
+- held-out baseline validation
+- compact feature ablation
+- bytes/sec P95 control
+- 20-seed stability
+- temporal-order control
 
 ## Current Supported Claims
 
-- The current locked package has exact inclusion/exclusion accounting.
-- The current locked package has 15 app-level IF baseline/interactive pairs.
-- Static alignment is exact for the current 112-run lock.
-- Window reconciliation is exact for scored versus ML-eligible window counts.
-- The independent validator recomputes pooled IF RDI and the paired Wilcoxon
-  result from persisted score files.
+- The current checkpoint has exact inclusion/exclusion accounting for 15 apps and 114 included runs.
+- Interactive RDI exceeds baseline RDI for all 15 apps under the primary pooled/window-weighted Isolation Forest aggregation.
+- The paired Wilcoxon result is W=0 with two-sided exact p=0.00006103515625.
+- Held-out baseline validation is available for all 15 apps; the held-out app-level median delta is 0.6129.
+- Bytes/sec alone reproduces a strong 15/15 positive transition and is highly correlated with the full IF delta.
+- The multivariate feature set changes ranking modestly, but the dominant effect is a traffic-intensity transition.
+- Timestamp fields are not model inputs. The method analyzes time-windowed feature vectors and is not sequence learning.
 
 ## Qualified Claims
 
-- Low baseline RDI is in-sample calibration prevalence, not independent proof of
-  baseline stability.
-- OC-SVM results are secondary because calibration warnings remain.
-- App-level network attribution is package-filtered capture, not absolute
-  process-level ground truth.
+- Low baseline RDI is in-sample calibration prevalence for the primary model, not independent proof of baseline stability.
+- Held-out baseline validation supports generalization beyond the exact baseline windows used for each fold, but it remains one-device, one-network, one-OS evidence.
+- Shuffled/reversed row controls preserve the feature multiset but cause small IF score differences, consistent with implementation-level row-order sensitivity rather than temporal-dependency modeling.
+- OC-SVM remains secondary because calibration warnings persist.
+- Static posture is context only for this paper; detailed static-runtime integration belongs outside this dynamic-focused rewrite.
 
-## Prohibited Claims Until Further Validation
+## Prohibited Claims
 
-- Do not say Paper 2 v2 is ready.
-- Do not claim held-out baseline stability.
-- Do not claim Isolation Forest beats simple traffic-volume baselines.
-- Do not claim sequence/time-series learning unless temporal-order controls
-  justify it.
-- Do not mix CNN build 19250507 with CNN build 19407005.
-- Do not modify the manuscript based on this package yet.
+- Do not claim this is the final submission freeze until optional collection is closed and the final workflow is run once.
+- Do not claim malicious behavior detection.
+- Do not claim temporal-dependency learning, recurrent modeling, or sequence learning.
+- Do not use 56 held-out folds as the inferential sample size.
+- Do not claim Isolation Forest proves a large effect beyond traffic intensity.
+- Do not mix app builds across a selected build group.
 
-## Paper Boundary
+## Final Rerun Decision
 
-Paper 2 v2 should stay dynamic/runtime-ML focused. Static posture may be used as
-context only. Detailed static-runtime integration belongs outside this Paper 2
-rewrite path.
-
-## Title Guidance
-
-Avoid strong "time-series" wording until temporal-order controls are completed.
-Current evidence supports "windowed runtime network behavior" more directly than
-sequence modeling.
+After collection is declared complete, run the final bounded rerun workflow once and compare it to this 114-run checkpoint before manuscript edits.
