@@ -51,7 +51,7 @@ def reporting_menu() -> None:
                     summary_cards.summary_item("Output", "report bundle with tables, figures, and source data", value_style="info"),
                     summary_cards.summary_item("Paper #1", "published static predecessor", value_style="muted"),
                     summary_cards.summary_item("Paper #2", "published runtime predecessor", value_style="muted"),
-                    summary_cards.summary_item("Integrated analysis", "current Paper #3 study", value_style="accent"),
+                    summary_cards.summary_item("Integrated analysis", "current static-runtime study", value_style="accent"),
                 ],
                 footer="Advanced archive and reproduction tools remain available under Legacy Archive Tools.",
             )
@@ -60,17 +60,17 @@ def reporting_menu() -> None:
             MenuOption(
                 "1",
                 "Static Exposure & Privacy Assessment",
-                "Current build-backed static analysis; Paper #1 compatibility audit; Paper #3 foundation evidence",
+                "Current build-backed static analysis; Paper #1 compatibility audit; integrated-study foundation evidence",
             ),
             MenuOption(
                 "2",
                 "Runtime Network Behavior Analysis",
-                "Current locked runtime analysis; Paper #2 method-regeneration package; Paper #3 foundation evidence",
+                "Current locked runtime analysis; Paper #2 method-regeneration package; integrated-study foundation evidence",
             ),
             MenuOption(
                 "3",
                 "Integrated Static-Runtime Privacy & Security Analysis",
-                "Integrated Paper #3 study",
+                "Integrated static-runtime study",
                 disabled=True,
                 badge="COMING NEXT",
             ),

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from scripts.publication import generate_android_publication_alignment as alignment
+from scytaledroid.Publication.app_category_policy import RETIRED_PUBLICATION_CATEGORY_LABELS
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -85,6 +86,51 @@ def test_publication_alignment_static_selection_and_reconciliation(tmp_path: Pat
     assert rows[0]["dynamic_run_id"] == "missing-run"
 
 
+def test_publication_alignment_manifest_uses_shared_publication_taxonomy() -> None:
+    cutoff_rows = [
+        {
+            "app": "Snapchat",
+            "package_name": "com.snapchat.android",
+            "selected_version_code": "299772",
+            "selected_version_name": "14.14.0.43",
+            "selected_base_apk_sha256": "a" * 64,
+            "selected_static_run_ids": "10",
+            "selected_dynamic_run_ids": "",
+            "valid_pcap_count": "0",
+        },
+        {
+            "app": "LinkedIn",
+            "package_name": "com.linkedin.android",
+            "selected_version_code": "123",
+            "selected_version_name": "1.2.3",
+            "selected_base_apk_sha256": "b" * 64,
+            "selected_static_run_ids": "20",
+            "selected_dynamic_run_ids": "",
+            "valid_pcap_count": "0",
+        },
+        {
+            "app": "TikTok",
+            "package_name": "com.zhiliaoapp.musically",
+            "selected_version_code": "456",
+            "selected_version_name": "4.5.6",
+            "selected_base_apk_sha256": "c" * 64,
+            "selected_static_run_ids": "30",
+            "selected_dynamic_run_ids": "",
+            "valid_pcap_count": "0",
+        },
+    ]
+
+    manifest, _, warnings = alignment._build_publication_manifest(cutoff_rows, {"apps": []}, {}, {})
+
+    by_pkg = {row["package_name"]: row for row in manifest}
+    assert by_pkg["com.snapchat.android"]["app_category"] == "Social Media"
+    assert by_pkg["com.linkedin.android"]["app_category"] == "Professional Networking"
+    assert by_pkg["com.zhiliaoapp.musically"]["app_category"] == "Social Media"
+    assert not {row["app_category"] for row in manifest} & RETIRED_PUBLICATION_CATEGORY_LABELS
+    assert len(warnings) == 3
+    assert all("no_contributing_static_run" in warning for warning in warnings)
+
+
 def test_generate_android_publication_alignment_final_cutoff(tmp_path: Path) -> None:
     repo = Path.cwd()
     cutoff = repo / "output" / "paper" / "dynamic_paper_cutoff_final_20260709T202819Z"
@@ -126,6 +172,11 @@ def test_generate_android_publication_alignment_final_cutoff(tmp_path: Path) -> 
 
     assert summary["mutation_scope"] == "read_only"
     assert len(manifest) == 15
+    assert not {row["app_category"] for row in manifest} & RETIRED_PUBLICATION_CATEGORY_LABELS
+    assert next(row for row in manifest if row["package_name"] == "com.snapchat.android")["app_category"] == "Social Media"
+    assert next(row for row in manifest if row["package_name"] == "com.linkedin.android")["app_category"] == "Professional Networking"
+    policy = _read_csv(out / "data" / "app_category_policy.csv")
+    assert len(policy) == 15
     assert len(dynamic) == 123
     assert Counter(row["evidence_class"] for row in dynamic) == {
         "strict_idle": 44,

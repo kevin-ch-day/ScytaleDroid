@@ -18,16 +18,20 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scytaledroid.DynamicAnalysis.run_qualification import analysis_included_rows
+from scytaledroid.Publication.app_category_policy import app_display_name
 
 FOCUS_PACKAGES: dict[str, str] = {
-    "bbc.mobile.news.ww": "BBC News",
-    "com.cnn.mobile.android.phone": "CNN",
-    "com.facebook.katana": "Facebook",
-    "com.facebook.orca": "Facebook Messenger",
-    "com.guardian": "The Guardian",
-    "com.twitter.android": "X (Twitter)",
-    "com.whatsapp": "WhatsApp",
-    "com.zhiliaoapp.musically": "TikTok",
+    package_name: app_display_name(package_name, package_name)
+    for package_name in (
+        "bbc.mobile.news.ww",
+        "com.cnn.mobile.android.phone",
+        "com.facebook.katana",
+        "com.facebook.orca",
+        "com.guardian",
+        "com.twitter.android",
+        "com.whatsapp",
+        "com.zhiliaoapp.musically",
+    )
 }
 
 FINGERPRINT_RUN_FIELDS = (

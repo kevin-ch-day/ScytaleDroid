@@ -20,7 +20,10 @@ def test_reporting_menu_source_explains_study_lineage_without_replacement_claims
     assert "current analysis window or app history" in text
     assert "published static predecessor" in text
     assert "published runtime predecessor" in text
-    assert "current Paper #3 study" in text
+    assert "current static-runtime study" in text
+    assert "integrated-study foundation evidence" in text
+    assert "Integrated static-runtime study" in text
+    assert "Paper #3" not in text
     assert "publication candidate" not in text
     assert "Contract" not in text
     assert "freeze, session, manifest, or as-of basis" not in text

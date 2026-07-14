@@ -24,6 +24,7 @@ import numpy as np
 from scipy import stats
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.run_duration_tiers import classify_duration_tier
+from scytaledroid.Publication.app_category_policy import APP_CATEGORY_POLICY, app_category, app_display_name
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_EVIDENCE_ROOT = REPO_ROOT / "data" / "evidence" / "dynamic"
@@ -33,42 +34,6 @@ PRIMARY_MODEL = "iforest"
 SECONDARY_MODEL = "ocsvm"
 BOOTSTRAP_SEED = 20260713
 BOOTSTRAP_N = 10_000
-
-APP_LABELS = {
-    "bbc.mobile.news.ww": "BBC News",
-    "com.cnn.mobile.android.phone": "CNN",
-    "com.facebook.katana": "Facebook",
-    "com.facebook.orca": "Facebook Msg",
-    "com.guardian": "The Guardian",
-    "com.instagram.android": "Instagram",
-    "com.linkedin.android": "LinkedIn",
-    "com.pinterest": "Pinterest",
-    "com.reddit.frontpage": "Reddit",
-    "com.snapchat.android": "Snapchat",
-    "com.twitter.android": "X",
-    "com.whatsapp": "WhatsApp",
-    "com.zhiliaoapp.musically": "TikTok",
-    "org.telegram.messenger": "Telegram",
-    "org.thoughtcrime.securesms": "Signal",
-}
-
-APP_CATEGORIES = {
-    "bbc.mobile.news.ww": "News",
-    "com.cnn.mobile.android.phone": "News",
-    "com.guardian": "News",
-    "com.facebook.katana": "Social media",
-    "com.instagram.android": "Social media",
-    "com.linkedin.android": "Social media",
-    "com.pinterest": "Social media",
-    "com.reddit.frontpage": "Social media",
-    "com.snapchat.android": "Social media",
-    "com.twitter.android": "Social media",
-    "com.zhiliaoapp.musically": "Social media",
-    "com.facebook.orca": "Messaging",
-    "com.whatsapp": "Messaging",
-    "org.telegram.messenger": "Messaging",
-    "org.thoughtcrime.securesms": "Messaging",
-}
 
 
 @dataclass(frozen=True)
@@ -282,8 +247,8 @@ def _build_run_metrics(
             records.append(
                 RunMetric(
                     package_name=package_name,
-                    display_name=APP_LABELS.get(package_name, package_name),
-                    category=APP_CATEGORIES.get(package_name, "Other"),
+                    display_name=app_display_name(package_name, package_name),
+                    category=app_category(package_name, "Other"),
                     run_id=run_id,
                     phase=phase,
                     duration_s=duration_s,
@@ -331,7 +296,7 @@ def _build_excluded_run_rows(
                     primary_reason = "not_selected_for_locked_build_group"
             rows.append(
                 {
-                    "display_name": APP_LABELS.get(str(package_name), str(package_name)),
+                    "display_name": app_display_name(str(package_name), str(package_name)),
                     "package_name": str(package_name),
                     "run_id": run_id,
                     "version_code": run.get("version_code", ""),
@@ -481,7 +446,7 @@ def _build_static_alignment_rows(
             mismatch_reason = "metadata_incomplete"
         rows.append(
             {
-                "display_name": APP_LABELS.get(str(package_name), str(package_name)),
+                "display_name": app_display_name(str(package_name), str(package_name)),
                 "package_name": str(package_name),
                 "selected_dynamic_version_code": dynamic_version,
                 "dynamic_apk_sha256": dynamic_sha,
@@ -522,9 +487,9 @@ def _build_cohort_rows(
         base_hashes = sorted({r.base_apk_sha256 for r in records if r.base_apk_sha256})
         rows.append(
             {
-                "display_name": APP_LABELS.get(package_name, package_name),
+                "display_name": app_display_name(package_name, package_name),
                 "package_name": package_name,
-                "category": APP_CATEGORIES.get(package_name, "Other"),
+                "category": app_category(package_name, "Other"),
                 "selected_version_code": app.get("selected_version_code") or ",".join(version_codes),
                 "selected_base_apk_sha256": app.get("selected_base_apk_sha256") or (base_hashes[0] if base_hashes else ""),
                 "artifact_set_hashes": ";".join(artifact_hashes),
@@ -560,14 +525,14 @@ def _build_per_app_rdi_rows(
     static_scores: Mapping[str, float],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for package_name in sorted(primary, key=lambda p: APP_LABELS.get(p, p)):
+    for package_name in sorted(primary, key=lambda p: app_display_name(p, p)):
         p = primary[package_name]
         s = secondary.get(package_name, {})
         rows.append(
             {
-                "display_name": APP_LABELS.get(package_name, package_name),
+                "display_name": app_display_name(package_name, package_name),
                 "package_name": package_name,
-                "category": APP_CATEGORIES.get(package_name, "Other"),
+                "category": app_category(package_name, "Other"),
                 "if_baseline_rdi": _float_str(p.get("baseline_rdi")),
                 "if_interactive_rdi": _float_str(p.get("interactive_rdi")),
                 "if_delta_rdi": _float_str(p.get("delta")),
@@ -610,8 +575,8 @@ def _aggregate_app_phase_values(
             continue
         out[package_name] = {
             "package_name": package_name,
-            "display_name": APP_LABELS.get(package_name, package_name),
-            "category": APP_CATEGORIES.get(package_name, "Other"),
+            "display_name": app_display_name(package_name, package_name),
+            "category": app_category(package_name, "Other"),
             "baseline_rdi": b_rdi,
             "interactive_rdi": i_rdi,
             "delta": i_rdi - b_rdi,
@@ -652,7 +617,7 @@ def _build_policy_summary(
         "model": model,
         "aggregation_policy": policy,
         "included_apps": len(rows),
-        "excluded_apps": sorted(set(APP_LABELS) - {str(r["package_name"]) for r in rows}),
+        "excluded_apps": sorted(set(APP_CATEGORY_POLICY) - {str(r["package_name"]) for r in rows}),
         "baseline_runs": sum(int(r["baseline_runs"]) for r in rows),
         "interactive_runs": sum(int(r["interactive_runs"]) for r in rows),
         "baseline_windows": sum(int(r["baseline_windows"]) for r in rows),
@@ -1269,7 +1234,7 @@ def _read_ocsvm_calibration_warnings() -> list[dict[str, Any]]:
         rows.append(
             {
                 "package_name": row.get("package_name", ""),
-                "display_name": APP_LABELS.get(str(row.get("package_name") or ""), str(row.get("package_name") or "")),
+                "display_name": app_display_name(str(row.get("package_name") or ""), str(row.get("package_name") or "")),
                 "model": row.get("model", ""),
                 "baseline_run_count": row.get("baseline_run_count", ""),
                 "baseline_scores_n": row.get("baseline_scores_n", ""),

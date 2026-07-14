@@ -24,6 +24,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scytaledroid.Database.db_core import db_engine  # noqa: E402
+from scytaledroid.Publication.app_category_policy import (  # noqa: E402
+    app_category,
+    app_category_policy_rows,
+    app_display_name,
+)
 
 DEFAULT_CUTOFF_DIR = REPO_ROOT / "output" / "paper" / "dynamic_paper_cutoff_final_20260709T202819Z"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "output" / "paper" / "android_empirical_alignment_final"
@@ -37,42 +42,6 @@ DEFAULT_OLD_DYNAMIC_RUN_EXPORT = (
     / "per_run_summary.csv"
 )
 EVIDENCE_ROOT = REPO_ROOT / "output" / "evidence" / "dynamic"
-
-APP_LABELS = {
-    "bbc.mobile.news.ww": "BBC News",
-    "com.cnn.mobile.android.phone": "CNN",
-    "com.facebook.katana": "Facebook",
-    "com.facebook.orca": "Facebook Messenger",
-    "com.instagram.android": "Instagram",
-    "com.linkedin.android": "LinkedIn",
-    "com.pinterest": "Pinterest",
-    "com.reddit.frontpage": "Reddit",
-    "org.thoughtcrime.securesms": "Signal",
-    "com.snapchat.android": "Snapchat",
-    "org.telegram.messenger": "Telegram",
-    "com.guardian": "The Guardian",
-    "com.zhiliaoapp.musically": "TikTok",
-    "com.whatsapp": "WhatsApp",
-    "com.twitter.android": "X",
-}
-
-APP_CATEGORIES = {
-    "bbc.mobile.news.ww": "News",
-    "com.cnn.mobile.android.phone": "News",
-    "com.guardian": "News",
-    "com.facebook.katana": "Social/content",
-    "com.instagram.android": "Social/content",
-    "com.linkedin.android": "Professional social",
-    "com.pinterest": "Social/content",
-    "com.reddit.frontpage": "Social/content",
-    "com.zhiliaoapp.musically": "Social/video",
-    "com.twitter.android": "Social/content",
-    "com.facebook.orca": "Messaging",
-    "org.thoughtcrime.securesms": "Messaging",
-    "com.snapchat.android": "Messaging/social",
-    "org.telegram.messenger": "Messaging",
-    "com.whatsapp": "Messaging",
-}
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -328,8 +297,8 @@ def _build_publication_manifest(
             selection_warning.append("no_contributing_static_run")
         out.append(
             {
-                "app_label": APP_LABELS.get(package, row.get("app") or package),
-                "app_category": APP_CATEGORIES.get(package, ""),
+                "app_label": app_display_name(package, row.get("app") or package),
+                "app_category": app_category(package, ""),
                 "package_name": package,
                 "selected_version_code": row["selected_version_code"],
                 "selected_version_name": row["selected_version_name"],
@@ -378,7 +347,7 @@ def _static_alignment_rows(
             contributes = static_id == contributing_static.get(package)
             rows.append(
                 {
-                    "app": APP_LABELS.get(package, package),
+                    "app": app_display_name(package, package),
                     "package": package,
                     "version_code": run.get("version_code") or cutoff["selected_version_code"],
                     "version_name": run.get("version_name") or cutoff["selected_version_name"],
@@ -848,6 +817,18 @@ def generate_alignment(cutoff_dir: Path, output_dir: Path) -> dict[str, Any]:
     ]
     _write_csv(output_dir / "publication_cohort_manifest.csv", publication_manifest, manifest_fields)
     _write_json(output_dir / "publication_cohort_manifest.json", publication_manifest)
+    _write_csv(
+        output_dir / "data" / "app_category_policy.csv",
+        app_category_policy_rows(),
+        [
+            "app_display_name",
+            "package_name",
+            "category",
+            "primary_function",
+            "assignment_rationale",
+            "taxonomy_version",
+        ],
+    )
 
     static_alignment = _static_alignment_rows(cutoff_rows, run_by_id, contributing)
     _write_csv(output_dir / "static_run_alignment_report.csv", static_alignment, list(static_alignment[0]))

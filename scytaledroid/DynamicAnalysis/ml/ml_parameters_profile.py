@@ -7,6 +7,8 @@ Notes:
 
 from __future__ import annotations
 
+from scytaledroid.Publication.app_category_policy import PUBLICATION_APP_ORDER, app_display_name
+
 ML_SCHEMA_VERSION = 1
 ML_SCHEMA_LABEL = f"v{ML_SCHEMA_VERSION}"
 
@@ -32,20 +34,7 @@ MESSAGING_PACKAGES = {
 }
 
 # Friendly labels used in publication-facing tables/figures (bundle only).
-DISPLAY_NAME_BY_PACKAGE = {
-    "com.facebook.katana": "Facebook",
-    "com.facebook.orca": "Facebook Messenger",
-    "com.instagram.android": "Instagram",
-    "com.linkedin.android": "LinkedIn",
-    "com.pinterest": "Pinterest",
-    "com.reddit.frontpage": "Reddit",
-    "org.thoughtcrime.securesms": "Signal",
-    "com.snapchat.android": "Snapchat",
-    "org.telegram.messenger": "Telegram",
-    "com.zhiliaoapp.musically": "TikTok",
-    "com.whatsapp": "WhatsApp",
-    "com.twitter.android": "X",
-}
+DISPLAY_NAME_BY_PACKAGE = {package_name: app_display_name(package_name) for package_name in PUBLICATION_APP_ORDER}
 
 # Windowing (locked)
 WINDOW_SIZE_S = 10.0

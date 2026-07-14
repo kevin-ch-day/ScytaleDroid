@@ -14,12 +14,17 @@ import json
 import math
 import shutil
 import statistics
+import sys
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scytaledroid.Publication.app_category_policy import app_category, app_display_name  # noqa: E402
 
 DEFAULT_CUTOFF_DIR = REPO_ROOT / "output" / "paper" / "dynamic_paper_cutoff_final_20260709T202819Z"
 DEFAULT_AUDIT_DIR = REPO_ROOT / "output" / "audit" / "paper_regen_check" / "20260709T160803Z"
@@ -41,42 +46,6 @@ COHORT_ORDER = [
     "com.whatsapp",
     "com.twitter.android",
 ]
-
-DISPLAY_OVERRIDES = {
-    "bbc.mobile.news.ww": "BBC News",
-    "com.cnn.mobile.android.phone": "CNN",
-    "com.facebook.katana": "Facebook",
-    "com.facebook.orca": "Facebook Msg",
-    "com.instagram.android": "Instagram",
-    "com.linkedin.android": "LinkedIn",
-    "com.pinterest": "Pinterest",
-    "com.reddit.frontpage": "Reddit",
-    "org.thoughtcrime.securesms": "Signal",
-    "com.snapchat.android": "Snapchat",
-    "org.telegram.messenger": "Telegram",
-    "com.guardian": "The Guardian",
-    "com.zhiliaoapp.musically": "TikTok",
-    "com.whatsapp": "WhatsApp",
-    "com.twitter.android": "X",
-}
-
-CATEGORY_OVERRIDES = {
-    "bbc.mobile.news.ww": "News",
-    "com.cnn.mobile.android.phone": "News",
-    "com.facebook.katana": "Social/content",
-    "com.facebook.orca": "Messaging",
-    "com.instagram.android": "Social/content",
-    "com.linkedin.android": "Professional social",
-    "com.pinterest": "Social/content",
-    "com.reddit.frontpage": "Social/content",
-    "org.thoughtcrime.securesms": "Messaging",
-    "com.snapchat.android": "Messaging/social",
-    "org.telegram.messenger": "Messaging",
-    "com.guardian": "News",
-    "com.zhiliaoapp.musically": "Social/video",
-    "com.whatsapp": "Messaging",
-    "com.twitter.android": "Social/content",
-}
 
 
 def _stamp() -> str:
@@ -291,7 +260,7 @@ def _build_dataset(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         paper1_network = paper1_network_by_pkg.get(pkg, {})
         dynamic = dynamic_by_pkg.get(pkg, {})
         rollup = rollup_by_pkg.get(pkg, {})
-        display = DISPLAY_OVERRIDES.get(pkg) or cutoff.get("app") or static.get("display_name") or pkg
+        display = app_display_name(pkg, cutoff.get("app") or static.get("display_name") or pkg)
         total_findings = _int(report_metrics.get("detector_findings") or static.get("total_static_findings"))
         high_findings = _int(paper1_inputs.get("severity_high_count") or static.get("high_or_critical_findings"))
         medium_findings = _int(paper1_inputs.get("severity_medium_count"))
@@ -317,7 +286,7 @@ def _build_dataset(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         row = {
             "app": display,
             "package_name": pkg,
-            "category": CATEGORY_OVERRIDES.get(pkg) or static.get("category") or "Consumer app",
+            "category": app_category(pkg, static.get("category") or "Consumer app"),
             "version_code": cutoff.get("selected_version_code", ""),
             "version_name": cutoff.get("selected_version_name", ""),
             "base_apk_sha256": cutoff.get("selected_base_apk_sha256", ""),

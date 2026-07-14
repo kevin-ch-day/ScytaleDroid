@@ -1040,7 +1040,7 @@ def _write_static_social_media_reproduction_status(root: Path, request: ReportRe
     lines = [
         "Static social media 2025 compatibility status",
         f"Saved alias active: {'yes' if supported else 'no'}",
-        "Historical app list: Facebook, Instagram, Facebook Messenger, Snapchat, TikTok, Twitter/X",
+        "Historical app list: Facebook, Instagram, Facebook Msg, Snapchat, TikTok, X",
         "Exact reproduction requires the original frozen manifest and fails closed when it is missing.",
         "Method-compatible regeneration is allowed with an explicitly selected session or manifest and must not claim exact historical reproduction.",
         "",

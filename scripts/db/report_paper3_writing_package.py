@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a repeatable Paper 3 writing workspace from cutoff evidence reports."""
+"""Generate a repeatable integrated-study writing workspace from cutoff evidence reports."""
 
 from __future__ import annotations
 
@@ -40,7 +40,8 @@ BRIDGE_FILES = (
     "paper3_evidence_table.csv",
 )
 
-SAFE_CLAIM = "15/15 Research Dataset Beta apps had paper-usable, build-backed evidence bundles at cutoff."
+STUDY_DATASET_LABEL = "15-app consumer app dataset"
+SAFE_CLAIM = "15/15 selected apps had paper-usable, build-backed evidence bundles at cutoff."
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -53,7 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bridge-dir",
         default=None,
-        help="Optional existing Paper 3 bridge directory to reuse for framing and claims.",
+        help="Optional existing bridge directory to reuse for framing and claims.",
     )
     parser.add_argument(
         "--output-dir",
@@ -384,16 +385,16 @@ def _build_tables_markdown(
         ]
         for row in decision_rows
     ]
-    return f"""# Paper 3 Tables Markdown
+    return f"""# Integrated Static-Runtime Tables Markdown
 
 ## Table 1: Prior Work Lineage
 
 {_md_table(
-    ["Study", "Scope", "Evidence type", "What Paper 3 reuses", "What Paper 3 changes"],
+    ["Study line", "Scope", "Evidence type", "What this study reuses", "What this study changes"],
     [
-        ["Paper 1", "Six social media apps", "Static manifest, permission, component, strings/resources, MASVS/CVSS", "Static-risk vocabulary and predecessor scope", "Paper 3 regenerates current static evidence and does not claim exact reproduction"],
-        ["Paper 2", "Twelve-app dynamic behavior study", "Idle/interactive captures, non-root physical device, package-filtered PCAP, RDI-style framing", "Dynamic observation method foundation", "Paper 3 expands to cutoff evidence bundles and a 15-app cohort"],
-        ["Paper 3", "Research Dataset Beta, 15 apps", "Static + dynamic build/version-backed evidence", "Prior static/dynamic method lineage", "Uses cutoff tiers to handle app-update churn"],
+        ["Published static predecessor", "Six social media apps", "Static manifest, permission, component, strings/resources, MASVS/CVSS", "Static-risk vocabulary and predecessor scope", "Regenerates current static evidence and does not claim exact reproduction"],
+        ["Published runtime predecessor", "Twelve-app dynamic behavior study", "Idle/interactive captures, non-root physical device, package-filtered PCAP, RDI-style framing", "Dynamic observation method foundation", "Expands to cutoff evidence bundles and a 15-app dataset"],
+        ["Current integrated study", STUDY_DATASET_LABEL, "Static + dynamic build/version-backed evidence", "Prior static/dynamic method lineage", "Uses cutoff tiers to handle app-update churn"],
     ],
 )}
 
@@ -402,7 +403,7 @@ def _build_tables_markdown(
 {_md_table(
     ["Metric", "Count"],
     [
-        ["Paper-usable apps", f"{tier_summary['paper_usable']}/{tier_summary['apps_total']}"],
+        ["Publication-usable apps", f"{tier_summary['paper_usable']}/{tier_summary['apps_total']}"],
         ["Strict current-build complete", current],
         ["Current-build mixed baseline", mixed],
         ["Prior-build paper evidence", prior],
@@ -447,7 +448,7 @@ def _build_tables_markdown(
         ["Prior-build evidence", "Prior-build rows remain labeled with selected version and run provenance."],
         ["QFG baseline class", "QFG is valid no-touch foreground evidence, but it is not strict idle."],
         ["Quota", "Do not describe the paper as 105/105 quota complete."],
-        ["Prior papers", "Paper 3 is a follow-on study, not an exact Paper 1 or Paper 2 reproduction."],
+        ["Study lineage", "The current integrated study is a follow-on analysis, not an exact reproduction of the published predecessor papers."],
     ],
 )}
 """
@@ -471,17 +472,17 @@ def _build_tables_latex(tier_rows: list[dict[str, str]], tier_summary: dict[str,
         + r" \\"
         for row in tier_rows
     )
-    return rf"""% Auto-generated Paper 3 table drafts.
+    return rf"""% Auto-generated integrated-study table drafts.
 % Verify width and caption placement before journal submission.
 
 \begin{{table*}}[t]
   \centering
-  \caption{{Paper 3 cutoff evidence tier summary.}}
+  \caption{{Cutoff evidence tier summary.}}
   \begin{{tabular}}{{lr}}
     \hline
     Metric & Count \\
     \hline
-    Paper-usable apps & {_latex_escape(f"{tier_summary['paper_usable']}/{tier_summary['apps_total']}")} \\
+    Publication-usable apps & {_latex_escape(f"{tier_summary['paper_usable']}/{tier_summary['apps_total']}")} \\
     Strict current-build complete & {_latex_escape(tier_summary['tier_counts'].get('STRICT_CURRENT_BUILD_COMPLETE', 0))} \\
     Current-build mixed baseline & {_latex_escape(tier_summary['tier_counts'].get('CURRENT_BUILD_MIXED_BASELINE', 0))} \\
     Prior-build paper evidence & {_latex_escape(tier_summary['tier_counts'].get('PRIOR_BUILD_PAPER_EVIDENCE', 0))} \\
@@ -492,7 +493,7 @@ def _build_tables_latex(tier_rows: list[dict[str, str]], tier_summary: dict[str,
 
 \begin{{table*}}[t]
   \centering
-  \caption{{Research Dataset Beta evidence bundles at cutoff.}}
+  \caption{{Selected 15-app evidence bundles at cutoff.}}
   \begin{{tabular}}{{llllrrr}}
     \hline
     App & Package & Tier & Relation & Strict idle & QFG & Interactive \\
@@ -554,7 +555,7 @@ def _write_workspace_files(
     ]
 
     drafts = {
-        "paper3_outline.md": f"""# Paper 3 Outline
+        "paper3_outline.md": f"""# Integrated Study Outline
 
 {source_line}
 
@@ -586,9 +587,9 @@ def _write_workspace_files(
 
 ## Last-Run Recommendation
 
-No more runs are required for Paper 3 readiness. Collection is paused; use the cutoff bundle and start writing. Non-blocking run-plan rows are retained only as future-work provenance.
+No more runs are required for cutoff readiness. Collection is paused; use the cutoff bundle and start writing. Non-blocking run-plan rows are retained only as future-work provenance.
 """,
-        "paper3_working_outline.md": f"""# Paper 3 Working Outline
+        "paper3_working_outline.md": f"""# Integrated Study Working Outline
 
 {source_line}
 
@@ -620,9 +621,9 @@ No more runs are required for Paper 3 readiness. Collection is paused; use the c
 
 ## Last-Run Recommendation
 
-No more runs are required for Paper 3 readiness. Collection is paused; use the cutoff bundle and start writing. Non-blocking run-plan rows are retained only as future-work provenance.
+No more runs are required for cutoff readiness. Collection is paused; use the cutoff bundle and start writing. Non-blocking run-plan rows are retained only as future-work provenance.
 """,
-        "paper3_section_plan.md": f"""# Paper 3 Section Plan
+        "paper3_section_plan.md": f"""# Integrated Study Section Plan
 
 ## Introduction
 
@@ -630,9 +631,9 @@ State the app-update churn problem and the cutoff solution. Use the core claim e
 
 ## Background
 
-- Paper 1: static-only six-app predecessor.
-- Paper 2: 12-app dynamic/RDI predecessor.
-- Paper 3: expanded 15-app Research Dataset Beta cutoff study.
+- Published static predecessor: static-only six-app study.
+- Published runtime predecessor: 12-app dynamic/RDI study.
+- Current study: expanded 15-app consumer app cutoff analysis.
 
 ## Methodology
 
@@ -648,17 +649,17 @@ Explain that current-build drift is operational churn and that prior-build rows 
 """,
         "paper3_introduction_draft.md": f"""# Introduction Draft
 
-Consumer Android applications update frequently enough that an all-current-build collection target can become unstable during an active study. In Paper 3, ScytaleDroid treats this churn as a measurement-design issue rather than as evidence loss. The study closes dynamic collection at a fixed cutoff and assembles app-level evidence bundles tied to package name, version code/name, static run IDs, dynamic run IDs, APK hashes, PCAP availability, and QA provenance.
+Consumer Android applications update frequently enough that an all-current-build collection target can become unstable during an active study. This study treats that churn as a measurement-design issue rather than as evidence loss. Dynamic collection is closed at a fixed cutoff and assembled into app-level evidence bundles tied to package name, version code/name, static run IDs, dynamic run IDs, APK hashes, PCAP availability, and QA provenance.
 
 The safe headline for this draft is: {SAFE_CLAIM} The paper should not claim that all 15 apps were current-build complete or that the full 105-run quota was complete. Instead, it should describe the cutoff tier split: {current} strict current-build complete, {mixed} current-build mixed-baseline, and {prior} retained prior-build evidence apps.
 """,
         "paper3_background_draft.md": f"""# Background Draft
 
-Paper 3 is a follow-on study, not a strict reproduction of Paper 1 or Paper 2.
+This integrated analysis is a follow-on study, not a strict reproduction of the published predecessor papers.
 
-- Paper 1 is the static predecessor snapshot for six social media apps: Facebook, Instagram, Facebook Messenger, Snapchat, TikTok, and Twitter/X.
-- Paper 2 is the dynamic predecessor for non-root physical-device capture, package-filtered PCAP analysis, traffic-shape features, and RDI-style interpretation.
-- Paper 3 expands the framing to the 15-app Research Dataset Beta cohort and combines static and dynamic evidence through cutoff evidence tiers.
+- The published static predecessor is the six-app snapshot for Facebook, Instagram, Facebook Msg, Snapchat, TikTok, and X.
+- The published runtime predecessor establishes non-root physical-device capture, package-filtered PCAP analysis, traffic-shape features, and RDI-style interpretation.
+- The current study expands the framing to a 15-app consumer app dataset and combines static and dynamic evidence through cutoff evidence tiers.
 
 {prior_refs[0]}
 
@@ -670,7 +671,7 @@ Paper 3 is a follow-on study, not a strict reproduction of Paper 1 or Paper 2.
 
 {_baseline_class_text()}
 
-The live current-build queue remains an operations tool that answers what should be refreshed next. The paper cutoff answers a separate research question: what valid, build-backed evidence existed at cutoff and can support Paper 3 claims.
+The live current-build queue remains an operations tool that answers what should be refreshed next. The paper cutoff answers a separate research question: what valid, build-backed evidence existed at cutoff and can support the study claims.
 """,
         "paper3_results_draft.md": f"""# Results Draft
 
@@ -688,18 +689,18 @@ Prior-build evidence should be discussed as retained evidence with explicit pack
 """,
         "paper3_limitations_draft.md": """# Limitations Draft
 
-- Paper 3 does not exactly reproduce Paper 1 or Paper 2 tables.
-- Paper 3 should not claim 15/15 current-build completion.
-- Paper 3 should not claim 105/105 quota completion.
+- The current study does not exactly reproduce the published predecessor tables.
+- The current study should not claim 15/15 current-build completion.
+- The current study should not claim 105/105 quota completion.
 - QFG captures are not strict idle captures.
 - Prior-build evidence remains labeled as prior-build evidence.
 - Static detector/resource parse caveats and dynamic signal caveats should be reported where relevant.
 """,
         "paper3_conclusion_draft.md": f"""# Conclusion Draft
 
-Paper 3 demonstrates that an Android app behavior study can remain auditable even when live apps update faster than an all-current-build capture wave can complete. At cutoff, {SAFE_CLAIM} The contribution is not merely additional collection volume; it is the build/version-backed cutoff model that keeps evidence usable, labeled, and reproducible.
+This study demonstrates that an Android app behavior study can remain auditable even when live apps update faster than an all-current-build capture wave can complete. At cutoff, {SAFE_CLAIM} The contribution is not merely additional collection volume; it is the build/version-backed cutoff model that keeps evidence usable, labeled, and reproducible.
 """,
-        "paper3_claims_control.md": f"""# Paper 3 Claims Control
+        "paper3_claims_control.md": f"""# Claims Control
 
 ## Safe Claims
 
@@ -734,14 +735,14 @@ Paper 3 demonstrates that an Android app behavior study can remain auditable eve
 
 {_baseline_class_text()}
 """,
-        "paper3_next_revision_items.md": """# Paper 3 Next Revision Items
+        "paper3_next_revision_items.md": """# Next Revision Items
 
 - Decide how much detail from the prior PDFs belongs in related work versus methods lineage.
 - Decide whether to include APK storage/cold-store work as reproducibility infrastructure or leave it out of the paper.
 - Confirm static detector/resource parse caveats before final results wording.
 - Confirm dynamic unresolved signal rows before final provider/signal claims.
 """,
-        "paper3_open_questions.md": """# Paper 3 Open Questions
+        "paper3_open_questions.md": """# Open Questions
 
 - Decide how much detail from the prior PDFs belongs in related work versus methods lineage.
 - Decide whether to include APK storage/cold-store work as reproducibility infrastructure or leave it out of the paper.
@@ -843,7 +844,7 @@ def generate_package(
             "Do not claim 105/105 quota complete.",
             "Do not equate QFG with strict idle.",
             "Do not equate prior-build evidence with current-build evidence.",
-            "Paper 3 is a follow-on study, not an exact Paper 1/Paper 2 reproduction.",
+            "The current integrated study is a follow-on analysis, not an exact reproduction of the published predecessor papers.",
         ],
         "last_run_recommendation_source": "paper_minimal_run_plan.csv",
         "last_run_recommendation": last_run_recommendation,

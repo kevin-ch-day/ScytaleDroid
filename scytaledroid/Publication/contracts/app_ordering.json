@@ -1,15 +1,17 @@
 [
+  "bbc.mobile.news.ww",
+  "com.cnn.mobile.android.phone",
   "com.facebook.katana",
   "com.facebook.orca",
   "com.instagram.android",
   "com.linkedin.android",
   "com.pinterest",
   "com.reddit.frontpage",
+  "org.thoughtcrime.securesms",
   "com.snapchat.android",
-  "com.twitter.android",
-  "com.whatsapp",
-  "com.zhiliaoapp.musically",
   "org.telegram.messenger",
-  "org.thoughtcrime.securesms"
+  "com.guardian",
+  "com.zhiliaoapp.musically",
+  "com.whatsapp",
+  "com.twitter.android"
 ]
-

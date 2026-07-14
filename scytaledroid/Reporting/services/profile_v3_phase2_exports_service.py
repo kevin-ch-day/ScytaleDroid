@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Profile v3 Phase 2 draft exports (uses current runs; no manifest required).
 
-This is a writing-time helper for Paper #3 while Phase 2 capture is still in progress.
+This is a writing-time helper for the integrated static-runtime study while Phase 2 capture is still in progress.
 It is filesystem-only and reuses existing evidence packs and per-run ML artifacts.
 
 It produces:

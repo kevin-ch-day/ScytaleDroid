@@ -34,6 +34,7 @@ from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import get_sampl
 from scytaledroid.DynamicAnalysis.ml.feature_matrix import BASIC_FEATURE_NAMES, rows_to_basic_matrix
 from scytaledroid.DynamicAnalysis.ml.pcap_window_features import build_window_features, extract_packet_timeline
 from scytaledroid.DynamicAnalysis.ml.telemetry_windowing import WindowSpec
+from scytaledroid.Publication.app_category_policy import app_display_name
 from scytaledroid.Publication.paper2_v2_contract import validate_paper2_v2_results_contract
 
 
@@ -668,24 +669,7 @@ def _app_meta(package_name: str, app: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _display_name(package_name: str) -> str:
-    names = {
-        "bbc.mobile.news.ww": "BBC News",
-        "com.cnn.mobile.android.phone": "CNN",
-        "com.facebook.katana": "Facebook",
-        "com.facebook.orca": "Facebook Msg",
-        "com.guardian": "The Guardian",
-        "com.instagram.android": "Instagram",
-        "com.linkedin.android": "LinkedIn",
-        "com.pinterest": "Pinterest",
-        "com.reddit.frontpage": "Reddit",
-        "com.snapchat.android": "Snapchat",
-        "com.twitter.android": "X",
-        "com.whatsapp": "WhatsApp",
-        "com.zhiliaoapp.musically": "TikTok",
-        "org.telegram.messenger": "Telegram",
-        "org.thoughtcrime.securesms": "Signal",
-    }
-    return names.get(package_name, package_name)
+    return app_display_name(package_name, package_name)
 
 
 def _rank_map(values: Mapping[str, float]) -> dict[str, int]:

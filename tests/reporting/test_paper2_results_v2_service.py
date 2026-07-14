@@ -127,6 +127,34 @@ def test_standard_duration_only_policy_filters_extended_runs() -> None:
     assert standard["com.example"]["interactive_rdi"] == 0.9
 
 
+def test_paper2_v2_rows_use_shared_publication_taxonomy() -> None:
+    primary = {
+        "com.snapchat.android": {
+            "baseline_rdi": 0.1,
+            "interactive_rdi": 0.4,
+            "delta": 0.3,
+            "baseline_runs": 1,
+            "interactive_runs": 2,
+            "baseline_windows": 10,
+            "interactive_windows": 20,
+        },
+        "com.linkedin.android": {
+            "baseline_rdi": 0.2,
+            "interactive_rdi": 0.3,
+            "delta": 0.1,
+            "baseline_runs": 1,
+            "interactive_runs": 1,
+            "baseline_windows": 10,
+            "interactive_windows": 10,
+        },
+    }
+    rows = svc._build_per_app_rdi_rows(primary, {}, {})
+    by_pkg = {row["package_name"]: row for row in rows}
+
+    assert by_pkg["com.snapchat.android"]["category"] == "Social Media"
+    assert by_pkg["com.linkedin.android"]["category"] == "Professional Networking"
+
+
 def test_hash_manifest_is_deterministic_and_relative(tmp_path: Path) -> None:
     output_root = tmp_path / "out"
     table = output_root / "paper2_statistics_v2.csv"

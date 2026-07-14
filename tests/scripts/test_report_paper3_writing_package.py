@@ -199,7 +199,7 @@ def test_help_exits_zero() -> None:
         check=False,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "paper 3 writing workspace" in (proc.stdout + proc.stderr).lower()
+    assert "integrated-study writing workspace" in (proc.stdout + proc.stderr).lower()
 
 
 def test_missing_cutoff_dir_fails_clearly(tmp_path: Path, capsys) -> None:
@@ -283,20 +283,36 @@ def test_valid_fixture_generates_workspace_manifest_claims_and_tables(tmp_path: 
 
     tables = (output / "paper3_tables_markdown.md").read_text(encoding="utf-8")
     assert "Evidence Tier Summary" in tables
-    assert "Paper-usable apps | 2/2" in tables
+    assert "Publication-usable apps | 2/2" in tables
     assert "PRIOR_BUILD_PAPER_EVIDENCE" in tables
 
     outline = (output / "paper3_working_outline.md").read_text(encoding="utf-8")
     assert "Collection is paused; use the cutoff bundle and start writing" in outline
     final_outline = (output / "paper3_outline.md").read_text(encoding="utf-8")
-    assert "# Paper 3 Outline" in final_outline
+    assert "# Integrated Study Outline" in final_outline
     assert "Non-blocking run-plan rows are retained only as future-work provenance" in final_outline
     next_items = (output / "paper3_next_revision_items.md").read_text(encoding="utf-8")
-    assert "Paper 3 Next Revision Items" in next_items
+    assert "# Next Revision Items" in next_items
 
     latex = (output / "paper3_tables_latex.tex").read_text(encoding="utf-8")
-    assert "Research Dataset Beta evidence bundles at cutoff" in latex
+    assert "Selected 15-app evidence bundles at cutoff" in latex
+    assert "Research Dataset Beta evidence bundles at cutoff" not in latex
     assert "com.twitter.android" in latex
+
+    introduction = (output / "paper3_introduction_draft.md").read_text(encoding="utf-8")
+    manifest_warnings = "\n".join(written_manifest["warnings"])
+    public_generated_text = "\n".join(
+        [
+            tables,
+            final_outline,
+            introduction,
+            latex,
+            (output / "paper3_limitations_draft.md").read_text(encoding="utf-8"),
+            manifest_warnings,
+        ]
+    )
+    assert "Paper 3" not in public_generated_text
+    assert "Paper #3" not in public_generated_text
 
 
 def test_main_stdout_json_reports_manifest(tmp_path: Path, capsys) -> None:
