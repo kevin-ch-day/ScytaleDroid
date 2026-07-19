@@ -40,6 +40,7 @@ def test_no_paper_terms_leakage_in_docs_and_scripts_outside_allowlist() -> None:
         Path("scripts/dynamic/evidence_hunt.py"),
         Path("scripts/publication/export_profile.py"),
         Path("scripts/publication/export_manifest_gate.py"),
+        Path("scripts/publication/generate_paper2_minimum_validation.py"),
         Path("scripts/publication/generate_paper2_results_v2.py"),
         Path("scripts/publication/generate_android_empirical_assets.py"),
         Path("scripts/publication/publication_ml_audit_report.py"),
