@@ -46,6 +46,9 @@ def test_main_menu_renders_when_base_schema_unavailable(monkeypatch):
     )
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
     monkeypatch.setattr(app_main.menu_utils, "print_header", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_main, "_describe_main_menu_capture_readiness", lambda _device: "ready")
+    monkeypatch.setattr(app_main, "_describe_main_menu_static_dynamic_readiness", lambda: "ready (0/0 plans)")
+    monkeypatch.setattr(app_main, "_describe_main_menu_evidence_recovery", lambda: "clear")
     monkeypatch.setattr(
         app_main.menu_utils,
         "print_menu",

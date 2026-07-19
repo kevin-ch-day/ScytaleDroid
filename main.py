@@ -26,12 +26,6 @@ from scytaledroid.Utils.System.world_clock.display import (
     snapshot_clocks,
 )
 from scytaledroid.Utils.System.world_clock.state import WorldClockState, load_state
-from scytaledroid.Utils.version_utils import get_git_commit
-
-_MAIN_MENU_UI_STATE: dict[str, bool] = {
-    "suppress_db_status_once": False,
-}
-
 
 def _resolve_timezones() -> WorldClockState:
     return load_state()
@@ -41,17 +35,6 @@ def _start_screen_transition() -> None:
     """Insert a single blank line before rendering the next major screen."""
 
     print()
-
-
-def _suppress_main_menu_db_status_once() -> None:
-    _MAIN_MENU_UI_STATE["suppress_db_status_once"] = True
-
-
-def _consume_main_menu_db_status_suppressed() -> bool:
-    suppressed = bool(_MAIN_MENU_UI_STATE.get("suppress_db_status_once"))
-    if suppressed:
-        _MAIN_MENU_UI_STATE["suppress_db_status_once"] = False
-    return suppressed
 
 
 def _describe_snapshot(snapshot: ClockSnapshot) -> tuple[str, str]:
@@ -118,12 +101,11 @@ def print_banner(*, show_clocks: bool = False) -> None:
         app_config.APP_VERSION,
         app_config.APP_RELEASE,
         app_config.APP_DESCRIPTION,
-        build_id=get_git_commit(),
         metrics=metrics,
     )
 
     log.info(
-        f"Application started - {app_config.APP_NAME} {app_config.APP_VERSION} ({app_config.APP_RELEASE})",
+        f"Application started - {app_config.APP_NAME} v{app_config.APP_VERSION}",
         category="application",
     )
     logging_engine.emit_environment_snapshot()
@@ -178,6 +160,59 @@ def _describe_main_menu_mercury() -> str:
     return "drive not detected"
 
 
+def _describe_main_menu_capture_readiness(selected_device: str) -> str:
+    """Return the next capture prerequisite without probing the device again."""
+
+    if selected_device == "none":
+        return "select a device for on-device workflows"
+    return "ready"
+
+
+def _describe_main_menu_static_dynamic_readiness() -> str:
+    """Summarize whether the active cohort has usable dynamic plans."""
+
+    try:
+        from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import (
+            build_static_handoff_plan_summary,
+        )
+
+        summary = build_static_handoff_plan_summary()
+    except Exception as exc:  # pragma: no cover - defensive landing-screen guard
+        log.warning(f"Failed to read static-to-dynamic plan readiness: {exc}", category="application")
+        return "unknown"
+
+    ready = int(summary.get("dataset_packages_with_plan") or 0)
+    total = int(summary.get("dataset_packages_total") or 0)
+    if bool(summary.get("ready_for_guided_dataset_run")):
+        return f"ready ({ready}/{total} plans)"
+    if total:
+        return f"partial ({ready}/{total} plans)"
+    return "no active cohort plans"
+
+
+def _describe_main_menu_evidence_recovery() -> str:
+    """Return local incomplete-pack recovery status without mutating evidence."""
+
+    try:
+        from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
+            summarize_incomplete_dynamic_run_dirs,
+        )
+
+        summary = summarize_incomplete_dynamic_run_dirs()
+    except Exception as exc:  # pragma: no cover - defensive landing-screen guard
+        log.warning(f"Failed to inspect incomplete dynamic evidence: {exc}", category="application")
+        return "unknown"
+
+    if summary.total_runs:
+        if summary.pcap_artifact_runs:
+            return (
+                f"{summary.total_runs} incomplete packs "
+                f"({len(summary.pcap_artifact_runs)} with PCAP artifacts) — Dynamic > Maintenance"
+            )
+        return f"{summary.total_runs} interrupted before capture — Dynamic > Maintenance"
+    return "clear (no incomplete dynamic packs)"
+
+
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
@@ -227,8 +262,6 @@ def main_menu() -> None:
                     category="application",
                     extra={"schema_gate_message": message, "schema_gate_detail": detail},
                 )
-        if not _consume_main_menu_db_status_suppressed():
-            _emit_main_menu_db_connection_line(ok, message, detail or "")
         print()
         menu_utils.print_header("Main Menu")
         try:
@@ -241,6 +274,9 @@ def main_menu() -> None:
         print(f"Selected device: {selected_device}")
         print(f"Database: {_describe_main_menu_database(ok, message, detail or '')}")
         print(f"Mercury: {_describe_main_menu_mercury()}")
+        print(f"Capture readiness: {_describe_main_menu_capture_readiness(selected_device)}")
+        print(f"Static-to-dynamic: {_describe_main_menu_static_dynamic_readiness()}")
+        print(f"Evidence recovery: {_describe_main_menu_evidence_recovery()}")
         print("-----")
         print()
         menu_utils.print_menu(
@@ -343,36 +379,6 @@ def _handle_copy_freeze_hash(snapshot: dict[str, object]) -> None:
             print(status_messages.status("Clipboard copy unavailable; full freeze hash:", level="info"))
             print(colors.apply(freeze_hash, colors.get_palette().muted))
     prompt_utils.press_enter_to_continue()
-
-
-def _emit_main_menu_db_connection_line(ok: bool, message: str, detail: str) -> None:
-    """Single-line persistence status on every main-menu draw (MariaDB/MySQL)."""
-
-    from scytaledroid.Database.db_core import db_config
-
-    if ok:
-        cfg = db_config.DB_CONFIG
-        host = cfg.get("host", "?")
-        port = cfg.get("port", "?")
-        database = (cfg.get("database") or "").strip() or "?"
-        status_messages.print_status(
-            f"DB: {database} @ {host}:{port}",
-            level="success",
-        )
-        return
-
-    headline = message.strip()
-    if headline == "Database disabled.":
-        status_messages.print_status(
-            "DB: off — set DSN in .env (menu 7)",
-            level="warn",
-        )
-        return
-
-    status_messages.print_status(f"DB: error — {headline}", level="warn")
-    trimmed = (detail or "").strip()
-    if trimmed:
-        status_messages.print_status(trimmed, level="warn")
 
 
 def _print_tier1_status_banner() -> dict[str, object]:
@@ -494,7 +500,6 @@ def handle_select_device() -> None:
     print(f"  Serial : {details['serial']}")
     print(f"  Android: {details['android']}")
     print(f"  Type   : {details['type']}")
-    _suppress_main_menu_db_status_once()
 
 def handle_device() -> None:
     """Launch the Android Devices hub."""

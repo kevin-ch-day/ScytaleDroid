@@ -10,14 +10,14 @@ def about_app() -> None:
     """Show application information with themed styling."""
 
     print()
-    menu_utils.print_header("About ScytaleDroid", "Android Security Research Platform")
+    menu_utils.print_header("About ScytaleDroid", "Open Source Android Security and Research Tool")
     menu_utils.print_hint(
         "Local-first research tooling for physical-device collection, static exposure analysis, and dynamic evidence measurement."
     )
     menu_utils.print_section("Application")
     menu_utils.print_metrics(
         [
-            ("Version", f"{app_config.APP_VERSION} ({app_config.APP_RELEASE})"),
+            ("Version", f"v{app_config.APP_VERSION}"),
             ("Maintainer", app_config.APP_AUTHOR),
             ("Source", app_config.GITHUB_REPO),
             ("Workspace", str(Path(app_config.DATA_DIR).resolve().parent)),

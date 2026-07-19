@@ -155,3 +155,22 @@ def test_menu_utils_print_hint_wraps_cleanly(capsys) -> None:
     )
     out = colors.strip(capsys.readouterr().out)
     assert "Choose a darker high-contrast theme for demos" in out
+
+
+def test_main_banner_is_plain_and_omits_build_id(capsys) -> None:
+    menu_utils.print_main_banner(
+        "ScytaleDroid",
+        "2.3.1",
+        "Open Source",
+        "Open Source Android Security and Research Tool",
+        build_id="7d8526b95460",
+        width=72,
+    )
+
+    out = colors.strip(capsys.readouterr().out)
+    assert "ScytaleDroid" in out
+    assert "Version: v2.3.1" in out
+    assert "Open Source Android Security and Research Tool" in out
+    assert "Build:" not in out
+    assert "╭" not in out
+    assert "╰" not in out

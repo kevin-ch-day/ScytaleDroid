@@ -23,6 +23,9 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
     )
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
     monkeypatch.setattr(app_main.menu_utils, "print_header", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_main, "_describe_main_menu_capture_readiness", lambda _device: "ready")
+    monkeypatch.setattr(app_main, "_describe_main_menu_static_dynamic_readiness", lambda: "ready (0/0 plans)")
+    monkeypatch.setattr(app_main, "_describe_main_menu_evidence_recovery", lambda: "clear")
 
     def _capture_menu(items, **kwargs):
         rendered_menus.append(([item.label for item in items], kwargs))
@@ -69,7 +72,6 @@ def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, cap
         lambda: (True, "ready", ""),
     )
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
-    monkeypatch.setattr(app_main, "_emit_main_menu_db_connection_line", lambda *_a, **_k: None)
 
     from scytaledroid.DeviceAnalysis import device_manager
 
@@ -88,6 +90,21 @@ def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, cap
         "_describe_main_menu_mercury",
         lambda: "mounted at /mnt/MERCURY_DATA_V2",
     )
+    monkeypatch.setattr(
+        app_main,
+        "_describe_main_menu_capture_readiness",
+        lambda _selected_device: "ready",
+    )
+    monkeypatch.setattr(
+        app_main,
+        "_describe_main_menu_static_dynamic_readiness",
+        lambda: "ready (15/15 plans)",
+    )
+    monkeypatch.setattr(
+        app_main,
+        "_describe_main_menu_evidence_recovery",
+        lambda: "clear (no incomplete dynamic packs)",
+    )
     monkeypatch.setattr(app_main.prompt_utils, "get_choice", lambda *_a, **_k: "0")
     monkeypatch.setattr(app_main.status_messages, "print_status", lambda *_a, **_k: None)
     monkeypatch.setattr(app_main.status_messages, "print_strip", lambda *_a, **_k: None)
@@ -98,7 +115,18 @@ def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, cap
     assert "Selected device: moto g 5G 2024 · ZY22JK89DR" in out
     assert "Database: scytaledroid_core_prod @ localhost:3306" in out
     assert "Mercury: mounted at /mnt/MERCURY_DATA_V2" in out
+    assert "Capture readiness: ready" in out
+    assert "Static-to-dynamic: ready (15/15 plans)" in out
+    assert "Evidence recovery: clear (no incomplete dynamic packs)" in out
     assert "-----" in out
+
+
+def test_main_menu_capture_readiness_requires_a_selected_device() -> None:
+    assert (
+        app_main._describe_main_menu_capture_readiness("none")
+        == "select a device for on-device workflows"
+    )
+    assert app_main._describe_main_menu_capture_readiness("moto g 5G 2024") == "ready"
 
 
 def test_main_menu_mercury_status_variants(monkeypatch) -> None:
@@ -195,29 +223,6 @@ def test_handle_machine_learning_starts_menu_on_new_line(monkeypatch, capsys) ->
     out = capsys.readouterr().out
     assert menu_calls["count"] == 1
     assert out.startswith("\nML HEADER\n")
-
-
-def test_main_menu_db_status_suppression_consumes_once() -> None:
-    app_main._MAIN_MENU_UI_STATE["suppress_db_status_once"] = False
-
-    app_main._suppress_main_menu_db_status_once()
-
-    assert app_main._consume_main_menu_db_status_suppressed() is True
-    assert app_main._consume_main_menu_db_status_suppressed() is False
-
-
-def test_emit_main_menu_db_disabled_hint_points_to_database_tools(monkeypatch) -> None:
-    messages: list[tuple[str, str]] = []
-
-    monkeypatch.setattr(
-        app_main.status_messages,
-        "print_status",
-        lambda message, level="info", **_kwargs: messages.append((str(message), str(level))),
-    )
-
-    app_main._emit_main_menu_db_connection_line(False, "Database disabled.", "DB is optional.")
-
-    assert messages[0] == ("DB: off — set DSN in .env (menu 7)", "warn")
 
 
 def test_environment_metrics_hidden_in_normal_prod_mode(monkeypatch) -> None:

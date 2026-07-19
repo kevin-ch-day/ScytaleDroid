@@ -153,6 +153,13 @@ def _wrap_text(text: str, width: int) -> list[str]:
     return wrapped or [text]
 
 
+def _display_version(app_version: str) -> str:
+    version = str(app_version or "").strip()
+    if not version:
+        return "v?"
+    return version if version.lower().startswith("v") else f"v{version}"
+
+
 def _format_kv_lines(
     items: Sequence[tuple[str, object]],
     *,
@@ -179,7 +186,7 @@ def print_banner(app_name: str, app_version: str, app_release: str, app_descript
     palette = colors.get_palette()
     term_width = min(get_terminal_width(), 96)
     header = colors.apply(app_name, palette.header, bold=True)
-    version_line = colors.apply(f"Version: {app_version} ({app_release})", palette.accent)
+    version_line = colors.apply(f"Version: {_display_version(app_version)}", palette.accent)
     lines = [header, version_line]
     if app_description:
         for line in _wrap_text(app_description, term_width - 4):
@@ -202,7 +209,7 @@ def print_main_banner(
     hero_lines: Sequence[str] = (),
     width: int | None = None,
 ) -> None:
-    """Render a simplified banner used at the top of the main menu."""
+    """Render a compact, plain-language banner used at the main menu."""
 
     palette = colors.get_palette()
     term_width = width or min(get_terminal_width(), 100)
@@ -210,11 +217,13 @@ def print_main_banner(
     ascii_ui = use_ascii_ui()
 
     header = colors.apply(app_name, palette.header, bold=True)
-    version_line = colors.apply(f"Version: {app_version}", palette.accent)
+    version_line = colors.apply(f"Version: {_display_version(app_version)}", palette.accent)
+
+    # ``build_id`` remains accepted for callers that pass it, but commit hashes
+    # belong in evidence provenance rather than the operator landing screen.
+    del build_id
 
     banner_lines = [header, version_line]
-    if build_id:
-        banner_lines.append(colors.apply(f"Build: {build_id}", palette.muted))
     if app_description:
         for line in _wrap_text(app_description, inner_width):
             banner_lines.append(colors.apply(line, palette.muted))
@@ -243,7 +252,8 @@ def print_main_banner(
             banner_lines.append(f"{bullet} {message}")
 
     text_blocks.print_accent_rule(width=term_width)
-    print(text_blocks.boxed(banner_lines, width=term_width, padding=1))
+    for line in banner_lines:
+        print(line)
 
     if menu_title:
         print()

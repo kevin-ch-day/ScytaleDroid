@@ -121,7 +121,7 @@ def build_report_view(report: StaticAnalysisReport) -> Mapping[str, Any]:
             "parser_provenance": parser_provenance,
             "timestamp_utc": timestamp_utc,
             "seed": metadata.get("run_id") or "—",
-            "version": f"{app_config.APP_VERSION} ({app_config.APP_RELEASE})",
+            "version": f"v{app_config.APP_VERSION}",
         },
     }
 
