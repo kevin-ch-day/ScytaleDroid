@@ -91,15 +91,18 @@ def prune_incomplete_dynamic_evidence_dirs(*, run_state_summary: Callable[[], No
     from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
         find_incomplete_dynamic_run_dirs,
         prune_incomplete_dynamic_run_dirs,
+        summarize_incomplete_dynamic_run_dirs,
     )
 
     print()
     menu_utils.print_header("Prune Incomplete Dynamic Evidence")
-    incomplete = find_incomplete_dynamic_run_dirs()
-    if not incomplete:
+    summary = summarize_incomplete_dynamic_run_dirs()
+    if not summary.total_runs:
         print(status_messages.status("No incomplete evidence dirs found.", level="success"))
         print(status_messages.status("Next: run option 3 (State summary) before collection.", level="info"))
         return
+
+    incomplete = [*summary.pre_capture_runs, *summary.pcap_artifact_runs]
 
     print(
         status_messages.status(
@@ -107,10 +110,26 @@ def prune_incomplete_dynamic_evidence_dirs(*, run_state_summary: Callable[[], No
             level="warn",
         )
     )
+    if summary.pre_capture_runs:
+        print(
+            status_messages.status(
+                f"Interrupted before PCAP: {len(summary.pre_capture_runs)}.",
+                level="info",
+            )
+        )
+    if summary.pcap_artifact_runs:
+        print(
+            status_messages.status(
+                f"Contains PCAP artifacts: {len(summary.pcap_artifact_runs)} — inspect before deletion.",
+                level="warn",
+            )
+        )
     preview = [p.name for p in incomplete[:10]]
     if preview:
         print(status_messages.status("Examples: " + ", ".join(preview), level="info"))
-    confirmed = prompt_utils.prompt_yes_no("Delete these incomplete dirs now? (safe)", default=False)
+    confirmed = prompt_utils.prompt_yes_no(
+        "Delete these incomplete dirs and their local artifacts?", default=False
+    )
     if not confirmed:
         print(status_messages.status("Prune canceled.", level="info"))
         return

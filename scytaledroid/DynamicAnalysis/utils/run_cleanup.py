@@ -54,6 +54,15 @@ class RecentRun:
     low_signal: bool | None
 
 
+@dataclass(frozen=True)
+class IncompleteDynamicRunSummary:
+    """Classify incomplete local packs before any operator cleanup action."""
+
+    total_runs: int
+    pre_capture_runs: tuple[Path, ...]
+    pcap_artifact_runs: tuple[Path, ...]
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -248,6 +257,32 @@ def find_incomplete_dynamic_run_dirs() -> list[Path]:
     return out
 
 
+def _has_pcap_artifact(run_dir: Path) -> bool:
+    """Return whether an incomplete pack contains a captured packet file."""
+
+    for path in run_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if name.endswith((".pcap", ".pcapng", ".pcap.gz", ".pcapng.gz")):
+            return True
+    return False
+
+
+def summarize_incomplete_dynamic_run_dirs() -> IncompleteDynamicRunSummary:
+    """Return a non-mutating recovery classification for incomplete local packs."""
+
+    incomplete = find_incomplete_dynamic_run_dirs()
+    pcap_artifact_runs = tuple(run_dir for run_dir in incomplete if _has_pcap_artifact(run_dir))
+    pcap_paths = set(pcap_artifact_runs)
+    pre_capture_runs = tuple(run_dir for run_dir in incomplete if run_dir not in pcap_paths)
+    return IncompleteDynamicRunSummary(
+        total_runs=len(incomplete),
+        pre_capture_runs=pre_capture_runs,
+        pcap_artifact_runs=pcap_artifact_runs,
+    )
+
+
 def prune_incomplete_dynamic_run_dirs() -> int:
     """Delete orphan/incomplete dynamic run dirs and return count removed."""
     deleted = 0
@@ -291,6 +326,7 @@ def delete_dynamic_evidence_packs(package_name: str) -> int:
 
 
 __all__ = [
+    "IncompleteDynamicRunSummary",
     "PackageRunCounts",
     "RecentRun",
     "dataset_tracker_counts",
@@ -301,4 +337,5 @@ __all__ = [
     "find_incomplete_dynamic_run_dirs",
     "prune_incomplete_dynamic_run_dirs",
     "reset_package_dataset_tracker",
+    "summarize_incomplete_dynamic_run_dirs",
 ]

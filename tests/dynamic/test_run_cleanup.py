@@ -211,3 +211,24 @@ def test_find_incomplete_dynamic_run_dirs_includes_stale_legacy_marker(
     monkeypatch.setattr(run_cleanup, "_now_epoch_s", lambda: 1_783_872_001.0)
 
     assert run_cleanup.find_incomplete_dynamic_run_dirs() == [run_dir]
+
+
+def test_summarize_incomplete_dynamic_run_dirs_separates_pcap_artifacts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "output"
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", str(output_root))
+    root = output_root / "evidence" / "dynamic"
+    pre_capture = root / "pre-capture"
+    pcap_artifact = root / "pcap-artifact"
+    pre_capture.mkdir(parents=True)
+    pcap_artifact.mkdir(parents=True)
+    (pcap_artifact / "capture.pcap").write_bytes(b"pcap")
+
+    summary = run_cleanup.summarize_incomplete_dynamic_run_dirs()
+
+    assert summary.total_runs == 2
+    assert summary.pre_capture_runs == (pre_capture,)
+    assert summary.pcap_artifact_runs == (pcap_artifact,)
