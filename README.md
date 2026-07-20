@@ -168,11 +168,25 @@ SCYTALEDROID_API_AUTH_DISABLED=1 SCYTALEDROID_ENV=test
 That bypass is rejected unless the API binds to a loopback host. Do not use it
 for shared workstations or network-accessible API services.
 
+Loopback is the default API bind. A non-loopback bind is rejected unless direct
+TLS is configured with `SCYTALEDROID_API_TLS_CERTFILE` and
+`SCYTALEDROID_API_TLS_KEYFILE`, or `SCYTALEDROID_API_TLS_TERMINATED=1` explicitly
+confirms that a trusted reverse proxy terminates TLS. Do not expose the API over
+plaintext HTTP: its bearer API key and evidence endpoints are sensitive.
+
 The `/upload` endpoint accepts only a single `.apk` filename. Uploaded bytes are
 streamed into the upload inbox first, validated as a ZIP-compatible APK with
 `AndroidManifest.xml`, and parsed for APK metadata before promotion to the
-canonical APK store. Rejected uploads return a stable `reason_code` and do not
-create normal canonical APK artifacts, sidecars, or upload receipts.
+canonical APK store. The upload path enforces compressed size, archive member
+count, per-member and aggregate uncompressed-size, and compression-ratio
+budgets before parsing. Static scans
+also have a bounded active-job limit. Rejected uploads return a stable
+`reason_code` and do not create normal canonical APK artifacts, sidecars, or
+upload receipts.
+
+The optional Android command-line tools bootstrap pins the Google archive URL
+and verifies its SHA-256 before extraction. If `CMDLINE_ZIP_URL` is overridden,
+set `CMDLINE_ZIP_SHA256` to the matching 64-character digest as well.
 
 ### Harvest devices
 

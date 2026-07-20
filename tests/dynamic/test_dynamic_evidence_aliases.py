@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
@@ -33,15 +34,23 @@ def test_alias_rebuild_repairs_only_canonical_run_aliases(tmp_path: Path) -> Non
     assert before.valid == 1
     assert before.stale == 1
     assert before.orphaned == 1
-    assert [(repair.run_id, repair.action) for repair in planned] == [("run-two", "replace-stale")]
+    assert [(repair.run_id, repair.action) for repair in planned] == [
+        ("run-one", "replace-absolute"),
+        ("run-two", "replace-stale"),
+    ]
     assert not (legacy / "run-two").exists()
 
     applied = rebuild_legacy_dynamic_aliases(canonical_root=canonical, legacy_root=legacy, apply=True)
     after = inspect_legacy_dynamic_aliases(canonical_root=canonical, legacy_root=legacy)
 
-    assert [(repair.run_id, repair.action) for repair in applied] == [("run-two", "replace-stale")]
+    assert [(repair.run_id, repair.action) for repair in applied] == [
+        ("run-one", "replace-absolute"),
+        ("run-two", "replace-stale"),
+    ]
     assert after.valid == 2
+    assert after.absolute_targets == 0
     assert after.orphaned == 1
+    assert not Path(os.readlink(legacy / "run-two")).is_absolute()
     assert (legacy / "orphan").is_symlink()
 
 

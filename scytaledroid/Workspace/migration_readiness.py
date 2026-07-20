@@ -21,7 +21,6 @@ from typing import Any
 
 # Source code moves through Git. These roots are the research corpus that Git
 # intentionally does not carry to the destination system.
-_CORPUS_ROOTS = ("data", "output", "logs")
 _REQUIRED_TOOLS = ("git", "python", "rsync", "mysqldump", "adb", "tshark", "capinfos")
 _TRANSFER_HEADROOM_RATIO = 1.20
 
@@ -148,10 +147,12 @@ def _transfer_footprint(roots: list[Mapping[str, Any]], *, external_cold_bytes: 
     }
 
 
-def _external_cold_store_record(repo_root: Path) -> dict[str, Any]:
+def _external_cold_store_record(repo_root: Path, *, data_dir: Path | None = None) -> dict[str, Any]:
     """Measure external canonical APK targets not included in ``du data``."""
 
-    logical_root = repo_root / "data" / "store" / "apk" / "sha256"
+    if data_dir is None:
+        data_dir = _workspace_roots(repo_root)["data"]
+    logical_root = data_dir / "store" / "apk" / "sha256"
     if not logical_root.is_dir():
         return {"links": 0, "missing": 0, "bytes": 0, "roots": []}
 
@@ -242,19 +243,101 @@ def _database_definer_probe() -> dict[str, Any]:
     return results
 
 
-def _dynamic_alias_probe(repo_root: Path) -> dict[str, Any]:
+def _database_export_record(path: Path | str | None, *, catalog: str) -> dict[str, Any]:
+    """Verify a caller-supplied database export without reading its contents.
+
+    Dumps can be compressed and can contain sensitive research metadata, so the
+    migration preflight only establishes that a non-empty, readable artifact was
+    deliberately supplied.  Restore coverage remains an operator smoke test.
+    """
+
+    if path is None or not str(path).strip():
+        return {
+            "catalog": catalog,
+            "supplied": False,
+            "valid": False,
+            "path": None,
+            "detail": "not supplied",
+        }
+    candidate = Path(path).expanduser()
+    try:
+        stat_result = candidate.stat()
+    except OSError as exc:
+        return {
+            "catalog": catalog,
+            "supplied": True,
+            "valid": False,
+            "path": str(candidate),
+            "detail": f"unavailable ({type(exc).__name__})",
+        }
+    valid = candidate.is_file() and stat_result.st_size > 0 and os.access(candidate, os.R_OK)
+    return {
+        "catalog": catalog,
+        "supplied": True,
+        "valid": valid,
+        "path": str(candidate),
+        "size_bytes": stat_result.st_size,
+        "detail": "readable non-empty export; contents intentionally not inspected"
+        if valid
+        else "path must be a readable non-empty regular file",
+    }
+
+
+def _dynamic_alias_probe(
+    repo_root: Path,
+    *,
+    data_dir: Path | None = None,
+    output_dir: Path | None = None,
+) -> dict[str, Any]:
     """Inspect transitional output aliases without treating them as evidence truth."""
 
     try:
+        if data_dir is None or output_dir is None:
+            configured = _workspace_roots(repo_root)
+            data_dir = data_dir or configured["data"]
+            output_dir = output_dir or configured["output"]
         from scytaledroid.DynamicAnalysis.utils.path_utils import inspect_legacy_dynamic_aliases
 
         summary = inspect_legacy_dynamic_aliases(
-            canonical_root=repo_root / "data" / "evidence" / "dynamic",
-            legacy_root=repo_root / "output" / "evidence" / "dynamic",
+            canonical_root=(data_dir or repo_root / "data") / "evidence" / "dynamic",
+            legacy_root=(output_dir or repo_root / "output") / "evidence" / "dynamic",
         )
     except OSError as exc:
         return {"available": False, "detail": type(exc).__name__}
     return {"available": True, **summary.__dict__}
+
+
+def _static_manifest_path_probe(repo_root: Path, *, evidence_dir: Path | None = None) -> dict[str, Any]:
+    """Count immutable static manifests retaining this workstation's absolute path.
+
+    Static manifests are historical provenance and must not be rewritten during a
+    move.  The check makes their source-path residue explicit so operators do not
+    mistake a transferred, valid manifest for a broken canonical evidence pack.
+    """
+
+    static_root = (evidence_dir or repo_root / "evidence") / "static_runs"
+    if not static_root.is_dir():
+        return {"available": False, "manifests": 0, "source_path_manifests": 0}
+
+    source_prefix = str(repo_root.resolve()).encode("utf-8")
+    manifests = source_path_manifests = 0
+    try:
+        for manifest in static_root.glob("*/run_manifest.json"):
+            manifests += 1
+            if source_prefix in manifest.read_bytes():
+                source_path_manifests += 1
+    except OSError as exc:
+        return {
+            "available": False,
+            "manifests": manifests,
+            "source_path_manifests": source_path_manifests,
+            "detail": type(exc).__name__,
+        }
+    return {
+        "available": True,
+        "manifests": manifests,
+        "source_path_manifests": source_path_manifests,
+    }
 
 
 def _destination_record(path: Path | None, footprint: Mapping[str, Any]) -> dict[str, Any]:
@@ -293,16 +376,14 @@ def _destination_record(path: Path | None, footprint: Mapping[str, Any]) -> dict
     }
 
 
-def _rsync_command_templates(repo_root: Path, destination_root: Path | None) -> list[str]:
+def _rsync_command_templates(roots: list[Mapping[str, Any]], destination_root: Path | None) -> list[str]:
     """Return review-only command templates; this function never runs rsync."""
 
     destination = str(destination_root.expanduser().resolve()) if destination_root else "<destination-root>"
     return [
-        (
-            "rsync -aHAX --numeric-ids --info=progress2 --partial --protect-args "
-            f"'{repo_root / name}/' '{destination}/ScytaleDroid/{name}/'"
-        )
-        for name in _CORPUS_ROOTS
+        "rsync -aHAX --numeric-ids --info=progress2 --partial --protect-args "
+        f"'{root['path']}/' '{destination}/ScytaleDroid/{root['name']}/'"
+        for root in roots
     ]
 
 
@@ -337,6 +418,57 @@ def _environment_record(repo_root: Path) -> dict[str, Any]:
         "private": private,
         "note": "configuration values are intentionally never inspected or exported",
     }
+
+
+def _workspace_roots(repo_root: Path) -> dict[str, Path]:
+    """Resolve transfer roots using the same configured paths as runtime setup."""
+
+    from scytaledroid.Config import app_config
+    from scytaledroid.Config.environment import resolve_workspace_path
+
+    roots = {
+        "data": resolve_workspace_path(app_config.DATA_DIR, repo_root=repo_root),
+        "output": resolve_workspace_path(app_config.OUTPUT_DIR, repo_root=repo_root),
+        "logs": resolve_workspace_path(app_config.LOGS_DIR, repo_root=repo_root),
+        # Static handoff artifacts currently use this repo-relative location.
+        "evidence": repo_root / "evidence",
+    }
+    dynamic_root = resolve_workspace_path(app_config.DYNAMIC_EVIDENCE_ROOT, repo_root=repo_root)
+    if not any(dynamic_root == root or root in dynamic_root.parents for root in roots.values()):
+        roots["dynamic_evidence"] = dynamic_root
+    return roots
+
+
+def _transfer_root_records(
+    repo_root: Path,
+    *,
+    size_resolver: Callable[[Path], int | None],
+) -> tuple[list[dict[str, Any]], dict[str, Path]]:
+    configured = _workspace_roots(repo_root)
+    records = [
+        _path_record(path, size_resolver=size_resolver) | {"name": name}
+        for name, path in configured.items()
+    ]
+    return records, configured
+
+
+def _workspace_path_portability(repo_root: Path, roots: Mapping[str, Path]) -> tuple[bool, str]:
+    """Flag custom roots because older maintenance paths are still repo-relative."""
+
+    defaults = {
+        "data": repo_root / "data",
+        "output": repo_root / "output",
+        "logs": repo_root / "logs",
+    }
+    changed = [name for name, expected in defaults.items() if roots.get(name) != expected]
+    if not changed:
+        return True, "repo-local workspace roots in use"
+    return (
+        False,
+        "custom workspace roots configured for "
+        f"{', '.join(changed)}; transfer paths are covered here, but legacy maintenance scripts "
+        "may still assume repo-local data/output/logs",
+    )
 
 
 def _probe_database() -> dict[str, Any]:
@@ -434,13 +566,15 @@ def build_migration_readiness_report(
     incomplete_loader: Callable[[], Any] | None = None,
     mercury_loader: Callable[[], Any] | None = None,
     destination_root: Path | str | None = None,
+    core_database_dump: Path | str | None = None,
+    permission_intel_database_dump: Path | str | None = None,
 ) -> dict[str, Any]:
     """Build a migration preflight report without changing local or DB state."""
 
     root = Path(repo_root).resolve()
-    data_dir = root / "data"
-    output_dir = root / "output"
-    roots = [_path_record(root / name, size_resolver=size_resolver) | {"name": name} for name in _CORPUS_ROOTS]
+    roots, configured_roots = _transfer_root_records(root, size_resolver=size_resolver)
+    data_dir = configured_roots["data"]
+    output_dir = configured_roots["output"]
     try:
         cold_store = dict(cold_store_loader(root))
     except Exception as exc:  # noqa: BLE001 - migration preflight must report unavailable data
@@ -451,6 +585,10 @@ def build_migration_readiness_report(
     git = git_state_loader(root)
     environment = _environment_record(root)
     database = database_probe()
+    database_exports = {
+        "core": _database_export_record(core_database_dump, catalog="core"),
+        "permission_intel": _database_export_record(permission_intel_database_dump, catalog="permission_intel"),
+    }
     try:
         permission_intel = dict(permission_intel_probe())
     except Exception as exc:  # noqa: BLE001
@@ -463,6 +601,7 @@ def build_migration_readiness_report(
         dynamic_aliases = dict(alias_loader(root))
     except Exception as exc:  # noqa: BLE001
         dynamic_aliases = {"available": False, "detail": type(exc).__name__}
+    static_manifest_paths = _static_manifest_path_probe(root, evidence_dir=configured_roots["evidence"])
     static_health = _latest_static_health(data_dir)
     paper_freeze = _latest_paper_freeze(output_dir)
 
@@ -512,7 +651,34 @@ def build_migration_readiness_report(
         _check(
             "research corpus roots",
             "blocker" if missing_roots else "ready",
-            f"missing or unreadable: {', '.join(missing_roots)}" if missing_roots else "code, data, output, and logs are readable",
+            f"missing or unreadable: {', '.join(missing_roots)}"
+            if missing_roots
+            else "configured data/output/log roots and static evidence are readable",
+        )
+    )
+    missing_database_exports = [catalog for catalog, export in database_exports.items() if not export["valid"]]
+    checks.append(
+        _check(
+            "database backup artifacts",
+            "blocker" if missing_database_exports else "ready",
+            (
+                "missing or unreadable export(s): "
+                f"{', '.join(missing_database_exports)}; create full catalog dumps with views, triggers, routines, and events "
+                "then rerun with --core-database-dump and --permission-intel-database-dump"
+            )
+            if missing_database_exports
+            else "; ".join(
+                f"{catalog}: {_format_bytes(int(export.get('size_bytes') or 0))}"
+                for catalog, export in database_exports.items()
+            ),
+        )
+    )
+    portable_workspace, workspace_portability_detail = _workspace_path_portability(root, configured_roots)
+    checks.append(
+        _check(
+            "workspace path portability",
+            "ready" if portable_workspace else "warning",
+            workspace_portability_detail,
         )
     )
     if destination["configured"]:
@@ -612,20 +778,37 @@ def build_migration_readiness_report(
         )
     )
     alias_issues = sum(int(dynamic_aliases.get(name) or 0) for name in ("missing", "stale", "conflicts", "orphaned"))
+    absolute_aliases = int(dynamic_aliases.get("absolute_targets") or 0)
     checks.append(
         _check(
             "dynamic compatibility aliases",
-            "warning" if not dynamic_aliases.get("available") or alias_issues else "ready",
+            "warning" if not dynamic_aliases.get("available") or alias_issues or absolute_aliases else "ready",
             str(dynamic_aliases.get("detail") or "alias inspection unavailable")
             if not dynamic_aliases.get("available")
             else (
                 f"canonical={dynamic_aliases.get('canonical_runs', 0)}, valid={dynamic_aliases.get('valid', 0)}, "
                 f"missing={dynamic_aliases.get('missing', 0)}, stale={dynamic_aliases.get('stale', 0)}, "
-                f"conflicts={dynamic_aliases.get('conflicts', 0)}, orphaned={dynamic_aliases.get('orphaned', 0)}; "
+                f"conflicts={dynamic_aliases.get('conflicts', 0)}, orphaned={dynamic_aliases.get('orphaned', 0)}, "
+                f"absolute_targets={absolute_aliases}; "
                 "run scripts/dynamic/rebuild_dynamic_evidence_aliases.py --apply --prune-orphans after restore"
             )
-            if alias_issues
+            if alias_issues or absolute_aliases
             else f"{dynamic_aliases.get('canonical_runs', 0)} canonical aliases resolve",
+        )
+    )
+    manifests_with_source_paths = int(static_manifest_paths.get("source_path_manifests") or 0)
+    checks.append(
+        _check(
+            "static manifest path portability",
+            "warning" if not static_manifest_paths.get("available") or manifests_with_source_paths else "ready",
+            str(static_manifest_paths.get("detail") or "static manifest inspection unavailable")
+            if not static_manifest_paths.get("available")
+            else (
+                f"{manifests_with_source_paths}/{static_manifest_paths.get('manifests', 0)} static manifests retain "
+                "source-host paths; preserve them as immutable provenance and use transferred evidence roots for navigation"
+            )
+            if manifests_with_source_paths
+            else f"{static_manifest_paths.get('manifests', 0)} static manifests have no source-host path residue",
         )
     )
     plan_ready = bool(handoff.get("ready_for_guided_dataset_run"))
@@ -675,14 +858,16 @@ def build_migration_readiness_report(
         "transfer_roots": roots,
         "transfer_footprint": footprint,
         "destination": destination,
-        "rsync_command_templates": _rsync_command_templates(root, destination_path),
+        "rsync_command_templates": _rsync_command_templates(roots, destination_path),
         "cold_store_rsync_command_templates": _cold_store_rsync_templates(cold_store),
         "environment": environment,
         "database": database,
+        "database_exports": database_exports,
         "permission_intel": permission_intel,
         "database_definers": definers,
         "external_cold_store": cold_store,
         "dynamic_aliases": dynamic_aliases,
+        "static_manifest_paths": static_manifest_paths,
         "tools": _tool_records(tool_resolver),
         "static_health": static_health,
         "static_dynamic_handoff": handoff,
@@ -692,9 +877,9 @@ def build_migration_readiness_report(
         "migration_steps": [
             "Commit and push the checked repository state, then clone the recorded branch/revision on the destination.",
             "Stop active capture/harvest work, then copy data, output, logs, and the external cold APK store with metadata-preserving tooling such as rsync; verify byte totals after transfer.",
-            "Export and restore both MariaDB catalogs separately, including views, triggers, routines, and events; provision or remap the listed source definer accounts.",
+            "Export and restore both MariaDB catalogs separately, including views, triggers, routines, and events; pass both dump paths to this report and provision or remap the listed source definer accounts.",
             "Provision destination configuration securely. Preserve the Mercury mount path, or set SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS and use scripts/device_analysis/retarget_cold_apk_symlinks.py in dry-run mode before applying it.",
-            "Run ./setup.sh (or SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh for capture hosts), then rebuild dynamic aliases with scripts/dynamic/rebuild_dynamic_evidence_aliases.py --apply --prune-orphans.",
+            "Run ./setup.sh (or SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh for capture hosts), then rebuild dynamic aliases with scripts/dynamic/rebuild_dynamic_evidence_aliases.py --apply --prune-orphans. Existing static manifests are immutable provenance; do not rewrite source-host path fields.",
             "Run ./run.sh --new-system-check --require-database, this preflight, and the paper-freeze report again on the destination.",
         ],
     }
@@ -731,6 +916,14 @@ def render_migration_readiness_report(report: Mapping[str, Any]) -> str:
         )
     database = report.get("database") or {}
     lines.append(f"Database: {'reachable' if database.get('reachable') else 'not reachable'} | {database.get('detail', 'unknown')}")
+    database_exports = report.get("database_exports") or {}
+    lines.append(
+        "Database exports: "
+        + "; ".join(
+            f"{catalog}={'ready' if export.get('valid') else 'missing'}"
+            for catalog, export in database_exports.items()
+        )
+    )
     permission_intel = report.get("permission_intel") or {}
     lines.append(
         "Permission Intel: "

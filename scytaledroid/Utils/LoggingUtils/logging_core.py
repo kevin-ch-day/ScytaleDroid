@@ -13,12 +13,14 @@ import json
 import logging
 import logging.handlers
 import os
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+
+from .redaction import redact_log_message, redact_log_value
 
 # Base log directory resolved from configuration so tests can override it.
 LOG_DIR = Path(getattr(app_config, "LOGS_DIR", "logs")).expanduser()
@@ -82,36 +84,7 @@ def _serialize_extra(record: logging.LogRecord) -> dict[str, Any]:
         if key in standard:
             continue
         payload[key] = value
-    return _redact(payload)
-
-
-SENSITIVE_KEYS = {
-    "api_key",
-    "auth",
-    "authorization",
-    "password",
-    "secret",
-    "token",
-}
-
-
-def _redact(value: Any) -> Any:
-    """Recursively redact values for sensitive keys in mapping containers."""
-
-    if isinstance(value, Mapping):
-        redacted: MutableMapping[str, Any] = type(value)()
-        for key, val in value.items():
-            if str(key).lower() in SENSITIVE_KEYS:
-                redacted[key] = "***REDACTED***"
-            else:
-                redacted[key] = _redact(val)
-        return redacted
-    if isinstance(value, (list, tuple, set)):
-        factory = type(value)
-        return factory(_redact(item) for item in value)
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+    return redact_log_value(payload)
 
 
 class JsonFormatter(logging.Formatter):
@@ -122,7 +95,7 @@ class JsonFormatter(logging.Formatter):
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": redact_log_message(record.getMessage()),
         }
 
         extras = _serialize_extra(record)
@@ -130,7 +103,7 @@ class JsonFormatter(logging.Formatter):
             data.update(extras)
 
         if record.exc_info:
-            data["stack"] = self.formatException(record.exc_info)
+            data["stack"] = redact_log_message(self.formatException(record.exc_info))
 
         return json.dumps(data, ensure_ascii=False)
 
@@ -141,7 +114,13 @@ class SafeFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - thin
         if not hasattr(record, "extra_suffix"):
             record.extra_suffix = ""
-        return super().format(record)
+        original_msg, original_args = record.msg, record.args
+        try:
+            record.msg = redact_log_message(record.getMessage())
+            record.args = ()
+            return super().format(record)
+        finally:
+            record.msg, record.args = original_msg, original_args
 
 
 class EnsureExtraSuffixFilter(logging.Filter):
@@ -311,5 +290,7 @@ __all__ = [
     "EnsureExtraSuffixFilter",
     "SafeFormatter",
     "make_rotating_handler",
+    "redact_log_message",
+    "redact_log_value",
     "setup_logger",
 ]

@@ -1,7 +1,13 @@
 
-# Re-export version metadata for callers that treat app_config as the canonical
-# config surface.
-from scytaledroid.Config import version as _version  # noqa: E402
+import os
+
+from scytaledroid.Config import version as _version
+from scytaledroid.Config.environment import load_dotenv
+from scytaledroid.Utils.System.runtime_mode import resolve_runtime_mode
+
+# Load the declared environment file before deriving path-based settings. This
+# keeps CLI startup and direct script execution consistent on a restored host.
+load_dotenv()
 
 APP_NAME = _version.APP_NAME
 APP_VERSION = _version.APP_VERSION
@@ -10,10 +16,10 @@ APP_DESCRIPTION = _version.APP_DESCRIPTION
 APP_AUTHOR = _version.APP_AUTHOR
 GITHUB_REPO = _version.GITHUB_REPO
 
-# Paths
-DATA_DIR   = "data"
-OUTPUT_DIR = "output"
-LOGS_DIR   = "logs"
+# Paths. Defaults retain the repository-local layout used by existing workspaces.
+DATA_DIR = str(os.getenv("SCYTALEDROID_DATA_DIR", "data")).strip() or "data"
+OUTPUT_DIR = str(os.getenv("SCYTALEDROID_OUTPUT_DIR", "output")).strip() or "output"
+LOGS_DIR = str(os.getenv("SCYTALEDROID_LOGS_DIR", "logs")).strip() or "logs"
 STATIC_ANALYSIS_RETENTION_DAYS = 30
 DYNAMIC_MIN_DURATION_S = 120
 DYNAMIC_TARGET_DURATION_S = 180
@@ -21,9 +27,6 @@ DYNAMIC_TARGET_DURATION_S = 180
 # Dynamic dataset QA
 # Default can be overridden at process start via SCYTALEDROID_MIN_PCAP_BYTES.
 # Env is read at import time (entrypoint default) and must not be read mid-run.
-import os  # noqa: E402
-
-from scytaledroid.Utils.System.runtime_mode import resolve_runtime_mode  # noqa: E402
 
 DYNAMIC_EVIDENCE_ROOT = str(
     os.getenv("SCYTALEDROID_DYNAMIC_EVIDENCE_ROOT", f"{DATA_DIR}/evidence/dynamic")

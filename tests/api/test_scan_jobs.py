@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,9 @@ def _enable_api_test_bypass(monkeypatch) -> None:
     monkeypatch.setenv("SCYTALEDROID_ENV", "test")
     monkeypatch.setenv("SCYTALEDROID_API_HOST", "127.0.0.1")
     monkeypatch.delenv("SCYTALEDROID_API_KEY", raising=False)
+    monkeypatch.delenv("SCYTALEDROID_API_TLS_CERTFILE", raising=False)
+    monkeypatch.delenv("SCYTALEDROID_API_TLS_KEYFILE", raising=False)
+    monkeypatch.delenv("SCYTALEDROID_API_TLS_TERMINATED", raising=False)
     with api_service._jobs_lock:
         api_service._jobs.clear()
 
@@ -34,6 +38,14 @@ def _zip_without_manifest() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("classes.dex", b"dex\n035\0")
+    return buf.getvalue()
+
+
+def _large_member_apk_bytes() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("AndroidManifest.xml", b"<manifest package='com.example.upload' />")
+        archive.writestr("assets/large.bin", os.urandom(2 * 1024 * 1024))
     return buf.getvalue()
 
 
@@ -297,6 +309,32 @@ def test_api_auth_bypass_rejected_for_unsafe_bind(monkeypatch) -> None:
         api_service.build_api_app()
 
 
+def test_remote_api_bind_requires_tls_configuration(monkeypatch) -> None:
+    monkeypatch.delenv("SCYTALEDROID_API_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("SCYTALEDROID_API_KEY", "unit-test-secret")
+    monkeypatch.setenv("SCYTALEDROID_API_HOST", "0.0.0.0")
+    monkeypatch.delenv("SCYTALEDROID_API_TLS_CERTFILE", raising=False)
+    monkeypatch.delenv("SCYTALEDROID_API_TLS_KEYFILE", raising=False)
+    monkeypatch.delenv("SCYTALEDROID_API_TLS_TERMINATED", raising=False)
+
+    with pytest.raises(api_service.ApiTransportConfigError, match="non-loopback API bind"):
+        api_service.build_api_app()
+
+
+def test_remote_api_bind_allows_explicit_tls_terminating_proxy(monkeypatch) -> None:
+    testclient = require_fastapi_testclient()
+    monkeypatch.delenv("SCYTALEDROID_API_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("SCYTALEDROID_API_KEY", "unit-test-secret")
+    monkeypatch.setenv("SCYTALEDROID_API_HOST", "0.0.0.0")
+    monkeypatch.setenv("SCYTALEDROID_API_TLS_TERMINATED", "1")
+
+    app = api_service.build_api_app()
+    client = testclient.TestClient(app)
+
+    assert app.state.scytaledroid_transport_mode == "reverse_proxy_tls"
+    assert client.get("/jobs", headers={"X-API-Key": "unit-test-secret"}).status_code == 200
+
+
 def test_upload_rejects_wrong_extension(monkeypatch, tmp_path: Path) -> None:
     testclient = require_fastapi_testclient()
     _enable_api_test_bypass(monkeypatch)
@@ -397,6 +435,61 @@ def test_upload_rejects_oversized_payload(monkeypatch, tmp_path: Path) -> None:
     assert response.status_code == 413
     assert response.json()["detail"]["reason_code"] == api_service.UPLOAD_REJECT_OVERSIZE
     assert not list((tmp_path / "store").glob("**/*"))
+
+
+def test_upload_rejects_archive_over_policy_limit(monkeypatch, tmp_path: Path) -> None:
+    testclient = require_fastapi_testclient()
+    _enable_api_test_bypass(monkeypatch)
+    monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SCYTALEDROID_API_MAX_APK_ARCHIVE_MEMBERS", "1")
+    client = testclient.TestClient(api_service.build_api_app())
+
+    response = client.post(
+        "/upload",
+        files={"file": ("many-members.apk", _valid_apk_bytes(), "application/vnd.android.package-archive")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["reason_code"] == api_service.UPLOAD_REJECT_ARCHIVE_LIMIT
+    assert not list((tmp_path / "store").glob("**/*"))
+
+
+def test_upload_rejects_oversized_archive_member(monkeypatch, tmp_path: Path) -> None:
+    testclient = require_fastapi_testclient()
+    _enable_api_test_bypass(monkeypatch)
+    monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SCYTALEDROID_API_MAX_APK_MEMBER_UNCOMPRESSED_MB", "1")
+    client = testclient.TestClient(api_service.build_api_app())
+
+    response = client.post(
+        "/upload",
+        files={"file": ("large-member.apk", _large_member_apk_bytes(), "application/vnd.android.package-archive")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["reason_code"] == api_service.UPLOAD_REJECT_ARCHIVE_LIMIT
+    assert not list((tmp_path / "store").glob("**/*"))
+
+
+def test_scan_rejects_request_when_active_capacity_is_reached(monkeypatch, tmp_path: Path) -> None:
+    testclient = require_fastapi_testclient()
+    _enable_api_test_bypass(monkeypatch)
+    monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SCYTALEDROID_API_MAX_ACTIVE_SCANS", "1")
+    apk_path = tmp_path / "store" / "apk" / "sha256" / "aa" / "queued.apk"
+    apk_path.parent.mkdir(parents=True, exist_ok=True)
+    apk_path.write_bytes(b"apk")
+    monkeypatch.setattr(api_service, "_artifact_group_from_path", lambda _path: _make_group(apk_path, "com.example.queued"))
+    monkeypatch.setattr(api_service, "_start_scan_worker", lambda *_args, **_kwargs: None)
+    client = testclient.TestClient(api_service.build_api_app())
+    payload = {"apk_path": str(apk_path), "profile": "full"}
+
+    assert client.post("/scan", json=payload).status_code == 200
+    response = client.post("/scan", json=payload)
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "30"
+    assert response.json()["detail"]["reason_code"] == api_service.SCAN_REJECT_CAPACITY
 
 
 def test_upload_ignores_path_traversal_filename(monkeypatch, tmp_path: Path) -> None:

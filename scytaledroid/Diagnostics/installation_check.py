@@ -8,10 +8,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from scytaledroid.Config import app_config
+from scytaledroid.Config.environment import resolve_workspace_path
 from scytaledroid.Diagnostics.deployment_check import CheckLine, _database_check, _python_check
 
 REQUIRED_SOURCE_PATHS = ("requirements.lock", "scytaledroid", "setup.sh", "run.sh")
-RESTORE_ROOTS = ("data/store/apk", "data/evidence/dynamic")
 RUNTIME_TOOLS = {
     "adb": "Android device access",
     "tshark": "PCAP analysis",
@@ -44,11 +45,21 @@ def describe_installation_state(repo_root: Path) -> InstallationState:
     return InstallationState("ready", "run --new-system-check after host changes")
 
 
+def _workspace_paths(repo_root: Path) -> dict[str, Path]:
+    data_dir = resolve_workspace_path(app_config.DATA_DIR, repo_root=repo_root)
+    output_dir = resolve_workspace_path(app_config.OUTPUT_DIR, repo_root=repo_root)
+    return {
+        "canonical APK store": data_dir / "store" / "apk",
+        "dynamic evidence": resolve_workspace_path(app_config.DYNAMIC_EVIDENCE_ROOT, repo_root=repo_root),
+        "static evidence": repo_root / "evidence" / "static_runs",
+        "dynamic compatibility aliases": output_dir / "evidence" / "dynamic",
+    }
+
+
 def _restore_roots_populated(repo_root: Path) -> bool:
     """Require entries, not merely setup-created empty directories."""
 
-    for relative in RESTORE_ROOTS:
-        root = repo_root / relative
+    for root in _workspace_paths(repo_root).values():
         try:
             if not root.is_dir() or not any(root.iterdir()):
                 return False
@@ -94,14 +105,11 @@ def _runtime_tool_checks(tool_resolver: Callable[[str], str | None]) -> list[Che
 
 
 def _restore_root_check(repo_root: Path) -> CheckLine:
-    populated = [
-        relative
-        for relative in RESTORE_ROOTS
-        if (repo_root / relative).is_dir() and any((repo_root / relative).iterdir())
-    ]
-    if len(populated) == len(RESTORE_ROOTS):
-        return CheckLine("ok", "workspace", "canonical APK and dynamic-evidence roots populated")
-    missing = [relative for relative in RESTORE_ROOTS if relative not in populated]
+    restore_roots = _workspace_paths(repo_root)
+    populated = [name for name, root in restore_roots.items() if root.is_dir() and any(root.iterdir())]
+    if len(populated) == len(restore_roots):
+        return CheckLine("ok", "workspace", "configured APK, static, and dynamic evidence roots populated")
+    missing = [name for name in restore_roots if name not in populated]
     return CheckLine(
         "warn",
         "workspace",
@@ -112,7 +120,7 @@ def _restore_root_check(repo_root: Path) -> CheckLine:
 def _cold_apk_store_check(repo_root: Path) -> CheckLine:
     """Verify restored APK symlinks without re-hashing the full APK corpus."""
 
-    sha_root = repo_root / "data" / "store" / "apk" / "sha256"
+    sha_root = _workspace_paths(repo_root)["canonical APK store"] / "sha256"
     if not sha_root.is_dir():
         return CheckLine("warn", "cold APK store", "canonical APK store not restored yet")
 
@@ -145,8 +153,8 @@ def _dynamic_alias_check(repo_root: Path) -> CheckLine:
         from scytaledroid.DynamicAnalysis.utils.path_utils import inspect_legacy_dynamic_aliases
 
         summary = inspect_legacy_dynamic_aliases(
-            canonical_root=repo_root / "data" / "evidence" / "dynamic",
-            legacy_root=repo_root / "output" / "evidence" / "dynamic",
+            canonical_root=_workspace_paths(repo_root)["dynamic evidence"],
+            legacy_root=_workspace_paths(repo_root)["dynamic compatibility aliases"],
         )
     except OSError as exc:
         return CheckLine("warn", "dynamic aliases", f"unable to inspect compatibility aliases ({type(exc).__name__})")
@@ -154,9 +162,10 @@ def _dynamic_alias_check(repo_root: Path) -> CheckLine:
     issues = summary.missing + summary.stale + summary.conflicts + summary.orphaned
     detail = (
         f"canonical={summary.canonical_runs}, valid={summary.valid}, missing={summary.missing}, "
-        f"stale={summary.stale}, conflicts={summary.conflicts}, orphaned={summary.orphaned}"
+        f"stale={summary.stale}, conflicts={summary.conflicts}, orphaned={summary.orphaned}, "
+        f"absolute_targets={summary.absolute_targets}"
     )
-    if issues:
+    if issues or summary.absolute_targets:
         return CheckLine(
             "warn",
             "dynamic aliases",

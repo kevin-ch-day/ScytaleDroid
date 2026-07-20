@@ -11,6 +11,7 @@ import uuid
 import zipfile
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from hmac import compare_digest
 from ipaddress import ip_address
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -45,10 +46,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 MAX_LIST_LIMIT = 200
 MAX_JOB_HISTORY = 200
 DEFAULT_MAX_UPLOAD_MB = 200
+DEFAULT_MAX_APK_ARCHIVE_MEMBERS = 20_000
+DEFAULT_MAX_APK_UNCOMPRESSED_MB = 1_024
+DEFAULT_MAX_APK_MEMBER_UNCOMPRESSED_MB = 512
+DEFAULT_MAX_APK_COMPRESSION_RATIO = 100
+DEFAULT_MAX_ACTIVE_SCAN_JOBS = 2
 API_KEY_PLACEHOLDER = "change-me"
 API_AUTH_DISABLED_ENV = "SCYTALEDROID_API_AUTH_DISABLED"
 API_ENV_ENV = "SCYTALEDROID_ENV"
 API_AUTH_BYPASS_ENVS = {"test", "development"}
+API_TLS_CERTFILE_ENV = "SCYTALEDROID_API_TLS_CERTFILE"
+API_TLS_KEYFILE_ENV = "SCYTALEDROID_API_TLS_KEYFILE"
+API_TLS_TERMINATED_ENV = "SCYTALEDROID_API_TLS_TERMINATED"
 APK_UPLOAD_SUFFIX = ".apk"
 APK_MANIFEST_NAME = "AndroidManifest.xml"
 UPLOAD_REJECT_EXTENSION = "invalid_extension"
@@ -56,7 +65,9 @@ UPLOAD_REJECT_NOT_ZIP = "invalid_apk_zip"
 UPLOAD_REJECT_MANIFEST_MISSING = "android_manifest_missing"
 UPLOAD_REJECT_CORRUPT_ZIP = "corrupt_apk_zip"
 UPLOAD_REJECT_OVERSIZE = "upload_too_large"
+UPLOAD_REJECT_ARCHIVE_LIMIT = "apk_archive_policy_limit"
 UPLOAD_REJECT_METADATA = "metadata_extraction_failed"
+SCAN_REJECT_CAPACITY = "scan_capacity_reached"
 
 
 @dataclass
@@ -85,6 +96,10 @@ class ApiAuthConfigError(RuntimeError):
     """Raised when API authentication configuration is unsafe."""
 
 
+class ApiTransportConfigError(RuntimeError):
+    """Raised when a network API bind has no explicit transport protection."""
+
+
 class UploadValidationError(ValueError):
     """Stable API upload rejection with a machine-readable reason code."""
 
@@ -100,6 +115,32 @@ def _record_job(job: JobRecord) -> None:
         if len(_jobs) > MAX_JOB_HISTORY:
             for stale in sorted(_jobs.values(), key=lambda entry: entry.created_at)[: len(_jobs) - MAX_JOB_HISTORY]:
                 _jobs.pop(stale.job_id, None)
+
+
+def _resolve_positive_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
+
+def _resolve_max_active_scan_jobs() -> int:
+    return _resolve_positive_int("SCYTALEDROID_API_MAX_ACTIVE_SCANS", DEFAULT_MAX_ACTIVE_SCAN_JOBS)
+
+
+def _reserve_scan_job(job: JobRecord) -> bool:
+    """Atomically reserve one bounded active scan slot for an API request."""
+
+    with _jobs_lock:
+        active = sum(entry.state in {"QUEUED", "RUNNING"} for entry in _jobs.values())
+        if active >= _resolve_max_active_scan_jobs():
+            return False
+        _jobs[job.job_id] = job
+        if len(_jobs) > MAX_JOB_HISTORY:
+            for stale in sorted(_jobs.values(), key=lambda entry: entry.created_at)[: len(_jobs) - MAX_JOB_HISTORY]:
+                _jobs.pop(stale.job_id, None)
+    return True
 
 
 def _update_job(
@@ -262,6 +303,33 @@ def _validate_upload_filename(filename: str | None) -> str:
 def _validate_apk_container(path: Path) -> None:
     try:
         with zipfile.ZipFile(path) as archive:
+            members = [entry for entry in archive.infolist() if not entry.is_dir()]
+            if len(members) > _resolve_max_apk_archive_members():
+                raise UploadValidationError(
+                    UPLOAD_REJECT_ARCHIVE_LIMIT,
+                    "APK archive has too many members for the API upload policy.",
+                )
+            max_member_bytes = _resolve_max_apk_member_uncompressed_bytes()
+            if any(entry.file_size > max_member_bytes for entry in members):
+                raise UploadValidationError(
+                    UPLOAD_REJECT_ARCHIVE_LIMIT,
+                    "APK archive member expands beyond the API upload policy.",
+                )
+            total_uncompressed = sum(entry.file_size for entry in members)
+            total_compressed = sum(entry.compress_size for entry in members)
+            if total_uncompressed > _resolve_max_apk_uncompressed_bytes():
+                raise UploadValidationError(
+                    UPLOAD_REJECT_ARCHIVE_LIMIT,
+                    "APK archive expands beyond the API upload policy.",
+                )
+            max_ratio = _resolve_max_apk_compression_ratio()
+            if total_uncompressed and (
+                not total_compressed or total_uncompressed / total_compressed > max_ratio
+            ):
+                raise UploadValidationError(
+                    UPLOAD_REJECT_ARCHIVE_LIMIT,
+                    "APK archive compression ratio exceeds the API upload policy.",
+                )
             try:
                 bad_member = archive.testzip()
             except RuntimeError as exc:
@@ -368,6 +436,28 @@ def _api_auth_disabled() -> bool:
     return _env_flag(API_AUTH_DISABLED_ENV)
 
 
+def validate_api_transport_config(*, bind_host: str | None = None) -> str:
+    """Return the transport mode or reject a remotely exposed plaintext API."""
+
+    if _is_loopback_host(bind_host):
+        return "loopback"
+    certfile = os.getenv(API_TLS_CERTFILE_ENV, "").strip()
+    keyfile = os.getenv(API_TLS_KEYFILE_ENV, "").strip()
+    if bool(certfile) != bool(keyfile):
+        raise ApiTransportConfigError(
+            f"{API_TLS_CERTFILE_ENV} and {API_TLS_KEYFILE_ENV} must be configured together."
+        )
+    if certfile and keyfile:
+        return "direct_tls"
+    if _env_flag(API_TLS_TERMINATED_ENV):
+        return "reverse_proxy_tls"
+    raise ApiTransportConfigError(
+        "Refusing non-loopback API bind without TLS. Configure direct TLS with "
+        f"{API_TLS_CERTFILE_ENV}/{API_TLS_KEYFILE_ENV}, or set "
+        f"{API_TLS_TERMINATED_ENV}=1 only behind a TLS-terminating reverse proxy."
+    )
+
+
 def validate_api_auth_config(*, bind_host: str | None = None) -> bool:
     """Validate API authentication policy and return True when auth is disabled intentionally."""
 
@@ -409,7 +499,7 @@ def _require_api_key(request: Any, *, auth_disabled: bool = False) -> None:
         token = auth_header.split(" ", 1)[1].strip()
     if not token:
         token = request.headers.get("X-API-Key", "").strip()
-    if token != api_key:
+    if not compare_digest(token, api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -420,6 +510,33 @@ def _resolve_max_upload_bytes() -> int:
     except ValueError:
         mb = DEFAULT_MAX_UPLOAD_MB
     return mb * 1024 * 1024
+
+
+def _resolve_max_apk_archive_members() -> int:
+    return _resolve_positive_int(
+        "SCYTALEDROID_API_MAX_APK_ARCHIVE_MEMBERS", DEFAULT_MAX_APK_ARCHIVE_MEMBERS
+    )
+
+
+def _resolve_max_apk_uncompressed_bytes() -> int:
+    mb = _resolve_positive_int(
+        "SCYTALEDROID_API_MAX_APK_UNCOMPRESSED_MB", DEFAULT_MAX_APK_UNCOMPRESSED_MB
+    )
+    return mb * 1024 * 1024
+
+
+def _resolve_max_apk_member_uncompressed_bytes() -> int:
+    mb = _resolve_positive_int(
+        "SCYTALEDROID_API_MAX_APK_MEMBER_UNCOMPRESSED_MB",
+        DEFAULT_MAX_APK_MEMBER_UNCOMPRESSED_MB,
+    )
+    return mb * 1024 * 1024
+
+
+def _resolve_max_apk_compression_ratio() -> int:
+    return _resolve_positive_int(
+        "SCYTALEDROID_API_MAX_APK_COMPRESSION_RATIO", DEFAULT_MAX_APK_COMPRESSION_RATIO
+    )
 
 
 def _resolve_allowed_apk_bases() -> tuple[Path, ...]:
@@ -473,6 +590,7 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
     if FastAPI is None or File is None or JSONResponse is None:
         raise RuntimeError("FastAPI dependencies are unavailable. Install API extras to use the server.")
     auth_disabled = validate_api_auth_config(bind_host=bind_host)
+    transport_mode = validate_api_transport_config(bind_host=bind_host)
 
     app = FastAPI(title="ScytaleDroid API", version=app_config.APP_VERSION)
 
@@ -557,6 +675,7 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
         }
 
     app.state.scytaledroid_auth_disabled = auth_disabled
+    app.state.scytaledroid_transport_mode = transport_mode
 
     @app.post("/scan")
     def scan_apk(
@@ -584,16 +703,28 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
             session_stamp=session_stamp,
             package_name=group.package_name,
         )
-        _record_job(record)
+        if not _reserve_scan_job(record):
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "reason_code": SCAN_REJECT_CAPACITY,
+                    "message": "API scan capacity is full; retry after an active scan completes.",
+                },
+                headers={"Retry-After": "30"},
+            )
 
-        _start_scan_worker(
-            job_id,
-            apk_path,
-            session_stamp,
-            payload.profile,
-            scope_label,
-            payload.allow_session_reuse,
-        )
+        try:
+            _start_scan_worker(
+                job_id,
+                apk_path,
+                session_stamp,
+                payload.profile,
+                scope_label,
+                payload.allow_session_reuse,
+            )
+        except Exception as exc:
+            _update_job(job_id, state="FAILED", detail="Unable to start scan worker.")
+            raise HTTPException(status_code=503, detail="Unable to start scan worker.") from exc
 
         return JSONResponse(
             {

@@ -251,8 +251,8 @@ def test_build_dynamic_plan_domain_sources_do_not_emit_raw_string_values() -> No
                 "samples": {
                     "api_keys": [
                         {
-                            "value": "AIzaSensitiveRawValueShouldNotSurface",
-                            "value_masked": "AIzaSens…",
+                            "value": "EXAMPLE_GOOGLE_API_KEY_NOT_LIVE",
+                            "value_masked": "EXAMPLE_GOOGLE…",
                             "src": "classes.dex",
                             "root_domain": "example.com",
                             "posture": "actionable",

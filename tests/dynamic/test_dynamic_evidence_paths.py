@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -76,3 +77,4 @@ def test_ensure_legacy_dynamic_symlink_for_canonical_run(monkeypatch, tmp_path: 
     assert link == legacy_root / RUN_ID
     assert link.is_symlink()
     assert link.resolve() == run_dir
+    assert not Path(os.readlink(link)).is_absolute()

@@ -525,8 +525,8 @@ def test_overlay_latest_static_reanalysis_uses_current_static_report_without_mut
                 "samples": {
                     "api_keys": [
                         {
-                            "value": "AIzaSensitiveRawValueShouldNotSurface",
-                            "value_masked": "AIzaSens…",
+                            "value": "EXAMPLE_GOOGLE_API_KEY_NOT_LIVE",
+                            "value_masked": "EXAMPLE_GOOGLE…",
                             "src": "classes.dex",
                             "root_domain": "auth.example.com",
                             "source_type": "dex",

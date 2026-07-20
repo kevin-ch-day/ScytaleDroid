@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_launch_scripts_have_valid_bash_syntax() -> None:
-    for script in ("run.sh", "setup.sh"):
+    for script in ("run.sh", "run_mariadb.sh", "setup.sh"):
         result = subprocess.run(
             ["bash", "-n", str(REPO_ROOT / script)],
             capture_output=True,
@@ -24,6 +24,10 @@ def test_setup_allows_headless_or_android_provisioned_modes() -> None:
 
     assert 'ANDROID_SETUP_MODE="${SCYTALEDROID_SETUP_ANDROID:-auto}"' in source
     assert 'SCYTALEDROID_SETUP_ANDROID=1' in source
+    assert "WORKSPACE_DIRS" in source
+    assert "app_config.DYNAMIC_EVIDENCE_ROOT" in source
+    assert "Could not resolve configured workspace directories" in source
+    assert 'PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"' in source
 
 
 def test_run_script_explains_required_setup_for_normal_launches() -> None:
@@ -32,6 +36,35 @@ def test_run_script_explains_required_setup_for_normal_launches() -> None:
     assert 'SETUP_MARKER="$ROOT_DIR/.setup/requirements.sha256"' in source
     assert "ScytaleDroid has not been set up on this host." in source
     assert "--new-system-check" in source
+    assert '[[ ! -x "$ROOT_DIR/.venv/bin/python" ]] || [[ ! -s "$SETUP_MARKER" ]]' in source
+
+
+def test_mariadb_launcher_does_not_source_environment_files() -> None:
+    source = (REPO_ROOT / "run_mariadb.sh").read_text(encoding="utf-8")
+
+    assert 'source "$ENV_FILE"' not in source
+    assert "Treat .env as data, not executable shell." in source
+
+
+def test_mariadb_launcher_treats_environment_file_as_data(tmp_path: Path) -> None:
+    sentinel = tmp_path / "executed"
+    env_file = tmp_path / "migration.env"
+    env_file.write_text(
+        f"UNSAFE=$(touch {sentinel})\nSCYTALEDROID_DB_NAME=ignored\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [str(REPO_ROOT / "run_mariadb.sh"), "mysql://user:pass@localhost:3306/test", "--help"],
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "SCYTALEDROID_ENV_FILE": str(env_file)},
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not sentinel.exists()
 
 
 def test_run_script_is_cwd_independent_and_exposes_new_system_check(tmp_path: Path) -> None:

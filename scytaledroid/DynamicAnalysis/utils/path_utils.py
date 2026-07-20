@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -19,6 +20,7 @@ class LegacyDynamicAliasSummary:
     stale: int
     conflicts: int
     orphaned: int
+    absolute_targets: int
 
 
 @dataclass(frozen=True)
@@ -111,7 +113,8 @@ def ensure_legacy_dynamic_symlink(run_dir: Path) -> Path | None:
         link_path = legacy_root / run_id
         if link_path.exists() or link_path.is_symlink():
             return link_path
-        link_path.symlink_to(run_dir.resolve(), target_is_directory=True)
+        # Relative aliases remain valid when data/ and output/ move together.
+        link_path.symlink_to(_relative_alias_target(run_dir, link_path.parent), target_is_directory=True)
         return link_path
     except OSError:
         return None
@@ -127,17 +130,20 @@ def inspect_legacy_dynamic_aliases(
     canonical = canonical_root or dynamic_evidence_root()
     legacy = legacy_root or legacy_dynamic_evidence_root()
     canonical_runs = {path.name: path for path in canonical.iterdir() if path.is_dir()} if canonical.is_dir() else {}
-    valid = missing = stale = conflicts = 0
+    valid = missing = stale = conflicts = absolute_targets = 0
     for run_id, run_dir in canonical_runs.items():
         alias = legacy / run_id
         if not alias.exists() and not alias.is_symlink():
             missing += 1
         elif not alias.is_symlink():
             conflicts += 1
-        elif alias.resolve(strict=False) == run_dir.resolve():
-            valid += 1
         else:
-            stale += 1
+            if os.path.isabs(os.readlink(alias)):
+                absolute_targets += 1
+            if alias.resolve(strict=False) == run_dir.resolve():
+                valid += 1
+            else:
+                stale += 1
 
     orphaned = 0
     if legacy.is_dir():
@@ -151,6 +157,7 @@ def inspect_legacy_dynamic_aliases(
         stale=stale,
         conflicts=conflicts,
         orphaned=orphaned,
+        absolute_targets=absolute_targets,
     )
 
 
@@ -179,18 +186,20 @@ def rebuild_legacy_dynamic_aliases(
     for run_dir in sorted(canonical_runs.values(), key=lambda path: path.name):
         alias = legacy / run_dir.name
         expected = run_dir.resolve()
-        if alias.is_symlink() and alias.resolve(strict=False) == expected:
+        alias_is_absolute = alias.is_symlink() and os.path.isabs(os.readlink(alias))
+        alias_matches_expected = alias.is_symlink() and alias.resolve(strict=False) == expected
+        if alias_matches_expected and not alias_is_absolute:
             continue
         if alias.exists() and not alias.is_symlink():
             repairs.append(LegacyDynamicAliasRepair(run_dir.name, "conflict", "existing non-symlink left unchanged"))
             continue
-        action = "create" if not alias.is_symlink() else "replace-stale"
+        action = "create" if not alias.is_symlink() else "replace-absolute" if alias_matches_expected else "replace-stale"
         repairs.append(LegacyDynamicAliasRepair(run_dir.name, action, str(expected)))
         if apply:
             legacy.mkdir(parents=True, exist_ok=True)
             if alias.is_symlink():
                 alias.unlink()
-            alias.symlink_to(expected, target_is_directory=True)
+            alias.symlink_to(_relative_alias_target(expected, alias.parent), target_is_directory=True)
 
     if prune_orphans and legacy.is_dir():
         for alias in sorted(legacy.iterdir(), key=lambda path: path.name):
@@ -209,6 +218,12 @@ def _is_run_dir_under(path: Path, root: Path) -> bool:
     except OSError:
         return False
     return root_resolved == resolved or root_resolved in resolved.parents
+
+
+def _relative_alias_target(target: Path, link_parent: Path) -> Path:
+    """Return a portable symlink target relative to its compatibility directory."""
+
+    return Path(os.path.relpath(target.resolve(), start=link_parent.resolve()))
 
 
 def resolve_evidence_path(evidence_path: str | None) -> Path | None:

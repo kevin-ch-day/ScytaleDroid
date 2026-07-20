@@ -6,10 +6,18 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-from .service import API_KEY_PLACEHOLDER, build_api_app, validate_api_auth_config
+from .service import (
+    API_KEY_PLACEHOLDER,
+    API_TLS_CERTFILE_ENV,
+    API_TLS_KEYFILE_ENV,
+    build_api_app,
+    validate_api_auth_config,
+    validate_api_transport_config,
+)
 
 
 @dataclass
@@ -55,6 +63,19 @@ def _require_api_key_configured() -> str:
     if api_key.lower() == API_KEY_PLACEHOLDER:
         raise RuntimeError("SCYTALEDROID_API_KEY uses the documented placeholder value; generate a unique secret.")
     return api_key
+
+
+def _resolve_tls_options(bind_host: str) -> dict[str, str]:
+    """Return direct-TLS Uvicorn options after validating the configured transport."""
+
+    if validate_api_transport_config(bind_host=bind_host) != "direct_tls":
+        return {}
+    certfile = Path(os.environ[API_TLS_CERTFILE_ENV]).expanduser()
+    keyfile = Path(os.environ[API_TLS_KEYFILE_ENV]).expanduser()
+    missing = [str(path) for path in (certfile, keyfile) if not path.is_file()]
+    if missing:
+        raise RuntimeError(f"Configured API TLS file(s) not found: {', '.join(missing)}")
+    return {"ssl_certfile": str(certfile), "ssl_keyfile": str(keyfile)}
 
 
 def api_status() -> ApiRuntimeState:
@@ -111,6 +132,12 @@ def start_api_server(*, force: bool = False) -> ApiRuntimeState:
 
     _api_host = _resolve_host()
     _api_port = _resolve_port()
+    try:
+        tls_options = _resolve_tls_options(_api_host)
+    except RuntimeError as exc:
+        _api_error = str(exc)
+        log.error(str(exc), category="api")
+        raise
 
     try:
         app = build_api_app(bind_host=_api_host)
@@ -129,7 +156,7 @@ def start_api_server(*, force: bool = False) -> ApiRuntimeState:
         )
 
     _api_error = None
-    config = uvicorn.Config(app, host=_api_host, port=_api_port, log_level="warning")
+    config = uvicorn.Config(app, host=_api_host, port=_api_port, log_level="warning", **tls_options)
     server = uvicorn.Server(config)
     _api_server = server
 

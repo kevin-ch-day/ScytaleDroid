@@ -47,6 +47,24 @@ def test_require_api_key_configured_raises_when_missing(monkeypatch: pytest.Monk
         runtime._require_api_key_configured()
 
 
+def test_direct_api_tls_requires_existing_cert_and_key_files(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    certfile = tmp_path / "api.crt"
+    keyfile = tmp_path / "api.key"
+    certfile.write_text("certificate", encoding="utf-8")
+    keyfile.write_text("key", encoding="utf-8")
+    monkeypatch.setenv("SCYTALEDROID_API_TLS_CERTFILE", str(certfile))
+    monkeypatch.setenv("SCYTALEDROID_API_TLS_KEYFILE", str(keyfile))
+
+    assert runtime._resolve_tls_options("0.0.0.0") == {
+        "ssl_certfile": str(certfile),
+        "ssl_keyfile": str(keyfile),
+    }
+
+    keyfile.unlink()
+    with pytest.raises(RuntimeError, match="TLS file"):
+        runtime._resolve_tls_options("0.0.0.0")
+
+
 # --- toolchain versions ---
 
 

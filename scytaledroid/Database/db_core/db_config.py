@@ -16,39 +16,9 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from scytaledroid.Config import app_config
+from scytaledroid.Config.environment import load_dotenv as _load_dotenv
 
-_BASE_DIR = Path(__file__).resolve().parents[3]
-_DOTENV_DEFAULT = _BASE_DIR / ".env"
 _PRIMARY_DB_ROOT = "SCYTALEDROID_DB"
-
-
-def _load_dotenv() -> bool:
-    """Lightweight .env loader (no external dependency)."""
-
-    if os.environ.get("SCYTALEDROID_NO_DOTENV") == "1":
-        return False
-    # Avoid pulling production/dev settings into unit tests.
-    if "PYTEST_CURRENT_TEST" in os.environ or any("pytest" in arg for arg in sys.argv[:1]):
-        return False
-    env_path = Path(os.environ.get("SCYTALEDROID_ENV_FILE") or _DOTENV_DEFAULT)
-    if not env_path.exists():
-        return False
-    loaded_any = False
-    try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, value = stripped.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
-                loaded_any = True
-    except Exception:
-        # Silent failure to avoid blocking startup if .env unreadable.
-        return False
-    return loaded_any
 
 
 def _default_sqlite_path() -> Path:

@@ -14,7 +14,7 @@ import re
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterable, Iterator, Mapping, MutableMapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +23,7 @@ from typing import Any
 import pymysql
 from pymysql import err
 from pymysql.cursors import Cursor, DictCursor
+from scytaledroid.Utils.LoggingUtils.redaction import redact_log_value
 
 from . import db_config
 from .db_config import DB_CONFIG
@@ -44,8 +45,6 @@ NAMED_PARAM_PATTERN = re.compile(r"%\(([^)]+)\)s")
 # codes seen in long-running static persistence sessions.
 TRANSIENT_ERRNOS = {1205, 1213, 2006, 2013, 2014}
 MAX_RETRIES = 3
-
-SENSITIVE_KEYS = {"api_key", "auth", "authorization", "password", "secret", "token"}
 
 _ENV_LOGGED = False
 
@@ -77,17 +76,7 @@ class _NormalisedStatement:
 
 
 def _redact(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        redacted: MutableMapping[str, Any] = type(value)()
-        for key, val in value.items():
-            if str(key).lower() in SENSITIVE_KEYS:
-                redacted[key] = "***"
-            else:
-                redacted[key] = _redact(val)
-        return redacted
-    if isinstance(value, (list, tuple)):
-        return type(value)(_redact(v) for v in value)
-    return value
+    return redact_log_value(value)
 
 
 def _sql_log_fields(sql: str) -> dict[str, str]:

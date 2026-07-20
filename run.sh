@@ -13,7 +13,7 @@ for argument in "$@"; do
       ;;
   esac
 done
-if [[ "$setup_bypass" -eq 0 ]] && [[ ! -x "$ROOT_DIR/.venv/bin/python" ]] && [[ ! -s "$SETUP_MARKER" ]]; then
+if [[ "$setup_bypass" -eq 0 ]] && { [[ ! -x "$ROOT_DIR/.venv/bin/python" ]] || [[ ! -s "$SETUP_MARKER" ]]; }; then
   echo "Error: ScytaleDroid has not been set up on this host." >&2
   echo "       Run ./setup.sh first, then create .env from .env.example." >&2
   echo "       For capture hosts: SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh" >&2

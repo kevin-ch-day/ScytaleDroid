@@ -9,6 +9,8 @@ Examples:
   PYTHONPATH=. python scripts/operator/report_system_migration_readiness.py
   PYTHONPATH=. python scripts/operator/report_system_migration_readiness.py --json
   PYTHONPATH=. python scripts/operator/report_system_migration_readiness.py --destination-root /mnt/NEW_SYSTEM
+  PYTHONPATH=. python scripts/operator/report_system_migration_readiness.py \
+    --core-database-dump /secure/core.sql.zst --permission-intel-database-dump /secure/permission_intel.sql.zst
   PYTHONPATH=. python scripts/operator/report_system_migration_readiness.py --output output/audit/migration/readiness.json
 """
 
@@ -32,6 +34,16 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional mounted destination root for read-only capacity validation and rsync command templates.",
     )
     parser.add_argument("--output", type=Path, help="Optional explicit JSON output path; no file is written by default.")
+    parser.add_argument(
+        "--core-database-dump",
+        type=Path,
+        help="Read-only path check for the full core-database dump required for migration.",
+    )
+    parser.add_argument(
+        "--permission-intel-database-dump",
+        type=Path,
+        help="Read-only path check for the full Permission Intel database dump required for migration.",
+    )
     return parser
 
 
@@ -44,7 +56,12 @@ def main(argv: list[str] | None = None) -> int:
         render_migration_readiness_report,
     )
 
-    report = build_migration_readiness_report(args.repo_root, destination_root=args.destination_root)
+    report = build_migration_readiness_report(
+        args.repo_root,
+        destination_root=args.destination_root,
+        core_database_dump=args.core_database_dump,
+        permission_intel_database_dump=args.permission_intel_database_dump,
+    )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")

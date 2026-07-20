@@ -55,8 +55,7 @@ def test_collect_checks_accepts_restored_workspace_and_setup_marker(monkeypatch,
     venv_python = tmp_path / ".venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("placeholder\n", encoding="utf-8")
-    for relative in check.RESTORE_ROOTS:
-        root = tmp_path / relative
+    for root in check._workspace_paths(tmp_path).values():  # noqa: SLF001 - seed each restore surface
         root.mkdir(parents=True)
         (root / ".restored").write_text("present\n", encoding="utf-8")
     (tmp_path / "data" / "store" / "apk" / "sha256").mkdir()

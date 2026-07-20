@@ -29,10 +29,38 @@ fi
 ENV_FILE="${SCYTALEDROID_ENV_FILE:-${ROOT_DIR}/.env}"
 
 if [ -f "$ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  set -a
-  source "$ENV_FILE"
-  set +a
+  # Treat .env as data, not executable shell. This matches the application
+  # loader and prevents a transferred configuration file from running code.
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    if [[ -z "${!key+x}" ]]; then
+      export "$key=$value"
+    fi
+  done < <(
+    python3 - "$ENV_FILE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+key_pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+try:
+    lines = path.read_text(encoding="utf-8").splitlines()
+except OSError as exc:
+    print(f"Unable to read environment file: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+for line in lines:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        continue
+    key, value = stripped.split("=", 1)
+    key = key.strip()
+    if not key_pattern.fullmatch(key):
+        continue
+    value = value.strip().strip('"').strip("'")
+    sys.stdout.buffer.write(key.encode("utf-8") + b"\0" + value.encode("utf-8") + b"\0")
+PY
+  )
 fi
 
 if [ $# -ge 1 ]; then

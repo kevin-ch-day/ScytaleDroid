@@ -1593,8 +1593,8 @@ def test_overlay_latest_static_reanalysis_adds_provenance_without_mutating_evide
                 "samples": {
                     "api_keys": [
                         {
-                            "value": "AIzaSensitiveRawValueShouldNotSurface",
-                            "value_masked": "AIzaSens…",
+                            "value": "EXAMPLE_GOOGLE_API_KEY_NOT_LIVE",
+                            "value_masked": "EXAMPLE_GOOGLE…",
                             "src": "classes.dex",
                             "root_domain": "auth.example.com",
                             "source_type": "dex",
@@ -1772,7 +1772,7 @@ def test_overlay_latest_static_reanalysis_adds_provenance_without_mutating_evide
     assert row["overlay_enriched_metadata_present"] == "1"
     assert row["overlay_static_report_path"]
     serialized = json.dumps(row, sort_keys=True)
-    assert "AIzaSensitiveRawValueShouldNotSurface" not in serialized
+    assert "EXAMPLE_GOOGLE_API_KEY_NOT_LIVE" not in serialized
 
     with (out_dir / "static_enrichment_overlay_impact.csv").open(encoding="utf-8") as handle:
         impact_rows = list(csv.DictReader(handle))

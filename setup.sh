@@ -252,9 +252,28 @@ else
   echo "[Setup] Android tooling is optional for this setup. Set SCYTALEDROID_SETUP_ANDROID=1 to install adb and SDK tools."
 fi
 
-mkdir -p "$ROOT_DIR/data/store/apk" "$ROOT_DIR/data/evidence/dynamic" "$ROOT_DIR/output" "$ROOT_DIR/logs"
+if ! WORKSPACE_DIR_OUTPUT="$(PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" - <<'PY'
+from pathlib import Path
 
-echo "[Setup] Workspace directories are ready."
+from scytaledroid.Config import app_config
+
+print(Path(app_config.DATA_DIR) / "store" / "apk")
+print(Path(app_config.DYNAMIC_EVIDENCE_ROOT))
+print(Path(app_config.OUTPUT_DIR))
+print(Path(app_config.LOGS_DIR))
+PY
+)"; then
+  echo "Error: Could not resolve configured workspace directories." >&2
+  exit 1
+fi
+mapfile -t WORKSPACE_DIRS <<< "$WORKSPACE_DIR_OUTPUT"
+if [[ ${#WORKSPACE_DIRS[@]} -ne 4 ]] || [[ -z "${WORKSPACE_DIRS[0]}${WORKSPACE_DIRS[1]}${WORKSPACE_DIRS[2]}${WORKSPACE_DIRS[3]}" ]]; then
+  echo "Error: Configured workspace directory resolution returned incomplete paths." >&2
+  exit 1
+fi
+mkdir -p "${WORKSPACE_DIRS[@]}"
+
+echo "[Setup] Workspace directories are ready (configured data/output/log roots)."
 if ! command_exists tshark || ! command_exists capinfos; then
   echo "[Setup] Dynamic PCAP tools are missing. Install with: sudo scripts/install_wireshark_cli.sh"
 fi

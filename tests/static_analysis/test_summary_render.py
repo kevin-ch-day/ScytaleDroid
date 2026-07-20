@@ -97,8 +97,8 @@ def test_render_app_result_preserves_string_enrichment_metadata_in_payload() -> 
         "samples": {
             "api_keys": [
                 {
-                    "value": "AIzaSyExampleSecretValue",
-                    "value_masked": "AIzaSyEx…",
+                    "value": "EXAMPLE_GOOGLE_API_KEY_NOT_LIVE",
+                    "value_masked": "EXAMPLE_GOOGLE…",
                     "src": "classes.dex",
                     "root_domain": "example.com",
                     "source_type": "dex",

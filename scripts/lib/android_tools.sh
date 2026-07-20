@@ -4,11 +4,52 @@ set -euo pipefail
 : "${ANDROID_HOME:="$HOME/Android/Sdk"}"
 PREFERRED_BT="${PREFERRED_BT:-35.0.0}"
 CMDLINE_ZIP_URL="${CMDLINE_ZIP_URL:-https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip}"
+# SHA-256 of the pinned command-line tools archive above. Override this together
+# with CMDLINE_ZIP_URL when intentionally selecting a different Google release.
+CMDLINE_ZIP_SHA256="${CMDLINE_ZIP_SHA256:-7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee}"
 JAVA_PKG="${JAVA_PKG:-java-17-openjdk-headless}"
 
 say(){ printf "\033[1;36m[i]\033[0m %s\n" "$*"; }
 warn(){ printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
 err(){ printf "\033[1;31m[x]\033[0m %s\n" "$*" >&2; }
+
+sha256_file() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+    return 0
+  fi
+  python3 - "$path" <<'PY'
+import hashlib
+import sys
+
+path = sys.argv[1]
+digest = hashlib.sha256()
+with open(path, "rb") as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
+print(digest.hexdigest())
+PY
+}
+
+verify_cmdline_zip_sha256() {
+  local path="$1"
+  local expected="${CMDLINE_ZIP_SHA256,,}"
+  if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]]; then
+    err "CMDLINE_ZIP_SHA256 must be a 64-character SHA-256 digest."
+    return 1
+  fi
+  local actual
+  actual="$(sha256_file "$path")"
+  if [[ "$actual" != "$expected" ]]; then
+    err "Android command-line tools SHA-256 mismatch; refusing to extract the download."
+    return 1
+  fi
+}
 
 ANDROID_TOOLS_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ANDROID_TOOLS_ROOT="$(cd -- "${ANDROID_TOOLS_SCRIPT_DIR}/.." && pwd -P)"
@@ -25,7 +66,9 @@ ensure_sdkmanager() {
   done
   say "sdkmanager not found — downloading command-line tools…"
   local zip="$ANDROID_HOME/commandlinetools-linux_latest.zip"
-  curl -L "$CMDLINE_ZIP_URL" -o "$zip"
+  curl --fail --location --proto '=https' --tlsv1.2 --retry 3 "$CMDLINE_ZIP_URL" -o "$zip"
+  verify_cmdline_zip_sha256 "$zip"
+  unzip -tq "$zip" >/dev/null
   unzip -q "$zip" -d "$ANDROID_HOME"
   mkdir -p "$ANDROID_HOME/cmdline-tools/latest"
   shopt -s dotglob nullglob
