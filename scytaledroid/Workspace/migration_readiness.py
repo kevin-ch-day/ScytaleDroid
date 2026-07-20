@@ -306,6 +306,18 @@ def _rsync_command_templates(repo_root: Path, destination_root: Path | None) -> 
     ]
 
 
+def _cold_store_rsync_templates(cold_store: Mapping[str, Any]) -> list[str]:
+    """Return review-only transfer commands for APK bytes outside the repository."""
+
+    templates: list[str] = []
+    for source in cold_store.get("roots") or ():
+        templates.append(
+            "rsync -aHAX --numeric-ids --info=progress2 --partial --protect-args "
+            f"'{source}/' '<destination-cold-apk-root>/'"
+        )
+    return templates
+
+
 def _environment_record(repo_root: Path) -> dict[str, Any]:
     env_path = repo_root / ".env"
     exists = env_path.is_file()
@@ -664,6 +676,7 @@ def build_migration_readiness_report(
         "transfer_footprint": footprint,
         "destination": destination,
         "rsync_command_templates": _rsync_command_templates(root, destination_path),
+        "cold_store_rsync_command_templates": _cold_store_rsync_templates(cold_store),
         "environment": environment,
         "database": database,
         "permission_intel": permission_intel,
@@ -744,6 +757,10 @@ def render_migration_readiness_report(report: Mapping[str, Any]) -> str:
             lines.append(f"{str(check.get('status', 'warning')).upper()}: {check.get('name')} - {check.get('detail')}")
     lines.extend(("", "Rsync command templates (review before use):"))
     lines.extend(f"- {command}" for command in report.get("rsync_command_templates") or [])
+    cold_commands = report.get("cold_store_rsync_command_templates") or []
+    if cold_commands:
+        lines.extend(("", "External cold APK store transfer (choose a destination mount path):"))
+        lines.extend(f"- {command}" for command in cold_commands)
     lines.extend(("", "Next steps:"))
     lines.extend(f"- {step}" for step in report.get("migration_steps") or [])
     return "\n".join(lines) + "\n"

@@ -160,7 +160,7 @@ def _dynamic_alias_check(repo_root: Path) -> CheckLine:
         return CheckLine(
             "warn",
             "dynamic aliases",
-            f"{detail}; repair canonical aliases with scripts/dynamic/rebuild_dynamic_evidence_aliases.py --apply",
+            f"{detail}; repair aliases with scripts/dynamic/rebuild_dynamic_evidence_aliases.py --apply --prune-orphans",
         )
     return CheckLine("ok", "dynamic aliases", detail)
 

@@ -21,7 +21,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--canonical-root", type=Path, help="Canonical dynamic evidence root.")
     parser.add_argument("--legacy-root", type=Path, help="Legacy output alias root.")
-    parser.add_argument("--apply", action="store_true", help="Create or replace only same-run stale aliases.")
+    parser.add_argument("--apply", action="store_true", help="Apply planned alias repairs.")
     parser.add_argument(
         "--prune-orphans",
         action="store_true",
