@@ -178,3 +178,11 @@ def test_materialize_apk_reuses_available_cold_blob_symlink(
     assert artifact_store.repo_relative_path(resolved) == f"data/store/apk/sha256/{digest[:2]}/{digest}.apk"
     assert cold_target.read_bytes() == b"cold"
     assert not source.exists()
+
+
+def test_external_apk_mount_roots_accept_new_host_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS", "/mnt/new-cold:/mnt/secondary-cold")
+
+    roots = artifact_store._configured_external_apk_store_mount_roots()  # noqa: SLF001 - config contract
+
+    assert roots == (Path("/mnt/new-cold"), Path("/mnt/secondary-cold"))

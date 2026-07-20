@@ -693,7 +693,8 @@ def build_migration_readiness_report(
             "Commit and push the checked repository state, then clone the recorded branch/revision on the destination.",
             "Stop active capture/harvest work, then copy data, output, logs, and the external cold APK store with metadata-preserving tooling such as rsync; verify byte totals after transfer.",
             "Export and restore both MariaDB catalogs separately, including views, triggers, routines, and events; provision or remap the listed source definer accounts.",
-            "Provision destination configuration securely, run ./setup.sh, then rebuild dynamic aliases with scripts/dynamic/rebuild_dynamic_evidence_aliases.py --apply --prune-orphans.",
+            "Provision destination configuration securely. Preserve the Mercury mount path, or set SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS and use scripts/device_analysis/retarget_cold_apk_symlinks.py in dry-run mode before applying it.",
+            "Run ./setup.sh (or SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh for capture hosts), then rebuild dynamic aliases with scripts/dynamic/rebuild_dynamic_evidence_aliases.py --apply --prune-orphans.",
             "Run ./run.sh --new-system-check --require-database, this preflight, and the paper-freeze report again on the destination.",
         ],
     }
