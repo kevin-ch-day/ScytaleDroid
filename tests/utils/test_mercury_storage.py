@@ -12,6 +12,12 @@ def test_user_media_mount_uses_requested_user() -> None:
     )
 
 
+def test_configured_mercury_mountpoint_accepts_new_host_path(monkeypatch) -> None:
+    monkeypatch.setenv("SCYTALEDROID_MERCURY_MOUNTPOINT", "/srv/scytaledroid-mercury")
+
+    assert mercury_storage.configured_mercury_mountpoint() == Path("/srv/scytaledroid-mercury")
+
+
 def test_run_mount_command_capture() -> None:
     result = mercury_storage.run_mount_command(
         (sys.executable, "-c", "print('mounted-ok')"),

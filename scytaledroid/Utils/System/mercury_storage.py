@@ -10,7 +10,16 @@ from pathlib import Path
 
 MERCURY_V2_LABEL = "MERCURY_DATA_V2"
 MERCURY_V2_DEVICE = Path(f"/dev/disk/by-label/{MERCURY_V2_LABEL}")
-MERCURY_V2_MOUNTPOINT = Path("/mnt/MERCURY_DATA_V2")
+
+
+def configured_mercury_mountpoint() -> Path:
+    """Return the host-specific Mercury mountpoint without changing its label."""
+
+    configured = str(os.environ.get("SCYTALEDROID_MERCURY_MOUNTPOINT", "") or "").strip()
+    return Path(configured or "/mnt/MERCURY_DATA_V2").expanduser()
+
+
+MERCURY_V2_MOUNTPOINT = configured_mercury_mountpoint()
 
 
 @dataclass(frozen=True)
@@ -112,6 +121,7 @@ def unmount_mercury_v2_user_session() -> CommandResult:
 
 __all__ = [
     "CommandResult",
+    "configured_mercury_mountpoint",
     "MERCURY_V2_DEVICE",
     "MERCURY_V2_LABEL",
     "MERCURY_V2_MOUNTPOINT",

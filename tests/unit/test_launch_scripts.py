@@ -26,6 +26,14 @@ def test_setup_allows_headless_or_android_provisioned_modes() -> None:
     assert 'SCYTALEDROID_SETUP_ANDROID=1' in source
 
 
+def test_run_script_explains_required_setup_for_normal_launches() -> None:
+    source = (REPO_ROOT / "run.sh").read_text(encoding="utf-8")
+
+    assert 'SETUP_MARKER="$ROOT_DIR/.setup/requirements.sha256"' in source
+    assert "ScytaleDroid has not been set up on this host." in source
+    assert "--new-system-check" in source
+
+
 def test_run_script_is_cwd_independent_and_exposes_new_system_check(tmp_path: Path) -> None:
     result = subprocess.run(
         [str(REPO_ROOT / "run.sh"), "--help"],
