@@ -14,7 +14,20 @@ from scytaledroid.Config import app_config
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-EXTERNAL_APK_STORE_MOUNT_ROOTS = (Path("/mnt/MERCURY_DATA_V2"), Path("/mnt/MERCURY_DATA_USB"))
+_DEFAULT_EXTERNAL_APK_STORE_MOUNT_ROOTS = (Path("/mnt/MERCURY_DATA_V2"), Path("/mnt/MERCURY_DATA_USB"))
+
+
+def _configured_external_apk_store_mount_roots() -> tuple[Path, ...]:
+    """Return explicit new-host mount roots or the established Mercury defaults."""
+
+    configured = str(os.getenv("SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS", "") or "").strip()
+    if not configured:
+        return _DEFAULT_EXTERNAL_APK_STORE_MOUNT_ROOTS
+    roots = tuple(Path(value).expanduser() for value in configured.split(os.pathsep) if value.strip())
+    return roots or _DEFAULT_EXTERNAL_APK_STORE_MOUNT_ROOTS
+
+
+EXTERNAL_APK_STORE_MOUNT_ROOTS = _configured_external_apk_store_mount_roots()
 
 
 class ExternalApkStoreUnavailable(RuntimeError):
