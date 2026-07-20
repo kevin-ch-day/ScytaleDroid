@@ -794,7 +794,7 @@ APK identity, static analysis, dynamic runs, PCAP evidence, and QA state are pre
         "Static app metrics: output/paper/android_empirical_alignment_final/data/publication_static_app_metrics.csv",
         "Dynamic run metrics: output/paper/android_empirical_alignment_final/data/publication_dynamic_run_metrics.csv",
         "App analysis dataset: output/paper/android_empirical_alignment_final/data/publication_app_analysis_dataset.csv",
-        "Manuscript path: /home/secadmin/Laughlin/GitHub/IEEE_CARS_2025_AI/",
+        "Manuscript location: external to this repository; record the submission workspace separately.",
     ]
     (out_dir / "report" / "single_source_of_truth.txt").write_text("\n".join(ssot) + "\n", encoding="utf-8")
 
