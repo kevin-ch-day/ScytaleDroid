@@ -106,8 +106,9 @@ ScytaleDroid targets modern Linux hosts. Before running the toolkit make sure yo
    ./setup.sh
    ```
    The script selects Python 3.11-3.13, creates `.venv`, installs the pinned runtime lock without
-   upgrading packaging tools by default, prepares workspace directories, and reports missing Fedora
-   runtime tools.
+   upgrading packaging tools by default, and prepares workspace directories. Android tooling is
+   optional for reporting/database-only hosts; use `SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh` on a
+   host that will collect from physical devices.
 3. Create your local configuration without copying any existing secrets:
    ```bash
    cp .env.example .env

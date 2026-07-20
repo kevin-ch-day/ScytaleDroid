@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_REQUESTED="${SCYTALEDROID_PYTHON:-}"
+ANDROID_SETUP_MODE="${SCYTALEDROID_SETUP_ANDROID:-auto}"
 PYTHON_BIN=""
 VENV_CREATED=0
 REQ_FILE_DEFAULT="$ROOT_DIR/requirements.lock"
@@ -14,6 +15,14 @@ fi
 SETUP_STATE_DIR="$ROOT_DIR/.setup"
 REQ_HASH_FILE="$SETUP_STATE_DIR/requirements.sha256"
 ANDROID_TOOLS_LIB="$ROOT_DIR/scripts/lib/android_tools.sh"
+
+case "$ANDROID_SETUP_MODE" in
+  auto|0|1) ;;
+  *)
+    echo "Error: SCYTALEDROID_SETUP_ANDROID must be auto, 0, or 1." >&2
+    exit 1
+    ;;
+esac
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -223,19 +232,24 @@ if command_exists dnf; then
   fi
 fi
 
-ensure_adb
-
-if [[ -f "$ANDROID_TOOLS_LIB" ]]; then
-  if ! command_exists sdkmanager; then
-    echo "[Setup] Android command-line tools not detected. Installing..."
-    # shellcheck disable=SC1090
-    source "$ANDROID_TOOLS_LIB"
-    setup_android_tools_main
+if [[ "$ANDROID_SETUP_MODE" == "1" ]]; then
+  ensure_adb
+  if [[ -f "$ANDROID_TOOLS_LIB" ]]; then
+    if ! command_exists sdkmanager; then
+      echo "[Setup] Android command-line tools not detected. Installing..."
+      # shellcheck disable=SC1090
+      source "$ANDROID_TOOLS_LIB"
+      setup_android_tools_main
+    else
+      echo "[Setup] Android command-line tools already available."
+    fi
   else
-    echo "[Setup] Android command-line tools already available."
+    echo "[Setup] Android tools helper not found; skipping Android tools setup."
   fi
+elif command_exists adb; then
+  echo "[Setup] Android tooling available; leaving it unchanged (set SCYTALEDROID_SETUP_ANDROID=1 to provision tools)."
 else
-  echo "[Setup] Android tools helper not found; skipping Android tools setup."
+  echo "[Setup] Android tooling is optional for this setup. Set SCYTALEDROID_SETUP_ANDROID=1 to install adb and SDK tools."
 fi
 
 mkdir -p "$ROOT_DIR/data/store/apk" "$ROOT_DIR/data/evidence/dynamic" "$ROOT_DIR/output" "$ROOT_DIR/logs"
@@ -249,3 +263,4 @@ if ! command_exists mariadb || ! command_exists mariadb-dump; then
 fi
 echo "[Setup] Next: create .env from .env.example, restore data/DB if applicable, then run:"
 echo "        ./run.sh --new-system-check --require-database"
+echo "        Use SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh when this host will capture from Android devices."
