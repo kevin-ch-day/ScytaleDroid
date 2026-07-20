@@ -19,6 +19,15 @@ def configured_mercury_mountpoint() -> Path:
     return Path(configured or "/mnt/MERCURY_DATA_V2").expanduser()
 
 
+def configured_cold_apk_store_root() -> Path:
+    """Return the optional external APK-byte store root for this host."""
+
+    configured = str(os.environ.get("SCYTALEDROID_COLD_APK_STORE_ROOT", "") or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return configured_mercury_mountpoint() / "scytaledroid_artifacts" / "apk_store" / "cold"
+
+
 MERCURY_V2_MOUNTPOINT = configured_mercury_mountpoint()
 
 
@@ -121,6 +130,7 @@ def unmount_mercury_v2_user_session() -> CommandResult:
 
 __all__ = [
     "CommandResult",
+    "configured_cold_apk_store_root",
     "configured_mercury_mountpoint",
     "MERCURY_V2_DEVICE",
     "MERCURY_V2_LABEL",

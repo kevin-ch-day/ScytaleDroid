@@ -18,6 +18,12 @@ def test_configured_mercury_mountpoint_accepts_new_host_path(monkeypatch) -> Non
     assert mercury_storage.configured_mercury_mountpoint() == Path("/srv/scytaledroid-mercury")
 
 
+def test_configured_cold_apk_store_root_uses_explicit_new_host_path(monkeypatch) -> None:
+    monkeypatch.setenv("SCYTALEDROID_COLD_APK_STORE_ROOT", "/srv/cold-apks")
+
+    assert mercury_storage.configured_cold_apk_store_root() == Path("/srv/cold-apks")
+
+
 def test_run_mount_command_capture() -> None:
     result = mercury_storage.run_mount_command(
         (sys.executable, "-c", "print('mounted-ok')"),

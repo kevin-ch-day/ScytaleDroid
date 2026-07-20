@@ -19,8 +19,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scytaledroid.Config import app_config  # noqa: E402
+from scytaledroid.Utils.System import mercury_storage  # noqa: E402
 
-DEFAULT_COLD_ROOT = Path("/mnt/MERCURY_DATA_V2/scytaledroid_artifacts/apk_store/cold")
+DEFAULT_COLD_ROOT = mercury_storage.configured_cold_apk_store_root()
 RECENT_STATIC_DAYS = 14
 YES = "yes"
 NO = "no"

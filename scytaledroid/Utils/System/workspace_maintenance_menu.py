@@ -725,7 +725,7 @@ def _mount_mercury_preferred() -> None:
         print(
             status_messages.status(
                 f"Mercury is currently mounted at {status.user_media_mount}. "
-                "Preferred ScytaleDroid cold-store paths use /mnt/MERCURY_DATA_V2.",
+                f"Preferred ScytaleDroid cold-store paths use {status.mountpoint}.",
                 level="warn",
             )
         )
@@ -762,7 +762,7 @@ def _mount_mercury_user_session() -> None:
     print(
         status_messages.status(
             "Mounting with udisksctl does not require sudo, but ScytaleDroid's preferred "
-            "cold-store root remains /mnt/MERCURY_DATA_V2.",
+            f"cold-store root remains {mercury_storage.MERCURY_V2_MOUNTPOINT}.",
             level="info",
         )
     )
@@ -784,12 +784,13 @@ def mercury_apk_storage_menu() -> None:
         _print_mercury_status()
         print()
         menu_utils.print_hint(
-            "Preferred state: MERCURY_DATA_V2 mounted at /mnt/MERCURY_DATA_V2 before harvest/static/APK cold-store work."
+            f"Preferred state: MERCURY_DATA_V2 mounted at {mercury_storage.MERCURY_V2_MOUNTPOINT} "
+            "before harvest/static/APK cold-store work."
         )
         items = [
             menu_utils.MenuOption("1", "Refresh status"),
-            menu_utils.MenuOption("2", "Mount Mercury V2 at /mnt/MERCURY_DATA_V2 (sudo)"),
-            menu_utils.MenuOption("3", "Unmount /mnt/MERCURY_DATA_V2 (sudo)"),
+            menu_utils.MenuOption("2", f"Mount Mercury V2 at {mercury_storage.MERCURY_V2_MOUNTPOINT} (sudo)"),
+            menu_utils.MenuOption("3", f"Unmount {mercury_storage.MERCURY_V2_MOUNTPOINT} (sudo)"),
             menu_utils.MenuOption("4", "Mount Mercury V2 in user session (udisksctl fallback)"),
             menu_utils.MenuOption("5", "Unmount user-session Mercury mount"),
             menu_utils.MenuOption("6", "Run quick APK store mount check"),

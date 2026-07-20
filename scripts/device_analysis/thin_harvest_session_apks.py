@@ -25,7 +25,16 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-EXTERNAL_APK_STORE_MOUNT_ROOTS = (Path("/mnt/MERCURY_DATA_V2"), Path("/mnt/MERCURY_DATA_USB"))
+
+def _external_apk_store_mount_roots() -> tuple[Path, ...]:
+    """Load the shared mount configuration after direct-script path bootstrap."""
+
+    from scytaledroid.DeviceAnalysis.services.artifact_store import EXTERNAL_APK_STORE_MOUNT_ROOTS
+
+    return EXTERNAL_APK_STORE_MOUNT_ROOTS
+
+
+EXTERNAL_APK_STORE_MOUNT_ROOTS = _external_apk_store_mount_roots()
 
 
 @dataclass(frozen=True)

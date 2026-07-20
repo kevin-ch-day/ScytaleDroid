@@ -6,9 +6,9 @@ the Mercury cold store, replaces the local canonical path with a symlink, and
 writes receipts. This script never touches DB rows, device_apks, dynamic
 evidence, PCAPs, static reports, or sidecars.
 
-For now the cold target is rooted at ``/mnt/MERCURY_DATA_V2``. Keep that path
-available as an alias after final Mercury promotion, or run a reviewed path
-migration for existing cold symlinks.
+The cold target defaults to the configured Mercury mount. Keep that path
+available after final promotion, or use the reviewed retarget helper for
+existing cold symlinks after a host migration.
 """
 
 from __future__ import annotations
@@ -32,9 +32,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scytaledroid.Config import app_config  # noqa: E402
+from scytaledroid.Utils.System import mercury_storage  # noqa: E402
 
-DEFAULT_COLD_ROOT = Path("/mnt/MERCURY_DATA_V2/scytaledroid_artifacts/apk_store/cold")
-DEFAULT_MOUNT_ROOT = Path("/mnt/MERCURY_DATA_V2")
+DEFAULT_COLD_ROOT = mercury_storage.configured_cold_apk_store_root()
+DEFAULT_MOUNT_ROOT = mercury_storage.configured_mercury_mountpoint()
 ELIGIBLE_CLASS = "PROMOTE_COLD_PRIOR_VERSION_CANDIDATE"
 BLOCKED_CLASSES = {
     "KEEP_HOT_CURRENT_RESEARCH_DATASET_BETA",
