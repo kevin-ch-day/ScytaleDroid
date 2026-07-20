@@ -370,6 +370,18 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
             return None
 
     countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(ds, tracker_truth)
+    baseline_not_idle_source = (
+        tracker_truth.get("baseline_not_idle")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("baseline_not_idle") is not None
+        else ds.get("baseline_not_idle")
+    )
+    baseline_not_idle_reasons = (
+        tracker_truth.get("baseline_not_idle_reasons")
+        if isinstance(tracker_truth, dict) and isinstance(tracker_truth.get("baseline_not_idle_reasons"), list)
+        else ds.get("baseline_not_idle_reasons")
+    )
+    if not isinstance(baseline_not_idle_reasons, list):
+        baseline_not_idle_reasons = []
 
     return {
         "dynamic_run_id": rid,
@@ -384,6 +396,11 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "countable": 1 if countable_source is True else (0 if countable_source is False else None),
         "valid_dataset_run": 1 if valid_dataset_source is True else (0 if valid_dataset_source is False else None),
         "invalid_reason_code": invalid_reason_source,
+        "baseline_not_idle": 1 if baseline_not_idle_source is True else (0 if baseline_not_idle_source is False else None),
+        "baseline_not_idle_reasons_json": json.dumps(
+            [str(reason) for reason in baseline_not_idle_reasons if str(reason).strip()],
+            sort_keys=True,
+        ),
         "duration_seconds": int(ds.get("duration_seconds") or 0) or None,
         "sampling_rate_s": sampling_rate_s_int,
         "started_at_utc": _to_mysql_dt(mf.get("started_at")),

@@ -204,6 +204,8 @@ def test_persist_dynamic_summary_persists_dataset_truth_from_manifest(monkeypatc
             "countable": True,
             "valid_dataset_run": True,
             "invalid_reason_code": None,
+            "baseline_not_idle": True,
+            "baseline_not_idle_reasons": ["BASELINE_BYTES_HIGH"],
         }
     }
     (tmp_path / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -235,6 +237,8 @@ def test_persist_dynamic_summary_persists_dataset_truth_from_manifest(monkeypatc
     assert inserted["countable"] == 1
     assert inserted["valid_dataset_run"] == 1
     assert inserted["invalid_reason_code"] is None
+    assert inserted["baseline_not_idle"] == 1
+    assert json.loads(inserted["baseline_not_idle_reasons_json"]) == ["BASELINE_BYTES_HIGH"]
 
 
 def test_persist_dynamic_summary_prefers_tracker_counts_toward_quota(monkeypatch, tmp_path):

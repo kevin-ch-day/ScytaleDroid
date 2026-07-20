@@ -70,6 +70,8 @@ def test_web_runtime_run_index_prefers_dynamic_run_context_semantics() -> None:
     assert "ctx.cohort_eligibility_state" in sql
     assert "ctx.cohort_status" in sql
     assert "ctx.cohort_reason_code" in sql
+    assert "ctx.baseline_not_idle" in sql
+    assert "ctx.baseline_not_idle_reasons_json" in sql
     assert "ctx.countable" in sql
     assert "ctx.valid_dataset_run" in sql
     assert "FROM dynamic_sessions ds" not in sql
@@ -88,13 +90,17 @@ def test_web_dynamic_app_queue_v1_uses_cohort_and_quota_semantics() -> None:
     assert "legacy_unknown_runs" in sql
     assert "baseline_extra_valid" in sql
     assert "baseline_low_signal_retained" in sql
+    assert "baseline_quiescent_fg_valid" in sql
+    assert "interactive_raw_valid" in sql
+    assert "retained_prior_build_valid_runs" in sql
+    assert "retained_prior_build_quiescent_fg_valid" in sql
     assert "collection_status" in sql
     assert "quota_gap_label" in sql
     assert "data_scope" in sql
     assert "db_current_build" in sql
     assert "latest_scoped_valid_dataset_run" in sql
     assert "current_build_invalid_run_count" in sql
-    assert "NULLIF(sds.latest_static_base_apk_sha256, '')" in sql
+    assert "NULLIF(lsr.base_apk_sha256_lc, '')" in sql
     assert "3 AS baseline_required" in sql
     assert "4 AS interactive_required" in sql
 
@@ -108,6 +114,8 @@ def test_web_runtime_run_detail_enriches_dynamic_sessions_with_context_states() 
     assert "ctx.cohort_eligibility_state" in sql
     assert "ctx.cohort_status" in sql
     assert "ctx.cohort_reason_code" in sql
+    assert "ds.*" in sql
+    assert "ds.*" in sql
     assert "COALESCE(NULLIF(ctx.app_label, ''), NULLIF(a.display_name, ''), ds.package_name) AS app_label" in sql
 
 

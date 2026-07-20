@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from tests.dynamic._index_from_evidence_support import write_json
 
 
@@ -64,7 +66,13 @@ def test_build_dynamic_session_row_from_evidence_pack(tmp_path):
             "ended_at": "2026-02-07T00:03:00Z",
             "status": "success",
             "target": {"package_name": "com.example.app"},
-            "dataset": {"tier": "dataset", "duration_seconds": 180, "pcap_size_bytes": 1234},
+            "dataset": {
+                "tier": "dataset",
+                "duration_seconds": 180,
+                "pcap_size_bytes": 1234,
+                "baseline_not_idle": True,
+                "baseline_not_idle_reasons": ["BASELINE_QUIC_HEAVY"],
+            },
             "operator": {"run_profile": "baseline_idle", "sampling_rate_s": 2},
             "artifacts": [{"type": "pcapdroid_capture", "relative_path": "inputs/app_only.pcapng"}],
         },
@@ -112,6 +120,8 @@ def test_build_dynamic_session_row_from_evidence_pack(tmp_path):
     assert row["netstats_missing_rows"] == 0
     assert row["netstats_rows"] == 44
     assert row["network_signal_quality"] == "netstats_ok"
+    assert row["baseline_not_idle"] == 1
+    assert json.loads(row["baseline_not_idle_reasons_json"]) == ["BASELINE_QUIC_HEAVY"]
 
 
 def test_build_dynamic_session_row_includes_static_handoff_hash(tmp_path):

@@ -248,6 +248,22 @@ STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS: tuple[MigrationSpec, ...] = (
     ),
 )
 
+DYNAMIC_SESSION_QFG_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260719_dynamic_session_qfg_metadata_v1",
+        migration_name="Persist quiescent foreground baseline metadata on dynamic sessions",
+        schema_version_before="0.3.14-static-finding-evidence-payload-schema",
+        schema_version_after="0.3.15-dynamic-session-qfg-metadata",
+        statements=(
+            "ALTER TABLE dynamic_sessions ADD COLUMN IF NOT EXISTS baseline_not_idle TINYINT(1) DEFAULT NULL",
+            "ALTER TABLE dynamic_sessions ADD COLUMN IF NOT EXISTS baseline_not_idle_reasons_json JSON DEFAULT NULL",
+        ),
+        description="Adds persisted QFG metadata for dynamic read models without changing countability.",
+        apply_mode="manual_script",
+        stage="dynamic_read_model",
+    ),
+)
+
 
 def registered_migrations() -> tuple[MigrationSpec, ...]:
     return (
@@ -260,6 +276,7 @@ def registered_migrations() -> tuple[MigrationSpec, ...]:
         + ARTIFACT_REGISTRY_SESSION_MIGRATIONS
         + STATIC_SESSION_RUN_LINKS_MIGRATIONS
         + STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS
+        + DYNAMIC_SESSION_QFG_MIGRATIONS
     )
 
 
@@ -746,6 +763,7 @@ __all__ = [
     "DYNAMIC_SERVICE_SIGNAL_MIGRATIONS",
     "STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS",
     "STATIC_SESSION_RUN_LINKS_MIGRATIONS",
+    "DYNAMIC_SESSION_QFG_MIGRATIONS",
     "attach_receipt_path_to_latest_migration",
     "append_schema_version",
     "build_schema_migration_report",

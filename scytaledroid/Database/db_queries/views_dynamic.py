@@ -112,6 +112,8 @@ SELECT
   ds.countable,
   ds.valid_dataset_run,
   ds.invalid_reason_code,
+  ds.baseline_not_idle,
+  ds.baseline_not_idle_reasons_json,
   CASE
     WHEN ds.valid_dataset_run = 1 THEN 'TECH_VALID'
     WHEN ds.valid_dataset_run = 0 THEN 'TECH_INVALID'

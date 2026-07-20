@@ -97,6 +97,8 @@ def persist_dynamic_summary(
         "countable": dataset_truth["countable"],
         "valid_dataset_run": dataset_truth["valid_dataset_run"],
         "invalid_reason_code": dataset_truth["invalid_reason_code"],
+        "baseline_not_idle": dataset_truth["baseline_not_idle"],
+        "baseline_not_idle_reasons_json": dataset_truth["baseline_not_idle_reasons_json"],
         "duration_seconds": duration_seconds,
         "sampling_duration_seconds": sampling_duration_seconds,
         "clock_alignment_delta_s": clock_alignment_delta_s,
@@ -757,6 +759,19 @@ def _extract_dataset_truth(
     countable = _dataset_bool_to_db(countable_source)
     valid_dataset_run = _dataset_bool_to_db(valid_dataset_source)
     invalid_reason_code = invalid_reason_source
+    baseline_not_idle_source = (
+        tracker_truth.get("baseline_not_idle")
+        if isinstance(tracker_truth, dict) and tracker_truth.get("baseline_not_idle") is not None
+        else dataset.get("baseline_not_idle")
+    )
+    baseline_not_idle = _dataset_bool_to_db(baseline_not_idle_source)
+    baseline_not_idle_reasons = (
+        tracker_truth.get("baseline_not_idle_reasons")
+        if isinstance(tracker_truth, dict) and isinstance(tracker_truth.get("baseline_not_idle_reasons"), list)
+        else dataset.get("baseline_not_idle_reasons")
+    )
+    if not isinstance(baseline_not_idle_reasons, list):
+        baseline_not_idle_reasons = []
 
     if countable is None:
         counts_toward_completion = getattr(config, "counts_toward_completion", None)
@@ -769,6 +784,11 @@ def _extract_dataset_truth(
         "countable": countable,
         "valid_dataset_run": valid_dataset_run,
         "invalid_reason_code": invalid_reason_code,
+        "baseline_not_idle": baseline_not_idle,
+        "baseline_not_idle_reasons_json": json.dumps(
+            [str(reason) for reason in baseline_not_idle_reasons if str(reason).strip()],
+            sort_keys=True,
+        ),
     }
 
 
