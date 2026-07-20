@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.DeviceAnalysis.inventory import adb_bulk
-
 
 pytestmark = [pytest.mark.unit]
 

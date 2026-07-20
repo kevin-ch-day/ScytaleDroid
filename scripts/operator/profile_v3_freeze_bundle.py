@@ -27,12 +27,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
 from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (  # noqa: E402
     effective_min_pcap_bytes_idle,
     effective_min_pcap_bytes_scripted,
     effective_min_windows_per_run,
 )
+from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
 
 
 def _sha256_file(path: Path) -> str:

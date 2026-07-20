@@ -28,7 +28,6 @@ from scytaledroid.Reporting.study_profiles.static_exposure_privacy import (  # n
     generate_static_exposure_privacy_report,
 )
 
-
 EVIDENCE_BASIS_ALIASES = {
     "exact_manifest": "exact_historical_freeze",
     "exact_historical_freeze": "exact_historical_freeze",

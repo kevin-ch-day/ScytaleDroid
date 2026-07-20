@@ -24,6 +24,7 @@ def test_main_menu_uses_phase1_platform_labels(monkeypatch) -> None:
     monkeypatch.setattr(app_main, "_print_tier1_status_banner", lambda: {})
     monkeypatch.setattr(app_main.menu_utils, "print_header", lambda *_a, **_k: None)
     monkeypatch.setattr(app_main, "_describe_main_menu_capture_readiness", lambda _device: "ready")
+    monkeypatch.setattr(app_main, "_describe_main_menu_setup_state", lambda: "ready — checked")
     monkeypatch.setattr(app_main, "_describe_main_menu_static_dynamic_readiness", lambda: "ready (0/0 plans)")
     monkeypatch.setattr(app_main, "_describe_main_menu_evidence_recovery", lambda: "clear")
 
@@ -95,6 +96,7 @@ def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, cap
         "_describe_main_menu_capture_readiness",
         lambda _selected_device: "ready",
     )
+    monkeypatch.setattr(app_main, "_describe_main_menu_setup_state", lambda: "ready — checked")
     monkeypatch.setattr(
         app_main,
         "_describe_main_menu_static_dynamic_readiness",
@@ -115,6 +117,7 @@ def test_main_menu_dashboard_shows_selected_device_and_database(monkeypatch, cap
     assert "Selected device: moto g 5G 2024 · ZY22JK89DR" in out
     assert "Database: scytaledroid_core_prod @ localhost:3306" in out
     assert "Mercury: mounted at /mnt/MERCURY_DATA_V2" in out
+    assert "System setup: ready — checked" in out
     assert "Capture readiness: ready" in out
     assert "Static-to-dynamic: ready (15/15 plans)" in out
     assert "Evidence recovery: clear (no incomplete dynamic packs)" in out

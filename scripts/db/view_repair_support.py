@@ -5,7 +5,7 @@ Not imported by runtime application code — scripts/db tooling only."""
 from __future__ import annotations
 
 import re
-from typing import Callable
+from collections.abc import Callable
 
 _VIEW_HEAD = re.compile(
     # Allow optional qualifiers (e.g. ``SQL SECURITY INVOKER``) between ``REPLACE`` and ``VIEW``.
@@ -49,13 +49,13 @@ def web_consumer_extension_ddls(
     idempotent even when the names also appear in ``ordered_schema_statements``.
     """
 
+    from scytaledroid.Database.db_queries.views_dynamic import CREATE_V_DYNAMIC_RUN_CONTEXT_V1
     from scytaledroid.Database.db_queries.views_inventory import CREATE_VW_LATEST_APK_PER_PACKAGE
     from scytaledroid.Database.db_queries.views_permission import (
+        CREATE_V_WEB_PERMISSION_INTEL_CURRENT,
         CREATE_VW_LATEST_PERMISSION_RISK,
         CREATE_VW_PERMISSION_AUDIT_LATEST,
-        CREATE_V_WEB_PERMISSION_INTEL_CURRENT,
     )
-    from scytaledroid.Database.db_queries.views_dynamic import CREATE_V_DYNAMIC_RUN_CONTEXT_V1
     from scytaledroid.Database.db_queries.views_static import (
         CREATE_V_STATIC_HANDOFF_V1,
         CREATE_V_STATIC_MASVS_FINDINGS_V1,

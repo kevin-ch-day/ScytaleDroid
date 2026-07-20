@@ -5,6 +5,7 @@ from pathlib import Path
 
 from scytaledroid.Database.db_utils import reset_static as reset_mod
 from scytaledroid.Database.db_utils.reset_static import (
+    STATIC_ANALYSIS_TABLES,
     classify_static_session_type,
     list_failed_static_session_candidates,
     list_static_session_candidates,
@@ -13,7 +14,6 @@ from scytaledroid.Database.db_utils.reset_static import (
     prune_static_sessions,
     purge_static_session_artifacts,
     reset_static_analysis_data,
-    STATIC_ANALYSIS_TABLES,
 )
 
 

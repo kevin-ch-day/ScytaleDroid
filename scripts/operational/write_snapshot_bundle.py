@@ -69,8 +69,8 @@ class BundleResult:
 
 
 def write_bundle(snapshot_dir: Path) -> BundleResult:
-    from scytaledroid.DynamicAnalysis.ml.operational_lint import lint_operational_snapshot
     from scytaledroid.DynamicAnalysis.ml.method_basis import runtime_ml_method_basis
+    from scytaledroid.DynamicAnalysis.ml.operational_lint import lint_operational_snapshot
     from scytaledroid.DynamicAnalysis.ml.snapshot_freeze import write_snapshot_freeze_manifest
     from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 

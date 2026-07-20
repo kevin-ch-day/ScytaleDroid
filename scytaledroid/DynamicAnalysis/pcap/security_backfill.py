@@ -14,10 +14,10 @@ from scytaledroid.DynamicAnalysis.pcap.correlate import write_static_dynamic_ove
 from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
 from scytaledroid.DynamicAnalysis.pcap.report import _find_pcap_artifact
 from scytaledroid.DynamicAnalysis.pcap.security_surface import (
+    SecuritySurfaceConfig,
     compute_static_dynamic_cleartext_posture,
     render_security_review_md,
     summarize_security_surface,
-    SecuritySurfaceConfig,
 )
 
 

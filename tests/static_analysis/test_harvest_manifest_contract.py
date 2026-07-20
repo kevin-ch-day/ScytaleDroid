@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection

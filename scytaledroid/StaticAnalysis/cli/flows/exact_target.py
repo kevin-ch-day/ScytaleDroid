@@ -15,8 +15,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from ...core.repository import ArtifactGroup, RepositoryArtifact, group_artifacts

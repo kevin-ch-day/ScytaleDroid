@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
 from ...core.detector_runner import PIPELINE_STAGES
-from ..flows.research_cohort import choose_research_cohort_scope as _choose_research_cohort_scope
 from ..core.analysis_profiles import run_modules_for_profile
+from ..flows.research_cohort import choose_research_cohort_scope as _choose_research_cohort_scope
 
 if TYPE_CHECKING:
     from ..commands.models import Command

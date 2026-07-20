@@ -132,10 +132,10 @@ def _render_compact_persistence_summary(
     canon_err_ct = len(list(dict.fromkeys(str(x) for x in canonical_failures if x)))
     compat_err_ct = len(list(dict.fromkeys(str(x) for x in compat_export_errors if x)))
     print(
-        (
+
             "Status  : "
             f"{run_status} | persistence_errors={persist_err_ct} | "
             f"canonical_failures={canon_err_ct} | compat_export_errors={compat_err_ct}"
-        )
+
     )
     print("Details : Database tools / Web view for full diagnostics")

@@ -5,7 +5,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-
 SCRIPT = Path("scripts/dynamic/migrate_dynamic_evidence_to_data_root.py")
 
 

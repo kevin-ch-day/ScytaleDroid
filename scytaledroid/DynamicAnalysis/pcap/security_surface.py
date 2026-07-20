@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from scytaledroid.DynamicAnalysis.domain_context import classify_domain, normalize_domain, root_domain
+from scytaledroid.DynamicAnalysis.domain_context import (
+    classify_domain,
+    normalize_domain,
+    root_domain,
+)
 
 _PLAINTEXT_PROTOCOLS = frozenset(
     {"http", "ftp", "ftp-data", "smtp", "imap", "pop", "irc", "telnet", "xmpp"}

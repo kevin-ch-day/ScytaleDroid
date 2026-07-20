@@ -151,7 +151,10 @@ def _manifest_from_payload(payload: dict[str, Any]):
 
 
 def _technical_validity(run_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, evaluate_dataset_validity
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        evaluate_dataset_validity,
+    )
 
     manifest = _manifest_from_payload(payload)
     return evaluate_dataset_validity(run_dir, manifest, {}, DatasetTrackerConfig())
@@ -253,8 +256,9 @@ def _connected_baseline_protocol_patch(payload: Mapping[str, Any]) -> dict[str, 
     if operator.get("baseline_protocol_id") and operator.get("baseline_protocol_version"):
         return {}
     try:
-        from scytaledroid.DynamicAnalysis.scenarios.manual import _build_baseline_protocol
         from types import SimpleNamespace
+
+        from scytaledroid.DynamicAnalysis.scenarios.manual import _build_baseline_protocol
 
         target_duration = int(
             operator.get("target_duration_s")
@@ -295,9 +299,15 @@ def _sync_manifest_from_tracker(run_dir: Path, tracker_row: Mapping[str, Any]) -
 
 
 def _apply_candidate(run_dir: Path, row: Mapping[str, Any], *, output_dir: Path, reason: str) -> dict[str, Any]:
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        recompute_dataset_tracker,
+    )
+    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+        index_dynamic_evidence_pack_to_db,
+    )
+
     from scripts.dynamic import refresh_analysis_summaries
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
-    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_pack_to_db
 
     payload = dict(row.get("_payload") or {})
     if not payload:

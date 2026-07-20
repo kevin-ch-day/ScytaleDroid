@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.StaticAnalysis.core.findings import Badge
 from scytaledroid.StaticAnalysis.core.models import ManifestFlags
 from scytaledroid.StaticAnalysis.detectors.network import NetworkSurfaceDetector
@@ -17,7 +16,6 @@ from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.url_tokenizer i
 from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.urlsafe import (
     safe_urlsplit,
 )
-
 
 # =============================================================================
 # Former tests/static_analysis/test_string_url_parsing.py

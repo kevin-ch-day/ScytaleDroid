@@ -107,7 +107,7 @@ def _emit_string_rollup_cohort_line(apps: Sequence[AppRunResult], *, total: int)
         1
         for app in split_apps
         if str(
-            ((getattr(app, "base_string_data", {}) or {}).get("aggregation_scope") if isinstance(getattr(app, "base_string_data", None), Mapping) else "")
+            (getattr(app, "base_string_data", {}) or {}).get("aggregation_scope") if isinstance(getattr(app, "base_string_data", None), Mapping) else ""
         ).strip().lower()
         == "artifact_merged"
     )

@@ -11,14 +11,17 @@ from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.freeze_eligibility import derive_freeze_eligibility
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.menus.summary_support import (
     build_collection_priorities,
     compute_tracker_vs_evidence_deltas,
     min_windows_per_run,
 )
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, resolve_dynamic_run_dir
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    resolve_dynamic_run_dir,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
@@ -155,7 +158,9 @@ def repair_reindex_tracker(*, callbacks: DynamicMaintenanceCallbacks) -> None:
         load_dataset_tracker,
         recompute_dataset_tracker,
     )
-    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import run_freeze_readiness_audit
+    from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
+        run_freeze_readiness_audit,
+    )
 
     print()
     menu_utils.print_header("Repair/Reindex Tracker")
@@ -322,7 +327,9 @@ def repair_reindex_tracker(*, callbacks: DynamicMaintenanceCallbacks) -> None:
     db_sync: dict[str, object] = {"attempted": False, "skipped_reason": None}
     try:
         from scytaledroid.Database.db_core import db_config
-        from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
+        from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+            index_dynamic_evidence_packs_to_db,
+        )
 
         if str(db_config.DB_CONFIG.get("engine") or "").lower() == "disabled":
             db_sync["skipped_reason"] = "db_disabled"

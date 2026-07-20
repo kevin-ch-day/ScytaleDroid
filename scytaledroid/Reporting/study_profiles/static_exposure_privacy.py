@@ -9,9 +9,10 @@ import re
 import shutil
 import subprocess
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Reporting.models import ReportRequest

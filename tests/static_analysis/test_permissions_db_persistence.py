@@ -5,7 +5,6 @@ from pathlib import Path
 
 from scytaledroid.Database.db_func.permissions import permission_dicts as permission_dicts_db
 
-
 _MODULE_PATH = (
     Path(__file__).resolve().parents[2]
     / "scytaledroid"

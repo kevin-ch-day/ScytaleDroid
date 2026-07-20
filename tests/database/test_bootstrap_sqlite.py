@@ -3,7 +3,6 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-
 from scytaledroid.Database.db_queries.harvest.install_sets import CREATE_HARVEST_APK_OBSERVATIONS
 from scytaledroid.Database.tools import bootstrap
 

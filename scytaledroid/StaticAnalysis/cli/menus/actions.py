@@ -19,8 +19,8 @@ except Exception:  # pragma: no cover - DB optional
 
 from ...core.detector_runner import PIPELINE_STAGES
 from ...core.repository import load_display_name_map
-from ..core.analysis_profiles import run_modules_for_profile
 from ..commands.models import Command
+from ..core.analysis_profiles import run_modules_for_profile
 from ..core.models import RunParameters
 from ..execution.scan_identity_helpers import select_group_artifacts
 from ..flows.profile_prior_session import (

@@ -154,6 +154,7 @@ def test_render_paper_freeze_readiness_brief_shows_summary(monkeypatch, capsys) 
                         "missing_baseline_runs": 0,
                         "missing_interactive_runs": 3,
                         "valid_pcap_count": 4,
+                        "strict_workflow_status": "strict idle ready",
                         "baseline_class_note": "Strict Idle is the quota baseline lane for paper readiness.",
                         "draft_role": "current_gap",
                         "collectability": "collectable_now",
@@ -175,6 +176,7 @@ def test_render_paper_freeze_readiness_brief_shows_summary(monkeypatch, capsys) 
                         "missing_baseline_runs": 0,
                         "missing_interactive_runs": 0,
                         "valid_pcap_count": 8,
+                        "strict_workflow_status": "strict idle ready",
                         "baseline_class_note": "Strict Idle is the quota baseline lane for paper readiness.",
                         "draft_role": "ready_coverage",
                         "collectability": "ready_prior_build",
@@ -218,6 +220,8 @@ def test_render_paper_freeze_readiness_brief_shows_summary(monkeypatch, capsys) 
     assert "MUST RUN NOW" in out
     assert "READY DO NOT TOUCH" in out
     assert "Strict Idle is the quota baseline lane" in out
+    assert "Strict" in out
+    assert "ready" in out
     assert "Reddit" in out
     assert "WhatsApp" in out
     assert "collectable" in out.lower()

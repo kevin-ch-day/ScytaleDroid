@@ -5,14 +5,13 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from openpyxl import load_workbook
-
+from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import _paper_provenance
 from scytaledroid.DynamicAnalysis.ml.publication_bundle.exporters import (
     tex_escape,
     write_csv_with_provenance,
     write_tex_table,
     write_xlsx,
 )
-from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import _paper_provenance
 
 
 def test_write_csv_with_provenance_comment_header(tmp_path: Path) -> None:

@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.harvest.models import ArtifactResult, PullResult
 from scytaledroid.DeviceAnalysis.services import apk_library_service, artifact_store
@@ -14,7 +13,6 @@ from tests.device_analysis._harvest_runner_support import (
     make_inventory_row,
     make_package_plan,
 )
-
 
 pytestmark = [pytest.mark.unit]
 

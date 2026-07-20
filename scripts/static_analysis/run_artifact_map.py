@@ -30,9 +30,10 @@ import re
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 SCRIPT_PATH = Path(__file__).resolve()
 
@@ -1588,7 +1589,9 @@ def build_artifact_map_report(
 
     from scytaledroid.Config import app_config
     from scytaledroid.DeviceAnalysis.services import artifact_store
-    from scytaledroid.StaticAnalysis.cli.execution.run_health.cli_output import sanitize_session_stamp_for_filename
+    from scytaledroid.StaticAnalysis.cli.execution.run_health.cli_output import (
+        sanitize_session_stamp_for_filename,
+    )
     from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
     data_dir = Path(app_config.DATA_DIR)
@@ -2355,7 +2358,9 @@ def main() -> int:
 
     if args.write_report is not None:
         from scytaledroid.Config import app_config
-        from scytaledroid.StaticAnalysis.cli.execution.run_health.cli_output import sanitize_session_stamp_for_filename
+        from scytaledroid.StaticAnalysis.cli.execution.run_health.cli_output import (
+            sanitize_session_stamp_for_filename,
+        )
 
         out_path: Path
         if args.write_report == "default":

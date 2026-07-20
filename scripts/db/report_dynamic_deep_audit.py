@@ -8,10 +8,11 @@ import csv
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -787,7 +788,9 @@ def _collect_run_records(
     package_filter: str | None = None,
 ) -> list[dict[str, Any]]:
     from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
-    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import verify_dynamic_evidence_packs
+    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import (
+        verify_dynamic_evidence_packs,
+    )
 
     verify_report = verify_dynamic_evidence_packs(output_root)
     verify_by_run = {
@@ -2179,11 +2182,11 @@ def _app_readiness_rows(
         evidence_base_score = min(
             READINESS_WEIGHTS["evidence_base"],
             round(
-                (
+
                     min(len(valid_runs), 5) / 5.0 * 15.0
                     + min(avg_quality, 100.0) / 100.0 * 15.0
                     + (5.0 if len(invalid_runs) == 0 else max(0.0, 5.0 - float(len(invalid_runs))))
-                )
+
             ),
         )
         coverage_completeness_score = min(
@@ -2751,12 +2754,12 @@ def generate_report(
         embedded_enriched = sum(
             1
             for run in run_rows
-            if bool(((run.get("embedded_corroboration") or {}).get("enriched_domain_metadata_present")))
+            if bool((run.get("embedded_corroboration") or {}).get("enriched_domain_metadata_present"))
         )
         overlay_enriched = sum(
             1
             for run in run_rows
-            if bool(((run.get("overlay_corroboration") or {}).get("enriched_domain_metadata_present")))
+            if bool((run.get("overlay_corroboration") or {}).get("enriched_domain_metadata_present"))
         )
         embedded_actionable = sum(
             1

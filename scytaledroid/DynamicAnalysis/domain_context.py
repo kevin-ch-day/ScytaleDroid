@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 COMMON_TWO_PART_SUFFIXES = {
     "co.uk",
     "org.uk",

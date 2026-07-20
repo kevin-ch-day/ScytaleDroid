@@ -1,5 +1,5 @@
-from scytaledroid.Database.db_utils.menus.health_checks_inventory import run_inventory_health_check
 from scytaledroid.Database.db_utils.menus import health_checks
+from scytaledroid.Database.db_utils.menus.health_checks_inventory import run_inventory_health_check
 from scytaledroid.Database.db_utils.menus.health_checks_permission import render_scoring_checks
 from scytaledroid.Database.db_utils.menus.health_checks_static import render_integrity_checks
 

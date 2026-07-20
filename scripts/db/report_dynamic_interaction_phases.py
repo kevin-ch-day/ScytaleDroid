@@ -49,12 +49,12 @@ def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) ->
 
 
 def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
+    from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
     from scytaledroid.DynamicAnalysis.pcap.interaction_phases import (
         build_interaction_timeline_from_run_dir,
         build_protocol_phase_marker_rows,
         phase_packet_transport_summary,
     )
-    from scytaledroid.DynamicAnalysis.pcap.diagnostics import dataset_pcap_failure_detail
 
     root = _dynamic_root()
     phase_rows: list[dict[str, Any]] = []

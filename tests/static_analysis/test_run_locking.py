@@ -5,7 +5,6 @@ import os
 import sys
 
 import pytest
-
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.flows import run_locking

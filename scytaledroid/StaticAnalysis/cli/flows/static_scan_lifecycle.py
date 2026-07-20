@@ -53,7 +53,9 @@ def emit_static_run_phase_log(
     """Structured RUN_PHASE log (prefers ``run_dispatch`` logger, falls back to run_events)."""
 
     from scytaledroid.StaticAnalysis.cli.flows import run_dispatch as _dispatch_phase
-    from scytaledroid.StaticAnalysis.cli.flows.run_events import _emit_phase_log as _run_events_emit_phase_log
+    from scytaledroid.StaticAnalysis.cli.flows.run_events import (
+        _emit_phase_log as _run_events_emit_phase_log,
+    )
 
     payload: dict[str, object] = {
         "event": log_events.RUN_PHASE,

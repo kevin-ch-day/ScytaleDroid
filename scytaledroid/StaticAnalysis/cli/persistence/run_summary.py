@@ -57,16 +57,26 @@ from .persistence_context import (
     _PreparedFindingsPersistenceContext,
     _TransactionBootstrapResult,
 )
-from .run_summary_stages import (
-    bootstrap_persistence_transaction as _bootstrap_persistence_transaction_impl,
-    finalize_static_handoff_stage as _finalize_static_handoff_stage_impl,
-    persist_findings_and_correlations_stage as _persist_findings_and_correlations_stage_impl,
-    persist_metrics_and_sections_stage as _persist_metrics_and_sections_stage_impl,
-    persist_permission_and_storage_stage as _persist_permission_and_storage_stage_impl,
-    persist_static_sections_wrapper as _persist_static_sections_wrapper_impl,
-)
 from .reports.evidence_report import normalize_evidence
 from .run_envelope import prepare_run_envelope
+from .run_summary_stages import (
+    bootstrap_persistence_transaction as _bootstrap_persistence_transaction_impl,
+)
+from .run_summary_stages import (
+    finalize_static_handoff_stage as _finalize_static_handoff_stage_impl,
+)
+from .run_summary_stages import (
+    persist_findings_and_correlations_stage as _persist_findings_and_correlations_stage_impl,
+)
+from .run_summary_stages import (
+    persist_metrics_and_sections_stage as _persist_metrics_and_sections_stage_impl,
+)
+from .run_summary_stages import (
+    persist_permission_and_storage_stage as _persist_permission_and_storage_stage_impl,
+)
+from .run_summary_stages import (
+    persist_static_sections_wrapper as _persist_static_sections_wrapper_impl,
+)
 from .stage_writers import (
     persist_metrics_and_sections_stage as _stage_persist_metrics_and_sections,
 )

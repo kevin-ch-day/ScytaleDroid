@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.execution import results
-
 from tests.static_analysis._results_support import (
     make_app_result,
     make_outcome,
     make_params,
 )
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract, pytest.mark.unit]
 

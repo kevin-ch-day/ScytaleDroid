@@ -16,17 +16,21 @@ import json
 import math
 import sys
 from collections import Counter, defaultdict
-from itertools import combinations
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from itertools import combinations
 from pathlib import Path
 from statistics import median
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scytaledroid.DynamicAnalysis.run_qualification import analysis_included_rows, row_analysis_included
+from scytaledroid.DynamicAnalysis.run_qualification import (
+    analysis_included_rows,
+    row_analysis_included,
+)
 from scytaledroid.Publication.app_category_policy import app_display_name
 
 RUN_FEATURE_MATRIX_FIELDS: tuple[str, ...] = (
@@ -1038,7 +1042,7 @@ def _build_run_feature_matrix(
             "top_alpn": _first_top_value(tls.get("top_alpn")),
             "top_sni": _first_top_value(tls.get("top_sni_from_client_hello")),
             "sni_to_ja4_diversity": (
-                float((_safe_int(row.get("sni_count")) or 0)) / float(unique_ja4_count)
+                float(_safe_int(row.get("sni_count")) or 0) / float(unique_ja4_count)
                 if (_safe_int(row.get("sni_count")) or 0) > 0 and unique_ja4_count and unique_ja4_count > 0
                 else None
             ),

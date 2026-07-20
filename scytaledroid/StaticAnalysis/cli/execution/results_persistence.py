@@ -10,7 +10,7 @@ def _set_report_metadata(*, base_report: object, metadata_map: Mapping[str, obje
     try:
         object.__setattr__(base_report, "metadata", dict(metadata_map))
     except Exception:
-        setattr(base_report, "metadata", dict(metadata_map))
+        base_report.metadata = dict(metadata_map)
 
 
 def _finding_fidelity_status(

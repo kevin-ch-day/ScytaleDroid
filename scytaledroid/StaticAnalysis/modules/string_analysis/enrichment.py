@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import replace
-import re
 
 from .constants import DOCUMENTARY_ROOTS
 from .hit_record import StringHit

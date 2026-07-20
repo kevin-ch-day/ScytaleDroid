@@ -13,10 +13,10 @@ import csv
 import hashlib
 import json
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
-
+from typing import Any
 
 DEFAULT_COLD_ROOT = Path("/mnt/MERCURY_DATA_V2/scytaledroid_artifacts/apk_store/cold")
 

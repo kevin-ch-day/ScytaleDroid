@@ -3,8 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, ScopeSelection
-from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+from scytaledroid.StaticAnalysis.cli.core.models import (
+    AppRunResult,
+    RunOutcome,
+    RunParameters,
+    ScopeSelection,
+)
 from scytaledroid.StaticAnalysis.cli.execution.cohort_scan_notes import emit_post_scan_cohort_notes
 from scytaledroid.StaticAnalysis.cli.flows import research_cohort as flow
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact

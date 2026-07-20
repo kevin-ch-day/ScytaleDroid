@@ -84,15 +84,15 @@ baseline linkage.
 
 ScytaleDroid targets modern Linux hosts. Before running the toolkit make sure you have:
 
-- **Python 3.11 or newer.** The project is linted and typed against Python 3.13; a 3.11+
-  interpreter is required for the CLI and utilities.
+- **Python 3.11, 3.12, or 3.13.** The pinned dependency locks and CI coverage target this
+  range. Python 3.13 is recommended for a new deployment.
 - **ADB** with access to the devices you plan to inventory. Confirm `adb devices`
   returns the hardware you want to target.
 - (Optional) **MariaDB/MySQL** if you want DB-backed persistence and cross-run analytics.
   The tool runs end-to-end without a DB; when enabled, DB writes are strict and require
   a compatible MySQL/MariaDB backend.
-- **Virtual environment (recommended).** Use `python -m venv .venv && source .venv/bin/activate`
-  to keep dependencies isolated.
+- **Virtual environment.** `./setup.sh` creates and uses `.venv` automatically so project
+  dependencies cannot conflict with unrelated system packages.
 
 ### Environment setup
 
@@ -105,9 +105,18 @@ ScytaleDroid targets modern Linux hosts. Before running the toolkit make sure yo
    ```bash
    ./setup.sh
    ```
-   The script validates Python availability, upgrades `pip`, and installs the packages
-   declared in `requirements.txt`.
-3. (Optional) Install developer tooling:
+   The script selects Python 3.11-3.13, creates `.venv`, installs the pinned runtime lock without
+   upgrading packaging tools by default, prepares workspace directories, and reports missing Fedora
+   runtime tools.
+3. Create your local configuration without copying any existing secrets:
+   ```bash
+   cp .env.example .env
+   ```
+   Configure the database credentials, restore data if this is a migration, then run:
+   ```bash
+   ./run.sh --new-system-check --require-database
+   ```
+4. (Optional) Install developer tooling:
    ```bash
    python -m pip install --upgrade ruff pytest
    ```
@@ -121,7 +130,8 @@ Useful smoke checks:
 
 ```bash
 adb devices              # Authorized device(s) listed as 'device'
-./run.sh                 # Launch CLI (--deploy-check for host/ADB/DB probe)
+./run.sh --new-system-check --require-database  # Validate a provisioned host
+./run.sh                 # Launch the operator console
 ```
 
 If you are targeting a database, export the DSN variables your environment

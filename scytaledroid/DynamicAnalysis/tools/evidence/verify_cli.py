@@ -812,7 +812,9 @@ def run_dynamic_evidence_quick_check(*, enrich_db_labels: bool = True) -> dict[s
     # If this is a dataset collection workspace, show which dataset apps have no runs yet.
     dataset_label = "Research cohort"
     try:
-        from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_context
+        from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
+            active_research_cohort_context,
+        )
 
         cohort_ctx = active_research_cohort_context()
         dataset_label = str(cohort_ctx.get("display_name") or dataset_label)

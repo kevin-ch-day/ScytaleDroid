@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC
 from types import SimpleNamespace
 
+import pytest
+from scytaledroid.Database.db_scripts import static_run_audit
 from scytaledroid.StaticAnalysis.cli.execution import (
     db_masvs_summary,
     db_severity_table,
@@ -10,11 +12,8 @@ from scytaledroid.StaticAnalysis.cli.execution import (
     diagnostics,
     results_formatters,
 )
-from scytaledroid.Database.db_scripts import static_run_audit
 from scytaledroid.StaticAnalysis.cli.persistence.reports import masvs_summary_report
 from scytaledroid.Utils.System import output_prefs
-
-import pytest
 
 
 @pytest.fixture(autouse=True)

@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.DeviceAnalysis.harvest import package_execution
 from tests.device_analysis._harvest_runner_support import (
     isolate_storage_contract,
@@ -12,7 +11,6 @@ from tests.device_analysis._harvest_runner_support import (
     make_package_plan,
     patch_runner_common,
 )
-
 
 pytestmark = [pytest.mark.unit]
 

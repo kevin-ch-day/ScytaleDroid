@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.execution import scan_report as sr
 

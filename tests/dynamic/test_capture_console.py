@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import sys
+from contextlib import contextmanager
 
 import pytest
-
 from scytaledroid.DynamicAnalysis.capture.console import CbreakTerminal, LiveCaptureConsole
 from scytaledroid.DynamicAnalysis.capture.state import CaptureAction, CaptureState
 

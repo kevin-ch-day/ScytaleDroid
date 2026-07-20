@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from scytaledroid.Reporting import menu
-from scytaledroid.Reporting import runtime_network_menu
-from scytaledroid.Reporting import static_exposure_menu
+from scytaledroid.Reporting import menu, runtime_network_menu, static_exposure_menu
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption, selectable_keys
 
 

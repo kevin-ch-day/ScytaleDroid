@@ -3,7 +3,6 @@ from __future__ import annotations
 from scytaledroid.StaticAnalysis.cli.core.masvs_mapper import summarise_controls
 from scytaledroid.StaticAnalysis.cli.persistence.findings_writer import compute_cvss_base
 
-
 # =============================================================================
 # Former tests/static_analysis/test_cvss_fallback.py
 # =============================================================================

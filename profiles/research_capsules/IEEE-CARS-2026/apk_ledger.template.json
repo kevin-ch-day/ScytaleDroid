@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "paper_id": "IEEE-CARS-2026",
+  "review_status": "DRAFT_UNREVIEWED",
+  "entries": [
+    {
+      "package_name": "com.example.app",
+      "app_name": "Example App",
+      "version_name": "1.2.3",
+      "version_code": "123",
+      "base_apk_sha256": "replace-with-64-character-lowercase-sha256",
+      "selected_apk_path": "data/store/apk/sha256/xx/example.apk",
+      "static_run_id": "1234",
+      "paper_build_relation": "selected_paper_build",
+      "inclusion_disposition": "included"
+    }
+  ]
+}

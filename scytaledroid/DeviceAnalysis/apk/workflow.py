@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis import harvest, inventory
-from scytaledroid.DeviceAnalysis.harvest import stale_replan
 from scytaledroid.DeviceAnalysis.adb import client as adb_client
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.apk import delta, planner, ui
@@ -19,6 +18,7 @@ from scytaledroid.DeviceAnalysis.device_menu.inventory_guard import (
     get_last_guard_decision,
     get_latest_inventory_metadata,
 )
+from scytaledroid.DeviceAnalysis.harvest import stale_replan
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.DisplayUtils import text_blocks
 from scytaledroid.Utils.LoggingUtils import logging_engine

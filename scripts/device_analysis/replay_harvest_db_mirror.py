@@ -19,12 +19,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DeviceAnalysis.harvest.replay import (
     find_package_manifests,
     load_package_manifest,
     replay_manifests,
 )
+from scytaledroid.DeviceAnalysis.services import artifact_store
 
 
 def _default_root() -> Path:

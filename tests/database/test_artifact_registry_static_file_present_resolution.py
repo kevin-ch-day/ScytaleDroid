@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
-
-from scytaledroid.Database.db_utils import artifact_registry_static_file_present_resolution as subject
+from scytaledroid.Database.db_utils import (
+    artifact_registry_static_file_present_resolution as subject,
+)
 
 
 def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:

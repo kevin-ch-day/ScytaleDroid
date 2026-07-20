@@ -6,8 +6,9 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text

@@ -3,9 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from scytaledroid.DeviceAnalysis.inventory import db_sync
-from scytaledroid.DeviceAnalysis.inventory import progress
-from scytaledroid.DeviceAnalysis.inventory import snapshot_io
+from scytaledroid.DeviceAnalysis.inventory import db_sync, progress, snapshot_io
 from scytaledroid.DeviceAnalysis.inventory.snapshot_io import _prune_inventory_files
 from scytaledroid.Utils.DisplayUtils import colors
 

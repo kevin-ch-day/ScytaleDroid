@@ -5,8 +5,9 @@ Separates quota accounting from analysis inclusion and low-signal retention.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 
 def _truthy_flag(value: object) -> bool:

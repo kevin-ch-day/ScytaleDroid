@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DeviceAnalysis.services.static_scope_service import static_scope_service
-from scytaledroid.Utils.DisplayUtils import colors, menu_utils, prompt_utils, status_messages, text_blocks
+from scytaledroid.Utils.DisplayUtils import (
+    colors,
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    text_blocks,
+)
 from scytaledroid.Utils.DisplayUtils.terminal import get_terminal_width
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -24,13 +30,13 @@ from .static_analysis_menu_ops import (
     choose_all_scope_variant as _choose_all_scope_variant,
 )
 from .static_analysis_menu_ops import (
-    choose_run_profile as _choose_run_profile,
-)
-from .static_analysis_menu_ops import (
     choose_exact_dynamic_worklist_target as _choose_exact_dynamic_worklist_target,
 )
 from .static_analysis_menu_ops import (
     choose_research_cohort_scope as _choose_research_cohort_scope,
+)
+from .static_analysis_menu_ops import (
+    choose_run_profile as _choose_run_profile,
 )
 from .static_analysis_menu_ops import (
     distinct_package_count as _distinct_package_count,

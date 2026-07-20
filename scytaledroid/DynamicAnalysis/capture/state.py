@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class CaptureStatus(str, Enum):
+class CaptureStatus(StrEnum):
     WAIT_TARGET_FOREGROUND = "WAIT_TARGET_FOREGROUND"
     RUNNING_VALID = "RUNNING_VALID"
     PAUSED_FOREGROUND_DRIFT = "PAUSED_FOREGROUND_DRIFT"
@@ -15,7 +15,7 @@ class CaptureStatus(str, Enum):
     FINALIZED = "FINALIZED"
 
 
-class CaptureAction(str, Enum):
+class CaptureAction(StrEnum):
     FINALIZE = "finalize"
     ABORT = "abort"
 

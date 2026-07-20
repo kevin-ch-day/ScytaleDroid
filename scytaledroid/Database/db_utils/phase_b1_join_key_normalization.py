@@ -729,7 +729,7 @@ def _apply_join_key_normalization(
             raise RuntimeError(f"{stem_prefix} after-state preflight not clean")
         if not bool((after_typed_parity.get("summary") or {}).get("parity_clean")):
             raise RuntimeError("phase-a typed read parity became unclean after apply")
-        if int((after_registry.get("fallback_needed_rows") or 0)) != 0:
+        if int(after_registry.get("fallback_needed_rows") or 0) != 0:
             raise RuntimeError("artifact registry fallback-needed rows appeared after apply")
 
         payload = {

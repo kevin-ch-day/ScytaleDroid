@@ -2,7 +2,6 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.DeviceAnalysis.harvest.models import (
     ArtifactPlan,
     HarvestPlan,
@@ -15,7 +14,6 @@ from scytaledroid.DeviceAnalysis.harvest.views import (
     render_harvest_summary_structured,
     render_scope_overview,
 )
-
 
 pytestmark = [pytest.mark.ui_contract]
 

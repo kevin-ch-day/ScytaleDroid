@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Iterable
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import TypeVar
 
 from scytaledroid.DeviceAnalysis.adb import cache as adb_cache

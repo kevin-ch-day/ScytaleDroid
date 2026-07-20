@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
-from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext, build_static_run_context
+from scytaledroid.StaticAnalysis.cli.core.run_context import (
+    StaticRunContext,
+    build_static_run_context,
+)
 from scytaledroid.StaticAnalysis.cli.core.run_specs import StaticRunSpec
 
 

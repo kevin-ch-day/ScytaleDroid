@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from scytaledroid.DeviceAnalysis.apk import ui
-from scytaledroid.DeviceAnalysis.apk import workflow
+from scytaledroid.DeviceAnalysis.apk import ui, workflow
 from scytaledroid.DeviceAnalysis.harvest.models import HarvestPlan, InventoryRow, ScopeSelection
 from scytaledroid.Utils.DisplayUtils import colors
 

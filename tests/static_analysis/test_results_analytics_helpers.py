@@ -3,10 +3,8 @@ from __future__ import annotations
 from collections import Counter
 
 import pytest
-
-from scytaledroid.StaticAnalysis.cli.execution import analytics, results
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
-
+from scytaledroid.StaticAnalysis.cli.execution import analytics, results
 
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract, pytest.mark.unit]
 

@@ -9,7 +9,6 @@ from scytaledroid.DeviceAnalysis.inventory.determinism import (
     normalize_inventory_row,
 )
 
-
 _FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "determinism"
 
 

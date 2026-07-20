@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.core.static_context import compute_static_context
 from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
 )

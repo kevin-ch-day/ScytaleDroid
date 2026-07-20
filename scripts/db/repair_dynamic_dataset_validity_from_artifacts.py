@@ -160,7 +160,10 @@ def _manifest_from_raw(raw: Mapping[str, Any], run_dir: Path):
 
 
 def _candidate_row(run_dir: Path) -> dict[str, Any] | None:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, evaluate_dataset_validity
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        evaluate_dataset_validity,
+    )
 
     manifest_path = run_dir / "run_manifest.json"
     raw = _read_json(manifest_path)
@@ -216,7 +219,10 @@ def _load_tracker_by_run() -> dict[str, Mapping[str, Any]]:
 
 
 def _refresh_tracker_truth() -> None:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        recompute_dataset_tracker,
+    )
 
     recompute_dataset_tracker(config=DatasetTrackerConfig())
 
@@ -328,7 +334,9 @@ def _sync_manifest_from_tracker(run_dir: Path, tracker_row: Mapping[str, Any]) -
 
 
 def _reindex_run_ids(evidence_root: Path, run_ids: Sequence[str]) -> int:
-    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_pack_to_db
+    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+        index_dynamic_evidence_pack_to_db,
+    )
 
     reindexed_db_rows = 0
     for run_id in run_ids:
@@ -351,8 +359,12 @@ def _apply_repairs(
     *,
     explicit_run_ids: Sequence[str] = (),
 ) -> tuple[int, int, int]:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        recompute_dataset_tracker,
+    )
     from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_plan_read_path
+
     from scripts.dynamic import refresh_analysis_summaries as refresh_summaries
 
     backups_dir = output_dir / "manifest_backups"

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 
+from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.models import IndexedString
 from scytaledroid.StaticAnalysis.modules.string_analysis.matcher import StringMatcher
 from scytaledroid.StaticAnalysis.modules.string_analysis.patterns.base import StringPattern
-from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.models import IndexedString
 
 
 class _IndexWithoutSearch:

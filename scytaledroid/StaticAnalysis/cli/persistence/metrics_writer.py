@@ -26,7 +26,6 @@ from scytaledroid.StaticAnalysis.risk.permission import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
-
 _SUPPRESSED_RISK_TAGS = {
     "policy_drift",
     "dev_placeholder",

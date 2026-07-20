@@ -38,7 +38,9 @@ def export_pcap_features_csv(*, resolve_dataset_freeze_read_path_fn) -> None:
 
 
 def export_dynamic_run_summary_csv(*, resolve_dataset_freeze_read_path_fn) -> None:
-    from scytaledroid.DynamicAnalysis.pcap.aggregate import export_dynamic_run_summary_csv as export_fn
+    from scytaledroid.DynamicAnalysis.pcap.aggregate import (
+        export_dynamic_run_summary_csv as export_fn,
+    )
 
     print()
     menu_utils.print_header("Run Summary Export")
@@ -147,7 +149,9 @@ def run_cohort_security_audit_export(*, include_hidden_patterns: bool = False) -
         except Exception as exc:  # noqa: BLE001
             print(status_messages.status(f"Hidden patterns export failed: {exc}", level="warn"))
     try:
-        from scytaledroid.DynamicAnalysis.pcap.security_cohort import generate_cohort_security_report
+        from scytaledroid.DynamicAnalysis.pcap.security_cohort import (
+            generate_cohort_security_report,
+        )
 
         cohort_payload = generate_cohort_security_report()
         review = (cohort_payload.get("output_files") or {}).get("cohort_security_review_md")

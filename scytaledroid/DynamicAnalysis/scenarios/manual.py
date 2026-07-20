@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.capture.console import CbreakTerminal, LiveCaptureConsole, SelectInputReader
+from scytaledroid.DynamicAnalysis.capture.console import (
+    CbreakTerminal,
+    LiveCaptureConsole,
+    SelectInputReader,
+)
 from scytaledroid.DynamicAnalysis.capture.state import CaptureAction
 from scytaledroid.DynamicAnalysis.capture.surface_probe import (
     infer_runtime_surface as _infer_runtime_surface,
@@ -25,64 +29,30 @@ from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     make_runtime_pcap_bytes_provider as _guided_make_runtime_pcap_bytes_provider,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    read_device_foreground_target as _guided_read_device_foreground_target,
+    read_device_foreground_package as _guided_read_device_foreground_package,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
-    read_device_foreground_package as _guided_read_device_foreground_package,
+    read_device_foreground_target as _guided_read_device_foreground_target,
 )
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     target_foreground_label as _guided_target_foreground_label,
 )
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
-from scytaledroid.DynamicAnalysis.scenarios.script_template_catalog import (
-    SNAPCHAT_TEMPLATE_HINTS,
-    V3_SCRIPTED_REPRO_TIPS,
-)
-from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
-    FACEBOOK_BEHAVIOR_V3 as _FACEBOOK_BEHAVIOR_V3,
-)
-from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
-    NEWS_BEHAVIOR_V2 as _NEWS_BEHAVIOR_V2,
-)
-from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
-    SCRIPTED_ARTICLE_LIMITATION_REASONS as _SCRIPTED_ARTICLE_LIMITATION_REASONS,
-)
-from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
-    SCRIPT_LIMITATION_REASON_LABELS,
-    SCRIPT_LIMITATION_REASON_TEXT as _SCRIPT_LIMITATION_REASON_TEXT,
-    SCRIPT_PROTOCOL_VERSION,
-    build_template_hash as _build_template_hash,
-    json_dumps_canonical,
-    news_branch_skip_reason as _news_branch_skip_reason,
-    normalize_limitation_reason as _normalize_limitation_reason,
-    preview_script_template_for_package,
-    prompt_facebook_control_account_mode as _prompt_facebook_control_account_mode,
-    prompt_facebook_repeat_plan as _prompt_facebook_repeat_plan,
-    prompt_news_subscription_branch as _prompt_news_subscription_branch,
-    prompt_step3_variant as _prompt_step3_variant,
-    requested_script_template as _requested_script_template,
-    resolve_script_template as _resolve_script_template,
-    script_step_event_metadata as _script_step_event_metadata,
-    scripted_step_action_line as _scripted_step_action_line,
-    scripted_step_description as _scripted_step_description,
-)
-from scytaledroid.DynamicAnalysis.scenarios.scripted_protocol_runtime import (
-    ScriptedProtocolDeps as _ScriptedProtocolDeps,
-)
-from scytaledroid.DynamicAnalysis.scenarios.scripted_protocol_runtime import (
-    ScriptedProtocolRuntime as _ScriptedProtocolRuntime,
-)
 from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
     baseline_idle_behavior_lines as _guidance_baseline_idle_behavior_lines,
-    baseline_idle_checkpoint_messages as _guidance_baseline_idle_checkpoint_messages,
-    baseline_idle_quota_warning as _guidance_baseline_idle_quota_warning,
-    baseline_idle_ready_note as _guidance_baseline_idle_ready_note,
-    messaging_connected_behavior_lines as _guidance_messaging_connected_behavior_lines,
 )
-from scytaledroid.DynamicAnalysis.scenarios.interactive_guidance import (
-    manual_interaction_behavior_lines as _guidance_manual_interaction_behavior_lines,
-    manual_interaction_checkpoint_messages as _guidance_manual_interaction_checkpoint_messages,
+from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
+    baseline_idle_checkpoint_messages as _guidance_baseline_idle_checkpoint_messages,
+)
+from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
+    baseline_idle_quota_warning as _guidance_baseline_idle_quota_warning,
+)
+from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
+    baseline_idle_ready_note as _guidance_baseline_idle_ready_note,
+)
+from scytaledroid.DynamicAnalysis.scenarios.baseline_guidance import (
+    messaging_connected_behavior_lines as _guidance_messaging_connected_behavior_lines,
 )
 from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
     ActiveCaptureConfig as _ActiveCaptureConfig,
@@ -105,6 +75,15 @@ from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
 from scytaledroid.DynamicAnalysis.scenarios.capture_runtime import (
     resolve_capture_version_code as _runtime_resolve_capture_version_code,
 )
+from scytaledroid.DynamicAnalysis.scenarios.interactive_guidance import (
+    manual_interaction_behavior_lines as _guidance_manual_interaction_behavior_lines,
+)
+from scytaledroid.DynamicAnalysis.scenarios.interactive_guidance import (
+    manual_interaction_checkpoint_messages as _guidance_manual_interaction_checkpoint_messages,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_call_outcome import (
+    collect_manual_call_outcome as _collect_manual_call_outcome,
+)
 from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
     capture_console_exit_message as _driver_capture_console_exit_message,
 )
@@ -123,8 +102,59 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
 from scytaledroid.DynamicAnalysis.scenarios.manual_capture_driver import (
     run_stopwatch as _driver_run_stopwatch,
 )
-from scytaledroid.DynamicAnalysis.scenarios.manual_call_outcome import (
-    collect_manual_call_outcome as _collect_manual_call_outcome,
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    FACEBOOK_BEHAVIOR_V3 as _FACEBOOK_BEHAVIOR_V3,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    NEWS_BEHAVIOR_V2 as _NEWS_BEHAVIOR_V2,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    SCRIPT_LIMITATION_REASON_LABELS,
+    SCRIPT_PROTOCOL_VERSION,
+    json_dumps_canonical,
+    preview_script_template_for_package,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    SCRIPT_LIMITATION_REASON_TEXT as _SCRIPT_LIMITATION_REASON_TEXT,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    SCRIPTED_ARTICLE_LIMITATION_REASONS as _SCRIPTED_ARTICLE_LIMITATION_REASONS,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    build_template_hash as _build_template_hash,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    news_branch_skip_reason as _news_branch_skip_reason,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    normalize_limitation_reason as _normalize_limitation_reason,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    prompt_facebook_control_account_mode as _prompt_facebook_control_account_mode,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    prompt_facebook_repeat_plan as _prompt_facebook_repeat_plan,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    prompt_news_subscription_branch as _prompt_news_subscription_branch,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    prompt_step3_variant as _prompt_step3_variant,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    requested_script_template as _requested_script_template,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    resolve_script_template as _resolve_script_template,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    script_step_event_metadata as _script_step_event_metadata,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    scripted_step_action_line as _scripted_step_action_line,
+)
+from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
+    scripted_step_description as _scripted_step_description,
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     clear_prompt_and_previous_line as _timing_clear_prompt_and_previous_line,
@@ -146,6 +176,16 @@ from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
 )
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     rewrite_previous_line_preserving_prompt as _timing_rewrite_previous_line_preserving_prompt,
+)
+from scytaledroid.DynamicAnalysis.scenarios.script_template_catalog import (
+    SNAPCHAT_TEMPLATE_HINTS,
+    V3_SCRIPTED_REPRO_TIPS,
+)
+from scytaledroid.DynamicAnalysis.scenarios.scripted_protocol_runtime import (
+    ScriptedProtocolDeps as _ScriptedProtocolDeps,
+)
+from scytaledroid.DynamicAnalysis.scenarios.scripted_protocol_runtime import (
+    ScriptedProtocolRuntime as _ScriptedProtocolRuntime,
 )
 from scytaledroid.DynamicAnalysis.templates.category_map import (
     category_for_package,

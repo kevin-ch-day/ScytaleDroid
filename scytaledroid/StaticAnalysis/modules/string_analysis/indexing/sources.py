@@ -11,8 +11,8 @@ from collections.abc import Iterable, Mapping
 from scytaledroid.StaticAnalysis._androguard import APK, FileNotPresent
 from scytaledroid.StaticAnalysis.engine import aapt2_fallback
 
-from .models import IndexedString
 from ..origins import canonical_origin_type
+from .models import IndexedString
 from .utils import (
     StringFragment,
     looks_textual,

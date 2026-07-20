@@ -28,10 +28,11 @@ import hashlib
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -384,7 +385,9 @@ def _init_optional_db() -> tuple[dict[int, DbStaticRunRow], set[int], dict[str, 
 def _load_freeze_manifest(data_dir: Path) -> tuple[set[str], list[str]]:
     notes: list[str] = []
     try:
-        from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
+        from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+            resolve_dataset_freeze_read_path,
+        )
 
         path = resolve_dataset_freeze_read_path()
     except Exception:

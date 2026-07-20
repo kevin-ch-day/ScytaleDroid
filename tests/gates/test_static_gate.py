@@ -3,12 +3,17 @@ from __future__ import annotations
 import re
 from types import SimpleNamespace
 
-import pytest
-
 import main as app_main
-from scytaledroid.Database.db_core import db_queries as core_q
+import pytest
 from scytaledroid.Database.db_core import db_config
+from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_func.static_analysis import string_analysis
+from scytaledroid.Database.db_queries import schema_manifest
 from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
+from scytaledroid.StaticAnalysis.cli.flows import headless_run
+from scytaledroid.StaticAnalysis.cli.menus import actions
+from scytaledroid.StaticAnalysis.cli.persistence import run_writers
 from scytaledroid.StaticAnalysis.cli.persistence.static_handoff import build_static_handoff
 from scytaledroid.StaticAnalysis.core import (
     ManifestFlags,
@@ -16,12 +21,6 @@ from scytaledroid.StaticAnalysis.core import (
     PermissionSummary,
     StaticAnalysisReport,
 )
-from scytaledroid.Database.db_queries import schema_manifest
-from scytaledroid.Database.db_func.static_analysis import string_analysis
-from scytaledroid.StaticAnalysis.cli.flows import headless_run
-from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-from scytaledroid.StaticAnalysis.cli.menus import actions
-from scytaledroid.StaticAnalysis.cli.persistence import run_writers
 
 
 def _require_db_or_skip() -> None:

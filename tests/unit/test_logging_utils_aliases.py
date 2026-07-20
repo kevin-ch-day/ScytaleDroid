@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from scytaledroid.Config import app_config
-from scytaledroid.Utils.LoggingUtils import logging_engine
-from scytaledroid.Utils.LoggingUtils import logging_utils
+from scytaledroid.Utils.LoggingUtils import logging_engine, logging_utils
 
 
 def test_static_analysis_alias_routes_to_static_logger(monkeypatch) -> None:

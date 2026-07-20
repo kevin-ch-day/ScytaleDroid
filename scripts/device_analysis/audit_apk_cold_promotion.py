@@ -8,17 +8,17 @@ import csv
 import json
 import sys
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scytaledroid.Config import app_config  # noqa: E402
-
 
 DEFAULT_COLD_ROOT = Path("/mnt/MERCURY_DATA_V2/scytaledroid_artifacts/apk_store/cold")
 RECENT_STATIC_DAYS = 14
@@ -700,7 +700,9 @@ def _current_installed_versions(data_root: Path) -> dict[str, str]:
 
 def _paper_freeze_base_shas() -> tuple[set[str], str]:
     try:
-        from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import build_paper_freeze_manifest
+        from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
+            build_paper_freeze_manifest,
+        )
 
         manifest = build_paper_freeze_manifest()
     except Exception as exc:

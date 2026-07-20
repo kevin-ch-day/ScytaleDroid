@@ -31,8 +31,8 @@ def _main() -> int:
 
     try:
         from scytaledroid.Database.db_core import permission_intel as intel_db
-        from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
         from scytaledroid.Database.db_utils import diagnostics as db_diag
+        from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
     except ImportError as e:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {e}\n")
         return 2

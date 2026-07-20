@@ -11,11 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest, manifest_to_dict
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
+from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest, manifest_to_dict
 from scytaledroid.DynamicAnalysis.pcap.enrichment import infer_direction_from_ports, safe_port
 from scytaledroid.DynamicAnalysis.scenarios.script_template_catalog import template_steps_for_id
-
 
 TIMELINE_RELATIVE_PATH = "analysis/interaction_timeline.json"
 PROTOCOL_PHASE_MARKERS_RELATIVE_PATH = "analysis/protocol_phase_markers.jsonl"

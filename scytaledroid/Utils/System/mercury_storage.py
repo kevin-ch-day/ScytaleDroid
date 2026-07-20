@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
-
 
 MERCURY_V2_LABEL = "MERCURY_DATA_V2"
 MERCURY_V2_DEVICE = Path(f"/dev/disk/by-label/{MERCURY_V2_LABEL}")
@@ -77,8 +76,7 @@ def run_mount_command(command: Sequence[str], *, capture: bool = False) -> Comma
         proc = subprocess.run(
             argv,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
         stdout = proc.stdout or ""

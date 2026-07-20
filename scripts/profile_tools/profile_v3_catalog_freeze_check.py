@@ -13,8 +13,8 @@ Policy (PM-locked for OSS vNext / Paper #3):
 from __future__ import annotations
 
 import argparse
-import sys
 import signal
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -25,7 +25,6 @@ from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
     ALLOWED_CATEGORIES,
     load_profile_v3_catalog,
 )
-
 
 EXPECTED_PAPER_GRADE_COHORT_SIZE = 21
 

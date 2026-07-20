@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from scytaledroid.Database.db_queries import schema_manifest
 from scripts.db.view_repair_support import views_from_ordered_schema_manifest
+from scytaledroid.Database.db_queries import schema_manifest
 
 
 def test_schema_manifest_orders_session_v2_views_after_sessions_table():

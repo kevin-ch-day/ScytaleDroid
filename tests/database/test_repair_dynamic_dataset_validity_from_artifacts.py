@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scripts.db import repair_dynamic_dataset_validity_from_artifacts as repair
 
 

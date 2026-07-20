@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import RunOutcome, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows import static_scan_lifecycle as lifecycle
 

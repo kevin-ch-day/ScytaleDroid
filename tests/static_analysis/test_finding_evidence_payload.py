@@ -6,7 +6,6 @@ import hashlib
 import json
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.persistence.finding_evidence_payload import (
     canonical_evidence_body,
     evidence_hash_mismatch_hint,

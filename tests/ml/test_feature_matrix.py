@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from scytaledroid.DynamicAnalysis.ml.feature_matrix import BASIC_FEATURE_NAMES, rows_to_basic_matrix
 from scytaledroid.DynamicAnalysis.ml.profile_v3_ml_derive import _rows_to_matrix_v3
 from scytaledroid.DynamicAnalysis.ml.telemetry_windowing import WindowSpec

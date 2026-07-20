@@ -12,7 +12,6 @@ from scytaledroid.DynamicAnalysis.utils.path_utils import (
     resolve_evidence_path,
 )
 
-
 RUN_ID = "4d3def16-83a9-43f6-8dad-0d1dd295d795"
 
 

@@ -10,8 +10,9 @@ from __future__ import annotations
 import csv
 import json
 from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from .artifact_registry_static_dangling import collect_artifact_registry_static_dangling_report
 from .artifact_registry_static_legacy_overlap import collect_static_legacy_overlap_report

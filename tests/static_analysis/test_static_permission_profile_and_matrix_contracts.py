@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from scytaledroid.StaticAnalysis.modules.permissions import permission_matrix_view as matrix_view
 from scytaledroid.StaticAnalysis.modules.permissions.analysis.profiles import build_profiles
 
-
 # =============================================================================
 # Former tests/static_analysis/test_permission_profile_classification.py
 # =============================================================================

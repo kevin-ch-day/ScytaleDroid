@@ -20,11 +20,6 @@ from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
     paper_artifacts_path,
     run_ml_on_evidence_packs,
 )
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
-    get_sampling_duration_seconds,
-    load_run_inputs,
-)
-from scytaledroid.DynamicAnalysis.run_duration_tiers import classify_duration_tier
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     active_dataset_freeze_path,
     active_dataset_plan_path,
@@ -116,7 +111,6 @@ def _print_ml_status(*, compact: bool = False, snapshot: dict[str, object] | Non
     artifacts_path = status["artifacts_path"]
     evidence_root = status["evidence_root"]
     plan_path = status["plan_path"]
-    dataset_tables = status["dataset_tables"]
     required_tables = status["required_tables"]
     existing_tables = status["existing_tables"]
     stale_tables = status["stale_tables"]

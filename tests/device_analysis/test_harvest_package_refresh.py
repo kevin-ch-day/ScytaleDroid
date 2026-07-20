@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.harvest import package_refresh
-from pathlib import Path
-
-from scytaledroid.DeviceAnalysis.harvest.models import ArtifactPlan, ArtifactResult, InventoryRow, PackagePlan
+from scytaledroid.DeviceAnalysis.harvest.models import (
+    ArtifactPlan,
+    ArtifactResult,
+    InventoryRow,
+    PackagePlan,
+)
 
 
 def test_refresh_inventory_row_from_device_avoids_pm_dump_when_identity_metadata_exists(
     monkeypatch,
 ) -> None:
-    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
     from scytaledroid.DeviceAnalysis import runtime_flags
+    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 
     monkeypatch.setattr(runtime_flags, "allow_inventory_fallbacks", lambda: False)
     monkeypatch.setattr(
@@ -66,8 +70,8 @@ def test_refresh_inventory_row_from_device_avoids_pm_dump_when_identity_metadata
 def test_refresh_inventory_row_from_device_falls_back_to_pm_dump_when_metadata_missing(
     monkeypatch,
 ) -> None:
-    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
     from scytaledroid.DeviceAnalysis import runtime_flags
+    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 
     monkeypatch.setattr(runtime_flags, "allow_inventory_fallbacks", lambda: False)
     monkeypatch.setattr(
@@ -116,8 +120,8 @@ def test_refresh_inventory_row_from_device_falls_back_to_pm_dump_when_metadata_m
 def test_refresh_inventory_row_from_device_skips_pm_dump_when_package_disappeared(
     monkeypatch,
 ) -> None:
-    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
     from scytaledroid.DeviceAnalysis import runtime_flags
+    from scytaledroid.DeviceAnalysis.adb import packages as adb_packages
 
     monkeypatch.setattr(runtime_flags, "allow_inventory_fallbacks", lambda: False)
     monkeypatch.setattr(

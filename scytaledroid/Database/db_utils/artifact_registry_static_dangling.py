@@ -11,9 +11,10 @@ import csv
 import json
 import re
 from collections import Counter, defaultdict
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 RunSql = Callable[..., Any]
 

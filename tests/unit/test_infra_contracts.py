@@ -8,10 +8,8 @@ Former files: ``test_db_transient_errno``, ``test_numpy_percentile_wrapper``,
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.Api import runtime
 from scytaledroid.Database.db_core import db_engine
-
 
 # --- db_engine transient errno ---
 

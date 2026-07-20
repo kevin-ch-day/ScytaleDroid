@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile
 from scytaledroid.Publication.app_category_policy import (
     APP_CATEGORY_POLICY,
     PUBLICATION_APP_ORDER,
@@ -13,7 +14,6 @@ from scytaledroid.Publication.app_category_policy import (
     app_display_name,
 )
 from scytaledroid.Publication.contract_inputs import load_publication_contracts
-from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile
 
 
 def test_publication_taxonomy_uses_current_primary_function_labels() -> None:

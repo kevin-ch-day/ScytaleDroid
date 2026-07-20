@@ -305,7 +305,9 @@ def bootstrap_database() -> None:
     except Exception as exc:  # pragma: no cover
         log.warning(f"Failed to record schema_version: {exc}", category="database")
     try:
-        from scytaledroid.Database.db_utils.schema_migration_registry import ensure_governance_baseline
+        from scytaledroid.Database.db_utils.schema_migration_registry import (
+            ensure_governance_baseline,
+        )
 
         ensure_governance_baseline(run_sql)
     except Exception as exc:  # pragma: no cover

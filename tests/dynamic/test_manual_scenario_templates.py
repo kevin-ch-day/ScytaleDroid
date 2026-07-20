@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
+from scytaledroid.DynamicAnalysis.scenarios import interactive_guidance
 from scytaledroid.DynamicAnalysis.scenarios.manual import (
     ManualScenarioRunner,
     _build_baseline_connected_schedule,
@@ -15,12 +16,11 @@ from scytaledroid.DynamicAnalysis.scenarios.manual import (
     _resolve_script_template,
     _run_messaging_connected_baseline,
 )
-from scytaledroid.DynamicAnalysis.scenarios import interactive_guidance
-from scytaledroid.DynamicAnalysis.scenarios.manual_templates import template_steps_for_id
 from scytaledroid.DynamicAnalysis.scenarios.manual_scripted import (
     NEWS_BEHAVIOR_V2,
     news_step_metadata,
 )
+from scytaledroid.DynamicAnalysis.scenarios.manual_templates import template_steps_for_id
 from tests.dynamic._manual_protocol_support import _ctx
 
 

@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
-from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
-from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
+from scytaledroid.DynamicAnalysis.pcap.security_surface import (
+    compute_static_dynamic_cleartext_posture,
+)
+from scytaledroid.DynamicAnalysis.run_qualification import qualification_fields_from_dataset
 from scytaledroid.DynamicAnalysis.utils.messaging_activity_labels import messaging_activity_label
 from scytaledroid.Utils.network_quality import evaluate_network_signal_quality
 

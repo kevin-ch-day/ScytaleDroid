@@ -21,17 +21,17 @@ import os
 import shutil
 import sys
 from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scytaledroid.Config import app_config  # noqa: E402
-
 
 DEFAULT_COLD_ROOT = Path("/mnt/MERCURY_DATA_V2/scytaledroid_artifacts/apk_store/cold")
 DEFAULT_MOUNT_ROOT = Path("/mnt/MERCURY_DATA_V2")

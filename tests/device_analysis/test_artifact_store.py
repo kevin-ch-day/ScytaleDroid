@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
 

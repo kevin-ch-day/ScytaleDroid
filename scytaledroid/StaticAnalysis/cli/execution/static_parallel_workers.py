@@ -45,7 +45,7 @@ def build_parallel_analyze_blob(
     cfg = build_analysis_config(params)
     return pickle.dumps(
         {
-            "path": str(Path(getattr(artifact, "path")).resolve()),
+            "path": str(Path(artifact.path).resolve()),
             "base_dir": str(Path(base_dir).resolve()),
             "metadata": dict(md),
             "config": cfg,

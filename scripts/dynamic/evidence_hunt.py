@@ -15,9 +15,9 @@ import json
 import shutil
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Iterable
 from typing import Any
 
 # Allow running as a standalone script without installing the package.
@@ -305,7 +305,10 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
 
     print(f"moved={moved} skipped={skipped} dry_run={bool(args.dry_run)}")
     if not args.dry_run and args.reindex_tracker:
-        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+            DatasetTrackerConfig,
+            recompute_dataset_tracker,
+        )
 
         recompute_dataset_tracker(config=DatasetTrackerConfig())
         print("tracker_reindexed=true")
@@ -360,7 +363,10 @@ def cmd_quarantine_audit(args: argparse.Namespace) -> int:
 
     print(json.dumps({"moved": moved, "skipped": skipped, "dry_run": bool(args.dry_run), "report": str(report_path), "keys": keys}))
     if not args.dry_run and args.reindex_tracker:
-        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig, recompute_dataset_tracker
+        from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+            DatasetTrackerConfig,
+            recompute_dataset_tracker,
+        )
 
         recompute_dataset_tracker(config=DatasetTrackerConfig())
         print(json.dumps({"tracker_reindexed": True}))
@@ -376,8 +382,8 @@ def cmd_per_app(args: argparse.Namespace) -> int:
     - Buckets run_profile to baseline vs interactive
     - Counts first N per bucket as quota_counted; remaining as extras
     """
-    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
     from scytaledroid.DynamicAnalysis.menus.dynamic_menu import _run_profile_bucket
+    from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper2
     from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
 
     cfg = DatasetTrackerConfig()
@@ -472,9 +478,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("summary")
     s.set_defaults(fn=cmd_summary)
 
-    l = sub.add_parser("list-excluded")
-    l.add_argument("--reason", action="append", default=[], help="filter exclusion reason (repeatable)")
-    l.set_defaults(fn=cmd_list_excluded)
+    excluded_parser = sub.add_parser("list-excluded")
+    excluded_parser.add_argument(
+        "--reason", action="append", default=[], help="filter exclusion reason (repeatable)"
+    )
+    excluded_parser.set_defaults(fn=cmd_list_excluded)
 
     d = sub.add_parser("drift")
     d.add_argument("--limit", type=int, default=50)

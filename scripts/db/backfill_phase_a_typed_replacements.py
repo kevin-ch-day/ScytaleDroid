@@ -40,7 +40,9 @@ def main(argv: list[str] | None = None) -> int:
             attach_receipt_path_to_latest_migration,
             registered_migrations,
         )
-        from scytaledroid.Database.db_utils.type_normalization_preflight import collect_type_normalization_preflight
+        from scytaledroid.Database.db_utils.type_normalization_preflight import (
+            collect_type_normalization_preflight,
+        )
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 1

@@ -9,8 +9,9 @@ from __future__ import annotations
 import csv
 import json
 from collections import Counter, defaultdict
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from .artifact_registry_static_session_retirement import collect_static_session_retirement_report
 

@@ -212,8 +212,10 @@ def _collect_unresolved_signal_rows(
 
 
 def generate_report(*, output_dir: Path | None = None) -> dict[str, Any]:
-    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import verify_dynamic_evidence_packs
     from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
+    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import (
+        verify_dynamic_evidence_packs,
+    )
 
     root = _dynamic_root()
     verify_report = verify_dynamic_evidence_packs(root)

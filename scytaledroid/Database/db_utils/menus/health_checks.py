@@ -7,14 +7,14 @@ from datetime import UTC, datetime
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core import run_sql
 from scytaledroid.Database.db_queries.sql_typed_reads import resolved_static_run_started_at_utc
-from scytaledroid.Database.db_utils.static_run_governance_checks import (
-    fetch_static_run_governance_counts,
-)
-from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.permission_intel_freeze import (
     list_operational_managed_tables,
 )
+from scytaledroid.Database.db_utils.static_run_governance_checks import (
+    fetch_static_run_governance_counts,
+)
+from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 

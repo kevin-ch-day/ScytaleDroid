@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = [pytest.mark.contract, pytest.mark.gate]
 
 ROOT = Path(__file__).resolve().parents[2]

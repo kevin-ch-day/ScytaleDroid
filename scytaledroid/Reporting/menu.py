@@ -14,6 +14,7 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.DisplayUtils.menu_utils import MenuOption
 
+from .ieee_cars_2026_package import ieee_cars_2026_package_status
 from .menu_actions import (
     fetch_publication_status,
     handle_cross_analysis_summary,
@@ -129,7 +130,7 @@ def _general_analysis_menu() -> None:
 
 def _evidence_exports_menu() -> None:
     options = [
-        MenuOption("1", "Static/dynamic provenance export builder (COMING NEXT)", disabled=True),
+        MenuOption("1", "IEEE-CARS-2026 evidence package", "Review the named Paper #3 cutoff, workspace, and capsule status."),
         MenuOption("2", "Open legacy archive exports", "Use Legacy Archive Tools for older archive export formats."),
     ]
     while True:
@@ -139,8 +140,81 @@ def _evidence_exports_menu() -> None:
         choice = prompt_utils.menu_choice(menu_utils.selectable_keys(options, include_exit=True), default="0")
         if choice == "0":
             return
-        if choice == "2":
+        if choice == "1":
+            _show_ieee_cars_2026_package_status()
+        elif choice == "2":
             _legacy_archive_tools_menu()
+
+
+def _show_ieee_cars_2026_package_status() -> None:
+    """Show the submission package boundary without generating or copying data."""
+
+    from pathlib import Path
+
+    status = ieee_cars_2026_package_status(repo_root=Path(__file__).resolve().parents[2])
+    target = status["target"]
+    freeze = status["freeze_manifest"]
+    workspace = status["writing_workspace"]
+    capsule = status["capsule"]
+    print()
+    menu_utils.print_header("IEEE-CARS-2026 Evidence Package")
+    print(
+        summary_cards.format_summary_card(
+            target["generation_label"],
+            [
+                summary_cards.summary_item("Package ID", target["identifier"], value_style="accent"),
+                summary_cards.summary_item("Venue", target["venue"], value_style="accent"),
+                summary_cards.summary_item("Format", target["target_format"], value_style="info"),
+                summary_cards.summary_item(
+                    "Freeze readiness",
+                    f"{freeze['readiness_ready']}/{freeze['apps_total']} selected-build ready" if freeze["path"] else "not found",
+                    value_style="success" if freeze["path"] else "warning",
+                ),
+                summary_cards.summary_item(
+                    "Evidence tier",
+                    f"{workspace['paper_usable_count']}/{workspace['apps_total']} paper-usable" if workspace["path"] else "not generated",
+                    value_style="success" if workspace["path"] else "warning",
+                ),
+                summary_cards.summary_item(
+                    "Workspace",
+                    "labeled" if workspace["target_labeled"] else "missing or unlabeled",
+                    value_style="success" if workspace["target_labeled"] else "warning",
+                ),
+                summary_cards.summary_item(
+                    "Manuscript",
+                    "registered" if workspace["manuscript_pdf"] else "not registered",
+                    value_style="success" if workspace["manuscript_pdf"] else "warning",
+                ),
+                summary_cards.summary_item(
+                    "Capsule",
+                    "ready to archive" if capsule["ready_to_archive"] else "not sealed",
+                    value_style="success" if capsule["ready_to_archive"] else "warning",
+                ),
+                summary_cards.summary_item(
+                    "Ledger drafts",
+                    f"{len(status['draft_ledgers'])} present" if status["draft_ledgers"] else "not generated",
+                    value_style="info" if status["draft_ledgers"] else "warning",
+                ),
+            ],
+            footer="This view is read-only. It never copies APKs, PCAPs, manuscripts, or database records.",
+        )
+    )
+    print()
+    print(f"Cutoff manifest : {freeze['path'] or 'missing'}")
+    if freeze["path"]:
+        print(f"Freeze readiness: {freeze['readiness_ready']}/{freeze['apps_total']} selected-build ready")
+    print(f"Writing workspace: {workspace['path'] or 'missing'}")
+    if workspace["path"]:
+        print(f"Evidence tier    : {workspace['paper_usable_count']}/{workspace['apps_total']} paper-usable")
+    print(f"Manuscript PDF   : {workspace['manuscript_pdf'] or 'not registered'}")
+    print(f"Capsule manifest: {capsule['path'] or 'missing'}")
+    print(f"Draft ledgers   : {len(status['draft_ledgers'])} present")
+    print(f"Ledger templates: {status['template_root']}")
+    if capsule["missing_required_roles"]:
+        print("Capsule blockers: " + ", ".join(str(item) for item in capsule["missing_required_roles"]))
+    print()
+    print("Next: review and approve explicit APK/evidence ledgers, create a scoped DB export, then build the hash-locked capsule manifest.")
+    prompt_utils.press_enter_to_continue()
 
 
 def _saved_report_bundles_menu() -> None:

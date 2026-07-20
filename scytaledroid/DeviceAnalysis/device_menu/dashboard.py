@@ -16,8 +16,8 @@ from pathlib import Path
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.constants import (
     INVENTORY_STALE_SECONDS,
 )
-from scytaledroid.DeviceAnalysis.inventory.mode_labels import inventory_mode_label
 from scytaledroid.DeviceAnalysis.device_menu.inventory_guard.utils import humanize_seconds
+from scytaledroid.DeviceAnalysis.inventory.mode_labels import inventory_mode_label
 from scytaledroid.DeviceAnalysis.inventory.progress import format_inventory_age_display
 from scytaledroid.DeviceAnalysis.services import artifact_store, device_service
 from scytaledroid.Utils.DisplayUtils import (

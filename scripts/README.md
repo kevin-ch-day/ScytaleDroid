@@ -26,6 +26,7 @@ and operator workflows:
 - `scripts/device_analysis/promote_apk_blobs_to_cold_store.py`
 - `scripts/db/report_dynamic_paper_freeze_readiness.py`
 - `scripts/db/report_paper3_writing_package.py`
+- `scripts/operator/report_system_migration_readiness.py` (read-only new-system transfer preflight)
 
 See `docs/supported_entrypoints.md` for the broader supported wrapper list.
 

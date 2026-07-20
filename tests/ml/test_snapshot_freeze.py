@@ -5,7 +5,6 @@ from pathlib import Path
 
 from scytaledroid.DynamicAnalysis.ml.snapshot_freeze import build_snapshot_freeze_manifest
 
-
 HEX_A = "a" * 64
 HEX_B = "b" * 64
 HEX_C = "c" * 64

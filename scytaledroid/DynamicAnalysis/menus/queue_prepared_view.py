@@ -32,7 +32,7 @@ class PreparedPackageSelectionView:
     no_evidence_anywhere_count: int = 0
     expected_runs: int = 0
     evidence_summary: dict[str, int | bool] | None = None
-    row_models: list["PreparedPackageSelectionRow"] | None = None
+    row_models: list[PreparedPackageSelectionRow] | None = None
     capture_device_selected: bool = True
 
 

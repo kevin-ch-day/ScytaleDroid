@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pymysql import err
-
 from scytaledroid.Database.db_core import db_engine
 
 

@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
 from scytaledroid.Database.db_utils.action_groups import risk_actions
 
 

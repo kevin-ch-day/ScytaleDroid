@@ -3,11 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult
 from scytaledroid.StaticAnalysis.cli.core.run_specs import StaticRunSpec
-from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
-from scytaledroid.StaticAnalysis.cli.flows import session_finalizer
+from scytaledroid.StaticAnalysis.cli.flows import run_dispatch, session_finalizer
 from tests.static_analysis._run_dispatch_support import (
     make_outcome,
     make_params,

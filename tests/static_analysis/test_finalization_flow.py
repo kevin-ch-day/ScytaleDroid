@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.persistence.finalization_flow import (
     StaticRunFinalizationCallbacks,
     finalize_persisted_static_run,

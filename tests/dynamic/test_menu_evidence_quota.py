@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis import research_cohort_runtime
 from scytaledroid.DynamicAnalysis.menus import dynamic_menu as menu
 from scytaledroid.DynamicAnalysis.menus import queue_metrics
-from scytaledroid.DynamicAnalysis import research_cohort_runtime
 
 
 class _Cfg:

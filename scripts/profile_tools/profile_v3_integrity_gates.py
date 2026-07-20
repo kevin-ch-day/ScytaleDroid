@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from _service_wrapper import run_service_wrapper
 
-
 if __name__ == "__main__":
     raise SystemExit(
         run_service_wrapper(

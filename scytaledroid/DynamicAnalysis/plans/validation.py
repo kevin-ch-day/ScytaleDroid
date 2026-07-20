@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .db_lookup import cross_check_session_link, fetch_static_run_row, missing_db_fields
-from .models import PlanValidationOutcome, SUPPORTED_SIGNATURE_VERSIONS
+from .models import SUPPORTED_SIGNATURE_VERSIONS, PlanValidationOutcome
 from .payload import normalize_plan, plan_schema_issues
 from .rendering import mismatch
 

@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.DeviceAnalysis import lazy_pkg
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

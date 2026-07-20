@@ -7,6 +7,11 @@ src = ["scytaledroid", "scripts", "tests"]
 select = ["E", "F", "I", "B", "UP"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# Standalone scripts deliberately bootstrap the repo path before importing
+# project modules so `python scripts/... --help` remains directly usable.
+"scripts/**/*.py" = ["E402"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

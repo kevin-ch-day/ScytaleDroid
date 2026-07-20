@@ -8,12 +8,12 @@ provides a single place to tune retry, timeout and diagnostic policies.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import sqlite3
 import time
 import uuid
-import hashlib
 from collections.abc import Iterable, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass

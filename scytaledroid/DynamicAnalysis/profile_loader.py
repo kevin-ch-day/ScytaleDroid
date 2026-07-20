@@ -145,7 +145,9 @@ def load_profile_packages(profile_key: str) -> set[str]:
     cohort_key = _cohort_key_from_profile_key(normalized)
     if cohort_key:
         try:
-            from scytaledroid.Database.db_func.research_cohorts import fetch_active_research_cohort_packages
+            from scytaledroid.Database.db_func.research_cohorts import (
+                fetch_active_research_cohort_packages,
+            )
 
             packages = {
                 str(pkg).strip().lower()

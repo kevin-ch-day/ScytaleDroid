@@ -6,12 +6,11 @@ from pathlib import Path
 from scytaledroid.StaticAnalysis.audit.run_log_audit import (
     persistence_audit_candidates,
     scan_log_tail,
-    summarize_persistence_audit,
     static_session_log_candidates,
+    summarize_persistence_audit,
     tail_text_lines,
 )
-from scytaledroid.Utils.LoggingUtils import logging_context
-from scytaledroid.Utils.LoggingUtils import logging_engine
+from scytaledroid.Utils.LoggingUtils import logging_context, logging_engine
 
 
 def test_tail_text_lines_returns_suffix(tmp_path: Path) -> None:

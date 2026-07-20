@@ -14,7 +14,10 @@ from scytaledroid.DynamicAnalysis.exports.dataset_export import export_tier1_pac
 from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
     index_dynamic_evidence_packs_to_db,
 )
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, dynamic_evidence_roots
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    dynamic_evidence_roots,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
 
@@ -201,7 +204,9 @@ def handle_tier1_end_to_end() -> None:
 def fetch_tier1_status() -> dict[str, object]:
     """Return a compact Baseline readiness snapshot for the reporting menu."""
 
-    from scytaledroid.Database.db_utils.schema_migration_registry import latest_registered_schema_version
+    from scytaledroid.Database.db_utils.schema_migration_registry import (
+        latest_registered_schema_version,
+    )
 
     status: dict[str, object] = {
         "schema_version": None,

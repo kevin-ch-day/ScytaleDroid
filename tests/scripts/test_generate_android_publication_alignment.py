@@ -8,7 +8,6 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-
 from scripts.publication import generate_android_publication_alignment as alignment
 from scytaledroid.Publication.app_category_policy import RETIRED_PUBLICATION_CATEGORY_LABELS
 

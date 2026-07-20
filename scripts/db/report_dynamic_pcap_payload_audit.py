@@ -14,9 +14,10 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 from urllib.parse import urlsplit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -195,7 +196,9 @@ def _cleartext_posture_run_fields(run_dir: Path, report: dict[str, Any] | None) 
     else:
         plan = _read_json(run_dir / "inputs" / "static_dynamic_plan.json")
         if isinstance(plan, dict):
-            from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
+            from scytaledroid.DynamicAnalysis.pcap.security_surface import (
+                compute_static_dynamic_cleartext_posture,
+            )
 
             posture = compute_static_dynamic_cleartext_posture(plan, report or {})
     static_allowed = posture.get("static_cleartext_allowed")

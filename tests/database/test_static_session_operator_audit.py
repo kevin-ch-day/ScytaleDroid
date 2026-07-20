@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from scytaledroid.Database.db_utils.menus.static_session_diagnostics_menu import (
+    run_static_session_canonical_audit,
+)
 from scytaledroid.Database.db_utils.static_session_operator_audit import (
     classify_session_header_diagnostic,
     sql_literal_for_session,
-)
-from scytaledroid.Database.db_utils.menus.static_session_diagnostics_menu import (
-    run_static_session_canonical_audit,
 )
 
 

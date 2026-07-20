@@ -39,7 +39,7 @@ def run_service_wrapper(wrapper_file: str, *, service_module: str, help_summary:
         sys.path.insert(0, str(repo_root))
 
     module = importlib.import_module(service_module)
-    service_main = getattr(module, "main")
+    service_main = module.main
     result = service_main()
     return 0 if result is None else int(result)
 

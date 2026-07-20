@@ -70,7 +70,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _artifact_from_dict(payload: dict[str, Any]) -> "ArtifactRecord":
+def _artifact_from_dict(payload: dict[str, Any]) -> ArtifactRecord:
     from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord
 
     return ArtifactRecord(
@@ -85,7 +85,7 @@ def _artifact_from_dict(payload: dict[str, Any]) -> "ArtifactRecord":
     )
 
 
-def _manifest_from_payload(payload: dict[str, Any]) -> "RunManifest":
+def _manifest_from_payload(payload: dict[str, Any]) -> RunManifest:
     from scytaledroid.DynamicAnalysis.core.manifest import ObserverRecord, RunManifest
 
     observers = []
@@ -152,7 +152,7 @@ def _completed_run_dirs(root: Path) -> tuple[list[Path], list[str], list[str]]:
     return run_dirs, in_progress, ghost
 
 
-def _summary_payload(run_dir: Path, manifest: "RunManifest") -> dict[str, Any]:
+def _summary_payload(run_dir: Path, manifest: RunManifest) -> dict[str, Any]:
     from scytaledroid.DynamicAnalysis.analysis.summarizer import DynamicRunSummarizer
     from scytaledroid.DynamicAnalysis.core.evidence_pack import EvidencePackWriter
 
@@ -163,7 +163,7 @@ def _summary_payload(run_dir: Path, manifest: "RunManifest") -> dict[str, Any]:
 def _rewrite_derived_artifacts(
     *,
     run_dir: Path,
-    manifest: "RunManifest",
+    manifest: RunManifest,
     refresh_pcap_report: bool,
     refresh_pcap_features: bool,
     refresh_overlap: bool,

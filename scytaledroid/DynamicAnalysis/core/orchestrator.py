@@ -52,11 +52,11 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     update_dataset_tracker,
 )
 from scytaledroid.DynamicAnalysis.pcap.features import write_pcap_features
+from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.interaction_phases import (
     write_interaction_timeline_artifact,
     write_protocol_phase_markers_artifact,
 )
-from scytaledroid.DynamicAnalysis.pcap.indexer import index_pcap_by_app
 from scytaledroid.DynamicAnalysis.pcap.report import write_pcap_report
 from scytaledroid.DynamicAnalysis.pcap.tools import collect_host_tools
 from scytaledroid.DynamicAnalysis.plans import (
@@ -74,10 +74,13 @@ from scytaledroid.DynamicAnalysis.scenarios import (
     ScenarioResult,
 )
 from scytaledroid.DynamicAnalysis.telemetry.sampler import TelemetrySampler
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    ensure_legacy_dynamic_symlink,
+)
 from scytaledroid.DynamicAnalysis.utils.pcap_minima import (
     effective_min_pcap_bytes_for_run_profile,
 )
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root, ensure_legacy_dynamic_symlink
 from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_engine
 from scytaledroid.Utils.version_utils import get_git_commit

@@ -4,11 +4,10 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
-from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+from scytaledroid.StaticAnalysis.cli.commands.models import Command
+from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_specs import StaticRunSpec
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
-from scytaledroid.StaticAnalysis.cli.commands.models import Command
-from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 from scytaledroid.StaticAnalysis.cli.menus import static_analysis_menu as menu
 from scytaledroid.StaticAnalysis.cli.menus import static_analysis_menu_helpers as helpers
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact

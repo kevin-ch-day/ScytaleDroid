@@ -13,9 +13,10 @@ import csv
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -324,6 +325,7 @@ def _load_seed_aware_catalogs(core_q: Any) -> tuple[
         default_service_signal_map_seed_rows,
         default_signal_catalog_seed_rows,
     )
+
     from scripts.db._dynamic_service_seed_overlay import (
         merge_missing_seed_service_maps,
         merge_missing_seed_services,

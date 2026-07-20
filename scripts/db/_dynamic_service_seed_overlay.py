@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def merge_missing_seed_services(

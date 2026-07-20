@@ -20,6 +20,7 @@ from scytaledroid.Utils.DisplayUtils import (
 )
 from scytaledroid.Utils.LoggingUtils import logging_engine, logging_events
 
+from ...core.repository import load_display_name_map
 from ...engine.strings import analyse_strings
 from ...persistence import refresh_saved_report_json
 from ...persistence.ingest import ingest_baseline_payload
@@ -63,6 +64,10 @@ from .diagnostics import (
     _render_diagnostic_app_summary,
     _schema_guard_status,
 )
+from .operator_display_label import (
+    build_operator_label_metadata_from_report,
+    resolve_operator_app_label,
+)
 from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
 from .plan import build_dynamic_plan_artifact
 from .results_dedupe import dedupe_profile_entries
@@ -74,6 +79,12 @@ from .results_persistence import (
     format_persistence_failure_detail,
     merge_persistence_metadata,
 )
+from .results_progress import (
+    _emit_static_persistence_event,
+    _format_persistence_progress_text,
+    _persistence_progress_display_label,
+    _render_compact_persistence_summary,
+)
 from .results_sections import (
     render_artifact_completeness,
     render_post_run_diagnostics_menu,
@@ -82,27 +93,24 @@ from .results_sections import (
     render_static_output_context,
     render_static_output_context_compact,
 )
-from .run_db_queries import _apply_display_names
-from ...core.repository import load_display_name_map
-from .operator_display_label import (
-    build_operator_label_metadata_from_report,
-    resolve_operator_app_label,
-)
-from .results_progress import (
-    _emit_static_persistence_event,
-    _format_persistence_progress_text,
-    _persistence_progress_display_label,
-    _render_compact_persistence_summary,
-)
 from .results_view_model import (
     RunResultsSessionMeta,
     RunResultsViewModel,
     _is_large_compact_batch,
+)
+from .results_view_model import (
     _load_json_mapping as _load_json_mapping_impl,
+)
+from .results_view_model import (
     build_run_results_view_model as _build_run_results_view_model_impl,
+)
+from .results_view_model import (
     collect_static_output_context as _collect_static_output_context_impl,
+)
+from .results_view_model import (
     load_run_results_session_meta as _load_run_results_session_meta_impl,
 )
+from .run_db_queries import _apply_display_names
 from .scan_formatters import _load_v3_catalog_label_overrides, format_duration
 from .string_analysis_payload import analyse_string_payload
 from .view import DetailBuffer
@@ -931,7 +939,7 @@ def _render_run_results_impl(
                 print(status_messages.status(failfast, level="error"))
                 exc_detail = "\n".join(
                     [
-                        f"persistence_stage=persist_run_summary_exception",
+                        "persistence_stage=persist_run_summary_exception",
                         f"package_name={app_result.package_name}",
                         f"session_stamp={params.session_stamp or '—'}",
                         f"static_run_id={app_result.static_run_id or '—'}",

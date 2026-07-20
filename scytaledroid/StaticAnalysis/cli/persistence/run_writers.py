@@ -12,12 +12,12 @@ from scytaledroid.Database.db_core.db_queries import run_sql_write
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .contracts import normalize_run_status
+from .dep_export import export_dep_json
 from .session_header_linkage import resolve_static_session_id_for_run
 from .static_session_summary import (
     ensure_static_session_shell,
     maybe_refresh_static_analysis_session_summary,
 )
-from .dep_export import export_dep_json
 
 
 def _is_transient_db_exc(exc: Exception) -> bool:

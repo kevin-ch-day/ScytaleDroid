@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "paper_id": "IEEE-CARS-2026",
+  "review_status": "DRAFT_UNREVIEWED",
+  "entries": [
+    {
+      "package_name": "com.example.app",
+      "version_code": "123",
+      "base_apk_sha256": "replace-with-64-character-lowercase-sha256",
+      "dynamic_run_id": "replace-with-run-id",
+      "run_profile": "baseline_idle",
+      "capture_started_at_utc": "2026-07-19T00:00:00Z",
+      "pcap": {
+        "path": "data/evidence/dynamic/run-id/pcap/capture.pcap",
+        "sha256": "replace-with-64-character-lowercase-sha256"
+      },
+      "artifacts": [
+        {
+          "role": "run_manifest",
+          "path": "data/evidence/dynamic/run-id/run_manifest.json",
+          "sha256": "replace-with-64-character-lowercase-sha256"
+        }
+      ],
+      "paper_eligibility": "paper_selected",
+      "validity_state": "VALID",
+      "manuscript_dependencies": ["Table 1"]
+    }
+  ]
+}

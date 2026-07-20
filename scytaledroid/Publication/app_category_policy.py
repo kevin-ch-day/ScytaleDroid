@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 TAXONOMY_VERSION = "integrated-primary-function-v1"
 
 PUBLICATION_APP_ORDER = [

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 
-from scytaledroid.StaticAnalysis.cli.execution import scan_flow
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+from scytaledroid.StaticAnalysis.cli.execution import scan_flow
 
 
 class FakeArtifact:

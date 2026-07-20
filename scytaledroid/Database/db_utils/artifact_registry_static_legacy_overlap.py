@@ -5,8 +5,9 @@ from __future__ import annotations
 import csv
 import json
 from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 RunSql = Callable[..., Any]
 

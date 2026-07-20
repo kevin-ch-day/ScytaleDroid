@@ -46,6 +46,9 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q scytaledroid scripts main.py
 
+      - name: Lint Python sources
+        run: python -m ruff check scytaledroid scripts tests
+
       - name: Run gate tests
         run: python -m pytest tests/gates -q
 

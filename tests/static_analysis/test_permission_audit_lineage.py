@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from scytaledroid.StaticAnalysis.modules.permissions.audit import PermissionAuditAccumulator
-from scytaledroid.StaticAnalysis.modules.permissions.audit import _build_snapshot_lineage
+from scytaledroid.StaticAnalysis.modules.permissions.audit import (
+    PermissionAuditAccumulator,
+    _build_snapshot_lineage,
+)
 
 
 def test_build_snapshot_lineage_tracks_fleet_static_run_ids() -> None:

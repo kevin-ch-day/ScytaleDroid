@@ -11,9 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -110,7 +111,9 @@ def _run_db_reindex(*, evidence_root: Path, output_dir: Path, apply: bool, skip_
     if skip_db_reindex:
         return {"skipped": True, "reason": "operator_skipped"}
 
-    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import index_dynamic_evidence_packs_to_db
+    from scytaledroid.DynamicAnalysis.storage.index_from_evidence import (
+        index_dynamic_evidence_packs_to_db,
+    )
 
     result = index_dynamic_evidence_packs_to_db(evidence_root)
     result["generated_at_utc"] = datetime.now(UTC).isoformat()

@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 
 import scytaledroid.StaticAnalysis.cli.audit.permission_session_insights as psi
-from scytaledroid.StaticAnalysis.cli.audit.permission_session_insights import fetch_permission_session_insights
+from scytaledroid.StaticAnalysis.cli.audit.permission_session_insights import (
+    fetch_permission_session_insights,
+)
 
 
 def test_classify_matrix_risk_skew() -> None:

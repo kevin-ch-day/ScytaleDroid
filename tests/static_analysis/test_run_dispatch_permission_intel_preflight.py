@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_context import StaticRunContext
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch

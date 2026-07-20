@@ -27,8 +27,10 @@ def render_dataset_status(
     tracker_path_fn,
     freeze_path_fn,
 ) -> None:
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import DatasetTrackerConfig
-    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
+    from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
+        DatasetTrackerConfig,
+        load_dataset_tracker,
+    )
 
     print()
     menu_utils.print_header("Cohort Status Overview")

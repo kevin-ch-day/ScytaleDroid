@@ -77,7 +77,9 @@ def _collect_static_session_retirement_summary(
     *,
     repo_root: Path,
 ) -> Mapping[str, Any]:
-    from .artifact_registry_static_session_retirement import collect_static_session_retirement_report
+    from .artifact_registry_static_session_retirement import (
+        collect_static_session_retirement_report,
+    )
 
     return collect_static_session_retirement_report(run_sql, repo_root=repo_root)
 

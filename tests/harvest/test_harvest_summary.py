@@ -11,16 +11,18 @@ from scytaledroid.DeviceAnalysis.harvest.models import (
     PullResult,
     ScopeSelection,
 )
+from scytaledroid.DeviceAnalysis.harvest.status import (
+    HarvestRunStatus,
+    build_harvest_run_status_from_runtime_stats,
+)
 from scytaledroid.DeviceAnalysis.harvest.summary import (
     HarvestRunMetrics,
     HarvestRunReport,
-    build_harvest_run_report,
-    render_harvest_summary,
     _build_summary_card_lines,
     _operator_harvest_finish_line,
+    build_harvest_run_report,
+    render_harvest_summary,
 )
-from scytaledroid.DeviceAnalysis.harvest.status import HarvestRunStatus
-from scytaledroid.DeviceAnalysis.harvest.status import build_harvest_run_status_from_runtime_stats
 
 
 def test_build_summary_card_lines_surfaces_executed_and_blocked_counts():

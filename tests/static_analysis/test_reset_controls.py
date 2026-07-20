@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from scytaledroid.StaticAnalysis.cli.menus import actions
 from scytaledroid.StaticAnalysis.cli.commands.models import Command
+from scytaledroid.StaticAnalysis.cli.menus import actions
 
 
 def test_confirm_reset_allows_session_only(monkeypatch):

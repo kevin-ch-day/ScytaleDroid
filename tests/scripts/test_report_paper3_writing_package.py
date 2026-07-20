@@ -229,6 +229,7 @@ def test_valid_fixture_generates_workspace_manifest_claims_and_tables(tmp_path: 
 
     expected_files = {
         "paper3_outline.md",
+        "paper3_submission_context.md",
         "paper3_working_outline.md",
         "paper3_section_plan.md",
         "paper3_introduction_draft.md",
@@ -261,6 +262,14 @@ def test_valid_fixture_generates_workspace_manifest_claims_and_tables(tmp_path: 
     assert written_manifest["writing_package_generator"] == "scripts/db/report_paper3_writing_package.py"
     assert written_manifest["generated_from_current_source"] is True
     assert written_manifest["manual_bridge_artifacts_supplied"] is True
+    assert written_manifest["publication_target"] == {
+        "submission_id": "IEEE-CARS-2026",
+        "paper_label": "ScytaleDroid Paper #3",
+        "generation_label": "ScytaleDroid Paper #3 | IEEE CARS 2026",
+        "venue": "IEEE Cyber Awareness and Research Symposium (IEEE CARS 2026)",
+        "venue_short_label": "IEEE CARS 2026",
+        "target_format": "IEEE conference format",
+    }
     assert written_manifest["last_run_recommendation_source"] == "paper_minimal_run_plan.csv"
     assert written_manifest["last_run_recommendation"]["required"] == "none"
     assert written_manifest["last_run_recommendation"]["optional_final_polish"] == (
@@ -290,7 +299,12 @@ def test_valid_fixture_generates_workspace_manifest_claims_and_tables(tmp_path: 
     assert "Collection is paused; use the cutoff bundle and start writing" in outline
     final_outline = (output / "paper3_outline.md").read_text(encoding="utf-8")
     assert "# Integrated Study Outline" in final_outline
+    assert "Generation target:** ScytaleDroid Paper #3 | IEEE CARS 2026" in final_outline
+    assert "\\n**Submission package ID" not in final_outline
     assert "Non-blocking run-plan rows are retained only as future-work provenance" in final_outline
+    submission_context = (output / "paper3_submission_context.md").read_text(encoding="utf-8")
+    assert "IEEE Cyber Awareness and Research Symposium (IEEE CARS 2026)" in submission_context
+    assert "not a submission package" in submission_context
     next_items = (output / "paper3_next_revision_items.md").read_text(encoding="utf-8")
     assert "# Next Revision Items" in next_items
 
@@ -311,8 +325,7 @@ def test_valid_fixture_generates_workspace_manifest_claims_and_tables(tmp_path: 
             manifest_warnings,
         ]
     )
-    assert "Paper 3" not in public_generated_text
-    assert "Paper #3" not in public_generated_text
+    assert "ScytaleDroid Paper #3 | IEEE CARS 2026" in public_generated_text
 
 
 def test_main_stdout_json_reports_manifest(tmp_path: Path, capsys) -> None:
@@ -324,3 +337,27 @@ def test_main_stdout_json_reports_manifest(tmp_path: Path, capsys) -> None:
     assert payload["output_dir"] == str(out)
     assert payload["paper_usable_count"] == 2
     assert (out / "paper3_source_manifest.json").exists()
+
+
+def test_default_workspace_name_uses_submission_identifier(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(report, "_REPO_ROOT", tmp_path)
+    assert report._default_output_dir().parent == tmp_path / "output" / "paper"
+    assert report._default_output_dir().name.startswith("IEEE-CARS-2026_draft_workspace_")
+
+
+def test_current_manuscript_is_hashed_as_an_explicit_source(tmp_path: Path) -> None:
+    cutoff = _make_cutoff_fixture(tmp_path)
+    manuscript = tmp_path / "IEEE_CARS_2026_Paper.pdf"
+    manuscript.write_bytes(b"paper-pdf-bytes")
+
+    manifest = report.generate_package(
+        cutoff_dir=cutoff,
+        output_dir=tmp_path / "workspace",
+        manuscript_pdf=manuscript,
+    )
+
+    assert manifest["manuscript_pdf"] == str(manuscript)
+    assert any(row["path"] == str(manuscript) and row["sha256"] for row in manifest["source_files_used"])
+    context = (tmp_path / "workspace" / "paper3_submission_context.md").read_text(encoding="utf-8")
+    assert f"Current manuscript PDF: `{manuscript}`" in context
+    assert "\\n**Submission package ID" not in context

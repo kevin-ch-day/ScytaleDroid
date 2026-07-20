@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from scytaledroid.Database.db_utils.health_checks import inventory_checks
-from scytaledroid.Database.db_utils.health_checks import queries
+from scytaledroid.Database.db_utils.health_checks import inventory_checks, queries
 from scytaledroid.Database.db_utils.health_checks import summary as health_summary
 
 

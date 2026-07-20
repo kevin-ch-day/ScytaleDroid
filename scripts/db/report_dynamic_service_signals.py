@@ -8,9 +8,10 @@ import csv
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -42,15 +43,16 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def generate_report(*, packages: list[str] | None = None, output_dir: Path | None = None) -> dict[str, Any]:
     from scytaledroid.Database.db_core import db_queries as core_q
-    from scytaledroid.DynamicAnalysis.service_context import resolve_service_for_domain
     from scytaledroid.DynamicAnalysis.service_context import (
         default_service_catalog_seed_rows,
         default_service_domain_map_seed_rows,
+        resolve_service_for_domain,
     )
     from scytaledroid.DynamicAnalysis.service_signals import (
         default_service_signal_map_seed_rows,
         default_signal_catalog_seed_rows,
     )
+
     from scripts.db._dynamic_service_seed_overlay import (
         merge_missing_seed_service_maps,
         merge_missing_seed_services,

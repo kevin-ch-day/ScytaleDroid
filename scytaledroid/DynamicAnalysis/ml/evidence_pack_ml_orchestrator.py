@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +26,6 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_freeze_read_path,
 )
 from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
-from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from . import ml_parameters_profile as config
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
@@ -43,44 +41,85 @@ from .evidence_pack_ml_preflight import (
 )
 from .feature_matrix import rows_to_basic_matrix
 from .freeze_profile.dataset_tables import (
-    clamp01 as _clamp01,
     compute_baseline_stability_rows as _compute_baseline_stability_rows,
-    compute_dars_component_rows as _compute_dars_component_rows,
-    compute_model_overlap_rows as _compute_model_overlap_rows,
-    compute_phase_rows as _compute_phase_rows,
-    compute_static_dynamic_stratification_row as _compute_static_dynamic_stratification_row,
-    compute_transport_mix_rows as _compute_transport_mix_rows,
-    extract_static_snapshot as _extract_static_snapshot,
-    pcap_size_bytes_from_inputs as _pcap_size_bytes_from_inputs,
-    safe_float as _safe_float,
-    transport_ratios_from_inputs as _transport_ratios_from_inputs,
-    write_baseline_stability_csv as _write_baseline_stability_csv,
-    write_dars_components_csv as _write_dars_components_csv,
-    write_ml_audit_csv as _write_ml_audit_csv,
-    write_model_overlap_csv as _write_model_overlap_csv,
-    write_prevalence_csvs as _write_prevalence_csvs,
-    write_static_dynamic_stratification_csv as _write_static_dynamic_stratification_csv,
-    write_transport_mix_csvs as _write_transport_mix_csvs,
 )
-from .freeze_profile.run_artifacts import (
-    read_ml_config_fingerprint as _read_ml_config_fingerprint,
-    write_app_skip as _write_app_skip,
-    write_cohort_status as _write_cohort_status,
-    write_global_cohort_status as _write_global_cohort_status,
-    write_model_manifest as _write_model_manifest,
-    write_run_skip as _write_run_skip,
+from .freeze_profile.dataset_tables import (
+    compute_dars_component_rows as _compute_dars_component_rows,
+)
+from .freeze_profile.dataset_tables import (
+    compute_model_overlap_rows as _compute_model_overlap_rows,
+)
+from .freeze_profile.dataset_tables import (
+    compute_phase_rows as _compute_phase_rows,
+)
+from .freeze_profile.dataset_tables import (
+    compute_static_dynamic_stratification_row as _compute_static_dynamic_stratification_row,
+)
+from .freeze_profile.dataset_tables import (
+    compute_transport_mix_rows as _compute_transport_mix_rows,
+)
+from .freeze_profile.dataset_tables import (
+    extract_static_snapshot as _extract_static_snapshot,
+)
+from .freeze_profile.dataset_tables import (
+    pcap_size_bytes_from_inputs as _pcap_size_bytes_from_inputs,
+)
+from .freeze_profile.dataset_tables import (
+    write_baseline_stability_csv as _write_baseline_stability_csv,
+)
+from .freeze_profile.dataset_tables import (
+    write_dars_components_csv as _write_dars_components_csv,
+)
+from .freeze_profile.dataset_tables import (
+    write_ml_audit_csv as _write_ml_audit_csv,
+)
+from .freeze_profile.dataset_tables import (
+    write_model_overlap_csv as _write_model_overlap_csv,
+)
+from .freeze_profile.dataset_tables import (
+    write_prevalence_csvs as _write_prevalence_csvs,
+)
+from .freeze_profile.dataset_tables import (
+    write_static_dynamic_stratification_csv as _write_static_dynamic_stratification_csv,
+)
+from .freeze_profile.dataset_tables import (
+    write_transport_mix_csvs as _write_transport_mix_csvs,
 )
 from .freeze_profile.identity_contract import (
     resolve_paper_identity_contract as _resolve_paper_identity_contract,
 )
+from .freeze_profile.run_artifacts import (
+    read_ml_config_fingerprint as _read_ml_config_fingerprint,
+)
+from .freeze_profile.run_artifacts import (
+    write_app_skip as _write_app_skip,
+)
+from .freeze_profile.run_artifacts import (
+    write_cohort_status as _write_cohort_status,
+)
+from .freeze_profile.run_artifacts import (
+    write_global_cohort_status as _write_global_cohort_status,
+)
+from .freeze_profile.run_artifacts import (
+    write_model_manifest as _write_model_manifest,
+)
+from .freeze_profile.run_artifacts import (
+    write_run_skip as _write_run_skip,
+)
 from .freeze_profile.run_summary import (
-    anomaly_streak_metrics as _anomaly_streak_metrics,
     baseline_feature_stats as _baseline_feature_stats,
-    build_topk_and_zscores as _build_topk_and_zscores,
-    compute_dars_v1 as _compute_dars_v1,
-    load_scores as _load_scores,
+)
+
+# Compatibility exports retained for callers that historically imported the
+# DARS helpers from this orchestrator rather than their implementation module.
+from .freeze_profile.run_summary import (
+    build_topk_and_zscores as _build_topk_and_zscores,  # noqa: F401
+)
+from .freeze_profile.run_summary import compute_dars_v1 as _compute_dars_v1  # noqa: F401
+from .freeze_profile.run_summary import (
     model_csv_label as _model_csv_label,
-    write_csv_dicts as _write_csv_dicts,
+)
+from .freeze_profile.run_summary import (
     write_ml_summary as _write_ml_summary,
 )
 from .io import MLOutputPaths
@@ -858,7 +897,7 @@ def _baseline_bytes_gate_ok(app_runs: list[RunInputs], *, baseline_rids: list[st
             threshold = fallback_min_bytes
         thresholds.append(max(0, int(threshold)))
 
-    for baseline, min_bytes_i in zip(baselines, thresholds):
+    for baseline, min_bytes_i in zip(baselines, thresholds, strict=True):
         size_bytes = None
         if isinstance(baseline.pcap_report, dict):
             sb = baseline.pcap_report.get("pcap_size_bytes")

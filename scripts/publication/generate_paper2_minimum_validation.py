@@ -27,16 +27,24 @@ if str(REPO_ROOT) not in sys.path:
 
 import numpy as np
 from scipy import stats
-
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as config
-from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import get_sampling_duration_seconds, load_run_inputs
+from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import (
+    anomaly_scores,
+    fit_model,
+    fixed_model_specs,
+)
+from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
+    get_sampling_duration_seconds,
+    load_run_inputs,
+)
 from scytaledroid.DynamicAnalysis.ml.feature_matrix import BASIC_FEATURE_NAMES, rows_to_basic_matrix
-from scytaledroid.DynamicAnalysis.ml.pcap_window_features import build_window_features, extract_packet_timeline
+from scytaledroid.DynamicAnalysis.ml.pcap_window_features import (
+    build_window_features,
+    extract_packet_timeline,
+)
 from scytaledroid.DynamicAnalysis.ml.telemetry_windowing import WindowSpec
 from scytaledroid.Publication.app_category_policy import app_display_name
 from scytaledroid.Publication.paper2_v2_contract import validate_paper2_v2_results_contract
-
 
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output" / "_internal" / "publication" / "paper2_v2"
 DEFAULT_EVIDENCE_ROOT = REPO_ROOT / "data" / "evidence" / "dynamic"
@@ -66,7 +74,9 @@ SEEDS = [
 
 
 def _default_freeze_path() -> str:
-    from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
+    from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+        resolve_dataset_freeze_read_path,
+    )
 
     return str(resolve_dataset_freeze_read_path())
 

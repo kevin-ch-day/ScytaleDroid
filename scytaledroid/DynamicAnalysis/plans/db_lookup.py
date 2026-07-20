@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from scytaledroid.Database.db_core import DatabaseError, db_queries as core_q
+from scytaledroid.Database.db_core import DatabaseError
+from scytaledroid.Database.db_core import db_queries as core_q
 
 
 def missing_db_fields(row: dict[str, object]) -> list[str]:

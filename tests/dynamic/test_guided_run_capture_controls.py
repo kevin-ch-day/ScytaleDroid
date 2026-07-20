@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from contextlib import contextmanager
 
 import pytest
-
 from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.scenarios import manual
 from scytaledroid.DynamicAnalysis.scenarios.manual import (

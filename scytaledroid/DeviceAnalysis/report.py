@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-from scytaledroid.DeviceAnalysis.inventory.mode_labels import inventory_mode_label
 from scytaledroid.DeviceAnalysis.inventory import normalizer
+from scytaledroid.DeviceAnalysis.inventory.mode_labels import inventory_mode_label
 from scytaledroid.DeviceAnalysis.services import device_service
 from scytaledroid.Utils.DisplayUtils import (
     error_panels,

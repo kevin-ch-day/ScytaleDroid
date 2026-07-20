@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_func.research_cohorts import (

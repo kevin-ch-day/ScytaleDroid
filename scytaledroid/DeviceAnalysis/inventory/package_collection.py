@@ -312,7 +312,7 @@ def collect_inventory(
                     "package_name": package_name,
                     "installer": getattr(bulk_entry, "installer", None),
                     "version_code": getattr(bulk_entry, "version_code", None),
-                    "user_id": str(getattr(bulk_entry, "uid")) if getattr(bulk_entry, "uid", None) is not None else None,
+                    "user_id": str(bulk_entry.uid) if getattr(bulk_entry, "uid", None) is not None else None,
                     "path_fidelity": path_fidelity,
                 }
                 metadata.update(bulk_dump_metadata)

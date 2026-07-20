@@ -5,8 +5,8 @@ from pathlib import Path
 from scripts.db.audit_dynamic_evidence_path_migration import (
     _REPO_ROOT,
     _annotate_missing_run_references,
-    _collect_reference_hits,
     _collect_filesystem_alignment,
+    _collect_reference_hits,
     normalize_dynamic_evidence_path,
 )
 

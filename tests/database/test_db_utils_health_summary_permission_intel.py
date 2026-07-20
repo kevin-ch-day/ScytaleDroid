@@ -6,7 +6,6 @@ from dataclasses import fields
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.Database.db_utils.health_checks.analysis_integrity import AnalysisIntegritySummary
 from scytaledroid.Database.db_utils.menus import health_checks as menu_module
 from scytaledroid.Database.db_utils.static_run_governance_checks import StaticRunGovernanceCounts

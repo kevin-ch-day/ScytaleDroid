@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.execution import results_persist
 from scytaledroid.StaticAnalysis.cli.execution.results_persistence import (
     apply_persistence_outcome,
@@ -13,7 +12,6 @@ from scytaledroid.StaticAnalysis.cli.execution.results_persistence import (
 from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
     StaticSessionRunRollups,
 )
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 

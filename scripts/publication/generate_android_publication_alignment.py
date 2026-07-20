@@ -15,9 +15,10 @@ import json
 import statistics
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -128,7 +129,7 @@ def _find_pcap_path(run_dir: Path, manifest: Mapping[str, Any]) -> Path | None:
 
 
 def _classify_evidence(run_manifest: Mapping[str, Any], summary: Mapping[str, Any]) -> str:
-    run_profile = str((summary.get("run_profile") or (run_manifest.get("operator") or {}).get("run_profile") or "")).lower()
+    run_profile = str(summary.get("run_profile") or (run_manifest.get("operator") or {}).get("run_profile") or "").lower()
     if "interaction" in run_profile or "interactive" in run_profile:
         return "interactive"
     if run_profile.startswith("baseline") or "baseline" in run_profile or "idle" in run_profile:

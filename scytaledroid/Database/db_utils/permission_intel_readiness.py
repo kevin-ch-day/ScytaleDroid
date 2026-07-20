@@ -8,7 +8,6 @@ from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.StaticAnalysis.cli.intel_gate import governance_ready
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages
 
-
 _EXPECTED_INTEL_CATALOG = "android_permission_intel"
 
 

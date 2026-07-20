@@ -13,10 +13,11 @@ def _run(
     profile: str,
     valid: bool = True,
     pcap: bool = True,
+    paper_eligible: bool | None = None,
     baseline_not_idle: bool = False,
     ended_at: str = "2026-07-04T10:00:00Z",
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "run_id": run_id,
         "version_code": version_code,
         "version_name": version_name,
@@ -28,6 +29,56 @@ def _run(
         "baseline_not_idle": baseline_not_idle,
         "ended_at": ended_at,
     }
+    if paper_eligible is not None:
+        payload["paper_eligible"] = paper_eligible
+    return payload
+
+
+def test_paper_freeze_excludes_explicitly_ineligible_runs_and_records_them(monkeypatch) -> None:
+    monkeypatch.setattr(subject, "active_research_cohort_packages", lambda: ("com.cnn.mobile.android.phone",))
+    monkeypatch.setattr(subject, "active_research_cohort_label", lambda: "Research Dataset Beta")
+    runs = [
+        _run(
+            run_id="cnn-b1",
+            version_code="19250507",
+            version_name="26.13.0",
+            static_run_id="5389",
+            base_sha="a" * 64,
+            profile="baseline_idle",
+        ),
+        _run(
+            run_id="cnn-excluded-script",
+            version_code="19250507",
+            version_name="26.13.0",
+            static_run_id="5389",
+            base_sha="a" * 64,
+            profile="interaction_scripted",
+            paper_eligible=False,
+        ),
+    ]
+    runs[1]["paper_exclusion_primary_reason_code"] = "EXCLUDED_SCRIPT_ABORT"
+    monkeypatch.setattr(
+        subject,
+        "_load_tracker_payload",
+        lambda cfg: ("ok", {"apps": {"com.cnn.mobile.android.phone": {"runs": runs}}}, None),
+    )
+    monkeypatch.setattr(subject, "resolve_active_package_identity", lambda package: ("19250507", "a" * 64))
+
+    manifest = subject.build_paper_freeze_manifest()
+
+    row = manifest["apps"][0]
+    assert row["selected_dynamic_run_ids"] == "cnn-b1"
+    assert row["interactive_count"] == 0
+    assert row["paper_excluded_run_count"] == 1
+    assert row["paper_excluded_dynamic_run_ids"] == "cnn-excluded-script"
+    assert row["paper_exclusion_reason_codes"] == "EXCLUDED_SCRIPT_ABORT"
+    assert manifest["selection_contract"] == {
+        "requires_valid_dataset_run": True,
+        "explicit_paper_ineligible_runs": "excluded",
+        "missing_paper_eligibility_field": "retained for legacy compatibility",
+    }
+    assert manifest["summary"]["selected_dynamic_runs"] == 1
+    assert manifest["summary"]["explicitly_paper_excluded_runs"] == 1
 
 
 def test_recommend_paper_freeze_selects_prior_build_with_better_coverage() -> None:
@@ -517,11 +568,11 @@ def test_paper_freeze_keeps_quiescent_fg_separate_from_strict_idle(monkeypatch) 
     assert row["strict_idle_count"] == 0
     assert row["quiescent_fg_count"] == 7
     assert row["interactive_count"] == 2
-    assert row["strict_idle_ready"] == "yes"
+    assert row["strict_idle_ready"] == "no"
     assert row["quiescent_fg_available"] == "yes"
-    assert row["strict_workflow_blocked"] == "no"
+    assert row["strict_workflow_blocked"] == "yes"
     assert row["status"] == "needs interactive"
-    assert "Quiescent FG evidence" in row["baseline_class_note"]
+    assert "does not satisfy strict-idle" in row["baseline_class_note"]
 
     board = subject.build_paper_freeze_decision_board()
     board_row = board["rows"][0]
@@ -529,14 +580,20 @@ def test_paper_freeze_keeps_quiescent_fg_separate_from_strict_idle(monkeypatch) 
     assert board_row["strict_idle_count"] == 0
     assert board_row["quiescent_fg_count"] == 7
     assert board_row["interactive_count"] == 2
+    assert board_row["strict_idle_ready"] == "no"
+    assert board_row["strict_workflow_blocked"] == "yes"
+    assert board_row["strict_workflow_status"] == "strict idle gap"
     assert board_row["action"] == "interactive if claim needs it"
     assert board_row["rough_draft_blocker"] == "no"
     assert "do not block the rough draft" in board_row["reason"]
     plan = manifest["paper_minimal_run_plan"][0]
-    assert plan["recommended_next_action"] == "interactive"
     assert plan["strict_idle_count"] == 0
     assert plan["quiescent_fg_count"] == 7
-    assert "Quiescent FG evidence" in plan["baseline_class_note"]
+    assert plan["strict_idle_ready"] == "no"
+    assert plan["strict_workflow_blocked"] == "yes"
+    assert plan["strict_workflow_status"] == "strict idle gap"
+    assert plan["recommended_next_action"] == "strict idle retry"
+    assert "does not satisfy strict-idle" in plan["baseline_class_note"]
 
 
 def test_paper_freeze_reddit_like_row_counts_baseline_and_separate_qfg(monkeypatch) -> None:

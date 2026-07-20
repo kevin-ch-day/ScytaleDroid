@@ -215,6 +215,8 @@ def execute_harvest(
         try:
             from scytaledroid.Database.db_func.harvest import (
                 apk_repository as repo,  # local import (optional DB)
+            )
+            from scytaledroid.Database.db_func.harvest import (
                 install_sets as install_set_repo,
             )
 

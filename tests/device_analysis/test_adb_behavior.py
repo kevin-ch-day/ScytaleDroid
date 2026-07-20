@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
 from scytaledroid.DeviceAnalysis.adb.errors import (
@@ -15,7 +14,6 @@ from scytaledroid.DeviceAnalysis.adb.errors import (
     AdbDeviceSelectionError,
     AdbTimeoutError,
 )
-
 
 ALLOWLIST = {
     "scytaledroid/DeviceAnalysis/adb/client.py",

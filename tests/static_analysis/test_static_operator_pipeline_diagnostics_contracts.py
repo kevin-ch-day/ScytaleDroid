@@ -3,7 +3,6 @@ from __future__ import annotations
 from scripts.operator import diagnose_static_pipeline as diag
 from scytaledroid.StaticAnalysis.cli.execution import scan_flow
 
-
 # =============================================================================
 # Former tests/static_analysis/test_diagnose_static_pipeline_script.py
 # =============================================================================

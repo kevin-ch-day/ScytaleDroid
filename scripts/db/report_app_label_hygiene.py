@@ -79,12 +79,12 @@ def _format_fixed_table(
 ) -> None:
     print(title)
     print(underline)
-    head = "  " + "  ".join(h[: w].ljust(w) for h, w in zip(headers, widths))
+    head = "  " + "  ".join(h[:w].ljust(w) for h, w in zip(headers, widths, strict=True))
     print(head)
     print("  " + "  ".join("-" * w for w in widths))
     for row in rows:
         cells = []
-        for value, w in zip(row, widths):
+        for value, w in zip(row, widths, strict=True):
             cells.append(str(value)[:w].ljust(w))
         print("  " + "  ".join(cells))
     print()

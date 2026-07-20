@@ -4,8 +4,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
+from scytaledroid.StaticAnalysis.cli.core.models import (
+    AppRunResult,
+    RunOutcome,
+    RunParameters,
+    ScopeSelection,
+)
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
+
+_DEFAULT_LAUNCH_RESULT = object()
 
 
 def make_outcome(
@@ -108,7 +115,12 @@ def patch_launch_scan_flow_defaults(
     monkeypatch.setattr(run_dispatch, "_session_finalization_issues", lambda **_k: [])
 
 
-def patch_execute_run_spec_defaults(monkeypatch, *, params: RunParameters, launch_result=object()) -> None:
+def patch_execute_run_spec_defaults(
+    monkeypatch,
+    *,
+    params: RunParameters,
+    launch_result=_DEFAULT_LAUNCH_RESULT,
+) -> None:
     monkeypatch.setattr(run_dispatch.output_prefs, "snapshot", lambda: {})
     monkeypatch.setattr(run_dispatch.output_prefs, "get_run_context", lambda: None)
     monkeypatch.setattr(run_dispatch.output_prefs, "set_quiet", lambda *_a, **_k: None)

@@ -11,13 +11,13 @@ This prevents mixed-version cohorts and makes "commercial app versions" defensib
 from __future__ import annotations
 
 import argparse
+import csv
 import glob
+import hashlib
 import json
 import re
-import sys
-import csv
-import hashlib
 import signal
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

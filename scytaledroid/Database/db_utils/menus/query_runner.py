@@ -9,11 +9,11 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import run_sql
-from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_scripts.static_run_audit import (
     GROUP_SCOPE_VERIFICATION_GUIDANCE,
     collect_static_run_counts,
 )
+from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.summary_surfaces import static_dynamic_summary_cache_status
 from scytaledroid.StaticAnalysis.cli.persistence.reports.masvs_summary_report import (
     fetch_db_masvs_summary_static_many,

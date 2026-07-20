@@ -9,9 +9,10 @@ import json
 import os
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 try:
     from scripts.device_analysis.report_apk_inventory_model import (

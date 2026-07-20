@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-
 from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.execution import post_run_cohort_quick_check as prq

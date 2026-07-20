@@ -19,8 +19,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.Reporting.services.profile_v3_exports_service import main as run_profile_v3_exports
 from scytaledroid.Reporting.services.paper2_results_v2_service import generate_paper2_results_v2
+from scytaledroid.Reporting.services.profile_v3_exports_service import (
+    main as run_profile_v3_exports,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

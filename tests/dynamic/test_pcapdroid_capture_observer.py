@@ -7,8 +7,8 @@ from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.observers.pcapdroid_capture import (
     PcapdroidCaptureObserver,
     _effective_min_pcap_bytes,
-    estimate_device_capture_size_bytes,
     _pull_with_retries,
+    estimate_device_capture_size_bytes,
 )
 from scytaledroid.DynamicAnalysis.pcap.naming import make_pcap_capture_name
 

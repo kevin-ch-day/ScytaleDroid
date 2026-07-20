@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.DeviceAnalysis import inventory_meta
 from scytaledroid.DeviceAnalysis.inventory import package_collection
-
-from tests.inventory._package_collection_support import bulk_entry, patch_inventory_collection_defaults
-
+from tests.inventory._package_collection_support import (
+    bulk_entry,
+    patch_inventory_collection_defaults,
+)
 
 pytestmark = [pytest.mark.unit]
 

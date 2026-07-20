@@ -6,10 +6,10 @@ from collections.abc import Callable
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_utils.menus import query_runner
+from scytaledroid.Database.db_utils.menus.sql_helpers import coerce_datetime
 from scytaledroid.StaticAnalysis.cli.audit.post_run_session_summary import (
     prompt_post_run_session_summary,
 )
-from scytaledroid.Database.db_utils.menus.sql_helpers import coerce_datetime
 from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, table_utils
 
 

@@ -106,7 +106,9 @@ def _load_app_labels(packages: list[str]) -> dict[str, str]:
 def _load_live_drift_map(packages: list[str]) -> tuple[dict[str, dict[str, str]], str, str]:
     try:
         from scytaledroid.DeviceAnalysis import device_manager
-        from scytaledroid.DynamicAnalysis.menus.queue_data_sources import resolve_live_build_drift_map
+        from scytaledroid.DynamicAnalysis.menus.queue_data_sources import (
+            resolve_live_build_drift_map,
+        )
     except Exception:
         return {}, "", ""
     try:

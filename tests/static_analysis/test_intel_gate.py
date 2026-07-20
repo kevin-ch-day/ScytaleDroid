@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli import intel_gate
 
 

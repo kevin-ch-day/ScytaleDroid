@@ -19,9 +19,9 @@ import json
 import os
 import platform
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
-import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:

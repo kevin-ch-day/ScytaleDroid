@@ -18,14 +18,14 @@ from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
     PaperFreezeRecommendation,
     recommend_paper_freeze_for_runs,
 )
+from scytaledroid.DynamicAnalysis.templates.category_map import (
+    category_for_package,
+    resolved_template_for_package,
+)
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     build_scoped_dataset_counts,
     default_resolve_tracker_run_identity,
     scope_tracker_runs_to_active_identity,
-)
-from scytaledroid.DynamicAnalysis.templates.category_map import (
-    category_for_package,
-    resolved_template_for_package,
 )
 from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import PackageRunCounts, find_dynamic_run_dirs

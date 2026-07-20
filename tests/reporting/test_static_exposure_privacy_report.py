@@ -6,15 +6,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from scytaledroid.Reporting.models import ReportRequest
 from scytaledroid.Reporting.services.report_scope_selector import (
+    _static_run_select_sql,
     build_report_request,
     find_static_application_matches,
     list_application_categories,
     resolve_application_category_scope,
     resolve_static_evidence,
-    _static_run_select_sql,
 )
 from scytaledroid.Reporting.study_profiles.static_exposure_privacy import (
     _component_exposure_from_findings,

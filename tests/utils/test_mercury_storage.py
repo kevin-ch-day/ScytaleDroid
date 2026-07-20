@@ -3,8 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from scytaledroid.Utils.System import workspace_maintenance_menu
-from scytaledroid.Utils.System import mercury_storage
+from scytaledroid.Utils.System import mercury_storage, workspace_maintenance_menu
 
 
 def test_user_media_mount_uses_requested_user() -> None:

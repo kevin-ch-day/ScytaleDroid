@@ -45,18 +45,27 @@ from .evidence_pack_ml_preflight import get_sampling_duration_seconds, load_run_
 from .method_basis import runtime_ml_method_basis
 from .pcap_window_features import build_window_features, extract_packet_timeline
 from .publication_bundle.exporters import (
-    tex_escape as _tex_escape,
     write_csv_with_provenance as _write_csv_with_provenance,
+)
+from .publication_bundle.exporters import (
     write_tex_table as _write_tex_table,
+)
+from .publication_bundle.exporters import (
     write_xlsx as _write_xlsx,
 )
 from .publication_bundle.manifest_utils import (
     copy_required as _copy_required,
+)
+from .publication_bundle.manifest_utils import (
     sha256_stream as _sha256_stream,
 )
 from .publication_bundle.validation import (
     write_determinism_checksums as _write_determinism_checksums,
+)
+from .publication_bundle.validation import (
     write_phrase_lint_report as _write_phrase_lint_report,
+)
+from .publication_bundle.validation import (
     write_required_fields_validation_report as _write_required_fields_validation_report,
 )
 from .telemetry_windowing import WindowSpec

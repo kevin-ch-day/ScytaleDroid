@@ -3,9 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.execution import results
-
 from tests.static_analysis._results_support import (
     make_app_result,
     make_outcome,
@@ -14,7 +12,6 @@ from tests.static_analysis._results_support import (
     make_run_ctx,
     patch_results_render_baseline,
 )
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract, pytest.mark.unit]
 

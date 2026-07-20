@@ -29,7 +29,6 @@ from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
     phase_from_normalized_profile,
     resolve_run_profile_from_manifest,
 )
-
 from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
     ProfileV3Error,
     load_profile_v3_catalog,

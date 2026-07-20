@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import artifact_store
-from scytaledroid.Utils.System import mercury_storage
 from scytaledroid.Utils.DisplayUtils import (
     display_settings,
     menu_utils,
@@ -16,12 +16,30 @@ from scytaledroid.Utils.DisplayUtils import (
     table_utils,
     text_blocks,
 )
+from scytaledroid.Utils.System import mercury_storage
 
 
 def _dir_size_bytes(path: Path) -> int:
-    total = 0
+    """Return allocated size without making the workspace UI walk large trees in Python."""
+
     if not path.exists():
         return 0
+    try:
+        completed = subprocess.run(
+            ("du", "-sk", str(path)),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=120,
+        )
+        if completed.returncode == 0:
+            token = (completed.stdout or "").strip().split("\t", 1)[0]
+            return int(token) * 1024
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+
+    # Keep the dashboard usable on hosts without GNU/coreutils ``du``.
+    total = 0
     for entry in path.rglob("*"):
         if entry.is_file():
             try:
@@ -41,8 +59,25 @@ def _humanize_bytes(value: int) -> str:
     return f"{size:.1f} PB"
 
 def _count_files(path: Path, *, pattern: str = "**/*") -> int:
+    """Count files without allocating every matching path for large workspaces."""
+
     if not path.exists():
         return 0
+    native_pattern = pattern.removeprefix("**/")
+    try:
+        completed = subprocess.run(
+            ("find", str(path), "-type", "f", "-name", native_pattern, "-printf", "."),
+            capture_output=True,
+            check=False,
+            text=False,
+            timeout=120,
+        )
+        if completed.returncode == 0:
+            return len(completed.stdout or b"")
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # Keep the maintenance view usable on hosts without GNU/findutils support.
     n = 0
     for entry in path.glob(pattern):
         if entry.is_file():
@@ -74,7 +109,7 @@ def _show_summary() -> None:
     logs_dir = Path("logs")
     output_dir = Path(app_config.OUTPUT_DIR)
     cache_dirs = [data_dir / "static_analysis" / "cache", output_dir / "cache"]
-    apk_files = list(apks_dir.rglob("*.apk")) if apks_dir.exists() else []
+    apk_count = _count_files(apks_dir, pattern="**/*.apk")
 
     apks_size = _dir_size_bytes(apks_dir)
     logs_size = _dir_size_bytes(logs_dir)
@@ -89,7 +124,7 @@ def _show_summary() -> None:
     menu_utils.print_section("Storage")
     storage_rows: list[list[str]] = [
         ["APK storage", str(apks_dir)],
-        ["APK files", f"{len(apk_files)}"],
+        ["APK files", f"{apk_count}"],
         ["APK size", _humanize_bytes(apks_size)],
         ["Receipts dir", str(receipts_dir)],
         ["Receipts size", _humanize_bytes(_dir_size_bytes(receipts_dir))],

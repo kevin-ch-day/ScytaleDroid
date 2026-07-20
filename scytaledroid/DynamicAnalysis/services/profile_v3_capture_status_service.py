@@ -37,13 +37,13 @@ from scytaledroid.DynamicAnalysis.run_profile_norm import (  # noqa: E402
     phase_from_normalized_profile,
     resolve_run_profile_from_manifest,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root  # noqa: E402
 from scytaledroid.DynamicAnalysis.utils.profile_v3_minima import (  # noqa: E402
     effective_min_pcap_bytes_idle,
     effective_min_pcap_bytes_scripted,
     effective_min_windows_per_run,
 )
 from scytaledroid.Publication.profile_v3_metrics import load_profile_v3_catalog  # noqa: E402
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root  # noqa: E402
 
 
 def _truthy_env(name: str, default: str = "0") -> bool:

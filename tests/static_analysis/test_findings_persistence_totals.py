@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections import Counter
 
 from scytaledroid.StaticAnalysis.cli.persistence.run_summary import (
-    _FindingPreparationAccumulator,
     _build_findings_persistence_context,
     _finding_cap_for_detector,
+    _FindingPreparationAccumulator,
 )
 
 

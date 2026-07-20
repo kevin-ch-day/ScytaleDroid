@@ -4,21 +4,21 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from scytaledroid.StaticAnalysis.core.context import AnalysisConfig, SecretsSamplerConfig
-from scytaledroid.StaticAnalysis.detectors.secrets import SecretsDetector
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.execution.string_analysis_payload import (
     merge_string_analysis_payloads,
 )
+from scytaledroid.StaticAnalysis.core.context import AnalysisConfig, SecretsSamplerConfig
+from scytaledroid.StaticAnalysis.detectors.secrets import SecretsDetector
 from scytaledroid.StaticAnalysis.engine.strings import _analyse_strings_from_index
 from scytaledroid.StaticAnalysis.engine.strings_detectors import (
     _classify_analytics,
     _classify_token,
     _detect_endpoints,
 )
-from scytaledroid.StaticAnalysis.modules.string_analysis import IndexedString, StringIndex
 from scytaledroid.StaticAnalysis.modules.string_analysis import (
+    IndexedString,
+    StringIndex,
     correlate_static_roots_with_dynamic_indicators,
     dynamic_indicators_from_report,
 )

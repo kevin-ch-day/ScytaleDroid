@@ -21,7 +21,11 @@ from .models import (
 )
 from .report_model import (
     EXCLUSION_LABELS as _EXCLUSION_LABELS,
+)
+from .report_model import (
     SKIP_LABELS as _SKIP_LABELS,
+)
+from .report_model import (
     HarvestRunMetrics,
     HarvestRunReport,
     HarvestRuntimeNoteSummary,

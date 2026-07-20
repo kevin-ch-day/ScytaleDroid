@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from scytaledroid.DynamicAnalysis.capture.state import CaptureAction, ObserverStatus
-from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.controllers.guided_run_capture import (
     ensure_target_foreground_before_capture as _guided_ensure_target_foreground_before_capture,
 )
+from scytaledroid.DynamicAnalysis.core.run_context import RunContext
 from scytaledroid.DynamicAnalysis.scenarios.manual_timing import (
     format_duration as _format_duration,
 )
@@ -422,8 +422,8 @@ class ActiveCaptureRuntime:
                 surface_label, surface_detail = surface_probe(state)
             except Exception:
                 surface_label, surface_detail = (None, None)
-            setattr(state, "foreground_surface_label", surface_label)
-            setattr(state, "foreground_surface_detail", surface_detail)
+            state.foreground_surface_label = surface_label
+            state.foreground_surface_detail = surface_detail
             current_surface = (surface_label, surface_detail)
             if current_surface != last_surface_ref.get("value"):
                 last_surface_ref["value"] = current_surface
@@ -452,7 +452,7 @@ class ActiveCaptureRuntime:
             target_reached_announced_ref["value"] = True
             if not continue_after_target:
                 emit_status("Target reached; finalizing capture.", "info")
-                setattr(state, "finalize_requested", True)
+                state.finalize_requested = True
 
 
 __all__ = [

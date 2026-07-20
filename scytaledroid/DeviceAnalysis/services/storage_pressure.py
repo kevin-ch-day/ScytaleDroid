@@ -14,8 +14,7 @@ import csv
 import json
 import os
 import stat
-from collections import Counter
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime

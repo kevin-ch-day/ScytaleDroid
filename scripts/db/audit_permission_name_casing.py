@@ -275,7 +275,7 @@ def _persistence_failure_permission_mentions(*, limit: int) -> dict[str, Any]:
             )
         else:
             rows = core_q.run_sql(
-                f"""
+                """
                 SELECT id, exception_message, errors_tail
                 FROM static_persistence_failures
                 WHERE (

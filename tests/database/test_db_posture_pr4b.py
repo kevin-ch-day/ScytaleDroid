@@ -3,8 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from scytaledroid.Database.db_core import db_config
-from scytaledroid.Database.db_core import db_engine
+from scytaledroid.Database.db_core import db_config, db_engine
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
 from scytaledroid.Database.tools import db_schema_snapshot

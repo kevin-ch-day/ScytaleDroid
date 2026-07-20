@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import RunOutcome, RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution import results as results_mod
 from scytaledroid.StaticAnalysis.cli.execution.results import prompt_deferred_post_run_diagnostics

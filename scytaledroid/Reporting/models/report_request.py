@@ -84,5 +84,5 @@ class ReportRequest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ReportRequest":
+    def from_dict(cls, payload: dict[str, Any]) -> ReportRequest:
         return cls(**payload)

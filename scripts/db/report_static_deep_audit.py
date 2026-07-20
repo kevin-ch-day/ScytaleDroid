@@ -8,9 +8,10 @@ import csv
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -767,7 +768,7 @@ def generate_static_deep_audit(
             "profile_key": _norm_text_or_none(db_row.get("profile_key")),
             "static_run_id": _safe_int(db_row.get("static_run_id"), default=None) if db_row else None,
             "workflow_completion_status": _norm_text_or_none(
-                ((run_health.get("workflow_completion_status")) if isinstance(run_health, Mapping) else None)
+                (run_health.get("workflow_completion_status")) if isinstance(run_health, Mapping) else None
             )
             or _norm_text_or_none(rh.get("workflow_completion_status"))
             or "unknown",

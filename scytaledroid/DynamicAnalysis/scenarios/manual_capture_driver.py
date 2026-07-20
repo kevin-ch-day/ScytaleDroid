@@ -12,7 +12,11 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
-from scytaledroid.DynamicAnalysis.capture.console import CbreakTerminal, LiveCaptureConsole, SelectInputReader
+from scytaledroid.DynamicAnalysis.capture.console import (
+    CbreakTerminal,
+    LiveCaptureConsole,
+    SelectInputReader,
+)
 from scytaledroid.DynamicAnalysis.capture.state import CaptureAction, CaptureState
 from scytaledroid.DynamicAnalysis.capture.surface_probe import (
     infer_runtime_surface as _infer_runtime_surface,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-import os
 
 try:  # optional DB access
     from scytaledroid.Database.db_core import run_sql, run_sql_many

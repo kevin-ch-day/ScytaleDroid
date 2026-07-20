@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.StaticAnalysis.core import detector_runner
 from scytaledroid.StaticAnalysis.core.context import AnalysisConfig
 from scytaledroid.StaticAnalysis.core.detector_runner import PipelineStage, run_detector_pipeline

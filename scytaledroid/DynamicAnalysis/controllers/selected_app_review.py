@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from scytaledroid.Config import app_config  # noqa: F401 - existing tests monkeypatch this module seam
+from scytaledroid.Config import (
+    app_config,  # noqa: F401 - existing tests monkeypatch this module seam
+)
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import load_dataset_tracker
 from scytaledroid.DynamicAnalysis.services.dynamic_target_state import derive_dynamic_target_state
-from scytaledroid.DynamicAnalysis.tracker_scope import default_resolve_tracker_run_identity, scope_tracker_runs_to_active_identity
+from scytaledroid.DynamicAnalysis.tracker_scope import (
+    default_resolve_tracker_run_identity,
+    scope_tracker_runs_to_active_identity,
+)
 from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_dynamic_run_dir
 from scytaledroid.Utils.DisplayUtils.summary_cards import print_summary_card, summary_item
 

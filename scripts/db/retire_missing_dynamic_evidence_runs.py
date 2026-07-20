@@ -257,7 +257,9 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     targets_after = _build_delete_targets(core_q.run_sql, run_ids)
                 if not args.skip_cache_refresh:
-                    from scytaledroid.Database.summary_surfaces import refresh_static_dynamic_summary_cache
+                    from scytaledroid.Database.summary_surfaces import (
+                        refresh_static_dynamic_summary_cache,
+                    )
 
                     inserted, materialized_at = refresh_static_dynamic_summary_cache(reuse_connection=True)
                     cache_refresh = {

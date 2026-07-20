@@ -20,6 +20,7 @@ from ..core.run_context import StaticRunContext
 from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
 from ..persistence.run_writers import resolve_apk_set_id_for_artifact_set_hash
 from ..persistence.static_session_summary import ensure_static_session_shell
+from .cohort_scan_notes import emit_post_scan_cohort_notes
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .operator_display_label import resolve_operator_app_label
@@ -51,7 +52,6 @@ from .scan_report import (
     build_analysis_config,
     generate_report,
 )
-from .cohort_scan_notes import emit_post_scan_cohort_notes
 from .scan_view import (
     format_recent_completion_line,
     is_compact_card_mode,

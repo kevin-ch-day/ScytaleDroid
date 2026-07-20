@@ -26,7 +26,9 @@ def main(argv: list[str] | None = None) -> int:
         from scytaledroid.Database.db_core import db_config
         from scytaledroid.Database.db_core import db_queries as core_q
         from scytaledroid.Database.db_core.session import database_session
-        from scytaledroid.Database.db_utils.dynamic_service_context import apply_dynamic_service_context_migration
+        from scytaledroid.Database.db_utils.dynamic_service_context import (
+            apply_dynamic_service_context_migration,
+        )
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 1

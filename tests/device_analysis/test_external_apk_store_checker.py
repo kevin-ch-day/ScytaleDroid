@@ -5,9 +5,7 @@ import io
 from pathlib import Path
 
 import pytest
-
 from scripts.device_analysis import check_external_apk_store_mount as checker
-
 
 pytestmark = [pytest.mark.unit]
 

@@ -24,7 +24,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scytaledroid.Publication.app_category_policy import app_category, app_display_name  # noqa: E402
+from scytaledroid.Publication.app_category_policy import (  # noqa: E402
+    app_category,
+    app_display_name,
+)
 
 DEFAULT_CUTOFF_DIR = REPO_ROOT / "output" / "paper" / "dynamic_paper_cutoff_final_20260709T202819Z"
 DEFAULT_AUDIT_DIR = REPO_ROOT / "output" / "audit" / "paper_regen_check" / "20260709T160803Z"

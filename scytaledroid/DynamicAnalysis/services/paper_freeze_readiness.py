@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
     _normalize_tracker_payload,
 )
+from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_plan_read_path
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
     active_research_cohort_label,
     active_research_cohort_packages,
 )
-from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_plan_read_path
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     default_resolve_tracker_run_identity,
     resolve_active_package_identity,
@@ -125,6 +126,12 @@ _PAPER_EVIDENCE_TIER_ORDER = {
     "TRUE_EVIDENCE_HOLE": 5,
 }
 
+_PAPER_FREEZE_SELECTION_CONTRACT = {
+    "requires_valid_dataset_run": True,
+    "explicit_paper_ineligible_runs": "excluded",
+    "missing_paper_eligibility_field": "retained for legacy compatibility",
+}
+
 
 def _norm_text(value: Any) -> str:
     return str(value or "").strip()
@@ -185,6 +192,34 @@ def _run_identity_key(package_name: str, run: dict[str, Any]) -> tuple[str, str,
         _norm_text(run.get("version_name")),
         _norm_text(base_sha or run.get("base_apk_sha256")).lower(),
     )
+
+
+def _paper_excluded_runs(runs: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Return explicitly excluded valid runs for manifest-level audit context."""
+
+    excluded: list[dict[str, str]] = []
+    seen_run_ids: set[str] = set()
+    for run in runs:
+        if not isinstance(run, dict) or run.get("valid_dataset_run") is not True:
+            continue
+        if run.get("paper_eligible") is not False:
+            continue
+        run_id = _norm_text(run.get("run_id"))
+        if not run_id or run_id in seen_run_ids:
+            continue
+        seen_run_ids.add(run_id)
+        reason_codes = run.get("paper_exclusion_all_reason_codes")
+        if isinstance(reason_codes, (list, tuple)):
+            reason = ",".join(_norm_text(value) for value in reason_codes if _norm_text(value))
+        else:
+            reason = ""
+        excluded.append(
+            {
+                "run_id": run_id,
+                "reason": reason or _norm_text(run.get("paper_exclusion_primary_reason_code")) or "unspecified",
+            }
+        )
+    return excluded
 
 
 def _build_status(*, baseline_valid_runs: int, interactive_valid_runs: int, cfg: DatasetTrackerConfig) -> tuple[str, int, int]:
@@ -272,9 +307,15 @@ def _baseline_class_note(candidate: PaperFreezeBuildCandidate | None) -> str:
     strict_i = int(candidate.strict_idle_runs)
     quiescent_i = int(candidate.quiescent_fg_runs)
     if strict_i > 0 and quiescent_i > 0:
-        return "Baseline evidence includes Quiescent FG app-activity tags for this selected build."
+        return (
+            "Strict Idle evidence is present; Quiescent FG evidence is retained separately "
+            "and does not increase the Strict Idle count."
+        )
     if quiescent_i > 0:
-        return "Quiescent FG evidence exists as app-activity tagged baseline evidence for this selected build."
+        return (
+            "Quiescent FG evidence is valid no-touch foreground evidence, but does not "
+            "satisfy strict-idle quota/readiness for this selected build."
+        )
     return "No-touch foreground baseline evidence is the quota baseline lane for paper readiness."
 
 
@@ -284,11 +325,26 @@ def _strict_no_touch_count(candidate: PaperFreezeBuildCandidate | None) -> int:
     return max(0, int(candidate.strict_idle_runs))
 
 
+def _strict_idle_ready(candidate: PaperFreezeBuildCandidate | None, cfg: DatasetTrackerConfig) -> bool:
+    """Return strict-idle readiness without treating QFG evidence as quota idle."""
+
+    return _strict_no_touch_count(candidate) >= int(cfg.baseline_required)
+
+
+def _strict_workflow_blocked(candidate: PaperFreezeBuildCandidate | None, cfg: DatasetTrackerConfig) -> bool:
+    """Report the strict collection hold while preserving raw interactive evidence."""
+
+    return bool(candidate and not _strict_idle_ready(candidate, cfg) and int(candidate.interactive_valid_runs) > 0)
+
+
 def _recommended_plan_action(
     *,
     status: str,
     selected: PaperFreezeBuildCandidate | None,
+    cfg: DatasetTrackerConfig,
 ) -> str:
+    if selected and int(selected.quiescent_fg_runs) > 0 and not _strict_idle_ready(selected, cfg):
+        return "strict idle retry"
     if status == "needs interactive":
         return "interactive"
     if status in {"needs baseline", "insufficient"}:
@@ -435,8 +491,8 @@ def _classify_decision_row(
                 selected_version_name=_norm_text(selected.version_name),
                 installed_version_code=installed_vc,
                 relation=selected_relation,
-                strict_idle_count=_strict_no_touch_count(selected),
-                quiescent_fg_count=int(selected.quiescent_fg_runs),
+                strict_idle_count=_strict_no_touch_count(basis),
+                quiescent_fg_count=int(basis.quiescent_fg_runs),
                 baseline_count=int(basis.baseline_valid_runs),
                 interactive_count=int(basis.interactive_valid_runs),
                 missing_baseline_runs=int(basis.missing_baseline_runs),
@@ -559,6 +615,10 @@ def summarize_build_candidates(
     grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for run in runs:
         if not isinstance(run, dict) or run.get("valid_dataset_run") is not True:
+            continue
+        # Paper-freeze selection is stricter than technical validity. Preserve
+        # legacy rows without this field, but never select an explicit exclusion.
+        if run.get("paper_eligible") is False:
             continue
         run_id = _norm_text(run.get("run_id"))
         if not run_id:
@@ -721,9 +781,12 @@ def build_paper_freeze_manifest(
     plan_rows: list[dict[str, Any]] = []
     ready = needs_baseline = needs_interactive = insufficient = refresh_candidates = 0
     ready_current = ready_prior = 0
+    selected_dynamic_run_count = 0
+    paper_excluded_run_count = 0
     for package_name in wanted:
         entry = app_rows.get(package_name) if isinstance(app_rows, dict) else None
         runs = entry.get("runs") if isinstance(entry, dict) and isinstance(entry.get("runs"), list) else []
+        excluded_runs = _paper_excluded_runs(runs)
         recommendation = recommend_paper_freeze_for_runs(package_name, runs, cfg=tracker_cfg)
         selected = recommendation.selected_build
         status = selected.status if selected else "insufficient"
@@ -743,6 +806,8 @@ def build_paper_freeze_manifest(
             refresh_candidates += 1
 
         selected_relation = selected.relation_to_active_target if selected else "none"
+        selected_dynamic_run_count += len(selected.run_ids) if selected else 0
+        paper_excluded_run_count += len(excluded_runs)
         row = {
             "app": package_name,
             "package_name": package_name,
@@ -752,6 +817,9 @@ def build_paper_freeze_manifest(
             "selected_static_run_id": _norm_text(selected.static_run_id if selected else ""),
             "selected_static_run_ids": ",".join(selected.static_run_ids) if selected else "",
             "selected_dynamic_run_ids": ",".join(selected.run_ids) if selected else "",
+            "paper_excluded_run_count": len(excluded_runs),
+            "paper_excluded_dynamic_run_ids": ",".join(row["run_id"] for row in excluded_runs),
+            "paper_exclusion_reason_codes": ";".join(row["reason"] for row in excluded_runs),
             "selected_base_apk_sha256": _norm_text(selected.base_apk_sha256 if selected else ""),
             "strict_idle_count": _strict_no_touch_count(selected),
             "quiescent_fg_count": int(selected.quiescent_fg_runs) if selected else 0,
@@ -763,19 +831,21 @@ def build_paper_freeze_manifest(
             "missing_baseline_runs": int(selected.missing_baseline_runs) if selected else int(tracker_cfg.baseline_required),
             "missing_interactive_runs": int(selected.missing_interactive_runs) if selected else int(tracker_cfg.interactive_required),
             "status": status,
+            "paper_evidence_status": status,
             "installed_target_version_code": recommendation.installed_target_version_code,
             "installed_target_base_apk_sha256": recommendation.installed_target_base_apk_sha256,
             "refresh_candidate": "yes" if recommendation.refresh_candidate else "no",
             "retained_prior_build_selected": "yes" if recommendation.retained_prior_build_selected else "no",
             "build_candidates_seen": len(recommendation.build_candidates),
-            "strict_idle_ready": "yes" if selected and int(selected.missing_baseline_runs) == 0 else "no",
+            "strict_idle_ready": "yes" if _strict_idle_ready(selected, tracker_cfg) else "no",
             "quiescent_fg_available": "yes" if selected and int(selected.quiescent_fg_runs) > 0 else "no",
             "strict_workflow_blocked": (
                 "yes"
-                if selected
-                and int(selected.missing_baseline_runs) > 0
-                and int(selected.interactive_valid_runs) > 0
+                if _strict_workflow_blocked(selected, tracker_cfg)
                 else "no"
+            ),
+            "strict_workflow_status": (
+                "strict idle ready" if _strict_idle_ready(selected, tracker_cfg) else "strict idle gap"
             ),
             "baseline_class_note": _baseline_class_note(selected),
         }
@@ -789,6 +859,7 @@ def build_paper_freeze_manifest(
                     "paper_target_relation": selected_relation,
                     "paper_target_static_run_ids": row["selected_static_run_ids"],
                     "status": status,
+                    "paper_evidence_status": row["paper_evidence_status"],
                     "missing_baseline_runs": row["missing_baseline_runs"],
                     "missing_interactive_runs": row["missing_interactive_runs"],
                     "installed_target_version_code": recommendation.installed_target_version_code,
@@ -796,10 +867,13 @@ def build_paper_freeze_manifest(
                     "strict_idle_count": row["strict_idle_count"],
                     "quiescent_fg_count": row["quiescent_fg_count"],
                     "strict_idle_ready": row["strict_idle_ready"],
+                    "strict_workflow_blocked": row["strict_workflow_blocked"],
+                    "strict_workflow_status": row["strict_workflow_status"],
                     "baseline_class_note": row["baseline_class_note"],
                     "recommended_next_action": _recommended_plan_action(
                         status=status,
                         selected=selected,
+                        cfg=tracker_cfg,
                     ),
                 }
             )
@@ -831,6 +905,7 @@ def build_paper_freeze_manifest(
     return {
         "tracker_status": tracker_status,
         "cohort_label": active_research_cohort_label(),
+        "selection_contract": dict(_PAPER_FREEZE_SELECTION_CONTRACT),
         "baseline_required": int(tracker_cfg.baseline_required),
         "interactive_required": int(tracker_cfg.interactive_required),
         "apps": rows,
@@ -844,6 +919,8 @@ def build_paper_freeze_manifest(
             "needs_interactive": needs_interactive,
             "insufficient": insufficient,
             "refresh_candidates": refresh_candidates,
+            "selected_dynamic_runs": selected_dynamic_run_count,
+            "explicitly_paper_excluded_runs": paper_excluded_run_count,
         },
     }
 
@@ -942,6 +1019,13 @@ def build_paper_freeze_decision_board(
 
     sections: dict[str, list[dict[str, Any]]] = {name: [] for name in _DECISION_BUCKET_ORDER}
     for row in decision_rows:
+        # The strict state must describe the build counts displayed in this
+        # decision row. Switch-target rows intentionally show the installed
+        # candidate's counts, not the selected prior-build target's counts.
+        strict_idle_ready = row.strict_idle_count >= int(tracker_cfg.baseline_required)
+        strict_workflow_blocked = bool(
+            not strict_idle_ready and row.interactive_count > 0
+        )
         sections[row.bucket].append(
             {
                 "package_name": row.package_name,
@@ -956,6 +1040,11 @@ def build_paper_freeze_decision_board(
                 "missing_baseline_runs": row.missing_baseline_runs,
                 "missing_interactive_runs": row.missing_interactive_runs,
                 "valid_pcap_count": row.valid_pcap_count,
+                "strict_idle_ready": "yes" if strict_idle_ready else "no",
+                "strict_workflow_blocked": "yes" if strict_workflow_blocked else "no",
+                "strict_workflow_status": (
+                    "strict idle ready" if strict_idle_ready else "strict idle gap"
+                ),
                 "baseline_class_note": row.baseline_class_note,
                 "draft_role": row.draft_role,
                 "collectability": row.collectability,

@@ -4,7 +4,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-
 SCRIPT = Path("scripts/reporting/prune_generated_report_bundles.py")
 
 

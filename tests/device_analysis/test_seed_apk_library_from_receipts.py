@@ -5,12 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scripts.device_analysis import seed_apk_library_from_receipts as seed
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.services import apk_library_service, artifact_store
 from tests.device_analysis._harvest_runner_support import isolate_storage_contract
-
 
 pytestmark = [pytest.mark.unit]
 

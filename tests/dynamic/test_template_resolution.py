@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.templates import category_map
 from scytaledroid.DynamicAnalysis.scenarios.script_template_catalog import template_steps_for_id
+from scytaledroid.DynamicAnalysis.templates import category_map
 
 
 def test_resolved_template_falls_back_to_category_map() -> None:

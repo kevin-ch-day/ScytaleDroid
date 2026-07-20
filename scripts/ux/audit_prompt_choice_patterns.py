@@ -13,9 +13,10 @@ import ast
 import csv
 import json
 from collections import Counter
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCAN_ROOTS = ("scytaledroid", "main.py")

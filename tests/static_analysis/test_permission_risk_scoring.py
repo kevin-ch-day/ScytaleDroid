@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import importlib
-
-import pytest
 from pathlib import Path
 
+import pytest
 from scytaledroid.StaticAnalysis.risk import permission as mod
 
 

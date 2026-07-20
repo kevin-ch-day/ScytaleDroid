@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 _MESSAGING_ACTIVITY_LABELS = {
     "connected_idle": "Connected idle",
     "idle": "Idle",

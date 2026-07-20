@@ -9,13 +9,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.Database.db_utils.action_groups import status_actions as sa
 from scytaledroid.Database.db_utils.menus.query_runner import (
     SESSION_DIGEST_REQUIRED_GROUP_TABLES,
     SESSION_DIGEST_REQUIRED_SINGLE_TABLES,
 )
-
 
 # --- status_actions: schema snapshot policy (legacy mirror vs required static) ---
 

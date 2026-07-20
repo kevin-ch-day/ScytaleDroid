@@ -3,9 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from scytaledroid.DeviceAnalysis import package_inventory
-
 
 pytestmark = [pytest.mark.unit]
 

@@ -42,10 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        from scytaledroid.Database.db_core import permission_intel as intel_db
         from scytaledroid.Database.db_func.permissions.queue_apply_compat_check import (
             queue_row_apply_outcome,
         )
-        from scytaledroid.Database.db_core import permission_intel as intel_db
     except ImportError as exc:
         sys.stderr.write(f"Import failed (PYTHONPATH=. from repo root): {exc}\n")
         return 1

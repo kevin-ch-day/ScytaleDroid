@@ -4,7 +4,6 @@ import pytest
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 from scytaledroid.StaticAnalysis.cli.execution import results, results_dedupe, results_formatters
 
-
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract, pytest.mark.unit]
 
 

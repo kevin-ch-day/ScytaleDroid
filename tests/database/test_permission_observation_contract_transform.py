@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-
 REQUIRED_OBSERVATION_FIELDS: frozenset[str] = frozenset(
     {"permission_string", "artifact_sha256", "static_run_id", "package_name"}
 )

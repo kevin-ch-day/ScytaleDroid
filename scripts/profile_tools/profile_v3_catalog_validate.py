@@ -22,12 +22,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root  # noqa: E402
 from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
     ProfileV3Error,
     load_profile_v3_catalog,
     load_profile_v3_manifest,
 )
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root  # noqa: E402
 
 
 def _rjson(path: Path) -> dict:

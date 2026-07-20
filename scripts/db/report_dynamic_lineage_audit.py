@@ -19,10 +19,11 @@ import json
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -456,7 +457,10 @@ def _delta_row(
 
 def generate_report(*, output_dir: Path | None = None, package_filter: str | None = None, device_serial: str | None = None) -> dict[str, Any]:
     from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_packages
-    from scytaledroid.DynamicAnalysis.tracker_scope import build_scoped_dataset_counts, resolve_active_package_identity
+    from scytaledroid.DynamicAnalysis.tracker_scope import (
+        build_scoped_dataset_counts,
+        resolve_active_package_identity,
+    )
 
     all_runs = _scan_dynamic_runs(package_filter=package_filter)
     dataset_packages = set(active_research_cohort_packages())

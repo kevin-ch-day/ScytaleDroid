@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.Database.db_utils.action_groups import status_actions as sa
 
 

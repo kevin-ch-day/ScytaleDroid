@@ -3,7 +3,9 @@ from __future__ import annotations
 import warnings
 
 from scytaledroid.StaticAnalysis.engine import aapt2_fallback
-from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.sources import collect_aapt2_resource_strings
+from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.sources import (
+    collect_aapt2_resource_strings,
+)
 
 
 def test_parse_resource_strings_from_aapt2_dump_resources() -> None:

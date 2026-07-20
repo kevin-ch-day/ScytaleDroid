@@ -7,7 +7,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from scytaledroid.Config import app_config
-
 from scytaledroid.Database.db_utils.menus.static_session_diagnostics_menu import (
     post_run_db_checks_submenu,
 )

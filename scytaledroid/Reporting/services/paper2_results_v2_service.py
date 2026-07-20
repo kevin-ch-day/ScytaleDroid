@@ -24,7 +24,11 @@ import numpy as np
 from scipy import stats
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.run_duration_tiers import classify_duration_tier
-from scytaledroid.Publication.app_category_policy import APP_CATEGORY_POLICY, app_category, app_display_name
+from scytaledroid.Publication.app_category_policy import (
+    APP_CATEGORY_POLICY,
+    app_category,
+    app_display_name,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_EVIDENCE_ROOT = REPO_ROOT / "data" / "evidence" / "dynamic"

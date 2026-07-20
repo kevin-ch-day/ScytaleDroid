@@ -6,8 +6,8 @@ from pathlib import Path
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution import analytics, permission_flow
 from scytaledroid.StaticAnalysis.cli.persistence import metrics_writer
-from scytaledroid.StaticAnalysis.modules.permissions import permission_console_rendering
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
+from scytaledroid.StaticAnalysis.modules.permissions import permission_console_rendering
 from scytaledroid.Utils.ops.operation_result import OperationResult
 
 

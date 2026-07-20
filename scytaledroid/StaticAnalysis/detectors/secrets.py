@@ -29,8 +29,8 @@ from ..modules.string_analysis.matcher import (
 from ..modules.string_analysis.origins import canonical_origin_type
 from ..modules.string_analysis.split_policy import (
     is_split_member_context,
-    should_skip_split_secret_entry,
     should_skip_split_regex_work,
+    should_skip_split_secret_entry,
 )
 from .base import BaseDetector, register_detector
 

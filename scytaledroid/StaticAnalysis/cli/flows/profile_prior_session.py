@@ -187,7 +187,9 @@ def format_grain_integrity_session_command(
 ) -> str:
     """Copy/paste grain/integrity CLI (repo root); complements :func:`format_audit_session_command`."""
 
-    from scytaledroid.Database.db_utils.static_session_grain_integrity import format_grain_integrity_cli_command
+    from scytaledroid.Database.db_utils.static_session_grain_integrity import (
+        format_grain_integrity_cli_command,
+    )
 
     return format_grain_integrity_cli_command(
         session_stamp,

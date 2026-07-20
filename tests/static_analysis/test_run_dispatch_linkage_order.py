@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
 from tests.static_analysis._run_dispatch_support import (
@@ -14,7 +13,6 @@ from tests.static_analysis._run_dispatch_support import (
     patch_launch_scan_flow_defaults,
     patch_static_run_lock,
 )
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract]
 

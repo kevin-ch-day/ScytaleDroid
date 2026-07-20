@@ -7,45 +7,58 @@ import shutil
 import textwrap
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.research_cohort_archive import (
-    resolve_dataset_freeze_read_path,
-    resolve_dataset_plan_read_path,
+from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
+from scytaledroid.DynamicAnalysis import app_queue_state
+from scytaledroid.DynamicAnalysis.menus.dataset_status_report import (
+    count_tracker_runs as _count_tracker_runs_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.dataset_status_report import (
+    render_dataset_status as _render_dataset_status_impl,
 )
 from scytaledroid.DynamicAnalysis.menus.environment_reports import (
     capture_environment_summary as _capture_environment_summary_impl,
-    render_host_pcap_tools as _render_host_pcap_tools_impl,
 )
-from scytaledroid.DynamicAnalysis.menus.dataset_status_report import (
-    count_tracker_runs as _count_tracker_runs_impl,
-    render_dataset_status as _render_dataset_status_impl,
+from scytaledroid.DynamicAnalysis.menus.environment_reports import (
+    render_host_pcap_tools as _render_host_pcap_tools_impl,
 )
 from scytaledroid.DynamicAnalysis.menus.state_summary_views import (
     render_compact_state_summary as _render_compact_state_summary_impl,
 )
 from scytaledroid.DynamicAnalysis.menus.status_reports_queue_debug import (
     render_cohort_status_debug as _render_cohort_status_debug_impl,
+)
+from scytaledroid.DynamicAnalysis.menus.status_reports_queue_debug import (
     render_cohort_status_help as _render_cohort_status_help_impl,
 )
-from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
-from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
-    build_paper_freeze_decision_board,
-    build_paper_freeze_manifest,
+from scytaledroid.DynamicAnalysis.queue_operator_ui import queue_compact_legend
+from scytaledroid.DynamicAnalysis.research_cohort_archive import (
+    resolve_dataset_freeze_read_path,
+    resolve_dataset_plan_read_path,
 )
-from scytaledroid.DynamicAnalysis import app_queue_rendering as _app_queue_rendering
-from scytaledroid.DynamicAnalysis import app_queue_state
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
 from scytaledroid.DynamicAnalysis.run_qualification import (
     bucket_evidence_label,
     qualification_summary_from_row,
     qualification_table_cells,
     sum_qualification_summaries,
 )
-from scytaledroid.DynamicAnalysis.queue_operator_ui import queue_compact_legend
+from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
+    build_paper_freeze_decision_board,
+    build_paper_freeze_manifest,
+)
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_readiness_audit import (
     run_freeze_readiness_audit,
 )
 from scytaledroid.DynamicAnalysis.tools.evidence.state_summary import build_state_summary
 from scytaledroid.StaticAnalysis.core.repository import group_artifacts, load_display_name_map
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards, table_utils, text_blocks
+from scytaledroid.Utils.DisplayUtils import (
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    summary_cards,
+    table_utils,
+    text_blocks,
+)
 
 
 def _bool_text(value: object) -> str:
@@ -169,6 +182,15 @@ def _compact_missing(row: dict[str, object]) -> str:
     return f"{int(row.get('missing_baseline_runs') or 0)}B {int(row.get('missing_interactive_runs') or 0)}I"
 
 
+def _strict_workflow_label(row: dict[str, object]) -> str:
+    status = str(row.get("strict_workflow_status") or "").strip().lower()
+    if status == "strict idle ready":
+        return "ready"
+    if status == "strict idle gap":
+        return "gap"
+    return "—"
+
+
 def _decision_action_label(row: dict[str, object]) -> str:
     action = str(row.get("action") or "").strip()
     return action or "—"
@@ -252,6 +274,7 @@ def render_paper_freeze_readiness_brief() -> None:
                     str(row.get("installed_version_code") or "—") or "—",
                     str(row.get("relation") or "none") or "none",
                     _compact_bi(row),
+                    _strict_workflow_label(row),
                     _compact_missing(row),
                     str(int(row.get("valid_pcap_count") or 0)),
                     str(row.get("baseline_class_note") or "—"),
@@ -269,6 +292,7 @@ def render_paper_freeze_readiness_brief() -> None:
                 "Inst VC",
                 "Rel",
                 "S/Q/I",
+                "Strict",
                 "Missing",
                 "PCAPs",
                 "Baseline note",
@@ -281,7 +305,7 @@ def render_paper_freeze_readiness_brief() -> None:
             table_rows,
             compact=False,
             padding=2,
-            min_widths=[12, 8, 8, 8, 9, 6, 5, 24, 12, 14, 10, 3, 24],
+            min_widths=[12, 8, 8, 8, 9, 6, 6, 5, 24, 12, 14, 10, 3, 24],
         )
     if latest_export:
         print(status_messages.status(f"Latest export: {latest_export}", level="info"))

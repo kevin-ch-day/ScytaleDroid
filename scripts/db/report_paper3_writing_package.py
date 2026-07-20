@@ -17,6 +17,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.Publication.submission_targets import IEEE_CARS_2026  # noqa: E402
+
 REQUIRED_CUTOFF_FILES = (
     "summary.json",
     "paper_evidence_tiers.csv",
@@ -42,6 +44,19 @@ BRIDGE_FILES = (
 
 STUDY_DATASET_LABEL = "15-app consumer app dataset"
 SAFE_CLAIM = "15/15 selected apps had paper-usable, build-backed evidence bundles at cutoff."
+def _generation_label() -> str:
+    return IEEE_CARS_2026.generation_label
+
+
+def _generation_context() -> str:
+    return "\n".join(
+        (
+            f"**Generation target:** {_generation_label()}  ",
+            f"**Submission package ID:** {IEEE_CARS_2026.identifier}  ",
+            f"**Venue:** {IEEE_CARS_2026.venue}  ",
+            f"**Target format:** {IEEE_CARS_2026.target_format}",
+        )
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -59,10 +74,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Optional destination directory. Defaults to output/paper/paper3_draft_workspace_<timestamp>.",
+        help="Optional destination directory. Defaults to output/paper/IEEE-CARS-2026_draft_workspace_<timestamp>.",
     )
     parser.add_argument("--paper-one-pdf", default=None, help="Optional path to the Paper 1 PDF.")
     parser.add_argument("--paper-two-pdf", default=None, help="Optional path to the Paper 2 PDF.")
+    parser.add_argument(
+        "--manuscript-pdf",
+        default=None,
+        help="Optional path to the current IEEE-CARS-2026 manuscript PDF; it is hashed, never copied.",
+    )
     parser.add_argument(
         "--json",
         action="store_true",
@@ -78,7 +98,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _default_output_dir() -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return _REPO_ROOT / "output" / "paper" / f"paper3_draft_workspace_{stamp}"
+    return _REPO_ROOT / "output" / "paper" / f"{IEEE_CARS_2026.identifier}_draft_workspace_{stamp}"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -541,6 +561,7 @@ def _write_workspace_files(
     last_run_recommendation: dict[str, Any],
     paper_one_pdf: Path | None,
     paper_two_pdf: Path | None,
+    manuscript_pdf: Path | None,
 ) -> list[Path]:
     safe_claims, caveat_claims, avoid_claims = _claim_groups(claims)
     files: list[Path] = []
@@ -553,9 +574,28 @@ def _write_workspace_files(
         f"Paper 1 PDF: `{paper_one_pdf}`" if paper_one_pdf else "Paper 1 PDF: not provided",
         f"Paper 2 PDF: `{paper_two_pdf}`" if paper_two_pdf else "Paper 2 PDF: not provided",
     ]
+    manuscript_ref = (
+        f"Current manuscript PDF: `{manuscript_pdf}`"
+        if manuscript_pdf
+        else "Current manuscript PDF: not registered in this workspace"
+    )
 
+    generation_context = _generation_context()
     drafts = {
+        "paper3_submission_context.md": f"""# Paper #3 Submission Context
+
+{generation_context}
+
+This workspace is generated from the selected cutoff evidence. It is a drafting
+workspace, not a submission package or a claim that the paper has been accepted.
+Use the venue's current author instructions and template when preparing the final
+manuscript.
+
+{manuscript_ref}
+""",
         "paper3_outline.md": f"""# Integrated Study Outline
+
+{generation_context}
 
 {source_line}
 
@@ -591,6 +631,8 @@ No more runs are required for cutoff readiness. Collection is paused; use the cu
 """,
         "paper3_working_outline.md": f"""# Integrated Study Working Outline
 
+{generation_context}
+
 {source_line}
 
 {bridge_line}
@@ -625,6 +667,8 @@ No more runs are required for cutoff readiness. Collection is paused; use the cu
 """,
         "paper3_section_plan.md": f"""# Integrated Study Section Plan
 
+{generation_context}
+
 ## Introduction
 
 State the app-update churn problem and the cutoff solution. Use the core claim exactly: {SAFE_CLAIM}
@@ -649,11 +693,15 @@ Explain that current-build drift is operational churn and that prior-build rows 
 """,
         "paper3_introduction_draft.md": f"""# Introduction Draft
 
+{generation_context}
+
 Consumer Android applications update frequently enough that an all-current-build collection target can become unstable during an active study. This study treats that churn as a measurement-design issue rather than as evidence loss. Dynamic collection is closed at a fixed cutoff and assembled into app-level evidence bundles tied to package name, version code/name, static run IDs, dynamic run IDs, APK hashes, PCAP availability, and QA provenance.
 
 The safe headline for this draft is: {SAFE_CLAIM} The paper should not claim that all 15 apps were current-build complete or that the full 105-run quota was complete. Instead, it should describe the cutoff tier split: {current} strict current-build complete, {mixed} current-build mixed-baseline, and {prior} retained prior-build evidence apps.
 """,
         "paper3_background_draft.md": f"""# Background Draft
+
+{generation_context}
 
 This integrated analysis is a follow-on study, not a strict reproduction of the published predecessor papers.
 
@@ -667,6 +715,8 @@ This integrated analysis is a follow-on study, not a strict reproduction of the 
 """,
         "paper3_methodology_draft.md": f"""# Methodology Draft
 
+{generation_context}
+
 {_methodology_text()}
 
 {_baseline_class_text()}
@@ -675,19 +725,25 @@ The live current-build queue remains an operations tool that answers what should
 """,
         "paper3_results_draft.md": f"""# Results Draft
 
+{generation_context}
+
 At cutoff, {tier_summary['paper_usable']}/{tier_summary['apps_total']} apps were paper-usable and {tier_summary['true_evidence_holes']} true evidence holes remained.
 
 {_md_table(["Evidence tier", "App count"], _status_counts(tier_rows))}
 
 The results section should present the cohort evidence table before detailed static and dynamic findings so readers can see which rows are current-build, mixed-baseline, or retained prior-build evidence.
 """,
-        "paper3_discussion_draft.md": """# Discussion Draft
+        "paper3_discussion_draft.md": f"""# Discussion Draft
+
+{generation_context}
 
 The cutoff model turns a moving operational target into an auditable research object. Apps that updated after their usable captures were collected are not treated as failed evidence; they are labeled by selected build and relation. This makes the paper finishable while preserving the provenance needed for later refresh work.
 
 Prior-build evidence should be discussed as retained evidence with explicit package/version and run provenance, not as current-build evidence. QFG captures should be discussed as app-driven foreground activity, not as strict idle.
 """,
-        "paper3_limitations_draft.md": """# Limitations Draft
+        "paper3_limitations_draft.md": f"""# Limitations Draft
+
+{generation_context}
 
 - The current study does not exactly reproduce the published predecessor tables.
 - The current study should not claim 15/15 current-build completion.
@@ -698,9 +754,13 @@ Prior-build evidence should be discussed as retained evidence with explicit pack
 """,
         "paper3_conclusion_draft.md": f"""# Conclusion Draft
 
+{generation_context}
+
 This study demonstrates that an Android app behavior study can remain auditable even when live apps update faster than an all-current-build capture wave can complete. At cutoff, {SAFE_CLAIM} The contribution is not merely additional collection volume; it is the build/version-backed cutoff model that keeps evidence usable, labeled, and reproducible.
 """,
         "paper3_claims_control.md": f"""# Claims Control
+
+{generation_context}
 
 ## Safe Claims
 
@@ -735,14 +795,18 @@ This study demonstrates that an Android app behavior study can remain auditable 
 
 {_baseline_class_text()}
 """,
-        "paper3_next_revision_items.md": """# Next Revision Items
+        "paper3_next_revision_items.md": f"""# Next Revision Items
+
+{generation_context}
 
 - Decide how much detail from the prior PDFs belongs in related work versus methods lineage.
 - Decide whether to include APK storage/cold-store work as reproducibility infrastructure or leave it out of the paper.
 - Confirm static detector/resource parse caveats before final results wording.
 - Confirm dynamic unresolved signal rows before final provider/signal claims.
 """,
-        "paper3_open_questions.md": """# Open Questions
+        "paper3_open_questions.md": f"""# Open Questions
+
+{generation_context}
 
 - Decide how much detail from the prior PDFs belongs in related work versus methods lineage.
 - Decide whether to include APK storage/cold-store work as reproducibility infrastructure or leave it out of the paper.
@@ -787,11 +851,13 @@ def generate_package(
     bridge_dir: Path | None = None,
     paper_one_pdf: Path | None = None,
     paper_two_pdf: Path | None = None,
+    manuscript_pdf: Path | None = None,
 ) -> dict[str, Any]:
     cutoff_dir = cutoff_dir.expanduser()
     bridge_dir = bridge_dir.expanduser() if bridge_dir else None
     paper_one_pdf = paper_one_pdf.expanduser() if paper_one_pdf else None
     paper_two_pdf = paper_two_pdf.expanduser() if paper_two_pdf else None
+    manuscript_pdf = manuscript_pdf.expanduser() if manuscript_pdf else None
     output_dir = (output_dir.expanduser() if output_dir else _default_output_dir())
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -805,7 +871,7 @@ def generate_package(
     last_run_recommendation = _last_run_recommendation_from_plan(run_plan_rows)
 
     bridge_files, bridge_texts, claims = _load_bridge_inputs(bridge_dir)
-    pdf_files = [path for path in (paper_one_pdf, paper_two_pdf) if path and path.exists()]
+    pdf_files = [path for path in (paper_one_pdf, paper_two_pdf, manuscript_pdf) if path and path.exists()]
 
     generated_files = _write_workspace_files(
         output_dir=output_dir,
@@ -820,6 +886,7 @@ def generate_package(
         last_run_recommendation=last_run_recommendation,
         paper_one_pdf=paper_one_pdf,
         paper_two_pdf=paper_two_pdf,
+        manuscript_pdf=manuscript_pdf,
     )
 
     source_files = cutoff_files + bridge_files + pdf_files
@@ -831,6 +898,15 @@ def generate_package(
         "output_dir": str(output_dir),
         "paper_one_pdf": str(paper_one_pdf) if paper_one_pdf else None,
         "paper_two_pdf": str(paper_two_pdf) if paper_two_pdf else None,
+        "manuscript_pdf": str(manuscript_pdf) if manuscript_pdf else None,
+        "publication_target": {
+            "submission_id": IEEE_CARS_2026.identifier,
+            "paper_label": IEEE_CARS_2026.paper_label,
+            "generation_label": _generation_label(),
+            "venue": IEEE_CARS_2026.venue,
+            "venue_short_label": IEEE_CARS_2026.venue_short_label,
+            "target_format": IEEE_CARS_2026.target_format,
+        },
         "official_cutoff_claim": SAFE_CLAIM,
         "writing_package_generator": "scripts/db/report_paper3_writing_package.py",
         "generated_from_current_source": True,
@@ -873,6 +949,7 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=Path(args.output_dir) if args.output_dir else None,
             paper_one_pdf=Path(args.paper_one_pdf) if args.paper_one_pdf else None,
             paper_two_pdf=Path(args.paper_two_pdf) if args.paper_two_pdf else None,
+            manuscript_pdf=Path(args.manuscript_pdf) if args.manuscript_pdf else None,
         )
     except (FileNotFoundError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

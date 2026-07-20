@@ -6,8 +6,8 @@ Merged from ``test_package_utils``, ``test_web_view_static_preference``,
 
 from __future__ import annotations
 
-from scytaledroid.Database.db_queries import views
 from scytaledroid.Database.db_queries import (
+    views,
     views_admin,
     views_bridge,
     views_dynamic,
@@ -22,7 +22,6 @@ from scytaledroid.Database.db_utils.package_utils import (
     is_suspicious_package_name,
     normalize_package_name,
 )
-
 
 # --- package_utils ---
 

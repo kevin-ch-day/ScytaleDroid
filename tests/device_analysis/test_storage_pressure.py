@@ -5,8 +5,8 @@ import os
 from hashlib import sha256
 from pathlib import Path
 
-from scytaledroid.DeviceAnalysis.services import storage_pressure
 from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
+from scytaledroid.DeviceAnalysis.services import storage_pressure
 
 
 def _write_apk(path: Path, payload: bytes) -> str:

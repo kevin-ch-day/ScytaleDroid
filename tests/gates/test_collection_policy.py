@@ -5,9 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from tests._collection_policy import derived_markers_for_path
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.gate]
 

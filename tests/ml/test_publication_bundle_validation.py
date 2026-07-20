@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as config
 from scytaledroid.DynamicAnalysis.ml.publication_bundle import validation
-from scytaledroid.DynamicAnalysis.ml.publication_bundle.manifest_utils import copy_required, sha256_stream
+from scytaledroid.DynamicAnalysis.ml.publication_bundle.manifest_utils import (
+    copy_required,
+    sha256_stream,
+)
 
 
 def test_sha256_stream_and_copy_required(tmp_path: Path) -> None:

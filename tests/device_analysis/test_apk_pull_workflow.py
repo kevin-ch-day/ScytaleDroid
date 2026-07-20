@@ -5,7 +5,13 @@ from types import SimpleNamespace
 
 from scytaledroid.DeviceAnalysis.apk.models import PlanResolution, SnapshotContext
 from scytaledroid.DeviceAnalysis.apk.workflow import run_apk_pull
-from scytaledroid.DeviceAnalysis.harvest.models import HarvestPlan, InventoryRow, PackagePlan, PullResult, ScopeSelection
+from scytaledroid.DeviceAnalysis.harvest.models import (
+    HarvestPlan,
+    InventoryRow,
+    PackagePlan,
+    PullResult,
+    ScopeSelection,
+)
 from scytaledroid.DeviceAnalysis.harvest.status import HarvestRunStatus
 
 

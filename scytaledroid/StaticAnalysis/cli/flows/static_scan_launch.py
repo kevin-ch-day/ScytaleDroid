@@ -24,6 +24,17 @@ from ..core.run_context import StaticRunContext
 from ..execution.static_run_map import REQUIRED_FIELDS
 from ..views.view_layouts import render_run_start
 from .postprocessing import PostSummaryResult
+from .selection import format_scope_target
+from .session_finalizer import refresh_static_session_cache
+from .static_run_helpers import (
+    modules_for_run as _modules_for_run,
+)
+from .static_run_helpers import (
+    purge_run_cache as _purge_run_cache,
+)
+from .static_run_helpers import (
+    resolve_workers as _resolve_workers,
+)
 from .static_scan_constants import (
     PHASE_COMPLETED,
     PHASE_FAILED,
@@ -42,17 +53,6 @@ from .static_scan_lifecycle import (
     emit_static_run_start_log,
 )
 from .static_scan_signals import build_static_scan_sigint_handler
-from .selection import format_scope_target
-from .session_finalizer import refresh_static_session_cache
-from .static_run_helpers import (
-    modules_for_run as _modules_for_run,
-)
-from .static_run_helpers import (
-    purge_run_cache as _purge_run_cache,
-)
-from .static_run_helpers import (
-    resolve_workers as _resolve_workers,
-)
 
 
 def launch_scan_flow_resolved(

@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.DeviceAnalysis.services import artifact_store
-from scytaledroid.StaticAnalysis.core.repository import discover_repository_artifacts, group_artifacts
+from scytaledroid.StaticAnalysis.core.repository import (
+    discover_repository_artifacts,
+    group_artifacts,
+)
 
 
 def _write_artifact(

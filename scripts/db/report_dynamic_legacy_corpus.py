@@ -8,10 +8,11 @@ import csv
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import median
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:

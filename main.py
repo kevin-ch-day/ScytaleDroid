@@ -213,6 +213,21 @@ def _describe_main_menu_evidence_recovery() -> str:
     return "clear (no incomplete dynamic packs)"
 
 
+def _describe_main_menu_setup_state() -> str:
+    """Return a cheap first-run status without probing external services."""
+
+    try:
+        from pathlib import Path
+
+        from scytaledroid.Diagnostics.installation_check import describe_installation_state
+
+        state = describe_installation_state(Path(__file__).resolve().parent)
+        return f"{state.level} — {state.detail}"
+    except Exception as exc:  # pragma: no cover - defensive landing-screen guard
+        log.warning(f"Failed to read installation state: {exc}", category="application")
+        return "unknown"
+
+
 def main_menu() -> None:
     """Render the main menu loop using the shared menu framework."""
 
@@ -274,6 +289,7 @@ def main_menu() -> None:
         print(f"Selected device: {selected_device}")
         print(f"Database: {_describe_main_menu_database(ok, message, detail or '')}")
         print(f"Mercury: {_describe_main_menu_mercury()}")
+        print(f"System setup: {_describe_main_menu_setup_state()}")
         print(f"Capture readiness: {_describe_main_menu_capture_readiness(selected_device)}")
         print(f"Static-to-dynamic: {_describe_main_menu_static_dynamic_readiness()}")
         print(f"Evidence recovery: {_describe_main_menu_evidence_recovery()}")
@@ -778,27 +794,44 @@ def main(argv: list[str] | None = None) -> int:
         help="Host / adb / DB smoke check, then exit",
     )
     parser.add_argument(
+        "--new-system-check",
+        action="store_true",
+        help="Read-only first-install / restore readiness check, then exit",
+    )
+    parser.add_argument(
         "--require-database",
         action="store_true",
-        help="With --deploy-check: fail if DB missing or unreachable",
+        help="With --deploy-check or --new-system-check: fail if DB missing or unreachable",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit machine-readable JSON (with --diag or --deploy-check)",
+        help="Emit machine-readable JSON (with --diag, --deploy-check, or --new-system-check)",
     )
     args = parser.parse_args(argv)
 
-    if args.json and not args.diag and not args.deploy_check:
-        parser.error("--json requires --diag or --deploy-check")
+    if args.json and not args.diag and not args.deploy_check and not args.new_system_check:
+        parser.error("--json requires --diag, --deploy-check, or --new-system-check")
 
-    if args.diag and args.deploy_check:
-        parser.error("Choose either --diag or --deploy-check (not both)")
+    selected_checks = sum((args.diag, args.deploy_check, args.new_system_check))
+    if selected_checks > 1:
+        parser.error("Choose only one of --diag, --deploy-check, or --new-system-check")
 
     if args.deploy_check:
         from scytaledroid.Diagnostics.deployment_check import run as run_deploy_check
 
         return run_deploy_check(
+            json_mode=args.json,
+            require_database=args.require_database,
+        )
+
+    if args.new_system_check:
+        from pathlib import Path
+
+        from scytaledroid.Diagnostics.installation_check import run as run_installation_check
+
+        return run_installation_check(
+            repo_root=Path(__file__).resolve().parent,
             json_mode=args.json,
             require_database=args.require_database,
         )

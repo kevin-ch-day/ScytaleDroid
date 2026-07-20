@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from scytaledroid.Reporting.services import cross_analysis_summary
 from scytaledroid.Reporting.menu_actions_cross_analysis_helpers import compact_runtime_state
+from scytaledroid.Reporting.services import cross_analysis_summary
 
 
 def test_fetch_cross_analysis_summary_rows_prefers_research_cohort_packages(monkeypatch) -> None:

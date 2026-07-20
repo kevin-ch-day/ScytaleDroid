@@ -60,9 +60,9 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        from scytaledroid.Database.db_core import db_queries as core_q
         from scytaledroid.Database.db_core.db_engine import DatabaseError
         from scytaledroid.Database.db_core.session import database_session
-        from scytaledroid.Database.db_core import db_queries as core_q
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 1

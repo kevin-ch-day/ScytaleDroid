@@ -8,9 +8,10 @@ import csv
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -99,7 +100,10 @@ def _evidence_validity(
     *,
     verify_by_run: dict[str, dict[str, Any]],
 ) -> tuple[bool, str]:
-    from scripts.db.report_dynamic_paper_exports import _evidence_status, _summarize_missing_artifacts
+    from scripts.db.report_dynamic_paper_exports import (
+        _evidence_status,
+        _summarize_missing_artifacts,
+    )
     run_id = str(manifest.get("dynamic_run_id") or run_dir.name)
     verify_row = verify_by_run.get(run_id, {})
     pcap_present, missing_artifacts = _summarize_missing_artifacts(run_dir, manifest, verify_row.get("issues") or [])
@@ -479,7 +483,9 @@ def _load_latest_static_run_ids(packages: set[str]) -> dict[str, int]:
 
 def _iter_dynamic_runs() -> list[dict[str, Any]]:
     from scytaledroid.DynamicAnalysis.pcap.context_summary import summarize_pcap_service_context
-    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import verify_dynamic_evidence_packs
+    from scytaledroid.DynamicAnalysis.tools.evidence.verify_core import (
+        verify_dynamic_evidence_packs,
+    )
 
     verify_report = verify_dynamic_evidence_packs(_dynamic_root())
     verify_by_run = {
@@ -638,8 +644,6 @@ def _build_static_rows(package_runs: dict[str, list[dict[str, Any]]]) -> tuple[l
                 "pinning_indicator_present": bool(ff.get("pinning_indicator_present") or False),
                 "http_like_static_endpoint_count": len(merged_http_roots),
                 "static_endpoint_root_count": len(merged_endpoint_roots),
-                "static_endpoint_inventory_status": inventory_status,
-                "static_endpoint_source": endpoint_source,
             }
         )
 

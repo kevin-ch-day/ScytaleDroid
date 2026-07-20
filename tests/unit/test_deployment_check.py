@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from scytaledroid.Diagnostics import deployment_check as dc
 
 

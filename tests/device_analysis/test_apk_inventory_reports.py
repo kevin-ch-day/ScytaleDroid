@@ -4,11 +4,11 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
+from scripts.device_analysis import repair_apk_library_logical_paths as logical_repair
+from scripts.device_analysis import repair_regular_legacy_apks as regular_repair
 from scripts.device_analysis import report_apk_inventory_model as inventory
 from scripts.device_analysis import report_apk_transition_debt as transition_debt
 from scripts.device_analysis import report_legacy_harvest_run_retirement as retirement
-from scripts.device_analysis import repair_regular_legacy_apks as regular_repair
-from scripts.device_analysis import repair_apk_library_logical_paths as logical_repair
 from scripts.device_analysis import verify_apk_library_integrity as verifier
 from scytaledroid.DeviceAnalysis.services import apk_library_service, artifact_store
 from tests.device_analysis._harvest_runner_support import isolate_storage_contract

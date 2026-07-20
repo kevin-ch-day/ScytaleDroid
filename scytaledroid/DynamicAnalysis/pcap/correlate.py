@@ -9,7 +9,9 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, RunManifest
-from scytaledroid.DynamicAnalysis.pcap.security_surface import compute_static_dynamic_cleartext_posture
+from scytaledroid.DynamicAnalysis.pcap.security_surface import (
+    compute_static_dynamic_cleartext_posture,
+)
 
 
 @dataclass(frozen=True)

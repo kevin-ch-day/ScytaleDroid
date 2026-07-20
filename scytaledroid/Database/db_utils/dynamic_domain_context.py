@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_queries.canonical.schema import CREATE_DYNAMIC_DOMAIN_REFERENCE
-from scytaledroid.Database.db_queries.dynamic.schema import _DDL_STATEMENTS as DYNAMIC_DDL_STATEMENTS
+from scytaledroid.Database.db_queries.dynamic.schema import (
+    _DDL_STATEMENTS as DYNAMIC_DDL_STATEMENTS,
+)
 from scytaledroid.DynamicAnalysis.domain_context import default_domain_reference_seed_rows
 
 from .schema_migration_registry import (

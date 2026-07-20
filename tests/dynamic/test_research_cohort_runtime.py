@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.datasets import research_dataset_alpha
 from scytaledroid.DynamicAnalysis import research_cohort_runtime
+from scytaledroid.DynamicAnalysis.datasets import research_dataset_alpha
 
 
 def test_load_dataset_packages_prefers_db_backed_research_cohort(monkeypatch) -> None:

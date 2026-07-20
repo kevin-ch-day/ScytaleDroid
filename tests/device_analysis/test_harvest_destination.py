@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from scytaledroid.Config import app_config
 
 
@@ -79,7 +78,10 @@ def test_package_evidence_dir_includes_app_and_version(monkeypatch: pytest.Monke
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
 
-    from scytaledroid.DeviceAnalysis.harvest.common import package_evidence_dir, package_evidence_leaf_name
+    from scytaledroid.DeviceAnalysis.harvest.common import (
+        package_evidence_dir,
+        package_evidence_leaf_name,
+    )
     from scytaledroid.DeviceAnalysis.harvest.models import InventoryRow
 
     inv = InventoryRow(

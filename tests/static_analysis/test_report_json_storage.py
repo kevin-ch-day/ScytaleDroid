@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
+
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunParameters
 from scytaledroid.StaticAnalysis.cli.execution.results_persistence import merge_persistence_metadata
@@ -10,8 +11,8 @@ from scytaledroid.StaticAnalysis.core import ManifestSummary, StaticAnalysisRepo
 from scytaledroid.StaticAnalysis.persistence import reports as reports_store
 from scytaledroid.StaticAnalysis.persistence.reports import (
     list_reports,
-    refresh_saved_report_json,
     rebuild_report_package_index,
+    refresh_saved_report_json,
     report_package_index_path,
     reports_for_package,
     save_report,

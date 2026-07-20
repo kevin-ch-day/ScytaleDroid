@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
 
-from scytaledroid.Utils.DisplayUtils import status_messages
-from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
     fetch_static_session_run_rollups,
     materialize_static_session_rollup,
 )
+from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...core import StaticAnalysisReport
 from ..core.models import RunParameters

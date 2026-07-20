@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scripts.publication import publication_ml_audit_report
 from scytaledroid.Reporting import menu_actions
 from scytaledroid.Reporting.services import dataset_readiness
-from scripts.publication import publication_ml_audit_report
 
 
 def _write_manifest(run_dir: Path, payload: dict[str, object]) -> None:

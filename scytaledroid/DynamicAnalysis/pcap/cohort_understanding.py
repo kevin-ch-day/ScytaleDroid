@@ -152,7 +152,9 @@ def _phase_cleartext_steps(run_dir: Path) -> int:
         if not isinstance(timeline, dict):
             return 0
         try:
-            from scytaledroid.DynamicAnalysis.pcap.interaction_phases import phase_packet_transport_summary
+            from scytaledroid.DynamicAnalysis.pcap.interaction_phases import (
+                phase_packet_transport_summary,
+            )
 
             rows = phase_packet_transport_summary(run_dir, timeline=timeline)
         except Exception:

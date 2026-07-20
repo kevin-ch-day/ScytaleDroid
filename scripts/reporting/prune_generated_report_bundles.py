@@ -15,7 +15,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.reporting.audit_output_workspace import _is_legacy_noise_file, _manifest_is_zero_row  # noqa: E402
+from scripts.reporting.audit_output_workspace import (  # noqa: E402
+    _is_legacy_noise_file,
+    _manifest_is_zero_row,
+)
 
 
 @dataclass(frozen=True)

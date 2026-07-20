@@ -10,23 +10,23 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.Database.db_func.research_cohorts import (
     fetch_research_cohort,
     normalize_research_cohort_key,
     profile_key_for_research_cohort,
 )
+from scytaledroid.Database.db_utils import schema_gate
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.DynamicAnalysis.profile_loader import load_profile_packages
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
-from scytaledroid.StaticAnalysis.cli.flows.research_cohort import prepare_research_cohort_scope
 from scytaledroid.StaticAnalysis.cli.flows.exact_target import (
     ExactTargetResolutionError,
     count_linkable_dynamic_sessions_for_hash,
     resolve_exact_static_target,
     write_exact_target_receipt,
 )
+from scytaledroid.StaticAnalysis.cli.flows.research_cohort import prepare_research_cohort_scope
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
 from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import (
     check_session_uniqueness as _check_session_uniqueness,

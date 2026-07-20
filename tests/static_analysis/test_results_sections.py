@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from scytaledroid.StaticAnalysis.cli.execution.results_sections import (
     render_export_all_tables_section,
     render_permission_snapshot_summary_section,
@@ -11,7 +10,6 @@ from scytaledroid.StaticAnalysis.cli.execution.results_sections import (
     render_static_output_context,
 )
 from scytaledroid.StaticAnalysis.cli.execution.view import DetailBuffer
-
 
 pytestmark = [pytest.mark.contract, pytest.mark.report_contract, pytest.mark.unit]
 

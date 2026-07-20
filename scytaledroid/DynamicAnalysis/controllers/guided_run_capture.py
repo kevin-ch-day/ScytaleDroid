@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.capture.state import CaptureState, ObserverStatus
@@ -192,7 +193,7 @@ def _resolve_task_component_from_activity_dump(
     in_task = False
     preferred_real: str | None = None
     fallback: str | None = None
-    task_marker = f"Task{{"
+    task_marker = "Task{"
     task_id_marker = f"#{str(task_id).strip()}"
     for line in lines:
         if task_marker in line and task_id_marker in line:

@@ -8,8 +8,9 @@ import csv
 import json
 import re
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 _COUNT_RE = re.compile(r"Count:\s*(\d+)")
 

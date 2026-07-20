@@ -51,8 +51,8 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - import-time shim
             dataset_pcap_failure_detail,
             deep_audit_pcap_failure_detail,
             export_pcap_failure_detail,
-            raw_pcap_failure_detail_from_canonical,
             extract_verify_issue_codes,
+            raw_pcap_failure_detail_from_canonical,
             verify_issue_codes_csv,
         )
 

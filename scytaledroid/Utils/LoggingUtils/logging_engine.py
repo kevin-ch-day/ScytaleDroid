@@ -69,7 +69,7 @@ class LogTarget:
 
 @dataclass(frozen=True)
 class _SessionMirror:
-    adapter: "ContextAdapter"
+    adapter: ContextAdapter
     logger: logging.Logger
     handlers: tuple[logging.Handler, ...]
 

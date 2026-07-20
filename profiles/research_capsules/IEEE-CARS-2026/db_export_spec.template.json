@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "paper_id": "IEEE-CARS-2026",
+  "review_status": "DRAFT_UNREVIEWED",
+  "database_engine": "mariadb",
+  "schema_definition_included": true,
+  "scope": {
+    "run_ids": ["replace-with-selected-run-id"],
+    "static_run_ids": [1234],
+    "package_names": ["com.example.app"],
+    "apk_sha256": ["replace-with-64-character-lowercase-sha256"]
+  },
+  "dependency_closure": [
+    "dynamic_sessions -> dependent run artifacts",
+    "static_analysis_runs -> selected static findings"
+  ],
+  "exclusions": [
+    "credentials and .env files",
+    "operational logs",
+    "unrelated apps and papers"
+  ],
+  "tables": [
+    {
+      "schema": "scytaledroid_core_prod",
+      "table": "dynamic_sessions",
+      "predicate": "dynamic_run_id IN ('replace-with-selected-run-id')"
+    }
+  ]
+}

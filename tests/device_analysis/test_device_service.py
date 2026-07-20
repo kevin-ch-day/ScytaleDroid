@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import pytest
-
-from scytaledroid.DeviceAnalysis.services import device_service
-from scytaledroid.DeviceAnalysis.services import inventory_service
 from scytaledroid.DeviceAnalysis.inventory.errors import InventoryCollectionError
+from scytaledroid.DeviceAnalysis.services import device_service, inventory_service
 
 
 def test_sync_inventory_threads_mode_to_runner(monkeypatch) -> None:

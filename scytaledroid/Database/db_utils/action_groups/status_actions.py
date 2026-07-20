@@ -12,12 +12,12 @@ from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_utils import diagnostics, schema_gate
-from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
-    LEGACY_MIRROR_TABLES_SNAPSHOT,
-)
 from scytaledroid.Database.db_utils.bridge_posture import (
     bridge_posture_summary,
     list_bridge_postures,
+)
+from scytaledroid.Database.db_utils.legacy_static_mirror_diagnostics import (
+    LEGACY_MIRROR_TABLES_SNAPSHOT,
 )
 from scytaledroid.Database.db_utils.permission_intel_freeze import (
     list_operational_managed_tables,

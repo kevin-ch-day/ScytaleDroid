@@ -5,12 +5,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from scytaledroid.StaticAnalysis.cli.flows import exact_target
-from scytaledroid.StaticAnalysis.cli.flows import headless_run
-from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
-from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 from scytaledroid.DeviceAnalysis.services import artifact_store
+from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
+from scytaledroid.StaticAnalysis.cli.flows import exact_target, headless_run
+from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 
 
 def _sha(data: bytes) -> str:

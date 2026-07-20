@@ -18,14 +18,14 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.LoggingUtils.logging_engine import configure_third_party_loggers
 
 from .._androguard import APK
+from ..detectors.correlation.runtime_state import snapshot_runtime_stats
 from ..engine import aapt2_fallback
 from ..engine.strings import _analyse_strings_from_index
 from ..engine.strings_capture import _classify_resource_parse_state, _summarize_bounds_warnings
-from ..detectors.correlation.runtime_state import snapshot_runtime_stats
 from ..modules import build_string_index
-from ..modules.string_analysis.origins import is_code_origin, is_resource_origin
 from ..modules.network_security import extract_network_security_policy
 from ..modules.permissions import load_permission_catalog
+from ..modules.string_analysis.origins import is_code_origin, is_resource_origin
 from .context import AnalysisConfig
 from .context_builders import (
     build_detector_context,
@@ -378,7 +378,7 @@ def _summarize_string_index_metadata(string_index: object) -> dict[str, object]:
     strings = tuple(getattr(string_index, "strings", tuple()) or tuple())
     by_origin_type: Mapping[str, int]
     if hasattr(string_index, "counts_by_origin_type"):
-        counts = getattr(string_index, "counts_by_origin_type")()
+        counts = string_index.counts_by_origin_type()
         by_origin_type = dict(counts) if isinstance(counts, Mapping) else {}
     else:
         rolled: MutableMapping[str, int] = {}

@@ -5,8 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.core.findings import Badge
-from scytaledroid.StaticAnalysis.detectors.correlation import diffing
-from scytaledroid.StaticAnalysis.detectors.correlation import splits
+from scytaledroid.StaticAnalysis.detectors.correlation import diffing, splits
 from scytaledroid.StaticAnalysis.detectors.correlation.detector import CorrelationDetector
 from scytaledroid.StaticAnalysis.detectors.correlation.models import (
     DiffBundle,

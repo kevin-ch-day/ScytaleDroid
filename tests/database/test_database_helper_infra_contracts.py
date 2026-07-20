@@ -9,15 +9,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-
-from scytaledroid.Database.db_utils import diagnostics
+from scytaledroid.Database.db_utils import diagnostics, reference_seed
 from scytaledroid.Database.db_utils import menu_actions as ma
-from scytaledroid.Database.db_utils import reference_seed
 from scytaledroid.Database.db_utils.sql_exception_context import (
     extract_sql_exception_context,
     infer_failing_table,
 )
-
 
 # --- menu_actions: bulk schema snapshot helpers (no live DB) ---
 

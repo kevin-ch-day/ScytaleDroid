@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
-from scytaledroid.Database.db_utils import artifact_registry_static_file_present_review_prune as subject
+from scytaledroid.Database.db_utils import (
+    artifact_registry_static_file_present_review_prune as subject,
+)
 
 
 def test_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:

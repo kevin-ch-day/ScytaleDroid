@@ -8,7 +8,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Utils.DisplayUtils import menu_utils, prompt_utils, status_messages, summary_cards, table_utils
+from scytaledroid.Utils.DisplayUtils import (
+    menu_utils,
+    prompt_utils,
+    status_messages,
+    summary_cards,
+    table_utils,
+)
 
 
 def _recent_static_window(default_as_of_now_fn: Callable[[], str], *, days: int = 30) -> tuple[str, str]:

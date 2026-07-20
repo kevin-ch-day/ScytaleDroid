@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import select
 import re
+import select
 import sys
 import termios
 import tty
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable
 
 from scytaledroid.DynamicAnalysis.capture.renderer import render_capture_dashboard
 from scytaledroid.DynamicAnalysis.capture.state import (

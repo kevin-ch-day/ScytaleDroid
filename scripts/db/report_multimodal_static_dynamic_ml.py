@@ -17,14 +17,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import sys
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import median
-from typing import Any, Mapping, Sequence
-
-import random
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -824,7 +824,7 @@ def _pearson(x_values: Sequence[float], y_values: Sequence[float]) -> float | No
         return None
     x_mean = sum(x_values) / float(len(x_values))
     y_mean = sum(y_values) / float(len(y_values))
-    num = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, y_values))
+    num = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, y_values, strict=True))
     den_x = math.sqrt(sum((x - x_mean) ** 2 for x in x_values))
     den_y = math.sqrt(sum((y - y_mean) ** 2 for y in y_values))
     if den_x <= 1e-12 or den_y <= 1e-12:
@@ -1240,7 +1240,7 @@ def _transform_vector(row: Mapping[str, Any], features: Sequence[str], scaler: M
 
 
 def _euclidean_distance(left: Sequence[float], right: Sequence[float]) -> float:
-    return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+    return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right, strict=True)))
 
 
 def _nearest_centroid_loocv(

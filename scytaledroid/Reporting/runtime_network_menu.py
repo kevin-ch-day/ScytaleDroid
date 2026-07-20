@@ -129,7 +129,9 @@ def _generate_paper2_foundation_package(*, writer=None) -> None:
         return
     try:
         if writer is None:
-            from scytaledroid.Reporting.services.paper2_results_v2_service import generate_paper2_results_v2
+            from scytaledroid.Reporting.services.paper2_results_v2_service import (
+                generate_paper2_results_v2,
+            )
 
             writer = generate_paper2_results_v2
         result = writer()
@@ -185,7 +187,9 @@ def _generate_locked_runtime_bundle() -> None:
         print(status_messages.status("Runtime report bundle generation canceled.", level="info"))
         return
     try:
-        from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import write_locked_runtime_deliverables_bundle
+        from scytaledroid.DynamicAnalysis.ml.artifact_bundle_writer import (
+            write_locked_runtime_deliverables_bundle,
+        )
 
         artifacts = write_locked_runtime_deliverables_bundle(fig_b1_run_id=run_id, interaction_tag=interaction_tag)
     except Exception as exc:  # noqa: BLE001

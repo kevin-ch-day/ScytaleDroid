@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             assess_exact_target_readiness,
         )
         from scytaledroid.StaticAnalysis.core.repository import group_artifacts
+
         from scripts.db import report_dynamic_static_recovery_plan as recovery
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
