@@ -5,7 +5,6 @@ Approved for deterministic runs (CI/demo) without menu interaction.
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ from scytaledroid.StaticAnalysis.cli.flows.exact_target import (
     resolve_exact_static_target,
     write_exact_target_receipt,
 )
+from scytaledroid.StaticAnalysis.cli.flows.headless_args import build_parser
 from scytaledroid.StaticAnalysis.cli.flows.research_cohort import prepare_research_cohort_scope
 from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
 from scytaledroid.StaticAnalysis.cli.flows.session_uniqueness import (
@@ -325,34 +325,7 @@ def _run_research_cohort(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Headless static analysis runner")
-    parser.add_argument("--apk", help="Path to APK file")
-    parser.add_argument("--apk-id", help="android_apk_repository.apk_id for exact-hash static analysis")
-    parser.add_argument("--base-apk-sha256", "--exact-hash", dest="base_apk_sha256", help="Exact base APK SHA-256 to analyze")
-    parser.add_argument(
-        "--include-splits",
-        default="auto",
-        choices=["auto", "base-only", "require"],
-        help="Exact target split handling: auto uses receipt-backed group; base-only must be explicit.",
-    )
-    parser.add_argument(
-        "--profile-key",
-        help="Legacy alias for --research-cohort-key <cohort_key>; accepts research_dataset_* values.",
-    )
-    parser.add_argument(
-        "--research-cohort-key",
-        help="Run a deterministic DB-backed research cohort headlessly.",
-    )
-    parser.add_argument("--session", help="Session stamp (defaults to generated)")
-    parser.add_argument("--scope-label", help="Scope label (defaults to package name)")
-    parser.add_argument(
-        "--profile",
-        default="full",
-        choices=["full", "permissions", "metadata", "lightweight", "split"],
-        help="Static analysis profile",
-    )
-    parser.add_argument("--dry-run", action="store_true", help="Run analysis without database persistence")
-    parser.add_argument("--allow-session-reuse", action="store_true", help="Permit reusing an existing session stamp")
+    parser = build_parser()
     args = parser.parse_args(argv)
     exact_mode = bool(args.apk_id or args.base_apk_sha256)
     selected_modes = sum(

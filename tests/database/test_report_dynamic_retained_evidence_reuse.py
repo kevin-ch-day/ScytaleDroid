@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.db import report_dynamic_retained_evidence_reuse as report
@@ -194,7 +195,11 @@ def test_generate_report_writes_retained_reuse_outputs(tmp_path: Path, monkeypat
         },
     )
 
-    summary = report.generate_report(output_dir=tmp_path / "out", recent_days=14)
+    summary = report.generate_report(
+        output_dir=tmp_path / "out",
+        recent_days=14,
+        now=datetime(2026, 7, 8, 12, tzinfo=UTC),
+    )
 
     assert summary["apps_total"] == 2
     assert summary["paper_usable_apps"] == 2

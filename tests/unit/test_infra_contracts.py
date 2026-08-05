@@ -37,11 +37,13 @@ def test_numpy_percentile_wrapper_matches_explicit_method() -> None:
 
 
 def test_require_api_key_configured_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SCYTALEDROID_API_AUTH_DISABLED", raising=False)
     monkeypatch.setenv("SCYTALEDROID_API_KEY", "test-secret")
     assert runtime._require_api_key_configured() == "test-secret"
 
 
 def test_require_api_key_configured_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SCYTALEDROID_API_AUTH_DISABLED", raising=False)
     monkeypatch.delenv("SCYTALEDROID_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="SCYTALEDROID_API_KEY is required"):
         runtime._require_api_key_configured()

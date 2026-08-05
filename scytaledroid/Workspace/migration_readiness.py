@@ -233,7 +233,7 @@ def _database_definer_probe() -> dict[str, Any]:
     try:
         from scytaledroid.Database.db_core import permission_intel
 
-        rows = permission_intel.run_sql(_DEFINER_SQL, fetch="all", read_only=True)
+        rows = permission_intel.fetch_database_definers()
         results["permission_intel"] = {
             "available": True,
             "definers": sorted(str(row[0]) for row in rows or ()),

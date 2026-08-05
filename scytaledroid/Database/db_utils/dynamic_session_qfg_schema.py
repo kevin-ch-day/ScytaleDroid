@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .schema_migration_registry import MigrationSpec, append_schema_version, latest_schema_version, record_schema_migration
+from .schema_migration_registry import (
+    MigrationSpec,
+    append_schema_version,
+    latest_schema_version,
+    record_schema_migration,
+)
 
 RunSql = Callable[..., object]
 

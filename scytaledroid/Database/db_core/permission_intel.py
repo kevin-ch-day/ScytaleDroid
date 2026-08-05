@@ -237,6 +237,28 @@ def probe_dictionary_read_access() -> bool:
         return False
 
 
+def fetch_database_definers() -> list[tuple[object, ...]]:
+    """Return object definers from the dedicated Permission Intel catalog."""
+
+    rows = run_sql(
+        """
+        SELECT DISTINCT definer
+        FROM (
+            SELECT DEFINER AS definer FROM information_schema.views WHERE table_schema = DATABASE()
+            UNION ALL SELECT DEFINER FROM information_schema.triggers WHERE trigger_schema = DATABASE()
+            UNION ALL SELECT DEFINER FROM information_schema.routines WHERE routine_schema = DATABASE()
+            UNION ALL SELECT DEFINER FROM information_schema.events WHERE event_schema = DATABASE()
+        ) AS scoped_definers
+        WHERE definer IS NOT NULL AND definer != ''
+        ORDER BY definer
+        """,
+        fetch="all",
+        query_name="permission_intel.fetch_database_definers",
+        read_only=True,
+    )
+    return list(rows or ())
+
+
 def fetch_aosp_permission_catalog_rows() -> list[tuple[object, object, object, object]]:
     """Return raw AOSP permission catalog rows from the permission-intel source."""
 
@@ -495,6 +517,7 @@ __all__ = [
     "SIGNAL_MAPPINGS_TABLE",
     "UNKNOWN_DICT_TABLE",
     "describe_target",
+    "fetch_database_definers",
     "fetch_aosp_permission_dict_rows",
     "fetch_aosp_permission_name_rows",
     "fetch_aosp_permission_catalog_rows",

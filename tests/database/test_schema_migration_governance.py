@@ -8,6 +8,7 @@ from pathlib import Path
 
 from scytaledroid.Database.db_queries import canonical as canonical_queries
 from scytaledroid.Database.db_queries import dynamic as dynamic_queries
+from scytaledroid.Database.db_utils.dynamic_session_qfg_schema import SCHEMA_VERSION_AFTER
 from scytaledroid.Database.db_utils.phase_a_typed_replacements import (
     backfill_typed_replacement_columns,
 )
@@ -32,7 +33,7 @@ def test_schema_migration_registry_has_no_duplicate_ids() -> None:
     assert duplicate_registry_ids() == {}
     assert len(registered_migrations()) >= 3
     assert registry_version_chain_issues() == []
-    assert latest_registered_schema_version() == "0.3.14-static-finding-evidence-payload-schema"
+    assert latest_registered_schema_version() == SCHEMA_VERSION_AFTER
 
 
 def test_runtime_schema_version_ddl_matches_live_hotfix_contract() -> None:

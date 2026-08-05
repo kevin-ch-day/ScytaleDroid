@@ -104,8 +104,27 @@ def _adb_check(timeout_s: float = 8.0) -> list[CheckLine]:
 
 
 def _database_check(require_database: bool) -> list[CheckLine]:
-    from scytaledroid.Database.db_core import db_config
-    from scytaledroid.Database.db_utils import schema_gate
+    # This check is intentionally available before ``setup.sh`` installs the
+    # optional database driver.  Avoid importing the DB package when no DSN is
+    # configured: its engine imports the driver, while the actionable result in
+    # this case is simply that database persistence is disabled.
+    configured = any(
+        (os.environ.get(name) or "").strip()
+        for name in ("SCYTALEDROID_DB_URL", "SCYTALEDROID_DB_NAME")
+    )
+    if not configured:
+        msg = "DSN unset (.env / SCYTALEDROID_DB_*)"
+        if require_database:
+            return [CheckLine("fail", "database", msg)]
+        return [CheckLine("warn", "database", msg)]
+
+    try:
+        from scytaledroid.Database.db_core import db_config
+        from scytaledroid.Database.db_utils import schema_gate
+    except ModuleNotFoundError as exc:
+        severity = "fail" if require_database else "warn"
+        dependency = exc.name or "database driver"
+        return [CheckLine(severity, "database", f"Python dependency missing: {dependency}")]
 
     if not db_config.db_enabled():
         msg = "DSN unset (.env / SCYTALEDROID_DB_*)"

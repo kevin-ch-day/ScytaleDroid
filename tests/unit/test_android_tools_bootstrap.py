@@ -8,6 +8,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ANDROID_TOOLS_SCRIPT = REPO_ROOT / "scripts" / "lib" / "android_tools.sh"
 
 
+def test_android_tools_verifies_apksigner_with_supported_version_flag() -> None:
+    source = ANDROID_TOOLS_SCRIPT.read_text(encoding="utf-8")
+
+    assert "apksigner --version" in source
+    assert "apksigner -version" not in source
+
+
 def _verify_checksum(path: Path, expected: str) -> subprocess.CompletedProcess[str]:
     command = (
         f'source "{ANDROID_TOOLS_SCRIPT}"; '

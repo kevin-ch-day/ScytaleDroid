@@ -111,7 +111,7 @@ verify_bins() {
   say "Verifying…"
   which sdkmanager && sdkmanager --version || true
   which aapt2 && aapt2 version || warn "aapt2 not found"
-  which apksigner && apksigner -version || warn "apksigner not found"
+  which apksigner && apksigner --version || warn "apksigner not found"
   if [[ -f "$ENV_CHECK" ]]; then
     python3 "$ENV_CHECK" || true
   fi

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scytaledroid.Database.db_utils.static_session_grain_integrity import (
     GRAIN_LEGEND_LINES,
+    _operator_label,
     aggregate_archive_json_pipeline_totals,
     collect_session_grain,
     count_json_files_in_dir,
@@ -30,6 +31,10 @@ def test_count_json_files_in_dir(tmp_path: Path) -> None:
     (tmp_path / "c.txt").write_text("x", encoding="utf-8")
     assert count_json_files_in_dir(tmp_path) == 2
     assert count_json_files_in_dir(tmp_path / "missing") == 0
+
+
+def test_operator_label_marks_long_identifiers_as_truncated() -> None:
+    assert _operator_label("com.example.very.long.package", 15) == "com.example...."
 
 
 def test_pipeline_rollup_from_report_dict() -> None:
@@ -106,6 +111,55 @@ def test_render_text_report_includes_grain_header() -> None:
     assert "APK JSON files (archive dir)   : 5" in text
     assert "com.a" in text
     assert "Persistence-audit" in text and "latest/" in text
+
+
+def test_render_text_report_matches_manifest_package_case_insensitively() -> None:
+    data = {
+        "session_stamp": "sess",
+        "static_run_rows": 1,
+        "status_breakdown": [("COMPLETED", 1)],
+        "canonical_findings_rows": 3,
+        "permission_matrix_rows": 2,
+        "permission_risk_vnext_rows": 2,
+        "string_summary_rows": 1,
+        "string_sample_rows": 4,
+        "correlation_rows": 0,
+        "session_link_rows": 1,
+        "rollup_rows": 1,
+        "persistence_failure_rows": 0,
+        "artifact_registry_rows_static": 2,
+        "top_packages": [
+            {
+                "static_run_id": 10,
+                "package_name": "com.amazon.mshop.android.business.shopping",
+                "finding_rows": 3,
+                "matrix_rows": 2,
+                "risk_rows": 2,
+                "string_summary_rows": 1,
+                "string_sample_rows": 4,
+                "correlation_rows": 0,
+                "persist_fail_rows": 0,
+                "artifact_registry_rows": 2,
+            }
+        ],
+    }
+    json_aggregate = {
+        "files_seen": 2,
+        "parse_errors": 0,
+        "totals": {"warn": 2, "policy": 0, "errors": 0},
+        "per_package": {
+            "com.amazon.mShop.android.business.shopping": {"files": 2, "warn": 2, "policy": 0, "errors": 0}
+        },
+    }
+
+    text = render_text_report(data, json_aggregate=json_aggregate)
+
+    assert "com.amazon.mshop.android.business.shopping" in text
+    comparison_section = text.split("Artifact JSON vs canonical DB", maxsplit=1)[1]
+    comparison_line = next(
+        line for line in comparison_section.splitlines() if line.startswith("com.amazon.mshop.android.business.shopping")
+    )
+    assert comparison_line.split() == ["com.amazon.mshop.android.business.shopping", "2", "2", "0", "3"]
 
 
 def test_render_text_report_with_display_labels_prefers_csv(tmp_path: Path) -> None:

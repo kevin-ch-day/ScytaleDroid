@@ -183,6 +183,9 @@ def _permission_intel_check() -> CheckLine:
         )
 
         state = assess_permission_intel_readiness()
+    except ModuleNotFoundError as exc:
+        dependency = exc.name or "database driver"
+        return CheckLine("warn", "permission intel", f"Python dependency missing: {dependency}")
     except Exception as exc:  # noqa: BLE001 - diagnostics must remain informative
         return CheckLine("warn", "permission intel", f"readiness unavailable ({type(exc).__name__})")
 

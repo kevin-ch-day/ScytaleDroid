@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -79,3 +80,34 @@ def test_run_script_is_cwd_independent_and_exposes_new_system_check(tmp_path: Pa
 
     assert result.returncode == 0, result.stderr
     assert "--new-system-check" in result.stdout
+
+
+def test_main_help_does_not_require_optional_database_driver() -> None:
+    """Keep fresh-host launcher help usable before runtime dependencies install."""
+
+    result = subprocess.run(
+        [sys.executable, "-S", str(REPO_ROOT / "main.py"), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--new-system-check" in result.stdout
+
+
+def test_subcommand_help_does_not_import_runtime_dependencies() -> None:
+    for command in ("device", "static"):
+        result = subprocess.run(
+            [sys.executable, "-S", str(REPO_ROOT / "main.py"), command, "--help"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "usage:" in result.stdout

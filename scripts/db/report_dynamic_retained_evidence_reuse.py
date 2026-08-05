@@ -234,13 +234,18 @@ def generate_report(
     output_dir: Path | None = None,
     package_filter: Sequence[str] | None = None,
     recent_days: int = 14,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     from scytaledroid.DynamicAnalysis.services.paper_freeze_readiness import (
         build_paper_evidence_tier_report,
         build_paper_freeze_manifest,
     )
 
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    else:
+        now = now.astimezone(UTC)
     normalized_filter = {_norm_text(pkg).lower() for pkg in (package_filter or []) if _norm_text(pkg)}
     manifest = build_paper_freeze_manifest(package_filter=list(normalized_filter) or None)
     tier_report = build_paper_evidence_tier_report(package_filter=list(normalized_filter) or None)

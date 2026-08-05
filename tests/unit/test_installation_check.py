@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scytaledroid.Diagnostics import deployment_check
 from scytaledroid.Diagnostics import installation_check as check
 
 
@@ -22,6 +23,17 @@ def test_installation_state_requires_env_before_setup_marker(tmp_path: Path) -> 
 
     assert state.level == "setup-required"
     assert ".env.example" in state.detail
+
+
+def test_database_preflight_reports_unconfigured_dsn_without_loading_driver(monkeypatch) -> None:
+    monkeypatch.delenv("SCYTALEDROID_DB_URL", raising=False)
+    monkeypatch.delenv("SCYTALEDROID_DB_NAME", raising=False)
+
+    checks = deployment_check._database_check(require_database=False)  # noqa: SLF001 - launcher contract
+
+    assert checks == [
+        deployment_check.CheckLine("warn", "database", "DSN unset (.env / SCYTALEDROID_DB_*)")
+    ]
 
 
 def test_collect_checks_reports_fresh_clone_without_hard_workspace_failure(monkeypatch, tmp_path: Path) -> None:

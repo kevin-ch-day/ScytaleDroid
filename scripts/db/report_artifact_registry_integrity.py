@@ -27,6 +27,24 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# ``link_state`` is a derived view expression.  On restored MariaDB catalogs it
+# can inherit a different collation from the current connection, so a bare
+# ``LIKE 'dangling%'`` may fail before the read-only report can run.  Keep the
+# normalization local to the predicate; it does not change view or row data.
+_LINK_STATE_EXPRESSION = "CONVERT(link_state USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+_DANGLING_LINK_STATE_PREDICATE = (
+    f"{_LINK_STATE_EXPRESSION} LIKE _utf8mb4'dangling%%' COLLATE utf8mb4_unicode_ci"
+)
+_UNKNOWN_RUN_TYPE_PREDICATE = (
+    f"{_LINK_STATE_EXPRESSION} = _utf8mb4'unknown_run_type' COLLATE utf8mb4_unicode_ci"
+)
+_DANGLING_STATIC_RUN_PREDICATE = (
+    f"{_LINK_STATE_EXPRESSION} = _utf8mb4'dangling_static_run' COLLATE utf8mb4_unicode_ci"
+)
+_DANGLING_DYNAMIC_RUN_PREDICATE = (
+    f"{_LINK_STATE_EXPRESSION} = _utf8mb4'dangling_dynamic_run' COLLATE utf8mb4_unicode_ci"
+)
+
 
 def _rows(core_q: Any, sql: str, params: Sequence[Any] | None = None) -> list[tuple[Any, ...]]:
     out = core_q.run_sql(sql, params, fetch="all", query_name="report.artifact_registry_integrity")
@@ -54,17 +72,17 @@ def collect_report(
     )
     dangling_by_type = _rows(
         core_q,
-        """
+        f"""
         SELECT run_type, artifact_type, link_state, COUNT(*) AS c
         FROM v_artifact_registry_integrity
-        WHERE link_state LIKE 'dangling%%' OR link_state = 'unknown_run_type'
+        WHERE ({_DANGLING_LINK_STATE_PREDICATE}) OR ({_UNKNOWN_RUN_TYPE_PREDICATE})
         GROUP BY run_type, artifact_type, link_state
         ORDER BY c DESC, run_type, artifact_type
         """,
     )
     dangling_age = _rows(
         core_q,
-        """
+        f"""
         SELECT
           run_type,
           link_state,
@@ -76,17 +94,17 @@ def collect_report(
           END AS age_bucket,
           COUNT(*) AS c
         FROM v_artifact_registry_integrity
-        WHERE link_state LIKE 'dangling%%' OR link_state = 'unknown_run_type'
+        WHERE ({_DANGLING_LINK_STATE_PREDICATE}) OR ({_UNKNOWN_RUN_TYPE_PREDICATE})
         GROUP BY run_type, link_state, age_bucket
         ORDER BY run_type, link_state, age_bucket
         """,
     )
     top_static = _rows(
         core_q,
-        """
+        f"""
         SELECT run_id, COUNT(*) AS c
         FROM v_artifact_registry_integrity
-        WHERE run_type = 'static' AND link_state = 'dangling_static_run'
+        WHERE run_type = 'static' AND {_DANGLING_STATIC_RUN_PREDICATE}
         GROUP BY run_id
         ORDER BY c DESC
         LIMIT %s
@@ -95,10 +113,10 @@ def collect_report(
     )
     top_dynamic = _rows(
         core_q,
-        """
+        f"""
         SELECT run_id, COUNT(*) AS c
         FROM v_artifact_registry_integrity
-        WHERE run_type = 'dynamic' AND link_state = 'dangling_dynamic_run'
+        WHERE run_type = 'dynamic' AND {_DANGLING_DYNAMIC_RUN_PREDICATE}
         GROUP BY run_id
         ORDER BY c DESC
         LIMIT %s
@@ -132,10 +150,10 @@ def collect_report(
     if path_sample_limit > 0:
         sample = _rows(
             core_q,
-            """
+            f"""
             SELECT artifact_id, run_type, link_state, host_path
             FROM v_artifact_registry_integrity
-            WHERE link_state LIKE 'dangling%%'
+            WHERE {_DANGLING_LINK_STATE_PREDICATE}
               AND host_path IS NOT NULL
               AND TRIM(host_path) <> ''
             ORDER BY created_at_utc DESC

@@ -215,6 +215,38 @@ def aggregate_archive_json_pipeline_totals(
     }
 
 
+def _casefold_pipeline_buckets(per_package: Mapping[object, object]) -> dict[str, dict[str, int]]:
+    """Merge archive pipeline buckets by case-insensitive package identity.
+
+    The canonical DB package key comes from the harvested package manager name,
+    while APK manifests can preserve mixed casing.  This helper is only for the
+    report's archive-to-DB comparison table; the source aggregate remains
+    unchanged so its original manifest labels stay available to operators.
+    """
+
+    merged: dict[str, dict[str, int]] = {}
+    for package_name, raw_bucket in per_package.items():
+        key = str(package_name or "").strip().casefold()
+        if not key or not isinstance(raw_bucket, Mapping):
+            continue
+        bucket = merged.setdefault(key, {"files": 0, "warn": 0, "policy": 0, "errors": 0})
+        for field in bucket:
+            bucket[field] += int(raw_bucket.get(field, 0) or 0)
+    return merged
+
+
+def _operator_label(value: object, width: int) -> str:
+    """Keep constrained report columns unambiguous when an identifier is long."""
+
+    text = str(value or "")
+    limit = max(1, int(width))
+    if len(text) <= limit:
+        return text
+    if limit <= 3:
+        return text[:limit]
+    return f"{text[: limit - 3]}..."
+
+
 def _scalar(
     run_sql: Callable[..., Any],
     sql: str,
@@ -481,7 +513,7 @@ def render_text_report(
         lines.append(f"  APK JSON files (archive dir)   : {json_archive_count}")
     lines.append("")
     overrides = display_override_by_lower or {}
-    pkg_w = 26 if with_display_labels else 40
+    pkg_w = 26 if with_display_labels else 48
     lines.append(
         "Top packages (DB footprint; registry rows include dep/manifest entries — not APK count)"
         + ("; display = CSV override if present else apps.display_name else package" if with_display_labels else "")
@@ -502,9 +534,9 @@ def render_text_report(
     for row in data.get("top_packages") or []:
         if not isinstance(row, Mapping):
             continue
-        pkg = str(row.get("package_name") or "")[: pkg_w - 2]
+        pkg = _operator_label(row.get("package_name"), pkg_w)
         if with_display_labels:
-            disp = operator_display_for_grain_row(row, override_by_lower=overrides)[:20]
+            disp = _operator_label(operator_display_for_grain_row(row, override_by_lower=overrides), 22)
             lines.append(
                 f"{pkg:<{pkg_w}} "
                 f"{disp:<22} "
@@ -542,15 +574,16 @@ def render_text_report(
             f"warn_sum={tot.get('warn')} policy_list_rows_sum={tot.get('policy')} error_events_sum={tot.get('errors')}"
         )
         lines.append("")
-        sub = f"{'package':<40} {'json_files':>10} {'warn_sum':>10} {'policy_rows':>12} {'err_events':>10}"
+        sub = f"{'package':<48} {'json_files':>10} {'warn_sum':>10} {'policy_rows':>12} {'err_events':>10}"
         lines.append(sub)
         lines.append("-" * len(sub))
         per = json_aggregate.get("per_package") or {}
         if isinstance(per, Mapping):
+            per_casefold = _casefold_pipeline_buckets(per)
             for pkg in sorted(per.keys(), key=lambda k: (-int((per[k] or {}).get("files", 0) or 0), k))[:25]:
                 b = per[pkg] if isinstance(per.get(pkg), Mapping) else {}
                 lines.append(
-                    f"{str(pkg)[:38]:<40} "
+                    f"{_operator_label(pkg, 48):<48} "
                     f"{int(b.get('files', 0)):>10} "
                     f"{int(b.get('warn', 0)):>10} "
                     f"{int(b.get('policy', 0)):>12} "
@@ -559,16 +592,16 @@ def render_text_report(
             lines.append("")
             lines.append("Artifact JSON vs canonical DB (package_name match; JSON side not deduped)")
             lines.append("-" * 88)
-            hdr2 = f"{'package':<36} {'json':>5} {'art_WARN':>9} {'art_policy':>11} {'DB_find':>8}"
+            hdr2 = f"{'package':<48} {'json':>5} {'art_WARN':>9} {'art_policy':>11} {'DB_find':>8}"
             lines.append(hdr2)
             lines.append("-" * len(hdr2))
             for row in data.get("top_packages") or []:
                 if not isinstance(row, Mapping):
                     continue
                 pkg = str(row.get("package_name") or "")
-                jb = per[pkg] if isinstance(per.get(pkg), Mapping) else {}
+                jb = per_casefold.get(pkg.casefold(), {})
                 lines.append(
-                    f"{pkg[:34]:<36} "
+                    f"{_operator_label(pkg, 48):<48} "
                     f"{int(jb.get('files', 0)):>5} "
                     f"{int(jb.get('warn', 0)):>9} "
                     f"{int(jb.get('policy', 0)):>11} "

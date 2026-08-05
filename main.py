@@ -8,7 +8,6 @@ import sys
 from collections.abc import Callable
 
 from scytaledroid.Config import app_config
-from scytaledroid.Database.db_core.db_engine import ensure_db_ready
 from scytaledroid.Utils.DisplayUtils import (
     colors,
     menu_utils,
@@ -26,6 +25,21 @@ from scytaledroid.Utils.System.world_clock.display import (
     snapshot_clocks,
 )
 from scytaledroid.Utils.System.world_clock.state import WorldClockState, load_state
+
+
+def ensure_db_ready() -> None:
+    """Initialize the DB engine only for commands that actually need it.
+
+    ``run.sh --help`` deliberately works before ``setup.sh`` has installed the
+    optional database driver.  Keeping this import lazy preserves that launcher
+    contract while retaining the existing, patchable helper used by menu and
+    maintenance flows.
+    """
+
+    from scytaledroid.Database.db_core.db_engine import ensure_db_ready as initialize_db
+
+    initialize_db()
+
 
 def _resolve_timezones() -> WorldClockState:
     return load_state()
@@ -616,10 +630,6 @@ def _open_devices_hub() -> None:
 
 
 def _run_device_cli(argv: list[str]) -> int:
-    from scytaledroid.DeviceAnalysis import device_manager
-    from scytaledroid.DeviceAnalysis.services import inventory_service
-    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
-
     parser = argparse.ArgumentParser(
         prog="python main.py device",
         description="Device inventory and harvest entrypoints (non-interactive sync or interactive hub).",
@@ -658,6 +668,10 @@ def _run_device_cli(argv: list[str]) -> int:
         return 0
 
     ensure_db_ready()
+    from scytaledroid.DeviceAnalysis import device_manager
+    from scytaledroid.DeviceAnalysis.services import inventory_service
+    from scytaledroid.DeviceAnalysis.workflows import inventory_workflow
+
     serial = args.serial or device_manager.get_active_serial()
     if not serial:
         sync.error(
@@ -740,6 +754,11 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "harvest":
         return _run_harvest_cli(argv[1:])
     if argv and argv[0] == "static":
+        if any(argument in {"-h", "--help"} for argument in argv[1:]):
+            from scytaledroid.StaticAnalysis.cli.flows.headless_args import build_parser
+
+            build_parser().parse_args(argv[1:])
+            return 0
         from scytaledroid.StaticAnalysis.cli.flows import headless_run
 
         return int(headless_run.main(argv[1:]))

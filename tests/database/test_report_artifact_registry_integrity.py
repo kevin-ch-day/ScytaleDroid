@@ -81,7 +81,42 @@ def test_collect_report_queries_core_q(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out["totals_by_run_type_link_state"][0]["count"] == 5
     assert out["host_path_probe"] is None
     assert all("LIKE 'dangling%'" not in sql for sql in seen_sql)
-    assert any("LIKE 'dangling%%'" in sql for sql in seen_sql)
+    assert any("LIKE _utf8mb4'dangling%%'" in sql for sql in seen_sql)
+
+
+def test_collect_report_uses_explicit_collation_for_dangling_predicates() -> None:
+    queries: list[str] = []
+
+    def run_sql(sql, params=None, *, fetch="all", **_kwargs):  # type: ignore[no-untyped-def]
+        normalized = " ".join(str(sql).split())
+        queries.append(normalized)
+        if "SELECT run_type, link_state, COUNT(*)" in normalized:
+            return [("static", "linked", 2), ("static", "dangling_static_run", 1)]
+        if "SELECT run_type, artifact_type, link_state" in normalized:
+            return [("static", "report", "dangling_static_run", 1)]
+        if "END AS age_bucket" in normalized:
+            return [("static", "dangling_static_run", "90d+", 1)]
+        if "WHERE run_type = 'static'" in normalized and "GROUP BY run_id" in normalized:
+            return [("42", 1)]
+        if "WHERE run_type = 'dynamic'" in normalized and "GROUP BY run_id" in normalized:
+            return []
+        if "run_id NOT REGEXP" in normalized:
+            return [(0,)]
+        if "WHERE ar.run_type = 'static'" in normalized:
+            return [(1,)]
+        raise AssertionError(normalized)
+
+    data = collect_report(type("CoreQueries", (), {"run_sql": staticmethod(run_sql)})(), top_n=10, path_sample_limit=0)
+
+    assert data["summary_counts"]["dangling_static_run_rows"] == 1
+    dangling_queries = [query for query in queries if "LIKE _utf8mb4'dangling%%'" in query]
+    assert len(dangling_queries) == 2
+    assert all("CONVERT(link_state USING utf8mb4) COLLATE utf8mb4_unicode_ci" in query for query in dangling_queries)
+    assert all(
+        "_utf8mb4'unknown_run_type' COLLATE utf8mb4_unicode_ci" in query for query in dangling_queries
+    )
+    assert any("_utf8mb4'dangling_static_run' COLLATE utf8mb4_unicode_ci" in query for query in queries)
+    assert any("_utf8mb4'dangling_dynamic_run' COLLATE utf8mb4_unicode_ci" in query for query in queries)
 
 
 def test_script_help_is_safe_without_pythonpath(assert_safe_script_help) -> None:

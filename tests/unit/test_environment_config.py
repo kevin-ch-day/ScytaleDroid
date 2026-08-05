@@ -14,6 +14,7 @@ def test_load_dotenv_preserves_process_values_and_parses_quoted_values(monkeypat
         "# comment\nSCYTALEDROID_DATA_DIR='/srv/data'\nEXISTING=from-file\nINVALID\n",
         encoding="utf-8",
     )
+    monkeypatch.delenv("SCYTALEDROID_NO_DOTENV", raising=False)
     monkeypatch.setenv("EXISTING", "from-process")
 
     try:
@@ -38,6 +39,7 @@ def test_load_dotenv_skips_invalid_variable_names(monkeypatch, tmp_path: Path) -
         "export SCYTALEDROID_OUTPUT_DIR=/ignored\nINVALID-KEY=value\nVALID_VALUE=kept\n",
         encoding="utf-8",
     )
+    monkeypatch.delenv("SCYTALEDROID_NO_DOTENV", raising=False)
     monkeypatch.delenv("SCYTALEDROID_OUTPUT_DIR", raising=False)
     monkeypatch.delenv("VALID_VALUE", raising=False)
 
