@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_REQUESTED="${SCYTALEDROID_PYTHON:-}"
 ANDROID_SETUP_MODE="${SCYTALEDROID_SETUP_ANDROID:-auto}"
+SETUP_VALIDATE="${SCYTALEDROID_SETUP_VALIDATE:-0}"
 PYTHON_BIN=""
 VENV_CREATED=0
 REQ_FILE_DEFAULT="$ROOT_DIR/requirements.lock"
@@ -15,6 +16,48 @@ fi
 SETUP_STATE_DIR="$ROOT_DIR/.setup"
 REQ_HASH_FILE="$SETUP_STATE_DIR/requirements.sha256"
 ANDROID_TOOLS_LIB="$ROOT_DIR/scripts/lib/android_tools.sh"
+
+usage() {
+  cat <<EOF
+Usage: ./setup.sh [--validate]
+
+Creates or refreshes the local Python environment and configured workspace
+directories. It does not create databases, rotate credentials, or inspect
+secret values.
+
+  --validate  After setup, run the read-only new-system check and require the
+              configured MariaDB and Permission Intel catalogs to be reachable.
+
+Environment switches:
+  SCYTALEDROID_SETUP_ANDROID=1          Provision Android tools for capture hosts.
+  SCYTALEDROID_SETUP_INSTALL_SYSTEM=1   Install missing Fedora packages.
+  SCYTALEDROID_SETUP_UPGRADE_TOOLING=1  Upgrade pip/setuptools/wheel.
+  SCYTALEDROID_SETUP_VALIDATE=1         Same as --validate.
+EOF
+}
+
+for argument in "$@"; do
+  case "$argument" in
+    --validate) SETUP_VALIDATE=1 ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Error: unsupported setup option: $argument" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$SETUP_VALIDATE" in
+  0|1) ;;
+  *)
+    echo "Error: SCYTALEDROID_SETUP_VALIDATE must be 0 or 1." >&2
+    exit 1
+    ;;
+esac
 
 case "$ANDROID_SETUP_MODE" in
   auto|0|1) ;;
@@ -280,6 +323,37 @@ fi
 if ! command_exists mariadb || ! command_exists mariadb-dump; then
   echo "[Setup] MariaDB client tools are missing. Install with: sudo dnf install mariadb"
 fi
-echo "[Setup] Next: create .env from .env.example, restore data/DB if applicable, then run:"
-echo "        ./run.sh --new-system-check --require-database"
+if [[ -L "$ROOT_DIR/.env" ]]; then
+  echo "[Setup] Existing .env is a symlink; replace it with an owner-only regular file before deployment checks."
+  ENVIRONMENT_STATE="needs-repair"
+elif [[ -f "$ROOT_DIR/.env" ]]; then
+  ENV_MODE="$(stat -c '%a' "$ROOT_DIR/.env" 2>/dev/null || printf 'unknown')"
+  if [[ "$ENV_MODE" == "600" ]]; then
+    echo "[Setup] Existing owner-only .env detected; leaving it unchanged."
+    ENVIRONMENT_STATE="ready"
+  else
+    echo "[Setup] Existing .env detected with mode $ENV_MODE; do not overwrite it. Run: chmod 600 .env"
+    ENVIRONMENT_STATE="needs-repair"
+  fi
+else
+  echo "[Setup] Fresh host: copy .env.example to .env, then run: chmod 600 .env"
+  ENVIRONMENT_STATE="missing"
+fi
+if [[ "$ENVIRONMENT_STATE" == "ready" ]]; then
+  echo "[Setup] Next: validate this configured host with:"
+  echo "        ./setup.sh --validate"
+else
+  echo "[Setup] Next: repair/create .env and restore data/DB if applicable, then run:"
+  echo "        ./setup.sh --validate"
+fi
 echo "        Use SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh when this host will capture from Android devices."
+
+if [[ "$SETUP_VALIDATE" == "1" ]]; then
+  echo "[Setup] Running read-only configured-host validation..."
+  if "$ROOT_DIR/run.sh" --new-system-check --require-database; then
+    echo "[Setup] Validation passed: this host is ready for the configured workflows."
+  else
+    echo "[Setup] Validation failed: resolve the reported checks, then rerun ./setup.sh --validate." >&2
+    exit 1
+  fi
+fi

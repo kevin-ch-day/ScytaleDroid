@@ -18,6 +18,43 @@ umask 077
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${REPO_ROOT}/.env"
+CONFIRMATION="PROVISION LOCAL SCYTALEDROID OPERATOR"
+
+usage()
+{
+    cat <<EOF
+Usage:
+  ./scripts/db/provision_new_system_databases.sh --check
+
+  ./scripts/db/provision_new_system_databases.sh --execute \\
+    --confirm '${CONFIRMATION}'
+
+--check performs the local service, administrator-access, catalog, and .env
+ownership preflight without changing MariaDB or .env.
+
+Creates or rotates the local scytaledroid_operator MariaDB account, updates the
+repo-root .env password fields, and runs connection and governance checks.
+This is a write-capable bootstrap operation. It requires an explicit exact
+confirmation before it creates logs, prompts for sudo, changes MariaDB, or
+updates .env.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+MODE=""
+if [[ $# -eq 1 && "${1:-}" == "--check" ]]; then
+    MODE="check"
+elif [[ $# -eq 3 && "${1:-}" == "--execute" && "${2:-}" == "--confirm" && "${3:-}" == "$CONFIRMATION" ]]; then
+    MODE="execute"
+else
+    printf '%s\n' 'BLOCKED use --check, or exact --execute and confirmation; no changes were made.' >&2
+    usage >&2
+    exit 2
+fi
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 LOG_DIR="${REPO_ROOT}/migration-checks"
@@ -35,6 +72,7 @@ PERMISSION_DB="android_permission_intel"
 
 DB_PASSWORD=""
 CLIENT_FILE=""
+OPERATOR_NAME="$(id -un)"
 
 mkdir -p "$LOG_DIR"
 
@@ -80,7 +118,11 @@ pause_before_return()
 {
     printf '\nLog file: %s\n' "$LOG_FILE"
     printf 'The parent terminal remains open.\n'
-    read -r -p "Press Enter to return to the command prompt..." _
+    if [[ -t 0 ]]; then
+        read -r -p "Press Enter to return to the command prompt..." _
+    else
+        printf 'Non-interactive session: returning without a pause.\n'
+    fi
     printf '\n'
 }
 
@@ -92,20 +134,30 @@ section "SCYTALEDROID DATABASE PROVISIONING"
 printf 'Repository : %s\n' "$REPO_ROOT"
 printf 'User       : %s\n' "$(id -un)"
 printf 'Started    : %s UTC\n' "$(date -u '+%Y-%m-%d %H:%M:%S')"
-printf '%s\n' \
-    'WARNING: Rerunning this script rotates the scytaledroid_operator password.' \
-    '         Do not rerun after a successful provisioning unless credential rotation is intended.'
+if [[ "$MODE" == "execute" ]]; then
+    printf '%s\n' \
+        'WARNING: Rerunning this script rotates the scytaledroid_operator password.' \
+        '         Do not rerun after a successful provisioning unless credential rotation is intended.'
+else
+    printf '%s\n' 'Mode       : read-only preflight; no MariaDB or .env changes will be made.'
+fi
 
 section "1. PREREQUISITES"
 
-if [[ "$(id -un)" != "systemadmin" ]]; then
-    fail "Run this script as systemadmin on the new Asus desktop"
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    fail "Run this script as the normal repository operator, not as root"
     pause_before_return
     exit 1
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
     fail "Missing environment file: $ENV_FILE"
+    pause_before_return
+    exit 1
+fi
+
+if [[ ! -O "$ENV_FILE" ]]; then
+    fail "Refusing to change .env not owned by the current operator: $ENV_FILE"
     pause_before_return
     exit 1
 fi
@@ -134,7 +186,7 @@ pass ".env exists"
 section "2. SUDO VALIDATION"
 
 printf '%s\n' \
-    "Enter the Linux password for systemadmin." \
+    "Enter the Linux password for ${OPERATOR_NAME}." \
     "This is not the MariaDB operator password."
 
 sudo -k
@@ -200,6 +252,21 @@ done
 
 if [[ "$MISSING_DATABASE" -ne 0 ]]; then
     printf '\nNo account or .env changes were made.\n'
+    pause_before_return
+    exit 1
+fi
+
+if [[ "$MODE" == "check" ]]; then
+    section "READ-ONLY PREFLIGHT SUMMARY"
+    printf 'Passed   : %d\n' "$PASS_COUNT"
+    printf 'Warnings : %d\n' "$WARN_COUNT"
+    printf 'Failures : %d\n' "$FAIL_COUNT"
+    if [[ "$FAIL_COUNT" -eq 0 ]]; then
+        printf '%s\n' 'Result   : READY FOR EXPLICIT EXECUTE; no account or configuration was changed.'
+        pause_before_return
+        exit 0
+    fi
+    printf '%s\n' 'Result   : NOT READY; no account or configuration was changed.'
     pause_before_return
     exit 1
 fi
@@ -271,6 +338,7 @@ section "6. UPDATE CANONICAL .ENV FIELDS"
 python3 - "$ENV_FILE" 3<<<"$DB_PASSWORD" <<'PY'
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 path = Path(sys.argv[1])
@@ -318,14 +386,26 @@ for key, value in canonical.items():
     if key not in seen:
         updated.append(f"{key}={value}")
 
-path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+payload = "\n".join(updated) + "\n"
+fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+temporary_path = Path(temporary_name)
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary_path, path)
+finally:
+    if temporary_path.exists():
+        temporary_path.unlink()
 PY
 
 PYTHON_RC=$?
 
 if [[ "$PYTHON_RC" -eq 0 ]]; then
     chmod 600 "$ENV_FILE"
-    pass "Canonical .env password fields were updated"
+    pass "Canonical .env password fields were updated atomically"
     pass ".env permissions were set to 600"
 else
     fail "Could not update .env"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Helper to launch ScytaleDroid against MariaDB using SCYTALEDROID_DB_URL from .env or args.
+# Helper to launch ScytaleDroid against MariaDB using SCYTALEDROID_DB_URL from .env.
 #
 # DB URL-from-parts logic mirrors scytaledroid.Database.db_core.db_config._compose_db_url_from_parts
 # (stdlib only here so cold-start does not import the full package tree).
@@ -9,19 +9,23 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   cat <<EOF
-Usage: $(basename "$0") [MYSQL_URL] [run.sh arguments...]
+Usage: $(basename "$0") [MYSQL_URL_WITHOUT_PASSWORD] [run.sh arguments...]
 
 Launches repo-root run.sh with a database URL set (remaining arguments pass through to ./run.sh). Resolve order:
-  1. First argument MYSQL_URL (if given), else
+  1. First argument MYSQL_URL_WITHOUT_PASSWORD (if given), else
   2. SCYTALEDROID_DB_URL from the environment (e.g. after sourcing .env), else
   3. Composed from SCYTALEDROID_DB_NAME and optional HOST/USER/PASSWD/PORT/SCHEME
      (same rules as Database/db_core/db_config composition).
 
 Environment file: SCYTALEDROID_ENV_FILE (default: ${ROOT_DIR}/.env)
 
+Do not pass a password-bearing DSN on the command line: it can be exposed in
+shell history and process listings. Put credentials in a private .env file
+(mode 0600) and use split SCYTALEDROID_DB_* variables instead.
+
 Examples:
   ./run_mariadb.sh                                         # compose URL from .env, then ./run.sh
-  ./run_mariadb.sh 'mysql://user:pass@localhost:3306/db'   # explicit URL before run.sh defaults
+  ./run_mariadb.sh 'mysql://scytaledroid_operator@localhost:3306/db'  # passwordless URL
 EOF
   exit 0
 fi
@@ -64,8 +68,24 @@ PY
 fi
 
 if [ $# -ge 1 ]; then
-  export SCYTALEDROID_DB_URL="$1"
-  shift
+  case "$1" in
+    mysql://*|mariadb://*)
+      if ! python3 - "$1" <<'PY'
+from sys import argv
+from urllib.parse import urlsplit
+
+parsed = urlsplit(argv[1])
+raise SystemExit(0 if parsed.password is None else 1)
+PY
+      then
+        echo "Refusing a password-bearing MariaDB URL argument." >&2
+        echo "Store credentials in a private .env file via SCYTALEDROID_DB_PASSWD instead." >&2
+        exit 2
+      fi
+      export SCYTALEDROID_DB_URL="$1"
+      shift
+      ;;
+  esac
 fi
 
 if [ -z "${SCYTALEDROID_DB_URL:-}" ]; then
@@ -137,7 +157,7 @@ PY
 fi
 
 if [ -z "${SCYTALEDROID_DB_URL:-}" ]; then
-  echo "SCYTALEDROID_DB_URL not set. Provide it or SCYTALEDROID_DB_NAME (and HOST/USER/etc.) in .env, or pass the URL as the first argument."
+  echo "SCYTALEDROID_DB_URL not set. Configure SCYTALEDROID_DB_NAME (and HOST/USER/PASSWD/etc.) in .env, or pass a passwordless URL as the first argument."
   exit 1
 fi
 

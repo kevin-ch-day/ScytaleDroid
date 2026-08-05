@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,9 +91,24 @@ def _setup_marker_check(repo_root: Path) -> CheckLine:
 
 
 def _environment_check(repo_root: Path) -> CheckLine:
-    if (repo_root / ".env").is_file():
-        return CheckLine("ok", "configuration", ".env present (values not inspected)")
-    return CheckLine("fail", "configuration", ".env missing; copy .env.example and configure credentials")
+    path = repo_root / ".env"
+    if not path.exists():
+        return CheckLine("fail", "configuration", ".env missing; copy .env.example and configure credentials")
+    try:
+        link_stat = path.lstat()
+        file_stat = path.stat()
+    except OSError as exc:
+        return CheckLine("fail", "configuration", f".env cannot be inspected ({type(exc).__name__})")
+    if stat.S_ISLNK(link_stat.st_mode):
+        return CheckLine("fail", "configuration", ".env must be a regular owner-only file, not a symlink")
+    if not stat.S_ISREG(file_stat.st_mode):
+        return CheckLine("fail", "configuration", ".env must be a regular owner-only file")
+    if file_stat.st_uid != os.geteuid():
+        return CheckLine("fail", "configuration", ".env must be owned by the current operator")
+    mode = stat.S_IMODE(file_stat.st_mode)
+    if mode & 0o077:
+        return CheckLine("fail", "configuration", f".env permissions {mode:03o}; require owner-only 0600")
+    return CheckLine("ok", "configuration", ".env is owner-only (values not inspected)")
 
 
 def _runtime_tool_checks(tool_resolver: Callable[[str], str | None]) -> list[CheckLine]:

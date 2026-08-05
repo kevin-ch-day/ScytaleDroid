@@ -29,6 +29,27 @@ def test_setup_allows_headless_or_android_provisioned_modes() -> None:
     assert "app_config.DYNAMIC_EVIDENCE_ROOT" in source
     assert "Could not resolve configured workspace directories" in source
     assert 'PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"' in source
+    assert "Existing owner-only .env detected; leaving it unchanged." in source
+    assert "Existing .env is a symlink" in source
+    assert "Fresh host: copy .env.example to .env" in source
+    assert "Usage: ./setup.sh [--validate]" in source
+    assert "SCYTALEDROID_SETUP_VALIDATE" in source
+    assert '"$ROOT_DIR/run.sh" --new-system-check --require-database' in source
+
+
+def test_setup_help_is_side_effect_free() -> None:
+    result = subprocess.run(
+        [str(REPO_ROOT / "setup.sh"), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--validate" in result.stdout
+    assert "SCYTALEDROID_SETUP_INSTALL_SYSTEM=1" in result.stdout
 
 
 def test_run_script_explains_required_setup_for_normal_launches() -> None:
@@ -56,7 +77,7 @@ def test_mariadb_launcher_treats_environment_file_as_data(tmp_path: Path) -> Non
     )
 
     result = subprocess.run(
-        [str(REPO_ROOT / "run_mariadb.sh"), "mysql://user:pass@localhost:3306/test", "--help"],
+        [str(REPO_ROOT / "run_mariadb.sh"), "mysql://user@localhost:3306/test", "--help"],
         capture_output=True,
         env={"PATH": "/usr/bin:/bin", "SCYTALEDROID_ENV_FILE": str(env_file)},
         text=True,
@@ -66,6 +87,26 @@ def test_mariadb_launcher_treats_environment_file_as_data(tmp_path: Path) -> Non
 
     assert result.returncode == 0, result.stderr
     assert not sentinel.exists()
+
+
+def test_mariadb_launcher_refuses_password_bearing_positional_url() -> None:
+    result = subprocess.run(
+        [
+            str(REPO_ROOT / "run_mariadb.sh"),
+            "mysql://operator:not-for-process-listings@localhost:3306/test",
+            "--new-system-check",
+        ],
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin"},
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.returncode == 2
+    assert "password-bearing MariaDB URL argument" in result.stderr
+    assert "not-for-process-listings" not in result.stdout
+    assert "not-for-process-listings" not in result.stderr
 
 
 def test_run_script_is_cwd_independent_and_exposes_new_system_check(tmp_path: Path) -> None:

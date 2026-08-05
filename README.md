@@ -109,14 +109,33 @@ ScytaleDroid targets modern Linux hosts. Before running the toolkit make sure yo
    upgrading packaging tools by default, and prepares workspace directories. Android tooling is
    optional for reporting/database-only hosts; use `SCYTALEDROID_SETUP_ANDROID=1 ./setup.sh` on a
    host that will collect from physical devices.
+   On an already configured host, combine setup and the read-only deployment
+   readiness check with:
+   ```bash
+   ./setup.sh --validate
+   ```
 3. Create your local configuration without copying any existing secrets:
    ```bash
    cp .env.example .env
+   chmod 600 .env
    ```
    Configure the database credentials, restore data if this is a migration, then run:
    ```bash
    ./run.sh --new-system-check --require-database
    ```
+   To bootstrap the local ScytaleDroid database account on a newly restored
+   workstation, first run its read-only preflight:
+   ```bash
+   ./scripts/db/provision_new_system_databases.sh --check
+   ```
+   Then use the reviewed write-capable helper explicitly if the preflight is
+   ready:
+   ```bash
+   ./scripts/db/provision_new_system_databases.sh --execute \
+     --confirm 'PROVISION LOCAL SCYTALEDROID OPERATOR'
+   ```
+   It must be run as the normal repository operator, prompts locally for sudo,
+   and refuses to modify an `.env` owned by another account.
 4. (Optional) Install developer tooling:
    ```bash
    python -m pip install --upgrade ruff pytest
@@ -282,9 +301,10 @@ Environment variables control CLI behaviour:
 - `SCY_PERMISSION_RISK_TOML` – optional path to TOML scoring config. If unset,
   the engine looks for `config/permission_risk.toml` or
   `data/config/permission_risk.toml`.
-- `SCYTALEDROID_DB_URL` – set to a MariaDB DSN when using the shared backend (e.g.,
-  `mysql://user:pass@localhost:3306/scytaledroid_db_dev`); place it in `.env`
-  for convenience and run via `./run_mariadb.sh`.
+- `SCYTALEDROID_DB_URL` – optional MariaDB DSN for the shared backend. Prefer the
+  split `SCYTALEDROID_DB_HOST` / `…_USER` / `…_PASSWD` values in private `.env`
+  rather than a password-bearing URL. `run_mariadb.sh` refuses password-bearing
+  command-line URLs because they leak through shell history and process listings.
 - `SCYTALEDROID_PERMISSION_INTEL_DB_URL` (or the prefixed
   `SCYTALEDROID_PERMISSION_INTEL_DB_*` variables) – optional separate
   permission-intel database target. If unset, ScytaleDroid stays in

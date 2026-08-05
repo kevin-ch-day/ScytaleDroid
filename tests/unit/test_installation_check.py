@@ -38,7 +38,9 @@ def test_database_preflight_reports_unconfigured_dsn_without_loading_driver(monk
 
 def test_collect_checks_reports_fresh_clone_without_hard_workspace_failure(monkeypatch, tmp_path: Path) -> None:
     _seed_source(tmp_path)
-    (tmp_path / ".env").write_text("SCYTALEDROID_DB_NAME=test\n", encoding="utf-8")
+    env_file = tmp_path / ".env"
+    env_file.write_text("SCYTALEDROID_DB_NAME=test\n", encoding="utf-8")
+    env_file.chmod(0o600)
     monkeypatch.setattr(
         check,
         "_database_check",
@@ -61,7 +63,9 @@ def test_collect_checks_reports_fresh_clone_without_hard_workspace_failure(monke
 
 def test_collect_checks_accepts_restored_workspace_and_setup_marker(monkeypatch, tmp_path: Path) -> None:
     _seed_source(tmp_path)
-    (tmp_path / ".env").write_text("SCYTALEDROID_DB_NAME=test\n", encoding="utf-8")
+    env_file = tmp_path / ".env"
+    env_file.write_text("SCYTALEDROID_DB_NAME=test\n", encoding="utf-8")
+    env_file.chmod(0o600)
     (tmp_path / ".setup").mkdir()
     (tmp_path / ".setup" / "requirements.sha256").write_text("hash\n", encoding="utf-8")
     venv_python = tmp_path / ".venv" / "bin" / "python"
@@ -87,6 +91,29 @@ def test_collect_checks_accepts_restored_workspace_and_setup_marker(monkeypatch,
 
     assert all(line.level == "ok" for line in checks)
     assert check.describe_installation_state(tmp_path).level == "ready"
+
+
+def test_environment_check_rejects_group_or_world_readable_env(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("SCYTALEDROID_DB_NAME=test\n", encoding="utf-8")
+    env_file.chmod(0o640)
+
+    result = check._environment_check(tmp_path)  # noqa: SLF001 - deployment contract
+
+    assert result.level == "fail"
+    assert "permissions 640" in result.message
+
+
+def test_environment_check_rejects_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "secret.env"
+    target.write_text("SCYTALEDROID_DB_NAME=test\n", encoding="utf-8")
+    target.chmod(0o600)
+    (tmp_path / ".env").symlink_to(target)
+
+    result = check._environment_check(tmp_path)  # noqa: SLF001 - deployment contract
+
+    assert result.level == "fail"
+    assert "not a symlink" in result.message
 
 
 def test_collect_checks_reports_unvalidated_python_version(monkeypatch, tmp_path: Path) -> None:
