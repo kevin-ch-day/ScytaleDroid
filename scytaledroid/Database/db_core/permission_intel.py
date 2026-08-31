@@ -53,6 +53,64 @@ _SIGNAL_TABLES: tuple[str, ...] = (
 
 MANAGED_TABLES: tuple[str, ...] = _REFERENCE_TABLES + _GOVERNANCE_TABLES + _SIGNAL_TABLES
 
+SUPPORTED_V1_SCHEMA_CONTRACT = "org.android-permission-intel.schema-v1-draft"
+_TRIAGE_STATUSES = frozenset(
+    {
+        "aosp_missing",
+        "app_defined",
+        "brand_spoof",
+        "gms_known",
+        "in_review",
+        "launcher_ecosystem",
+        "malformed",
+        "malicious_dga",
+        "new",
+        "oem_candidate",
+        "resolved_aosp",
+        "resolved_oem",
+    }
+)
+_QUEUE_ACTIONS = frozenset({"aosp", "oem", "google", "app_defined", "reject", "defer"})
+_QUEUE_STATUSES = frozenset({"queued", "applied", "error", "skipped", "rejected"})
+
+
+class PermissionIntelSubmissionError(ValueError):
+    """A Scytale producer attempted a blank or unsupported PI submission."""
+
+
+def _required_text(payload: Mapping[str, Any], key: str) -> str:
+    value = str(payload.get(key) or "").strip()
+    if not value:
+        raise PermissionIntelSubmissionError(f"{key} must not be blank")
+    return value
+
+
+def validate_unknown_submission(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize one unknown-ledger submission and reject vocabulary drift."""
+    normalized = dict(payload)
+    normalized["permission_string"] = _required_text(payload, "permission_string")
+    status = _required_text(payload, "triage_status").lower()
+    if status not in _TRIAGE_STATUSES:
+        raise PermissionIntelSubmissionError(f"unsupported triage_status: {status}")
+    normalized["triage_status"] = status
+    return normalized
+
+
+def validate_queue_submission(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize queue vocabulary and require durable producer identity."""
+    normalized = validate_unknown_submission(payload)
+    action = _required_text(payload, "queue_action").lower()
+    status = _required_text(payload, "status").lower()
+    if action not in _QUEUE_ACTIONS:
+        raise PermissionIntelSubmissionError(f"unsupported queue_action: {action}")
+    if status not in _QUEUE_STATUSES:
+        raise PermissionIntelSubmissionError(f"unsupported queue status: {status}")
+    normalized["queue_action"] = action
+    normalized["status"] = status
+    normalized["requested_by"] = _required_text(payload, "requested_by")
+    normalized["source_system"] = _required_text(payload, "source_system")
+    return normalized
+
 
 def is_permission_intel_configured() -> bool:
     """Return True when ``SCYTALEDROID_PERMISSION_INTEL_DB_*`` resolves to a mysql/mariadb DSN.
@@ -274,6 +332,97 @@ def fetch_aosp_permission_catalog_rows() -> list[tuple[object, object, object, o
     return list(rows or [])
 
 
+def fetch_v1_catalog_gate() -> dict[str, Any]:
+    """Return the one accepted v1 catalog or fail closed on compatibility drift."""
+    rows = run_sql(
+        """
+        SELECT catalog_release_id, schema_contract_id, schema_contract_version,
+               catalog_digest, source_set_digest, exhaustive_scope,
+               catalog_release_status, catalog_import_status, import_receipt_count
+          FROM android_permission_v1_catalog_release
+        """,
+        fetch="all",
+        dictionary=True,
+        query_name="permission_intel.fetch_v1_catalog_gate",
+        read_only=True,
+    )
+    if len(rows or []) != 1:
+        raise RuntimeError("Permission Intel v1 requires exactly one accepted catalog")
+    row = dict(rows[0])
+    if row.get("schema_contract_id") != SUPPORTED_V1_SCHEMA_CONTRACT:
+        raise RuntimeError("Permission Intel v1 schema contract is incompatible")
+    if row.get("catalog_release_status") != "ACCEPTED":
+        raise RuntimeError("Permission Intel v1 catalog is not accepted")
+    if row.get("catalog_import_status") != "IMPORTED" or int(
+        row.get("import_receipt_count") or 0
+    ) < 1:
+        raise RuntimeError("Permission Intel v1 catalog receipt is incomplete")
+    return row
+
+
+def fetch_v1_permission_rows(values: Sequence[str]) -> list[dict[str, Any]]:
+    """Return exact-case v1 platform references with structured protection fields."""
+    items = tuple(v.strip() for v in values if isinstance(v, str) and v.strip())
+    if not items:
+        return []
+    gate = fetch_v1_catalog_gate()
+    placeholders = ",".join(["%s"] * len(items))
+    rows = run_sql(
+        f"""
+        SELECT catalog_release_id, catalog_digest, canonical_permission,
+               symbolic_name, namespace, defining_package, authority_class,
+               lifecycle, accepted_platform_release, source_provenance_status,
+               protection_base, protection_modifiers,
+               compatibility_protection_expression
+         FROM android_permission_v1_scytaledroid_permission
+         WHERE BINARY canonical_permission IN ({placeholders})
+           AND authority_class IN ('AOSP_PUBLIC', 'AOSP_INTERNAL', 'AOSP_MODULE')
+        """,
+        items,
+        fetch="all",
+        dictionary=True,
+        query_name="permission_intel.fetch_v1_permission_rows",
+        read_only=True,
+    )
+    return [
+        {
+            **dict(row),
+            "scope_complete": bool(gate.get("exhaustive_scope")),
+            "reference_mode": "SHADOW_READ_ONLY",
+        }
+        for row in rows or []
+    ]
+
+
+def fetch_v1_permission_catalog_rows() -> list[dict[str, Any]]:
+    """Return the complete accepted v1 Scytale projection after the compatibility gate."""
+    gate = fetch_v1_catalog_gate()
+    rows = run_sql(
+        """
+        SELECT catalog_release_id, catalog_digest, canonical_permission,
+               symbolic_name, namespace, defining_package, authority_class,
+               lifecycle, accepted_platform_release, source_provenance_status,
+               protection_base, protection_modifiers,
+               compatibility_protection_expression
+          FROM android_permission_v1_scytaledroid_permission
+         WHERE authority_class IN ('AOSP_PUBLIC', 'AOSP_INTERNAL', 'AOSP_MODULE')
+         ORDER BY BINARY canonical_permission
+        """,
+        fetch="all",
+        dictionary=True,
+        query_name="permission_intel.fetch_v1_permission_catalog_rows",
+        read_only=True,
+    )
+    return [
+        {
+            **dict(row),
+            "scope_complete": bool(gate.get("exhaustive_scope")),
+            "reference_mode": "SHADOW_READ_ONLY",
+        }
+        for row in rows or []
+    ]
+
+
 def fetch_aosp_permission_dict_rows(
     values: Sequence[str],
     *,
@@ -402,6 +551,7 @@ def fetch_vendor_meta_rows() -> list[tuple[object, ...]]:
 
 
 def upsert_unknown_permission(payload: Mapping[str, Any]) -> None:
+    payload = validate_unknown_submission(payload)
     run_sql(
         """
         INSERT INTO android_permission_dict_unknown
@@ -424,6 +574,7 @@ def upsert_unknown_permission(payload: Mapping[str, Any]) -> None:
 
 
 def insert_permission_queue(payload: Mapping[str, Any]) -> None:
+    payload = validate_queue_submission(payload)
     run_sql(
         """
         INSERT INTO android_permission_dict_queue
@@ -516,11 +667,16 @@ __all__ = [
     "SIGNAL_CATALOG_TABLE",
     "SIGNAL_MAPPINGS_TABLE",
     "UNKNOWN_DICT_TABLE",
+    "PermissionIntelSubmissionError",
+    "SUPPORTED_V1_SCHEMA_CONTRACT",
     "describe_target",
     "fetch_database_definers",
     "fetch_aosp_permission_dict_rows",
     "fetch_aosp_permission_name_rows",
     "fetch_aosp_permission_catalog_rows",
+    "fetch_v1_catalog_gate",
+    "fetch_v1_permission_catalog_rows",
+    "fetch_v1_permission_rows",
     "fetch_oem_permission_dict_rows",
     "fetch_signal_catalog_rows",
     "fetch_vendor_meta_rows",
@@ -539,4 +695,6 @@ __all__ = [
     "update_oem_permission_seen",
     "update_signal_catalog_row",
     "upsert_unknown_permission",
+    "validate_queue_submission",
+    "validate_unknown_submission",
 ]

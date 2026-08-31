@@ -204,7 +204,7 @@ def persist_declared_permissions(
                 _pd.insert_queue(
                     {
                         "permission_string": norm,
-                        "queue_action": "aosp",
+                        "queue_action": "defer",
                         "proposed_bucket": None,
                         "proposed_classification": None,
                         "triage_status": triage_status,
@@ -222,7 +222,7 @@ def persist_declared_permissions(
                         "package_name": package_name,
                         "permission_name": norm,
                         "triage_status": triage_status,
-                        "queue_action": "aosp",
+                        "queue_action": "defer",
                         "table": permission_intel.QUEUE_DICT_TABLE,
                         "error_class": exc.__class__.__name__,
                     },
