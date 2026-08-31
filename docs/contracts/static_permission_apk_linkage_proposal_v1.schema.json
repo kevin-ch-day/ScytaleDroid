@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scytaledroid.invalid/contracts/static-permission-apk-linkage-proposal-v1.schema.json",
+  "title": "ScytaleDroid static permission APK linkage proposal v1",
+  "type": "object",
+  "required": ["proposal_format", "production_effect", "rows", "proposal_digest"],
+  "properties": {
+    "proposal_format": {"const": "scytaledroid-static-permission-apk-linkage-proposal-v1"},
+    "production_effect": {"const": "none"},
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "matrix_row_id",
+          "run_id",
+          "current_apk_id",
+          "current_apk_id_equals_run_id",
+          "current_repository_row_exists",
+          "current_numeric_match_has_verified_content_identity",
+          "normalized_base_apk_sha256",
+          "verified_content_match_count",
+          "proposed_repository_apk_id",
+          "classification",
+          "resolution_status",
+          "before_image_digest",
+          "expected_after_image_digest",
+          "required_update_preconditions"
+        ],
+        "properties": {
+          "matrix_row_id": {"type": "integer", "minimum": 1},
+          "run_id": {"type": "integer", "minimum": 1},
+          "current_apk_id": {"type": "integer", "minimum": 1},
+          "current_apk_id_equals_run_id": {"type": "boolean"},
+          "current_repository_row_exists": {"type": "boolean"},
+          "current_numeric_match_has_verified_content_identity": {"type": "boolean"},
+          "normalized_base_apk_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "verified_content_match_count": {"type": "integer", "minimum": 0},
+          "proposed_repository_apk_id": {"type": ["integer", "null"], "minimum": 1},
+          "classification": {"type": "string"},
+          "resolution_status": {"type": "string"},
+          "ambiguity_reason": {"type": ["string", "null"]},
+          "before_image_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "expected_after_image_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "required_update_preconditions": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "proposal_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}
