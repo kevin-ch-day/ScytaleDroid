@@ -93,18 +93,17 @@ Paste operator output here when filing tickets:
 
 ---
 
-## 3. Legacy `aosp_promote` rows — options (no mutation in P1A)
+## 3. Legacy `aosp_promote` rows — fail-closed posture
 
-| Option | Risk | Owner | Schema? | Migration? | Affects existing rows? | Tests |
-| --- | --- | --- | --- | --- | --- | --- |
-| **1 — Document only** | Rows stay **unapplyable** until manual fix | Shared | No | No | No | Audit script shows count |
-| **2 — Erebus alias** | Low; normalize in apply | Erebus | No | No | Behavior only | Erebus unit tests for `aosp_promote` |
-| **3 — One-time UPDATE** | Medium; wrong WHERE could corrupt queue | DBA + ops | No | No (data fix) | Yes | Backup + row count diff |
-| **4 — LUT / governance** | Best long-term; more moving parts | Platform | Optional FK | Yes | Optional | Cross-repo contract tests |
+New Scytale submissions use `aosp`. The compatibility layer recognizes the
+legacy spelling `aosp_promote` only so it can return the explicit
+`blocked_legacy_alias` outcome. It does not convert that value into an apply
+action. Existing legacy rows require an independently reviewed, exact-row
+maintenance plan; namespace resemblance and an alias are not source authority.
 
-**Current code posture (Scytale):** new inserts use **`aosp`**; **`insert_queue`** maps legacy **`aosp_promote` → `aosp`**.
-
-**Instinct alignment:** Option **2** medium-term for brownfield; Option **4** long-term.
+The 2026-08-31 read-only production audit found zero `aosp_promote` rows. That
+snapshot does not authorize adding an alias, rewriting historical queue rows,
+or weakening the fail-closed outcome.
 
 ---
 
@@ -119,17 +118,32 @@ Paste operator output here when filing tickets:
 | `static_run_id` | `static_permission_matrix.run_id` | FK to `static_analysis_runs.id` (see matrix DDL). |
 | APK SHA-256 | `static_analysis_runs.base_apk_sha256` | Required column in `static_schema_gate` inventory. |
 | `version_code` / `version_name` | `app_versions` via `static_analysis_runs.app_version_id` | Join in linkage audit. |
-| `apk_id` | Matrix optional | Nullable; links to `android_apk_repository.id` when set. |
+| `apk_id` | Matrix optional | Nullable; repository identity is `android_apk_repository.apk_id`. |
 | Detector / tool version | `static_analysis_findings` / run metadata | Not part of matrix row — separate if needed for provenance. |
 | Device harvest | Device inventory tables | Not assumed for static APK path. |
 
 ### 4.2 Read-only linkage audit
 
 ```bash
-PYTHONPATH=. python scripts/db/audit_static_permission_observation_linkage.py
+PYTHONPATH=. python scripts/db/audit_static_permission_observation_linkage.py --json
+# Exact proposal output must be outside Git and is created mode 0600:
+PYTHONPATH=. python scripts/db/audit_static_permission_observation_linkage.py \
+  --proposal-output /absolute/private/path/static-linkage-proposal.json \
+  --summary-output /absolute/private/path/static-linkage-summary.json
 ```
 
-Reports: column presence, counts of matrix rows with missing run SHA-256, null `apk_id`, optional sha mismatch vs repository, and a small sample join.
+The audit proves the live table definitions, validates both hexadecimal hashes,
+converts them to bytes, and uses `base_apk_sha256` to resolve repository
+content identity. Numeric equality among matrix `apk_id`, run `id`, and
+repository `apk_id` is never accepted as APK identity. Required-query,
+incomplete-section, malformed-hash, and ambiguous-match states fail closed.
+
+The 2026-08-31 read-only recalculation found 27,051 non-null linkage rows across
+609 runs. All 27,051 resolve to a unique repository row by content hash and all
+27,051 current IDs are incorrect: 21,489 are direct run-ID substitutions,
+2,377 point to an existing numeric repository ID with a different hash, and
+3,185 point to no repository ID. The exact proposal was generated outside Git;
+it contains no executable UPDATE and has not been applied.
 
 ### 4.3 Candidate join (reference)
 
@@ -162,7 +176,7 @@ LIMIT 20;
 Ready for **S2 implementation design review** (not blind production obs writes) only when:
 
 - [ ] **Queue compatibility verified** — `audit_permission_intel_queue_compatibility.py` run on **production PI**; outcomes documented.  
-- [ ] **Legacy `aosp_promote`** — count **zero** *or* **Erebus alias (option 2)** accepted/deployed *or* data fix planned.  
+- [ ] **Legacy `aosp_promote`** — count **zero** or an independently reviewed exact-row maintenance plan exists; the runtime alias remains blocked.
 - [ ] **Observation identity** — option **A** or **C** (or E→A/C) selected with owner (see S2 doc §11).  
 - [ ] **Transform** — static rows can build validated payloads (`validate_proposed_static_observation_row`); **SHA-256** available at transform time (`base_apk_sha256` join).  
 - [ ] **Source/provenance** — `source` ENUM + `source_system` story agreed.  
@@ -188,4 +202,9 @@ Runs: `check_permission_intel.py`, queue audit, linkage audit, and the pytest bu
 | --- | --- |
 | Ready for S2 **implementation**? | **No** until identity + uniqueness + source are signed; queue evidence logged. |
 | Ready for S2 **design review**? | **Yes** after P1A scripts run once on shared PI + core. |
-| Next single decision? | **Surrogate `sample_id` registry vs extended UNIQUE** (S2 §11), in parallel with **Erebus `aosp_promote` alias** if legacy rows exist. |
+| Next single decision? | **Surrogate `sample_id` registry vs extended UNIQUE** (S2 §11). Any legacy queue remediation remains a separate governed maintenance decision. |
+
+Runtime-reference access and maintenance authority are separate. The runtime
+role may read approved PI reference views and submit through the governed
+surface, but it must not receive DDL, arbitrary PI DML, `obs_sample` writes, or
+repair-executor authority. No production grant was changed by this audit.
