@@ -57,11 +57,14 @@ python scripts/db/check_permission_intel.py
 cd /home/secadmin/Laughlin/GitHub/ScytaleDroid
 export PYTHONPATH=.
 python scripts/db/audit_permission_intel_queue_compatibility.py
-# Optional machine summary:
-python scripts/db/audit_permission_intel_queue_compatibility.py --json
+# Optional digest-bound machine evidence (path must be outside this repo):
+python scripts/db/audit_permission_intel_queue_compatibility.py --json \
+  --output /absolute/private/path/queue-compatibility.json
 ```
 
 Uses **`DATABASE()`** on the PI connection — do **not** hardcode `android_permission_intel.` in SQL when the DSN already selects the catalog.
+The output file is created atomically with mode `0600` and records the live v1
+release, schema/catalog digests, exhaustive-scope flag, and a semantic digest.
 
 ### 2.2 What the script reports
 

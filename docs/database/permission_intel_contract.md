@@ -69,10 +69,15 @@ work:
 
 ```bash
 PYTHONPATH=. python scripts/db/check_permission_intel.py
-PYTHONPATH=. python scripts/db/audit_permission_intel_queue_compatibility.py
+PYTHONPATH=. python scripts/db/audit_permission_intel_queue_compatibility.py \
+  --json --output /absolute/private/path/queue-compatibility.json
 PYTHONPATH=. python scripts/db/audit_static_permission_observation_linkage.py
 ./scripts/db/run_permission_intel_scytale_s2_readiness_audit.sh
 ```
+
+The queue report remains read-only. When `--output` is supplied, it writes a
+mode-`0600` evidence file outside the repository and binds the result to the
+live v1 release, schema/catalog digests, and its own semantic digest.
 
 Related active docs:
 

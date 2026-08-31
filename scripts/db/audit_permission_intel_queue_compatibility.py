@@ -20,7 +20,9 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,12 +34,48 @@ if str(_REPO_ROOT) not in sys.path:
 _QUEUE_ACTIVE: tuple[str, ...] = ("queued", "pending")
 
 
+def _semantic_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != "semantic_digest"}
+
+
+def _bind_semantic_digest(payload: dict[str, Any]) -> dict[str, Any]:
+    semantic = json.dumps(
+        _semantic_payload(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return {**payload, "semantic_digest": hashlib.sha256(semantic).hexdigest()}
+
+
+def _write_private_report(path: Path, payload: dict[str, Any]) -> Path:
+    from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+    resolved = path.expanduser().resolve()
+    try:
+        resolved.relative_to(_REPO_ROOT.resolve())
+    except ValueError:
+        pass
+    else:
+        raise ValueError("queue compatibility evidence must remain outside the repository")
+    resolved.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(resolved.parent, 0o700)
+    atomic_write_text(resolved, json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n")
+    os.chmod(resolved, 0o600)
+    return resolved
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--json",
         action="store_true",
         help="Emit machine-readable JSON summary as the last line (stderr for human banner).",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Write a mode-0600 digest-bound JSON report outside the repository.",
     )
     args = parser.parse_args(argv)
 
@@ -63,6 +101,12 @@ def main(argv: list[str] | None = None) -> int:
     print("# Permission Intel queue compatibility (read-only)")
     print(f"  database: {target.get('database')} @ {target.get('host')}:{target.get('port')}")
     print(f"  config_source: {target.get('source')}")
+
+    try:
+        catalog_gate = intel_db.fetch_v1_catalog_gate()
+    except Exception as exc:
+        sys.stderr.write(f"Permission Intel v1 catalog gate failed: {exc.__class__.__name__}\n")
+        return 2
 
     if not intel_db.intel_table_exists(intel_db.QUEUE_DICT_TABLE):
         sys.stderr.write(f"Table missing: {intel_db.QUEUE_DICT_TABLE}\n")
@@ -237,8 +281,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  authority breakdown: {resolution_by_authority}")
     print("  note: matches are resolution candidates only; this report performs no mutation")
 
-    summary = {
+    summary = _bind_semantic_digest({
+        "report_format": "scytaledroid-permission-queue-compatibility-v2",
+        "production_effect": "none",
+        "query_mode": "read_only",
         "pi_database": target.get("database"),
+        "catalog_release_id": catalog_gate.get("catalog_release_id"),
+        "catalog_digest": catalog_gate.get("catalog_digest"),
+        "schema_contract_id": catalog_gate.get("schema_contract_id"),
+        "schema_contract_version": catalog_gate.get("schema_contract_version"),
+        "exhaustive_scope": bool(catalog_gate.get("exhaustive_scope")),
         "legacy_aosp_promote_total": legacy_count,
         "active_scanned": len(active),
         "outcome_buckets": buckets,
@@ -249,7 +301,10 @@ def main(argv: list[str] | None = None) -> int:
             "no_exact_catalog_match": no_exact_catalog_match,
             "by_authority": resolution_by_authority,
         },
-    }
+    })
+    if args.output:
+        report_path = _write_private_report(args.output, summary)
+        print(f"  private report: {report_path}")
     if args.json:
         print("\nJSON_SUMMARY=" + json.dumps(summary, default=str))
 
