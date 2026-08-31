@@ -4,8 +4,8 @@
 Uses ``SCYTALEDROID_PERMISSION_INTEL_DB_*`` / URL — same resolution as
 ``scytaledroid.Database.db_core.permission_intel``. **No DML/DDL.**
 
-Mirrors Erebus ``permission_queue_apply`` / ``evaluate_queue_row`` semantics for
-``unknown_action`` detection (``aosp`` maps to apply; legacy ``aosp_promote`` does not).
+Mirrors the hardened Erebus queue vocabulary and AOSP promotion guard. Queue
+rows may propose review work, but cannot create accepted AOSP platform truth.
 
 Run from repo root::
 
@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"          earliest={r.get('earliest_created')} latest={r.get('latest_created')}")
 
-    print("\n## 2) Legacy queue_action = 'aosp_promote' (would be unknown_action for Erebus apply)")
+    print("\n## 2) Legacy queue_action = 'aosp_promote' (recognized but AOSP promotion remains blocked)")
     legacy_count = qscalar(
         f"""
         SELECT COUNT(*) FROM {intel_db.QUEUE_DICT_TABLE}
@@ -166,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     buckets: dict[str, int] = {"apply": 0, "skipped": 0, "rejected": 0, "error": 0}
     unknown_samples: list[dict[str, Any]] = []
+    error_samples: list[dict[str, Any]] = []
     null_prop: dict[str, int] = {
         "proposed_classification_null": 0,
         "proposed_bucket_null": 0,
@@ -179,36 +180,75 @@ def main(argv: list[str] | None = None) -> int:
             null_prop["proposed_bucket_null"] += 1
         bucket, detail = queue_row_apply_outcome(dict(r))
         buckets[bucket] = buckets.get(bucket, 0) + 1
-        if bucket == "error" and detail and str(detail).startswith("unknown_action"):
-            if len(unknown_samples) < 15:
-                unknown_samples.append(
-                    {
-                        "queue_id": r.get("queue_id"),
-                        "permission_string": r.get("permission_string"),
-                        "queue_action": r.get("queue_action"),
-                        "detail": detail,
-                    }
-                )
+        if bucket == "error" and detail:
+            sample = {
+                "queue_id": r.get("queue_id"),
+                "permission_string": r.get("permission_string"),
+                "queue_action": r.get("queue_action"),
+                "detail": detail,
+            }
+            if len(error_samples) < 15:
+                error_samples.append(sample)
+            if str(detail).startswith(("unknown_action", "unsupported queue action")):
+                if len(unknown_samples) < 15:
+                    unknown_samples.append(sample)
 
     print(f"  scanned active rows (limit 500): {len(active)}")
     print(f"  outcome buckets: {buckets}")
     print(
-        "  NULL/empty proposed fields (informational; ``aosp`` still maps to apply): "
+        "  NULL/empty proposed fields (informational; action vocabulary remains authoritative): "
         f"{null_prop}"
     )
-    if unknown_samples:
-        print("  sample unknown_action rows:")
-        for s in unknown_samples:
+    if error_samples:
+        print("  sample blocked/error rows:")
+        for s in error_samples:
             print(f"    {s}")
     else:
-        print("  no unknown_action in sampled active rows")
+        print("  no blocked/error rows in sampled active rows")
+
+    print("\n## 5) Blocked AOSP rows with exact accepted-catalog evidence")
+    resolution_rows = qall(
+        f"""
+        SELECT COALESCE(p.authority_class, 'NO_EXACT_MATCH') AS authority_class,
+               COUNT(*) AS rows_count
+        FROM {intel_db.QUEUE_DICT_TABLE} AS q
+        LEFT JOIN android_permission_v1_current_permission AS p
+          ON BINARY p.canonical_permission = BINARY q.permission_string
+        WHERE LOWER(TRIM(q.status)) IN ({in_status})
+          AND LOWER(TRIM(q.queue_action)) IN ('aosp', 'aosp_promote')
+        GROUP BY COALESCE(p.authority_class, 'NO_EXACT_MATCH')
+        ORDER BY rows_count DESC, authority_class
+        """
+    )
+    resolution_by_authority = {
+        str(row.get("authority_class") or "NO_EXACT_MATCH"): int(
+            row.get("rows_count") or 0
+        )
+        for row in resolution_rows
+    }
+    exact_catalog_matches = sum(
+        count
+        for authority, count in resolution_by_authority.items()
+        if authority != "NO_EXACT_MATCH"
+    )
+    no_exact_catalog_match = resolution_by_authority.get("NO_EXACT_MATCH", 0)
+    print(f"  exact accepted-catalog matches: {exact_catalog_matches}")
+    print(f"  no exact accepted-catalog match: {no_exact_catalog_match}")
+    print(f"  authority breakdown: {resolution_by_authority}")
+    print("  note: matches are resolution candidates only; this report performs no mutation")
 
     summary = {
         "pi_database": target.get("database"),
         "legacy_aosp_promote_total": legacy_count,
         "active_scanned": len(active),
         "outcome_buckets": buckets,
+        "error_samples": error_samples,
         "unknown_action_samples": unknown_samples,
+        "catalog_resolution_candidates": {
+            "exact_catalog_matches": exact_catalog_matches,
+            "no_exact_catalog_match": no_exact_catalog_match,
+            "by_authority": resolution_by_authority,
+        },
     }
     if args.json:
         print("\nJSON_SUMMARY=" + json.dumps(summary, default=str))
