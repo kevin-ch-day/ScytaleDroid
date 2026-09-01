@@ -66,12 +66,23 @@ class PermissionDescriptor:
 class PermissionCatalog:
     """In-memory lookup table for Android permission metadata."""
 
-    def __init__(self, *, entries: Mapping[str, PermissionDescriptor], version: str) -> None:
-        self._entries = {name.lower(): descriptor for name, descriptor in entries.items()}
+    def __init__(
+        self,
+        *,
+        entries: Mapping[str, PermissionDescriptor],
+        version: str,
+        case_sensitive: bool = False,
+    ) -> None:
+        self._case_sensitive = case_sensitive
+        self._entries = {
+            name if case_sensitive else name.lower(): descriptor
+            for name, descriptor in entries.items()
+        }
         self.version = version
 
     def describe(self, name: str) -> PermissionDescriptor | None:
-        return self._entries.get(name.lower())
+        key = name if self._case_sensitive else name.lower()
+        return self._entries.get(key)
 
     def guard_strength(self, name: str) -> str:
         descriptor = self.describe(name)
@@ -126,9 +137,9 @@ def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
         return {}, "0"
 
     try:
-        rows = intel_q.fetch_aosp_permission_catalog_rows()
+        rows = intel_q.fetch_v1_permission_catalog_rows()
     except Exception:
-        rows = []
+        return {}, "v1-unavailable" if intel_q.is_permission_intel_configured() else "0"
     if not rows:
         return {}, "0"
 
@@ -136,16 +147,16 @@ def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
     for row in rows:
         if not row:
             continue
-        name = str(row[0] or "").strip()
+        name = str(row.get("canonical_permission") or "").strip()
         if not name:
             continue
-        tokens = _normalise_tokens(row[1] or "")
+        tokens = _normalise_tokens(row.get("compatibility_protection_expression") or "")
         entries[name] = PermissionDescriptor(
             name=name,
             protection=tokens,
-            source="dict_aosp",
-            added_api=_coerce_int(row[2]),
-            deprecated_api=_coerce_int(row[3]),
+            source="permission_intel_v1_shadow",
+            added_api=_coerce_int(row.get("accepted_platform_release")),
+            deprecated_api=None,
         )
 
     version = str(len(entries))
@@ -195,11 +206,13 @@ def load_permission_catalog() -> PermissionCatalog:
 
     entries, version = _load_db_catalog()
     if entries:
-        return PermissionCatalog(entries=entries, version=version)
+        return PermissionCatalog(entries=entries, version=version, case_sensitive=True)
+    if version == "v1-unavailable":
+        return PermissionCatalog(entries={}, version=version)
     for path in _default_catalog_paths():
         try:
             origin = path.stem
-            entries = _load_yaml_catalog(path, origin=origin)
+            entries = _load_yaml_catalog(path, origin=f"fallback_non_authoritative:{origin}")
         except Exception:
             continue
         if entries:
@@ -235,7 +248,11 @@ def build_catalog_from_permissions_xml(xml_path: Path) -> PermissionCatalog:
             protection=tokens,
             source="platform_xml",
         )
-    return PermissionCatalog(entries=entries, version=str(xml_path.stat().st_mtime_ns))
+    return PermissionCatalog(
+        entries=entries,
+        version=str(xml_path.stat().st_mtime_ns),
+        case_sensitive=True,
+    )
 
 
 def classify_permission(

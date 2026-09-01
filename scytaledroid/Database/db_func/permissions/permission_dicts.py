@@ -134,17 +134,17 @@ def upsert_unknown(payload: Mapping[str, object]) -> None:
 
 def insert_queue(payload: Mapping[str, object]) -> None:
     params = dict(payload)
-    # Erebus queue-apply maps ``aosp`` via class_action_map; ``aosp_promote`` is not recognized.
+    # A queue candidate is not accepted platform truth. Legacy aliases remain review-only.
     qa = str(params.get("queue_action") or "").strip().lower()
-    if qa == "aosp_promote":
-        params["queue_action"] = "aosp"
+    if qa in {"aosp", "aosp_promote"}:
+        params["queue_action"] = "defer"
     now = _utc_now()
     params.setdefault("proposed_bucket", None)
     params.setdefault("proposed_classification", None)
-    params.setdefault("triage_status", None)
+    params.setdefault("triage_status", "new")
     params.setdefault("notes", None)
-    params.setdefault("requested_by", None)
-    params.setdefault("source_system", "web")
+    params.setdefault("requested_by", "scytaledroid")
+    params.setdefault("source_system", "scytaledroid")
     params.setdefault("created_at_utc", now)
     params.setdefault("updated_at_utc", now)
     params.setdefault("status", "queued")

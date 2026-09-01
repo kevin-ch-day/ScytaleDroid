@@ -79,7 +79,7 @@ def _scytale_emitted_dict_unknown_triage_statuses() -> frozenset[str]:
 
 def _scytale_queue_action_from_static() -> frozenset[str]:
     """queue_action literals emitted by static ``permissions_db`` (not governance CSV import)."""
-    return frozenset({"aosp"})
+    return frozenset({"defer"})
 
 
 def _scytale_queue_source_system() -> frozenset[str]:
@@ -114,10 +114,10 @@ def test_permissions_db_ghostaosp_broadcast_perms_stable() -> None:
     }
 
 
-def test_queue_action_aosp_is_erbus_compatible() -> None:
-    """Static path emits ``aosp`` — matches Erebus ``permission_queue_apply.class_action_map``."""
+def test_queue_action_is_review_only() -> None:
+    """Static AOSP-like gaps are deferred; a queue row cannot establish platform truth."""
     scytale_actions = _scytale_queue_action_from_static()
-    assert scytale_actions == {"aosp"}
+    assert scytale_actions == {"defer"}
     assert scytale_actions <= PI_ECOSYSTEM_QUEUE_ACTION_EXAMPLES_FROM_EREBUS
 
 
@@ -140,7 +140,7 @@ def test_insert_queue_default_status_is_documented(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(intel_mod, "insert_permission_queue", _fake_insert)
     permission_dicts.insert_queue(payload)
-    assert captured.get("queue_action") == "aosp"
+    assert captured.get("queue_action") == "defer"
     assert captured.get("status") == "queued"
     assert captured["status"] in PI_DOCUMENTED_QUEUE_ROW_WORKFLOW_STATUSES
 
