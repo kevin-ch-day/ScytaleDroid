@@ -31,6 +31,11 @@ SELECT
   s.session_link_rows,
   s.rollup_rows,
   s.persistence_failure_rows,
+  s.expected_package_count,
+  s.reconciled_package_count,
+  s.completion_reconciliation_status,
+  s.selection_artifact_manifest_sha256,
+  s.completion_reconciled_at_utc,
   s.web_visibility_default,
   s.cleanup_status,
   s.superseded_by_session_id,
@@ -42,6 +47,10 @@ SELECT
     WHEN COALESCE(s.interrupted_run_count, 0) <> 0 THEN 0
     WHEN COALESCE(s.persist_error_run_count, 0) <> 0 THEN 0
     WHEN COALESCE(s.persistence_failure_rows, 0) <> 0 THEN 0
+    WHEN s.completion_reconciliation_status IS NOT NULL
+      AND s.completion_reconciliation_status <> 'COMPLETE_RECONCILED' THEN 0
+    WHEN s.expected_package_count IS NOT NULL
+      AND COALESCE(s.reconciled_package_count, 0) <> s.expected_package_count THEN 0
     WHEN (
       LOWER(COALESCE(s.session_stamp, '')) LIKE '%qa%'
       OR LOWER(COALESCE(s.session_label, '')) LIKE '%qa%'
@@ -73,6 +82,12 @@ SELECT
   END AS web_default_eligible,
   CASE
     WHEN COALESCE(s.session_status, '') = 'IN_PROGRESS' THEN 'in_progress_unfinalized'
+    WHEN s.completion_reconciliation_status IS NOT NULL
+      AND s.completion_reconciliation_status <> 'COMPLETE_RECONCILED'
+      THEN 'completion_reconciliation_failed'
+    WHEN s.expected_package_count IS NOT NULL
+      AND COALESCE(s.reconciled_package_count, 0) <> s.expected_package_count
+      THEN 'completion_reconciliation_failed'
     WHEN s.session_disposition = 'interrupted_partial_session' THEN 'interrupted_by_operator'
     WHEN s.session_disposition = 'mixed_completed_failed_session' THEN 'mixed_needs_review'
     WHEN s.session_disposition = 'broken_persist_error_session' THEN 'broken_persistence_historical'
@@ -99,6 +114,12 @@ SELECT
   END AS health_class,
   CASE
     WHEN s.session_status = 'IN_PROGRESS' THEN 'operator_review'
+    WHEN s.completion_reconciliation_status IS NOT NULL
+      AND s.completion_reconciliation_status <> 'COMPLETE_RECONCILED'
+      THEN 'not_default_usable'
+    WHEN s.expected_package_count IS NOT NULL
+      AND COALESCE(s.reconciled_package_count, 0) <> s.expected_package_count
+      THEN 'not_default_usable'
     WHEN s.session_status IN ('FAILED', 'INTERRUPTED') THEN 'not_default_usable'
     WHEN s.session_status = 'PARTIAL' THEN 'operator_review'
     WHEN COALESCE(s.session_status, '') = 'COMPLETED'
@@ -129,6 +150,10 @@ SELECT
   END AS usability_class,
   CASE
     WHEN s.session_status = 'IN_PROGRESS' THEN 1
+    WHEN s.completion_reconciliation_status IS NOT NULL
+      AND s.completion_reconciliation_status <> 'COMPLETE_RECONCILED' THEN 2
+    WHEN s.expected_package_count IS NOT NULL
+      AND COALESCE(s.reconciled_package_count, 0) <> s.expected_package_count THEN 2
     WHEN COALESCE(s.session_status, '') = 'COMPLETED'
       AND COALESCE(s.failed_run_count, 0) = 0
       AND COALESCE(s.persistence_failure_rows, 0) = 0
@@ -167,6 +192,15 @@ SELECT
       THEN ROUND(s.completed_run_count / s.total_run_count * 100, 1)
     ELSE 0
   END AS completion_pct,
+  CASE
+    WHEN COALESCE(s.expected_package_count, 0) > 0
+      THEN ROUND(
+        LEAST(COALESCE(s.reconciled_package_count, 0), s.expected_package_count)
+        / s.expected_package_count * 100,
+        1
+      )
+    ELSE NULL
+  END AS selection_reconciliation_pct,
   s.tool_semver,
   s.tool_git_commit,
   s.schema_version,

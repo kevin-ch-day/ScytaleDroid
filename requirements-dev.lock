@@ -200,6 +200,8 @@ ptyprocess==0.7.0
     # via pexpect
 publicsuffix2==2.20191221
     # via mitmproxy
+publicsuffixlist==1.0.2.20260625
+    # via -r requirements.in
 pure-eval==0.2.3
     # via stack-data
 pyasn1==0.6.4

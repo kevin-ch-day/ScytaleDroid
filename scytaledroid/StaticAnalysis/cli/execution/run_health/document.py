@@ -33,6 +33,8 @@ def _workflow_run_status(
         if completed_ct > 0:
             return "partial"
         return "failed"
+    if outcome.failures:
+        return "failed"
     if db_persistence_status == "failed":
         return "failed"
     if failed_ct > 0:
@@ -174,7 +176,8 @@ def build_run_health_document(
 
     detector_errors_total = 0
     detector_warnings_total = 0
-    detector_failures_total = 0
+    policy_gate_failures_total = 0
+    finding_signals_total = 0
     parse_fallback_total = 0
     resource_parse_partial_total = 0
     resource_reparse_candidate_total = 0
@@ -185,6 +188,12 @@ def build_run_health_document(
     p0_persisted_total = 0
     p0_capped_total = 0
     string_warn_apps = 0
+    placeholder_stage_opportunities_total = 0
+    implemented_stage_opportunities_total = 0
+    executed_implemented_stage_opportunities_total = 0
+    placeholder_affected_apps = 0
+    placeholder_detector_ids: set[str] = set()
+    non_placeholder_skip_class_counts: dict[str, int] = {}
     partial_ct = completed_ct = failed_ct = skipped_ct = 0
     artifact_rows_total = outcome.total_artifacts
     scanned_success = outcome.completed_artifacts
@@ -192,12 +201,42 @@ def build_run_health_document(
     apps_out: list[dict[str, object]] = []
     for app in outcome.results:
         summary = _summarize_app_pipeline(app)
+        app_placeholder_stages = int(
+            summary.get("placeholder_stage_opportunities", 0) or 0
+        )
+        app_implemented_stages = int(
+            summary.get("implemented_stage_opportunities", 0) or 0
+        )
+        app_executed_implemented = int(
+            summary.get("executed_implemented_stage_opportunities", 0) or 0
+        )
+        placeholder_stage_opportunities_total += app_placeholder_stages
+        implemented_stage_opportunities_total += app_implemented_stages
+        executed_implemented_stage_opportunities_total += app_executed_implemented
+        placeholder_affected_apps += int(app_placeholder_stages > 0)
+        for placeholder in summary.get("placeholder_detectors") or ():
+            if not isinstance(placeholder, Mapping):
+                continue
+            detector_id = str(
+                placeholder.get("detector") or placeholder.get("section") or ""
+            ).strip()
+            if detector_id:
+                placeholder_detector_ids.add(detector_id)
+        skip_classes = summary.get("non_placeholder_skip_class_counts")
+        if isinstance(skip_classes, Mapping):
+            for key, value in skip_classes.items():
+                token = str(key)
+                non_placeholder_skip_class_counts[token] = (
+                    non_placeholder_skip_class_counts.get(token, 0)
+                    + int(value or 0)
+                )
         rollup = rollup_parse_fallback_signals(app)
 
         errs = int(summary.get("error_count", 0) or 0)
         detector_errors_total += errs
         detector_warnings_total += int(summary.get("warn_count", 0) or 0)
-        detector_failures_total += int(summary.get("fail_count", 0) or 0)
+        policy_gate_failures_total += int(summary.get("policy_fail_count", 0) or 0)
+        finding_signals_total += int(summary.get("finding_fail_count", 0) or 0)
 
         pf_est = int(rollup.get("parse_fallback_events_est", 0) or 0)
         parse_fallback_total += pf_est
@@ -281,7 +320,7 @@ def build_run_health_document(
         app_detector_posture = _app_detector_posture(
             detector_errors=errs,
             detector_warnings=int(summary.get("warn_count", 0) or 0),
-            detector_failures=int(summary.get("fail_count", 0) or 0),
+            detector_failures=int(summary.get("policy_fail_count", 0) or 0) + int(summary.get("finding_fail_count", 0) or 0),
         )
         app_workflow_completion_status = _app_workflow_completion_status(
             app=app,
@@ -317,6 +356,16 @@ def build_run_health_document(
                 "detector_total_agg": summary.get("detector_total"),
                 "detector_errors_agg": errs,
                 "skipped_detectors_merged": summary.get("skipped_detectors") or [],
+                "measurement_coverage": {
+                    "planned_stage_opportunities": summary.get("detector_total"),
+                    "implemented_stage_opportunities": app_implemented_stages,
+                    "executed_implemented_stage_opportunities": app_executed_implemented,
+                    "placeholder_stage_opportunities": app_placeholder_stages,
+                    "implemented_stage_execution_rate": summary.get(
+                        "implemented_stage_execution_rate"
+                    ),
+                    "placeholder_detectors": summary.get("placeholder_detectors") or [],
+                },
                 "parse_fallback_signals": rollup,
                 "string_summary": str_sig,
                 "report_saved": bool(collect_report_paths_for_app(app)),
@@ -368,7 +417,7 @@ def build_run_health_document(
     detector_pipeline_status = _session_detector_pipeline_status(
         detector_errors_total,
         detector_warnings_total,
-        detector_failures_total,
+        policy_gate_failures_total + finding_signals_total,
     )
     workflow_completion_status = _workflow_run_status(
         outcome=outcome,
@@ -382,7 +431,7 @@ def build_run_health_document(
     detector_posture = _detector_posture(
         detector_errors_total=detector_errors_total,
         detector_warnings_total=detector_warnings_total,
-        detector_failures_total=detector_failures_total,
+        detector_failures_total=policy_gate_failures_total + finding_signals_total,
     )
     finding_fidelity_status = _finding_fidelity_status(
         runtime_total=findings_runtime_total,
@@ -392,6 +441,45 @@ def build_run_health_document(
     )
     string_session_status = "warnings" if string_warn_apps > 0 else "ok"
     governance_snapshot = infer_session_governance_snapshot(params)
+    resolved_worker_budget = outcome.session_metrics.get("resolved_worker_budget")
+    artifact_concurrency_cap = outcome.session_metrics.get("artifact_concurrency_cap")
+    implemented_execution_rate = (
+        round(
+            executed_implemented_stage_opportunities_total
+            / implemented_stage_opportunities_total,
+            6,
+        )
+        if implemented_stage_opportunities_total
+        else None
+    )
+    design_deferred_stage_opportunities = int(
+        non_placeholder_skip_class_counts.get("design_deferred", 0)
+    )
+    non_deferred_implemented_stage_opportunities = max(
+        0,
+        implemented_stage_opportunities_total - design_deferred_stage_opportunities,
+    )
+    non_deferred_implemented_execution_rate = (
+        round(
+            executed_implemented_stage_opportunities_total
+            / non_deferred_implemented_stage_opportunities,
+            6,
+        )
+        if non_deferred_implemented_stage_opportunities
+        else None
+    )
+    if placeholder_stage_opportunities_total > 0:
+        measurement_coverage_status = "partial_declared_placeholders"
+    elif (
+        implemented_stage_opportunities_total > 0
+        and executed_implemented_stage_opportunities_total
+        < implemented_stage_opportunities_total
+    ):
+        measurement_coverage_status = "partial_runtime_availability"
+    elif implemented_stage_opportunities_total > 0:
+        measurement_coverage_status = "complete_configured"
+    else:
+        measurement_coverage_status = "unknown"
 
     payload: dict[str, object] = {
         "schema_version": 3,
@@ -413,6 +501,24 @@ def build_run_health_document(
         "detector_posture": detector_posture,
         "detector_posture_status": detector_posture,
         "finding_fidelity_status": finding_fidelity_status,
+        "measurement_coverage": {
+            "status": measurement_coverage_status,
+            "implemented_stage_opportunities": implemented_stage_opportunities_total,
+            "executed_implemented_stage_opportunities": executed_implemented_stage_opportunities_total,
+            "placeholder_stage_opportunities": placeholder_stage_opportunities_total,
+            "implemented_stage_execution_rate": implemented_execution_rate,
+            "non_deferred_implemented_stage_opportunities": non_deferred_implemented_stage_opportunities,
+            "non_deferred_implemented_execution_rate": non_deferred_implemented_execution_rate,
+            "non_placeholder_skip_class_counts": dict(
+                sorted(non_placeholder_skip_class_counts.items())
+            ),
+            "placeholder_affected_apps": placeholder_affected_apps,
+            "placeholder_detector_ids": sorted(placeholder_detector_ids),
+            "interpretation": (
+                "Detector-stage execution coverage only; not source-code coverage, "
+                "vulnerability recall, or evidence that unreported weaknesses are absent."
+            ),
+        },
         "aborted": bool(outcome.aborted),
         "persistence_requested": persistence_enabled,
         "persistence_ready_param": bool(getattr(params, "persistence_ready", False)),
@@ -421,11 +527,13 @@ def build_run_health_document(
         "governance": governance_snapshot,
         "status_reasons": {
             "detector_warnings": detector_warnings_total,
-            "detector_failures": detector_failures_total,
+            "detector_failures": policy_gate_failures_total + finding_signals_total,
+            "policy_gate_failures": policy_gate_failures_total,
+            "finding_signals": finding_signals_total,
             "detector_errors": detector_errors_total,
             # Explicit names for operators (same counts as detector_errors / detector_failures).
             "detector_execution_errors": detector_errors_total,
-            "detector_finding_failures": detector_failures_total,
+            "detector_finding_failures": finding_signals_total,
             "parse_fallbacks": parse_fallback_total,
             "resource_parse_partial_artifacts": resource_parse_partial_total,
             "resource_reparse_candidate_artifacts": resource_reparse_candidate_total,
@@ -434,6 +542,8 @@ def build_run_health_document(
             "workflow_completion_status": workflow_completion_status,
             "detector_posture": detector_posture,
             "finding_fidelity_status": finding_fidelity_status,
+            "measurement_coverage_status": measurement_coverage_status,
+            "placeholder_detector_ids": sorted(placeholder_detector_ids),
             "detector_pipeline_status": detector_pipeline_status,
             # Deprecated alias: historically named "status" but mixed policy-fail stages with execution errors.
             "detector_status": detector_pipeline_status,
@@ -444,6 +554,23 @@ def build_run_health_document(
             "app_total": len(outcome.results),
             "artifact_total_discovered_estimate": artifact_rows_total,
             "artifacts_scan_completed_counter": scanned_success,
+            # Requested/available budget and observed peak are distinct. A
+            # nominal auto worker budget does not prove artifact-level
+            # parallel execution occurred.
+            "resolved_worker_budget": resolved_worker_budget,
+            "artifact_concurrency_cap": artifact_concurrency_cap,
+            "measurement_coverage_status": measurement_coverage_status,
+            "implemented_stage_opportunities": implemented_stage_opportunities_total,
+            "executed_implemented_stage_opportunities": executed_implemented_stage_opportunities_total,
+            "placeholder_stage_opportunities": placeholder_stage_opportunities_total,
+            "implemented_stage_execution_rate": implemented_execution_rate,
+            "non_deferred_implemented_stage_opportunities": non_deferred_implemented_stage_opportunities,
+            "non_deferred_implemented_execution_rate": non_deferred_implemented_execution_rate,
+            "non_placeholder_skip_class_counts": dict(
+                sorted(non_placeholder_skip_class_counts.items())
+            ),
+            "placeholder_affected_apps": placeholder_affected_apps,
+            "placeholder_detector_ids": sorted(placeholder_detector_ids),
             "apps_complete_final": completed_ct,
             "apps_partial_final": partial_ct,
             # Neutral/operator-facing alias for compatibility-only "partial" app rollups.
@@ -452,7 +579,9 @@ def build_run_health_document(
             "apps_skipped_final": skipped_ct,
             "detector_errors_total_estimate": detector_errors_total,
             "detector_warnings_total_estimate": detector_warnings_total,
-            "detector_failures_total_estimate": detector_failures_total,
+            "detector_failures_total_estimate": policy_gate_failures_total + finding_signals_total,
+            "policy_gate_failures_total_estimate": policy_gate_failures_total,
+            "finding_signals_total_estimate": finding_signals_total,
             "parse_fallback_events_total_estimate": parse_fallback_total,
             "resource_parse_partial_artifacts_total": resource_parse_partial_total,
             "resource_reparse_candidate_artifacts_total": resource_reparse_candidate_total,

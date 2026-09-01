@@ -8,7 +8,7 @@ from typing import Any
 
 from scytaledroid.Database.db_core import db_engine
 from scytaledroid.Database.db_core import db_queries as core_q
-from scytaledroid.Database.db_core.db_queries import run_sql_write
+from scytaledroid.Database.db_core.db_queries import run_sql_rowcount, run_sql_write
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from .contracts import normalize_run_status
@@ -709,7 +709,7 @@ def update_static_run_status(
     ended_at_utc: str | None = None,
     abort_reason: str | None = None,
     abort_signal: str | None = None,
-) -> None:
+) -> bool:
     now = _utc_now_dbstr()
     ended_at = _normalize_datetime_value(ended_at_utc) or now
     canonical_status = normalize_run_status(status)
@@ -718,7 +718,7 @@ def update_static_run_status(
         abort_reason=abort_reason,
     )
     try:
-        run_sql_write(
+        affected = run_sql_rowcount(
             """
             UPDATE static_analysis_runs
             SET status=%s,
@@ -728,12 +728,22 @@ def update_static_run_status(
             WHERE id=%s
             """,
             (canonical_status, ended_at, persisted_abort, abort_signal, static_run_id),
+            query_name="static_run.update_terminal_status",
         )
+        if affected != 1:
+            log.warning(
+                "Failed to verify static run terminal status update "
+                f"for {static_run_id}: affected_rows={affected}",
+                category="static_analysis",
+            )
+            return False
+        return True
     except Exception as exc:
         log.warning(
             f"Failed to update static run status for {static_run_id}: {exc}",
             category="static_analysis",
         )
+        return False
 
 
 def finalize_open_static_runs(

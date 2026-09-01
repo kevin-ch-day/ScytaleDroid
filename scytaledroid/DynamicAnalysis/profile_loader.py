@@ -134,12 +134,6 @@ def load_all_profiles() -> list[dict[str, object]]:
     return _merge_profiles(load_operational_profiles(), load_research_cohort_profiles())
 
 
-def load_db_profiles() -> list[dict[str, object]]:
-    """Legacy compatibility alias for callers that still expect merged profile results."""
-
-    return load_all_profiles()
-
-
 def load_profile_packages(profile_key: str) -> set[str]:
     normalized = _normalize_key(profile_key)
     cohort_key = _cohort_key_from_profile_key(normalized)
@@ -172,7 +166,6 @@ def load_profile_packages(profile_key: str) -> set[str]:
 
 __all__ = [
     "load_all_profiles",
-    "load_db_profiles",
     "load_operational_profiles",
     "load_profile_packages",
     "load_research_cohort_profiles",

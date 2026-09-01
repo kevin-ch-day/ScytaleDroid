@@ -153,3 +153,56 @@ def test_fallback_sums_metadata_when_no_detector_results() -> None:
     out = _summarize_app_pipeline(app)
     assert out["warn_count"] == 1
     assert out["ok_count"] == 1
+
+
+def test_summarize_preserves_placeholder_coverage_across_splits() -> None:
+    placeholder = {
+        "detector": "dynamic_loading",
+        "section": "dynamic_loading",
+        "reason": "not implemented",
+    }
+    summary = {
+        "detector_total": 20,
+        "detector_executed": 17,
+        "detector_skipped": 3,
+        "total_duration_sec": 1.0,
+        "status_counts": {"OK": 17, "SKIPPED": 3},
+        "severity_counts": {},
+        "placeholder_detector_count": 1,
+        "placeholder_detectors": [placeholder],
+        "non_placeholder_skip_class_counts": {"design_deferred": 1},
+    }
+    now = datetime.now(UTC)
+    app = AppRunResult("com.example.app", "Cat")
+    app.artifacts = [
+        ArtifactOutcome(
+            "base",
+            _minimal_report(detector_results=(), pipeline_summary=dict(summary)),
+            Counter(),
+            0.0,
+            None,
+            now,
+            now,
+        ),
+        ArtifactOutcome(
+            "split",
+            _minimal_report(detector_results=(), pipeline_summary=dict(summary)),
+            Counter(),
+            0.0,
+            None,
+            now,
+            now,
+        ),
+    ]
+
+    out = _summarize_app_pipeline(app)
+
+    assert out["placeholder_detector_count"] == 1
+    assert out["placeholder_detectors"] == [placeholder]
+    assert out["placeholder_stage_opportunities"] == 2
+    assert out["implemented_stage_opportunities"] == 38
+    assert out["executed_implemented_stage_opportunities"] == 34
+    assert out["implemented_stage_execution_rate"] == round(34 / 38, 6)
+    assert out["non_placeholder_skip_class_counts"] == {"design_deferred": 2}
+    assert out["non_deferred_implemented_stage_opportunities"] == 36
+    assert out["non_deferred_implemented_execution_rate"] == round(34 / 36, 6)

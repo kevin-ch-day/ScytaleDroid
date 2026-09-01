@@ -308,7 +308,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
     )
     from scytaledroid.DynamicAnalysis.ml.deliverable_bundle_paths import (
         freeze_anchor_path,
-        output_phase_e_bundle_root,
+        output_locked_runtime_bundle_root,
     )
     from scytaledroid.DynamicAnalysis.ml.ml_parameters_profile import (
         EXEMPLAR_ALLOWED_INTERACTION_TAGS,
@@ -450,7 +450,7 @@ def _write_phase_e_deliverables_bundle_from_pin() -> bool:
         print(status_messages.status(f"Bundle generation failed: {exc}", level="fail"))
         return False
 
-    print(status_messages.status(f"Wrote baseline bundle: {relative_path(output_phase_e_bundle_root())}", level="success"))
+    print(status_messages.status(f"Wrote baseline bundle: {relative_path(output_locked_runtime_bundle_root())}", level="success"))
     print(status_messages.status(f"Manifest: {relative_path(artifacts.artifacts_manifest_json)}", level="info"))
     try:
         required_payload = json.loads(artifacts.required_fields_validation_json.read_text(encoding="utf-8"))

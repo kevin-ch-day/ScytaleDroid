@@ -10,22 +10,23 @@ def _summary_source() -> str:
     ).read_text(encoding="utf-8")
 
 
-def test_refresh_summary_update_omits_operator_owned_columns():
+def _refresh_update_statement() -> str:
     text = _summary_source()
-    u = text.find("UPDATE static_analysis_sessions")
-    w = text.find("WHERE static_session_id", u)
-    assert u != -1 and w != -1
-    stmt = text[u:w]
+    status_set = text.find("session_status = %s")
+    u = text.rfind("UPDATE static_analysis_sessions", 0, status_set)
+    w = text.find("WHERE static_session_id", status_set)
+    assert status_set != -1 and u != -1 and w != -1
+    return text[u:w]
+
+
+def test_refresh_summary_update_omits_operator_owned_columns():
+    stmt = _refresh_update_statement()
     for col in ("web_visibility_default", "cleanup_status", "superseded_by_session_id"):
         assert col not in stmt
 
 
 def test_refresh_summary_update_propagates_runtime_provenance():
-    text = _summary_source()
-    u = text.find("UPDATE static_analysis_sessions")
-    w = text.find("WHERE static_session_id", u)
-    assert u != -1 and w != -1
-    stmt = text[u:w]
+    stmt = _refresh_update_statement()
     assert "tool_semver = COALESCE(%s, tool_semver)" in stmt
     assert "tool_git_commit = COALESCE(%s, tool_git_commit)" in stmt
     assert "schema_version = COALESCE(%s, schema_version)" in stmt

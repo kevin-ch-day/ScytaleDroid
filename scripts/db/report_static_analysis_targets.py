@@ -20,9 +20,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scytaledroid.Database.db_scripts import package_lineage_read_model as _lineage_read_model
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
@@ -217,27 +214,6 @@ def _print_text(payload: dict[str, Any], *, limit: int) -> None:
     print("=== Notes ===")
     for note in payload["notes"]:
         print(f"  - {note}")
-
-
-
-# Compatibility aliases for tests and any external callers that imported these
-# script-private helpers before the shared read model existed.
-_fetch_base_rows = _lineage_read_model.fetch_base_rows
-_fetch_static_coverage = _lineage_read_model.fetch_static_coverage
-_fetch_dynamic_coverage = _lineage_read_model.fetch_dynamic_coverage
-_fetch_apk_sets_by_hash = _lineage_read_model.fetch_apk_sets_by_hash
-_fetch_same_version_hash_drift_keys = _lineage_read_model.fetch_same_version_hash_drift_keys
-_table_exists = _lineage_read_model.table_exists
-_recorded_abs_path = _lineage_read_model.recorded_abs_path
-_path_exists = _lineage_read_model.path_exists
-_norm_sha = _lineage_read_model.norm_sha
-_byte_status = _lineage_read_model.byte_status
-_split_status = _lineage_read_model.split_status
-_target_reason = _lineage_read_model.target_reason
-_target_status = _lineage_read_model.target_status
-_priority = _lineage_read_model.target_priority
-_operator_action = _lineage_read_model.operator_action
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

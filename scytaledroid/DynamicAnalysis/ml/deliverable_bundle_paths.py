@@ -145,37 +145,3 @@ def output_locked_runtime_bundle_artifacts_manifest_path() -> Path:
 
 def output_locked_runtime_bundle_readme_path() -> Path:
     return output_locked_runtime_bundle_root() / "README.md"
-
-
-# Backward-compatible helper aliases. Keep these until older scripts and tests are
-# migrated off the historical phase label.
-def output_phase_e_bundle_root() -> Path:
-    return output_locked_runtime_bundle_root()
-
-
-def output_phase_e_bundle_figures_dir() -> Path:
-    return output_locked_runtime_bundle_figures_dir()
-
-
-def output_phase_e_bundle_tables_dir() -> Path:
-    return output_locked_runtime_bundle_tables_dir()
-
-
-def output_phase_e_bundle_appendix_dir() -> Path:
-    return output_locked_runtime_bundle_appendix_dir()
-
-
-def output_phase_e_bundle_manifest_dir() -> Path:
-    return output_locked_runtime_bundle_manifest_dir()
-
-
-def output_phase_e_bundle_freeze_copy_path() -> Path:
-    return output_locked_runtime_bundle_freeze_copy_path()
-
-
-def output_phase_e_bundle_artifacts_manifest_path() -> Path:
-    return output_locked_runtime_bundle_artifacts_manifest_path()
-
-
-def output_phase_e_bundle_readme_path() -> Path:
-    return output_locked_runtime_bundle_readme_path()

@@ -264,6 +264,29 @@ DYNAMIC_SESSION_QFG_MIGRATIONS: tuple[MigrationSpec, ...] = (
     ),
 )
 
+DYNAMIC_DOMAIN_NORMALIZATION_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260816_dynamic_domain_normalization_v2",
+        migration_name="Add versioned dynamic registrable-domain identity",
+        schema_version_before="0.3.15-dynamic-session-qfg-metadata",
+        schema_version_after="0.3.16-dynamic-domain-normalization-v2",
+        statements=(
+            "ALTER TABLE dynamic_domain_observations "
+            "ADD COLUMN IF NOT EXISTS registrable_domain_psl VARCHAR(255) DEFAULT NULL, "
+            "ADD COLUMN IF NOT EXISTS registrable_domain_normalization VARCHAR(96) NOT NULL DEFAULT 'legacy_suffix_v1', "
+            "ADD COLUMN IF NOT EXISTS registrable_domain_reference_sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_dyn_domain_obs_registrable_psl "
+            "ON dynamic_domain_observations (registrable_domain_psl)",
+        ),
+        description=(
+            "Preserves dynamic aggregation roots while adding a separate pinned-PSL "
+            "registrant boundary and normalization provenance."
+        ),
+        apply_mode="manual_script",
+        stage="dynamic_context",
+    ),
+)
+
 
 def registered_migrations() -> tuple[MigrationSpec, ...]:
     return (
@@ -277,6 +300,7 @@ def registered_migrations() -> tuple[MigrationSpec, ...]:
         + STATIC_SESSION_RUN_LINKS_MIGRATIONS
         + STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS
         + DYNAMIC_SESSION_QFG_MIGRATIONS
+        + DYNAMIC_DOMAIN_NORMALIZATION_MIGRATIONS
     )
 
 

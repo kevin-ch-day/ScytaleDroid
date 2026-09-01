@@ -435,12 +435,6 @@ def render_dataset_status() -> None:
     )
 
 
-def build_freeze_state_payload() -> dict[str, object]:
-    """Compatibility wrapper for state summary construction."""
-
-    return build_state_summary()
-
-
 def run_state_summary_report(
     *,
     summary: object,
@@ -591,28 +585,30 @@ def run_state_summary_report(
     if delta_rows:
         print()
         menu_utils.print_header("Tracker vs Evidence (Per App)")
-        table_utils.print_table(
-            delta_rows,
-            headers=[
-                "Package",
-                "Tracker countable",
-                "Evidence eligible countable",
-                "Extras",
-                "Excluded",
-            ],
+        delta_headers = [
+            "Package",
+            "Tracker countable",
+            "Evidence eligible countable",
+            "Extras",
+            "Excluded",
+        ]
+        table_utils.render_table(
+            delta_headers,
+            ([row.get(header) for header in delta_headers] for row in delta_rows),
         )
         if priorities:
             print()
             menu_utils.print_header("Next Collection Priorities")
-            table_utils.print_table(
-                priorities,
-                headers=[
-                    "Package",
-                    "Need baseline",
-                    "Need interactive",
-                    "Total needed",
-                    "Suggested next",
-                ],
+            priority_headers = [
+                "Package",
+                "Need baseline",
+                "Need interactive",
+                "Total needed",
+                "Suggested next",
+            ]
+            table_utils.render_table(
+                priority_headers,
+                ([row.get(header) for header in priority_headers] for row in priorities),
             )
     print(status_messages.status(f"Audit report: {summary.report_path}", level="info"))
 
@@ -622,7 +618,6 @@ def render_host_pcap_tools() -> None:
 
 
 __all__ = [
-    "build_freeze_state_payload",
     "render_dataset_status",
     "run_state_summary_report",
     "run_freeze_readiness_audit_report",

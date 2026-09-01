@@ -18,9 +18,6 @@ MANIFEST_VERSION = 1
 # but all newly generated manifests must use the canonical publication id.
 ALLOWED_EXPORT_IDS = {"publication", "paper2"}
 EXPORT_ID = "publication"
-# Back-compat aliases (internal API only).
-ALLOWED_PAPER_IDS = ALLOWED_EXPORT_IDS
-PAPER_ID = EXPORT_ID
 NORM_NONE = "none"
 NORM_TEX_WHITESPACE_LF = "tex_whitespace_lf"
 _HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -132,7 +129,7 @@ def build_manifest_from_artifacts(
         )
     return {
         "manifest_version": MANIFEST_VERSION,
-        "paper": PAPER_ID,
+        "paper": EXPORT_ID,
         "description": description,
         "generated_utc": generated_utc,
         "artifacts": artifacts,
@@ -228,8 +225,6 @@ __all__ = [
     "MANIFEST_VERSION",
     "ALLOWED_EXPORT_IDS",
     "EXPORT_ID",
-    "ALLOWED_PAPER_IDS",
-    "PAPER_ID",
     "NORM_NONE",
     "NORM_TEX_WHITESPACE_LF",
     "ManifestCompareResult",

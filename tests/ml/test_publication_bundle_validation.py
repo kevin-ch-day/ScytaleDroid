@@ -86,6 +86,18 @@ def test_required_fields_validation_report_passes_complete_manifest(
     assert payload["missing_by_run"] == {}
 
 
+def test_required_fields_validation_rejects_unsafe_freeze_run_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze = tmp_path / "dataset_freeze.json"
+    freeze.write_text(json.dumps({"included_run_ids": ["../escape"]}), encoding="utf-8")
+    monkeypatch.setattr(validation, "freeze_anchor_path", lambda: freeze)
+
+    with pytest.raises(ValueError, match="Unsafe freeze run_id"):
+        validation.write_required_fields_validation_report(manifest_dir=tmp_path)
+
+
 def test_determinism_checksums_handles_missing_run_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     freeze = tmp_path / "dataset_freeze.json"
     freeze.write_text(json.dumps({"included_run_ids": ["run-1"]}), encoding="utf-8")

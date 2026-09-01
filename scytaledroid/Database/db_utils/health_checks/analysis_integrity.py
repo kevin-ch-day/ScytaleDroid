@@ -19,15 +19,12 @@ class AnalysisIntegritySummary:
     """Cross-layer integrity snapshot.
 
     `quota_valid_runs_missing_features` is the authoritative dynamic feature-gap metric.
-    `countable_runs_missing_features` is retained as a compatibility alias for older
-    menu/tests that still use pre-normalization terminology.
     """
 
     dynamic_runs: int | None
     dynamic_feature_rows: int | None
     dynamic_runs_missing_features: int | None
     quota_valid_runs_missing_features: int | None
-    countable_runs_missing_features: int | None
     packages_latest_run_has_features: int | None
     packages_latest_run_missing_features_older_features_exist: int | None
     packages_no_feature_rows_for_package: int | None
@@ -224,8 +221,6 @@ def fetch_analysis_integrity_summary() -> AnalysisIntegritySummary:
             """
         ),
         quota_valid_runs_missing_features=quota_valid_runs_missing_features,
-        # Compatibility alias for older countable terminology.
-        countable_runs_missing_features=quota_valid_runs_missing_features,
         packages_latest_run_has_features=scalar(
             """
             SELECT COUNT(*)

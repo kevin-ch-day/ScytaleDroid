@@ -21,27 +21,17 @@ from ..core.findings import (
 )
 from ..core.results_builder import make_detector_result
 from ..modules.string_analysis import IndexedString, StringIndex
-from ..modules.string_analysis.network import extract_endpoints
+from ..modules.string_analysis.network import EndpointMatch, extract_endpoints
+from ..modules.string_analysis.parsing.host_normalizer import (
+    registrable_domain,
+    registrable_domain_resolver_metadata,
+)
 from .base import BaseDetector, register_detector
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TRACKER_RECEIPT_DIR = _REPO_ROOT / "data" / "state" / "external_sdk_tracker_intel"
 _TRACKER_RECEIPT_GLOB = "external_sdk_tracker_intel_refresh_*.json"
-_COMMON_TWO_PART_SUFFIXES = {
-    "co.uk",
-    "org.uk",
-    "gov.uk",
-    "ac.uk",
-    "com.au",
-    "net.au",
-    "org.au",
-    "edu.au",
-    "co.jp",
-    "com.br",
-}
-_NAMESPACE_PATTERN = re.compile(
-    r"\b[a-zA-Z_][a-zA-Z0-9_$]*(?:\.[a-zA-Z0-9_$]+){2,}\b"
-)
+_NAMESPACE_PATTERN = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_$]*(?:\.[a-zA-Z0-9_$]+){2,}\b")
 
 
 @dataclass(frozen=True)
@@ -59,17 +49,9 @@ def _latest_tracker_receipt_path() -> Path | None:
     return candidates[-1]
 
 
-def _approx_root_domain(host: str) -> str:
+def _root_domain(host: str) -> str:
     text = str(host or "").strip().lower().strip(".")
-    if "." not in text:
-        return text
-    parts = [part for part in text.split(".") if part]
-    if len(parts) < 2:
-        return text
-    tail = ".".join(parts[-2:])
-    if len(parts) >= 3 and tail in _COMMON_TWO_PART_SUFFIXES:
-        return ".".join(parts[-3:])
-    return tail
+    return registrable_domain(text) or text
 
 
 def _normalize_code_token(value: object) -> str | None:
@@ -85,6 +67,13 @@ def _normalize_code_token(value: object) -> str | None:
     if not re.fullmatch(r"[a-z0-9_$]+(?:\.[a-z0-9_$]+)+", text):
         return None
     return text
+
+
+def _int_metric(value: object, *, default: int = 0) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _extract_code_tokens(raw_value: object) -> tuple[str, ...]:
@@ -113,7 +102,7 @@ def _extract_domain_tokens(raw_value: object) -> tuple[str, ...]:
             continue
         if not re.fullmatch(r"[a-z0-9._-]+", text.lower()):
             continue
-        root = _approx_root_domain(text)
+        root = _root_domain(text)
         if not root or root in seen:
             continue
         seen.add(root)
@@ -201,7 +190,9 @@ def _matches_code_token(observed: str, tracker_token: str) -> bool:
     return observed == tracker_token or observed.startswith(f"{tracker_token}.")
 
 
-def _evidence_from_entry(entry: IndexedString, *, description: str, extra: Mapping[str, object]) -> EvidencePointer:
+def _evidence_from_entry(
+    entry: IndexedString, *, description: str, extra: Mapping[str, object]
+) -> EvidencePointer:
     return EvidencePointer(
         location=entry.pointer,
         hash_short=entry.sha_short,
@@ -231,23 +222,27 @@ class SdkInventoryDetector(BaseDetector):
 
         namespace_hits = _collect_namespace_hits(context.string_index)
         namespace_total = len(namespace_hits)
-        endpoints = extract_endpoints(context.string_index) if context.string_index is not None else ()
-        endpoint_roots: dict[str, list[object]] = defaultdict(list)
+        endpoints = (
+            extract_endpoints(context.string_index) if context.string_index is not None else ()
+        )
+        endpoint_roots: dict[str, list[EndpointMatch]] = defaultdict(list)
         for endpoint in endpoints:
-            root = _approx_root_domain(endpoint.host)
+            root = _root_domain(endpoint.host)
             if root and len(endpoint_roots[root]) < 3:
                 endpoint_roots[root].append(endpoint)
 
+        external_intel_metrics: dict[str, object] = {
+            "receipt_available": bool(receipt_path),
+            "receipt_path": receipt_path.as_posix() if receipt_path else None,
+        }
         metrics: dict[str, object] = {
-            "External tracker intel": {
-                "receipt_available": bool(receipt_path),
-                "receipt_path": receipt_path.as_posix() if receipt_path else None,
-            },
+            "External tracker intel": external_intel_metrics,
             "Observed signals": {
                 "namespace_candidates": namespace_total,
                 "http_endpoint_candidates": len(endpoints),
                 "root_domains_observed": len(endpoint_roots),
                 "declared_libraries": len(tuple(context.libraries or ())),
+                "domain_normalization": registrable_domain_resolver_metadata(),
             },
         }
 
@@ -267,13 +262,21 @@ class SdkInventoryDetector(BaseDetector):
             )
 
         tracker_rows, tracker_summary = _load_tracker_rows(receipt_path)
-        metrics["External tracker intel"] = {
-            **metrics["External tracker intel"],
-            "snapshot_date": tracker_summary.get("snapshot_date"),
-            "tracker_rows": len(tracker_rows),
-            "rows_with_code_signature": int(tracker_summary.get("rows_with_code_signature") or 0),
-            "rows_with_network_signature": int(tracker_summary.get("rows_with_network_signature") or 0),
-        }
+        source_row_count = _int_metric(tracker_summary.get("row_count"), default=len(tracker_rows))
+        external_intel_metrics.update(
+            {
+                "snapshot_date": tracker_summary.get("snapshot_date"),
+                "source_row_count": source_row_count,
+                "usable_tracker_rows": len(tracker_rows),
+                "unusable_tracker_rows": max(0, source_row_count - len(tracker_rows)),
+                "rows_with_code_signature": _int_metric(
+                    tracker_summary.get("rows_with_code_signature")
+                ),
+                "rows_with_network_signature": _int_metric(
+                    tracker_summary.get("rows_with_network_signature")
+                ),
+            }
+        )
 
         matched_code_trackers: list[TrackerIntelRow] = []
         matched_network_trackers: list[TrackerIntelRow] = []
@@ -375,9 +378,13 @@ class SdkInventoryDetector(BaseDetector):
             )
 
         if context.string_index is None:
-            notes.append("String index was unavailable for this artifact, so overlap coverage is reduced.")
+            notes.append(
+                "String index was unavailable for this artifact, so overlap coverage is reduced."
+            )
         elif not namespace_hits and not endpoints:
-            notes.append("No namespace-like strings or HTTP(S) endpoints were available for overlap matching.")
+            notes.append(
+                "No namespace-like strings or HTTP(S) endpoints were available for overlap matching."
+            )
         if matched_tracker_names:
             notes.append(
                 f"Matched tracker references: {', '.join(sorted(matched_tracker_names)[:6])}"

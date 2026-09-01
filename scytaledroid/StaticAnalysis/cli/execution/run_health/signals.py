@@ -66,7 +66,8 @@ def summarize_execution_signals_for_app(
     summary = _summarize_app_pipeline(app)
 
     errs = int(summary.get("error_count", 0) or 0)
-    fails = int(summary.get("fail_count", 0) or 0)
+    policy_fails = int(summary.get("policy_fail_count", 0) or 0)
+    finding_signals = int(summary.get("finding_fail_count", 0) or 0)
     warns = int(summary.get("warn_count", 0) or 0)
     parse_use = int(summary.get("parse_fallback_events_est", 0) or 0)
 
@@ -89,8 +90,10 @@ def summarize_execution_signals_for_app(
         drivers.append(f"artifacts_ok_below_expected ({success_n}/{disc})")
     if errs > 0:
         drivers.append(f"detector_errors={errs}")
-    if fails > 0:
-        drivers.append(f"policy_failures={fails}")
+    if policy_fails > 0:
+        drivers.append(f"policy_gate_failures={policy_fails}")
+    if finding_signals > 0:
+        drivers.append(f"finding_signals={finding_signals}")
     if warns > 0:
         drivers.append(f"detector_warnings={warns}")
     if parse_use > 0:
@@ -104,8 +107,9 @@ def summarize_execution_signals_for_app(
         "drivers": drivers,
         "counts": {
             "detector_warnings": warns,
-            "detector_failures": fails,
-            "policy_failures": fails,
+            "detector_failures": policy_fails + finding_signals,
+            "policy_gate_failures": policy_fails,
+            "finding_signals": finding_signals,
             "detector_errors": errs,
             "parse_fallback_events_est": parse_use,
             "artifacts_discovered": disc,

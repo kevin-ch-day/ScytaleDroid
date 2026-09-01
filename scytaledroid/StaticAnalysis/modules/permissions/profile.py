@@ -372,8 +372,4 @@ def _group_permissions(profiles: Mapping[str, PermissionProfile]) -> Mapping[str
     return groups
 
 
-def _build_notes(*, total: int, dangerous: int, signature: int, privileged: int, special_access: int) -> list[str]:  # Back-compat
-    return build_notes(total=total, dangerous=dangerous, signature=signature, privileged=privileged, special_access=special_access)
-
-
 __all__ = ["PermissionAnalysis", "build_permission_analysis"]

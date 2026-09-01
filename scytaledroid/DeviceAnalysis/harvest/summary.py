@@ -29,7 +29,6 @@ from .report_model import (
     HarvestRunMetrics,
     HarvestRunReport,
     HarvestRuntimeNoteSummary,
-    _build_summary_card_lines,  # noqa: F401 - re-exported for legacy tests/callers
     _format_policy_details,
     build_harvest_run_report,
 )

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import math
 import statistics
@@ -24,11 +25,13 @@ import numpy as np
 from scipy import stats
 from scytaledroid.DynamicAnalysis.research_cohort_archive import resolve_dataset_freeze_read_path
 from scytaledroid.DynamicAnalysis.run_duration_tiers import classify_duration_tier
+from scytaledroid.DynamicAnalysis.utils.path_utils import normalize_run_id, resolve_run_dir_under
 from scytaledroid.Publication.app_category_policy import (
     APP_CATEGORY_POLICY,
     app_category,
     app_display_name,
 )
+from scytaledroid.Utils.IO.atomic_write import atomic_write_bytes, atomic_write_text
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_EVIDENCE_ROOT = REPO_ROOT / "data" / "evidence" / "dynamic"
@@ -38,6 +41,43 @@ PRIMARY_MODEL = "iforest"
 SECONDARY_MODEL = "ocsvm"
 BOOTSTRAP_SEED = 20260713
 BOOTSTRAP_N = 10_000
+
+
+def _resolve_evidence_run_dir(evidence_root: Path, run_id: object) -> Path:
+    """Resolve a single-component run ID beneath the evidence root."""
+
+    normalized = normalize_run_id(run_id)
+    if normalized is None:
+        raise RuntimeError(f"Paper 2 freeze contains invalid or unsafe run_id: {run_id!r}")
+    run_dir = resolve_run_dir_under(evidence_root, normalized)
+    if run_dir is None:
+        raise RuntimeError(f"Paper 2 frozen run escapes evidence root: {normalized!r}")
+    return run_dir
+
+
+def _validate_freeze_run_paths(*, freeze: Mapping[str, Any], evidence_root: Path) -> None:
+    """Fail before creating publication outputs when freeze IDs are unsafe."""
+
+    run_id_lists: list[object] = [freeze.get("included_run_ids")]
+    apps = freeze.get("apps")
+    if isinstance(apps, Mapping):
+        for app in apps.values():
+            if not isinstance(app, Mapping):
+                continue
+            run_id_lists.extend(
+                [
+                    app.get("included_run_ids"),
+                    app.get("baseline_run_ids"),
+                    app.get("interactive_run_ids"),
+                ]
+            )
+    for values in run_id_lists:
+        if values is None:
+            continue
+        if not isinstance(values, list):
+            raise RuntimeError("Paper 2 freeze run-id field must be a list")
+        for run_id in values:
+            _resolve_evidence_run_dir(evidence_root, run_id)
 
 
 @dataclass(frozen=True)
@@ -82,13 +122,18 @@ def generate_paper2_results_v2(
 
     freeze_path = Path(freeze_path or resolve_dataset_freeze_read_path())
     output_root = Path(output_root)
+    freeze = _read_json(freeze_path)
+    if not isinstance(freeze, Mapping):
+        raise RuntimeError(f"Paper 2 freeze manifest is not an object: {freeze_path}")
+    _validate_freeze_run_paths(freeze=freeze, evidence_root=evidence_root)
+
     tables_dir = output_root / "tables"
     figures_dir = output_root / "figures"
     manifest_dir = output_root / "manifest"
     for directory in (tables_dir, figures_dir, manifest_dir):
         directory.mkdir(parents=True, exist_ok=True)
+    _invalidate_generation_markers(manifest_dir)
 
-    freeze = _read_json(freeze_path)
     dataset_plan = _read_json(dataset_plan_path) if dataset_plan_path.exists() else {}
     static_scores = _read_static_scores(freeze=freeze, evidence_root=evidence_root)
     run_records, qa_warnings = _build_run_metrics(
@@ -184,16 +229,16 @@ def generate_paper2_results_v2(
         "generated_files": [],
     }
     results_path = output_root / "publication_results_v2.json"
-    results_path.write_text(json.dumps(publication_results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(results_path, json.dumps(publication_results, indent=2, sort_keys=True) + "\n")
     files.append(results_path)
 
     qa_path = output_root / "paper2_qa_v2.json"
-    qa_path.write_text(json.dumps(qa, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(qa_path, json.dumps(qa, indent=2, sort_keys=True) + "\n")
     files.append(qa_path)
 
     publication_results["generated_files"] = [str(p.relative_to(output_root)) for p in files]
     publication_results["hash_manifest"] = "manifest/paper2_results_v2_manifest.json"
-    results_path.write_text(json.dumps(publication_results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(results_path, json.dumps(publication_results, indent=2, sort_keys=True) + "\n")
     hash_manifest = _write_hash_manifest(manifest_dir / "paper2_results_v2_manifest.json", files, base_dir=output_root)
     receipt_path = _write_generation_receipt(
         manifest_dir / "generation_receipt_v2.json",
@@ -235,7 +280,8 @@ def _build_run_metrics(
             run_id = str(run_id)
             phase = "baseline" if run_id in baseline_ids else "interactive" if run_id in interactive_ids else "unknown"
             plan_run = plan_runs.get(run_id, {})
-            ml_dir = evidence_root / run_id / "analysis" / "ml" / "v1"
+            run_dir = _resolve_evidence_run_dir(evidence_root, run_id)
+            ml_dir = run_dir / "analysis" / "ml" / "v1"
             iforest = _read_score_metrics(ml_dir / "anomaly_scores_iforest.csv")
             ocsvm = _read_score_metrics(ml_dir / "anomaly_scores_ocsvm.csv")
             if iforest.windows == 0:
@@ -374,7 +420,8 @@ def _build_window_reconciliation_rows(
     rows: list[dict[str, Any]] = []
     for run_id in [str(run_id) for run_id in freeze.get("included_run_ids") or []]:
         plan_run = plan_runs.get(run_id, {})
-        ml_dir = evidence_root / run_id / "analysis" / "ml" / "v1"
+        run_dir = _resolve_evidence_run_dir(evidence_root, run_id)
+        ml_dir = run_dir / "analysis" / "ml" / "v1"
         preflight = _read_json_or_empty(ml_dir / "ml_preflight.json")
         ml_summary = _read_json_or_empty(ml_dir / "ml_summary.json")
         planned = _int_or_none(plan_run.get("window_count_final") or plan_run.get("window_count"))
@@ -432,7 +479,15 @@ def _build_static_alignment_rows(
     for package_name, app in sorted((freeze.get("apps") or {}).items()):
         included = [str(run_id) for run_id in app.get("included_run_ids") or []]
         selected_run = plan_runs.get(included[0], {}) if included else {}
-        static_plan = _read_json_or_empty(evidence_root / included[0] / "inputs" / "static_dynamic_plan.json") if included else {}
+        static_plan = (
+            _read_json_or_empty(
+                _resolve_evidence_run_dir(evidence_root, included[0])
+                / "inputs"
+                / "static_dynamic_plan.json"
+            )
+            if included
+            else {}
+        )
         dynamic_version = str(app.get("selected_version_code") or selected_run.get("version_code") or "")
         dynamic_sha = str(app.get("selected_base_apk_sha256") or selected_run.get("base_apk_sha256") or "")
         static_version = str(static_plan.get("version_code") or "")
@@ -1057,12 +1112,13 @@ def _deterministic_manifest_fields(
     ml_config_fingerprints: dict[str, str] = {}
     feature_schema_versions: set[str] = set()
     for run_id in included_run_ids:
-        ml_dir = evidence_root / run_id / "analysis" / "ml" / "v1"
+        run_dir = _resolve_evidence_run_dir(evidence_root, run_id)
+        ml_dir = run_dir / "analysis" / "ml" / "v1"
         score_hashes[run_id] = {
             "iforest": _sha256_optional(ml_dir / "anomaly_scores_iforest.csv"),
             "ocsvm": _sha256_optional(ml_dir / "anomaly_scores_ocsvm.csv"),
         }
-        feature_hashes[run_id] = _sha256_optional(evidence_root / run_id / "analysis" / "pcap_features.json")
+        feature_hashes[run_id] = _sha256_optional(run_dir / "analysis" / "pcap_features.json")
         model_manifest_path = ml_dir / "model_manifest.json"
         model_manifest_hashes[run_id] = _sha256_optional(model_manifest_path)
         manifest = _read_json_or_empty(model_manifest_path)
@@ -1268,7 +1324,9 @@ def _write_figures(figures_dir: Path, per_app_rows: Sequence[Mapping[str, Any]])
     ax.grid(axis="x", alpha=0.25)
     fig.tight_layout()
     png = figures_dir / "paper2_delta_sorted_v2.png"
-    fig.savefig(png, dpi=240)
+    png_buffer = io.BytesIO()
+    fig.savefig(png_buffer, format="png", dpi=240)
+    atomic_write_bytes(png, png_buffer.getvalue())
     plt.close(fig)
 
     source = figures_dir / "paper2_delta_sorted_v2_source.csv"
@@ -1306,23 +1364,40 @@ def _write_latex_statistics(path: Path, statistics_rows: Sequence[Mapping[str, A
         "\\end{table}",
         "",
     ]
-    path.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines))
     return path
 
 
 def _write_hash_manifest(path: Path, files: Sequence[Path], *, base_dir: Path | None = None) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     base = Path(base_dir) if base_dir is not None else None
     for file in files:
-        if file.exists():
+        if file.is_file():
             try:
                 display_path = str(file.relative_to(base)) if base is not None else str(file)
             except ValueError:
                 display_path = str(file)
             rows.append({"path": display_path, "sha256": _sha256(file), "bytes": file.stat().st_size})
-    path.write_text(json.dumps({"schema_version": "paper2_results_v2_hash_manifest", "files": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(
+        path,
+        json.dumps(
+            {"schema_version": "paper2_results_v2_hash_manifest", "files": rows},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
     return path
+
+
+def _invalidate_generation_markers(manifest_dir: Path) -> None:
+    """Remove stale success markers before replacing a publication bundle."""
+
+    for name in ("paper2_results_v2_manifest.json", "generation_receipt_v2.json"):
+        try:
+            (manifest_dir / name).unlink()
+        except FileNotFoundError:
+            continue
 
 
 def _write_generation_receipt(
@@ -1349,21 +1424,21 @@ def _write_generation_receipt(
         "qa_status": qa.get("status"),
         "qa_warning_count": qa.get("warning_count"),
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return path
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames: list[str] = []
     for row in rows:
         for key in row.keys():
             if key not in fieldnames:
                 fieldnames.append(key)
-    with path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    atomic_write_text(path, buffer.getvalue())
     return path
 
 

@@ -1202,9 +1202,7 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = {
         "report_type": "dynamic_readiness_audit",
-        # Preferred public keys come first; legacy aliases remain below for compatibility.
         "generated_at": generated_at,
-        "generated_at_utc": generated_at,
         "repo_root": str(_REPO_ROOT),
         "data_root": str(data_dir),
         "output_dir": str(audit_output_dir),

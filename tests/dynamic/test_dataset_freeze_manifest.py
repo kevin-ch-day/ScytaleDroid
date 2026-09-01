@@ -155,6 +155,121 @@ def test_build_dataset_freeze_manifest_includes_all_eligible_runs_above_minimum(
     )
 
 
+def test_build_dataset_freeze_manifest_rejects_stale_pcap_report_hash(tmp_path: Path) -> None:
+    plan = tmp_path / "dataset_plan.json"
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    package = "com.example.app"
+    plan.write_text(json.dumps({"apps": {package: {}}}), encoding="utf-8")
+    contract_hash = freeze_contract_hash(build_freeze_contract_snapshot())
+    _write_freeze_run_fixture(evidence_root, run_id="baseline", package=package, run_profile="baseline_idle", baseline_hash="1" * 64, interaction_protocol_version=None, contract_hash=contract_hash)
+    for index in range(2):
+        _write_freeze_run_fixture(evidence_root, run_id=f"interactive-{index}", package=package, run_profile="interaction_manual", baseline_hash=None, interaction_protocol_version=2, contract_hash=contract_hash)
+    report = evidence_root / "baseline" / "analysis" / "pcap_report.json"
+    report.write_text(json.dumps({"pcap_size_bytes": 60000, "pcap_sha256": "0" * 64}), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="FREEZE_PCAP_REPORT_HASH_MISMATCH:baseline"):
+        build_dataset_freeze_manifest(dataset_plan_path=plan, evidence_root=evidence_root, cfg=FreezeConfig(baseline_required=1, interactive_required=2))
+
+
+def test_build_dataset_freeze_manifest_rejects_non_scalar_pcap_report_size(tmp_path: Path) -> None:
+    plan = tmp_path / "dataset_plan.json"
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    package = "com.example.app"
+    plan.write_text(json.dumps({"apps": {package: {}}}), encoding="utf-8")
+    contract_hash = freeze_contract_hash(build_freeze_contract_snapshot())
+    _write_freeze_run_fixture(evidence_root, run_id="baseline", package=package, run_profile="baseline_idle", baseline_hash="1" * 64, interaction_protocol_version=None, contract_hash=contract_hash)
+    for index in range(2):
+        _write_freeze_run_fixture(evidence_root, run_id=f"interactive-{index}", package=package, run_profile="interaction_manual", baseline_hash=None, interaction_protocol_version=2, contract_hash=contract_hash)
+    report = evidence_root / "baseline" / "analysis" / "pcap_report.json"
+    report.write_text(json.dumps({"pcap_size_bytes": []}), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="FREEZE_PCAP_REPORT_SIZE_INVALID:baseline"):
+        build_dataset_freeze_manifest(dataset_plan_path=plan, evidence_root=evidence_root, cfg=FreezeConfig(baseline_required=1, interactive_required=2))
+
+
+@pytest.mark.parametrize("reported_size", [True, -1, 60000.5])
+def test_build_dataset_freeze_manifest_rejects_invalid_scalar_pcap_report_size(
+    tmp_path: Path,
+    reported_size: object,
+) -> None:
+    plan = tmp_path / "dataset_plan.json"
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    package = "com.example.app"
+    plan.write_text(json.dumps({"apps": {package: {}}}), encoding="utf-8")
+    contract_hash = freeze_contract_hash(build_freeze_contract_snapshot())
+    _write_freeze_run_fixture(
+        evidence_root,
+        run_id="baseline",
+        package=package,
+        run_profile="baseline_idle",
+        baseline_hash="1" * 64,
+        interaction_protocol_version=None,
+        contract_hash=contract_hash,
+    )
+    for index in range(2):
+        _write_freeze_run_fixture(
+            evidence_root,
+            run_id=f"interactive-{index}",
+            package=package,
+            run_profile="interaction_manual",
+            baseline_hash=None,
+            interaction_protocol_version=2,
+            contract_hash=contract_hash,
+        )
+    report = evidence_root / "baseline" / "analysis" / "pcap_report.json"
+    report.write_text(json.dumps({"pcap_size_bytes": reported_size}), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="FREEZE_PCAP_REPORT_SIZE_INVALID:baseline"):
+        build_dataset_freeze_manifest(
+            dataset_plan_path=plan,
+            evidence_root=evidence_root,
+            cfg=FreezeConfig(baseline_required=1, interactive_required=2),
+        )
+
+
+def test_build_dataset_freeze_manifest_rejects_pcap_path_outside_run(tmp_path: Path) -> None:
+    plan = tmp_path / "dataset_plan.json"
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    package = "com.example.app"
+    plan.write_text(json.dumps({"apps": {package: {}}}), encoding="utf-8")
+    contract_hash = freeze_contract_hash(build_freeze_contract_snapshot())
+    _write_freeze_run_fixture(
+        evidence_root,
+        run_id="baseline",
+        package=package,
+        run_profile="baseline_idle",
+        baseline_hash="1" * 64,
+        interaction_protocol_version=None,
+        contract_hash=contract_hash,
+    )
+    for index in range(2):
+        _write_freeze_run_fixture(
+            evidence_root,
+            run_id=f"interactive-{index}",
+            package=package,
+            run_profile="interaction_manual",
+            baseline_hash=None,
+            interaction_protocol_version=2,
+            contract_hash=contract_hash,
+        )
+    manifest_path = evidence_root / "baseline" / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][0]["relative_path"] = "../../outside.pcap"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (tmp_path / "outside.pcap").write_bytes(b"outside")
+
+    with pytest.raises(RuntimeError, match="FREEZE_UNSAFE_ARTIFACT_PATH:baseline"):
+        build_dataset_freeze_manifest(
+            dataset_plan_path=plan,
+            evidence_root=evidence_root,
+            cfg=FreezeConfig(baseline_required=1, interactive_required=2),
+        )
+
+
 def test_build_dataset_freeze_manifest_respects_max_age_window(tmp_path: Path) -> None:
     plan = tmp_path / "dataset_plan.json"
     evidence_root = tmp_path / "evidence"

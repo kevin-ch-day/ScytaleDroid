@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path
+
 
 def split_run_ids(value: object) -> list[str]:
     """Normalize the comma-separated selected-run representation used by freezes."""
@@ -26,7 +28,10 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _manifest_run_record(run_id: str, evidence_root: Path) -> dict[str, Any]:
-    manifest_path = evidence_root / run_id / "run_manifest.json"
+    run_dir = resolve_contained_path(evidence_root, run_id)
+    if run_dir is None:
+        return {"dynamic_run_id": run_id, "artifact_status": "unsafe_run_id"}
+    manifest_path = run_dir / "run_manifest.json"
     if not manifest_path.is_file():
         return {"dynamic_run_id": run_id, "artifact_status": "missing_run_manifest"}
 

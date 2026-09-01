@@ -128,7 +128,7 @@ from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
     active_research_cohort_label,
     active_research_cohort_packages,
     chooseable_active_research_cohorts,
-    persist_active_research_cohort_key,  # re-exported for test monkeypatch compatibility
+    persist_active_research_cohort_key,
 )
 from scytaledroid.DynamicAnalysis.run_qualification import (
     format_bucket_queue_label,

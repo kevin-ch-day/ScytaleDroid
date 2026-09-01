@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scytaledroid.DynamicAnalysis.core.manifest import ArtifactRecord, ObserverRecord, RunManifest
+import pytest
+from scytaledroid.DynamicAnalysis.core.manifest import (
+    ArtifactRecord,
+    ObserverRecord,
+    RunManifest,
+)
 from scytaledroid.DynamicAnalysis.pcap import dataset_tracker as tracker
 from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     DatasetTrackerConfig,
@@ -12,6 +17,117 @@ from scytaledroid.DynamicAnalysis.pcap.dataset_tracker import (
     recompute_dataset_tracker,
     update_dataset_tracker,
 )
+
+
+def test_load_dataset_tracker_never_writes(tmp_path: Path, monkeypatch) -> None:
+    tracker_path = tmp_path / "dataset_plan.json"
+    original = '{"apps": {"com.example.app": {"runs": []}}}\n'
+    tracker_path.write_text(original, encoding="utf-8")
+    before_mtime = tracker_path.stat().st_mtime_ns
+    monkeypatch.setattr(tracker, "resolve_dataset_plan_read_path", lambda: tracker_path)
+    monkeypatch.setattr(tracker, "active_research_cohort_key", lambda: None)
+    monkeypatch.setattr(
+        tracker,
+        "write_dataset_plan_payload",
+        lambda _payload: (_ for _ in ()).throw(AssertionError("load wrote tracker")),
+    )
+
+    payload = tracker.load_dataset_tracker()
+
+    assert payload["apps"]["com.example.app"]["runs"] == []
+    assert tracker_path.read_text(encoding="utf-8") == original
+    assert tracker_path.stat().st_mtime_ns == before_mtime
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["dataset_plan.json"]
+
+
+def test_load_dataset_tracker_rejects_corrupt_json_without_rewriting(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    tracker_path = tmp_path / "dataset_plan.json"
+    original = b'{"apps": '
+    tracker_path.write_bytes(original)
+    monkeypatch.setattr(tracker, "resolve_dataset_plan_read_path", lambda: tracker_path)
+    monkeypatch.setattr(tracker, "active_research_cohort_key", lambda: None)
+
+    try:
+        tracker.load_dataset_tracker()
+    except RuntimeError as exc:
+        assert "DATASET_PLAN_INVALID_JSON" in str(exc)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("corrupt tracker was accepted")
+
+    assert tracker_path.read_bytes() == original
+
+
+def test_update_dataset_tracker_does_not_overwrite_corrupt_plan(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    tracker_path = tmp_path / "dataset_plan.json"
+    original = b"not-json\n"
+    tracker_path.write_bytes(original)
+    monkeypatch.setattr(tracker, "resolve_dataset_plan_read_path", lambda: tracker_path)
+    monkeypatch.setattr(tracker, "active_research_cohort_packages", lambda: ())
+    manifest = RunManifest(
+        run_manifest_version=1,
+        dynamic_run_id="run-corrupt-plan",
+        created_at="2026-08-16T00:00:00Z",
+        status="success",
+        target={"package_name": "com.example.app"},
+        operator={"tier": "dataset", "run_profile": "interaction_manual"},
+        scenario={"id": "basic_usage"},
+    )
+
+    try:
+        update_dataset_tracker(manifest, tmp_path / "run-corrupt-plan")
+    except RuntimeError as exc:
+        assert "DATASET_PLAN_INVALID_JSON" in str(exc)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("corrupt tracker was overwritten")
+
+    assert tracker_path.read_bytes() == original
+
+
+def test_load_dataset_tracker_rejects_malformed_app_runs_without_hiding_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    tracker_path = tmp_path / "dataset_plan.json"
+    original = json.dumps(
+        {
+            "apps": {
+                "com.example.app": {
+                    "runs": [{"run_id": "run-1"}, "damaged-row"],
+                }
+            }
+        }
+    )
+    tracker_path.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(tracker, "resolve_dataset_plan_read_path", lambda: tracker_path)
+    monkeypatch.setattr(tracker, "active_research_cohort_key", lambda: None)
+
+    with pytest.raises(RuntimeError, match="DATASET_PLAN_INVALID_RUN_ENTRY"):
+        tracker.load_dataset_tracker()
+
+    assert tracker_path.read_text(encoding="utf-8") == original
+
+
+def test_load_dataset_tracker_accepts_legacy_app_entry_without_runs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    tracker_path = tmp_path / "dataset_plan.json"
+    tracker_path.write_text(
+        json.dumps({"apps": {"com.example.app": {"legacy_summary": True}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tracker, "resolve_dataset_plan_read_path", lambda: tracker_path)
+    monkeypatch.setattr(tracker, "active_research_cohort_key", lambda: None)
+
+    payload = tracker.load_dataset_tracker()
+
+    assert payload["apps"]["com.example.app"]["runs"] == []
 
 
 def test_recompute_dataset_tracker_preserves_manifest_dataset_fields(

@@ -68,7 +68,3 @@ def _session_detector_pipeline_status(detector_errors_total: int, warn_total: in
     if warn_total > 0:
         return "warnings"
     return "ok"
-
-
-# Back-compat for imports; prefer `_session_detector_pipeline_status`.
-_session_detector_status_label = _session_detector_pipeline_status

@@ -6,8 +6,6 @@ This document answers operator and analyst questions about **what ScytaleDroid w
 
 `PYTHONPATH=. python scripts/static_analysis/run_artifact_map.py --session <session_stamp> [--json] [--write-report] [--no-db] [--strict] [--strict-log-duplicates] [--include-harvest-linkage] [--include-harvest-receipt-linkage]`
 
-Legacy flags `--compare-log` and `--db` are no-ops (the script always runs the full audit; use `--no-db` to skip SQL).
-
 **Defaults:** `DATA_DIR` → `data/`, `OUTPUT_DIR` → `output/`, `LOGS_DIR` → `logs/` (`scytaledroid/Config/app_config.py`). Paths below are relative to the **repository working directory** unless noted.
 
 ---
@@ -180,6 +178,30 @@ There is **no single file** that is “the” run. For paper-grade and cross-ses
 | **Logs** | `logs/static_analysis.log` (+ `.jsonl`): scanner, `REPORT_SAVED`, persistence events. `logs/db.log` (+ `.jsonl`): **`database`** logger channel (SQL / DB tooling), not the same stream as static. |
 
 Environment knobs (see `scytaledroid/Config/app_config.py`): **`SCYTALEDROID_STATIC_REPORT_JSON_MODE`**, **`SCYTALEDROID_STATIC_HTML_MODE`** (`off` \| `latest` \| `archive` \| `both`).
+
+Permission parity is a derived post-processing activity. It reuses saved reports when possible; if a report must be regenerated, the fallback remains in memory and must not republish over the authoritative session archive or latest mirror.
+
+The artifact-map audit checks both archive cardinality and minimum report lineage (`session_stamp`, `execution_id`, SHA-256, artifact-set/manifest hashes, and `identity_valid`). If a historical interruption left only missing lineage fields, use the dry-run-first repair and review its plan before applying:
+
+```bash
+PYTHONPATH=. python scripts/static_analysis/repair_archive_report_lineage.py --session <session>
+PYTHONPATH=. python scripts/static_analysis/repair_archive_report_lineage.py --session <session> --include-latest-mirrors --apply
+```
+
+The repair accepts only unanimous same-package sibling values, never overwrites an existing lineage value, backs up exact original bytes, and records before/after file hashes plus an invariant hash of all non-metadata report content.
+
+### Detector-stage measurement coverage
+
+The full-profile label describes the configured pipeline, not exhaustive vulnerability coverage. Report and run-health records therefore separate:
+
+- **planned stage opportunities**: detector stages declared for each APK report;
+- **declared placeholders**: unfinished stages that cannot produce measurements;
+- **implemented stage opportunities**: planned opportunities minus placeholders;
+- **executed implemented stages**: implemented stages that actually ran;
+- **design-deferred stages**: deliberate package-grain work, such as running correlation once on the base report instead of repeating it for every split;
+- **input-unavailable stages**: implemented stages that could not run because required evidence, such as a string index, was unavailable.
+
+These are instrument-coverage counts. They are **not** source-code coverage, vulnerability recall, exploitability, or proof that unreported weaknesses are absent. This interpretation follows [OWASP MASTG automated static-analysis guidance](https://mas.owasp.org/MASTG/techniques/android/MASTG-TECH-0025/) that analyzers cannot find all problems by themselves and the NIST measurement principle that a coverage result must identify its measurement object and denominator ([NIST IR 8289](https://doi.org/10.6028/NIST.IR.8289)).
 
 ---
 

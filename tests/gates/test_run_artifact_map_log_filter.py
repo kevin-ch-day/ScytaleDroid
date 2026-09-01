@@ -158,6 +158,108 @@ def test_strict_violations_ignore_raw_vs_unique_when_disk_aligns() -> None:
     assert "duplicate_report_saved_events" in mod._strict_violations(report_dup_strict)
 
 
+def test_archive_provenance_detects_lineage_loss_in_valid_json(tmp_path: Path) -> None:
+    mod = _load_run_artifact_map()
+    digest = "a" * 64
+    report_path = tmp_path / f"{digest}.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "package_name": "com.example.app",
+                    "session_stamp": "session-1",
+                    "sha256": digest,
+                    "is_split_member": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    audit = mod._audit_archive_report_provenance(
+        [report_path],
+        expected_session="session-1",
+    )
+
+    assert audit["status"] == "DEGRADED"
+    assert audit["reports_missing_lineage_count"] == 1
+    assert audit["missing_by_field"] == {
+        "artifact_manifest_sha256": 1,
+        "artifact_set_hash": 1,
+        "base_apk_sha256": 1,
+        "execution_id": 1,
+        "identity_valid": 1,
+    }
+    assert audit["sha256_filename_mismatch_count"] == 0
+
+
+def test_archive_detector_coverage_separates_placeholders_from_runtime_skips(
+    tmp_path: Path,
+) -> None:
+    mod = _load_run_artifact_map()
+    report_path = tmp_path / f"{'a' * 64}.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "pipeline_summary": {
+                        "detector_total": 20,
+                        "detector_executed": 15,
+                        "placeholder_detector_count": 3,
+                        "placeholder_detectors": [
+                            {"detector": "dynamic_loading"},
+                            {"detector": "file_io_sinks"},
+                            {"detector": "interaction_risks"},
+                        ],
+                        "skipped_detectors": [
+                            {"detector": "webview", "reason": "string index unavailable"},
+                            {"detector": "crypto", "reason": "string index unavailable"},
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    coverage = mod._audit_archive_detector_coverage([report_path])
+
+    assert coverage["status"] == "partial_declared_placeholders"
+    assert coverage["planned_stage_opportunities"] == 20
+    assert coverage["implemented_stage_opportunities"] == 17
+    assert coverage["executed_implemented_stage_opportunities"] == 15
+    assert coverage["placeholder_stage_opportunities"] == 3
+    assert coverage["placeholder_detector_artifact_counts"] == {
+        "dynamic_loading": 1,
+        "file_io_sinks": 1,
+        "interaction_risks": 1,
+    }
+    assert coverage["non_placeholder_skip_reason_counts"] == {
+        "string index unavailable": 2
+    }
+    assert coverage["non_placeholder_skip_class_counts"] == {"input_unavailable": 2}
+    assert coverage["non_deferred_implemented_stage_opportunities"] == 17
+    assert coverage["non_deferred_implemented_execution_rate"] == round(15 / 17, 6)
+
+
+def test_strict_violations_include_archive_lineage_degradation() -> None:
+    mod = _load_run_artifact_map()
+    report = {
+        "selection_contract": {"artifact_count": 1, "group_count": 1, "present": True},
+        "per_artifact_scanner_evidence": {
+            "archived_json_count": 1,
+            "unique_archive_path_count": 1,
+            "report_saved_events_missing_archive_path": 0,
+            "archive_report_provenance": {"status": "DEGRADED"},
+        },
+        "per_app_db_projection": {"available": False},
+        "post_run_diagnostics": {"persistence_audit": {"present": True}},
+        "audit_options": {},
+    }
+
+    assert "archive_report_lineage_degraded" in mod._strict_violations(report)
+
+
 def test_finalize_report_keeps_evidence_status_ok_for_log_dup_only(tmp_path: Path) -> None:
     mod = _load_run_artifact_map()
     report = {

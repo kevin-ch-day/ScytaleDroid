@@ -209,13 +209,20 @@ def finalize_persisted_static_run(
                 f"db_write_failed:static_run.classification_update:{exc.__class__.__name__}:{exc}"
             )
 
-    callbacks.update_static_run_status(
+    status_updated = callbacks.update_static_run_status(
         static_run_id=static_run_id,
         status=callbacks.normalize_run_status(run_status),
         ended_at_utc=ended_at_utc,
         abort_reason=abort_reason,
         abort_signal=abort_signal,
     )
+    if status_updated is False:
+        outcome.canonical_failed = True
+        run_status = "FAILED"
+        outcome.add_error(
+            "db_write_failed:static_run.status_update:"
+            f"static_run_id={static_run_id}"
+        )
     refresh_stamp = session_stamp
     refresh_scope = scope_label
     try:

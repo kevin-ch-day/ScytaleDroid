@@ -5,6 +5,7 @@ import json
 import math
 from pathlib import Path
 
+import pytest
 from scytaledroid.Reporting.services import paper2_results_v2_service as svc
 
 
@@ -35,6 +36,98 @@ def test_read_score_metrics_uses_full_precision_window_flags(tmp_path: Path) -> 
     assert metrics.anomalous_windows == 2
     assert metrics.rdi == 0.4
     assert metrics.threshold == 0.5
+
+
+def test_build_run_metrics_rejects_run_id_outside_evidence_root(tmp_path: Path) -> None:
+    freeze = {
+        "apps": {
+            "com.example": {
+                "included_run_ids": ["../outside-run"],
+                "baseline_run_ids": ["../outside-run"],
+                "interactive_run_ids": [],
+            }
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="unsafe run_id"):
+        svc._build_run_metrics(freeze=freeze, dataset_plan={}, evidence_root=tmp_path / "evidence")
+
+
+def test_generator_rejects_unsafe_freeze_before_creating_outputs(tmp_path: Path) -> None:
+    freeze_path = tmp_path / "dataset_freeze.json"
+    freeze_path.write_text(
+        json.dumps({"included_run_ids": ["../outside-run"], "apps": {}}),
+        encoding="utf-8",
+    )
+    output_root = tmp_path / "publication-output"
+
+    with pytest.raises(RuntimeError, match="unsafe run_id"):
+        svc.generate_paper2_results_v2(
+            freeze_path=freeze_path,
+            dataset_plan_path=tmp_path / "missing-plan.json",
+            evidence_root=tmp_path / "evidence",
+            output_root=output_root,
+        )
+
+    assert not output_root.exists()
+
+
+def test_generator_rejects_non_object_freeze_before_creating_outputs(tmp_path: Path) -> None:
+    freeze_path = tmp_path / "dataset_freeze.json"
+    freeze_path.write_text("[]", encoding="utf-8")
+    output_root = tmp_path / "publication-output"
+
+    with pytest.raises(RuntimeError, match="not an object"):
+        svc.generate_paper2_results_v2(
+            freeze_path=freeze_path,
+            dataset_plan_path=tmp_path / "missing-plan.json",
+            evidence_root=tmp_path / "evidence",
+            output_root=output_root,
+        )
+
+    assert not output_root.exists()
+
+
+def test_generator_invalidates_stale_completion_markers_before_work(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    freeze_path = tmp_path / "dataset_freeze.json"
+    freeze_path.write_text(
+        json.dumps({"included_run_ids": [], "apps": {}}),
+        encoding="utf-8",
+    )
+    output_root = tmp_path / "publication-output"
+    manifest_dir = output_root / "manifest"
+    manifest_dir.mkdir(parents=True)
+    hash_marker = manifest_dir / "paper2_results_v2_manifest.json"
+    receipt_marker = manifest_dir / "generation_receipt_v2.json"
+    hash_marker.write_text("stale", encoding="utf-8")
+    receipt_marker.write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(svc, "_read_static_scores", lambda **_kwargs: {})
+    monkeypatch.setattr(svc, "_build_run_metrics", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("stop")))
+
+    with pytest.raises(RuntimeError, match="stop"):
+        svc.generate_paper2_results_v2(
+            freeze_path=freeze_path,
+            dataset_plan_path=tmp_path / "missing-plan.json",
+            evidence_root=tmp_path / "evidence",
+            output_root=output_root,
+        )
+
+    assert not hash_marker.exists()
+    assert not receipt_marker.exists()
+
+
+def test_evidence_run_resolver_rejects_symlink_escape(tmp_path: Path) -> None:
+    evidence_root = tmp_path / "evidence"
+    outside = tmp_path / "outside"
+    evidence_root.mkdir()
+    outside.mkdir()
+    (evidence_root / "linked-run").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="escapes evidence root"):
+        svc._resolve_evidence_run_dir(evidence_root, "linked-run")
 
 
 def test_paired_stats_records_exact_two_sided_wilcoxon_details() -> None:

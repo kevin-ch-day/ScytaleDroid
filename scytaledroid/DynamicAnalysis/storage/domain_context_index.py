@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_utils.dynamic_domain_normalization import (
+    normalization_columns_available as _normalization_columns_available,
+)
 from scytaledroid.DynamicAnalysis.domain_context import (
     DomainReference,
     classify_domain,
@@ -15,6 +18,35 @@ from scytaledroid.DynamicAnalysis.domain_context import (
     normalize_domain,
 )
 from scytaledroid.DynamicAnalysis.ip_context import classify_ip_destination, normalize_ip
+from scytaledroid.Utils.domain_identity import build_root_domain_identity
+
+
+def _with_root_identity(
+    row: dict[str, Any],
+    *,
+    observed_domain: object,
+    service_root_domain: object,
+    is_ip: bool = False,
+) -> dict[str, Any]:
+    identity = build_root_domain_identity(
+        str(observed_domain or ""),
+        str(service_root_domain or observed_domain or ""),
+        is_ip=is_ip,
+    )
+    row.update(
+        {
+            "root_domain": identity.root_domain,
+            "registrable_domain_psl": identity.registrable_domain_psl,
+            "registrable_domain_normalization": identity.normalization_key,
+            "registrable_domain_reference_sha256": identity.reference_sha256,
+        }
+    )
+    return row
+
+
+def _has_normalization_columns() -> bool:
+    """Probe physical schema without converting DB failures into legacy mode."""
+    return _normalization_columns_available(core_q.run_sql)
 
 
 def _endpoint_host(value: object) -> str:
@@ -62,8 +94,9 @@ def _reference_rows_to_objects(rows: list[Mapping[str, Any]]) -> tuple[DomainRef
 
 def load_domain_references_from_db() -> tuple[DomainReference, ...]:
     try:
-        rows = core_q.run_sql(
-            """
+        rows = (
+            core_q.run_sql(
+                """
             SELECT
               package_name_scope,
               domain_pattern,
@@ -79,11 +112,13 @@ def load_domain_references_from_db() -> tuple[DomainReference, ...]:
             WHERE is_active = 1
             ORDER BY package_name_scope, match_type, domain_pattern
             """,
-            (),
-            fetch="all",
-            dictionary=True,
-            query_name="dynamic.domain_context.load_references",
-        ) or []
+                (),
+                fetch="all",
+                dictionary=True,
+                query_name="dynamic.domain_context.load_references",
+            )
+            or []
+        )
     except Exception:
         rows = []
     if not rows:
@@ -117,22 +152,25 @@ def build_domain_observation_rows_from_pcap_report(
                 count_i = None
             ctx = classify_domain(domain, package_name=package_name, references=refs)
             rows.append(
-                {
-                    "dynamic_run_id": dynamic_run_id,
-                    "package_name": package_name,
-                    "indicator_type": kind,
-                    "observed_domain": ctx.get("domain"),
-                    "root_domain": ctx.get("root_domain"),
-                    "indicator_count": count_i,
-                    "indicator_source": source,
-                    "owner_class": ctx.get("owner_class"),
-                    "role_class": ctx.get("role_class"),
-                    "confidence": ctx.get("confidence"),
-                    "classification_basis": ctx.get("basis"),
-                    "package_name_scope": ctx.get("package_name_scope"),
-                    "match_type": ctx.get("match_type"),
-                    "is_first_party": 1 if ctx.get("first_party") else 0,
-                }
+                _with_root_identity(
+                    {
+                        "dynamic_run_id": dynamic_run_id,
+                        "package_name": package_name,
+                        "indicator_type": kind,
+                        "observed_domain": ctx.get("domain"),
+                        "indicator_count": count_i,
+                        "indicator_source": source,
+                        "owner_class": ctx.get("owner_class"),
+                        "role_class": ctx.get("role_class"),
+                        "confidence": ctx.get("confidence"),
+                        "classification_basis": ctx.get("basis"),
+                        "package_name_scope": ctx.get("package_name_scope"),
+                        "match_type": ctx.get("match_type"),
+                        "is_first_party": 1 if ctx.get("first_party") else 0,
+                    },
+                    observed_domain=ctx.get("domain"),
+                    service_root_domain=ctx.get("root_domain"),
+                )
             )
 
     _append("dns", report.get("top_dns"), source="top_dns")
@@ -156,26 +194,31 @@ def build_domain_observation_rows_from_pcap_report(
                     break
                 seen_ip_rows.add(dedupe_key)
                 try:
-                    count_i = int(flow.get("packets")) if flow.get("packets") is not None else None
+                    packet_value = flow.get("packets")
+                    count_i = int(str(packet_value)) if packet_value is not None else None
                 except Exception:
                     count_i = None
                 rows.append(
-                    {
-                        "dynamic_run_id": dynamic_run_id,
-                        "package_name": package_name,
-                        "indicator_type": "ip_dst",
-                        "observed_domain": ctx.get("ip"),
-                        "root_domain": ctx.get("cidr") or ctx.get("ip"),
-                        "indicator_count": count_i,
-                        "indicator_source": "top_flow_ip",
-                        "owner_class": ctx.get("owner_class"),
-                        "role_class": ctx.get("role_class"),
-                        "confidence": ctx.get("confidence"),
-                        "classification_basis": ctx.get("basis"),
-                        "package_name_scope": ctx.get("package_name_scope"),
-                        "match_type": ctx.get("match_type"),
-                        "is_first_party": 1 if ctx.get("first_party") else 0,
-                    }
+                    _with_root_identity(
+                        {
+                            "dynamic_run_id": dynamic_run_id,
+                            "package_name": package_name,
+                            "indicator_type": "ip_dst",
+                            "observed_domain": ctx.get("ip"),
+                            "indicator_count": count_i,
+                            "indicator_source": "top_flow_ip",
+                            "owner_class": ctx.get("owner_class"),
+                            "role_class": ctx.get("role_class"),
+                            "confidence": ctx.get("confidence"),
+                            "classification_basis": ctx.get("basis"),
+                            "package_name_scope": ctx.get("package_name_scope"),
+                            "match_type": ctx.get("match_type"),
+                            "is_first_party": 1 if ctx.get("first_party") else 0,
+                        },
+                        observed_domain=ctx.get("ip"),
+                        service_root_domain=ctx.get("cidr") or ctx.get("ip"),
+                        is_ip=True,
+                    )
                 )
                 break
     return rows
@@ -206,22 +249,28 @@ def build_domain_observation_rows_from_network_indicators(
             if not ctx.get("first_party"):
                 continue
             rows.append(
-                {
-                    "dynamic_run_id": dynamic_run_id,
-                    "package_name": package_name,
-                    "indicator_type": kind,
-                    "observed_domain": ctx.get("ip"),
-                    "root_domain": ctx.get("cidr") or ctx.get("ip"),
-                    "indicator_count": count_i,
-                    "indicator_source": str(item.get("indicator_source") or "dynamic_network_indicators")[:32],
-                    "owner_class": ctx.get("owner_class"),
-                    "role_class": ctx.get("role_class"),
-                    "confidence": ctx.get("confidence"),
-                    "classification_basis": ctx.get("basis"),
-                    "package_name_scope": ctx.get("package_name_scope"),
-                    "match_type": ctx.get("match_type"),
-                    "is_first_party": 1 if ctx.get("first_party") else 0,
-                }
+                _with_root_identity(
+                    {
+                        "dynamic_run_id": dynamic_run_id,
+                        "package_name": package_name,
+                        "indicator_type": kind,
+                        "observed_domain": ctx.get("ip"),
+                        "indicator_count": count_i,
+                        "indicator_source": str(
+                            item.get("indicator_source") or "dynamic_network_indicators"
+                        )[:32],
+                        "owner_class": ctx.get("owner_class"),
+                        "role_class": ctx.get("role_class"),
+                        "confidence": ctx.get("confidence"),
+                        "classification_basis": ctx.get("basis"),
+                        "package_name_scope": ctx.get("package_name_scope"),
+                        "match_type": ctx.get("match_type"),
+                        "is_first_party": 1 if ctx.get("first_party") else 0,
+                    },
+                    observed_domain=ctx.get("ip"),
+                    service_root_domain=ctx.get("cidr") or ctx.get("ip"),
+                    is_ip=True,
+                )
             )
             continue
         domain = normalize_domain(item.get("indicator_value"))
@@ -233,22 +282,27 @@ def build_domain_observation_rows_from_network_indicators(
             count_i = 0
         ctx = classify_domain(domain, package_name=package_name, references=refs)
         rows.append(
-            {
-                "dynamic_run_id": dynamic_run_id,
-                "package_name": package_name,
-                "indicator_type": kind,
-                "observed_domain": ctx.get("domain"),
-                "root_domain": ctx.get("root_domain"),
-                "indicator_count": count_i,
-                "indicator_source": str(item.get("indicator_source") or "dynamic_network_indicators")[:32],
-                "owner_class": ctx.get("owner_class"),
-                "role_class": ctx.get("role_class"),
-                "confidence": ctx.get("confidence"),
-                "classification_basis": ctx.get("basis"),
-                "package_name_scope": ctx.get("package_name_scope"),
-                "match_type": ctx.get("match_type"),
-                "is_first_party": 1 if ctx.get("first_party") else 0,
-            }
+            _with_root_identity(
+                {
+                    "dynamic_run_id": dynamic_run_id,
+                    "package_name": package_name,
+                    "indicator_type": kind,
+                    "observed_domain": ctx.get("domain"),
+                    "indicator_count": count_i,
+                    "indicator_source": str(
+                        item.get("indicator_source") or "dynamic_network_indicators"
+                    )[:32],
+                    "owner_class": ctx.get("owner_class"),
+                    "role_class": ctx.get("role_class"),
+                    "confidence": ctx.get("confidence"),
+                    "classification_basis": ctx.get("basis"),
+                    "package_name_scope": ctx.get("package_name_scope"),
+                    "match_type": ctx.get("match_type"),
+                    "is_first_party": 1 if ctx.get("first_party") else 0,
+                },
+                observed_domain=ctx.get("domain"),
+                service_root_domain=ctx.get("root_domain"),
+            )
         )
     return rows
 
@@ -256,7 +310,54 @@ def build_domain_observation_rows_from_network_indicators(
 def _insert_domain_observation_rows(rows: list[dict[str, Any]], *, query_name: str) -> int:
     if not rows:
         return 0
-    sql = """
+    has_normalization = _has_normalization_columns()
+    data: list[tuple[Any, ...]]
+    if has_normalization:
+        sql = """
+        INSERT INTO dynamic_domain_observations (
+          dynamic_run_id,
+          package_name,
+          indicator_type,
+          observed_domain,
+          root_domain,
+          registrable_domain_psl,
+          registrable_domain_normalization,
+          registrable_domain_reference_sha256,
+          indicator_count,
+          indicator_source,
+          owner_class,
+          role_class,
+          confidence,
+          classification_basis,
+          package_name_scope,
+          match_type,
+          is_first_party
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        data = [
+            (
+                row.get("dynamic_run_id"),
+                row.get("package_name"),
+                row.get("indicator_type"),
+                row.get("observed_domain"),
+                row.get("root_domain"),
+                row.get("registrable_domain_psl"),
+                row.get("registrable_domain_normalization"),
+                row.get("registrable_domain_reference_sha256"),
+                row.get("indicator_count"),
+                row.get("indicator_source"),
+                row.get("owner_class"),
+                row.get("role_class"),
+                row.get("confidence"),
+                row.get("classification_basis"),
+                row.get("package_name_scope"),
+                row.get("match_type"),
+                row.get("is_first_party"),
+            )
+            for row in rows
+        ]
+    else:
+        sql = """
         INSERT INTO dynamic_domain_observations (
           dynamic_run_id,
           package_name,
@@ -273,26 +374,26 @@ def _insert_domain_observation_rows(rows: list[dict[str, Any]], *, query_name: s
           match_type,
           is_first_party
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """
-    data = [
-        (
-            row.get("dynamic_run_id"),
-            row.get("package_name"),
-            row.get("indicator_type"),
-            row.get("observed_domain"),
-            row.get("root_domain"),
-            row.get("indicator_count"),
-            row.get("indicator_source"),
-            row.get("owner_class"),
-            row.get("role_class"),
-            row.get("confidence"),
-            row.get("classification_basis"),
-            row.get("package_name_scope"),
-            row.get("match_type"),
-            row.get("is_first_party"),
-        )
-        for row in rows
-    ]
+        """
+        data = [
+            (
+                row.get("dynamic_run_id"),
+                row.get("package_name"),
+                row.get("indicator_type"),
+                row.get("observed_domain"),
+                row.get("root_domain"),
+                row.get("indicator_count"),
+                row.get("indicator_source"),
+                row.get("owner_class"),
+                row.get("role_class"),
+                row.get("confidence"),
+                row.get("classification_basis"),
+                row.get("package_name_scope"),
+                row.get("match_type"),
+                row.get("is_first_party"),
+            )
+            for row in rows
+        ]
     core_q.run_sql_many(sql, data, query_name=query_name)
     return len(data)
 
@@ -323,18 +424,25 @@ def index_dynamic_domain_context_for_run(
     return _insert_domain_observation_rows(rows, query_name="dynamic.domain_context.insert")
 
 
-def index_dynamic_domain_context_from_network_indicators(*, only_missing: bool = True) -> dict[str, Any]:
+def index_dynamic_domain_context_from_network_indicators(
+    *, only_missing: bool = True
+) -> dict[str, Any]:
     references = load_domain_references_from_db()
-    missing_clause = """
+    missing_clause = (
+        """
       AND NOT EXISTS (
         SELECT 1
         FROM dynamic_domain_observations ddo
         WHERE ddo.dynamic_run_id = ds.dynamic_run_id
         LIMIT 1
       )
-    """ if only_missing else ""
-    run_rows = core_q.run_sql(
-        f"""
+    """
+        if only_missing
+        else ""
+    )
+    run_rows = (
+        core_q.run_sql(
+            f"""
         SELECT
           ds.dynamic_run_id,
           ds.package_name,
@@ -347,11 +455,13 @@ def index_dynamic_domain_context_from_network_indicators(*, only_missing: bool =
         GROUP BY ds.dynamic_run_id, ds.package_name
         ORDER BY ds.package_name, ds.dynamic_run_id
         """,
-        (),
-        fetch="all",
-        dictionary=True,
-        query_name="dynamic.domain_context.indicator_candidate_runs",
-    ) or []
+            (),
+            fetch="all",
+            dictionary=True,
+            query_name="dynamic.domain_context.indicator_candidate_runs",
+        )
+        or []
+    )
     scanned = 0
     indexed = 0
     errors = 0
@@ -364,8 +474,9 @@ def index_dynamic_domain_context_from_network_indicators(*, only_missing: bool =
             continue
         scanned += 1
         try:
-            indicators = core_q.run_sql(
-                """
+            indicators = (
+                core_q.run_sql(
+                    """
                 SELECT
                   indicator_type,
                   indicator_value,
@@ -377,11 +488,13 @@ def index_dynamic_domain_context_from_network_indicators(*, only_missing: bool =
                 GROUP BY indicator_type, indicator_value
                 ORDER BY indicator_type, indicator_value
                 """,
-                (dynamic_run_id,),
-                fetch="all",
-                dictionary=True,
-                query_name="dynamic.domain_context.indicator_rows_for_run",
-            ) or []
+                    (dynamic_run_id,),
+                    fetch="all",
+                    dictionary=True,
+                    query_name="dynamic.domain_context.indicator_rows_for_run",
+                )
+                or []
+            )
             rows = build_domain_observation_rows_from_network_indicators(
                 [row for row in indicators if isinstance(row, Mapping)],
                 dynamic_run_id=dynamic_run_id,
@@ -395,14 +508,28 @@ def index_dynamic_domain_context_from_network_indicators(*, only_missing: bool =
         except Exception:
             errors += 1
             continue
-    return {"scanned": scanned, "indexed_rows": indexed, "errors": errors, "only_missing": only_missing}
+    return {
+        "scanned": scanned,
+        "indexed_rows": indexed,
+        "errors": errors,
+        "only_missing": only_missing,
+    }
 
 
-def refresh_dynamic_domain_observation_classifications(*, unknown_only: bool = True) -> dict[str, Any]:
+def refresh_dynamic_domain_observation_classifications(
+    *, unknown_only: bool = True
+) -> dict[str, Any]:
     references = load_domain_references_from_db()
+    has_normalization = _has_normalization_columns()
     where_sql = "WHERE LOWER(TRIM(COALESCE(owner_class, ''))) = 'unknown'" if unknown_only else ""
-    rows = core_q.run_sql(
-        f"""
+    provenance_sql = (
+        ", registrable_domain_psl, registrable_domain_normalization, registrable_domain_reference_sha256"
+        if has_normalization
+        else ""
+    )
+    rows = (
+        core_q.run_sql(
+            f"""
         SELECT
           observation_id,
           dynamic_run_id,
@@ -416,15 +543,18 @@ def refresh_dynamic_domain_observation_classifications(*, unknown_only: bool = T
           package_name_scope,
           match_type,
           is_first_party
+          {provenance_sql}
         FROM dynamic_domain_observations
         {where_sql}
         ORDER BY package_name, observed_domain, observation_id
         """,
-        (),
-        fetch="all",
-        dictionary=True,
-        query_name="dynamic.domain_context.refresh_candidates",
-    ) or []
+            (),
+            fetch="all",
+            dictionary=True,
+            query_name="dynamic.domain_context.refresh_candidates",
+        )
+        or []
+    )
     scanned = 0
     updated = 0
     errors = 0
@@ -441,8 +571,12 @@ def refresh_dynamic_domain_observation_classifications(*, unknown_only: bool = T
             ctx = classify_domain(domain, package_name=package_name, references=references)
             if ctx.get("owner_class") == "unknown":
                 continue
-            next_values = {
-                "root_domain": str(ctx.get("root_domain") or ""),
+            identity = build_root_domain_identity(
+                domain,
+                str(ctx.get("root_domain") or domain),
+            )
+            next_values: dict[str, Any] = {
+                "root_domain": identity.root_domain,
                 "owner_class": str(ctx.get("owner_class") or ""),
                 "role_class": str(ctx.get("role_class") or ""),
                 "confidence": str(ctx.get("confidence") or ""),
@@ -461,10 +595,64 @@ def refresh_dynamic_domain_observation_classifications(*, unknown_only: bool = T
                 "match_type": str(row.get("match_type") or ""),
                 "is_first_party": int(row.get("is_first_party") or 0),
             }
+            if has_normalization:
+                next_values.update(
+                    {
+                        "registrable_domain_psl": identity.registrable_domain_psl,
+                        "registrable_domain_normalization": identity.normalization_key,
+                        "registrable_domain_reference_sha256": identity.reference_sha256,
+                    }
+                )
+                current_values.update(
+                    {
+                        "registrable_domain_psl": str(row.get("registrable_domain_psl") or ""),
+                        "registrable_domain_normalization": str(
+                            row.get("registrable_domain_normalization") or ""
+                        ),
+                        "registrable_domain_reference_sha256": row.get(
+                            "registrable_domain_reference_sha256"
+                        ),
+                    }
+                )
             if current_values == next_values:
                 continue
-            core_q.run_sql_write(
-                """
+            if has_normalization:
+                core_q.run_sql_write(
+                    """
+                UPDATE dynamic_domain_observations
+                SET
+                  root_domain = %s,
+                  registrable_domain_psl = %s,
+                  registrable_domain_normalization = %s,
+                  registrable_domain_reference_sha256 = %s,
+                  owner_class = %s,
+                  role_class = %s,
+                  confidence = %s,
+                  classification_basis = %s,
+                  package_name_scope = %s,
+                  match_type = %s,
+                  is_first_party = %s
+                WHERE observation_id = %s
+                """,
+                    (
+                        next_values["root_domain"],
+                        next_values["registrable_domain_psl"],
+                        next_values["registrable_domain_normalization"],
+                        next_values["registrable_domain_reference_sha256"],
+                        next_values["owner_class"],
+                        next_values["role_class"],
+                        next_values["confidence"],
+                        next_values["classification_basis"],
+                        next_values["package_name_scope"],
+                        next_values["match_type"],
+                        next_values["is_first_party"],
+                        observation_id,
+                    ),
+                    query_name="dynamic.domain_context.refresh_observation",
+                )
+            else:
+                core_q.run_sql_write(
+                    """
                 UPDATE dynamic_domain_observations
                 SET
                   root_domain = %s,
@@ -477,24 +665,29 @@ def refresh_dynamic_domain_observation_classifications(*, unknown_only: bool = T
                   is_first_party = %s
                 WHERE observation_id = %s
                 """,
-                (
-                    next_values["root_domain"],
-                    next_values["owner_class"],
-                    next_values["role_class"],
-                    next_values["confidence"],
-                    next_values["classification_basis"],
-                    next_values["package_name_scope"],
-                    next_values["match_type"],
-                    next_values["is_first_party"],
-                    observation_id,
-                ),
-                query_name="dynamic.domain_context.refresh_observation",
-            )
+                    (
+                        next_values["root_domain"],
+                        next_values["owner_class"],
+                        next_values["role_class"],
+                        next_values["confidence"],
+                        next_values["classification_basis"],
+                        next_values["package_name_scope"],
+                        next_values["match_type"],
+                        next_values["is_first_party"],
+                        observation_id,
+                    ),
+                    query_name="dynamic.domain_context.refresh_observation",
+                )
             updated += 1
         except Exception:
             errors += 1
             continue
-    return {"scanned": scanned, "updated_rows": updated, "errors": errors, "unknown_only": unknown_only}
+    return {
+        "scanned": scanned,
+        "updated_rows": updated,
+        "errors": errors,
+        "unknown_only": unknown_only,
+    }
 
 
 def index_dynamic_domain_context_from_evidence_packs(root: Path) -> dict[str, Any]:
@@ -509,7 +702,9 @@ def index_dynamic_domain_context_from_evidence_packs(root: Path) -> dict[str, An
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if not isinstance(manifest, dict):
                 continue
-            dynamic_run_id = str(manifest.get("dynamic_run_id") or manifest_path.parent.name).strip()
+            dynamic_run_id = str(
+                manifest.get("dynamic_run_id") or manifest_path.parent.name
+            ).strip()
             target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
             package_name = str((target or {}).get("package_name") or "").strip()
             if not dynamic_run_id or not package_name:

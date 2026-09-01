@@ -19,7 +19,6 @@ uses **unique** ``archive_path`` counts for strict alignment with on-disk archiv
 Exit codes: 0 ok, 1 bad args / import failure, 2 --strict violations (complete-looking session failed checks).
 Use ``--strict-log-duplicates`` with ``--strict`` to fail on duplicate ``report.saved`` lines (named violation ``duplicate_report_saved_events``).
 
-Legacy ``--compare-log`` and ``--db`` are deprecated no-ops (full audit always runs; use ``--no-db`` to skip SQL).
 """
 
 from __future__ import annotations
@@ -706,6 +705,197 @@ def _audit_archive_json_files(archive_dir: Path) -> tuple[list[Path], int, list[
     return paths, bad, bad_samples
 
 
+_ARCHIVE_LINEAGE_FIELDS = (
+    "session_stamp",
+    "execution_id",
+    "sha256",
+    "base_apk_sha256",
+    "artifact_set_hash",
+    "artifact_manifest_sha256",
+    "identity_valid",
+)
+
+
+def _audit_archive_report_provenance(
+    archive_paths: list[Path],
+    *,
+    expected_session: str,
+) -> dict[str, Any]:
+    """Audit research-lineage metadata without modifying session evidence."""
+
+    missing_by_field: Counter[str] = Counter()
+    affected: list[dict[str, Any]] = []
+    affected_count = 0
+    missing_report_count = 0
+    identity_counts: Counter[str] = Counter()
+    stem_mismatch_count = 0
+    session_mismatch_count = 0
+    readable = 0
+
+    for path in archive_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        readable += 1
+        metadata = payload.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        missing = [
+            field
+            for field in _ARCHIVE_LINEAGE_FIELDS
+            if field not in metadata or metadata.get(field) in (None, "")
+        ]
+        missing_by_field.update(missing)
+        missing_report_count += int(bool(missing))
+
+        identity = metadata.get("identity_valid")
+        if identity is True:
+            identity_counts["true"] += 1
+        elif identity is False:
+            identity_counts["false"] += 1
+        else:
+            identity_counts["missing_or_non_boolean"] += 1
+
+        sha256 = str(metadata.get("sha256") or "").strip().lower()
+        stem_mismatch = bool(sha256 and sha256 != path.stem.lower())
+        session = str(metadata.get("session_stamp") or "").strip()
+        session_mismatch = bool(session and session != expected_session)
+        stem_mismatch_count += int(stem_mismatch)
+        session_mismatch_count += int(session_mismatch)
+
+        if missing or stem_mismatch or session_mismatch:
+            affected_count += 1
+            if len(affected) < 25:
+                affected.append(
+                    {
+                        "archive_file": path.name,
+                        "package_name": metadata.get("package_name"),
+                        "is_split_member": metadata.get("is_split_member"),
+                        "missing_lineage_fields": missing,
+                        "sha256_filename_mismatch": stem_mismatch,
+                        "session_stamp_mismatch": session_mismatch,
+                    }
+                )
+
+    return {
+        "status": (
+            "DEGRADED"
+            if missing_by_field or stem_mismatch_count or session_mismatch_count
+            else "OK"
+        ),
+        "reports_checked": readable,
+        "required_lineage_fields": list(_ARCHIVE_LINEAGE_FIELDS),
+        "reports_missing_lineage_count": missing_report_count,
+        "missing_lineage_field_instances": sum(missing_by_field.values()),
+        "missing_by_field": dict(sorted(missing_by_field.items())),
+        "identity_valid_counts": dict(identity_counts),
+        "sha256_filename_mismatch_count": stem_mismatch_count,
+        "session_stamp_mismatch_count": session_mismatch_count,
+        "affected_report_count": affected_count,
+        "affected_reports_sample": affected,
+        "affected_reports_sample_truncated": affected_count > len(affected),
+        "note": (
+            "Archive presence/counts do not establish provenance. This check verifies "
+            "the minimum session, execution, content, artifact-set, and identity lineage "
+            "needed to attribute each report to the selected run."
+        ),
+    }
+
+
+def _audit_archive_detector_coverage(archive_paths: list[Path]) -> dict[str, Any]:
+    """Derive detector-stage coverage from saved pipeline summaries."""
+
+    from scytaledroid.StaticAnalysis.core.pipeline_artifacts import (
+        classify_detector_skip_reason,
+    )
+
+    planned = 0
+    executed = 0
+    placeholders = 0
+    reports_with_summary = 0
+    reports_with_placeholders = 0
+    placeholder_ids: Counter[str] = Counter()
+    unavailable_reasons: Counter[str] = Counter()
+    skip_classes: Counter[str] = Counter()
+
+    for path in archive_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        metadata = payload.get("metadata") if isinstance(payload, dict) else None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        summary = metadata.get("pipeline_summary")
+        if not isinstance(summary, dict):
+            continue
+        reports_with_summary += 1
+        planned += int(summary.get("detector_total", 0) or 0)
+        executed += int(summary.get("detector_executed", 0) or 0)
+        rows = summary.get("placeholder_detectors")
+        rows = rows if isinstance(rows, list) else []
+        placeholder_count = int(
+            summary.get("placeholder_detector_count", len(rows)) or 0
+        )
+        placeholders += placeholder_count
+        reports_with_placeholders += int(placeholder_count > 0)
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            detector_id = str(row.get("detector") or row.get("section") or "").strip()
+            if detector_id:
+                placeholder_ids[detector_id] += 1
+        skipped = summary.get("skipped_detectors")
+        if isinstance(skipped, list):
+            for row in skipped:
+                if not isinstance(row, Mapping):
+                    continue
+                reason = str(row.get("reason") or "unspecified").strip() or "unspecified"
+                unavailable_reasons[reason] += 1
+                skip_classes[classify_detector_skip_reason(reason)] += 1
+
+    implemented = max(0, planned - placeholders)
+    executed_implemented = min(executed, implemented)
+    design_deferred = int(skip_classes.get("design_deferred", 0))
+    non_deferred_implemented = max(0, implemented - design_deferred)
+    if placeholders > 0:
+        status = "partial_declared_placeholders"
+    elif implemented and executed_implemented < implemented:
+        status = "partial_runtime_availability"
+    elif implemented:
+        status = "complete_configured"
+    else:
+        status = "unknown"
+    return {
+        "status": status,
+        "reports_checked": len(archive_paths),
+        "reports_with_pipeline_summary": reports_with_summary,
+        "planned_stage_opportunities": planned,
+        "implemented_stage_opportunities": implemented,
+        "executed_implemented_stage_opportunities": executed_implemented,
+        "placeholder_stage_opportunities": placeholders,
+        "implemented_stage_execution_rate": (
+            round(executed_implemented / implemented, 6) if implemented else None
+        ),
+        "non_deferred_implemented_stage_opportunities": non_deferred_implemented,
+        "non_deferred_implemented_execution_rate": (
+            round(executed_implemented / non_deferred_implemented, 6)
+            if non_deferred_implemented
+            else None
+        ),
+        "reports_with_placeholders": reports_with_placeholders,
+        "placeholder_detector_artifact_counts": dict(placeholder_ids.most_common()),
+        "non_placeholder_skip_reason_counts": dict(unavailable_reasons.most_common()),
+        "non_placeholder_skip_class_counts": dict(skip_classes.most_common()),
+        "interpretation": (
+            "Stage-opportunity coverage across saved APK reports. This denominator measures "
+            "declared detector execution, not source-code coverage, vulnerability recall, "
+            "or absence of unreported weaknesses."
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # DB audit (join apps via app_versions)
 # ---------------------------------------------------------------------------
@@ -1126,6 +1316,7 @@ def _strict_violations(report: dict[str, Any]) -> list[str]:
     if unique_paths is None:
         unique_paths = 0
     missing_path_ev = _as_int(ev.get("report_saved_events_missing_archive_path")) or 0
+    provenance = ev.get("archive_report_provenance")
     dup_extra = (
         _as_int(ev.get("duplicate_archive_event_extra_count"))
         or _as_int(ev.get("duplicate_report_saved_events"))
@@ -1133,6 +1324,8 @@ def _strict_violations(report: dict[str, Any]) -> list[str]:
     )
 
     if sel_n is not None and sel_n > 0 and arch == sel_n == unique_paths:
+        if isinstance(provenance, Mapping) and provenance.get("status") == "DEGRADED":
+            violations.append("archive_report_lineage_degraded")
         if not pr.get("present"):
             violations.append("persistence_audit_missing_when_scan_counts_full")
         gc = _as_int(sc.get("group_count"))
@@ -1618,6 +1811,11 @@ def build_artifact_map_report(
 
     selection = _load_selection(selection_json)
     archive_paths, bad_json_count, bad_json_samples = _audit_archive_json_files(archive_dir)
+    archive_report_provenance = _audit_archive_report_provenance(
+        archive_paths,
+        expected_session=session,
+    )
+    archive_detector_coverage = _audit_archive_detector_coverage(archive_paths)
     archived_count = len(archive_paths)
     archive_stems = {p.stem for p in archive_paths}
 
@@ -1782,6 +1980,8 @@ def build_artifact_map_report(
             "archived_json_count": archived_count,
             "bad_json_count": bad_json_count,
             "bad_json_samples": bad_json_samples,
+            "archive_report_provenance": archive_report_provenance,
+            "archive_detector_coverage": archive_detector_coverage,
             "delta_archived_minus_selection_artifact_count": delta_archive_vs_selection,
             "raw_report_saved_event_count": log_path_rollup["raw_report_saved_event_count"],
             "unique_archive_path_count": log_path_rollup["unique_archive_path_count"],
@@ -2275,8 +2475,6 @@ def main() -> int:
         description="Audit static session artifacts (selection, archive, logs, mirrors, DB). Read-only.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Deprecated (no-op): --compare-log, --db — the audit always includes log/DB analysis; "
-            "use --no-db to skip SQL.\n"
             "Exit codes: 0 success, 1 usage/import error, 2 --strict and strict_violations non-empty.\n"
             "--strict-log-duplicates adds duplicate_report_saved_events when raw JSONL lines repeat archive_path."
         ),
@@ -2326,10 +2524,6 @@ def main() -> int:
             "reports *.apk.meta.json and harvest_package_manifest.json relative to pull paths for store-selected APKs."
         ),
     )
-    # Legacy flags (no-op for compatibility)
-    parser.add_argument("--compare-log", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--db", action="store_true", help=argparse.SUPPRESS)
-
     args = parser.parse_args()
     session = str(args.session).strip()
     if not session:

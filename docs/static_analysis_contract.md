@@ -22,6 +22,25 @@ findings.
   graph, and string-index summary under `metadata.repro_bundle` for each run.
   Detectors that diff state (e.g., correlation, split aggregation) must consume
   this bundle rather than reparsing raw files.
+- **Installed artifact-set integrity:** A paper-grade split-APK run requires
+  exactly one base APK and every receipt-declared member to materialize as a
+  distinct local artifact. Before computing `artifact_set_hash`, the runner
+  must hash the local bytes and reject any mismatch with the harvested SHA-256.
+  A manifest that was complete at harvest time does not override missing,
+  duplicated, or changed files at analysis time. This follows Android's
+  installed-app model, in which base, feature, and configuration APKs jointly
+  form the delivered application ([Android App Bundle format](https://developer.android.com/guide/app-bundle/app-bundle-format)).
+- **Terminal completion integrity:** A session is workflow-complete only when
+  every artifact in the frozen selection has one matching terminal report,
+  its selected and analyzed SHA-256 values agree, and each expected canonical
+  package row has a committed persistence transaction. Missing, duplicate, or
+  foreign outcomes, content-hash substitution, a non-terminal package state,
+  or failure to write the canonical terminal status must prevent a reconciled
+  completion result. The generated completion-reconciliation receipt is a
+  derived diagnostic; it does not replace the frozen selection, report, or
+  canonical database row as a source of truth. Its package denominator and
+  state are also recorded on ``static_analysis_sessions`` so DB/Web eligibility
+  cannot infer completeness solely from the subset of run rows that exist.
 
 ## 1. Core Types
 

@@ -504,22 +504,22 @@ def test_recovery_plan_report_bundle_splits_action_worklists(tmp_path) -> None:
 
 
 def test_static_target_dynamic_gap_missing_old_root_is_blocked() -> None:
-    from scripts.db import report_static_analysis_targets as targets
+    from scytaledroid.Database.db_scripts import package_lineage_read_model as targets
 
-    byte_status = targets._byte_status(
+    byte_status = targets.byte_status(
         recorded_exists=False,
         canonical_exists=False,
         recorded_root_exists=False,
         recorded_location_known=True,
     )
-    status = targets._target_status(
+    status = targets.target_status(
         exact_static=0,
         byte_status=byte_status,
         split_status="unknown_until_bytes_restored",
         dynamic_unlinked=5,
         same_version_hash_drift=False,
     )
-    reason = targets._target_reason(
+    reason = targets.target_reason(
         exact_static=0,
         byte_status=byte_status,
         dynamic_sessions=5,
@@ -533,9 +533,9 @@ def test_static_target_dynamic_gap_missing_old_root_is_blocked() -> None:
 
 
 def test_static_target_exact_static_with_unlinked_dynamic_is_link_preview() -> None:
-    from scripts.db import report_static_analysis_targets as targets
+    from scytaledroid.Database.db_scripts import package_lineage_read_model as targets
 
-    status = targets._target_status(
+    status = targets.target_status(
         exact_static=1,
         byte_status="available_canonical",
         split_status="install_set_known",
@@ -547,9 +547,9 @@ def test_static_target_exact_static_with_unlinked_dynamic_is_link_preview() -> N
 
 
 def test_static_target_static_covered_recorded_only_rebuilds_store() -> None:
-    from scripts.db import report_static_analysis_targets as targets
+    from scytaledroid.Database.db_scripts import package_lineage_read_model as targets
 
-    status = targets._target_status(
+    status = targets.target_status(
         exact_static=1,
         byte_status="available_recorded",
         split_status="install_set_known",
@@ -561,16 +561,16 @@ def test_static_target_static_covered_recorded_only_rebuilds_store() -> None:
 
 
 def test_static_target_static_covered_missing_current_root_is_artifact_lifecycle() -> None:
-    from scripts.db import report_static_analysis_targets as targets
+    from scytaledroid.Database.db_scripts import package_lineage_read_model as targets
 
-    status = targets._target_status(
+    status = targets.target_status(
         exact_static=1,
         byte_status="missing_current_root_file",
         split_status="unknown_until_bytes_restored",
         dynamic_unlinked=0,
         same_version_hash_drift=False,
     )
-    reason = targets._target_reason(
+    reason = targets.target_reason(
         exact_static=1,
         byte_status="missing_current_root_file",
         dynamic_sessions=0,
@@ -580,7 +580,7 @@ def test_static_target_static_covered_missing_current_root_is_artifact_lifecycle
 
     assert reason == "artifact_lifecycle_gap"
     assert status == "artifact_lifecycle_gap"
-    assert targets._operator_action(status) == "Restore or reharvest bytes"
+    assert targets.operator_action(status) == "Restore or reharvest bytes"
 
 
 def test_workbench_action_mapping_keeps_states_distinct() -> None:

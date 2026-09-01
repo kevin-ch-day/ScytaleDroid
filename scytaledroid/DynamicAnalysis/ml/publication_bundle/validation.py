@@ -9,8 +9,11 @@ from typing import Any
 
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
     dynamic_evidence_root,
+    normalize_run_id,
     resolve_dynamic_run_dir,
+    resolve_run_dir_under,
 )
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from .. import ml_parameters_profile as config
 from ..deliverable_bundle_paths import (
@@ -31,10 +34,25 @@ PROHIBITED_PHRASES = (
 )
 
 
+def _included_run_ids(freeze_payload: object) -> list[str]:
+    if not isinstance(freeze_payload, dict):
+        raise ValueError("Freeze manifest must be an object")
+    values = freeze_payload.get("included_run_ids")
+    if not isinstance(values, list):
+        raise ValueError("Freeze manifest included_run_ids must be a list")
+    run_ids: list[str] = []
+    for value in values:
+        run_id = normalize_run_id(value)
+        if run_id is None:
+            raise ValueError(f"Unsafe freeze run_id: {value!r}")
+        run_ids.append(run_id)
+    return run_ids
+
+
 def write_required_fields_validation_report(*, manifest_dir: Path) -> Path:
     """Required-field validation for publication-grade model manifests."""
     freeze_payload = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
-    included_run_ids = [str(x) for x in (freeze_payload.get("included_run_ids") or []) if str(x).strip()]
+    included_run_ids = _included_run_ids(freeze_payload)
     required_paths = {
         "seed": ("seed",),
         "window_size_s": ("windowing", "window_size_s"),
@@ -85,7 +103,7 @@ def write_required_fields_validation_report(*, manifest_dir: Path) -> Path:
         "missing_by_run": missing_by_run,
     }
     out_path = manifest_dir / "required_fields_validation.json"
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(out_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return out_path
 
 
@@ -105,14 +123,14 @@ def write_phrase_lint_report(*, target_paths: tuple[Path, ...], out_path: Path) 
         "ok": len(violations) == 0,
         "violations": violations,
     }
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(out_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return out_path
 
 
 def write_determinism_checksums(*, manifest_dir: Path) -> Path:
     """Write deterministic hash anchors for publication-facing reproducibility checks."""
     freeze_payload = json.loads(freeze_anchor_path().read_text(encoding="utf-8"))
-    included_run_ids = [str(x) for x in (freeze_payload.get("included_run_ids") or []) if str(x).strip()]
+    included_run_ids = _included_run_ids(freeze_payload)
     per_run: dict[str, Any] = {}
     spec = WindowSpec(window_size_s=config.WINDOW_SIZE_S, stride_s=config.WINDOW_STRIDE_S)
     for rid in included_run_ids:
@@ -166,13 +184,18 @@ def write_determinism_checksums(*, manifest_dir: Path) -> Path:
         "per_run": per_run,
     }
     out_path = manifest_dir / "determinism_checksums.json"
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(out_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return out_path
 
 
 def _dynamic_run_dir(run_id: str | int | None) -> Path:
-    rid = str(run_id or "").strip()
-    return resolve_dynamic_run_dir(rid) or dynamic_evidence_root() / rid
+    rid = run_id if isinstance(run_id, str) else str(run_id or "")
+    run_dir = resolve_dynamic_run_dir(rid)
+    if run_dir is None:
+        run_dir = resolve_run_dir_under(dynamic_evidence_root(), rid)
+    if run_dir is None:
+        raise ValueError(f"Unsafe dynamic run_id: {run_id!r}")
+    return run_dir
 
 
 __all__ = [

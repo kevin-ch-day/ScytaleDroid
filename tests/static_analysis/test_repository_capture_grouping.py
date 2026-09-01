@@ -237,6 +237,74 @@ def test_grouping_loads_receipt_backed_artifacts(tmp_path: Path) -> None:
     assert group.harvest_capture_status == "clean"
 
 
+def test_receipt_group_blocks_when_declared_member_does_not_materialize(tmp_path: Path) -> None:
+    base_sha = "f" * 64
+    missing_sha = "e" * 64
+    canonical_apk = tmp_path / "data" / "store" / "apk" / "sha256" / "ff" / f"{base_sha}.apk"
+    canonical_apk.parent.mkdir(parents=True, exist_ok=True)
+    canonical_apk.write_bytes(b"apk")
+    receipt_root = tmp_path / "data" / "receipts" / "harvest"
+    receipt_path = receipt_root / "20260328-rda-full" / "com.example.partial.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    observed = [
+        {
+            "split_label": "base",
+            "file_name": canonical_apk.name,
+            "is_base": True,
+            "canonical_store_path": canonical_apk.relative_to(tmp_path).as_posix(),
+            "sha256": base_sha,
+        },
+        {
+            "split_label": "split_config.en",
+            "file_name": f"{missing_sha}.apk",
+            "is_base": False,
+            "canonical_store_path": "missing/split_config.en.apk",
+            "sha256": missing_sha,
+        },
+    ]
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "execution_state": "completed",
+                "package": {
+                    "package_name": "com.example.partial",
+                    "session_label": "20260328-rda-full",
+                },
+                "inventory": {},
+                "execution": {"observed_artifacts": observed},
+                "status": {
+                    "capture_status": "clean",
+                    "persistence_status": "mirrored",
+                    "research_status": "pending_audit",
+                },
+                "comparison": {
+                    "observed_artifact_count": 2,
+                    "matches_planned_artifacts": True,
+                    "observed_hashes_complete": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cwd = Path.cwd()
+    try:
+        import os
+
+        os.chdir(tmp_path)
+        groups = group_artifacts(receipt_root)
+    finally:
+        os.chdir(cwd)
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert len(group.artifacts) == 1
+    assert group.harvest_expected_artifact_count == 2
+    assert group.harvest_materialization_complete is False
+    assert "HARVEST_ARTIFACT_MATERIALIZATION_INCOMPLETE" in group.harvest_non_canonical_reasons
+    assert group.harvest_research_usable is False
+
+
 def test_artifacts_from_receipt_preserve_device_serial(tmp_path: Path) -> None:
     apk_path = tmp_path / "signal.apk"
     apk_path.write_bytes(b"apk")

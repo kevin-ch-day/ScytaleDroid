@@ -24,7 +24,7 @@ These views keep **stable names** for existing SQL and tooling; definitions no l
 | Name | Definition |
 | --- | --- |
 | `vw_static_risk_surfaces_latest` | `SELECT … FROM v_static_risk_surfaces_v1` plus NULL legacy bucket columns and `composite_static_surface_state = 'canonical_static_latest'`. |
-| `v_masvs_matrix` | Maps `v_static_masvs_matrix_v1` into the historic column layout; **`run_id` is `static_analysis_runs.id`** (not legacy `runs.run_id`). Fail bits follow canonical severity statuses; inconclusive columns are `0`. |
+| `v_masvs_matrix` | Maps `v_static_masvs_matrix_v1` into the historic column layout; **`run_id` is `static_analysis_runs.id`** (not legacy `runs.run_id`). Fail bits follow canonical severity statuses; inconclusive columns are `0`. Status comparisons use `CONVERT(...) COLLATE utf8mb4_unicode_ci` so MariaDB 11.8 `SHOW CREATE` / `mariadb-dump` do not hit a `utf8mb4_uca1400_ai_ci` vs `utf8mb4_general_ci` mix. |
 
 ### Consumers still referencing these names
 

@@ -200,6 +200,36 @@ class ArtifactGroup:
         return _bool_from_mapping(self.harvest_comparison, "observed_hashes_complete")
 
     @property
+    def harvest_expected_artifact_count(self) -> int | None:
+        comparison_count = _nonnegative_int_from_mapping(
+            self.harvest_comparison,
+            "observed_artifact_count",
+        )
+        execution_count = _manifest_observed_artifact_count(self.harvest_manifest)
+        if comparison_count is not None:
+            return comparison_count
+        return execution_count
+
+    @property
+    def harvest_manifest_counts_consistent(self) -> bool | None:
+        comparison_count = _nonnegative_int_from_mapping(
+            self.harvest_comparison,
+            "observed_artifact_count",
+        )
+        execution_count = _manifest_observed_artifact_count(self.harvest_manifest)
+        if comparison_count is None or execution_count is None:
+            return None
+        return comparison_count == execution_count
+
+    @property
+    def harvest_materialization_complete(self) -> bool | None:
+        expected_count = self.harvest_expected_artifact_count
+        if expected_count is None:
+            return None
+        membership_count = len({_materialized_membership_key(item) for item in self.artifacts})
+        return len(self.artifacts) == expected_count and membership_count == expected_count
+
+    @property
     def harvest_non_canonical_reasons(self) -> tuple[str, ...]:
         reasons: list[str] = []
         if not self.harvest_manifest:
@@ -216,8 +246,17 @@ class ArtifactGroup:
             reasons.append("HARVEST_CAPTURE_FAILED")
         if self.matches_planned_artifacts is False:
             reasons.append("HARVEST_PLANNED_OBSERVED_MISMATCH")
+        if _bool_from_mapping(
+            self.harvest_comparison,
+            "inventory_paths_match_declared_splits",
+        ) is False:
+            reasons.append("HARVEST_INVENTORY_SPLIT_COUNT_MISMATCH")
         if self.observed_hashes_complete is False:
             reasons.append("HARVEST_OBSERVED_HASHES_INCOMPLETE")
+        if self.harvest_manifest_counts_consistent is False:
+            reasons.append("HARVEST_MANIFEST_ARTIFACT_COUNT_INCONSISTENT")
+        if self.harvest_materialization_complete is False:
+            reasons.append("HARVEST_ARTIFACT_MATERIALIZATION_INCOMPLETE")
         research_status = (self.harvest_research_status or "").lower()
         if research_status == "ineligible":
             reasons.append("HARVEST_RESEARCH_INELIGIBLE")
@@ -543,6 +582,42 @@ def _bool_from_mapping(payload: Mapping[str, object], key: str) -> bool | None:
     if isinstance(value, bool):
         return value
     return None
+
+
+def _nonnegative_int_from_mapping(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _manifest_observed_artifact_count(manifest: Mapping[str, object] | None) -> int | None:
+    if not isinstance(manifest, Mapping):
+        return None
+    execution = manifest.get("execution")
+    if not isinstance(execution, Mapping):
+        return None
+    observed = execution.get("observed_artifacts")
+    if not isinstance(observed, Sequence) or isinstance(observed, (str, bytes)):
+        return None
+    return len(observed)
+
+
+def _materialized_membership_key(artifact: RepositoryArtifact) -> tuple[str, str, bool]:
+    label = str(
+        artifact.metadata.get("split_name")
+        or artifact.metadata.get("split")
+        or artifact.metadata.get("artifact")
+        or artifact.path.name
+    ).strip().lower()
+    digest = str(artifact.sha256 or "").strip().lower()
+    if not digest:
+        digest = f"path:{artifact.path.resolve()}"
+    return label, digest, artifact.is_split_member
 
 
 def _normalise_token(value: object) -> str | None:

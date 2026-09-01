@@ -6,6 +6,43 @@ from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
 )
 
 
+def test_record_completion_reconciliation_persists_frozen_denominator(monkeypatch):
+    writes: list[tuple[object, ...]] = []
+
+    def _write(_sql, params, **_kwargs):
+        writes.append(params)
+        return 1
+
+    monkeypatch.setattr(sss.core_q, "run_sql_rowcount", _write)
+
+    assert sss.record_static_session_completion_reconciliation(
+        session_stamp="session-1",
+        scope_label="All harvested apps",
+        receipt={
+            "status": "INCOMPLETE",
+            "selected_packages": 15,
+            "terminal_packages": 14,
+            "selection_artifact_manifest_sha256": "a" * 64,
+        },
+    ) is True
+    assert writes
+    assert writes[0][0:4] == (15, 14, "INCOMPLETE", "a" * 64)
+
+
+def test_record_completion_reconciliation_rejects_invalid_receipt(monkeypatch):
+    monkeypatch.setattr(
+        sss.core_q,
+        "run_sql_rowcount",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected DB write")),
+    )
+
+    assert sss.record_static_session_completion_reconciliation(
+        session_stamp="session-1",
+        scope_label="scope",
+        receipt={"status": "COMPLETE_RECONCILED", "selection_artifact_manifest_sha256": "bad"},
+    ) is False
+
+
 def test_maybe_refresh_static_analysis_session_summary_noop_blank_stamp(monkeypatch):
     called: list[object] = []
 

@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    bound_manifest_run_id,
+    resolve_contained_path,
+)
 
 from . import ml_parameters_profile as ml_config
 from .seed_identity import identity_key_fallback, identity_key_from_plan
@@ -50,17 +54,21 @@ class MlPreflightResult:
 
 def load_run_inputs(run_dir: Path) -> RunInputs | None:
     manifest_path = run_dir / "run_manifest.json"
-    if not manifest_path.exists():
+    if not manifest_path.is_file():
         return None
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    run_id = str(manifest.get("dynamic_run_id") or run_dir.name)
+    if not isinstance(manifest, dict):
+        return None
+    run_id = bound_manifest_run_id(manifest, run_dir)
+    if run_id is None:
+        return None
 
     def _load_json(rel: str) -> dict[str, Any] | None:
         path = run_dir / rel
-        if not path.exists():
+        if not path.is_file():
             return None
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -86,8 +94,8 @@ def load_run_inputs(run_dir: Path) -> RunInputs | None:
                 continue
             rel = item.get("relative_path")
             if isinstance(rel, str) and rel:
-                candidate = run_dir / rel
-                if candidate.exists():
+                candidate = resolve_contained_path(run_dir, rel)
+                if candidate is not None and candidate.is_file():
                     pcap_path = candidate
                     break
 

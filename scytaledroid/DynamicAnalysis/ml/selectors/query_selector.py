@@ -23,6 +23,7 @@ from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
     load_run_inputs,
 )
 from scytaledroid.DynamicAnalysis.run_qualification import run_included_in_default_analysis
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_run_dir_under
 
 from .models import QueryParams, RunRef, SelectionResult
 
@@ -101,12 +102,15 @@ class QuerySelector:
         excluded: dict[str, dict[str, Any]] = {}
 
         for rid in self._candidate_run_ids():
-            run_dir = self.evidence_root / rid
-            if not run_dir.exists():
+            run_dir = resolve_run_dir_under(self.evidence_root, rid)
+            if run_dir is None:
+                excluded[rid] = {"reason": "unsafe_run_id"}
+                continue
+            if not run_dir.is_dir():
                 excluded[rid] = {"reason": "missing_evidence_dir", "evidence_dir": str(run_dir)}
                 continue
             manifest_path = run_dir / "run_manifest.json"
-            if not manifest_path.exists():
+            if not manifest_path.is_file():
                 excluded[rid] = {"reason": "missing_run_manifest", "evidence_dir": str(run_dir)}
                 continue
 

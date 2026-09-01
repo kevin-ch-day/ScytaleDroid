@@ -28,6 +28,12 @@ def test_build_pipeline_summary_skipped_uses_metrics_summary_when_no_skip_reason
     assert isinstance(placeholders, list) and len(placeholders) == 1
     assert placeholders[0]["reason"] == "Domain verification analysis placeholder"
     assert summary.get("placeholder_detector_count") == 1
+    coverage = summary.get("measurement_coverage")
+    assert isinstance(coverage, dict)
+    assert coverage["planned_stage_count"] == 1
+    assert coverage["implemented_stage_count"] == 0
+    assert coverage["placeholder_stage_count"] == 1
+    assert coverage["implemented_stage_execution_rate"] is None
 
 
 def test_build_pipeline_summary_skipped_prefers_skip_reason_over_summary() -> None:
@@ -46,6 +52,7 @@ def test_build_pipeline_summary_skipped_prefers_skip_reason_over_summary() -> No
     summary = build_pipeline_summary(results)
     skipped = summary.get("skipped_detectors")
     assert isinstance(skipped, list) and skipped[0]["reason"] == "profile gate"
+    assert summary["non_placeholder_skip_class_counts"] == {"other": 1}
 
 
 def test_build_pipeline_trace_skipped_adds_summary_to_notes() -> None:

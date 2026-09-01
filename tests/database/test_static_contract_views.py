@@ -59,6 +59,8 @@ def test_canonical_masvs_risk_views_avoid_legacy_tables() -> None:
     assert "masvs_network_status" in m
     assert "from v_static_masvs_matrix_v1" in compat_m
     assert " from runs" not in compat_m
+    assert "collate utf8mb4_unicode_ci" in compat_m
+    assert "collate utf8mb4_unicode_ci" in s
 
 
 def test_web_app_masvs_latest_reads_canonical_matrix_for_preferred_run() -> None:

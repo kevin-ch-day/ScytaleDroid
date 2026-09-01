@@ -30,7 +30,10 @@ from scytaledroid.DynamicAnalysis.tools.evidence.freeze_manifest import (
     FreezeConfig,
     build_dataset_freeze_manifest,
 )
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    resolve_run_dir_under,
+)
 
 
 def runtime_ml_status_snapshot() -> dict[str, object]:
@@ -232,10 +235,11 @@ def duration_tier_status(*, freeze_path: Path, evidence_root: Path) -> str:
     counts: dict[str, int] = {}
     labels: dict[str, str] = {}
     for raw_run_id in run_ids:
-        run_id = str(raw_run_id or "").strip()
+        run_id = raw_run_id if isinstance(raw_run_id, str) else ""
         if not run_id:
             continue
-        inputs = load_run_inputs(evidence_root / run_id)
+        run_dir = resolve_run_dir_under(evidence_root, run_id)
+        inputs = load_run_inputs(run_dir) if run_dir is not None else None
         duration = get_sampling_duration_seconds(inputs) if inputs else None
         tier = classify_duration_tier(duration)
         counts[tier.key] = int(counts.get(tier.key, 0)) + 1

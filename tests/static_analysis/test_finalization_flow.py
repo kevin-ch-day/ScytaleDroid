@@ -152,6 +152,34 @@ def test_finalize_persisted_writes_findings_reconciliation_sql():
 
 
 @pytest.mark.unit
+def test_finalize_persisted_run_fails_when_terminal_status_write_fails():
+    outcome = _Outcome()
+    callbacks = _build_callbacks()
+    callbacks.update_static_run_status = lambda **_kwargs: False
+
+    status = finalize_persisted_static_run(
+        static_run_id=101,
+        dry_run=False,
+        package_for_run="com.example",
+        session_stamp="sess-1",
+        scope_label="com.example",
+        run_package="com.example",
+        run_status="COMPLETED",
+        paper_grade_requested=False,
+        canonical_action=None,
+        persistence_failed=False,
+        outcome=outcome,
+        ended_at_utc=None,
+        abort_reason=None,
+        abort_signal=None,
+        callbacks=callbacks,
+    )
+
+    assert status == "FAILED"
+    assert outcome.canonical_failed is True
+    assert outcome.errors == ["db_write_failed:static_run.status_update:static_run_id=101"]
+
+@pytest.mark.unit
 def test_group_scope_skip_does_not_mutate_slotted_outcome(monkeypatch):
     messages: list[str] = []
     monkeypatch.setattr(

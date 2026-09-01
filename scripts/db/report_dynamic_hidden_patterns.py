@@ -179,6 +179,8 @@ def _visibility_loss_flag(report: dict[str, Any], *, domain_count: int) -> bool:
     vis = report.get("tls_quic_visibility") if isinstance(report.get("tls_quic_visibility"), dict) else {}
     quic_candidates = int(vis.get("quic_candidate_packets") or 0)
     tls_visible = bool(vis.get("tls_visible"))
+    if vis.get("tls_name_metadata_limited") is True and domain_count == 0:
+        return True
     if quic_candidates > 0 and (not tls_visible or domain_count == 0):
         return True
     if int(report.get("pcap_size_bytes") or 0) > 0 and domain_count == 0:

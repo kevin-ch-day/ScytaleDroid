@@ -23,6 +23,7 @@ from scytaledroid.DynamicAnalysis.run_profile_norm import (
     phase_from_normalized_profile,
     resolve_run_profile_from_manifest,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path
 
 ENGINE_IFOREST = "iforest"
 ENGINE_ALIASES = {
@@ -350,8 +351,13 @@ def compute_profile_v3_per_app(
         rid = str(run_id).strip()
         if not rid:
             continue
-        run_dir = evidence_root / rid
-        if not run_dir.exists():
+        run_dir = resolve_contained_path(evidence_root, rid)
+        if run_dir is None:
+            raise ProfileV3Error(
+                "PROFILE_V3_UNSAFE_RUN_ID",
+                f"run id escapes evidence root: {rid}",
+            )
+        if not run_dir.is_dir():
             raise ProfileV3Error("PROFILE_V3_MISSING_RUN_DIR", f"missing run dir: {run_dir}")
         runs.append(
             compute_run_flags(

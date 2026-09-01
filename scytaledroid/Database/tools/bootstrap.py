@@ -10,6 +10,7 @@ MySQL/MariaDB when DB is enabled.
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 from collections.abc import Iterable
@@ -230,6 +231,13 @@ def _verify_required_schema(*, dialect: str) -> None:
             "run_class",
             "non_canonical_reasons",
         ],
+        "static_analysis_sessions": [
+            "expected_package_count",
+            "reconciled_package_count",
+            "completion_reconciliation_status",
+            "selection_artifact_manifest_sha256",
+            "completion_reconciled_at_utc",
+        ],
     }
     for table, cols in required_columns.items():
         try:
@@ -315,5 +323,15 @@ def bootstrap_database() -> None:
     log.info("Schema bootstrap complete.", category="database")
 
 
-if __name__ == "__main__":  # pragma: no cover
+def main(argv: list[str] | None = None) -> None:
+    """Parse CLI arguments before entering the write-capable bootstrap path."""
+
+    parser = argparse.ArgumentParser(
+        description="Apply the idempotent ScytaleDroid database schema manifest."
+    )
+    parser.parse_args(argv)
     bootstrap_database()
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
+from typing import cast
 
 from scytaledroid.Config import app_config
 from scytaledroid.DeviceAnalysis.identity import compute_signer_set_hash, normalize_hex_digest
 from scytaledroid.StaticAnalysis.core import ManifestFlags, StaticAnalysisReport
+from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.host_normalizer import (
+    registrable_domain,
+)
 from scytaledroid.Utils.evidence_store import filesystem_safe_slug
 
 from .diagnostics_render import summarise_masvs_inline
@@ -17,18 +22,27 @@ from .diagnostics_render import summarise_masvs_inline
 PLAN_SCHEMA_VERSION = "v1"
 PAPER_CONTRACT_VERSION = 1
 REASON_TAXONOMY_VERSION = 1
-_COMMON_TWO_PART_SUFFIXES = {
-    "co.uk",
-    "org.uk",
-    "gov.uk",
-    "ac.uk",
-    "com.au",
-    "net.au",
-    "org.au",
-    "edu.au",
-    "co.jp",
-    "com.br",
-}
+
+
+def _as_mapping(value: object) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    return cast(Mapping[str, object], value)
+
+
+def _safe_int(value: object, *, default: int = 0) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: object, *, default: float = 0.0) -> float:
+    try:
+        parsed = float(str(value))
+    except (TypeError, ValueError):
+        return default
+    return parsed if isfinite(parsed) else default
 
 
 def _normalize_domain(value: object) -> str:
@@ -62,15 +76,7 @@ def _normalize_domain(value: object) -> str:
 
 def _registrable_domain(value: object) -> str:
     host = _normalize_domain(value)
-    if "." not in host:
-        return host
-    parts = [part for part in host.split(".") if part]
-    if len(parts) < 2:
-        return host
-    tail = ".".join(parts[-2:])
-    if len(parts) >= 3 and tail in _COMMON_TWO_PART_SUFFIXES:
-        return ".".join(parts[-3:])
-    return tail
+    return registrable_domain(host) or host
 
 
 def _validate_plan_schema(plan: Mapping[str, object]) -> None:
@@ -79,13 +85,21 @@ def _validate_plan_schema(plan: Mapping[str, object]) -> None:
     Empty arrays are acceptable; missing fields are not.
     """
 
-    required_top = ("plan_schema_version", "schema_version", "generated_at", "run_identity", "network_targets")
+    required_top = (
+        "plan_schema_version",
+        "schema_version",
+        "generated_at",
+        "run_identity",
+        "network_targets",
+    )
     missing = [key for key in required_top if key not in plan]
     if missing:
         raise RuntimeError(f"dynamic plan schema missing required keys: {', '.join(missing)}")
 
     if plan.get("plan_schema_version") != PLAN_SCHEMA_VERSION:
-        raise RuntimeError(f"dynamic plan schema_version unsupported: {plan.get('plan_schema_version')}")
+        raise RuntimeError(
+            f"dynamic plan schema_version unsupported: {plan.get('plan_schema_version')}"
+        )
 
     identity = plan.get("run_identity")
     if not isinstance(identity, Mapping):
@@ -130,11 +144,15 @@ def _build_modernization_guidance(
     flags = getattr(report, "manifest_flags", ManifestFlags())
     guidance: list[str] = []
 
-    aggregates = string_payload.get("aggregates") if isinstance(string_payload, Mapping) else {}
+    aggregates = _as_mapping(string_payload.get("aggregates"))
 
     if getattr(flags, "request_legacy_external_storage", False):
-        guidance.append("  - Migrate file access to scoped storage APIs (MediaStore, SAF) or app-private directories.")
-        guidance.append("    Once migration is complete remove `android:requestLegacyExternalStorage=\"true\"` from <application>.")
+        guidance.append(
+            "  - Migrate file access to scoped storage APIs (MediaStore, SAF) or app-private directories."
+        )
+        guidance.append(
+            '    Once migration is complete remove `android:requestLegacyExternalStorage="true"` from <application>.'
+        )
 
     uses_cleartext = getattr(flags, "uses_cleartext_traffic", False)
     network_config_present = bool(getattr(flags, "network_security_config", None))
@@ -147,8 +165,8 @@ def _build_modernization_guidance(
                 for entry in roots:
                     if not isinstance(entry, Mapping):
                         continue
-                    schemes = entry.get("schemes") if isinstance(entry.get("schemes"), Mapping) else {}
-                    http_count = int(schemes.get("http", 0) or 0)
+                    schemes = _as_mapping(entry.get("schemes"))
+                    http_count = _safe_int(schemes.get("http"))
                     if http_count <= 0:
                         continue
                     root = str(entry.get("root_domain") or "").strip()
@@ -172,23 +190,35 @@ def _build_modernization_guidance(
         host_names = [host for host, _ in http_hosts[:3]]
 
         if not http_hosts:
-            guidance.append("  - Remove `android:usesCleartextTraffic=\"true\"`; no HTTP endpoints were detected.")
+            guidance.append(
+                '  - Remove `android:usesCleartextTraffic="true"`; no HTTP endpoints were detected.'
+            )
         else:
-            guidance.append("  - Provide a network security config that blocks cleartext by default and explicitly")
-            guidance.append("    allows only the required HTTP domains while migrating remaining traffic to HTTPS.")
+            guidance.append(
+                "  - Provide a network security config that blocks cleartext by default and explicitly"
+            )
+            guidance.append(
+                "    allows only the required HTTP domains while migrating remaining traffic to HTTPS."
+            )
             guidance.append("    res/xml/network_security_config.xml:")
             guidance.append("      <network-security-config>")
-            guidance.append("          <base-config cleartextTrafficPermitted=\"false\" />")
+            guidance.append('          <base-config cleartextTrafficPermitted="false" />')
             for host in host_names:
-                guidance.append("          <domain-config cleartextTrafficPermitted=\"true\">")
-                guidance.append(f"              <domain includeSubdomains=\"true\">{host}</domain>")
+                guidance.append('          <domain-config cleartextTrafficPermitted="true">')
+                guidance.append(f'              <domain includeSubdomains="true">{host}</domain>')
                 guidance.append("          </domain-config>")
             if not host_names:
-                guidance.append("          <!-- add <domain> entries for the domains that must remain on HTTP -->")
+                guidance.append(
+                    "          <!-- add <domain> entries for the domains that must remain on HTTP -->"
+                )
             guidance.append("      </network-security-config>")
-            guidance.append("    Reference the config from <application android:networkSecurityConfig=\"@xml/network_security_config\"/>.")
+            guidance.append(
+                '    Reference the config from <application android:networkSecurityConfig="@xml/network_security_config"/>.'
+            )
             if not network_config_present:
-                guidance.append("    (No existing networkSecurityConfig was detected in the manifest.)")
+                guidance.append(
+                    "    (No existing networkSecurityConfig was detected in the manifest.)"
+                )
 
     return guidance
 
@@ -216,8 +246,12 @@ def write_baseline_json(
 
 
 def _extract_network_surface_domains(report: StaticAnalysisReport) -> tuple[list[str], list[str]]:
-    detector_metrics = report.detector_metrics if isinstance(report.detector_metrics, Mapping) else {}
-    network_surface = detector_metrics.get("network_surface") if isinstance(detector_metrics, Mapping) else {}
+    detector_metrics = (
+        report.detector_metrics if isinstance(report.detector_metrics, Mapping) else {}
+    )
+    network_surface = (
+        detector_metrics.get("network_surface") if isinstance(detector_metrics, Mapping) else {}
+    )
     surface = network_surface.get("surface") if isinstance(network_surface, Mapping) else {}
     urls = surface.get("urls") if isinstance(surface, Mapping) else {}
 
@@ -241,10 +275,10 @@ def _extract_network_surface_domains(report: StaticAnalysisReport) -> tuple[list
 
 
 def _extract_domains(string_payload: Mapping[str, object]) -> tuple[list[str], list[str]]:
-    aggregates = string_payload.get("aggregates", {}) if isinstance(string_payload, Mapping) else {}
-    samples = string_payload.get("selected_samples") if isinstance(string_payload, Mapping) else None
+    aggregates = _as_mapping(string_payload.get("aggregates"))
+    samples = string_payload.get("selected_samples")
     if not samples:
-        samples = string_payload.get("samples", {}) if isinstance(string_payload, Mapping) else {}
+        samples = string_payload.get("samples")
     domains: set[str] = set()
     cleartext_domains: set[str] = set()
 
@@ -258,8 +292,8 @@ def _extract_domains(string_payload: Mapping[str, object]) -> tuple[list[str], l
                 if not root:
                     continue
                 domains.add(root)
-                schemes = entry.get("schemes") if isinstance(entry.get("schemes"), Mapping) else {}
-                if str(schemes.get("http") or "0").isdigit() and int(schemes.get("http") or 0) > 0:
+                schemes = _as_mapping(entry.get("schemes"))
+                if _safe_int(schemes.get("http")) > 0:
                     cleartext_domains.add(root)
         endpoint_clear = aggregates.get("endpoint_cleartext")
         if isinstance(endpoint_clear, Sequence):
@@ -440,34 +474,50 @@ def _build_static_features_snapshot(
             masvs_summary[area] = {"high": 0, "medium": 0, "low": 0, "info": 0, "control_count": 0}
             continue
         masvs_summary[area] = {
-            "high": int(block.get("high") or 0),
-            "medium": int(block.get("medium") or 0),
-            "low": int(block.get("low") or 0),
-            "info": int(block.get("info") or 0),
-            "control_count": int(block.get("control_count") or 0),
+            "high": _safe_int(block.get("high")),
+            "medium": _safe_int(block.get("medium")),
+            "low": _safe_int(block.get("low")),
+            "info": _safe_int(block.get("info")),
+            "control_count": _safe_int(block.get("control_count")),
         }
     sdk_score = 0.0
     if isinstance(sdk_indicators, Mapping) and sdk_indicators.get("score") is not None:
-        try:
-            sdk_score = float(sdk_indicators.get("score") or 0.0)
-        except Exception:
-            sdk_score = 0.0
+        sdk_score = _safe_float(sdk_indicators.get("score"))
     sdk_score = max(0.0, min(1.0, float(sdk_score)))
 
-    total_high = sum(int((masvs_summary.get(area) or {}).get("high") or 0) for area in masvs_summary)
-    total_medium = sum(int((masvs_summary.get(area) or {}).get("medium") or 0) for area in masvs_summary)
+    total_high = sum(
+        int((masvs_summary.get(area) or {}).get("high") or 0) for area in masvs_summary
+    )
+    total_medium = sum(
+        int((masvs_summary.get(area) or {}).get("medium") or 0) for area in masvs_summary
+    )
     total_low = sum(int((masvs_summary.get(area) or {}).get("low") or 0) for area in masvs_summary)
-    total_info = sum(int((masvs_summary.get(area) or {}).get("info") or 0) for area in masvs_summary)
-    total_controls = sum(int((masvs_summary.get(area) or {}).get("control_count") or 0) for area in masvs_summary)
+    total_info = sum(
+        int((masvs_summary.get(area) or {}).get("info") or 0) for area in masvs_summary
+    )
+    total_controls = sum(
+        int((masvs_summary.get(area) or {}).get("control_count") or 0) for area in masvs_summary
+    )
     masvs_total_score = float(
-        round((total_high * 1.0) + (total_medium * 0.5) + (total_low * 0.25) + (total_info * 0.1), 3)
+        round(
+            (total_high * 1.0) + (total_medium * 0.5) + (total_low * 0.25) + (total_info * 0.1), 3
+        )
     )
 
     exported_norm = min(float(int(exported.total())) / 100.0, 1.0)
     dangerous_norm = min(float(int(len(dangerous))) / 20.0, 1.0)
     cleartext_norm = 1.0 if bool(report.manifest_flags.uses_cleartext_traffic) else 0.0
     static_risk_score = float(
-        round(100.0 * ((exported_norm * 0.25) + (dangerous_norm * 0.25) + (cleartext_norm * 0.25) + (sdk_score * 0.25)), 3)
+        round(
+            100.0
+            * (
+                (exported_norm * 0.25)
+                + (dangerous_norm * 0.25)
+                + (cleartext_norm * 0.25)
+                + (sdk_score * 0.25)
+            ),
+            3,
+        )
     )
     if static_risk_score >= 66.7:
         static_risk_band = "HIGH"
@@ -505,29 +555,58 @@ def build_dynamic_plan(
     schema_version: str | None = None,
     batch_id: str | None = None,
 ) -> Mapping[str, object]:
-    metadata = payload.get("app", {}) if isinstance(payload, Mapping) else {}
-    baseline = payload.get("baseline", {}) if isinstance(payload, Mapping) else {}
-    string_payload = baseline.get("string_analysis", {}) if isinstance(baseline, Mapping) else {}
-    webview_summary = baseline.get("webview") if isinstance(baseline, Mapping) else None
+    payload_app = _as_mapping(payload.get("app"))
+    baseline = _as_mapping(payload.get("baseline"))
+    string_payload = _as_mapping(baseline.get("string_analysis"))
+    webview_value = baseline.get("webview")
+    webview_summary = _as_mapping(webview_value) if isinstance(webview_value, Mapping) else None
+
+    # The report owns analysis identity. Rendered payload metadata may enrich or
+    # override it, but an omitted optional ``app`` block must not erase it.
+    metadata: dict[str, object] = dict(_as_mapping(report.metadata))
+    metadata.update(payload_app)
+    for key, fallback in (
+        ("package", report.manifest.package_name),
+        ("version_name", report.manifest.version_name),
+        ("version_code", report.manifest.version_code),
+    ):
+        if metadata.get(key) in (None, ""):
+            metadata[key] = fallback
+    if not isinstance(metadata.get("hashes"), Mapping):
+        metadata["hashes"] = dict(report.hashes)
 
     exported = report.exported_components
     permissions = report.permissions
     string_domains_raw, string_cleartext_raw = _extract_domains(string_payload)
     nsc_domains_raw, nsc_cleartext_raw = _extract_nsc_domains(report)
-    string_domains = sorted({d for d in (_normalize_domain(item) for item in string_domains_raw) if d})
-    string_cleartext = sorted({d for d in (_normalize_domain(item) for item in string_cleartext_raw) if d})
+    string_domains = sorted(
+        {d for d in (_normalize_domain(item) for item in string_domains_raw) if d}
+    )
+    string_cleartext = sorted(
+        {d for d in (_normalize_domain(item) for item in string_cleartext_raw) if d}
+    )
     nsc_domains = sorted({d for d in (_normalize_domain(item) for item in nsc_domains_raw) if d})
-    nsc_cleartext = sorted({d for d in (_normalize_domain(item) for item in nsc_cleartext_raw) if d})
-    network_surface_domains_raw, network_surface_cleartext_raw = _extract_network_surface_domains(report)
-    network_surface_domains = sorted({d for d in (_normalize_domain(item) for item in network_surface_domains_raw) if d})
-    network_surface_cleartext = sorted({d for d in (_normalize_domain(item) for item in network_surface_cleartext_raw) if d})
+    nsc_cleartext = sorted(
+        {d for d in (_normalize_domain(item) for item in nsc_cleartext_raw) if d}
+    )
+    network_surface_domains_raw, network_surface_cleartext_raw = _extract_network_surface_domains(
+        report
+    )
+    network_surface_domains = sorted(
+        {d for d in (_normalize_domain(item) for item in network_surface_domains_raw) if d}
+    )
+    network_surface_cleartext = sorted(
+        {d for d in (_normalize_domain(item) for item in network_surface_cleartext_raw) if d}
+    )
     domains, domain_sources = _merge_domain_sources(
         string_domains=string_domains,
         nsc_domains=nsc_domains,
         network_surface_domains=network_surface_domains,
-        string_payload=string_payload if isinstance(string_payload, Mapping) else {},
+        string_payload=string_payload,
     )
-    cleartext_domains = sorted(set(string_cleartext).union(nsc_cleartext).union(network_surface_cleartext))
+    cleartext_domains = sorted(
+        set(string_cleartext).union(nsc_cleartext).union(network_surface_cleartext)
+    )
     declared = sorted(set(permissions.declared))
     dangerous = sorted(set(permissions.dangerous))
     high_value = _high_value_permissions(declared)
@@ -544,7 +623,7 @@ def build_dynamic_plan(
 
     # Optional: SDK indicators (context-only). This is a forward-compatible hook:
     # Phase E treats missing as 0 and records the omission in posture scoring.
-    sdk_indicators = baseline.get("sdk_indicators") if isinstance(baseline, Mapping) else None
+    sdk_indicators = baseline.get("sdk_indicators")
 
     # Contract note: the plan JSON is the "static snapshot" consumed by dynamic runs.
     # Keep a dedicated schema version so we can evolve the plan format without relying

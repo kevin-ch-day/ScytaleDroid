@@ -26,20 +26,21 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
     dynamic_evidence_root,
     resolve_dynamic_run_dir,
+    resolve_run_dir_under,
 )
 
 from . import ml_parameters_profile as config
 from .deliverable_bundle_paths import (
     dataset_tables_dir,
     freeze_anchor_path,
-    output_phase_e_bundle_appendix_dir,
-    output_phase_e_bundle_artifacts_manifest_path,
-    output_phase_e_bundle_figures_dir,
-    output_phase_e_bundle_freeze_copy_path,
-    output_phase_e_bundle_manifest_dir,
-    output_phase_e_bundle_readme_path,
-    output_phase_e_bundle_root,
-    output_phase_e_bundle_tables_dir,
+    output_locked_runtime_bundle_appendix_dir,
+    output_locked_runtime_bundle_artifacts_manifest_path,
+    output_locked_runtime_bundle_figures_dir,
+    output_locked_runtime_bundle_freeze_copy_path,
+    output_locked_runtime_bundle_manifest_dir,
+    output_locked_runtime_bundle_readme_path,
+    output_locked_runtime_bundle_root,
+    output_locked_runtime_bundle_tables_dir,
 )
 from .evidence_pack_ml_preflight import get_sampling_duration_seconds, load_run_inputs
 from .method_basis import runtime_ml_method_basis
@@ -101,8 +102,13 @@ def _save_png_pdf(fig: Any, png: Path, pdf: Path) -> None:
     fig.savefig(pdf, metadata=_STABLE_PDF_METADATA)
 
 def _dynamic_run_dir(run_id: str | int | None) -> Path:
-    rid = str(run_id or "").strip()
-    return resolve_dynamic_run_dir(rid) or dynamic_evidence_root() / rid
+    rid = run_id if isinstance(run_id, str) else str(run_id or "")
+    run_dir = resolve_dynamic_run_dir(rid)
+    if run_dir is None:
+        run_dir = resolve_run_dir_under(dynamic_evidence_root(), rid)
+    if run_dir is None:
+        raise ValueError(f"Unsafe dynamic run_id: {run_id!r}")
+    return run_dir
 
 
 def _apply_ieee_figure_style() -> None:
@@ -175,11 +181,11 @@ def write_phase_e_deliverables_bundle(
     - ML v1 outputs exist for the exemplar run (anomaly_scores_*).
     """
 
-    out_root = output_phase_e_bundle_root()
-    figs_dir = output_phase_e_bundle_figures_dir()
-    tables_dir = output_phase_e_bundle_tables_dir()
-    appendix_dir = output_phase_e_bundle_appendix_dir()
-    manifest_dir = output_phase_e_bundle_manifest_dir()
+    out_root = output_locked_runtime_bundle_root()
+    figs_dir = output_locked_runtime_bundle_figures_dir()
+    tables_dir = output_locked_runtime_bundle_tables_dir()
+    appendix_dir = output_locked_runtime_bundle_appendix_dir()
+    manifest_dir = output_locked_runtime_bundle_manifest_dir()
     for d in (out_root, figs_dir, tables_dir, appendix_dir, manifest_dir):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -210,13 +216,13 @@ def write_phase_e_deliverables_bundle(
     )
 
     # Freeze anchor copy (convenience; canonical stays in data/archive/).
-    _copy_required(freeze_anchor_path(), output_phase_e_bundle_freeze_copy_path(), overwrite=True)
+    _copy_required(freeze_anchor_path(), output_locked_runtime_bundle_freeze_copy_path(), overwrite=True)
 
     # Copy the exemplar pin lockfile for audit convenience.
     from .evidence_pack_ml_orchestrator import paper_artifacts_path
 
     paper_artifacts = paper_artifacts_path(freeze_anchor_path())
-    _copy_required(paper_artifacts, output_phase_e_bundle_manifest_dir() / "paper_artifacts.json", overwrite=True)
+    _copy_required(paper_artifacts, output_locked_runtime_bundle_manifest_dir() / "paper_artifacts.json", overwrite=True)
 
     # Figures (PM locked): Fig B1 + B2 + B4.
     fig_b1_png, fig_b1_pdf = _write_fig_b1(fig_b1_run_id, figs_dir, interaction_tag=interaction_tag, overwrite=True)
@@ -252,11 +258,11 @@ def write_phase_e_deliverables_bundle(
     determinism_checksums = _write_determinism_checksums(manifest_dir=manifest_dir)
 
     # Bundle README.
-    readme = output_phase_e_bundle_readme_path()
+    readme = output_locked_runtime_bundle_readme_path()
     readme.write_text(_render_bundle_readme(fig_b1_run_id), encoding="utf-8")
 
     # Bundle manifest (hashes + versions + pointers).
-    artifacts_manifest_json = output_phase_e_bundle_artifacts_manifest_path()
+    artifacts_manifest_json = output_locked_runtime_bundle_artifacts_manifest_path()
     _write_bundle_manifest(
         artifacts_manifest_json,
         fig_b1_run_id=fig_b1_run_id,
@@ -306,7 +312,7 @@ def write_phase_e_deliverables_bundle(
     # Close-out receipt: pins freeze + bundle-manifest hashes so a zipped bundle
     # can be verified later without re-running anything.
     _write_bundle_closure_record(
-        output_phase_e_bundle_manifest_dir() / "phase_e_closure_record.json",
+        output_locked_runtime_bundle_manifest_dir() / "phase_e_closure_record.json",
         bundle_manifest_path=artifacts_manifest_json,
     )
 
@@ -955,12 +961,12 @@ def _write_bundle_manifest(
             "table_8_tex": {"path": str(table_8_tex), "sha256": _sha256_stream(table_8_tex)},
             "repro_appendix": {"path": str(repro_appendix_md), "sha256": _sha256_stream(repro_appendix_md)},
             "freeze_copy": {
-                "path": str(output_phase_e_bundle_freeze_copy_path()),
-                "sha256": _sha256_stream(output_phase_e_bundle_freeze_copy_path()),
+                "path": str(output_locked_runtime_bundle_freeze_copy_path()),
+                "sha256": _sha256_stream(output_locked_runtime_bundle_freeze_copy_path()),
             },
             "paper_artifacts_copy": {
-                "path": str(output_phase_e_bundle_manifest_dir() / "paper_artifacts.json"),
-                "sha256": _sha256_stream(output_phase_e_bundle_manifest_dir() / "paper_artifacts.json"),
+                "path": str(output_locked_runtime_bundle_manifest_dir() / "paper_artifacts.json"),
+                "sha256": _sha256_stream(output_locked_runtime_bundle_manifest_dir() / "paper_artifacts.json"),
             },
         },
     }
@@ -998,7 +1004,7 @@ def _write_bundle_closure_record(path: Path, *, bundle_manifest_path: Path) -> N
     payload = {
         "bundle_manifest_path": str(bundle_manifest_path),
         "bundle_manifest_sha256": _sha256_stream(bundle_manifest_path),
-        "bundle_root": str(output_phase_e_bundle_root()),
+        "bundle_root": str(output_locked_runtime_bundle_root()),
         "closed_at_utc": datetime.now(UTC).isoformat(),
         "toolchain": gather_toolchain_versions(),
         "freeze_anchor": str(freeze_anchor_path()),

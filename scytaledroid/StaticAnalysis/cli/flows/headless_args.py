@@ -24,10 +24,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exact target split handling: auto uses receipt-backed group; base-only must be explicit.",
     )
     parser.add_argument(
-        "--profile-key",
-        help="Legacy alias for --research-cohort-key <cohort_key>; accepts research_dataset_* values.",
-    )
-    parser.add_argument(
         "--research-cohort-key",
         help="Run a deterministic DB-backed research cohort headlessly.",
     )

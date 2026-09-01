@@ -446,6 +446,42 @@ def _resolve_trusted_metadata_hashes(apk_path: Path, metadata: Mapping[str, obje
     return digests, "canonical_store_verified"
 
 
+def _validate_sha256_metadata_provenance(
+    apk_path: Path,
+    metadata: Mapping[str, object],
+) -> tuple[str | None, str]:
+    """Validate SHA-256 identity independently of optional legacy digests."""
+
+    sha256 = _normalize_hash(metadata.get("sha256"), length=_HASH_DIGEST_LENGTHS["sha256"])
+    if sha256 is None:
+        return None, "missing_or_invalid_sha256"
+
+    actual_size = apk_path.stat().st_size
+    declared_size = _coerce_int(metadata.get("file_size"))
+    if declared_size is not None and declared_size != actual_size:
+        return None, "file_size_mismatch"
+
+    try:
+        expected_canonical = artifact_store.canonical_apk_path(sha256).resolve()
+    except Exception:
+        return None, "canonical_path_error"
+    if apk_path.resolve() != expected_canonical:
+        return None, "not_canonical_store_path"
+
+    canonical_store_path = metadata.get("canonical_store_path")
+    if isinstance(canonical_store_path, str) and canonical_store_path.strip():
+        candidate = Path(canonical_store_path.strip())
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        try:
+            if candidate.resolve() != expected_canonical:
+                return None, "canonical_store_path_mismatch"
+        except Exception:
+            return None, "canonical_store_path_unresolvable"
+
+    return sha256, "canonical_store_sha256_verified"
+
+
 def _resolve_hashes_for_analysis(apk_path: Path, metadata: Mapping[str, object]) -> tuple[dict[str, str], dict[str, object]]:
     trusted_hashes, provenance_reason = _resolve_trusted_metadata_hashes(apk_path, metadata)
     if trusted_hashes is not None:
@@ -454,13 +490,38 @@ def _resolve_hashes_for_analysis(apk_path: Path, metadata: Mapping[str, object])
             "hash_recomputed": False,
             "hash_provenance_ok": True,
             "hash_provenance_reason": provenance_reason,
+            "hash_metadata_digest_set_complete": True,
+            "content_sha256_matches_provenance": True,
+            "content_sha256_provenance_reason": "canonical_store_sha256_verified",
         }
 
-    return compute_hashes(apk_path), {
+    computed_hashes = compute_hashes(apk_path)
+    metadata_digest_set_complete = not provenance_reason.startswith("missing_or_invalid_")
+    sha256_expected, sha256_reason = _validate_sha256_metadata_provenance(apk_path, metadata)
+    sha256_matches_provenance = bool(
+        sha256_expected and computed_hashes.get("sha256") == sha256_expected
+    )
+    # MD5 and SHA-1 remain useful compatibility identifiers but are not
+    # prerequisites for SHA-256 content identity. When the canonical SHA-256
+    # provenance validates and recomputation agrees, missing legacy digests do
+    # not make the APK identity unverified.
+    provenance_ok = bool(
+        sha256_matches_provenance
+        and provenance_reason in {"missing_or_invalid_md5", "missing_or_invalid_sha1"}
+    )
+    effective_reason = (
+        "canonical_store_sha256_verified_after_recompute"
+        if provenance_ok
+        else provenance_reason
+    )
+    return computed_hashes, {
         "hash_source": "computed",
         "hash_recomputed": True,
-        "hash_provenance_ok": False,
-        "hash_provenance_reason": provenance_reason,
+        "hash_provenance_ok": provenance_ok,
+        "hash_provenance_reason": effective_reason,
+        "hash_metadata_digest_set_complete": metadata_digest_set_complete,
+        "content_sha256_matches_provenance": sha256_matches_provenance,
+        "content_sha256_provenance_reason": sha256_reason,
     }
 
 

@@ -36,6 +36,20 @@ from .scan_formatters import _load_v3_catalog_label_overrides
 from .static_run_map import load_run_map, validate_run_map
 
 
+def _generate_missing_permission_report(
+    artifact: object,
+    base_dir: Path,
+    params: RunParameters,
+    *,
+    parity_mode: bool,
+):
+    """Generate a report, suppressing publication for parity fallback work."""
+
+    if parity_mode:
+        return generate_report(artifact, base_dir, params, persist_report=False)
+    return generate_report(artifact, base_dir, params)
+
+
 def _permission_audit_snapshot_stats(snapshot_key: str) -> tuple[int | None, int]:
     from scytaledroid.Database.db_core import db_queries as core_q
 
@@ -216,7 +230,16 @@ def execute_permission_scan(
             if report is not None:
                 report_source = "saved_report"
         if report is None:
-            report, _, error, skipped = generate_report(artifact, base_dir, params)
+            # Parity is a derived post-processing activity. If the
+            # authoritative saved report cannot be loaded, regenerate only in
+            # memory so reduced parity metadata cannot overwrite the original
+            # session archive or latest-report record.
+            report, _, error, skipped = _generate_missing_permission_report(
+                artifact,
+                base_dir,
+                params,
+                parity_mode=reuse_saved_reports,
+            )
         if skipped or error:
             continue
         last_report = report
@@ -319,6 +342,9 @@ def execute_permission_scan(
                         "package_name": group.package_name,
                         "app_label": operator_label,
                         "report_source": report_source,
+                        "report_published": not (
+                            reuse_saved_reports and report_source == "generated"
+                        ),
                     }
                 )
             except Exception:

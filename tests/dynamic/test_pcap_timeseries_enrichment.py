@@ -42,6 +42,35 @@ def test_infer_direction_from_ports_labels_known_and_unknown_roles() -> None:
     )
 
 
+def test_tls_name_visibility_does_not_claim_ech_from_missing_sni() -> None:
+    visibility = timeseries.classify_tls_name_metadata_visibility(
+        tls_handshake_packets=1,
+        tls_client_hello_packets=1,
+        tls_sni_unique_count=0,
+        quic_candidate_packets=0,
+    )
+
+    assert visibility == {
+        "tls_name_metadata_class": "client_hello_observed_without_sni",
+        "tls_name_metadata_limited": True,
+        "tls_name_metadata_basis": "decoded_client_hello_sni_absent",
+        "ech_status": "not_determinable_from_passive_metadata",
+    }
+
+
+def test_tls_name_visibility_marks_udp_service_port_signal_as_heuristic() -> None:
+    visibility = timeseries.classify_tls_name_metadata_visibility(
+        tls_handshake_packets=0,
+        tls_client_hello_packets=0,
+        tls_sni_unique_count=0,
+        quic_candidate_packets=12,
+    )
+
+    assert visibility["tls_name_metadata_class"] == "udp_service_port_without_decoded_tls_name"
+    assert visibility["tls_name_metadata_basis"] == "udp_80_443_heuristic_only"
+    assert visibility["tls_name_metadata_limited"] is True
+
+
 def test_scan_pcap_timeseries_includes_direction_flow_burst_and_visibility(monkeypatch, tmp_path: Path) -> None:
     pcap_path = tmp_path / "sample.pcap"
     pcap_path.write_bytes(b"pcap")
@@ -75,3 +104,5 @@ def test_scan_pcap_timeseries_includes_direction_flow_burst_and_visibility(monke
     assert stats["tls_quic_visibility"]["tls_handshake_packets"] == 2
     assert stats["tls_quic_visibility"]["tls_sni_unique_count"] == 1
     assert stats["tls_quic_visibility"]["tls_alpn_unique_count"] == 1
+    assert stats["tls_quic_visibility"]["tls_name_metadata_class"] == "sni_observed"
+    assert stats["tls_quic_visibility"]["tls_name_metadata_limited"] is False

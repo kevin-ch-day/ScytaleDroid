@@ -8,7 +8,6 @@ from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunOutcome
 from scytaledroid.StaticAnalysis.cli.execution.scan_formatters import (
     _format_compact_progress_text,
     format_scan_progress_checkpoint_card,
-    format_scan_progress_heartbeat,
     format_scan_progress_heartbeat_lines,
     format_scan_progress_single_line,
     format_static_run_final_summary_block,
@@ -198,21 +197,6 @@ def test_heartbeat_eta_preliminary_suffix() -> None:
         eta_preliminary=True,
     )
     assert "preliminary" in l2
-
-
-def test_heartbeat_line1_only_backward_compat() -> None:
-    line = format_scan_progress_heartbeat(
-        apps_completed=1,
-        total_apps=3,
-        artifacts_done=2,
-        total_artifacts=5,
-        current_app_label="X",
-        current_package_name="com.example.x",
-        agg_checks=Counter({"ok": 0, "warn": 0, "fail": 0, "policy_fail": 0, "finding_fail": 0, "error": 0}),
-        eta_text="5m",
-    )
-    assert line == "2/5 APKs · 1/3 pkgs · X"
-    assert "ETA" not in line
 
 
 def test_single_line_joins_heartbeat_parts() -> None:
@@ -410,10 +394,10 @@ def test_format_static_run_final_summary_block_with_pipeline_digest() -> None:
     )
     assert "Static run summary" in block
     assert "Session" in block and "sess-1" in block
-    assert "1 complete" in block and "1 partial" in block
+    assert "2 scan-complete" in block and "1 with detector/persistence caveats" in block
     assert "Evidence (reports)" in block and "9 / 10" in block
-    assert "DB persistence" in block and "OK" in block
-    assert "Run completion" in block and "COMPLETE" in block
+    assert "Canonical persistence" in block and "PENDING" in block
+    assert "Scan execution" in block and "SCAN COMPLETE" in block
     assert "Detector posture" in block and "PARTIAL" in block
     assert "Execution errors" in block and "0" in block
     assert "audit_static_session.py --session 'sess-1'" in block

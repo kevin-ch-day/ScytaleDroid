@@ -22,10 +22,14 @@ from typing import Any
 import numpy as np
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.research_cohort_archive import (
-    legacy_archive_dir,
     resolve_dataset_freeze_read_path,
 )
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    normalize_run_id,
+    resolve_run_dir_under,
+)
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from . import ml_parameters_profile as config
 from .anomaly_model_training import anomaly_scores, fit_model, fixed_model_specs
@@ -109,13 +113,6 @@ from .freeze_profile.run_artifacts import (
 from .freeze_profile.run_summary import (
     baseline_feature_stats as _baseline_feature_stats,
 )
-
-# Compatibility exports retained for callers that historically imported the
-# DARS helpers from this orchestrator rather than their implementation module.
-from .freeze_profile.run_summary import (
-    build_topk_and_zscores as _build_topk_and_zscores,  # noqa: F401
-)
-from .freeze_profile.run_summary import compute_dars_v1 as _compute_dars_v1  # noqa: F401
 from .freeze_profile.run_summary import (
     model_csv_label as _model_csv_label,
 )
@@ -131,13 +128,6 @@ from .pcap_window_features import (
 )
 from .seed_identity import derive_seed
 from .telemetry_windowing import WindowSpec
-
-FREEZE_DIR = legacy_archive_dir()
-# Legacy import-compatibility constants. Runtime code should call
-# default_freeze_manifest_path() / paper_artifacts_path() so active cohort
-# archive paths are honored.
-DATASET_FREEZE_CANONICAL = FREEZE_DIR / config.FREEZE_CANONICAL_FILENAME
-PAPER_ARTIFACTS_PATH = FREEZE_DIR / "paper_artifacts.json"
 
 
 @dataclass(frozen=True)
@@ -261,7 +251,7 @@ def run_ml_on_evidence_packs(
             missing_fp: list[str] = []
             stale_freeze: list[str] = []
             for rid in sorted(included_run_ids):
-                run_dir = root / str(rid)
+                run_dir = _resolve_frozen_run_dir(root, rid)
                 out_dir = _ml_output_dir(run_dir, frozen=True)
                 found_freeze_hash = _read_model_manifest_freeze_hash(out_dir)
                 if freeze_dataset_hash and found_freeze_hash != freeze_dataset_hash:
@@ -349,7 +339,7 @@ def run_ml_on_evidence_packs(
             for rid in run_ids:
                 if rid not in included_run_ids:
                     raise RuntimeError(f"Freeze manifest inconsistency: {rid} not in included_run_ids")
-                run_dir = root / rid
+                run_dir = _resolve_frozen_run_dir(root, rid)
                 inputs = load_run_inputs(run_dir)
                 if not inputs:
                     raise RuntimeError(f"Included run missing/invalid run_manifest.json: {rid}")
@@ -738,7 +728,7 @@ def run_ml_on_evidence_packs(
         # Compute "scored" as "all included runs that have complete v1 outputs present",
         # regardless of whether this invocation had to write anything.
         runs_scored = sum(
-            1 for rid in included_run_ids if _run_has_complete_v1_outputs(root / rid)
+            1 for rid in included_run_ids if _run_has_complete_v1_outputs(_resolve_frozen_run_dir(root, rid))
         )
         runs_reused = max(0, runs_scored - len(written_run_ids))
         return MlRunStats(
@@ -754,8 +744,8 @@ def run_ml_on_evidence_packs(
 def _all_frozen_v1_outputs_exist(root: Path, included_run_ids: set[str]) -> bool:
     """Return True if all included runs already have the required v1 outputs on disk."""
     for rid in included_run_ids:
-        run_dir = root / rid
-        if not run_dir.exists():
+        run_dir = _resolve_frozen_run_dir(root, rid)
+        if not run_dir.is_dir():
             return False
         if not _run_has_complete_v1_outputs(run_dir):
             return False
@@ -770,7 +760,7 @@ def _run_has_complete_v1_outputs(run_dir: Path) -> bool:
         paths.iforest_scores_path,
         paths.ocsvm_scores_path,
     ]
-    return all(path.exists() for path in required)
+    return all(path.is_file() for path in required)
 
 
 def _read_model_manifest_freeze_hash(out_dir: Path) -> str | None:
@@ -816,9 +806,27 @@ def _load_frozen_run_ids_from_payload(payload: dict[str, Any]) -> set[str] | Non
         return None
     out: set[str] = set()
     for rid in ids:
-        if isinstance(rid, str) and rid:
-            out.add(rid)
+        out.add(_validate_frozen_run_id(rid))
     return out or None
+
+
+def _validate_frozen_run_id(value: object) -> str:
+    """Return a single path-component run ID or fail closed."""
+
+    normalized = normalize_run_id(value)
+    if normalized is None:
+        raise RuntimeError(f"Freeze manifest contains invalid or unsafe run_id: {value!r}")
+    return normalized
+
+
+def _resolve_frozen_run_dir(evidence_root: Path, run_id: object) -> Path:
+    """Resolve a frozen run without permitting traversal or symlink escape."""
+
+    normalized = _validate_frozen_run_id(run_id)
+    run_dir = resolve_run_dir_under(evidence_root, normalized)
+    if run_dir is None:
+        raise RuntimeError(f"Frozen run escapes evidence root: {normalized!r}")
+    return run_dir
 
 
 def _parse_ended_at_epoch(value: object) -> float:
@@ -839,7 +847,7 @@ def _parse_ended_at_epoch(value: object) -> float:
 def _ordered_freeze_run_ids(values: object, *, checksums: dict[str, Any]) -> list[str]:
     if not isinstance(values, list):
         return []
-    ids = [str(x).strip() for x in values if str(x).strip()]
+    ids = [_validate_frozen_run_id(value) for value in values]
     return sorted(dict.fromkeys(ids), key=lambda rid: (_parse_ended_at_epoch((checksums.get(rid) or {}).get("ended_at")), rid))
 
 
@@ -983,7 +991,7 @@ def _maybe_write_paper_artifacts_json(*, candidate: _ExemplarCandidate | None, f
         },
         "written_at": datetime.now(UTC).isoformat(),
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _freeze_dataset_hash_from_path(path: Path) -> str:
@@ -1051,7 +1059,7 @@ def _rebuild_dataset_outputs_from_v1(
         # Load manifests just for tags/low_signal.
         inputs_by_rid: dict[str, RunInputs] = {}
         for rid in run_ids:
-            run_dir = evidence_root / rid
+            run_dir = _resolve_frozen_run_dir(evidence_root, rid)
             inputs = load_run_inputs(run_dir)
             if not inputs:
                 raise RuntimeError(f"Missing included run during rebuild: {rid}")
@@ -1071,7 +1079,7 @@ def _rebuild_dataset_outputs_from_v1(
 
         for model_name in (config.MODEL_IFOREST, config.MODEL_OCSVM):
             for rid in run_ids:
-                out_dir = _ml_output_dir(evidence_root / rid, frozen=True)
+                out_dir = _ml_output_dir(_resolve_frozen_run_dir(evidence_root, rid), frozen=True)
                 csv_path = out_dir / f"anomaly_scores_{_model_csv_label(model_name)}.csv"
                 scores, threshold = _read_scores_and_threshold(csv_path)
                 per_model_scores_by_run[model_name][rid] = scores
@@ -1079,7 +1087,10 @@ def _rebuild_dataset_outputs_from_v1(
                     per_model_thresholds[model_name] = float(threshold)
             # training_mode + thresholds are recorded in model_manifest (same for all 3 runs in app)
             baseline_model_rid = baseline_ids[0]
-            mf = _ml_output_dir(evidence_root / baseline_model_rid, frozen=True) / "model_manifest.json"
+            mf = _ml_output_dir(
+                _resolve_frozen_run_dir(evidence_root, baseline_model_rid),
+                frozen=True,
+            ) / "model_manifest.json"
             try:
                 m = json.loads(mf.read_text(encoding="utf-8"))
                 models = m.get("models") if isinstance(m.get("models"), dict) else {}
@@ -1106,7 +1117,10 @@ def _rebuild_dataset_outputs_from_v1(
         )
         windows_dropped_partial = 0
         for rid in run_ids:
-            summary_path = _ml_output_dir(evidence_root / rid, frozen=True) / "ml_summary.json"
+            summary_path = _ml_output_dir(
+                _resolve_frozen_run_dir(evidence_root, rid),
+                frozen=True,
+            ) / "ml_summary.json"
             if summary_path.exists():
                 try:
                     summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -1278,7 +1292,8 @@ def _select_fig_b1_exemplar_from_existing_or_inputs(
         per_model_thresholds: dict[str, float] = {}
 
         for rid in interactive_ids:
-            inputs = load_run_inputs(evidence_root / rid)
+            run_dir = _resolve_frozen_run_dir(evidence_root, rid)
+            inputs = load_run_inputs(run_dir)
             if not inputs:
                 continue
             per_run_tag[rid] = _interaction_tag_from_manifest(inputs.manifest)
@@ -1286,7 +1301,7 @@ def _select_fig_b1_exemplar_from_existing_or_inputs(
             per_run_low_signal[rid] = bool(ds.get("low_signal") is True)
             # Load anomaly scores/thresholds.
             for model_name in (config.MODEL_IFOREST, config.MODEL_OCSVM):
-                out_dir = _ml_output_dir(evidence_root / rid, frozen=True)
+                out_dir = _ml_output_dir(run_dir, frozen=True)
                 csv_path = out_dir / f"anomaly_scores_{_model_csv_label(model_name)}.csv"
                 scores, threshold = _read_scores_and_threshold(csv_path)
                 per_model_scores_by_run[model_name][rid] = scores

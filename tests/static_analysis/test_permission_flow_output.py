@@ -68,6 +68,31 @@ def _make_selection(tmp_path: Path) -> ScopeSelection:
     return ScopeSelection(scope="profile", label="Example profile", groups=tuple(groups))
 
 
+def test_permission_parity_fallback_generates_without_publishing(tmp_path, monkeypatch):
+    params = RunParameters(profile="permissions", scope="all", scope_label="All")
+    artifact = object()
+    calls: list[dict[str, object]] = []
+
+    def _fake_generate(_artifact, _base_dir, _params, **kwargs):
+        calls.append(kwargs)
+        return _FakeReport(manifest=_FakeManifest()), None, None, False
+
+    monkeypatch.setattr(permission_flow, "generate_report", _fake_generate)
+
+    report, path, error, skipped = permission_flow._generate_missing_permission_report(
+        artifact,
+        tmp_path,
+        params,
+        parity_mode=True,
+    )
+
+    assert isinstance(report, _FakeReport)
+    assert path is None
+    assert error is None
+    assert skipped is False
+    assert calls == [{"persist_report": False}]
+
+
 def test_permission_flow_passes_progress_index_to_renderer(tmp_path, monkeypatch):
     selection = _make_selection(tmp_path)
     params = RunParameters(profile="permissions", scope="profile", scope_label="Example profile")

@@ -26,7 +26,9 @@ def test_build_dynamic_plan_uses_canonical_signer_set_hash() -> None:
         file_name="example.apk",
         file_size=123,
         hashes={"sha256": "f" * 64},
-        manifest=ManifestSummary(package_name="com.example.app", version_name="1.0", version_code="123"),
+        manifest=ManifestSummary(
+            package_name="com.example.app", version_name="1.0", version_code="123"
+        ),
         manifest_flags=ManifestFlags(),
         permissions=PermissionSummary(),
         components=ComponentSummary(),
@@ -47,7 +49,24 @@ def test_build_dynamic_plan_uses_canonical_signer_set_hash() -> None:
         },
     )
 
-    plan = build_dynamic_plan(report, {"aggregates": {}, "selected_samples": {}})
+    plan = build_dynamic_plan(
+        report,
+        {
+            "baseline": {
+                "string_analysis": {
+                    "aggregates": {
+                        "endpoint_roots": [
+                            {
+                                "root_domain": "invalid-metric.example",
+                                "schemes": {"http": "not-an-integer"},
+                            }
+                        ]
+                    }
+                },
+                "sdk_indicators": {"score": "nan"},
+            }
+        },
+    )
     identity = plan["run_identity"]
 
     expected_hash = compute_signer_set_hash(signatures)
@@ -55,6 +74,12 @@ def test_build_dynamic_plan_uses_canonical_signer_set_hash() -> None:
     assert identity["signer_primary_digest"] == ("aa" * 32)
     assert identity["signer_set_hash"] == expected_hash
     assert identity["signer_digest"] == expected_hash
+    assert identity["package_name_lc"] == "com.example.app"
+    assert plan["package_name"] == "com.example.app"
+    assert plan["version_name"] == "1.0"
+    assert plan["version_code"] == "123"
+    assert plan["network_targets"]["cleartext_domains"] == []
+    assert plan["static_features"]["sdk_indicator_score"] == 0.0
 
 
 def test_build_dynamic_plan_uses_merged_split_domain_payload() -> None:
@@ -64,7 +89,9 @@ def test_build_dynamic_plan_uses_merged_split_domain_payload() -> None:
         file_name="example.apk",
         file_size=123,
         hashes={"sha256": "f" * 64},
-        manifest=ManifestSummary(package_name="com.example.split", version_name="1.0", version_code="123"),
+        manifest=ManifestSummary(
+            package_name="com.example.split", version_name="1.0", version_code="123"
+        ),
         manifest_flags=ManifestFlags(),
         permissions=PermissionSummary(),
         components=ComponentSummary(),
@@ -163,7 +190,9 @@ def test_build_dynamic_plan_falls_back_to_selected_samples_when_samples_empty() 
         file_name="example.apk",
         file_size=123,
         hashes={"sha256": "f" * 64},
-        manifest=ManifestSummary(package_name="com.example.selected", version_name="1.0", version_code="123"),
+        manifest=ManifestSummary(
+            package_name="com.example.selected", version_name="1.0", version_code="123"
+        ),
         manifest_flags=ManifestFlags(),
         permissions=PermissionSummary(),
         components=ComponentSummary(),
@@ -223,7 +252,9 @@ def test_build_dynamic_plan_domain_sources_do_not_emit_raw_string_values() -> No
         file_name="example.apk",
         file_size=123,
         hashes={"sha256": "f" * 64},
-        manifest=ManifestSummary(package_name="com.example.redacted", version_name="1.0", version_code="123"),
+        manifest=ManifestSummary(
+            package_name="com.example.redacted", version_name="1.0", version_code="123"
+        ),
         manifest_flags=ManifestFlags(),
         permissions=PermissionSummary(),
         components=ComponentSummary(),
@@ -276,14 +307,18 @@ def test_build_dynamic_plan_domain_sources_do_not_emit_raw_string_values() -> No
     assert domain_row["domain"] == "example.com"
 
 
-def test_build_dynamic_plan_falls_back_to_network_surface_urls_when_string_endpoints_missing() -> None:
+def test_build_dynamic_plan_falls_back_to_network_surface_urls_when_string_endpoints_missing() -> (
+    None
+):
     report = StaticAnalysisReport(
         file_path="/tmp/example.apk",
         relative_path="example.apk",
         file_name="example.apk",
         file_size=123,
         hashes={"sha256": "f" * 64},
-        manifest=ManifestSummary(package_name="com.example.news", version_name="1.0", version_code="123"),
+        manifest=ManifestSummary(
+            package_name="com.example.news", version_name="1.0", version_code="123"
+        ),
         manifest_flags=ManifestFlags(),
         permissions=PermissionSummary(),
         components=ComponentSummary(),
@@ -340,3 +375,37 @@ def test_build_dynamic_plan_falls_back_to_network_surface_urls_when_string_endpo
     assert by_domain["cnn.io"]["sources"] == ["network_surface"]
     assert by_domain["apache.org"]["sources"] == ["network_surface"]
     assert "http://ref-cerebro.api.cnn.io/api/v1/config" not in str(network["domain_sources"])
+
+
+def test_build_dynamic_plan_preserves_private_suffix_tenant_boundaries() -> None:
+    report = StaticAnalysisReport(
+        file_path="/tmp/example.apk",
+        relative_path="example.apk",
+        file_name="example.apk",
+        file_size=123,
+        hashes={"sha256": "f" * 64},
+        manifest=ManifestSummary(
+            package_name="com.example.hosted", version_name="1.0", version_code="123"
+        ),
+        manifest_flags=ManifestFlags(),
+        permissions=PermissionSummary(),
+        components=ComponentSummary(),
+        exported_components=ComponentSummary(),
+        signatures=("aa" * 32,),
+        detector_metrics={
+            "network_surface": {
+                "surface": {
+                    "urls": {
+                        "https": [
+                            "https://api.project.github.io/v1",
+                            "https://api.other.github.io/v1",
+                        ]
+                    }
+                }
+            }
+        },
+    )
+
+    plan = build_dynamic_plan(report, {"aggregates": {}, "selected_samples": {}})
+
+    assert plan["network_targets"]["domains"] == ["other.github.io", "project.github.io"]

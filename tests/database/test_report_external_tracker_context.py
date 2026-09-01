@@ -15,6 +15,12 @@ def test_extract_domain_tokens_normalizes_tracker_patterns() -> None:
     assert "inmobi.com" in tokens
 
 
+def test_extract_domain_tokens_preserves_private_suffix_tenant_boundary() -> None:
+    tokens = report._extract_domain_tokens(r"api\.project\.github\.io|other\.github\.io")
+
+    assert tokens == ["other.github.io", "project.github.io"]
+
+
 def test_classify_overlap_confidence_separates_generic_and_specific_roots() -> None:
     assert report._classify_overlap_confidence("google.com") == ("low", "generic_root_overlap")
     assert report._classify_overlap_confidence("amazonaws.com") == (
@@ -74,7 +80,9 @@ def test_overlap_rows_include_curated_service_context_and_noisy_queue() -> None:
         }
     ]
 
-    overlap_rows, unmatched_rows, noisy_rows, _ = report._build_overlap_rows(runs, package_domains, tracker_rows)
+    overlap_rows, unmatched_rows, noisy_rows, _ = report._build_overlap_rows(
+        runs, package_domains, tracker_rows
+    )
 
     assert not unmatched_rows
     assert noisy_rows[0]["root_domain"] == "http"
@@ -221,7 +229,9 @@ def test_main_generates_bundle_from_mocked_db(tmp_path: Path, monkeypatch) -> No
     assert summary["unmatched_root_domain_count"] == 1
     assert summary["unmatched_without_curated_context_count"] == 1
     assert summary["domain_research_candidate_count"] == 1
-    assert summary["domain_research_candidate_class_counts"] == {"likely_first_party_or_brand_reference": 1}
+    assert summary["domain_research_candidate_class_counts"] == {
+        "likely_first_party_or_brand_reference": 1
+    }
     assert summary["noisy_static_root_domain_count"] == 1
     assert summary["no_db_writes"] is True
     assert "risk" not in (tmp_path / "summary.json").read_text(encoding="utf-8").lower()

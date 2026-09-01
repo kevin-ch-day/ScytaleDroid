@@ -31,6 +31,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Source endpoint to fetch (default: %(default)s).",
     )
     parser.add_argument(
+        "--input-receipt",
+        type=Path,
+        default=None,
+        help="Replay a verified JSON receipt instead of contacting the live API.",
+    )
+    parser.add_argument(
         "--snapshot-date",
         type=_parse_date,
         default=None,
@@ -58,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             ensure_external_tracker_intel_schema,
             fetch_exodus_trackers,
             load_external_tracker_snapshot_counts,
+            load_verified_refresh_receipt,
             normalize_exodus_trackers,
             upsert_external_tracker_rows,
             write_refresh_receipt_bundle,
@@ -66,16 +73,34 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 1
 
+    payload: dict[str, object] | None = None
+    replay_provenance: dict[str, object] | None = None
     try:
-        payload = fetch_exodus_trackers(args.source_url, timeout=max(int(args.timeout), 1))
-        rows = normalize_exodus_trackers(
-            payload,
-            fetched_at_utc=fetched_at,
-            snapshot_date=args.snapshot_date,
-            source_url=args.source_url,
-        )
+        if args.input_receipt is not None:
+            if args.snapshot_date is not None:
+                raise ValueError(
+                    "--snapshot-date cannot be combined with --input-receipt"
+                )
+            rows, replay_provenance = load_verified_refresh_receipt(
+                args.input_receipt.resolve()
+            )
+        else:
+            payload = fetch_exodus_trackers(
+                args.source_url,
+                timeout=max(int(args.timeout), 1),
+            )
+            rows = normalize_exodus_trackers(
+                payload,
+                fetched_at_utc=fetched_at,
+                snapshot_date=args.snapshot_date,
+                source_url=args.source_url,
+            )
+        if not rows:
+            raise ValueError(
+                "source returned no usable tracker rows; refusing an empty snapshot"
+            )
     except Exception as exc:  # noqa: BLE001 - operator-facing boundary
-        sys.stderr.write(f"Fetch failed: {exc}\n")
+        sys.stderr.write(f"Source load failed: {exc}\n")
         return 2
 
     snapshot_before: dict[str, int] = {"total_rows": 0, "distinct_trackers": 0}
@@ -118,7 +143,15 @@ def main(argv: list[str] | None = None) -> int:
         snapshot_after=snapshot_after,
         applied=args.apply,
         source_url=args.source_url,
+        source_payload=payload,
     )
+    if replay_provenance is not None:
+        summary.update(replay_provenance)
+        summary["replayed_from_verified_receipt"] = True
+        summary["live_api_contacted"] = False
+    else:
+        summary["replayed_from_verified_receipt"] = False
+        summary["live_api_contacted"] = True
 
     receipt_files: dict[str, str] = {}
     if args.write_bundle:

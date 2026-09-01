@@ -6,13 +6,17 @@ import json
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
 from ..scan_formatters import _detector_posture_readable
 
 
 def sanitize_session_stamp_for_filename(session_stamp: str | None) -> str:
     """Return a filesystem-friendly token for tagging ``run_health`` JSON files."""
     token = str(session_stamp or "unknown-session").strip()
-    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in token).strip("_")
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in token).strip(
+        "_"
+    )
     return cleaned[:120] if cleaned else "unknown-session"
 
 
@@ -32,20 +36,32 @@ def _workflow_completion_stdout_label(exec_workflow: str) -> str:
 
 
 def write_run_health_json(path: Path, document: Mapping[str, object]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(document, indent=2, sort_keys=False, ensure_ascii=False) + "\n"
-    path.write_text(text, encoding="utf-8")
+    atomic_write_text(path, text)
     return path
 
 
 def _safe_int_token(value: object) -> int:
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return 0
     try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
-def _workflow_execution_label(doc: Mapping[str, object], sr: Mapping[str, object], roll: Mapping[str, object]) -> str:
+def _first_present(mapping: Mapping[str, object], *keys: str) -> object | None:
+    """Return the first present, non-``None`` value while preserving explicit zeroes."""
+
+    for key in keys:
+        if key in mapping and mapping.get(key) is not None:
+            return mapping.get(key)
+    return None
+
+
+def _workflow_execution_label(
+    doc: Mapping[str, object], sr: Mapping[str, object], roll: Mapping[str, object]
+) -> str:
     """High-level scan/persistence workflow (not detector severity)."""
 
     if bool(doc.get("aborted")):
@@ -80,9 +96,7 @@ def compact_run_health_stdout_line(doc: Mapping[str, object]) -> str:
         or "unknown"
     )
     fidelity = str(
-        doc.get("finding_fidelity_status")
-        or roll.get("finding_fidelity_status")
-        or "unknown"
+        doc.get("finding_fidelity_status") or roll.get("finding_fidelity_status") or "unknown"
     )
 
     return (
@@ -148,7 +162,11 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
 
     sr = doc.get("status_reasons") if isinstance(doc.get("status_reasons"), Mapping) else {}
     roll = doc.get("run_rollups") if isinstance(doc.get("run_rollups"), Mapping) else {}
-    string_note = doc.get("string_summary_note") if isinstance(doc.get("string_summary_note"), Mapping) else {}
+    string_note = (
+        doc.get("string_summary_note")
+        if isinstance(doc.get("string_summary_note"), Mapping)
+        else {}
+    )
     path = _run_health_display_path(doc)
 
     lines: list[str] = [
@@ -175,15 +193,24 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         or ""
     ).strip()
     finding_fidelity_status = str(
-        doc.get("finding_fidelity_status")
-        or roll.get("finding_fidelity_status")
-        or "unknown"
+        doc.get("finding_fidelity_status") or roll.get("finding_fidelity_status") or "unknown"
     ).strip()
     gov_r = _truncate_stdout_token(sr.get("governance_reason"))
     pipe = sr.get("detector_pipeline_status") or sr.get("detector_status")
-    det_exec = _safe_int_token(sr.get("detector_execution_errors") or sr.get("detector_errors"))
+    det_exec = _safe_int_token(_first_present(sr, "detector_execution_errors", "detector_errors"))
     det_warn = _safe_int_token(sr.get("detector_warnings"))
-    det_fail = _safe_int_token(sr.get("detector_finding_failures") or sr.get("detector_failures"))
+    policy_fail = _safe_int_token(sr.get("policy_gate_failures"))
+    # Historical health JSON only had the combined detector_failures field.
+    # Treat that legacy value as an unspecified finding/gate total, never as a
+    # policy failure, so old receipts cannot manufacture policy failures.
+    finding_signals = _safe_int_token(
+        _first_present(
+            sr,
+            "finding_signals",
+            "detector_finding_failures",
+            "detector_failures",
+        )
+    )
     findings_runtime = _safe_int_token(roll.get("findings_runtime_total"))
     findings_persisted = _safe_int_token(roll.get("findings_persisted_db_total"))
     findings_capped = _safe_int_token(roll.get("findings_capped_not_persisted_total"))
@@ -194,16 +221,20 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
     else:
         artifacts_done = _safe_int_token(roll.get("artifacts_scan_completed_counter"))
         artifacts_tot = _safe_int_token(roll.get("artifact_total_discovered_estimate"))
-        exec_label = "complete" if artifacts_tot > 0 and artifacts_done >= artifacts_tot else "incomplete"
+        exec_label = (
+            "complete" if artifacts_tot > 0 and artifacts_done >= artifacts_tot else "incomplete"
+        )
 
-    det_human = _detector_result_operator_label(str(pipe) if pipe is not None else None, execution_errors=det_exec)
+    det_human = _detector_result_operator_label(
+        str(pipe) if pipe is not None else None, execution_errors=det_exec
+    )
 
     lines.extend(
         [
             f"Execution        : {exec_label} (workflow={exec_workflow})",
             (
                 "Detector result  : "
-                f"{det_human} | detector_warnings={det_warn} policy_failures={det_fail} "
+                f"{det_human} | detector_warnings={det_warn} policy_gate_failures={policy_fail} finding_signals={finding_signals} "
                 f"execution_errors={det_exec}"
                 + (" (none - not analyzer crashes)" if det_exec == 0 else "")
             ),
@@ -216,10 +247,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
                 f"runtime={findings_runtime} persisted_db={findings_persisted} "
                 f"capped_not_persisted={findings_capped}"
             ),
-            (
-                "Governance       : "
-                f"{sr.get('governance_grade')} - {gov_r}"
-            ),
+            (f"Governance       : {sr.get('governance_grade')} - {gov_r}"),
             f"Run completion   : {_workflow_completion_stdout_label(exec_workflow)}",
             f"Workflow status  : {workflow_run_status.upper() if workflow_run_status else '—'}",
             (
@@ -236,14 +264,47 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             ),
         ]
     )
+    worker_budget = roll.get("resolved_worker_budget")
+    concurrency_cap = roll.get("artifact_concurrency_cap")
+    if worker_budget is not None or concurrency_cap is not None:
+        lines.append(
+            "Artifact workers : "
+            f"observed_peak={concurrency_cap if concurrency_cap is not None else '—'} "
+            f"| resolved_budget={worker_budget if worker_budget is not None else '—'}"
+        )
+    coverage = (
+        doc.get("measurement_coverage")
+        if isinstance(doc.get("measurement_coverage"), Mapping)
+        else {}
+    )
+    if coverage:
+        placeholder_ids = coverage.get("placeholder_detector_ids")
+        placeholder_text = (
+            ",".join(str(item) for item in placeholder_ids)
+            if isinstance(placeholder_ids, list) and placeholder_ids
+            else "none"
+        )
+        lines.append(
+            "Measurement cov. : "
+            f"{coverage.get('status') or 'unknown'} | "
+            f"implemented_executed={coverage.get('executed_implemented_stage_opportunities')}/"
+            f"{coverage.get('implemented_stage_opportunities')} "
+            f"| placeholder_stages={coverage.get('placeholder_stage_opportunities')} "
+            f"| placeholders={placeholder_text}"
+        )
+    reconciliation = doc.get("completion_reconciliation")
+    if isinstance(reconciliation, Mapping):
+        lines.append(
+            "Reconciliation  : "
+            f"{str(reconciliation.get('status') or 'UNKNOWN')} | "
+            f"artifacts={reconciliation.get('accounted_artifacts')}/{reconciliation.get('selected_artifacts')} "
+            f"unexplained={reconciliation.get('unexplained_artifacts')}"
+        )
 
     if string_note:
         string_scope = str(string_note.get("string_summary_scope") or "").strip() or "unknown"
         max_artifacts = _safe_int_token(string_note.get("discovered_max_artifacts_per_app"))
-        lines.append(
-            "String summary   : "
-            f"{string_scope} | max_artifacts_per_app={max_artifacts}"
-        )
+        lines.append(f"String summary   : {string_scope} | max_artifacts_per_app={max_artifacts}")
         warning = str(string_note.get("string_summary_warning") or "").strip()
         if warning:
             lines.append(f"String note      : {warning}")
@@ -284,21 +345,25 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         if str(row.get("final_status") or "") != "partial":
             continue
         pkg = str(row.get("package_name") or "?")
-        sig = row.get("execution_signals") if isinstance(row.get("execution_signals"), Mapping) else {}
+        sig = (
+            row.get("execution_signals")
+            if isinstance(row.get("execution_signals"), Mapping)
+            else {}
+        )
         drivers = sig.get("drivers") if isinstance(sig.get("drivers"), list) else []
         if drivers:
             partial_hints.append(f"{pkg}: " + "; ".join(str(d) for d in drivers[:6]))
         elif len(partial_hints) < 4:
             partial_hints.append(f"{pkg}: (see execution_signals in run_health.json)")
     if partial_hints:
-        lines.append(
-            "Apps with detector/persistence caveats: " + " | ".join(partial_hints[:4])
-        )
+        lines.append("Apps with detector/persistence caveats: " + " | ".join(partial_hints[:4]))
 
     return lines
 
 
-def attach_run_health_outputs_on_document(doc: MutableMapping[str, object], *, path: Path, base_dir: Path) -> None:
+def attach_run_health_outputs_on_document(
+    doc: MutableMapping[str, object], *, path: Path, base_dir: Path
+) -> None:
     outp = dict(doc.get("outputs") if isinstance(doc.get("outputs"), Mapping) else {})
     outp["run_health_json_abs"] = str(path)
     outp["run_health_base_dir_abs"] = str(base_dir)

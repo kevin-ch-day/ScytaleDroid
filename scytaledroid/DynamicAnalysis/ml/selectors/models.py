@@ -19,6 +19,7 @@ from typing import Any, Literal
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
 from scytaledroid.DynamicAnalysis.ml.anomaly_model_training import fixed_model_specs
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 from scytaledroid.Utils.toolchain_versions import gather_toolchain_versions
 
 SelectorType = Literal["freeze", "query"]
@@ -90,6 +91,7 @@ def _git_commit_hash(repo_root: Path) -> str | None:
 def _repo_root() -> Path:
     # repo_root/scytaledroid/DynamicAnalysis/ml/selectors/models.py -> parents[5] is repo root
     return Path(__file__).resolve().parents[5]
+
 
 def _cfg_for_selector(selector_type: SelectorType):
     # Freeze selector fingerprints profile config; query selector fingerprints operational config.
@@ -180,8 +182,7 @@ def write_selection_manifest(path: Path, *, result: SelectionResult) -> Selectio
     digest = sha256(blob).hexdigest()
     payload["selection_manifest_sha256"] = digest
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return SelectionManifest(payload=payload, sha256=digest)
 
 

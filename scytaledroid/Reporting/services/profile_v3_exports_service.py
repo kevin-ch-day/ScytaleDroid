@@ -34,10 +34,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path  # noqa: E402
 from scytaledroid.Publication.paper_mode import PaperModeContext  # noqa: E402
 from scytaledroid.Publication.profile_v3_contract import lint_profile_v3_bundle  # noqa: E402
 from scytaledroid.Publication.profile_v3_metrics import (  # noqa: E402
     ENGINE_IFOREST,
+    ProfileV3Error,
     compute_profile_v3_per_app,
     env_allow_multi_model,
     inspect_run_inputs,
@@ -358,7 +360,12 @@ def main(argv: list[str] | None = None) -> int:
     # Inspect per-run inputs for provenance and early fail-closed errors.
     run_inspections: dict[str, dict[str, object]] = {}
     for rid in included:
-        run_dir = evidence_root / rid
+        run_dir = resolve_contained_path(evidence_root, rid)
+        if run_dir is None:
+            raise ProfileV3Error(
+                "PROFILE_V3_UNSAFE_RUN_ID",
+                f"run id escapes evidence root: {rid}",
+            )
         run_inspections[rid] = inspect_run_inputs(run_dir=run_dir, allow_multi_model=allow_multi)
 
     per_app = compute_profile_v3_per_app(

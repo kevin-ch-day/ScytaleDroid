@@ -17,6 +17,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
+REQUIRED_FROZEN_INPUTS = (
+    "run_manifest.json",
+    "inputs/static_dynamic_plan.json",
+    "analysis/summary.json",
+    "analysis/pcap_report.json",
+    "analysis/pcap_features.json",
+)
+
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
@@ -65,12 +76,24 @@ def verify_dataset_freeze_immutability(
     missing = 0
     mismatches = 0
 
+    seen_run_ids: set[str] = set()
     for raw_rid in included:
         if not isinstance(raw_rid, str) or not raw_rid.strip():
+            missing += 1
+            issues.append({"run_id": "", "issue": "invalid_run_id"})
             continue
         rid = raw_rid.strip()
+        if rid in seen_run_ids:
+            missing += 1
+            issues.append({"run_id": rid[:8], "issue": "duplicate_run_id"})
+            continue
+        seen_run_ids.add(rid)
+        run_dir = resolve_contained_path(evidence_root, rid)
+        if run_dir is None:
+            missing += 1
+            issues.append({"run_id": rid[:8], "issue": "unsafe_run_id"})
+            continue
         scanned += 1
-        run_dir = evidence_root / rid
         expected = checksums.get(rid)
         if not isinstance(expected, dict):
             missing += 1
@@ -78,16 +101,38 @@ def verify_dataset_freeze_immutability(
             continue
 
         files = expected.get("files_sha256")
-        if not isinstance(files, dict):
+        if not isinstance(files, dict) or not files:
             missing += 1
             issues.append({"run_id": rid[:8], "issue": "missing_files_sha256"})
             continue
 
+        for required_path in REQUIRED_FROZEN_INPUTS:
+            if required_path not in files:
+                missing += 1
+                issues.append(
+                    {
+                        "run_id": rid[:8],
+                        "issue": "missing_expected_checksum",
+                        "path": required_path,
+                    }
+                )
+
         for rel, want in files.items():
-            if not isinstance(rel, str) or not isinstance(want, str) or not rel.strip() or not want.strip():
+            if (
+                not isinstance(rel, str)
+                or not isinstance(want, str)
+                or not rel.strip()
+                or not want.strip()
+            ):
+                missing += 1
+                issues.append({"run_id": rid[:8], "issue": "invalid_checksum_entry"})
                 continue
-            path = run_dir / rel
-            if not path.exists():
+            path = resolve_contained_path(run_dir, rel)
+            if path is None:
+                missing += 1
+                issues.append({"run_id": rid[:8], "issue": "unsafe_path", "path": rel})
+                continue
+            if not path.is_file():
                 missing += 1
                 issues.append({"run_id": rid[:8], "issue": "missing_file", "path": rel})
                 continue
@@ -101,8 +146,11 @@ def verify_dataset_freeze_immutability(
             rel = pcap.get("relative_path")
             want = pcap.get("sha256")
             if isinstance(rel, str) and rel and isinstance(want, str) and want:
-                p = run_dir / rel
-                if p.exists():
+                p = resolve_contained_path(run_dir, rel)
+                if p is None:
+                    missing += 1
+                    issues.append({"run_id": rid[:8], "issue": "unsafe_path", "path": rel})
+                elif p.is_file():
                     got = _sha256_file(p)
                     if got != want:
                         mismatches += 1
@@ -116,7 +164,8 @@ def verify_dataset_freeze_immutability(
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         dest = out_dir / f"freeze-immutability-check-{stamp}.json"
-        dest.write_text(
+        atomic_write_text(
+            dest,
             json.dumps(
                 {
                     "generated_at_utc": datetime.now(UTC).isoformat(),
@@ -128,8 +177,8 @@ def verify_dataset_freeze_immutability(
                 },
                 indent=2,
                 sort_keys=True,
-            ),
-            encoding="utf-8",
+            )
+            + "\n",
         )
 
     return FreezeVerifyResult(
@@ -141,4 +190,8 @@ def verify_dataset_freeze_immutability(
     )
 
 
-__all__ = ["FreezeVerifyResult", "verify_dataset_freeze_immutability"]
+__all__ = [
+    "FreezeVerifyResult",
+    "REQUIRED_FROZEN_INPUTS",
+    "verify_dataset_freeze_immutability",
+]

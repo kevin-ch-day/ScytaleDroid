@@ -259,6 +259,38 @@ analysis/summary.md
   - `tls_mitm_suspected: true | false | unknown`
 - `notable_log_signals: []`
 
+### 8.1 Passive name-metadata visibility
+
+DNS names, TLS Server Name Indication (SNI), and transport signals are
+metadata observations, not a complete inventory of remote application-layer
+destinations. Passive capture does not decrypt TLS payloads. QUIC encrypts most
+transport metadata, and Encrypted Client Hello (ECH) can hide the true SNI;
+therefore, missing DNS or SNI must not be interpreted as evidence that no
+communication occurred. It also must not be reported as proof that ECH was
+used.
+
+New `analysis/pcap_report.json` outputs record these additive fields under
+`tls_quic_visibility`:
+
+- `tls_name_metadata_class`: the strongest decoded name-metadata state
+- `tls_name_metadata_limited`: whether TLS/UDP service-port activity was
+  observed without decoded SNI
+- `tls_name_metadata_basis`: the observation supporting the classification
+- `ech_status`: `not_determinable_from_passive_metadata`
+
+`tls_visible` remains a backward-compatible indicator that some TLS handshake,
+SNI, or ALPN metadata was decoded. It is not equivalent to hostname visibility.
+Likewise, `quic_candidate_packets` is a UDP port 80/443 heuristic, not proof
+that the packets are QUIC. Run-level visibility-loss diagnostics combine these
+signals with the observed domain inventory. Per-interaction-phase
+`visibility_loss_flag` is narrower: it indicates encrypted traffic in that
+phase without DNS in the same phase and may reflect cached or earlier name
+resolution.
+
+Method basis: [OWASP MASTG passive eavesdropping](https://mas.owasp.org/MASTG/techniques/generic/MASTG-TECH-0122/),
+[RFC 9312 QUIC manageability](https://www.rfc-editor.org/rfc/rfc9312.html), and
+[RFC 9849 Encrypted Client Hello](https://www.rfc-editor.org/rfc/rfc9849.html).
+
 ## 9. Profile v3 capture minima
 
 Current human-visible minima for Profile v3:
@@ -284,7 +316,7 @@ remains the default publication-grade path unless an explicit re-scope says
 otherwise.
 - Evidence pointers (artifact paths + sha256)
 
-## 8.1 Telemetry windows (time-series readiness)
+## 8.2 Telemetry windows (time-series readiness)
 
 Dynamic telemetry should be segmentable into fixed-length windows suitable for
 time-series modeling. Windowing metadata (window size, overlap, sampling rate)

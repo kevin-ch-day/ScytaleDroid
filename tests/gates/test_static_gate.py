@@ -291,7 +291,7 @@ def test_secret_redaction_no_raw_secret_leak_db_scan():
 
 def test_headless_dataset_mode_requires_session():
     with pytest.raises(SystemExit):
-        headless_run.main(["--profile-key", "research_dataset_alpha"])
+        headless_run.main(["--research-cohort-key", "research_dataset_alpha"])
 
 
 def test_headless_dataset_mode_builds_single_profile_run(monkeypatch):
@@ -324,7 +324,7 @@ def test_headless_dataset_mode_builds_single_profile_run(monkeypatch):
 
     rc = headless_run.main(
         [
-            "--profile-key",
+            "--research-cohort-key",
             "research_dataset_alpha",
             "--session",
             "20260328-rda-contract",
@@ -346,60 +346,6 @@ def test_headless_dataset_mode_builds_single_profile_run(monkeypatch):
     assert params.scope == "research_cohort"
     assert params.scope_label == "Research Dataset Alpha"
     assert params.session_stamp == "20260328-rda-contract"
-
-
-def test_headless_dataset_mode_legacy_beta_alias_builds_research_cohort_run(monkeypatch):
-    captured: dict[str, object] = {}
-    groups = (
-        SimpleNamespace(package_name="com.beta.one"),
-        SimpleNamespace(package_name="com.beta.two"),
-    )
-
-    prepared = SimpleNamespace(
-        display_name="Research Dataset Beta",
-        selection=ScopeSelection(
-            scope="research_cohort",
-            label="Research Dataset Beta",
-            groups=groups,
-        ),
-    )
-
-    monkeypatch.setattr(headless_run, "group_artifacts", lambda *_a, **_k: groups)
-    monkeypatch.setattr(headless_run, "prepare_research_cohort_scope", lambda *_a, **_k: prepared)
-    monkeypatch.setattr(headless_run, "_check_session_uniqueness", lambda *_a, **_k: None)
-
-    def _build_spec(**kwargs):
-        captured["selection"] = kwargs["selection"]
-        captured["params"] = kwargs["params"]
-        return SimpleNamespace(selection=kwargs["selection"], params=kwargs["params"])
-
-    monkeypatch.setattr(headless_run, "build_static_run_spec", _build_spec)
-    monkeypatch.setattr(headless_run, "execute_run_spec", lambda spec: captured.setdefault("spec", spec))
-
-    rc = headless_run.main(
-        [
-            "--profile-key",
-            "research_dataset_beta",
-            "--session",
-            "20260615-rdb-contract",
-            "--profile",
-            "full",
-            "--dry-run",
-        ]
-    )
-
-    assert rc == 0
-    selection = captured["selection"]
-    params = captured["params"]
-    assert selection.scope == "research_cohort"
-    assert selection.label == "Research Dataset Beta"
-    assert tuple(group.package_name for group in selection.groups) == (
-        "com.beta.one",
-        "com.beta.two",
-    )
-    assert params.scope == "research_cohort"
-    assert params.scope_label == "Research Dataset Beta"
-    assert params.session_stamp == "20260615-rdb-contract"
 
 
 def test_headless_research_cohort_mode_runs_db_backed_beta(monkeypatch):

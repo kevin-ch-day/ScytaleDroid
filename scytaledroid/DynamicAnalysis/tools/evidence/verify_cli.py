@@ -16,7 +16,10 @@ from typing import Any
 
 from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.pcap.diagnostics import security_surface_issue_codes
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    resolve_contained_path,
+)
 from scytaledroid.Utils.DisplayUtils import menu_utils, status_messages, table_utils
 
 REQUIRED_FILES = [
@@ -282,11 +285,14 @@ def _pcap_path_from_manifest(run_dir: Path, manifest: dict[str, Any]) -> Path | 
                 continue
             rel = item.get("relative_path")
             if isinstance(rel, str) and rel:
-                candidate = run_dir / rel
-                if candidate.exists():
+                candidate = resolve_contained_path(run_dir, rel)
+                if candidate is not None and candidate.is_file():
                     return candidate
-    candidates = list(run_dir.glob("**/*.pcap*"))
-    return candidates[0] if candidates else None
+    for candidate in run_dir.glob("**/*.pcap*"):
+        contained = resolve_contained_path(run_dir, candidate.relative_to(run_dir))
+        if contained is not None and contained.is_file():
+            return contained
+    return None
 
 
 def _dataset_block(manifest: dict[str, Any]) -> dict[str, Any] | None:

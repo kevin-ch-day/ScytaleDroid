@@ -31,20 +31,6 @@ def test_raw_ansi_sequences_are_limited_to_allowlist() -> None:
     assert violations == []
 
 
-def test_print_table_accepts_row_dicts(capsys) -> None:
-    table_utils.print_table(
-        [
-            {"A": "x", "B": 1},
-            {"A": "y", "B": 2},
-        ],
-        headers=["A", "B"],
-    )
-    out = capsys.readouterr().out
-    assert "A" in out
-    assert "B" in out
-    assert "x" in out
-
-
 def test_error_panel_divider_is_rendered_line() -> None:
     panel = error_panels.format_panel("Error", "Something happened", width=40, tone="error")
     lines = colors.strip(panel).splitlines()

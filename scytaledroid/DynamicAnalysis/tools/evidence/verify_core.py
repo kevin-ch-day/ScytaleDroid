@@ -7,19 +7,21 @@ It is safe to run on an air-gapped machine.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-REQUIRED_FROZEN_INPUTS = (
-    "run_manifest.json",
-    "inputs/static_dynamic_plan.json",
-    "analysis/summary.json",
-    "analysis/pcap_report.json",
-    "analysis/pcap_features.json",
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_verify import (
+    REQUIRED_FROZEN_INPUTS,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    bound_manifest_run_id,
+    resolve_contained_path,
+)
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 # Hostname-ish filter for quick "junk in top-N" detection (not a strict DNS validator).
 _HOSTNAME_RE = re.compile(
@@ -70,7 +72,7 @@ def verify_dynamic_evidence_packs(
 
     for run_dir in sorted([p for p in output_root.iterdir() if p.is_dir()]):
         manifest_path = run_dir / "run_manifest.json"
-        if not manifest_path.exists():
+        if not manifest_path.is_file():
             continue
         scanned += 1
         run_id = run_dir.name
@@ -100,6 +102,14 @@ def verify_dynamic_evidence_packs(
             dataset.get("tier") if isinstance(dataset, dict) else None
         )
 
+        if bound_manifest_run_id(manifest, run_dir) is None:
+            issues.append(
+                VerifyIssue(
+                    "manifest_run_id_mismatch",
+                    "manifest.dynamic_run_id does not match the evidence directory name",
+                )
+            )
+
         if dataset_only and str(tier or "").lower() != "dataset":
             continue
 
@@ -121,7 +131,7 @@ def verify_dynamic_evidence_packs(
 
         # Frozen inputs existence checks.
         for rel in REQUIRED_FROZEN_INPUTS:
-            if not (run_dir / rel).exists():
+            if not (run_dir / rel).is_file():
                 issues.append(VerifyIssue("missing_frozen_input", f"Missing {rel}"))
 
         # PCAP existence: trust the artifact record for the path.
@@ -135,12 +145,15 @@ def verify_dynamic_evidence_packs(
         if not pcap_rel:
             issues.append(VerifyIssue("pcap_artifact_missing", "No pcapdroid_capture artifact in manifest"))
         else:
-            if not (run_dir / pcap_rel).exists():
+            pcap_path = resolve_contained_path(run_dir, pcap_rel)
+            if pcap_path is None:
+                issues.append(VerifyIssue("pcap_path_unsafe", f"PCAP path escapes run directory: {pcap_rel}"))
+            elif not pcap_path.is_file():
                 issues.append(VerifyIssue("pcap_file_missing", f"PCAP referenced but missing: {pcap_rel}"))
 
         # Plan identity: ensure run_identity tuple exists (static snapshot contract).
         plan_path = run_dir / "inputs/static_dynamic_plan.json"
-        if plan_path.exists():
+        if plan_path.is_file():
             try:
                 plan = json.loads(plan_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -165,7 +178,8 @@ def verify_dynamic_evidence_packs(
 
         # pcap_report consistency and transport ratios sanity.
         report_path = run_dir / "analysis/pcap_report.json"
-        if report_path.exists():
+        report: dict[str, Any] | None = None
+        if report_path.is_file():
             try:
                 report = json.loads(report_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -177,7 +191,11 @@ def verify_dynamic_evidence_packs(
                     issues.append(VerifyIssue("missing_tools_dataset", f"Dataset-tier run has missing_tools={missing_tools}"))
                 proto = report.get("protocol_hierarchy") or []
                 if isinstance(proto, list) and not proto:
-                    if int(report.get("no_traffic_observed") or 0) != 1:
+                    try:
+                        no_traffic_observed = int(report.get("no_traffic_observed") or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        no_traffic_observed = 0
+                    if no_traffic_observed != 1:
                         issues.append(
                             VerifyIssue(
                                 "protocol_empty_no_reason",
@@ -195,7 +213,9 @@ def verify_dynamic_evidence_packs(
                     except Exception:
                         issues.append(VerifyIssue("ratio_invalid", f"pcap_report.protocol_ratios.{key} not numeric"))
                         continue
-                    if vf < 0 or vf > 1:
+                    if not math.isfinite(vf):
+                        issues.append(VerifyIssue("ratio_invalid", f"pcap_report.protocol_ratios.{key} not finite"))
+                    elif vf < 0 or vf > 1:
                         issues.append(
                             VerifyIssue(
                                 "ratio_out_of_range",
@@ -241,14 +261,14 @@ def verify_dynamic_evidence_packs(
                     pass
 
         feat_path = run_dir / "analysis/pcap_features.json"
-        if feat_path.exists():
+        if feat_path.is_file():
             try:
                 feats = json.loads(feat_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 feats = None
                 issues.append(VerifyIssue("pcap_features_invalid_json", "analysis/pcap_features.json not parseable"))
             if isinstance(feats, dict):
-                proxies = feats.get("proxies") or {}
+                proxies = feats.get("proxies") if isinstance(feats.get("proxies"), dict) else {}
                 for key in ("tls_ratio", "quic_ratio", "tcp_ratio", "udp_ratio"):
                     if key in proxies and proxies[key] is not None:
                         try:
@@ -256,7 +276,9 @@ def verify_dynamic_evidence_packs(
                         except Exception:
                             issues.append(VerifyIssue("ratio_invalid", f"{key} not numeric"))
                             continue
-                        if v < 0 or v > 1:
+                        if not math.isfinite(v):
+                            issues.append(VerifyIssue("ratio_invalid", f"{key} not finite"))
+                        elif v < 0 or v > 1:
                             issues.append(VerifyIssue("ratio_out_of_range", f"{key}={v} not in [0,1]"))
                 # If both report and features provide normalized ratios, they should not drift significantly.
                 if isinstance(report, dict) and isinstance(report.get("protocol_ratios"), dict):
@@ -270,6 +292,8 @@ def verify_dynamic_evidence_packs(
                             pf = float(pv)
                             rf = float(rv)
                         except Exception:
+                            continue
+                        if not math.isfinite(pf) or not math.isfinite(rf):
                             continue
                         if abs(pf - rf) > 0.15:
                             issues.append(
@@ -331,7 +355,7 @@ def write_verify_report(report: dict[str, Any], *, dest_dir: Path) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     path = dest_dir / f"dynamic-verify-{stamp}.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(path, json.dumps(report, indent=2, sort_keys=True) + "\n")
     return path
 
 

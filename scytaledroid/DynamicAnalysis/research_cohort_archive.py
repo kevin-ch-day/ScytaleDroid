@@ -39,16 +39,20 @@ def active_dataset_freeze_path(*, cohort_key: str | None = None) -> Path:
 
 
 def resolve_dataset_plan_read_path(*, cohort_key: str | None = None) -> Path:
-    active = active_dataset_plan_path(cohort_key=cohort_key)
-    if active.exists():
-        return active
+    # An active cohort is an isolation boundary.  A missing cohort plan means a
+    # new/uninitialized cohort, never "reuse whichever legacy plan is present".
+    active_key = str(cohort_key or active_research_cohort_key() or "").strip().lower()
+    if active_key:
+        return active_dataset_plan_path(cohort_key=active_key)
     return legacy_dataset_plan_path()
 
 
 def resolve_dataset_freeze_read_path(*, cohort_key: str | None = None) -> Path:
-    active = active_dataset_freeze_path(cohort_key=cohort_key)
-    if active.exists():
-        return active
+    # Match dataset-plan isolation: an active cohort must never inherit a
+    # legacy freeze belonging to whichever cohort was active previously.
+    active_key = str(cohort_key or active_research_cohort_key() or "").strip().lower()
+    if active_key:
+        return active_dataset_freeze_path(cohort_key=active_key)
     return legacy_dataset_freeze_path()
 
 
@@ -57,7 +61,17 @@ def write_dataset_plan_payload(payload: dict[str, Any], *, cohort_key: str | Non
     legacy = legacy_dataset_plan_path()
     primary.parent.mkdir(parents=True, exist_ok=True)
     legacy.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    stored = dict(payload)
+    active_key = str(cohort_key or active_research_cohort_key() or "").strip().lower()
+    if active_key:
+        existing_key = str(stored.get("cohort_key") or "").strip().lower()
+        if existing_key and existing_key != active_key:
+            raise ValueError(
+                f"Dataset plan cohort mismatch: payload={existing_key} active={active_key}"
+            )
+        stored.setdefault("schema_version", 1)
+        stored["cohort_key"] = active_key
+    text = json.dumps(stored, indent=2, sort_keys=True) + "\n"
     atomic_write_text(primary, text)
     if primary.resolve() != legacy.resolve():
         atomic_write_text(legacy, text)
@@ -69,10 +83,19 @@ def write_dataset_freeze_payload(payload: dict[str, Any], *, cohort_key: str | N
     legacy = legacy_dataset_freeze_path()
     primary.parent.mkdir(parents=True, exist_ok=True)
     legacy.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, indent=2, sort_keys=True)
-    primary.write_text(text, encoding="utf-8")
+    stored = dict(payload)
+    active_key = str(cohort_key or active_research_cohort_key() or "").strip().lower()
+    if active_key:
+        existing_key = str(stored.get("cohort_key") or "").strip().lower()
+        if existing_key and existing_key != active_key:
+            raise ValueError(
+                f"Dataset freeze cohort mismatch: payload={existing_key} active={active_key}"
+            )
+        stored["cohort_key"] = active_key
+    text = json.dumps(stored, indent=2, sort_keys=True) + "\n"
+    atomic_write_text(primary, text)
     if primary.resolve() != legacy.resolve():
-        legacy.write_text(text, encoding="utf-8")
+        atomic_write_text(legacy, text)
     return primary
 
 

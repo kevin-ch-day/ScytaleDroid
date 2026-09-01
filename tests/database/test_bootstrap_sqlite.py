@@ -79,3 +79,16 @@ def test_bootstrap_database_rejects_sqlite_outside_tests(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="SQLite bootstrap is test-only"):
         bootstrap.bootstrap_database()
+
+
+def test_bootstrap_module_help_is_side_effect_free(monkeypatch) -> None:
+    monkeypatch.setattr(
+        bootstrap,
+        "bootstrap_database",
+        lambda: (_ for _ in ()).throw(AssertionError("bootstrap must not run for --help")),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        bootstrap.main(["--help"])
+
+    assert exc_info.value.code == 0

@@ -65,6 +65,13 @@ def build_package_comparison(plan: PackagePlan, result: PullResult) -> dict[str,
     planned_keys = {_comparison_key(entry) for entry in planned}
     missing = [entry for entry in planned if _comparison_key(entry) not in observed_keys]
     unexpected = [entry for entry in observed if _comparison_key(entry) not in planned_keys]
+    declared_split_count = _declared_split_count(plan.inventory)
+    inventory_path_count = len(plan.inventory.apk_paths)
+    inventory_paths_match_declared_splits = (
+        inventory_path_count == declared_split_count
+        if declared_split_count is not None
+        else None
+    )
     return {
         "planned_artifact_count": len(planned),
         "observed_artifact_count": len(observed),
@@ -72,6 +79,9 @@ def build_package_comparison(plan: PackagePlan, result: PullResult) -> dict[str,
         "unexpected_artifacts": unexpected,
         "matches_planned_artifacts": not missing and not unexpected and len(observed) == len(planned),
         "observed_hashes_complete": all(bool(entry.get("sha256")) for entry in observed),
+        "package_manager_split_count": declared_split_count,
+        "inventory_path_count": inventory_path_count,
+        "inventory_paths_match_declared_splits": inventory_paths_match_declared_splits,
     }
 
 
@@ -79,7 +89,11 @@ def finalize_package_result(result: PullResult, *, write_db_requested: bool) -> 
     comparison = build_package_comparison(result.plan, result)
     result.comparison = comparison
     if result.capture_status != "drifted":
-        if comparison["matches_planned_artifacts"] and not result.errors:
+        if (
+            comparison["matches_planned_artifacts"]
+            and comparison["inventory_paths_match_declared_splits"] is not False
+            and not result.errors
+        ):
             result.capture_status = "clean"
         elif result.ok:
             result.capture_status = "partial"
@@ -91,7 +105,11 @@ def finalize_package_result(result: PullResult, *, write_db_requested: bool) -> 
         result.persistence_status = "not_requested"
     if result.capture_status in {"partial", "failed", "drifted"}:
         result.research_status = "ineligible"
-    elif not comparison["matches_planned_artifacts"] or not comparison["observed_hashes_complete"]:
+    elif (
+        not comparison["matches_planned_artifacts"]
+        or not comparison["observed_hashes_complete"]
+        or comparison["inventory_paths_match_declared_splits"] is False
+    ):
         result.research_status = "ineligible"
     else:
         result.research_status = "pending_audit"
@@ -164,6 +182,9 @@ def write_package_manifest(
             "apk_paths": list(inventory.apk_paths),
             "split_count": inventory.split_count,
             "split_membership_hash": inventory_split_membership_hash(inventory),
+            "package_manager_split_names": _declared_split_names(inventory),
+            "package_manager_split_count": _declared_split_count(inventory),
+            "split_path_count_consistent": _inventory_split_path_count_consistent(inventory),
         },
         "planning": {
             "preflight_reason": result.preflight_reason,
@@ -211,6 +232,34 @@ def _comparison_key(entry: Mapping[str, object]) -> tuple[str, str]:
         str(entry.get("split_label") or "").strip(),
         str(entry.get("file_name") or "").strip(),
     )
+
+
+def _declared_split_names(inventory: InventoryRow) -> list[str]:
+    raw = dict(inventory.raw or {})
+    value = raw.get("package_manager_split_names")
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _declared_split_count(inventory: InventoryRow) -> int | None:
+    raw = dict(inventory.raw or {})
+    value = raw.get("package_manager_split_count")
+    if isinstance(value, bool):
+        return None
+    try:
+        count = int(str(value).strip())
+    except (TypeError, ValueError):
+        names = _declared_split_names(inventory)
+        return len(names) if names else None
+    return count if count >= 1 else None
+
+
+def _inventory_split_path_count_consistent(inventory: InventoryRow) -> bool | None:
+    declared_count = _declared_split_count(inventory)
+    if declared_count is None:
+        return None
+    return len(inventory.apk_paths) == declared_count
 
 
 def _stale_replan_payload(result: PullResult) -> dict[str, object]:

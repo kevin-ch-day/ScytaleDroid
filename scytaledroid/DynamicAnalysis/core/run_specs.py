@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
 
@@ -31,6 +31,7 @@ class DynamicRunSpec:
     observer_prompts_enabled: bool = False
     # Secret for PCAPdroid capture (never persisted).
     pcapdroid_api_key: str | None = None
+    final_operator_metadata_collector: Callable[[object], Mapping[str, object] | None] | None = None
 
 
 def build_dynamic_run_spec(
@@ -53,6 +54,7 @@ def build_dynamic_run_spec(
     require_dynamic_schema: bool = True,
     observer_prompts_enabled: bool = False,
     pcapdroid_api_key: str | None = None,
+    final_operator_metadata_collector: Callable[[object], Mapping[str, object] | None] | None = None,
 ) -> DynamicRunSpec:
     return DynamicRunSpec(
         package_name=package_name,
@@ -73,6 +75,7 @@ def build_dynamic_run_spec(
         require_dynamic_schema=require_dynamic_schema,
         observer_prompts_enabled=observer_prompts_enabled,
         pcapdroid_api_key=pcapdroid_api_key,
+        final_operator_metadata_collector=final_operator_metadata_collector,
     )
 
 

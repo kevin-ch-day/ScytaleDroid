@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import numpy as np
-from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_orchestrator import (
-    _build_topk_and_zscores,
-    _compute_dars_v1,
+from scytaledroid.DynamicAnalysis.ml.freeze_profile.run_summary import (
+    build_topk_and_zscores,
+    compute_dars_v1,
 )
 
 
 def test_compute_dars_v1_basic() -> None:
     scores = [1.0, 2.0, 3.0, 4.0, 5.0]
-    out = _compute_dars_v1(scores=scores, threshold=2.5)
+    out = compute_dars_v1(scores=scores, threshold=2.5)
     assert out["windows_total_n"] == 5
     assert out["operator"] == ">="
     assert out["k_policy"] == "ceil_10pct_windows"
@@ -20,13 +20,13 @@ def test_compute_dars_v1_basic() -> None:
 
 
 def test_compute_dars_v1_empty() -> None:
-    out = _compute_dars_v1(scores=[], threshold=1.0)
+    out = compute_dars_v1(scores=[], threshold=1.0)
     assert out["windows_total_n"] == 0
     assert float(out["dars_v1"]) == 0.0
 
 
 def test_compute_dars_v1_inclusive_threshold() -> None:
-    out = _compute_dars_v1(scores=[1.0, 2.0, 2.0], threshold=2.0)
+    out = compute_dars_v1(scores=[1.0, 2.0, 2.0], threshold=2.0)
     assert abs(float(out["exceedance_ratio"]) - (2.0 / 3.0)) < 1e-6
 
 
@@ -42,7 +42,7 @@ def test_topk_rows_use_inclusive_exceedance() -> None:
         "mu": [1.0, 1.0, 1.0],
         "sigma": [1.0, 1.0, 1.0],
     }
-    topk_rows, _ = _build_topk_and_zscores(
+    topk_rows, _ = build_topk_and_zscores(
         window_rows=window_rows,
         run_matrix=run_matrix,
         scores=scores,

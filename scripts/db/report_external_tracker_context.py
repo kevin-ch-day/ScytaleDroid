@@ -37,19 +37,11 @@ from scytaledroid.DynamicAnalysis.service_context import (
     default_service_domain_map_seed_rows,
     resolve_service_for_domain,
 )
+from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.host_normalizer import (
+    registrable_domain,
+    registrable_domain_resolver_metadata,
+)
 
-COMMON_TWO_PART_SUFFIXES = {
-    "co.uk",
-    "org.uk",
-    "gov.uk",
-    "ac.uk",
-    "com.au",
-    "net.au",
-    "org.au",
-    "edu.au",
-    "co.jp",
-    "com.br",
-}
 GENERIC_ROOT_DOMAINS = {
     "amazon.com",
     "android.com",
@@ -124,7 +116,10 @@ class RunPackage:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--session", help="Restrict to one static session_stamp. Default is latest preferred run per package.")
+    parser.add_argument(
+        "--session",
+        help="Restrict to one static session_stamp. Default is latest preferred run per package.",
+    )
     parser.add_argument(
         "--output-dir",
         default=None,
@@ -170,18 +165,21 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
 
 
 def _table_exists(core_q: Any, name: str) -> bool:
-    row = core_q.run_sql(
-        """
+    row = (
+        core_q.run_sql(
+            """
         SELECT COUNT(*) AS c
         FROM information_schema.tables
         WHERE table_schema = DATABASE()
           AND table_name = %s
         """,
-        (name,),
-        fetch="one",
-        dictionary=True,
-        query_name="report.external_tracker_context.table_exists",
-    ) or {}
+            (name,),
+            fetch="one",
+            dictionary=True,
+            query_name="report.external_tracker_context.table_exists",
+        )
+        or {}
+    )
     return bool(int(row.get("c") or 0))
 
 
@@ -243,28 +241,35 @@ def _session_runs_sql() -> str:
 
 def _load_runs(core_q: Any, *, session: str | None) -> list[RunPackage]:
     if session:
-        rows = core_q.run_sql(
-            _session_runs_sql(),
-            (session,),
-            fetch="all",
-            dictionary=True,
-            query_name="report.external_tracker_context.session_runs",
-        ) or []
+        rows = (
+            core_q.run_sql(
+                _session_runs_sql(),
+                (session,),
+                fetch="all",
+                dictionary=True,
+                query_name="report.external_tracker_context.session_runs",
+            )
+            or []
+        )
     else:
-        rows = core_q.run_sql(
-            _latest_runs_sql(),
-            (),
-            fetch="all",
-            dictionary=True,
-            query_name="report.external_tracker_context.latest_runs",
-        ) or []
+        rows = (
+            core_q.run_sql(
+                _latest_runs_sql(),
+                (),
+                fetch="all",
+                dictionary=True,
+                query_name="report.external_tracker_context.latest_runs",
+            )
+            or []
+        )
     out: list[RunPackage] = []
     for row in rows:
         out.append(
             RunPackage(
                 static_run_id=int(row["static_run_id"]),
                 package_name=_norm_text(row.get("package_name")).lower(),
-                display_name=_norm_text(row.get("display_name")) or _norm_text(row.get("package_name")).lower(),
+                display_name=_norm_text(row.get("display_name"))
+                or _norm_text(row.get("package_name")).lower(),
                 session_stamp=_norm_text_or_none(row.get("session_stamp")),
                 session_label=_norm_text_or_none(row.get("session_label")),
                 scope_label=_norm_text_or_none(row.get("scope_label")),
@@ -278,17 +283,9 @@ def _ids_sql(run_ids: Sequence[int]) -> tuple[str, tuple[Any, ...]]:
     return placeholders, tuple(int(run_id) for run_id in run_ids)
 
 
-def _approx_root_domain(host: str) -> str:
+def _root_domain(host: str) -> str:
     text = _norm_text(host).lower().strip(".")
-    if "." not in text:
-        return text
-    parts = [part for part in text.split(".") if part]
-    if len(parts) < 2:
-        return text
-    tail = ".".join(parts[-2:])
-    if len(parts) >= 3 and tail in COMMON_TWO_PART_SUFFIXES:
-        return ".".join(parts[-3:])
-    return tail
+    return registrable_domain(text) or text
 
 
 def _root_domain_quality(root_domain: str) -> tuple[str, str]:
@@ -316,14 +313,14 @@ def _extract_domain_tokens(network_signature: Any) -> list[str]:
             continue
         if not re.fullmatch(r"[a-z0-9._-]+", text):
             continue
-        root = _approx_root_domain(text)
+        root = _root_domain(text)
         if root:
             tokens.add(root)
     return sorted(tokens)
 
 
 def _classify_overlap_confidence(root_domain: str) -> tuple[str, str]:
-    root = _approx_root_domain(root_domain)
+    root = _root_domain(root_domain)
     if root in GENERIC_ROOT_DOMAINS:
         return "low", "generic_root_overlap"
     if root in GENERIC_INFRASTRUCTURE_ROOTS:
@@ -331,21 +328,27 @@ def _classify_overlap_confidence(root_domain: str) -> tuple[str, str]:
     return "medium", "specific_root_overlap"
 
 
-def _load_external_tracker_domains(core_q: Any) -> tuple[list[dict[str, Any]], list[str], str | None]:
+def _load_external_tracker_domains(
+    core_q: Any,
+) -> tuple[list[dict[str, Any]], list[str], str | None]:
     if not _table_exists(core_q, "external_sdk_tracker_intel"):
         return [], ["missing_table:external_sdk_tracker_intel"], None
-    snapshot_row = core_q.run_sql(
-        "SELECT MAX(snapshot_date) AS snapshot_date FROM external_sdk_tracker_intel",
-        (),
-        fetch="one",
-        dictionary=True,
-        query_name="report.external_tracker_context.latest_snapshot",
-    ) or {}
+    snapshot_row = (
+        core_q.run_sql(
+            "SELECT MAX(snapshot_date) AS snapshot_date FROM external_sdk_tracker_intel",
+            (),
+            fetch="one",
+            dictionary=True,
+            query_name="report.external_tracker_context.latest_snapshot",
+        )
+        or {}
+    )
     snapshot_date = _norm_text_or_none(snapshot_row.get("snapshot_date"))
     if not snapshot_date:
         return [], ["no_snapshot_rows:external_sdk_tracker_intel"], None
-    rows = core_q.run_sql(
-        """
+    rows = (
+        core_q.run_sql(
+            """
         SELECT
           tracker_name,
           tracker_id_external,
@@ -357,11 +360,13 @@ def _load_external_tracker_domains(core_q: Any) -> tuple[list[dict[str, Any]], l
         WHERE snapshot_date = %s
         ORDER BY tracker_name ASC, tracker_id_external ASC
         """,
-        (snapshot_date,),
-        fetch="all",
-        dictionary=True,
-        query_name="report.external_tracker_context.external_trackers",
-    ) or []
+            (snapshot_date,),
+            fetch="all",
+            dictionary=True,
+            query_name="report.external_tracker_context.external_trackers",
+        )
+        or []
+    )
     warnings: list[str] = []
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -393,10 +398,15 @@ def _load_external_tracker_domains(core_q: Any) -> tuple[list[dict[str, Any]], l
 def _load_package_domains(core_q: Any, run_ids: Sequence[int]) -> list[dict[str, Any]]:
     if not run_ids:
         return []
-    table_name = "static_string_selected_samples" if _table_exists(core_q, "static_string_selected_samples") else "static_string_samples"
+    table_name = (
+        "static_string_selected_samples"
+        if _table_exists(core_q, "static_string_selected_samples")
+        else "static_string_samples"
+    )
     ids_sql, params = _ids_sql(run_ids)
-    rows = core_q.run_sql(
-        f"""
+    rows = (
+        core_q.run_sql(
+            f"""
         SELECT
           sample.static_run_id AS static_run_id,
           summary.package_name,
@@ -412,11 +422,13 @@ def _load_package_domains(core_q: Any, run_ids: Sequence[int]) -> list[dict[str,
         GROUP BY sample.static_run_id, summary.package_name, sample.root_domain
         ORDER BY summary.package_name ASC, sample.root_domain ASC
         """,
-        params,
-        fetch="all",
-        dictionary=True,
-        query_name="report.external_tracker_context.package_domains",
-    ) or []
+            params,
+            fetch="all",
+            dictionary=True,
+            query_name="report.external_tracker_context.package_domains",
+        )
+        or []
+    )
     return [dict(row) for row in rows]
 
 
@@ -539,11 +551,16 @@ def _build_overlap_rows(
     return overlap_rows, unmatched_rows, noisy_rows, tracker_inventory_rows
 
 
-def _summarize_overlap_rows(overlap_rows: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _summarize_overlap_rows(
+    overlap_rows: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     package_rollup: dict[tuple[int, str], dict[str, Any]] = {}
     tracker_rollup: dict[tuple[str, str], dict[str, Any]] = {}
     for row in overlap_rows:
-        package_key = (int(row.get("static_run_id") or 0), _norm_text(row.get("package_name")).lower())
+        package_key = (
+            int(row.get("static_run_id") or 0),
+            _norm_text(row.get("package_name")).lower(),
+        )
         package_entry = package_rollup.setdefault(
             package_key,
             {
@@ -564,7 +581,10 @@ def _summarize_overlap_rows(overlap_rows: Sequence[Mapping[str, Any]]) -> tuple[
         package_entry["http_sample_count"] += int(row.get("http_sample_count") or 0)
         package_entry["https_sample_count"] += int(row.get("https_sample_count") or 0)
 
-        tracker_key = (_norm_text(row.get("tracker_name")), _norm_text(row.get("overlap_confidence")))
+        tracker_key = (
+            _norm_text(row.get("tracker_name")),
+            _norm_text(row.get("overlap_confidence")),
+        )
         tracker_entry = tracker_rollup.setdefault(
             tracker_key,
             {
@@ -596,7 +616,9 @@ def _summarize_overlap_rows(overlap_rows: Sequence[Mapping[str, Any]]) -> tuple[
                 "https_sample_count": entry["https_sample_count"],
             }
         )
-    package_rows.sort(key=lambda row: (-int(row["matched_tracker_count"]), str(row["package_name"])))
+    package_rows.sort(
+        key=lambda row: (-int(row["matched_tracker_count"]), str(row["package_name"]))
+    )
 
     tracker_rows: list[dict[str, Any]] = []
     for entry in tracker_rollup.values():
@@ -611,11 +633,15 @@ def _summarize_overlap_rows(overlap_rows: Sequence[Mapping[str, Any]]) -> tuple[
                 "root_domains": ", ".join(sorted(entry["root_domains"])),
             }
         )
-    tracker_rows.sort(key=lambda row: (-int(row["matched_package_count"]), str(row["tracker_name"])))
+    tracker_rows.sort(
+        key=lambda row: (-int(row["matched_package_count"]), str(row["tracker_name"]))
+    )
     return package_rows, tracker_rows
 
 
-def _summarize_unmatched_domains(unmatched_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _summarize_unmatched_domains(
+    unmatched_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
     rollup: dict[str, dict[str, Any]] = {}
     for row in unmatched_rows:
         domain = _norm_text(row.get("root_domain")).lower()
@@ -640,7 +666,9 @@ def _summarize_unmatched_domains(unmatched_rows: Sequence[Mapping[str, Any]]) ->
         if row.get("curated_service_key"):
             entry["curated_service_keys"].add(_norm_text(row.get("curated_service_key")))
         if row.get("curated_service_confidence"):
-            entry["curated_service_confidences"].add(_norm_text(row.get("curated_service_confidence")))
+            entry["curated_service_confidences"].add(
+                _norm_text(row.get("curated_service_confidence"))
+            )
     rows: list[dict[str, Any]] = []
     for entry in rollup.values():
         rows.append(
@@ -654,10 +682,18 @@ def _summarize_unmatched_domains(unmatched_rows: Sequence[Mapping[str, Any]]) ->
                 "https_sample_count": entry["https_sample_count"],
                 "example_packages": ", ".join(sorted(list(entry["package_names"]))[:10]),
                 "curated_service_keys": ", ".join(sorted(entry["curated_service_keys"])),
-                "curated_service_confidences": ", ".join(sorted(entry["curated_service_confidences"])),
+                "curated_service_confidences": ", ".join(
+                    sorted(entry["curated_service_confidences"])
+                ),
             }
         )
-    rows.sort(key=lambda row: (-int(row["package_count"]), -int(row["sample_rows"]), str(row["root_domain"])))
+    rows.sort(
+        key=lambda row: (
+            -int(row["package_count"]),
+            -int(row["sample_rows"]),
+            str(row["root_domain"]),
+        )
+    )
     return rows
 
 
@@ -713,7 +749,9 @@ def _classify_domain_research_candidate(row: Mapping[str, Any]) -> tuple[str, st
     )
 
 
-def _build_domain_research_candidates(unmatched_domain_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _build_domain_research_candidates(
+    unmatched_domain_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for row in unmatched_domain_rows:
         candidate_class, suggested_action, reason = _classify_domain_research_candidate(row)
@@ -770,19 +808,35 @@ def main(argv: list[str] | None = None) -> int:
 
     package_domains = _load_package_domains(core_q, run_ids)
     tracker_rows, warnings, snapshot_date = _load_external_tracker_domains(core_q)
-    overlap_rows, unmatched_rows, noisy_rows, tracker_inventory_rows = _build_overlap_rows(runs, package_domains, tracker_rows)
+    overlap_rows, unmatched_rows, noisy_rows, tracker_inventory_rows = _build_overlap_rows(
+        runs, package_domains, tracker_rows
+    )
     package_rollup_rows, tracker_rollup_rows = _summarize_overlap_rows(overlap_rows)
     unmatched_domain_rows = _summarize_unmatched_domains(unmatched_rows)
     noisy_domain_rows = _summarize_unmatched_domains(noisy_rows)
     domain_research_candidate_rows = _build_domain_research_candidates(unmatched_domain_rows)
 
-    confidence_counts = Counter(_norm_text(row.get("overlap_confidence")) for row in overlap_rows if row.get("overlap_confidence"))
-    curated_counts = Counter(_norm_text(row.get("curated_service_confidence")) for row in overlap_rows if row.get("curated_service_confidence"))
-    candidate_class_counts = Counter(_norm_text(row.get("candidate_class")) for row in domain_research_candidate_rows)
+    confidence_counts = Counter(
+        _norm_text(row.get("overlap_confidence"))
+        for row in overlap_rows
+        if row.get("overlap_confidence")
+    )
+    curated_counts = Counter(
+        _norm_text(row.get("curated_service_confidence"))
+        for row in overlap_rows
+        if row.get("curated_service_confidence")
+    )
+    candidate_class_counts = Counter(
+        _norm_text(row.get("candidate_class")) for row in domain_research_candidate_rows
+    )
     tracker_domain_token_count = sum(len(row.get("domain_tokens") or []) for row in tracker_rows)
 
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    out_dir = Path(args.output_dir) if args.output_dir else (_REPO_ROOT / "output" / "audit" / "external_tracker_context" / stamp)
+    out_dir = (
+        Path(args.output_dir)
+        if args.output_dir
+        else (_REPO_ROOT / "output" / "audit" / "external_tracker_context" / stamp)
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     summary = {
@@ -792,18 +846,37 @@ def main(argv: list[str] | None = None) -> int:
         "session": args.session,
         "package_count": len(runs),
         "selected_endpoint_domain_rows": len(package_domains),
-        "distinct_root_domain_count": len({_norm_text(row.get('root_domain')).lower() for row in package_domains if row.get('root_domain')}),
+        "distinct_root_domain_count": len(
+            {
+                _norm_text(row.get("root_domain")).lower()
+                for row in package_domains
+                if row.get("root_domain")
+            }
+        ),
         "external_tracker_count": len(tracker_rows),
         "tracker_domain_token_count": tracker_domain_token_count,
+        "domain_normalization": registrable_domain_resolver_metadata(),
         "package_with_any_overlap_count": len(package_rollup_rows),
-        "package_with_medium_overlap_count": sum(1 for row in package_rollup_rows if "medium" in _norm_text(row.get("confidence_levels")).split(", ")),
-        "package_with_low_overlap_count": sum(1 for row in package_rollup_rows if "low" in _norm_text(row.get("confidence_levels")).split(", ")),
+        "package_with_medium_overlap_count": sum(
+            1
+            for row in package_rollup_rows
+            if "medium" in _norm_text(row.get("confidence_levels")).split(", ")
+        ),
+        "package_with_low_overlap_count": sum(
+            1
+            for row in package_rollup_rows
+            if "low" in _norm_text(row.get("confidence_levels")).split(", ")
+        ),
         "overlap_row_count": len(overlap_rows),
         "overlap_confidence_counts": dict(sorted(confidence_counts.items())),
         "overlap_curated_service_confidence_counts": dict(sorted(curated_counts.items())),
         "unmatched_root_domain_count": len(unmatched_domain_rows),
-        "unmatched_with_curated_context_count": sum(1 for row in unmatched_domain_rows if row.get("curated_service_keys")),
-        "unmatched_without_curated_context_count": sum(1 for row in unmatched_domain_rows if not row.get("curated_service_keys")),
+        "unmatched_with_curated_context_count": sum(
+            1 for row in unmatched_domain_rows if row.get("curated_service_keys")
+        ),
+        "unmatched_without_curated_context_count": sum(
+            1 for row in unmatched_domain_rows if not row.get("curated_service_keys")
+        ),
         "noisy_static_root_domain_count": len(noisy_domain_rows),
         "domain_research_candidate_count": len(domain_research_candidate_rows),
         "domain_research_candidate_class_counts": dict(sorted(candidate_class_counts.items())),
@@ -813,6 +886,7 @@ def main(argv: list[str] | None = None) -> int:
             "Matches are contextual overlays derived from selected static endpoint root domains.",
             "Current selected endpoint evidence stores root domains, not full hostnames or URLs.",
             "Generic-root and infrastructure-root overlaps are intentionally labeled low confidence.",
+            "Tracker signatures are reduced with the pinned offline Public Suffix List resolver identified in domain_normalization.",
             "Noisy static string tokens are separated from true unmatched root domains.",
             "Curated service context is included as interpretation context; it does not prove SDK embedding.",
             "No DB writes were performed by this report.",
@@ -849,10 +923,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"package_with_any_overlap_count: {summary['package_with_any_overlap_count']}")
     print(f"package_with_medium_overlap_count: {summary['package_with_medium_overlap_count']}")
     print(f"package_with_low_overlap_count: {summary['package_with_low_overlap_count']}")
-    print(f"overlap_confidence_counts: {json.dumps(summary['overlap_confidence_counts'], sort_keys=True)}")
+    print(
+        f"overlap_confidence_counts: {json.dumps(summary['overlap_confidence_counts'], sort_keys=True)}"
+    )
     print(f"unmatched_root_domain_count: {summary['unmatched_root_domain_count']}")
-    print(f"unmatched_without_curated_context_count: {summary['unmatched_without_curated_context_count']}")
-    print(f"domain_research_candidate_class_counts: {json.dumps(summary['domain_research_candidate_class_counts'], sort_keys=True)}")
+    print(
+        f"unmatched_without_curated_context_count: {summary['unmatched_without_curated_context_count']}"
+    )
+    print(
+        f"domain_research_candidate_class_counts: {json.dumps(summary['domain_research_candidate_class_counts'], sort_keys=True)}"
+    )
     print(f"noisy_static_root_domain_count: {summary['noisy_static_root_domain_count']}")
     print(f"output_dir: {out_dir}")
     return 0

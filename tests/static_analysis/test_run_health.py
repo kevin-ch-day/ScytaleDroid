@@ -12,6 +12,7 @@ from scytaledroid.StaticAnalysis.cli.execution.run_health import (
     compute_run_aggregate_status,
     format_run_health_stdout_lines,
     merge_skipped_detectors,
+    write_run_health_json,
 )
 
 
@@ -25,6 +26,16 @@ def test_merge_skipped_detectors_dedupes_by_detector_section_reason() -> None:
     )
     assert len(merged) == 2
     assert merged[0]["reason"] == "r1"
+
+
+def test_write_run_health_json_emits_complete_newline_terminated_json(tmp_path: Path) -> None:
+    target = tmp_path / "nested" / "run_health.json"
+
+    written = write_run_health_json(target, {"status": "complete", "count": 2})
+
+    assert written == target
+    assert target.read_text(encoding="utf-8").endswith("\n")
+    assert target.read_text(encoding="utf-8").startswith('{\n  "status": "complete"')
 
 
 def test_compute_run_aggregate_status_mixed_complete_skipped_is_partial() -> None:
@@ -68,6 +79,7 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
         Path("/tmp"),
         [],
         [],
+        session_metrics={"resolved_worker_budget": 16, "artifact_concurrency_cap": 1},
     )
     from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 
@@ -80,6 +92,8 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
     roll = doc["run_rollups"]
     assert isinstance(roll, dict)
     assert roll.get("scan_execution_complete") is True
+    assert roll["resolved_worker_budget"] == 16
+    assert roll["artifact_concurrency_cap"] == 1
     assert doc["final_run_status"] == "complete"
     assert doc["workflow_completion_status"] == "complete"
     assert doc["workflow_run_status"] == "complete"
@@ -125,6 +139,96 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
     assert doc.get("post_run_grain_merged_at_utc") is None
 
 
+def test_successful_scan_with_persistence_failure_is_not_workflow_complete() -> None:
+    app = AppRunResult(
+        "p1", "C", discovered_artifacts=1, persisted_artifacts=0, final_status="complete"
+    )
+    outcome = RunOutcome(
+        [app],
+        datetime.now(UTC),
+        datetime.now(UTC),
+        ScopeSelection(scope="all", label="All", groups=()),
+        Path("/tmp"),
+        [],
+        [],
+        total_artifacts=1,
+        completed_artifacts=1,
+        persistence_failed=True,
+    )
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+
+    doc = build_run_health_document(
+        outcome,
+        RunParameters(
+            profile="full", scope="all", scope_label="All", session_stamp="failed-persist"
+        ),
+        persistence_enabled=True,
+        persist_attempted=True,
+    )
+    assert doc["workflow_completion_status"] == "failed"
+    assert doc["status_reasons"]["db_persistence_status"] == "failed"
+
+
+def test_run_health_keeps_policy_finding_warning_and_execution_counters_independent(
+    monkeypatch,
+) -> None:
+    app = AppRunResult(
+        "p1", "C", discovered_artifacts=1, persisted_artifacts=1, final_status="complete"
+    )
+    app.artifacts = [SimpleNamespace(report=None)]
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.scan_report._summarize_app_pipeline",
+        lambda _app: {
+            "error_count": 1,
+            "warn_count": 7,
+            "policy_fail_count": 2,
+            "finding_fail_count": 4,
+            "fail_count": 6,
+            "parse_fallback_events_est": 0,
+            "detector_executed": 1,
+            "detector_skipped": 0,
+            "detector_total": 1,
+            "skipped_detectors": [],
+            "placeholder_stage_opportunities": 1,
+            "implemented_stage_opportunities": 4,
+            "executed_implemented_stage_opportunities": 3,
+            "implemented_stage_execution_rate": 0.75,
+            "placeholder_detectors": [
+                {"detector": "dynamic_loading", "reason": "not implemented"}
+            ],
+        },
+    )
+    outcome = RunOutcome(
+        [app],
+        datetime.now(UTC),
+        datetime.now(UTC),
+        ScopeSelection(scope="all", label="All", groups=()),
+        Path("/tmp"),
+        [],
+        [],
+        total_artifacts=1,
+        completed_artifacts=1,
+    )
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+
+    doc = build_run_health_document(
+        outcome,
+        RunParameters(profile="full", scope="all", scope_label="All"),
+        persistence_enabled=True,
+        persist_attempted=True,
+    )
+    reasons = doc["status_reasons"]
+    assert reasons["detector_warnings"] == 7
+    assert reasons["policy_gate_failures"] == 2
+    assert reasons["finding_signals"] == 4
+    assert reasons["detector_execution_errors"] == 1
+    assert "policy_failures" not in reasons
+    coverage = doc["measurement_coverage"]
+    assert coverage["status"] == "partial_declared_placeholders"
+    assert coverage["placeholder_detector_ids"] == ["dynamic_loading"]
+    assert coverage["implemented_stage_execution_rate"] == 0.75
+
+
 def test_format_run_health_stdout_lines_partial_app_hints() -> None:
     doc = {
         "final_run_status": "complete",
@@ -147,8 +251,17 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
             "scan_execution_complete": True,
             "artifacts_scan_completed_counter": 5,
             "artifact_total_discovered_estimate": 5,
+            "resolved_worker_budget": 16,
+            "artifact_concurrency_cap": 1,
         },
         "outputs": {},
+        "measurement_coverage": {
+            "status": "partial_declared_placeholders",
+            "implemented_stage_opportunities": 17,
+            "executed_implemented_stage_opportunities": 17,
+            "placeholder_stage_opportunities": 3,
+            "placeholder_detector_ids": ["dynamic_loading", "file_io_sinks"],
+        },
         "status_reasons": {
             "detector_warnings": 3,
             "detector_failures": 1,
@@ -173,6 +286,12 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
         ],
     }
     lines = format_run_health_stdout_lines(doc)
+    assert "Artifact workers : observed_peak=1 | resolved_budget=16" in lines
+    assert (
+        "Measurement cov. : partial_declared_placeholders | "
+        "implemented_executed=17/17 | placeholder_stages=3 | "
+        "placeholders=dynamic_loading,file_io_sinks"
+    ) in lines
     assert len(lines) >= 3
     assert "Apps with detector/persistence caveats" in lines[-1]
     assert "com.foo.app" in lines[-1]
@@ -202,6 +321,8 @@ def test_build_run_health_document_preserves_legacy_partial_but_exposes_complete
             "error_count": 0,
             "warn_count": 1,
             "fail_count": 1,
+            "policy_fail_count": 0,
+            "finding_fail_count": 1,
             "parse_fallback_events_est": 0,
             "detector_executed": 2,
             "detector_skipped": 0,
@@ -309,7 +430,8 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "Execution        : complete" in body
     assert "Detector result  :" in body
     assert "detector_warnings=3" in body
-    assert "policy_failures=1" in body
+    assert "policy_gate_failures=0" in body
+    assert "finding_signals=1" in body
     assert "execution_errors=0 (none - not analyzer crashes)" in body
     assert "Finding fidelity : capped | runtime=100 persisted_db=75 capped_not_persisted=25" in body
     assert "Run completion   : COMPLETE" in body
@@ -320,10 +442,53 @@ def test_format_run_health_stdout_lines_adds_reasons_row() -> None:
     assert "pipeline_token=warnings_and_policy_failures" in body
     assert "String summary   : artifact_merged | max_artifacts_per_app=3" in body
     assert "Operator note    :" in body
-    assert "Legacy compatibility counters may still record detector-warning/gate apps under 'partial'" in body
-    assert "Fidelity warning : CAPPED - 25 runtime findings were capped before canonical DB persistence." in body
-    assert "High-priority fidelity warning: 2 P0 findings were capped before canonical DB persistence." in body
+    assert (
+        "Legacy compatibility counters may still record detector-warning/gate apps under 'partial'"
+        in body
+    )
+    assert (
+        "Fidelity warning : CAPPED - 25 runtime findings were capped before canonical DB persistence."
+        in body
+    )
+    assert (
+        "High-priority fidelity warning: 2 P0 findings were capped before canonical DB persistence."
+        in body
+    )
     assert "Persistence note :" in body
+
+
+def test_format_run_health_stdout_lines_preserves_explicit_zero_finding_signals() -> None:
+    doc = {
+        "workflow_completion_status": "complete",
+        "detector_posture": "policy_or_finding_gates",
+        "run_rollups": {
+            "scan_execution_complete": True,
+            "findings_runtime_total": 0,
+            "findings_persisted_db_total": 0,
+            "findings_capped_not_persisted_total": 0,
+        },
+        "status_reasons": {
+            "detector_warnings": float("inf"),
+            "detector_failures": 3,
+            "detector_execution_errors": 0,
+            "detector_errors": 9,
+            "policy_gate_failures": 3,
+            "finding_signals": 0,
+            "detector_finding_failures": 0,
+            "db_persistence_status": "ok",
+            "string_status": "ok",
+            "detector_pipeline_status": "policy_failures",
+            "governance_grade": "ok",
+            "governance_reason": "ready",
+        },
+    }
+
+    body = "\n".join(format_run_health_stdout_lines(doc))
+
+    assert "policy_gate_failures=3" in body
+    assert "detector_warnings=0" in body
+    assert "finding_signals=0" in body
+    assert "execution_errors=0 (none - not analyzer crashes)" in body
 
 
 def test_format_run_health_stdout_lines_surfaces_legacy_split_string_warning() -> None:
@@ -422,7 +587,9 @@ def test_attach_run_health_outputs_prefers_real_file_location_for_display(tmp_pa
 
 def test_build_run_health_document_includes_string_summary_note() -> None:
     sel = ScopeSelection(scope="profile", label="Research Dataset Alpha", groups=tuple())
-    app = AppRunResult("com.example.app", "Uncategorized", discovered_artifacts=45, final_status="partial")
+    app = AppRunResult(
+        "com.example.app", "Uncategorized", discovered_artifacts=45, final_status="partial"
+    )
     outcome = RunOutcome(
         [app],
         datetime.now(UTC),
@@ -438,7 +605,12 @@ def test_build_run_health_document_includes_string_summary_note() -> None:
 
     doc = build_run_health_document(
         outcome,
-        RunParameters(profile="full", scope="profile", scope_label="Research Dataset Alpha", session_stamp="s1"),
+        RunParameters(
+            profile="full",
+            scope="profile",
+            scope_label="Research Dataset Alpha",
+            session_stamp="s1",
+        ),
         persistence_enabled=False,
         persist_attempted=False,
     )
@@ -472,7 +644,9 @@ def test_build_run_health_document_marks_split_string_summary_merged() -> None:
 
     doc = build_run_health_document(
         outcome,
-        RunParameters(profile="full", scope="profile", scope_label="Research Dataset Beta", session_stamp="s2"),
+        RunParameters(
+            profile="full", scope="profile", scope_label="Research Dataset Beta", session_stamp="s2"
+        ),
         persistence_enabled=False,
         persist_attempted=False,
     )

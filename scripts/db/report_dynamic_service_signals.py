@@ -276,15 +276,12 @@ def generate_report(*, packages: list[str] | None = None, output_dir: Path | Non
         "observation_rows": len(observation_rows),
         "signal_observation_rows": len(signal_observation_rows),
         "services_without_signal_mappings": len(services_without_signal_mappings_rows),
-        # Deprecated alias kept for one compatibility pass while downstream reads migrate.
-        "unresolved_service_signal_rows": len(services_without_signal_mappings_rows),
         "focus_area_hit_counts": dict(sorted(focus_area_counts.items())),
         "severity_hit_counts": dict(sorted(severity_counts.items())),
         "output_files": {
             "package_signal_rows_csv": str((output_root / "package_signal_rows.csv").resolve()),
             "package_signal_summary_csv": str((output_root / "package_signal_summary.csv").resolve()),
             "services_without_signal_mappings_csv": str((output_root / "services_without_signal_mappings.csv").resolve()),
-            "unresolved_service_signal_rows_csv": str((output_root / "services_without_signal_mappings.csv").resolve()),
             "summary_json": str((output_root / "summary.json").resolve()),
         },
         "no_db_writes": True,

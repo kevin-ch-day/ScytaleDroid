@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
+
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
@@ -91,7 +93,7 @@ def demote_noncanonical_canonical_freeze(
     payload["legacy_demoted_at_utc"] = datetime.now(UTC).isoformat()
     payload["legacy_demotion_reasons"] = [str(r) for r in reasons]
     payload["legacy_source"] = "dataset_freeze.json"
-    legacy_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(legacy_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     canonical_path.unlink(missing_ok=True)
     return {"demoted": True, "legacy_path": str(legacy_path), "state": state}
 

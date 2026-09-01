@@ -608,6 +608,11 @@ _DDL_STATEMENTS: list[str] = [
       session_link_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
       rollup_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
       persistence_failure_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      expected_package_count INT UNSIGNED DEFAULT NULL,
+      reconciled_package_count INT UNSIGNED DEFAULT NULL,
+      completion_reconciliation_status VARCHAR(32) DEFAULT NULL,
+      selection_artifact_manifest_sha256 CHAR(64) DEFAULT NULL,
+      completion_reconciled_at_utc DATETIME DEFAULT NULL,
       web_visibility_default VARCHAR(16) NOT NULL DEFAULT 'operator',
       cleanup_status VARCHAR(32) NOT NULL DEFAULT 'none',
       superseded_by_session_id BIGINT UNSIGNED DEFAULT NULL,
@@ -629,6 +634,14 @@ _DDL_STATEMENTS: list[str] = [
         REFERENCES static_analysis_sessions(static_session_id)
         ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    """,
+    """
+    ALTER TABLE static_analysis_sessions
+      ADD COLUMN IF NOT EXISTS expected_package_count INT UNSIGNED DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS reconciled_package_count INT UNSIGNED DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS completion_reconciliation_status VARCHAR(32) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS selection_artifact_manifest_sha256 CHAR(64) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS completion_reconciled_at_utc DATETIME DEFAULT NULL;
     """,
     """
     CREATE TABLE IF NOT EXISTS static_session_disposition_history (

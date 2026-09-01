@@ -73,7 +73,7 @@ def test_load_research_cohort_profiles_reads_db_backed_cohorts(monkeypatch) -> N
     ]
 
 
-def test_load_db_profiles_keeps_legacy_merged_view(monkeypatch) -> None:
+def test_load_all_profiles_merges_operational_and_research_profiles(monkeypatch) -> None:
     monkeypatch.setattr(
         profile_loader,
         "load_operational_profiles",
@@ -107,7 +107,7 @@ def test_load_db_profiles_keeps_legacy_merged_view(monkeypatch) -> None:
         ],
     )
 
-    profiles = profile_loader.load_db_profiles()
+    profiles = profile_loader.load_all_profiles()
 
     by_key = {str(row["profile_key"]): row for row in profiles}
     assert by_key["RESEARCH_DATASET_ALPHA"]["app_count"] == 12

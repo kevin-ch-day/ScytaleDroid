@@ -25,6 +25,15 @@ Repo-owned operational table populated from the public Exodus Privacy tracker AP
 - write path: `scripts/db/refresh_external_sdk_tracker_intel.py`
 - receipts: `data/state/external_sdk_tracker_intel/`
 
+Receipt bundles preserve the canonical source-payload hash, normalized content/snapshot hashes, UTC retrieval-date semantics, and Exodus ODbL/DbCL attribution. A frozen receipt can be verified and replayed without contacting the mutable API:
+
+```bash
+PYTHONPATH=. python scripts/db/refresh_external_sdk_tracker_intel.py \
+  --input-receipt data/state/external_sdk_tracker_intel/<receipt>.json --json
+```
+
+Add `--apply` only after reviewing the replay summary and target database configuration. Replay rejects content or snapshot hash mismatches and refuses empty snapshots.
+
 This table adds:
 
 - tracker name
@@ -55,6 +64,14 @@ This matters because the current static selected endpoint evidence generally
 retains root domains, not full hostnames/URLs. That means the present correlation
 layer is useful, but still conservative and often ambiguous for large first-party
 or infrastructure domains.
+
+Tracker signatures and observed hosts are reduced to registrable domains with
+the pinned, offline `publicsuffixlist` dependency and its bundled Public Suffix List,
+including private suffix boundaries such as `github.io`. Detector and audit JSON
+record the resolver version and exact list SHA-256. Unknown or synthetic suffixes
+retain the prior deterministic fallback so offline fixtures remain stable. The
+bundled list is intentionally not refreshed at scan time; future list upgrades
+must update the pin and be treated as a versioned measurement change.
 
 ## Why this matters for the papers
 

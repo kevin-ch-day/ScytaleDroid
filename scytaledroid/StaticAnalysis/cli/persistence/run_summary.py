@@ -1451,8 +1451,8 @@ def update_static_run_status(
     ended_at_utc: str | None = None,
     abort_reason: str | None = None,
     abort_signal: str | None = None,
-) -> None:
-    _run_writers.update_static_run_status(
+) -> bool:
+    return _run_writers.update_static_run_status(
         static_run_id=static_run_id,
         status=status,
         ended_at_utc=ended_at_utc,

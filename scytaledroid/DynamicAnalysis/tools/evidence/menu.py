@@ -389,12 +389,6 @@ def _fetch_profile_v2_ordering_db() -> list[str]:
     # Fall back to legacy DB rows while older workspaces are still being migrated.
     return fetch_ordering("paper2")
 
-
-# Back-compat alias (internal name only).
-def _fetch_paper2_ordering_db() -> list[str]:  # pragma: no cover
-    return _fetch_profile_v2_ordering_db()
-
-
 def _render_app_runs(root: Path, display_name: str, package_name: str, runs: list[dict]) -> None:
     print()
     valid_count = sum(1 for r in runs if r.get("valid") is True and r.get("countable") is not False)

@@ -41,6 +41,57 @@ def _write_run(root: Path, run_id: str, package_name: str, *, valid: bool = True
     (run_dir / "inputs" / "static_dynamic_plan.json").write_text(json.dumps(plan), encoding="utf-8")
 
 
+def test_freeze_presence_classification_rejects_run_id_outside_evidence_root(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "dataset_freeze.json").write_text(
+        json.dumps({"included_run_ids": ["../outside-run", None]}),
+        encoding="utf-8",
+    )
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+
+    result = freeze_readiness_audit._classify_freeze_run_id_presence(
+        archive_dir=archive,
+        evidence_root=evidence_root,
+    )
+
+    assert result["total_run_ids"] == 1
+    assert result["missing_run_dirs"] == 1
+    assert result["sample_by_reason"]["missing_run_dirs"] == [
+        {"run_id": "../outside-run", "reason": "unsafe_run_id"}
+    ]
+
+
+def test_freeze_presence_classification_reports_manifest_run_id_mismatch(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "dataset_freeze.json").write_text(
+        json.dumps({"included_run_ids": ["run-a"]}),
+        encoding="utf-8",
+    )
+    evidence_root = tmp_path / "evidence"
+    _write_run(evidence_root, "run-a", "com.example")
+    manifest_path = evidence_root / "run-a" / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["dynamic_run_id"] = "run-b"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = freeze_readiness_audit._classify_freeze_run_id_presence(
+        archive_dir=archive,
+        evidence_root=evidence_root,
+    )
+
+    assert result["found_but_identity_mismatch"] == 1
+    assert result["sample_by_reason"]["found_but_identity_mismatch"] == [
+        {"run_id": "run-a", "reason": "manifest_run_id_mismatch"}
+    ]
+
+
 def test_run_freeze_readiness_audit_scopes_run_counts_to_active_research_cohort(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "output" / "evidence" / "dynamic"
     out_dir = tmp_path / "audit"

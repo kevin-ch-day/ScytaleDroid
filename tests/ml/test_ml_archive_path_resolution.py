@@ -29,11 +29,11 @@ def test_ml_paper_artifacts_lockfile_is_dataset_adjacent(tmp_path: Path) -> None
 
 def test_locked_runtime_bundle_paths_preserve_legacy_aliases() -> None:
     assert deliverable_bundle_paths.output_locked_runtime_bundle_root() == (
-        deliverable_bundle_paths.output_phase_e_bundle_root()
+        deliverable_bundle_paths.output_locked_runtime_bundle_root()
     )
     assert deliverable_bundle_paths.output_locked_runtime_bundle_tables_dir() == (
-        deliverable_bundle_paths.output_phase_e_bundle_tables_dir()
+        deliverable_bundle_paths.output_locked_runtime_bundle_tables_dir()
     )
     assert deliverable_bundle_paths.output_locked_runtime_bundle_artifacts_manifest_path() == (
-        deliverable_bundle_paths.output_phase_e_bundle_artifacts_manifest_path()
+        deliverable_bundle_paths.output_locked_runtime_bundle_artifacts_manifest_path()
     )

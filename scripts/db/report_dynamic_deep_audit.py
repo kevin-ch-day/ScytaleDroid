@@ -925,8 +925,15 @@ def _collect_run_records(
                 "signal_count": _safe_int(service_signals.get("signal_count")),
                 "dynamic_domains": dynamic_domains,
                 "visibility_loss_flag": bool(
-                    ((report.get("tls_quic_visibility") or {}).get("quic_candidate_packets") or 0) > 0
-                    and not bool((report.get("tls_quic_visibility") or {}).get("tls_visible"))
+                    (
+                        (report.get("tls_quic_visibility") or {}).get("tls_name_metadata_limited")
+                        is True
+                        and not dynamic_domains
+                    )
+                    or (
+                        ((report.get("tls_quic_visibility") or {}).get("quic_candidate_packets") or 0) > 0
+                        and not bool((report.get("tls_quic_visibility") or {}).get("tls_visible"))
+                    )
                 ),
                 "http_observed": _http_observed_from_report(report),
                 "corroboration": corroboration,

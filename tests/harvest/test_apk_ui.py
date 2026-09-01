@@ -47,7 +47,7 @@ def test_report_harvest_started_retains_non_root_policy_context(capsys) -> None:
     )
 
     out = colors.strip(capsys.readouterr().out)
-    assert "Harvest start: Full inventory pullable" in out
+    assert "Harvest start: Pull all available APKs" in out
     assert "Processing: 152 pullable package(s) · ~571 APK path(s) (pull or reuse)" in out
     assert "Blocked: policy-blocked 426" in out
     assert "Policy: non-root paths (system/product/vendor APK paths not harvested)" in out
@@ -68,9 +68,9 @@ def test_prompt_plan_action_simple_mode_defaults_to_execute(monkeypatch, capsys)
     out = colors.strip(capsys.readouterr().out)
     assert action == "pull_snapshot"
     assert "Harvest action" in out
-    assert "Scope: Full inventory pullable" in out
-    assert "Ready: 152 pullable package(s) · ~576 APK path(s)" in out
-    assert "Blocked before pull: 426 package(s)" in out
+    assert "Scope: Pull all available APKs" in out
+    assert "Will pull: 152 package(s) · ~576 APK file(s), including splits" in out
+    assert "Not available: 426 system package(s) on this non-root device" in out
     assert "Start harvest now?" not in out
 
 
@@ -107,7 +107,7 @@ def test_report_full_refresh_scope_applied_uses_full_device_wording(capsys) -> N
     ui.report_full_refresh_scope_applied(578, pullable_count=152)
 
     out = colors.strip(capsys.readouterr().out)
-    assert "Full inventory scope: 578 inventory package(s) selected · 152 pullable" in out
+    assert "Whole collection selected: 152 available package(s)" in out
 
 
 def test_resolve_harvest_plan_reports_scheduled_pullable_count(monkeypatch) -> None:

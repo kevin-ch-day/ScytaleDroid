@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -42,6 +42,9 @@ class DynamicSessionConfig:
     observer_prompts_enabled: bool = False
     # Secret value used only for PCAPdroid observer start/stop. Never written to evidence/DB.
     pcapdroid_api_key: str | None = None
+    # Invoked after capture but before validity, tracker persistence, and manifest
+    # sealing. It supplies final operator facts and must not write evidence files.
+    final_operator_metadata_collector: Callable[[object], Mapping[str, object] | None] | None = None
 
 
 @dataclass

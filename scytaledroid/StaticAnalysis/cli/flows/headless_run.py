@@ -11,7 +11,6 @@ from typing import Any
 
 from scytaledroid.Database.db_func.research_cohorts import (
     fetch_research_cohort,
-    normalize_research_cohort_key,
     profile_key_for_research_cohort,
 )
 from scytaledroid.Database.db_utils import schema_gate
@@ -243,13 +242,6 @@ def _display_name_for_cohort(cohort_key: str, legacy_profile_key: str | None = N
     return str(cohort_key or "Research cohort").replace("_", " ").title()
 
 
-def _cohort_key_from_legacy_profile_key(profile_key: str | None) -> str | None:
-    normalized = normalize_research_cohort_key(profile_key)
-    if normalized and normalized.startswith("research_dataset_"):
-        return normalized
-    return None
-
-
 def _run_research_cohort(
     *,
     cohort_key: str,
@@ -329,12 +321,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     exact_mode = bool(args.apk_id or args.base_apk_sha256)
     selected_modes = sum(
-        1 for enabled in (bool(args.apk), bool(args.profile_key), bool(args.research_cohort_key), exact_mode) if enabled
+        1 for enabled in (bool(args.apk), bool(args.research_cohort_key), exact_mode) if enabled
     )
     if selected_modes != 1:
         raise SystemExit(
-            "Choose exactly one mode: --apk <path> OR --profile-key research_dataset_* "
-            "OR --research-cohort-key <cohort_key> "
+            "Choose exactly one mode: --apk <path> OR --research-cohort-key <cohort_key> "
             "OR --apk-id/--base-apk-sha256 exact target."
         )
 
@@ -351,22 +342,6 @@ def main(argv: list[str] | None = None) -> int:
     output_prefs.set_run_mode("batch")
     if args.allow_session_reuse:
         print("⚠ Session reuse enabled — reproducibility risk (may mix previous results).")
-    if args.profile_key:
-        if not args.session:
-            raise SystemExit("--session is required when using --profile-key for deterministic cohort runs.")
-        cohort_key = _cohort_key_from_legacy_profile_key(str(args.profile_key).strip())
-        if not cohort_key:
-            raise SystemExit(
-                "--profile-key is a legacy research cohort alias and must be a research_dataset_* key."
-            )
-        return _run_research_cohort(
-            cohort_key=cohort_key,
-            session=args.session,
-            profile=args.profile,
-            allow_session_reuse=args.allow_session_reuse,
-            dry_run=args.dry_run,
-            legacy_profile_key=str(args.profile_key).strip().upper(),
-        )
     if args.research_cohort_key:
         if not args.session:
             raise SystemExit("--session is required when using --research-cohort-key for deterministic cohort runs.")

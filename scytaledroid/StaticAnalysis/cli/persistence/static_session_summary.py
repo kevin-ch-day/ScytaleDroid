@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -247,6 +249,59 @@ def ensure_static_session_shell(
         query_name="static_session.ensure_shell",
     )
     return resolve_static_session_id_for_run(stamp, scope)
+
+
+def record_static_session_completion_reconciliation(
+    *,
+    session_stamp: str,
+    scope_label: str | None,
+    receipt: Mapping[str, object],
+) -> bool:
+    """Persist the frozen-selection denominator and reconciliation result.
+
+    Run-derived counters remain owned by ``refresh_static_analysis_session_summary``.
+    These fields record the independent frozen-selection contract so a session
+    with a missing run row cannot appear complete merely because every row that
+    *does* exist is terminal.
+    """
+
+    stamp = (session_stamp or "").strip()
+    scope = _norm_scope(scope_label)
+    status = str(receipt.get("status") or "").strip().upper()
+    if not stamp or status not in {"COMPLETE_RECONCILED", "INCOMPLETE", "INCONSISTENT"}:
+        return False
+    try:
+        expected = max(0, int(receipt.get("selected_packages") or 0))
+        reconciled = max(0, int(receipt.get("terminal_packages") or 0))
+    except (TypeError, ValueError):
+        return False
+    digest = str(receipt.get("selection_artifact_manifest_sha256") or "").strip().lower()
+    if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+        return False
+
+    affected = core_q.run_sql_rowcount(
+        """
+        UPDATE static_analysis_sessions
+        SET expected_package_count=%s,
+            reconciled_package_count=%s,
+            completion_reconciliation_status=%s,
+            selection_artifact_manifest_sha256=%s,
+            completion_reconciled_at_utc=%s
+        WHERE session_stamp=%s
+          AND COALESCE(TRIM(BOTH FROM scope_label), '')=%s
+        """,
+        (
+            expected,
+            reconciled,
+            status,
+            digest,
+            datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+            stamp,
+            scope,
+        ),
+        query_name="static_session.record_completion_reconciliation",
+    )
+    return affected == 1
 
 
 def _scalar_child_count(sql: str, params: tuple[object, ...]) -> int:

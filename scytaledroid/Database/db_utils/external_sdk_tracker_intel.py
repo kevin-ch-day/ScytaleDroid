@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
@@ -16,7 +17,75 @@ RunSql = Callable[..., Any]
 
 EXODUS_TRACKERS_URL = "https://reports.exodus-privacy.eu.org/api/trackers"
 EXODUS_SOURCE_KEY = "exodus_privacy"
-EXODUS_SOURCE_TERMS_NOTE = "Public Exodus Privacy API; refresh conservatively and retain source attribution."
+EXODUS_SOURCE_TERMS_NOTE = (
+    "Exodus Privacy API database results: ODbL 1.0; individual contents: "
+    "DbCL 1.0. Retain attribution and refresh conservatively."
+)
+EXODUS_DATABASE_LICENSE_URL = "https://opendatacommons.org/licenses/odbl/1-0/"
+EXODUS_CONTENTS_LICENSE_URL = "https://opendatacommons.org/licenses/dbcl/1-0/"
+
+
+def _canonical_json_sha256(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def tracker_rows_content_sha256(rows: list[Mapping[str, Any]]) -> str:
+    """Hash normalized tracker content independent of retrieval timestamp/date."""
+
+    volatile = {"fetched_at_utc", "snapshot_date"}
+    stable_rows = [
+        {key: value for key, value in sorted(row.items()) if key not in volatile}
+        for row in rows
+    ]
+    return _canonical_json_sha256(stable_rows)
+
+
+def load_verified_refresh_receipt(
+    path: Path,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load a frozen receipt and verify its declared normalized hashes."""
+
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("tracker receipt must be a JSON object")
+    rows_raw = payload.get("rows")
+    summary_raw = payload.get("summary")
+    if not isinstance(rows_raw, list) or not rows_raw:
+        raise ValueError("tracker receipt contains no rows")
+    if not isinstance(summary_raw, Mapping):
+        raise ValueError("tracker receipt summary is missing")
+    rows = [dict(row) for row in rows_raw if isinstance(row, Mapping)]
+    if len(rows) != len(rows_raw):
+        raise ValueError("tracker receipt contains non-object rows")
+
+    calculated_content = tracker_rows_content_sha256(rows)
+    calculated_snapshot = _canonical_json_sha256(rows)
+    declared_content = str(summary_raw.get("normalized_content_sha256") or "")
+    declared_snapshot = str(summary_raw.get("normalized_snapshot_sha256") or "")
+    if declared_content and declared_content != calculated_content:
+        raise ValueError("tracker receipt normalized-content hash mismatch")
+    if declared_snapshot and declared_snapshot != calculated_snapshot:
+        raise ValueError("tracker receipt normalized-snapshot hash mismatch")
+
+    provenance = {
+        "source_receipt_path": str(path.resolve()),
+        "source_receipt_file_sha256": hashlib.sha256(raw).hexdigest(),
+        "source_payload_canonical_sha256": summary_raw.get(
+            "source_payload_canonical_sha256"
+        ),
+        "normalized_content_sha256": calculated_content,
+        "normalized_snapshot_sha256": calculated_snapshot,
+        "source_snapshot_date": summary_raw.get("snapshot_date"),
+        "source_url": summary_raw.get("source_url"),
+    }
+    return rows, provenance
 
 
 def fetch_exodus_trackers(url: str = EXODUS_TRACKERS_URL, *, timeout: int = 30) -> dict[str, Any]:
@@ -218,6 +287,7 @@ def build_refresh_summary(
     snapshot_after: Mapping[str, int] | None,
     applied: bool,
     source_url: str = EXODUS_TRACKERS_URL,
+    source_payload: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     categories: dict[str, int] = {}
     website_populated = 0
@@ -262,6 +332,17 @@ def build_refresh_summary(
         "rows_with_website": website_populated,
         "top_categories": top_categories,
         "source_terms_note": EXODUS_SOURCE_TERMS_NOTE,
+        "source_database_license": EXODUS_DATABASE_LICENSE_URL,
+        "source_contents_license": EXODUS_CONTENTS_LICENSE_URL,
+        "snapshot_date_semantics": "UTC retrieval date, not an upstream release/version date",
+        "source_payload_canonical_sha256": (
+            _canonical_json_sha256(source_payload)
+            if source_payload is not None
+            else None
+        ),
+        "normalized_content_sha256": tracker_rows_content_sha256(rows),
+        "normalized_snapshot_sha256": _canonical_json_sha256(rows),
+        "fetched_at_utc": rows[0].get("fetched_at_utc") if rows else None,
         "no_db_writes": not applied,
     }
 
@@ -325,11 +406,15 @@ __all__ = [
     "EXODUS_SOURCE_KEY",
     "EXODUS_SOURCE_TERMS_NOTE",
     "EXODUS_TRACKERS_URL",
+    "EXODUS_DATABASE_LICENSE_URL",
+    "EXODUS_CONTENTS_LICENSE_URL",
     "build_refresh_summary",
     "ensure_external_tracker_intel_schema",
     "fetch_exodus_trackers",
     "load_external_tracker_snapshot_counts",
+    "load_verified_refresh_receipt",
     "normalize_exodus_trackers",
+    "tracker_rows_content_sha256",
     "upsert_external_tracker_rows",
     "write_refresh_receipt_bundle",
 ]

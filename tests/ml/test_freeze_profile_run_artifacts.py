@@ -76,6 +76,35 @@ def test_write_model_manifest_preserves_method_basis_and_config_sidecar(tmp_path
     assert read_ml_config_fingerprint(out_dir) == "fp-test"
 
 
+def test_write_model_manifest_does_not_read_capture_metadata_outside_run(tmp_path: Path) -> None:
+    run_inputs = _run_inputs(tmp_path)
+    run_inputs.manifest["artifacts"] = [
+        {"type": "pcapdroid_capture_meta", "relative_path": "../outside-meta.json"}
+    ]
+    (tmp_path / "outside-meta.json").write_text(
+        json.dumps({"capture_mode": "escaped", "pcapdroid_version": "9.9.9"}),
+        encoding="utf-8",
+    )
+    out_dir = run_inputs.run_dir / "analysis" / "ml" / config.ML_SCHEMA_LABEL
+    path = out_dir / "model_manifest.json"
+
+    write_model_manifest(
+        path,
+        run_inputs=run_inputs,
+        identity_key_used="base_apk_sha256:" + "a" * 64,
+        seed=7,
+        window_spec=WindowSpec(window_size_s=10.0, stride_s=5.0),
+        model_outputs={config.MODEL_IFOREST: {"params": {}}},
+        freeze_manifest_path=None,
+        ml_config_fingerprint="fp-test",
+        ml_config_fingerprint_payload={"mode": "test"},
+    )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["capture_semantics"]["capture_mode"] == "unknown"
+    assert payload["capture_semantics"]["pcapdroid_version"] == "unknown"
+
+
 def test_write_cohort_status_validates_reason_codes(tmp_path: Path) -> None:
     run_inputs = _run_inputs(tmp_path)
 

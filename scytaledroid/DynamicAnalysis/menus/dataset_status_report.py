@@ -118,18 +118,19 @@ def render_dataset_status(
         )
     ui_level = str(os.environ.get("SCYTALEDROID_UI_LEVEL") or "").strip().lower()
     if ui_level in {"details", "debug"}:
-        table_utils.print_table(
-            rows,
-            headers=[
-                "Package",
-                "Display",
-                "Target",
-                "Runs",
-                "Valid packs",
-                "Latest run",
-                "Freeze eligible",
-                "Blocking reason",
-            ],
+        headers = [
+            "Package",
+            "Display",
+            "Target",
+            "Runs",
+            "Valid packs",
+            "Latest run",
+            "Freeze eligible",
+            "Blocking reason",
+        ]
+        table_utils.render_table(
+            headers,
+            ([row.get(header) for header in headers] for row in rows),
         )
         return
     for row in rows:

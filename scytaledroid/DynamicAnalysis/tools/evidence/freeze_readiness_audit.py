@@ -26,10 +26,14 @@ from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
     inspect_canonical_freeze,
 )
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_verify import REQUIRED_FROZEN_INPUTS
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    bound_manifest_run_id,
     dynamic_evidence_root,
     resolve_dynamic_run_dir,
+    resolve_run_dir_under,
 )
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -203,7 +207,10 @@ def run_freeze_readiness_audit(
                 issues["missing_run_manifest_dirs"].append(str(run_dir.name))
                 continue
             workspace_total_runs += 1
-            run_id = str(manifest.get("dynamic_run_id") or run_dir.name)
+            run_id = bound_manifest_run_id(manifest, run_dir)
+            if run_id is None:
+                issues["identity_mismatch"].append(str(run_dir.name))
+                continue
             operator = manifest.get("operator") if isinstance(manifest.get("operator"), dict) else {}
             target = manifest.get("target") if isinstance(manifest.get("target"), dict) else {}
             dataset = manifest.get("dataset") if isinstance(manifest.get("dataset"), dict) else {}
@@ -405,7 +412,7 @@ def run_freeze_readiness_audit(
         "issues": issues,
         "runs": run_rows,
     }
-    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(report_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     return AuditSummary(
         total_runs=total_runs,
@@ -468,14 +475,7 @@ def _classify_freeze_run_id_presence(*, archive_dir: Path, evidence_root: Path) 
             "found_but_identity_mismatch": 0,
             "sample_by_reason": {},
         }
-    ids = [str(v).strip() for v in ids_raw if str(v).strip()]
-    required = (
-        "run_manifest.json",
-        "inputs/static_dynamic_plan.json",
-        "analysis/summary.json",
-        "analysis/pcap_report.json",
-        "analysis/pcap_features.json",
-    )
+    ids = [v for v in ids_raw if isinstance(v, str) and v]
     summary: dict[str, Any] = {
         "freeze_exists": True,
         "total_run_ids": len(ids),
@@ -492,11 +492,18 @@ def _classify_freeze_run_id_presence(*, archive_dir: Path, evidence_root: Path) 
         },
     }
     for run_id in ids:
-        run_dir = resolve_dynamic_run_dir(run_id) if evidence_root == dynamic_evidence_root() else evidence_root / run_id
-        if not run_dir.exists():
+        run_dir = (
+            resolve_dynamic_run_dir(run_id)
+            if evidence_root == dynamic_evidence_root()
+            else resolve_run_dir_under(evidence_root, run_id)
+        )
+        if run_dir is None or not run_dir.is_dir():
             summary["missing_run_dirs"] = int(summary["missing_run_dirs"]) + 1
             if len(summary["sample_by_reason"]["missing_run_dirs"]) < 5:
-                summary["sample_by_reason"]["missing_run_dirs"].append({"run_id": run_id})
+                sample = {"run_id": run_id}
+                if run_dir is None:
+                    sample["reason"] = "unsafe_run_id"
+                summary["sample_by_reason"]["missing_run_dirs"].append(sample)
             continue
         summary["present_run_dirs"] = int(summary["present_run_dirs"]) + 1
         manifest = _read_json(run_dir / "run_manifest.json")
@@ -505,7 +512,14 @@ def _classify_freeze_run_id_presence(*, archive_dir: Path, evidence_root: Path) 
             if len(summary["sample_by_reason"]["found_but_incomplete"]) < 5:
                 summary["sample_by_reason"]["found_but_incomplete"].append({"run_id": run_id})
             continue
-        missing = [rel for rel in required if not (run_dir / rel).exists()]
+        if bound_manifest_run_id(manifest, run_dir) != run_id:
+            summary["found_but_identity_mismatch"] = int(summary["found_but_identity_mismatch"]) + 1
+            if len(summary["sample_by_reason"]["found_but_identity_mismatch"]) < 5:
+                summary["sample_by_reason"]["found_but_identity_mismatch"].append(
+                    {"run_id": run_id, "reason": "manifest_run_id_mismatch"}
+                )
+            continue
+        missing = [rel for rel in REQUIRED_FROZEN_INPUTS if not (run_dir / rel).is_file()]
         if missing:
             summary["found_but_missing_required_files"] = int(summary["found_but_missing_required_files"]) + 1
             if len(summary["sample_by_reason"]["found_but_missing_required_files"]) < 5:

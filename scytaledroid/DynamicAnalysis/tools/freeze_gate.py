@@ -15,7 +15,13 @@ from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.DynamicAnalysis.core.freeze_identity import compute_freeze_dataset_hash_from_path
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as profile_config
 from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_verify import (
+    verify_dataset_freeze_immutability,
+)
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    resolve_contained_path,
+)
 
 DB_VERIFY_RETRIES = 3
 DB_VERIFY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
@@ -73,11 +79,41 @@ def run_freeze_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
         errors.append(
             f"freeze_manifest:min_pcap_bytes_mismatch:{int(freeze_threshold)}!={int(profile_config.MIN_PCAP_BYTES)}"
         )
-    run_ids = [str(r).strip() for r in included if str(r).strip()]
+    try:
+        immutability = verify_dataset_freeze_immutability(
+            freeze_path=freeze_path,
+            evidence_root=evidence_root,
+            write_outputs=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"freeze_immutability:verification_failed:{exc}")
+    else:
+        for issue in immutability.issues:
+            errors.append(
+                "freeze_immutability:"
+                f"{issue.get('run_id') or '?'}:{issue.get('issue') or 'unknown'}:"
+                f"{issue.get('path') or ''}"
+            )
+
+    run_ids: list[str] = []
+    seen_run_ids: set[str] = set()
+    for raw_run_id in included:
+        if not isinstance(raw_run_id, str) or not raw_run_id.strip():
+            errors.append("freeze_manifest:invalid_run_id")
+            continue
+        run_id = raw_run_id.strip()
+        if run_id in seen_run_ids:
+            errors.append(f"freeze_manifest:duplicate_run_id:{run_id}")
+            continue
+        seen_run_ids.add(run_id)
+        run_ids.append(run_id)
     checked = 0
     for run_id in run_ids:
+        run_dir = resolve_contained_path(evidence_root, run_id)
+        if run_dir is None:
+            errors.append(f"freeze_manifest:unsafe_run_id:{run_id}")
+            continue
         checked += 1
-        run_dir = evidence_root / run_id
         ml_dir = run_dir / "analysis" / "ml" / profile_config.ML_SCHEMA_LABEL
         model_manifest_path = ml_dir / "model_manifest.json"
         summary_path = ml_dir / "ml_summary.json"
@@ -100,7 +136,7 @@ def run_freeze_gate(*, freeze_path: Path, evidence_root: Path) -> GateResult:
             if_scores,
         ]
         for req in required_paths:
-            if not req.exists():
+            if not req.is_file():
                 errors.append(f"{run_id}:missing:{req.name}")
         if errors and any(err.startswith(f"{run_id}:missing:") for err in errors):
             continue

@@ -56,6 +56,26 @@ def test_compose_inventory_entry_derives_split_membership_hash():
     assert len(str(entry["split_membership_hash"])) == 64
 
 
+def test_compose_inventory_entry_preserves_independent_package_manager_split_count():
+    entry = normalizer.compose_inventory_entry(
+        "com.example.app",
+        ["/data/app/base.apk", "/data/app/split_config.en.apk"],
+        {
+            "version_code": "100",
+            "split_names": ["base", "config.en", "config.arm64_v8a"],
+        },
+        None,
+    )
+
+    assert entry["package_manager_split_names"] == [
+        "base",
+        "config.en",
+        "config.arm64_v8a",
+    ]
+    assert entry["package_manager_split_count"] == 3
+    assert entry["split_path_count_consistent"] is False
+
+
 def test_split_count_handles_string_flags():
     entry = {"apk_paths": ["/data/app/base.apk", "/data/app/split.apk"], "split_count": "yes"}
     assert normalizer.split_count(entry) == 2

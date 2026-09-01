@@ -12,7 +12,6 @@ from scytaledroid.Utils.DisplayUtils import (
     prompt_utils,
     status_messages,
     table_utils,
-    terminal,
 )
 
 from . import rules
@@ -33,7 +32,7 @@ _LAST_SCOPE: ScopeSelection | None = None
 
 # Menu label for the all-inventory scope after applying the active path policy.
 FULL_INVENTORY_POLICY_FILTERED_LABEL = "All pullable packages (full inventory)"
-FULL_INVENTORY_MENU_LABEL = "Full inventory pullable"
+FULL_INVENTORY_MENU_LABEL = "Pull all available APKs"
 
 _DASH = "—"
 
@@ -82,10 +81,6 @@ def _load_latest_scoped_inventory_packages(*, device_serial: str, scope_id: str)
     return pkgs if isinstance(pkgs, list) else None
 
 
-def _append_non_root_note(label: str) -> str:
-    return label
-
-
 def _compact_scope_label(label: str) -> str:
     text = str(label or "").strip()
     if text == FULL_INVENTORY_POLICY_FILTERED_LABEL:
@@ -124,18 +119,6 @@ def _last_scope_detail(selection: ScopeSelection, *, is_rooted: bool) -> str:
     )
 
 
-def _scope_table_headers(*, narrow: bool) -> list[str]:
-    if narrow:
-        return ["#", "Scope", "Inv", "Pull", "APKs", "Note"]
-    return ["#", "Scope", "Inventory", "Pullable", "APKs", "Notes"]
-
-
-def _scope_table_min_widths(*, narrow: bool) -> list[int]:
-    if narrow:
-        return [1, 18, 3, 4, 4, 10]
-    return [1, 20, 9, 8, 4, 12]
-
-
 def _render_last_scope_block(selection: ScopeSelection, *, is_rooted: bool) -> None:
     print()
     print("Last scope")
@@ -143,33 +126,6 @@ def _render_last_scope_block(selection: ScopeSelection, *, is_rooted: bool) -> N
     print("R) Re-run last scope")
     print(f"   {_last_scope_detail(selection, is_rooted=is_rooted)}")
 
-
-def _render_scope_options_table(
-    entries: Sequence[_ScopeMenuDisplayRow],
-    *,
-    narrow: bool,
-) -> None:
-    print()
-    print("Available scopes")
-    print("----------------")
-    table_rows = [
-        [
-            entry.key,
-            entry.label,
-            _format_count_cell(entry.inventory_count),
-            _format_count_cell(entry.pullable_count),
-            _format_count_cell(entry.estimated_apks, approx=True),
-            str(entry.note or "").strip(),
-        ]
-        for entry in entries
-    ]
-    table_utils.render_table(
-        _scope_table_headers(narrow=narrow),
-        table_rows,
-        compact=True,
-        min_widths=_scope_table_min_widths(narrow=narrow),
-    )
-    print("0 Back")
 
 def _merge_rows_prefer_scoped(
     *,
@@ -474,8 +430,6 @@ def select_package_scope(
     allow = set(google_allowlist or rules.GOOGLE_ALLOWLIST)
     context = build_scope_context(rows, allow)
     # Note: profile groups / watchlists are rendered inside build_scope_context() output.
-
-    default_rows, _ = apply_default_scope(rows, allow)
     updated_rows, updated_meta = filter_updated_only(rows)
     if not is_rooted:
         readable_updated = [
@@ -534,41 +488,13 @@ def select_package_scope(
             if profile_scope_count
             else "none available"
         )
-        _add_entry(
-            "1",
-            "App profile",
-            packages=inv_total,
-            pullable=_DASH,
-            files=_DASH,
-            note=profile_note,
-            handler=lambda: _scope_profiles(rows, allow, device_serial=device_serial, is_rooted=is_rooted),
-        )
-
-        _add_entry(
-            "2",
-            "Play & user apps",
-            packages=default_pkg,
-            pullable=default_pkg if isinstance(default_pkg, int) else None,
-            files=default_files,
-            note="recommended",
-            handler=lambda: _scope_default(rows, allow),
-        )
-        _add_entry(
-            "3",
-            "Google allow-list",
-            packages=google_pkg,
-            pullable=google_pkg if isinstance(google_pkg, int) else None,
-            files=google_files,
-            note="allow-list",
-            handler=lambda: _scope_google_allowlist(rows, allow),
-        )
         full_note = (
             f"{blocked_full} policy-blocked"
             if (not is_rooted and blocked_full)
             else ("root device · full paths" if is_rooted else None)
         )
         _add_entry(
-            "4",
+            "1",
             FULL_INVENTORY_MENU_LABEL,
             packages=inv_total,
             pullable=len(pullable_full),
@@ -594,13 +520,37 @@ def select_package_scope(
                 },
             ),
         )
+        _add_entry(
+            "2",
+            "App profile",
+            packages=inv_total,
+            pullable=_DASH,
+            files=_DASH,
+            note=profile_note,
+            handler=lambda: _scope_profiles(rows, allow, device_serial=device_serial, is_rooted=is_rooted),
+        )
+        _add_entry(
+            "3",
+            "Play & user apps",
+            packages=default_pkg,
+            pullable=default_pkg if isinstance(default_pkg, int) else None,
+            files=default_files,
+            note="smaller default scope",
+            handler=lambda: _scope_default(rows, allow),
+        )
+        _add_entry(
+            "4",
+            "Google allow-list",
+            packages=google_pkg,
+            pullable=google_pkg if isinstance(google_pkg, int) else None,
+            files=google_files,
+            note="allow-list",
+            handler=lambda: _scope_google_allowlist(rows, allow),
+        )
 
         _render_scope_table(
             rows,
-            device_serial,
             is_rooted,
-            context,
-            default_rows,
             entries=entries,
             last_scope=_LAST_SCOPE,
         )
@@ -610,9 +560,9 @@ def select_package_scope(
             valid_choices.append("R")
         choice = prompt_utils.get_choice(
             valid_choices,
-            default="2",
+            default="1",
             casefold=True,
-            prompt="Select scope #: ",
+            prompt="Select collection [1]: ",
         )
         if choice == "0":
             return None
@@ -694,10 +644,7 @@ def select_package_scope_auto(
 
 def _render_scope_table(
     rows: Sequence[InventoryRow],
-    device_serial: str,
     is_rooted: bool,
-    context: dict[str, object],
-    default_rows: Sequence[InventoryRow],
     *,
     entries: Sequence[_ScopeMenuDisplayRow],
     last_scope: ScopeSelection | None,
@@ -705,40 +652,53 @@ def _render_scope_table(
     print()
     menu_utils.print_header("Harvest Scope")
     print()
-    print("Inventory snapshot")
-    print("------------------")
+    print("Available on this device")
+    print("------------------------")
     candidates = len(rows)
     pullable_rows = _rows_pullable_under_path_policy(rows, is_rooted=is_rooted)
     eligible = len(pullable_rows)
     blocked = max(candidates - eligible, 0)
     policy = "none (root)" if is_rooted else "non-root paths"
     est_artifacts = estimated_files(pullable_rows)
-    print(f"Snapshot packages : {candidates}")
-    print(f"Pullable packages : {eligible}")
-    print(f"Policy-blocked    : {blocked}")
-    print(f"Policy            : {policy}")
-    print(f"Estimated APKs    : ~{est_artifacts}")
+    print(f"{eligible} package(s) · ~{est_artifacts} APK file(s), including splits")
+    if blocked:
+        print(f"{blocked} system package(s) are unavailable through {policy}.")
     if not is_rooted and blocked > 0:
         print()
-        print(
-            "Note: system/product/vendor APK paths remain inventoried but are not "
-            "pulled on a non-root device."
-        )
+        print("System/product/vendor APK paths remain inventoried but are not pulled.")
     if last_scope is not None:
         _render_last_scope_block(last_scope, is_rooted=is_rooted)
-    narrow = terminal.get_terminal_width(default=100) < 96
-    _render_scope_options_table(entries, narrow=narrow)
-
-
-def _format_rerun_label(selection: ScopeSelection) -> str:
-    pkg_count = len(selection.packages)
-    return f"Re-run last scope ({selection.label} – {pkg_count} pkg(s))"
-
-
-def _format_menu_count(stats: dict[str, int]) -> str:
-    packages = stats.get("packages", 0)
-    files = stats.get("files", 0)
-    return f"{packages} pkg(s) · ~{files} file(s)"
+    primary = next((entry for entry in entries if entry.key == "1"), None)
+    secondary = [entry for entry in entries if entry.key != "1"]
+    if primary is not None:
+        print()
+        print("Most common action")
+        print("------------------")
+        print(
+            f"1) {primary.label} [recommended] — "
+            f"{_format_count_cell(primary.pullable_count)} packages · "
+            f"~{_format_count_cell(primary.estimated_apks)} APK files"
+        )
+    if secondary:
+        print()
+        print("Pull a smaller collection")
+        print("-------------------------")
+        for entry in secondary:
+            detail = str(entry.note or "").strip()
+            if entry.pullable_count not in {None, _DASH}:
+                detail = " · ".join(
+                    part
+                    for part in (
+                        f"{_format_count_cell(entry.pullable_count)} packages",
+                        f"~{_format_count_cell(entry.estimated_apks)} APK files"
+                        if entry.estimated_apks not in {None, _DASH}
+                        else "",
+                        detail,
+                    )
+                    if part
+                )
+            print(f"{entry.key}) {entry.label}" + (f" — {detail}" if detail else ""))
+    print("0) Back")
 
 
 def _format_watchlist_hint(entry: _WatchlistEntry) -> str | None:

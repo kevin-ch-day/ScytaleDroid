@@ -108,7 +108,6 @@ def test_fetch_analysis_integrity_summary_includes_dynamic_retention_counts(monk
     assert summary.dynamic_feature_rows == 37
     assert summary.dynamic_runs_missing_features == 103
     assert summary.quota_valid_runs_missing_features == 95
-    assert summary.countable_runs_missing_features == 95
     assert summary.packages_latest_run_has_features == 1
     assert summary.packages_latest_run_missing_features_older_features_exist == 12
     assert summary.packages_no_feature_rows_for_package == 5

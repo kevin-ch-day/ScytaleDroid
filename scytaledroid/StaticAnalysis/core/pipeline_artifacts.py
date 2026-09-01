@@ -18,6 +18,23 @@ if TYPE_CHECKING:  # pragma: no cover - typing imports only
     from .context import DetectorContext
 
 
+def classify_detector_skip_reason(reason: object) -> str:
+    """Classify why an implemented detector stage did not execute."""
+
+    text = str(reason or "").strip().lower()
+    if "deferred for split member" in text:
+        return "design_deferred"
+    if "string index unavailable" in text:
+        return "input_unavailable"
+    if (
+        "disabled by custom selection" in text
+        or "skipped by quick profile" in text
+        or "disabled for profile" in text
+    ):
+        return "configuration_gated"
+    return "other"
+
+
 @dataclass(frozen=True)
 class PipelineArtifacts:
     """Container for derived metadata about a detector pipeline run."""
@@ -219,9 +236,32 @@ def build_pipeline_summary(results: Sequence[DetectorResult]) -> Mapping[str, ob
 
     if skipped_details:
         summary["skipped_detectors"] = skipped_details
+        skip_classes = Counter(
+            classify_detector_skip_reason(row.get("reason"))
+            for row in skipped_details
+        )
+        summary["non_placeholder_skip_class_counts"] = {
+            key: int(value) for key, value in sorted(skip_classes.items())
+        }
     if placeholder_details:
         summary["placeholder_detector_count"] = len(placeholder_details)
         summary["placeholder_detectors"] = placeholder_details
+
+    implemented = max(0, total - len(placeholder_details))
+    executed_implemented = min(executed, implemented)
+    summary["measurement_coverage"] = {
+        "planned_stage_count": total,
+        "implemented_stage_count": implemented,
+        "placeholder_stage_count": len(placeholder_details),
+        "executed_implemented_stage_count": executed_implemented,
+        "implemented_stage_execution_rate": (
+            round(executed_implemented / implemented, 6) if implemented else None
+        ),
+        "interpretation": (
+            "Execution coverage of declared detector stages; this is not code coverage, "
+            "vulnerability recall, or proof that unreported weaknesses are absent."
+        ),
+    }
 
     return summary
 

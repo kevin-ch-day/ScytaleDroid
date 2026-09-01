@@ -13,6 +13,7 @@ from scytaledroid.DynamicAnalysis.core.freeze_identity import (
     FREEZE_DATASET_IDENTITY_VERSION,
     compute_freeze_dataset_hash_from_path,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from .. import ml_parameters_profile as config
@@ -299,7 +300,9 @@ def _capture_semantics_from_run_inputs(run_inputs: RunInputs) -> dict[str, Any]:
     filter_type = "PCAPdroid app_filter (package)"
     if meta_rel:
         try:
-            meta_path = run_inputs.run_dir / meta_rel
+            meta_path = resolve_contained_path(run_inputs.run_dir, meta_rel)
+            if meta_path is None or not meta_path.is_file():
+                raise ValueError("unsafe or missing capture metadata path")
             payload = json.loads(meta_path.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
                 capture_mode = str(payload.get("capture_mode") or "unknown")

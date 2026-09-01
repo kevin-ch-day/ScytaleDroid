@@ -6,6 +6,102 @@ from pathlib import Path
 from scripts.db import report_dynamic_domain_context as report
 
 
+def test_read_json_rejects_invalid_utf8_without_crashing(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.json"
+    path.write_bytes(b"\xff\xfe\x00")
+
+    assert report._read_json(path) is None
+
+
+def test_load_run_row_tolerates_partial_nested_evidence(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-partial"
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-partial",
+                "target": {"package_name": "com.example.partial"},
+                "dataset": ["unexpected"],
+                "operator": "unexpected",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "report_status": "ok",
+                "pcap_size_bytes": "not-a-number",
+                "packet_count": {"unexpected": "object"},
+                "top_dns": {"unexpected": "object"},
+                "top_sni": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_features.json").write_text(
+        json.dumps({"proxies": {"domains_per_min": "NaN"}}), encoding="utf-8"
+    )
+    (run_dir / "analysis" / "static_dynamic_overlap.json").write_text(
+        json.dumps(
+            {
+                "static_domains_count": "not-a-number",
+                "dynamic_domains_count": {"unexpected": "object"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    row = report._load_run_row(run_dir)
+
+    assert row is not None
+    assert row.package_name == "com.example.partial"
+    assert row.run_profile == ""
+    assert row.pcap_bytes is None
+    assert row.packet_count is None
+    assert row.domains_per_min is None
+    assert row.top_dns == ()
+    assert row.top_sni == ()
+    assert row.static_domains_count is None
+    assert row.dynamic_domains_count is None
+
+
+def test_load_run_row_preserves_zero_primary_metrics(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-zero"
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dynamic_run_id": "run-zero",
+                "target": {"package_name": "com.example.zero"},
+                "dataset": {
+                    "actual_sampling_seconds": 0,
+                    "sampling_duration_seconds": 240,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analysis" / "pcap_report.json").write_text(
+        json.dumps(
+            {
+                "pcap_size_bytes": 0,
+                "bytes_total": 99,
+                "packet_count": 0,
+                "packets_total": 88,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    row = report._load_run_row(run_dir)
+
+    assert row is not None
+    assert row.sampling_seconds == 0.0
+    assert row.pcap_bytes == 0
+    assert row.packet_count == 0
+
+
 def test_context_for_domain_prefers_curated_suffix_and_package_hints() -> None:
     bbc_api = report._context_for_domain(
         "bbc-global-app.api.bbc.com", package_name="bbc.mobile.news.ww"
@@ -258,6 +354,7 @@ def test_generate_report_summarizes_runs_and_context(tmp_path: Path) -> None:
                 "top_dns": [
                     {"value": "bbc-global-app.api.bbc.com", "count": 4},
                     {"value": "googleads.g.doubleclick.net", "count": 2},
+                    {"value": "api.vungle.akadns.net", "count": 1},
                 ],
                 "top_sni": [
                     {"value": "device-api.urbanairship.com", "count": 3},
@@ -359,10 +456,25 @@ def test_generate_report_summarizes_runs_and_context(tmp_path: Path) -> None:
         report._load_state_rows = original_state_rows  # type: ignore[assignment]
 
     assert summary["dynamic_runs_scanned"] == 2
+    assert summary["runs_with_pcap_report"] == 2
+    assert summary["runs_without_pcap_report"] == 0
+    assert summary["runs_with_dns_topn"] == 2
+    assert summary["runs_with_sni_topn"] == 2
+    assert summary["runs_with_any_domain_topn"] == 2
+    assert summary["runs_without_domain_topn"] == 0
+    assert summary["pcap_report_status_counts"] == {"present_status_missing": 2}
+    assert summary["runs_without_domain_topn_status_counts"] == {}
+    assert summary["domain_inventory_scope"].startswith("pcap_report_top_n")
     assert summary["packages_scanned"] == 1
     assert summary["packages_with_manual_runs"] == 1
     assert summary["packages_with_quota_met"] == 1
     assert summary["packages_with_baseline_manual_contrast"] == 1
+    assert summary["psl_boundary_difference_count"] == 1
+    assert summary["psl_boundary_difference_rate"] > 0
+    assert summary["psl_boundary_difference_packages"] == 1
+    assert summary["psl_boundary_difference_root_domains"] == {"akadns.net": 1}
+    assert summary["psl_registrant_dimension_status"] == "additive_dimension_recommended"
+    assert summary["candidate_domain_normalization"]["resolver"] == "publicsuffixlist"
     assert (out_dir / "summary.json").exists()
     package_rows = (out_dir / "package_run_overview.csv").read_text(encoding="utf-8")
     domain_rows = (out_dir / "package_domain_context.csv").read_text(encoding="utf-8")
@@ -372,6 +484,7 @@ def test_generate_report_summarizes_runs_and_context(tmp_path: Path) -> None:
     assert "publisher_api" in domain_rows
     assert "engagement_push" in domain_rows
     assert "adtech_monetization" in domain_rows
+    assert "vungle.akadns.net" in domain_rows
     assert "runtime_domains_exceed_static_domain_context" in gap_rows
     assert "manual_only_domain_count" in contrast_rows
     assert "device-api.urbanairship.com" in contrast_rows

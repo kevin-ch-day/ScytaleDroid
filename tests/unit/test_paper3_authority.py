@@ -76,3 +76,23 @@ def test_authority_audit_reports_membership_delta_and_selected_exclusion(tmp_pat
         "historic-only": "historical_only",
         "shared": "shared",
     }
+
+
+def test_authority_audit_does_not_read_run_outside_evidence_root(tmp_path: Path) -> None:
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    alignment = tmp_path / "alignment.json"
+    freeze = tmp_path / "freeze.json"
+    alignment.write_text(
+        json.dumps({"selected_dynamic_run_ids": ["../outside-run"]}),
+        encoding="utf-8",
+    )
+    freeze.write_text(json.dumps({"apps": []}), encoding="utf-8")
+
+    report = build_paper3_authority_audit(
+        alignment_manifest_path=alignment,
+        freeze_manifest_path=freeze,
+        evidence_root=evidence_root,
+    )
+
+    assert report["runs"][0]["artifact_status"] == "unsafe_run_id"

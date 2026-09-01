@@ -327,6 +327,16 @@ def test_duration_tier_status_summarizes_locked_dataset_runs(tmp_path: Path) -> 
     )
 
 
+def test_duration_tier_status_does_not_follow_unsafe_run_id(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    _write_duration_run(tmp_path, "outside-run", 1800)
+    freeze = tmp_path / "dataset_freeze.json"
+    freeze.write_text(json.dumps({"included_run_ids": ["../outside-run"]}), encoding="utf-8")
+
+    assert ml_menu._duration_tier_status(freeze_path=freeze, evidence_root=evidence) == "Unknown 1"
+
+
 def test_freeze_status_summary_shortens_insufficient_runs_blocker() -> None:
     status = (
         "blocked - FREEZE_INSUFFICIENT_ELIGIBLE_RUNS:6 app(s):"

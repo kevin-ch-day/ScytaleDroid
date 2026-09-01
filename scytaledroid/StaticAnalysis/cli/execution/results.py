@@ -33,6 +33,9 @@ from ..persistence.run_summary import (
     update_static_run_status,
 )
 from ..persistence.run_writers import export_dep_snapshot
+from ..persistence.static_session_summary import (
+    record_static_session_completion_reconciliation,
+)
 from ..views.renderers.summary_render import render_app_result
 from .analytics import (
     _build_permission_profile,
@@ -52,6 +55,10 @@ from .artifacts import (
     update_static_aliases,
     write_baseline_json_artifact,
     write_manifest_evidence,
+)
+from .completion_reconciliation import (
+    build_static_completion_reconciliation,
+    write_static_completion_reconciliation,
 )
 from .db_verification import (
     _render_db_masvs_summary,
@@ -1527,14 +1534,95 @@ def _render_run_results_impl(
             reconcile_app_final_status_after_persistence(res, persistence_enabled=bool(persist_enabled))
         outcome.run_aggregate_status = compute_run_aggregate_status(outcome)
 
+        # This receipt is derived from the frozen scope object used by execute_scan,
+        # not a rediscovery of the mutable APK library.  Write it only after the
+        # persistence phase so a "complete" reconciliation cannot predate DB work.
+        reconciliation = build_static_completion_reconciliation(
+            outcome,
+            scan_splits=bool(getattr(params, "scan_splits", True)),
+            require_canonical_persistence=bool(persist_enabled),
+        )
+        reconciliation_state = str(reconciliation.get("status") or "INCONSISTENT")
+        if reconciliation_state in {"INCOMPLETE", "INCONSISTENT"}:
+            # A report/DB scan may have individually succeeded, but the session
+            # cannot truthfully become workflow-complete while its frozen
+            # selection has unexplained, duplicate, or foreign terminal work.
+            failure_code = f"completion_reconciliation:{reconciliation_state.lower()}"
+            if failure_code not in outcome.failures:
+                outcome.failures.append(failure_code)
+        if persist_enabled:
+            try:
+                reconciliation_persisted = record_static_session_completion_reconciliation(
+                    session_stamp=str(getattr(params, "session_stamp", None) or ""),
+                    scope_label=(
+                        getattr(params, "scope_label", None)
+                        or getattr(outcome.scope, "label", None)
+                    ),
+                    receipt=reconciliation,
+                )
+            except Exception as exc:
+                reconciliation_persisted = False
+                reconciliation = dict(reconciliation)
+                reconciliation["db_persist_error"] = f"{exc.__class__.__name__}: {exc}"
+            if not reconciliation_persisted:
+                reconciliation = dict(reconciliation)
+                reconciliation["status"] = "INCONSISTENT"
+                reconciliation["db_persisted"] = False
+                failure_code = "completion_reconciliation:db_persist_failed"
+                if failure_code not in outcome.failures:
+                    outcome.failures.append(failure_code)
+            else:
+                reconciliation = dict(reconciliation)
+                reconciliation["db_persisted"] = True
+        stamp_name = sanitize_session_stamp_for_filename(getattr(params, "session_stamp", None))
+        reconciliation_target = outcome.base_dir / f"{stamp_name}_completion_reconciliation.json"
+        reconciliation_path: str | None = None
+        try:
+            write_static_completion_reconciliation(reconciliation_target, reconciliation)
+            reconciliation_path = str(reconciliation_target.resolve())
+            outcome.session_metrics["completion_reconciliation"] = reconciliation
+            outcome.session_metrics["completion_reconciliation_path"] = reconciliation_path
+        except OSError as exc:
+            reconciliation = dict(reconciliation)
+            reconciliation["status"] = "INCONSISTENT"
+            reconciliation["write_error"] = f"{exc.__class__.__name__}: {exc}"
+            if persist_enabled:
+                try:
+                    reconciliation["db_persisted"] = (
+                        record_static_session_completion_reconciliation(
+                            session_stamp=str(getattr(params, "session_stamp", None) or ""),
+                            scope_label=(
+                                getattr(params, "scope_label", None)
+                                or getattr(outcome.scope, "label", None)
+                            ),
+                            receipt=reconciliation,
+                        )
+                    )
+                except Exception as db_exc:
+                    reconciliation["db_persisted"] = False
+                    reconciliation["db_persist_error"] = (
+                        f"{db_exc.__class__.__name__}: {db_exc}"
+                    )
+                if not reconciliation["db_persisted"]:
+                    db_failure_code = "completion_reconciliation:db_persist_failed"
+                    if db_failure_code not in outcome.failures:
+                        outcome.failures.append(db_failure_code)
+            outcome.session_metrics["completion_reconciliation"] = reconciliation
+            outcome.session_metrics["completion_reconciliation_path"] = None
+            failure_code = "completion_reconciliation:receipt_write_failed"
+            if failure_code not in outcome.failures:
+                outcome.failures.append(failure_code)
+            print(status_messages.status(f"Completion reconciliation receipt could not be written ({exc}).", level="warn"))
+
         health_doc = build_run_health_document(
             outcome,
             params,
             persistence_enabled=bool(persist_enabled),
             persist_attempted=bool(persist_enabled and not params.dry_run),
         )
-        stamp_name = sanitize_session_stamp_for_filename(getattr(params, "session_stamp", None))
         health_target = outcome.base_dir / f"{stamp_name}_run_health.json"
+        health_doc["completion_reconciliation"] = reconciliation
+        health_doc["completion_reconciliation_path"] = reconciliation_path
         attach_run_health_outputs_on_document(
             health_doc,
             path=health_target.resolve(),

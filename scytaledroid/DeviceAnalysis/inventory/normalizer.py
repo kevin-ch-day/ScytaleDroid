@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from scytaledroid.Database.db_utils.package_utils import normalize_package_name
 
 from .. import package_profiles
@@ -11,13 +13,13 @@ from ..identity import compute_split_membership_hash
 def compose_inventory_entry(
     package_name: str,
     paths: list[str],
-    metadata: dict[str, str | None],
-    canonical: dict[str, object | None] = None,
+    metadata: Mapping[str, object],
+    canonical: Mapping[str, object | None] | None = None,
 ) -> dict[str, object]:
     cleaned_package = normalize_package_name(package_name, context="inventory") or package_name.strip()
     primary_path = paths[0] if paths else ""
     fallback_category, partition = _derive_category(primary_path)
-    installer = _normalise_installer(metadata.get("installer"))
+    installer = _normalise_installer(maybe_str(metadata.get("installer")))
     review_needed = canonical is None
 
     category_id = canonical.get("category_id") if canonical else None
@@ -81,6 +83,15 @@ def compose_inventory_entry(
     apk_dirs = sorted({path.rsplit("/", 1)[0] for path in paths if "/" in path})
     split_membership_hash = compute_split_membership_hash(paths)
     path_fidelity = maybe_str(metadata.get("path_fidelity")) or "pm_path"
+    package_manager_split_names = _normalise_split_names(metadata.get("split_names"))
+    package_manager_split_count = (
+        len(package_manager_split_names) if package_manager_split_names else None
+    )
+    split_path_count_consistent = (
+        split_count == package_manager_split_count
+        if package_manager_split_count is not None
+        else None
+    )
 
     entry: dict[str, object] = {
         "package_name": cleaned_package,
@@ -108,6 +119,9 @@ def compose_inventory_entry(
         "apk_paths": paths,
         "apk_dirs": apk_dirs,
         "path_fidelity": path_fidelity,
+        "package_manager_split_names": package_manager_split_names,
+        "package_manager_split_count": package_manager_split_count,
+        "split_path_count_consistent": split_path_count_consistent,
         "review_needed": review_needed,
         "inferred_category": heuristic_category,
         "inferred_profile": heuristic_profile,
@@ -123,7 +137,7 @@ def compose_inventory_entry(
     if split_membership_hash:
         entry["split_membership_hash"] = split_membership_hash
 
-    entry["split_count"] = split_count  # type: ignore[index]
+    entry["split_count"] = split_count
 
     return entry
 
@@ -184,6 +198,12 @@ def maybe_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalise_split_names(value: object) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def split_count(entry: dict[str, object]) -> int:

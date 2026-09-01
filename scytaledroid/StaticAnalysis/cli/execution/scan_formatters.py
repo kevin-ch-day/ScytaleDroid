@@ -255,36 +255,6 @@ def format_scan_progress_heartbeat_lines(
     return line1, line2
 
 
-def format_scan_progress_heartbeat(
-    *,
-    apps_completed: int,
-    total_apps: int,
-    artifacts_done: int,
-    total_artifacts: int,
-    current_app_label: str | None,
-    current_package_name: str | None,
-    agg_checks: Counter[str],
-    eta_text: str,
-    archive_reports_written: int | None = None,
-    eta_preliminary: bool = False,
-) -> str:
-    """Return line 1 only (backward compat). Use :func:`format_scan_progress_heartbeat_lines` for both."""
-
-    line1, _line2 = format_scan_progress_heartbeat_lines(
-        apps_completed=apps_completed,
-        total_apps=total_apps,
-        artifacts_done=artifacts_done,
-        total_artifacts=total_artifacts,
-        current_app_label=current_app_label,
-        current_package_name=current_package_name,
-        agg_checks=agg_checks,
-        eta_text=eta_text,
-        archive_reports_written=archive_reports_written,
-        eta_preliminary=eta_preliminary,
-    )
-    return line1
-
-
 def format_scan_progress_checkpoint_card(
     *,
     apps_completed: int,
@@ -468,7 +438,7 @@ def format_static_run_final_summary_block(
     dry_run: bool,
     agg_checks: Counter[str] | None = None,
 ) -> str:
-    """Plain multiline end-of-run summary for compact static scans (no detector/DB changes)."""
+    """Plain scan-phase summary; persistence/finalization has not happened yet."""
 
     def _kv(label: str, value: str) -> str:
         return f"{label:<18}: {value}"
@@ -484,8 +454,18 @@ def format_static_run_final_summary_block(
         if st:
             status_ctr[st] += 1
     total_pkgs = len(outcome.results)
-    parts = [f"{status_ctr[k]} {k}" for k in sorted(status_ctr.keys())]
-    pkg_roll = ", ".join(parts) if parts else "—"
+    # ``partial`` is a legacy strict-quality status: warnings/findings can make
+    # a fully scanned app partial even when no execution work is missing.
+    # Keep the raw value out of this execution-completion headline.
+    caveats = int(status_ctr.get("partial", 0) or 0)
+    completed_like = int(status_ctr.get("complete", 0) or 0) + caveats
+    if total_pkgs and completed_like == total_pkgs:
+        pkg_roll = f"{completed_like} scan-complete"
+        if caveats:
+            pkg_roll += f"; {caveats} with detector/persistence caveats"
+    else:
+        parts = [f"{status_ctr[k]} {k}" for k in sorted(status_ctr.keys())]
+        pkg_roll = ", ".join(parts) if parts else "—"
 
     total_art = int(outcome.total_artifacts or 0)
     if total_art > 0:
@@ -500,16 +480,14 @@ def format_static_run_final_summary_block(
         evidence_disp = "—"
 
     if dry_run:
-        persist = "dry-run (DB/evidence writes skipped as configured)"
+        persist = "not applicable (dry-run)"
     elif not persistence_ready:
         persist = "off (persistence not ready)"
-    elif outcome.persistence_failed:
-        persist = "ERROR (session reported persistence failure)"
     else:
-        persist = "OK"
+        persist = "PENDING (canonical writes/finalization not started)"
 
     agg = str(outcome.run_aggregate_status or "—").strip() or "—"
-    workflow = _workflow_completion_token(outcome)
+    workflow = "SCAN COMPLETE — workflow finalizing"
     posture = _detector_posture_readable(agg)
     execution_errs = "—"
     if agg_checks is not None:
@@ -531,8 +509,8 @@ def format_static_run_final_summary_block(
         "------------------",
         _kv("Session", stamp),
         _kv("Packages", f"{total_pkgs} in scope ({pkg_roll})"),
-        _kv("Run completion", workflow),
-        _kv("DB persistence", persist),
+        _kv("Scan execution", workflow),
+        _kv("Canonical persistence", persist),
         _kv("Evidence (reports)", evidence_disp),
         _kv("Detector posture", posture),
         _kv("Execution errors", execution_errs),
@@ -880,7 +858,6 @@ __all__ = [
     "format_duration",
     "format_elapsed_for_progress",
     "format_scan_progress_checkpoint_card",
-    "format_scan_progress_heartbeat",
     "format_scan_progress_heartbeat_lines",
     "format_scan_progress_single_line",
     "format_static_run_final_summary_block",

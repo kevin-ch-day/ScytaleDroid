@@ -18,6 +18,7 @@ from scytaledroid.DynamicAnalysis.ml.evidence_pack_ml_preflight import (
     derive_run_mode,
     load_run_inputs,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_run_dir_under
 
 from .models import RunRef, SelectionResult
 
@@ -87,9 +88,12 @@ class FreezeSelector:
             for rid in run_ids:
                 if rid not in included_set:
                     raise RuntimeError(f"Freeze manifest inconsistency: {rid} not in included_run_ids")
-                run_dir = self.evidence_root / rid
+                run_dir = resolve_run_dir_under(self.evidence_root, rid)
+                if run_dir is None:
+                    excluded[rid] = {"reason": "unsafe_run_id"}
+                    continue
                 mf = run_dir / "run_manifest.json"
-                if not mf.exists():
+                if not mf.is_file():
                     excluded[rid] = {"reason": "missing_run_manifest", "evidence_dir": str(run_dir)}
                     continue
                 inputs = load_run_inputs(run_dir)

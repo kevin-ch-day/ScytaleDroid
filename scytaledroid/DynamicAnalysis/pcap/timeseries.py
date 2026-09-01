@@ -30,6 +30,42 @@ from .enrichment import (
 )
 
 
+def classify_tls_name_metadata_visibility(
+    *,
+    tls_handshake_packets: int,
+    tls_client_hello_packets: int,
+    tls_sni_unique_count: int,
+    quic_candidate_packets: int,
+) -> dict[str, Any]:
+    """Classify passive TLS name metadata without inferring encrypted payload semantics."""
+    if tls_sni_unique_count > 0:
+        visibility_class = "sni_observed"
+        basis = "decoded_sni"
+        limited = False
+    elif tls_client_hello_packets > 0:
+        visibility_class = "client_hello_observed_without_sni"
+        basis = "decoded_client_hello_sni_absent"
+        limited = True
+    elif tls_handshake_packets > 0:
+        visibility_class = "tls_handshake_observed_without_client_hello_or_sni"
+        basis = "partial_or_non_client_tls_handshake_visibility"
+        limited = True
+    elif quic_candidate_packets > 0:
+        visibility_class = "udp_service_port_without_decoded_tls_name"
+        basis = "udp_80_443_heuristic_only"
+        limited = True
+    else:
+        visibility_class = "no_tls_quic_name_signal"
+        basis = "no_decoded_tls_or_udp_service_port_signal"
+        limited = False
+    return {
+        "tls_name_metadata_class": visibility_class,
+        "tls_name_metadata_limited": limited,
+        "tls_name_metadata_basis": basis,
+        "ech_status": "not_determinable_from_passive_metadata",
+    }
+
+
 def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str | None = None) -> dict[str, Any]:
     """Scan PCAP with tshark fields output (streaming) and compute summary stats.
 
@@ -174,6 +210,13 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
     flow_summary = summarize_flows(flow_stats)
     startup_profile = _startup_profile_summary(bytes_by_s, pkts_by_s, duration_s=float(max_sec + 1))
 
+    name_visibility = classify_tls_name_metadata_visibility(
+        tls_handshake_packets=tls_handshake_total,
+        tls_client_hello_packets=tls_client_hello_count,
+        tls_sni_unique_count=len(tls_sni_values),
+        quic_candidate_packets=quic_candidate_packets,
+    )
+
     return {
         "bytes_per_second_p50": b50,
         "bytes_per_second_p95": b95,
@@ -211,6 +254,7 @@ def scan_pcap_timeseries_and_destinations(pcap_path: Path, *, tshark_path: str |
             "quic_candidate_packets": int(quic_candidate_packets),
             "tls_visible": bool(tls_handshake_total or tls_sni_values or tls_alpn_values),
             "quic_visibility_basis": "udp_service_port_heuristic",
+            **name_visibility,
         },
         "window_metrics": {
             "180s": _window_metric_summary(bytes_by_s, pkts_by_s, window_s=180),
@@ -321,6 +365,7 @@ def _startup_profile_summary(
     }
 __all__ = [
     "PacketMetadata",
+    "classify_tls_name_metadata_visibility",
     "infer_direction_from_ports",
     "percentile",
     "scan_pcap_timeseries_and_destinations",

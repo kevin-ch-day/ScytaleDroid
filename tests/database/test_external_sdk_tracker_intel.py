@@ -4,12 +4,15 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from scytaledroid.Database.db_utils.external_sdk_tracker_intel import (
     EXODUS_SOURCE_KEY,
     EXODUS_TRACKERS_URL,
     build_refresh_summary,
     ensure_external_tracker_intel_schema,
+    load_verified_refresh_receipt,
     normalize_exodus_trackers,
+    tracker_rows_content_sha256,
     upsert_external_tracker_rows,
     write_refresh_receipt_bundle,
 )
@@ -127,11 +130,17 @@ def test_build_summary_and_write_receipt_bundle(tmp_path: Path) -> None:
         snapshot_before={"total_rows": 0, "distinct_trackers": 0},
         snapshot_after={"total_rows": 2, "distinct_trackers": 2},
         applied=True,
+        source_payload={"trackers": {"1": {"name": "Teemo"}}},
     )
     assert summary["row_count"] == 2
     assert summary["distinct_tracker_ids"] == 2
     assert summary["rows_with_code_signature"] == 1
     assert summary["rows_with_network_signature"] == 2
+    assert len(summary["source_payload_canonical_sha256"]) == 64
+    assert len(summary["normalized_content_sha256"]) == 64
+    assert len(summary["normalized_snapshot_sha256"]) == 64
+    assert summary["snapshot_date_semantics"].startswith("UTC retrieval date")
+    assert "odbl" in summary["source_database_license"].lower()
     files = write_refresh_receipt_bundle(
         summary=summary,
         rows=rows,
@@ -145,3 +154,52 @@ def test_build_summary_and_write_receipt_bundle(tmp_path: Path) -> None:
     assert payload["rows"][0]["tracker_name"] == "Teemo"
     assert files["csv"].endswith("external_sdk_tracker_intel_refresh_test.csv")
     assert files["txt"].endswith("external_sdk_tracker_intel_refresh_test.txt")
+
+
+def test_tracker_content_hash_ignores_retrieval_time_and_snapshot_date() -> None:
+    base = {
+        "tracker_id_external": "1",
+        "tracker_name": "Example",
+        "fetched_at_utc": "2026-01-01 00:00:00",
+        "snapshot_date": "2026-01-01",
+    }
+    later = {
+        **base,
+        "fetched_at_utc": "2026-08-16 23:59:59",
+        "snapshot_date": "2026-08-16",
+    }
+
+    assert tracker_rows_content_sha256([base]) == tracker_rows_content_sha256([later])
+
+
+def test_verified_receipt_rejects_normalized_content_tampering(tmp_path: Path) -> None:
+    rows = [
+        {
+            "tracker_id_external": "1",
+            "tracker_name": "Example",
+            "snapshot_date": "2026-08-17",
+            "fetched_at_utc": "2026-08-17 01:00:00",
+        }
+    ]
+    summary = build_refresh_summary(
+        rows=rows,
+        snapshot_before=None,
+        snapshot_after=None,
+        applied=False,
+    )
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(
+        json.dumps({"summary": summary, "rows": rows}),
+        encoding="utf-8",
+    )
+
+    loaded, provenance = load_verified_refresh_receipt(receipt)
+    assert loaded == rows
+    assert len(provenance["source_receipt_file_sha256"]) == 64
+
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    payload["rows"][0]["tracker_name"] = "Tampered"
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="normalized-content hash mismatch"):
+        load_verified_refresh_receipt(receipt)

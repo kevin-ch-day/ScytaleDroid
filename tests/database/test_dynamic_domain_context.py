@@ -130,6 +130,7 @@ def test_apply_dynamic_domain_context_migration_reseeds_when_already_applied() -
 
 
 def test_build_and_index_domain_observation_rows(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(domain_context_index, "_has_normalization_columns", lambda: False)
     run_dir = tmp_path / "run-1"
     (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
     (run_dir / "analysis" / "pcap_report.json").write_text(
@@ -308,6 +309,7 @@ def test_build_domain_observation_rows_from_network_indicators_accepts_telegram_
 
 
 def test_index_dynamic_domain_context_from_network_indicators_only_missing(monkeypatch) -> None:
+    monkeypatch.setattr(domain_context_index, "_has_normalization_columns", lambda: False)
     query_names: list[str] = []
     inserted: list[tuple[object, ...]] = []
 
@@ -361,6 +363,7 @@ def test_index_dynamic_domain_context_from_network_indicators_only_missing(monke
 def test_refresh_dynamic_domain_observation_classifications_updates_unknown_rows(
     monkeypatch,
 ) -> None:
+    monkeypatch.setattr(domain_context_index, "_has_normalization_columns", lambda: False)
     writes: list[tuple[object, ...]] = []
 
     def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
@@ -404,6 +407,7 @@ def test_refresh_dynamic_domain_observation_classifications_updates_unknown_rows
 def test_refresh_dynamic_domain_observation_classifications_skips_unchanged_rows(
     monkeypatch,
 ) -> None:
+    monkeypatch.setattr(domain_context_index, "_has_normalization_columns", lambda: False)
     writes: list[tuple[object, ...]] = []
 
     def fake_run_sql(sql, params=(), *, fetch="one", dictionary=False, query_name=None):  # noqa: ANN001,ARG001
@@ -520,7 +524,9 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert fb_shortlink["owner_class"] == "first_party"
     assert fb_shortlink["role_class"] == "platform_shortlink_or_deep_link"
 
-    instagram_meta = classify_domain("meta.com", package_name="com.instagram.android", references=refs)
+    instagram_meta = classify_domain(
+        "meta.com", package_name="com.instagram.android", references=refs
+    )
     assert instagram_meta["owner_class"] == "first_party"
     assert instagram_meta["role_class"] == "platform_corporate_or_account_surface"
 
@@ -698,9 +704,7 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
     assert bbc_live["owner_class"] == "first_party"
     assert bbc_live["role_class"] == "publisher_api"
 
-    bbc_home = classify_domain(
-        "www.bbc.com", package_name="bbc.mobile.news.ww", references=refs
-    )
+    bbc_home = classify_domain("www.bbc.com", package_name="bbc.mobile.news.ww", references=refs)
     assert bbc_home["owner_class"] == "first_party"
     assert bbc_home["role_class"] == "publisher_content"
 
@@ -1088,6 +1092,7 @@ def test_classify_domain_handles_facebook_net_and_atdmt_suffixes() -> None:
 def test_index_dynamic_evidence_pack_to_db_includes_domain_context(
     monkeypatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(domain_context_index, "_has_normalization_columns", lambda: False)
     run_dir = tmp_path / "run-1"
     (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
     (run_dir / "run_manifest.json").write_text(
@@ -1153,6 +1158,41 @@ def test_index_dynamic_evidence_pack_to_db_includes_domain_context(
             "role_class": "content_delivery",
         }
     ]
+
+
+def test_index_dynamic_evidence_pack_reports_optional_stage_failure(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from scytaledroid.DynamicAnalysis.storage import index_from_evidence
+
+    monkeypatch.setattr(
+        index_from_evidence,
+        "build_dynamic_session_row_from_evidence_pack",
+        lambda _run_dir: {"dynamic_run_id": "run-1", "package_name": "com.example"},
+    )
+    monkeypatch.setattr(index_from_evidence, "upsert_dynamic_session_row", lambda _row: None)
+    monkeypatch.setattr(
+        index_from_evidence,
+        "build_dynamic_network_features_row_from_evidence_pack",
+        lambda _run_dir: None,
+    )
+    monkeypatch.setattr(
+        index_from_evidence,
+        "index_network_indicators_for_run",
+        lambda _run_id, _run_dir: 0,
+    )
+    monkeypatch.setattr(
+        index_from_evidence,
+        "index_dynamic_domain_context_for_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("schema probe failed")),
+    )
+
+    result = index_from_evidence.index_dynamic_evidence_pack_to_db(tmp_path)
+
+    assert result["ok"] is True
+    assert result["partial"] is True
+    assert result["domain_context_indexed"] == 0
+    assert result["stage_errors"] == [{"stage": "domain_context", "error": "schema probe failed"}]
 
 
 def test_classify_domain_covers_cnn_facebook_and_guardian_gaps() -> None:

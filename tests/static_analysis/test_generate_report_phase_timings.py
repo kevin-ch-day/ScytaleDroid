@@ -103,3 +103,39 @@ def test_generate_report_legacy_save_report_signature_still_supported(
     assert err is None
     assert skipped is False
     assert calls == ["legacy"]
+
+
+def test_generate_report_can_return_in_memory_without_publishing(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_artifact: MagicMock,
+    tmp_path: Path,
+) -> None:
+    params = RunParameters(
+        profile="full",
+        scope="all",
+        scope_label="All",
+        dry_run=False,
+        persistence_ready=True,
+    )
+    fake_report = MagicMock()
+    fake_report.metadata = {"duration_seconds": 0.05}
+    fake_report.detector_results = []
+
+    monkeypatch.setattr(sr, "analyze_apk", lambda *_a, **_k: fake_report)
+
+    def _unexpected_save(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("in-memory regeneration must not publish a report")
+
+    monkeypatch.setattr(sr, "save_report", _unexpected_save)
+
+    report, path, err, skipped = sr.generate_report(
+        stub_artifact,
+        tmp_path,
+        params,
+        persist_report=False,
+    )
+
+    assert report is fake_report
+    assert path is None
+    assert err is None
+    assert skipped is False

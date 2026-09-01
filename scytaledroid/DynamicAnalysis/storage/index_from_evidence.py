@@ -151,14 +151,10 @@ def _derived_low_signal_truth(
         return low_signal, reasons
 
     low_signal = (
-        True
-        if ds.get("low_signal") is True
-        else (False if ds.get("low_signal") is False else None)
+        True if ds.get("low_signal") is True else (False if ds.get("low_signal") is False else None)
     )
     reasons = (
-        list(ds.get("low_signal_reasons"))
-        if isinstance(ds.get("low_signal_reasons"), list)
-        else []
+        list(ds.get("low_signal_reasons")) if isinstance(ds.get("low_signal_reasons"), list) else []
     )
     return low_signal, reasons
 
@@ -323,7 +319,9 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
     summary = _read_json(run_dir / "analysis" / "summary.json") or {}
     telemetry = summary.get("telemetry") if isinstance(summary.get("telemetry"), dict) else {}
     telemetry_stats = telemetry.get("stats") if isinstance(telemetry.get("stats"), dict) else {}
-    telemetry_quality = telemetry.get("quality") if isinstance(telemetry.get("quality"), dict) else {}
+    telemetry_quality = (
+        telemetry.get("quality") if isinstance(telemetry.get("quality"), dict) else {}
+    )
 
     # PCAP artifact metadata (best-effort).
     pcap_rel = None
@@ -369,7 +367,9 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         except Exception:
             return None
 
-    countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(ds, tracker_truth)
+    countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(
+        ds, tracker_truth
+    )
     baseline_not_idle_source = (
         tracker_truth.get("baseline_not_idle")
         if isinstance(tracker_truth, dict) and tracker_truth.get("baseline_not_idle") is not None
@@ -377,7 +377,8 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
     )
     baseline_not_idle_reasons = (
         tracker_truth.get("baseline_not_idle_reasons")
-        if isinstance(tracker_truth, dict) and isinstance(tracker_truth.get("baseline_not_idle_reasons"), list)
+        if isinstance(tracker_truth, dict)
+        and isinstance(tracker_truth.get("baseline_not_idle_reasons"), list)
         else ds.get("baseline_not_idle_reasons")
     )
     if not isinstance(baseline_not_idle_reasons, list):
@@ -389,14 +390,20 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "device_serial": str((target or {}).get("device_serial") or "").strip() or None,
         # Operator protocol tags (interpretability only; not used for scoring).
         "operator_run_profile": str((op or {}).get("run_profile") or "").strip() or None,
-        "operator_interaction_level": str((op or {}).get("interaction_level") or "").strip() or None,
-        "operator_messaging_activity": str((op or {}).get("messaging_activity") or "").strip() or None,
+        "operator_interaction_level": str((op or {}).get("interaction_level") or "").strip()
+        or None,
+        "operator_messaging_activity": str((op or {}).get("messaging_activity") or "").strip()
+        or None,
         "scenario_id": scenario_id,
         "tier": str(ds.get("tier") or "") or None,
         "countable": 1 if countable_source is True else (0 if countable_source is False else None),
-        "valid_dataset_run": 1 if valid_dataset_source is True else (0 if valid_dataset_source is False else None),
+        "valid_dataset_run": 1
+        if valid_dataset_source is True
+        else (0 if valid_dataset_source is False else None),
         "invalid_reason_code": invalid_reason_source,
-        "baseline_not_idle": 1 if baseline_not_idle_source is True else (0 if baseline_not_idle_source is False else None),
+        "baseline_not_idle": 1
+        if baseline_not_idle_source is True
+        else (0 if baseline_not_idle_source is False else None),
         "baseline_not_idle_reasons_json": json.dumps(
             [str(reason) for reason in baseline_not_idle_reasons if str(reason).strip()],
             sort_keys=True,
@@ -416,22 +423,36 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "artifact_set_hash": ident.get("artifact_set_hash"),
         "version_name": plan.get("version_name"),
         "version_code": int(plan.get("version_code") or 0) or None,
-        "netstats_available": 1 if ((mf.get("qa") or {}).get("network_quality") == "netstats_ok") else None,
+        "netstats_available": 1
+        if ((mf.get("qa") or {}).get("network_quality") == "netstats_ok")
+        else None,
         "expected_samples": _as_int(telemetry_stats.get("expected_samples")),
         "captured_samples": _as_int(telemetry_stats.get("captured_samples")),
-        "sample_max_gap_s": _as_float(telemetry_stats.get("sample_max_gap_s") or telemetry_quality.get("max_gap_s")),
+        "sample_max_gap_s": _as_float(
+            telemetry_stats.get("sample_max_gap_s") or telemetry_quality.get("max_gap_s")
+        ),
         "netstats_missing_rows": _as_int(telemetry_stats.get("netstats_missing_rows")),
         "netstats_rows": _as_int(telemetry_stats.get("netstats_rows")),
-        "network_signal_quality": str(telemetry_stats.get("network_signal_quality") or telemetry.get("network_signal_quality") or "") or None,
+        "network_signal_quality": str(
+            telemetry_stats.get("network_signal_quality")
+            or telemetry.get("network_signal_quality")
+            or ""
+        )
+        or None,
         "pcap_relpath": pcap_rel,
-        "pcap_bytes": int(pcap_report.get("pcap_size_bytes") or ds.get("pcap_size_bytes") or 0) or None,
+        "pcap_bytes": int(pcap_report.get("pcap_size_bytes") or ds.get("pcap_size_bytes") or 0)
+        or None,
         "pcap_sha256": str(pcap_report.get("pcap_sha256") or ds.get("pcap_sha256") or "") or None,
         "pcap_valid": 1
         if (pcap_report.get("report_status") == "ok" and pcap_report.get("pcap_size_bytes"))
         else (0 if ds.get("pcap_valid") is False else None),
         "pcap_validated_at_utc": _to_mysql_dt(pcap_report.get("generated_at")),
-        "sampling_duration_seconds": float(ds.get("sampling_duration_seconds")) if ds.get("sampling_duration_seconds") is not None else None,
-        "clock_alignment_delta_s": float(ds.get("clock_delta_seconds")) if ds.get("clock_delta_seconds") is not None else None,
+        "sampling_duration_seconds": float(ds.get("sampling_duration_seconds"))
+        if ds.get("sampling_duration_seconds") is not None
+        else None,
+        "clock_alignment_delta_s": float(ds.get("clock_delta_seconds"))
+        if ds.get("clock_delta_seconds") is not None
+        else None,
         "tool_semver": app_config.APP_VERSION,
         "tool_git_commit": None,
         "schema_version": schema_version,
@@ -443,11 +464,13 @@ def upsert_dynamic_session_row(row: dict[str, Any]) -> None:
     placeholders = ", ".join(["%s"] * len(cols))
     updates = ", ".join([f"{c}=VALUES({c})" for c in cols if c != "dynamic_run_id"])
     sql = f"""
-        INSERT INTO dynamic_sessions ({', '.join(cols)})
+        INSERT INTO dynamic_sessions ({", ".join(cols)})
         VALUES ({placeholders})
         ON DUPLICATE KEY UPDATE {updates}
     """
-    core_q.run_sql_write(sql, tuple(row[c] for c in cols), query_name="dynamic.sessions.index_from_evidence")
+    core_q.run_sql_write(
+        sql, tuple(row[c] for c in cols), query_name="dynamic.sessions.index_from_evidence"
+    )
 
 
 def _existing_dynamic_session_cols(row: dict[str, Any]) -> list[str]:
@@ -494,9 +517,7 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     qual = pf.get("quality") if isinstance(pf.get("quality"), dict) else {}
     posture_block = pf.get("traffic_posture") if isinstance(pf.get("traffic_posture"), dict) else {}
     posture_summary = (
-        posture_block.get("summary")
-        if isinstance(posture_block.get("summary"), dict)
-        else {}
+        posture_block.get("summary") if isinstance(posture_block.get("summary"), dict) else {}
     )
 
     pr = _read_json(run_dir / "analysis" / "pcap_report.json") or {}
@@ -545,18 +566,27 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     direction = pr.get("direction_summary") if isinstance(pr.get("direction_summary"), dict) else {}
     flow = pr.get("flow_summary") if isinstance(pr.get("flow_summary"), dict) else {}
     burst = pr.get("burst_summary") if isinstance(pr.get("burst_summary"), dict) else {}
-    visibility = pr.get("tls_quic_visibility") if isinstance(pr.get("tls_quic_visibility"), dict) else {}
-    transport_health = pr.get("transport_health") if isinstance(pr.get("transport_health"), dict) else {}
+    visibility = (
+        pr.get("tls_quic_visibility") if isinstance(pr.get("tls_quic_visibility"), dict) else {}
+    )
+    transport_health = (
+        pr.get("transport_health") if isinstance(pr.get("transport_health"), dict) else {}
+    )
     lifecycle = (
         transport_health.get("lifecycle_summary")
         if isinstance(transport_health.get("lifecycle_summary"), dict)
         else {}
     )
-    tls_fingerprints = pr.get("tls_fingerprints") if isinstance(pr.get("tls_fingerprints"), dict) else {}
-    need_transport_health = any(
-        transport_health.get(key) is None
-        for key in ("issue_packet_count", "reset_packet_count")
-    ) or not lifecycle
+    tls_fingerprints = (
+        pr.get("tls_fingerprints") if isinstance(pr.get("tls_fingerprints"), dict) else {}
+    )
+    need_transport_health = (
+        any(
+            transport_health.get(key) is None
+            for key in ("issue_packet_count", "reset_packet_count")
+        )
+        or not lifecycle
+    )
     if need_transport_health and pcap_path and pcap_path.exists():
         try:
             derived_transport_health = summarize_transport_health(pcap_path)
@@ -574,16 +604,25 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
                 else {}
             )
     if lifecycle:
-        if proxies.get("tcp_reset_stream_ratio") is None and lifecycle.get("reset_stream_ratio") is not None:
+        if (
+            proxies.get("tcp_reset_stream_ratio") is None
+            and lifecycle.get("reset_stream_ratio") is not None
+        ):
             proxies["tcp_reset_stream_ratio"] = lifecycle.get("reset_stream_ratio")
         if (
             proxies.get("tcp_clean_close_stream_ratio") is None
             and lifecycle.get("clean_close_stream_ratio") is not None
         ):
             proxies["tcp_clean_close_stream_ratio"] = lifecycle.get("clean_close_stream_ratio")
-        if proxies.get("tcp_partial_stream_ratio") is None and lifecycle.get("partial_stream_ratio") is not None:
+        if (
+            proxies.get("tcp_partial_stream_ratio") is None
+            and lifecycle.get("partial_stream_ratio") is not None
+        ):
             proxies["tcp_partial_stream_ratio"] = lifecycle.get("partial_stream_ratio")
-        if proxies.get("tcp_issue_stream_ratio") is None and lifecycle.get("issue_stream_ratio") is not None:
+        if (
+            proxies.get("tcp_issue_stream_ratio") is None
+            and lifecycle.get("issue_stream_ratio") is not None
+        ):
             proxies["tcp_issue_stream_ratio"] = lifecycle.get("issue_stream_ratio")
     need_tls_fingerprints = any(
         tls_fingerprints.get(key) is None
@@ -619,31 +658,23 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     pf_flows = pf.get("flows") if isinstance(pf.get("flows"), dict) else {}
     pf_bursts = pf.get("bursts") if isinstance(pf.get("bursts"), dict) else {}
     pf_visibility = pf.get("visibility") if isinstance(pf.get("visibility"), dict) else {}
-    pf_transport_health = pf.get("transport_health") if isinstance(pf.get("transport_health"), dict) else {}
+    pf_transport_health = (
+        pf.get("transport_health") if isinstance(pf.get("transport_health"), dict) else {}
+    )
     pf_fingerprints = pf.get("fingerprints") if isinstance(pf.get("fingerprints"), dict) else {}
     pf_startup = pf.get("startup_profile") if isinstance(pf.get("startup_profile"), dict) else {}
     if not pf_startup:
         pf_startup = pf.get("startup") if isinstance(pf.get("startup"), dict) else {}
 
     pf_direction_summary = (
-        pf_direction.get("summary")
-        if isinstance(pf_direction.get("summary"), dict)
-        else {}
+        pf_direction.get("summary") if isinstance(pf_direction.get("summary"), dict) else {}
     )
-    pf_flow_summary = (
-        pf_flows.get("summary")
-        if isinstance(pf_flows.get("summary"), dict)
-        else {}
-    )
+    pf_flow_summary = pf_flows.get("summary") if isinstance(pf_flows.get("summary"), dict) else {}
     pf_burst_summary = (
-        pf_bursts.get("summary")
-        if isinstance(pf_bursts.get("summary"), dict)
-        else {}
+        pf_bursts.get("summary") if isinstance(pf_bursts.get("summary"), dict) else {}
     )
     pf_visibility_summary = (
-        pf_visibility.get("summary")
-        if isinstance(pf_visibility.get("summary"), dict)
-        else {}
+        pf_visibility.get("summary") if isinstance(pf_visibility.get("summary"), dict) else {}
     )
     pf_transport_summary = (
         pf_transport_health.get("summary")
@@ -651,14 +682,10 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         else {}
     )
     pf_fingerprint_summary = (
-        pf_fingerprints.get("summary")
-        if isinstance(pf_fingerprints.get("summary"), dict)
-        else {}
+        pf_fingerprints.get("summary") if isinstance(pf_fingerprints.get("summary"), dict) else {}
     )
     pf_startup_summary = (
-        pf_startup.get("summary")
-        if isinstance(pf_startup.get("summary"), dict)
-        else {}
+        pf_startup.get("summary") if isinstance(pf_startup.get("summary"), dict) else {}
     )
 
     if not direction and pf_direction_summary:
@@ -676,16 +703,25 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     if not lifecycle and isinstance(transport_health.get("lifecycle_summary"), dict):
         lifecycle = transport_health.get("lifecycle_summary") or {}
     if lifecycle:
-        if proxies.get("tcp_reset_stream_ratio") is None and lifecycle.get("reset_stream_ratio") is not None:
+        if (
+            proxies.get("tcp_reset_stream_ratio") is None
+            and lifecycle.get("reset_stream_ratio") is not None
+        ):
             proxies["tcp_reset_stream_ratio"] = lifecycle.get("reset_stream_ratio")
         if (
             proxies.get("tcp_clean_close_stream_ratio") is None
             and lifecycle.get("clean_close_stream_ratio") is not None
         ):
             proxies["tcp_clean_close_stream_ratio"] = lifecycle.get("clean_close_stream_ratio")
-        if proxies.get("tcp_partial_stream_ratio") is None and lifecycle.get("partial_stream_ratio") is not None:
+        if (
+            proxies.get("tcp_partial_stream_ratio") is None
+            and lifecycle.get("partial_stream_ratio") is not None
+        ):
             proxies["tcp_partial_stream_ratio"] = lifecycle.get("partial_stream_ratio")
-        if proxies.get("tcp_issue_stream_ratio") is None and lifecycle.get("issue_stream_ratio") is not None:
+        if (
+            proxies.get("tcp_issue_stream_ratio") is None
+            and lifecycle.get("issue_stream_ratio") is not None
+        ):
             proxies["tcp_issue_stream_ratio"] = lifecycle.get("issue_stream_ratio")
     if tls_fingerprints:
         for proxy_key in (
@@ -704,26 +740,10 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     if not posture_summary:
         posture_summary = summarize_traffic_posture(
             metrics=metrics,
-            direction_summary=(
-                pf_direction_summary
-                if pf_direction_summary
-                else direction
-            ),
-            flow_summary=(
-                pf_flow_summary
-                if pf_flow_summary
-                else flow
-            ),
-            burst_summary=(
-                pf_burst_summary
-                if pf_burst_summary
-                else burst
-            ),
-            visibility_summary=(
-                pf_visibility_summary
-                if pf_visibility_summary
-                else visibility
-            ),
+            direction_summary=(pf_direction_summary if pf_direction_summary else direction),
+            flow_summary=(pf_flow_summary if pf_flow_summary else flow),
+            burst_summary=(pf_burst_summary if pf_burst_summary else burst),
+            visibility_summary=(pf_visibility_summary if pf_visibility_summary else visibility),
             startup_summary=pf_startup_summary,
         )
 
@@ -804,13 +824,19 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
             proxies["domains_per_min"] = float(sni_ui + dns_ui) / float(denom_min)
         # Fallback: when report-level unique counts are missing, approximate from the
         # top-N-limited unique_domains_topn proxy (still useful as a diversity rate).
-        if proxies.get("domains_per_min") is None and proxies.get("unique_domains_topn") is not None:
+        if (
+            proxies.get("domains_per_min") is None
+            and proxies.get("unique_domains_topn") is not None
+        ):
             try:
                 ud = int(proxies.get("unique_domains_topn") or 0)
             except Exception:
                 ud = 0
             proxies["domains_per_min"] = float(ud) / float(denom_min) if denom_min else None
-        if proxies.get("new_domain_rate_per_min") is None and proxies.get("domains_per_min") is not None:
+        if (
+            proxies.get("new_domain_rate_per_min") is None
+            and proxies.get("domains_per_min") is not None
+        ):
             proxies["new_domain_rate_per_min"] = proxies.get("domains_per_min")
         if proxies.get("new_sni_rate_per_min") is None and sni_u is not None:
             proxies["new_sni_rate_per_min"] = float(sni_ui) / float(denom_min)
@@ -857,19 +883,31 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
     # In pcap_features.json we store protocol tags under quality.protocol
     proto = qual.get("protocol") if isinstance(qual.get("protocol"), dict) else {}
     run_profile = str(proto.get("run_profile") or op.get("run_profile") or "").strip() or None
-    interaction_level = str(proto.get("interaction_level") or op.get("interaction_level") or "").strip() or None
+    interaction_level = (
+        str(proto.get("interaction_level") or op.get("interaction_level") or "").strip() or None
+    )
 
     host_tools = env.get("host_tools") if isinstance(env.get("host_tools"), dict) else None
     # Stored as JSON (string) for audit/repro; do not denormalize tool versions yet.
-    host_tools_json = json.dumps(host_tools, sort_keys=True) if isinstance(host_tools, dict) else None
+    host_tools_json = (
+        json.dumps(host_tools, sort_keys=True) if isinstance(host_tools, dict) else None
+    )
 
     schema_ver = None
-    if isinstance(pf.get("feature_schema_version"), str) and pf.get("feature_schema_version").strip():
+    if (
+        isinstance(pf.get("feature_schema_version"), str)
+        and pf.get("feature_schema_version").strip()
+    ):
         schema_ver = pf.get("feature_schema_version").strip()
-    elif isinstance(qual.get("feature_schema_version"), str) and qual.get("feature_schema_version").strip():
+    elif (
+        isinstance(qual.get("feature_schema_version"), str)
+        and qual.get("feature_schema_version").strip()
+    ):
         schema_ver = qual.get("feature_schema_version").strip()
 
-    countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(ds, tracker_truth)
+    countable_source, valid_dataset_source, invalid_reason_source = _derived_dataset_truth(
+        ds, tracker_truth
+    )
     low_signal_source, low_signal_reasons = _derived_low_signal_truth(
         run_dir,
         package_name=pkg,
@@ -884,57 +922,135 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         "run_profile": run_profile,
         "interaction_level": interaction_level,
         "tier": str(ds.get("tier") or "") or None,
-        "valid_dataset_run": 1 if valid_dataset_source is True else (0 if valid_dataset_source is False else None),
+        "valid_dataset_run": 1
+        if valid_dataset_source is True
+        else (0 if valid_dataset_source is False else None),
         "invalid_reason_code": invalid_reason_source,
         "countable": 1 if countable_source is True else (0 if countable_source is False else None),
-        "low_signal": 1 if low_signal_source is True else (0 if low_signal_source is False else None),
+        "low_signal": 1
+        if low_signal_source is True
+        else (0 if low_signal_source is False else None),
         "low_signal_reasons_json": json.dumps(low_signal_reasons, sort_keys=True),
         "min_pcap_bytes": int(ds.get("min_pcap_bytes") or 0) or None,
         "min_duration_s": int(getattr(app_config, "DYNAMIC_MIN_DURATION_S", 120)),
         "feature_schema_version": schema_ver or "v1",
         "host_tools_json": host_tools_json,
-
         # Metrics
-        "capture_duration_s": float(metrics.get("capture_duration_s")) if metrics.get("capture_duration_s") is not None else None,
-        "packet_count": int(metrics.get("packet_count")) if metrics.get("packet_count") is not None else None,
-        "data_size_bytes": int(metrics.get("data_size_bytes")) if metrics.get("data_size_bytes") is not None else None,
-        "bytes_per_sec": float(metrics.get("bytes_per_sec")) if metrics.get("bytes_per_sec") is not None else None,
-        "packets_per_sec": float(metrics.get("packets_per_sec")) if metrics.get("packets_per_sec") is not None else None,
-        "avg_packet_size_bytes": float(metrics.get("avg_packet_size_bytes")) if metrics.get("avg_packet_size_bytes") is not None else None,
-        "avg_packet_rate_pps": float(metrics.get("avg_packet_rate_pps")) if metrics.get("avg_packet_rate_pps") is not None else None,
-        "bytes_per_second_p50": float(metrics.get("bytes_per_second_p50")) if metrics.get("bytes_per_second_p50") is not None else None,
-        "bytes_per_second_p95": float(metrics.get("bytes_per_second_p95")) if metrics.get("bytes_per_second_p95") is not None else None,
-        "bytes_per_second_max": float(metrics.get("bytes_per_second_max")) if metrics.get("bytes_per_second_max") is not None else None,
-        "packets_per_second_p50": float(metrics.get("packets_per_second_p50")) if metrics.get("packets_per_second_p50") is not None else None,
-        "packets_per_second_p95": float(metrics.get("packets_per_second_p95")) if metrics.get("packets_per_second_p95") is not None else None,
-        "packets_per_second_max": float(metrics.get("packets_per_second_max")) if metrics.get("packets_per_second_max") is not None else None,
-        "burstiness_bytes_p95_over_p50": float(metrics.get("burstiness_bytes_p95_over_p50")) if metrics.get("burstiness_bytes_p95_over_p50") is not None else None,
-        "burstiness_packets_p95_over_p50": float(metrics.get("burstiness_packets_p95_over_p50")) if metrics.get("burstiness_packets_p95_over_p50") is not None else None,
-
+        "capture_duration_s": float(metrics.get("capture_duration_s"))
+        if metrics.get("capture_duration_s") is not None
+        else None,
+        "packet_count": int(metrics.get("packet_count"))
+        if metrics.get("packet_count") is not None
+        else None,
+        "data_size_bytes": int(metrics.get("data_size_bytes"))
+        if metrics.get("data_size_bytes") is not None
+        else None,
+        "bytes_per_sec": float(metrics.get("bytes_per_sec"))
+        if metrics.get("bytes_per_sec") is not None
+        else None,
+        "packets_per_sec": float(metrics.get("packets_per_sec"))
+        if metrics.get("packets_per_sec") is not None
+        else None,
+        "avg_packet_size_bytes": float(metrics.get("avg_packet_size_bytes"))
+        if metrics.get("avg_packet_size_bytes") is not None
+        else None,
+        "avg_packet_rate_pps": float(metrics.get("avg_packet_rate_pps"))
+        if metrics.get("avg_packet_rate_pps") is not None
+        else None,
+        "bytes_per_second_p50": float(metrics.get("bytes_per_second_p50"))
+        if metrics.get("bytes_per_second_p50") is not None
+        else None,
+        "bytes_per_second_p95": float(metrics.get("bytes_per_second_p95"))
+        if metrics.get("bytes_per_second_p95") is not None
+        else None,
+        "bytes_per_second_max": float(metrics.get("bytes_per_second_max"))
+        if metrics.get("bytes_per_second_max") is not None
+        else None,
+        "packets_per_second_p50": float(metrics.get("packets_per_second_p50"))
+        if metrics.get("packets_per_second_p50") is not None
+        else None,
+        "packets_per_second_p95": float(metrics.get("packets_per_second_p95"))
+        if metrics.get("packets_per_second_p95") is not None
+        else None,
+        "packets_per_second_max": float(metrics.get("packets_per_second_max"))
+        if metrics.get("packets_per_second_max") is not None
+        else None,
+        "burstiness_bytes_p95_over_p50": float(metrics.get("burstiness_bytes_p95_over_p50"))
+        if metrics.get("burstiness_bytes_p95_over_p50") is not None
+        else None,
+        "burstiness_packets_p95_over_p50": float(metrics.get("burstiness_packets_p95_over_p50"))
+        if metrics.get("burstiness_packets_p95_over_p50") is not None
+        else None,
         # Proxies
-        "tls_ratio": float(proxies.get("tls_ratio")) if proxies.get("tls_ratio") is not None else None,
-        "quic_ratio": float(proxies.get("quic_ratio")) if proxies.get("quic_ratio") is not None else None,
-        "tcp_ratio": float(proxies.get("tcp_ratio")) if proxies.get("tcp_ratio") is not None else None,
-        "udp_ratio": float(proxies.get("udp_ratio")) if proxies.get("udp_ratio") is not None else None,
-        "unique_dns_topn": int(proxies.get("unique_dns_topn")) if proxies.get("unique_dns_topn") is not None else None,
-        "unique_sni_topn": int(proxies.get("unique_sni_topn")) if proxies.get("unique_sni_topn") is not None else None,
-        "unique_domains_topn": int(proxies.get("unique_domains_topn")) if proxies.get("unique_domains_topn") is not None else None,
-        "unique_dst_ip_count": int(proxies.get("unique_dst_ip_count")) if proxies.get("unique_dst_ip_count") is not None else None,
-        "unique_dst_port_count": int(proxies.get("unique_dst_port_count")) if proxies.get("unique_dst_port_count") is not None else None,
-        "sni_observation_count": int(proxies.get("sni_observation_count")) if proxies.get("sni_observation_count") is not None else None,
-        "dns_observation_count": int(proxies.get("dns_observation_count")) if proxies.get("dns_observation_count") is not None else None,
-        "unique_sni_count": int(proxies.get("unique_sni_count")) if proxies.get("unique_sni_count") is not None else None,
-        "unique_dns_qname_count": int(proxies.get("unique_dns_qname_count")) if proxies.get("unique_dns_qname_count") is not None else None,
-        "top1_sni_share": float(proxies.get("top1_sni_share")) if proxies.get("top1_sni_share") is not None else None,
-        "top1_dns_share": float(proxies.get("top1_dns_share")) if proxies.get("top1_dns_share") is not None else None,
-        "domains_per_min": float(proxies.get("domains_per_min")) if proxies.get("domains_per_min") is not None else None,
-        "new_domain_rate_per_min": float(proxies.get("new_domain_rate_per_min")) if proxies.get("new_domain_rate_per_min") is not None else None,
-        "new_sni_rate_per_min": float(proxies.get("new_sni_rate_per_min")) if proxies.get("new_sni_rate_per_min") is not None else None,
-        "new_dns_rate_per_min": float(proxies.get("new_dns_rate_per_min")) if proxies.get("new_dns_rate_per_min") is not None else None,
-        "top_dns_total": int(proxies.get("top_dns_total")) if proxies.get("top_dns_total") is not None else None,
-        "top_sni_total": int(proxies.get("top_sni_total")) if proxies.get("top_sni_total") is not None else None,
-        "dns_concentration": float(proxies.get("dns_concentration")) if proxies.get("dns_concentration") is not None else None,
-        "sni_concentration": float(proxies.get("sni_concentration")) if proxies.get("sni_concentration") is not None else None,
+        "tls_ratio": float(proxies.get("tls_ratio"))
+        if proxies.get("tls_ratio") is not None
+        else None,
+        "quic_ratio": float(proxies.get("quic_ratio"))
+        if proxies.get("quic_ratio") is not None
+        else None,
+        "tcp_ratio": float(proxies.get("tcp_ratio"))
+        if proxies.get("tcp_ratio") is not None
+        else None,
+        "udp_ratio": float(proxies.get("udp_ratio"))
+        if proxies.get("udp_ratio") is not None
+        else None,
+        "unique_dns_topn": int(proxies.get("unique_dns_topn"))
+        if proxies.get("unique_dns_topn") is not None
+        else None,
+        "unique_sni_topn": int(proxies.get("unique_sni_topn"))
+        if proxies.get("unique_sni_topn") is not None
+        else None,
+        "unique_domains_topn": int(proxies.get("unique_domains_topn"))
+        if proxies.get("unique_domains_topn") is not None
+        else None,
+        "unique_dst_ip_count": int(proxies.get("unique_dst_ip_count"))
+        if proxies.get("unique_dst_ip_count") is not None
+        else None,
+        "unique_dst_port_count": int(proxies.get("unique_dst_port_count"))
+        if proxies.get("unique_dst_port_count") is not None
+        else None,
+        "sni_observation_count": int(proxies.get("sni_observation_count"))
+        if proxies.get("sni_observation_count") is not None
+        else None,
+        "dns_observation_count": int(proxies.get("dns_observation_count"))
+        if proxies.get("dns_observation_count") is not None
+        else None,
+        "unique_sni_count": int(proxies.get("unique_sni_count"))
+        if proxies.get("unique_sni_count") is not None
+        else None,
+        "unique_dns_qname_count": int(proxies.get("unique_dns_qname_count"))
+        if proxies.get("unique_dns_qname_count") is not None
+        else None,
+        "top1_sni_share": float(proxies.get("top1_sni_share"))
+        if proxies.get("top1_sni_share") is not None
+        else None,
+        "top1_dns_share": float(proxies.get("top1_dns_share"))
+        if proxies.get("top1_dns_share") is not None
+        else None,
+        "domains_per_min": float(proxies.get("domains_per_min"))
+        if proxies.get("domains_per_min") is not None
+        else None,
+        "new_domain_rate_per_min": float(proxies.get("new_domain_rate_per_min"))
+        if proxies.get("new_domain_rate_per_min") is not None
+        else None,
+        "new_sni_rate_per_min": float(proxies.get("new_sni_rate_per_min"))
+        if proxies.get("new_sni_rate_per_min") is not None
+        else None,
+        "new_dns_rate_per_min": float(proxies.get("new_dns_rate_per_min"))
+        if proxies.get("new_dns_rate_per_min") is not None
+        else None,
+        "top_dns_total": int(proxies.get("top_dns_total"))
+        if proxies.get("top_dns_total") is not None
+        else None,
+        "top_sni_total": int(proxies.get("top_sni_total"))
+        if proxies.get("top_sni_total") is not None
+        else None,
+        "dns_concentration": float(proxies.get("dns_concentration"))
+        if proxies.get("dns_concentration") is not None
+        else None,
+        "sni_concentration": float(proxies.get("sni_concentration"))
+        if proxies.get("sni_concentration") is not None
+        else None,
         "direction_outbound_bytes": report_extras["direction_outbound_bytes"],
         "direction_inbound_bytes": report_extras["direction_inbound_bytes"],
         "direction_unknown_bytes": report_extras["direction_unknown_bytes"],
@@ -946,29 +1062,77 @@ def build_dynamic_network_features_row_from_evidence_pack(run_dir: Path) -> dict
         "udp_flow_count": report_extras["udp_flow_count"],
         "active_second_count": report_extras["active_second_count"],
         "burst_count": report_extras["burst_count"],
-        "max_burst_duration_s": float(report_extras["max_burst_duration_s"]) if report_extras["max_burst_duration_s"] is not None else None,
-        "median_burst_duration_s": float(report_extras["median_burst_duration_s"]) if report_extras["median_burst_duration_s"] is not None else None,
-        "median_interburst_gap_s": float(report_extras["median_interburst_gap_s"]) if report_extras["median_interburst_gap_s"] is not None else None,
-        "outbound_packet_ratio": float(posture_summary.get("outbound_packet_ratio")) if posture_summary.get("outbound_packet_ratio") is not None else None,
-        "inbound_packet_ratio": float(posture_summary.get("inbound_packet_ratio")) if posture_summary.get("inbound_packet_ratio") is not None else None,
-        "outbound_byte_ratio": float(posture_summary.get("outbound_byte_ratio")) if posture_summary.get("outbound_byte_ratio") is not None else None,
-        "inbound_byte_ratio": float(posture_summary.get("inbound_byte_ratio")) if posture_summary.get("inbound_byte_ratio") is not None else None,
-        "direction_confident_packet_ratio": float(posture_summary.get("direction_confident_packet_ratio")) if posture_summary.get("direction_confident_packet_ratio") is not None else None,
-        "active_second_ratio": float(posture_summary.get("active_second_ratio")) if posture_summary.get("active_second_ratio") is not None else None,
-        "bursts_per_min": float(posture_summary.get("bursts_per_min")) if posture_summary.get("bursts_per_min") is not None else None,
-        "median_packets_per_flow": float(posture_summary.get("median_packets_per_flow")) if posture_summary.get("median_packets_per_flow") is not None else None,
-        "median_bytes_per_flow": float(posture_summary.get("median_bytes_per_flow")) if posture_summary.get("median_bytes_per_flow") is not None else None,
-        "top_flow_packet_share": float(posture_summary.get("top_flow_packet_share")) if posture_summary.get("top_flow_packet_share") is not None else None,
-        "top_flow_byte_share": float(posture_summary.get("top_flow_byte_share")) if posture_summary.get("top_flow_byte_share") is not None else None,
-        "tls_handshakes_per_min": float(posture_summary.get("tls_handshakes_per_min")) if posture_summary.get("tls_handshakes_per_min") is not None else None,
-        "tcp_reset_stream_ratio": float(proxies.get("tcp_reset_stream_ratio")) if proxies.get("tcp_reset_stream_ratio") is not None else None,
-        "tcp_clean_close_stream_ratio": float(proxies.get("tcp_clean_close_stream_ratio")) if proxies.get("tcp_clean_close_stream_ratio") is not None else None,
-        "tcp_partial_stream_ratio": float(proxies.get("tcp_partial_stream_ratio")) if proxies.get("tcp_partial_stream_ratio") is not None else None,
-        "tcp_issue_stream_ratio": float(proxies.get("tcp_issue_stream_ratio")) if proxies.get("tcp_issue_stream_ratio") is not None else None,
-        "top1_ja3_share": float(proxies.get("top1_ja3_share")) if proxies.get("top1_ja3_share") is not None else None,
-        "top1_ja4_share": float(proxies.get("top1_ja4_share")) if proxies.get("top1_ja4_share") is not None else None,
-        "top1_ja3s_share": float(proxies.get("top1_ja3s_share")) if proxies.get("top1_ja3s_share") is not None else None,
-        "tls_visible": 1 if report_extras["tls_visible"] is True else (0 if report_extras["tls_visible"] is False else None),
+        "max_burst_duration_s": float(report_extras["max_burst_duration_s"])
+        if report_extras["max_burst_duration_s"] is not None
+        else None,
+        "median_burst_duration_s": float(report_extras["median_burst_duration_s"])
+        if report_extras["median_burst_duration_s"] is not None
+        else None,
+        "median_interburst_gap_s": float(report_extras["median_interburst_gap_s"])
+        if report_extras["median_interburst_gap_s"] is not None
+        else None,
+        "outbound_packet_ratio": float(posture_summary.get("outbound_packet_ratio"))
+        if posture_summary.get("outbound_packet_ratio") is not None
+        else None,
+        "inbound_packet_ratio": float(posture_summary.get("inbound_packet_ratio"))
+        if posture_summary.get("inbound_packet_ratio") is not None
+        else None,
+        "outbound_byte_ratio": float(posture_summary.get("outbound_byte_ratio"))
+        if posture_summary.get("outbound_byte_ratio") is not None
+        else None,
+        "inbound_byte_ratio": float(posture_summary.get("inbound_byte_ratio"))
+        if posture_summary.get("inbound_byte_ratio") is not None
+        else None,
+        "direction_confident_packet_ratio": float(
+            posture_summary.get("direction_confident_packet_ratio")
+        )
+        if posture_summary.get("direction_confident_packet_ratio") is not None
+        else None,
+        "active_second_ratio": float(posture_summary.get("active_second_ratio"))
+        if posture_summary.get("active_second_ratio") is not None
+        else None,
+        "bursts_per_min": float(posture_summary.get("bursts_per_min"))
+        if posture_summary.get("bursts_per_min") is not None
+        else None,
+        "median_packets_per_flow": float(posture_summary.get("median_packets_per_flow"))
+        if posture_summary.get("median_packets_per_flow") is not None
+        else None,
+        "median_bytes_per_flow": float(posture_summary.get("median_bytes_per_flow"))
+        if posture_summary.get("median_bytes_per_flow") is not None
+        else None,
+        "top_flow_packet_share": float(posture_summary.get("top_flow_packet_share"))
+        if posture_summary.get("top_flow_packet_share") is not None
+        else None,
+        "top_flow_byte_share": float(posture_summary.get("top_flow_byte_share"))
+        if posture_summary.get("top_flow_byte_share") is not None
+        else None,
+        "tls_handshakes_per_min": float(posture_summary.get("tls_handshakes_per_min"))
+        if posture_summary.get("tls_handshakes_per_min") is not None
+        else None,
+        "tcp_reset_stream_ratio": float(proxies.get("tcp_reset_stream_ratio"))
+        if proxies.get("tcp_reset_stream_ratio") is not None
+        else None,
+        "tcp_clean_close_stream_ratio": float(proxies.get("tcp_clean_close_stream_ratio"))
+        if proxies.get("tcp_clean_close_stream_ratio") is not None
+        else None,
+        "tcp_partial_stream_ratio": float(proxies.get("tcp_partial_stream_ratio"))
+        if proxies.get("tcp_partial_stream_ratio") is not None
+        else None,
+        "tcp_issue_stream_ratio": float(proxies.get("tcp_issue_stream_ratio"))
+        if proxies.get("tcp_issue_stream_ratio") is not None
+        else None,
+        "top1_ja3_share": float(proxies.get("top1_ja3_share"))
+        if proxies.get("top1_ja3_share") is not None
+        else None,
+        "top1_ja4_share": float(proxies.get("top1_ja4_share"))
+        if proxies.get("top1_ja4_share") is not None
+        else None,
+        "top1_ja3s_share": float(proxies.get("top1_ja3s_share"))
+        if proxies.get("top1_ja3s_share") is not None
+        else None,
+        "tls_visible": 1
+        if report_extras["tls_visible"] is True
+        else (0 if report_extras["tls_visible"] is False else None),
         "tls_handshake_packets": report_extras["tls_handshake_packets"],
         "tls_client_hello_packets": report_extras["tls_client_hello_packets"],
         "tls_server_hello_packets": report_extras["tls_server_hello_packets"],
@@ -996,11 +1160,13 @@ def upsert_dynamic_network_features_row(row: dict[str, Any]) -> None:
     placeholders = ", ".join(["%s"] * len(cols))
     updates = ", ".join([f"{c}=VALUES({c})" for c in cols if c != "dynamic_run_id"])
     sql = f"""
-        INSERT INTO dynamic_network_features ({', '.join(cols)})
+        INSERT INTO dynamic_network_features ({", ".join(cols)})
         VALUES ({placeholders})
         ON DUPLICATE KEY UPDATE {updates}
     """
-    core_q.run_sql_write(sql, tuple(row[c] for c in cols), query_name="dynamic.network_features.index_from_evidence")
+    core_q.run_sql_write(
+        sql, tuple(row[c] for c in cols), query_name="dynamic.network_features.index_from_evidence"
+    )
 
 
 def index_dynamic_evidence_pack_to_db(run_dir: Path) -> dict[str, Any]:
@@ -1012,34 +1178,44 @@ def index_dynamic_evidence_pack_to_db(run_dir: Path) -> dict[str, Any]:
     try:
         upsert_dynamic_session_row(row)
     except Exception as exc:
-        return {"ok": False, "reason": f"dynamic_sessions_upsert_failed:{exc}", "dynamic_run_id": rid}
+        return {
+            "ok": False,
+            "reason": f"dynamic_sessions_upsert_failed:{exc}",
+            "dynamic_run_id": rid,
+        }
 
     features_upserted = 0
+    stage_errors: list[dict[str, str]] = []
     feat_row = build_dynamic_network_features_row_from_evidence_pack(run_dir)
     if feat_row:
         try:
             upsert_dynamic_network_features_row(feat_row)
             features_upserted = 1
-        except Exception:
+        except Exception as exc:
             features_upserted = 0
+            stage_errors.append({"stage": "network_features", "error": str(exc)})
 
     indicators = 0
     try:
         indicators = index_network_indicators_for_run(rid, run_dir)
-    except Exception:
+    except Exception as exc:
         indicators = 0
+        stage_errors.append({"stage": "network_indicators", "error": str(exc)})
     domain_context = 0
     try:
         if pkg:
             domain_context = index_dynamic_domain_context_for_run(rid, pkg, run_dir)
-    except Exception:
+    except Exception as exc:
         domain_context = 0
+        stage_errors.append({"stage": "domain_context", "error": str(exc)})
     return {
         "ok": True,
         "dynamic_run_id": rid,
         "network_features_upserted": features_upserted,
         "indicators_indexed": indicators,
         "domain_context_indexed": domain_context,
+        "partial": bool(stage_errors),
+        "stage_errors": stage_errors,
     }
 
 
@@ -1051,6 +1227,7 @@ def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
     features = 0
     indicators = 0
     domain_context = 0
+    partial = 0
     errors: list[str] = []
     for rd in run_dirs:
         if not rd.is_dir():
@@ -1062,6 +1239,14 @@ def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
         res = index_dynamic_evidence_pack_to_db(rd)
         if res.get("ok") is True:
             ok += 1
+            if res.get("partial") is True:
+                partial += 1
+                for stage_error in res.get("stage_errors") or []:
+                    if isinstance(stage_error, dict):
+                        errors.append(
+                            f"{res.get('dynamic_run_id')}:{stage_error.get('stage')}:"
+                            f"{stage_error.get('error')}"
+                        )
             indicators += int(res.get("indicators_indexed") or 0)
             features += int(res.get("network_features_upserted") or 0)
             domain_context += int(res.get("domain_context_indexed") or 0)
@@ -1070,6 +1255,7 @@ def index_dynamic_evidence_packs_to_db(root: Path) -> dict[str, Any]:
     return {
         "scanned": scanned,
         "ok": ok,
+        "partial": partial,
         "network_features_upserted": features,
         "indicators_indexed": indicators,
         "domain_context_indexed": domain_context,

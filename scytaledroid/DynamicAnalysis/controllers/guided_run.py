@@ -75,7 +75,6 @@ from scytaledroid.DynamicAnalysis.tracker_scope import (
 from scytaledroid.DynamicAnalysis.tracker_scope import (
     default_resolve_tracker_run_identity as _resolve_tracker_run_identity_shared,
 )
-from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_evidence_path
 from scytaledroid.DynamicAnalysis.utils.run_cleanup import (
     delete_dynamic_evidence_packs,
     find_dynamic_run_dirs,
@@ -2403,6 +2402,10 @@ def _run_guided_dataset_iteration(
         interaction_level=interaction_level,
         messaging_activity=messaging_activity,
         counts_toward_completion=counts_toward_completion,
+        final_operator_metadata_collector=_protocol_fit_metadata_collector(
+            run_profile=run_profile,
+            package_name=package_name,
+        ),
     )
     result = execute_dynamic_run_spec(spec)
     print_run_summary(result, label)
@@ -2424,124 +2427,52 @@ def _run_guided_dataset_iteration(
     _post_run_integrity_check(result)
     if result.dynamic_run_id and print_tier1_qa_result:
         print_tier1_qa_result(result.dynamic_run_id)
-    _capture_protocol_fit_feedback(
-        result=result, run_profile=run_profile, package_name=package_name
-    )
     return True
 
 
-def _capture_protocol_fit_feedback(*, result, run_profile: str, package_name: str | None) -> None:
+def _protocol_fit_metadata_collector(*, run_profile: str, package_name: str | None):
+    """Build a collector executed after capture but before evidence is sealed."""
     if run_profile != "interaction_scripted":
-        return
-    if not result or str(getattr(result, "status", "")).lower() != "success":
-        return
-    run_id = str(getattr(result, "dynamic_run_id", "") or "").strip()
-    if not run_id:
-        return
-    print()
-    menu_utils.print_header("Protocol Fit (Optional)")
-    fit_options = [
-        menu_utils.MenuOption("1", "Great", description="Steps matched app flow well."),
-        menu_utils.MenuOption("2", "Okay", description="Mostly good; minor mismatch."),
-        menu_utils.MenuOption("3", "Poor", description="Steps did not fit app well."),
-    ]
-    menu_utils.render_menu(
-        menu_utils.MenuSpec(
-            items=fit_options,
-            default="2",
-            show_exit=False,
-            show_descriptions=True,
-            compact=True,
-        )
-    )
-    fit_choice = prompt_utils.get_choice(
-        ["1", "2", "3"], default="2", invalid_message="Choose 1-3."
-    )
-    fit_label = {"1": "great", "2": "okay", "3": "poor"}.get(fit_choice, "okay")
+        return None
 
-    step_ref = ""
-    replacement_note = ""
-    if fit_label == "poor":
-        step_ref = prompt_utils.prompt_text(
-            "Which step number felt wrong? (optional, e.g., 2)",
-            required=False,
-        ).strip()
-        replacement_note = prompt_utils.prompt_text(
-            "Suggested replacement step (optional one-line note)",
-            required=False,
-        ).strip()
-        print(
-            status_messages.status(
-                "Rerun recommended with the correct template/protocol before counting this app for paper cohort.",
-                level="warn",
+    def _collect(manifest) -> dict[str, object]:
+        print()
+        menu_utils.print_header("Protocol Fit (Required Before Evidence Seal)")
+        menu_utils.render_menu(
+            menu_utils.MenuSpec(
+                items=[
+                    menu_utils.MenuOption("1", "Great", description="Steps matched app flow well."),
+                    menu_utils.MenuOption("2", "Okay", description="Mostly good; minor mismatch."),
+                    menu_utils.MenuOption("3", "Poor", description="Steps did not fit app well."),
+                ],
+                default="2", show_exit=False, show_descriptions=True, compact=True,
             )
         )
-
-    # Messaging templates may legitimately send messages (text-mode templates). Only flag
-    # "send" as a protocol violation when it was not expected by the selected template.
-    send_detected = False
-
-    event = {
-        "timestamp_utc": datetime.now(UTC).isoformat(),
-        "event": "protocol_fit_feedback",
-        "run_id": run_id,
-        "run_profile": run_profile,
-        "fit": fit_label,
-        "step_ref": step_ref or None,
-        "replacement_note": replacement_note or None,
-        "script_protocol_send": bool(send_detected),
-    }
-    run_dir = (
-        resolve_evidence_path(getattr(result, "evidence_path", None))
-        if getattr(result, "evidence_path", None)
-        else None
-    )
-    if not run_dir:
-        return
-    manifest_path = Path(run_dir) / "run_manifest.json"
-    events_path = Path(run_dir) / "notes" / "run_events.jsonl"
-    try:
-        events_path.parent.mkdir(parents=True, exist_ok=True)
-        with events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, sort_keys=True) + "\n")
-    except Exception:
-        return
-    try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            operator_existing = (
-                payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
+        fit_choice = prompt_utils.get_choice(["1", "2", "3"], default="2", invalid_message="Choose 1-3.")
+        fit_label = {"1": "great", "2": "okay", "3": "poor"}.get(fit_choice, "okay")
+        step_ref = replacement_note = ""
+        if fit_label == "poor":
+            step_ref = prompt_utils.prompt_text("Which step number felt wrong? (optional, e.g., 2)", required=False).strip()
+            replacement_note = prompt_utils.prompt_text("Suggested replacement step (optional one-line note)", required=False).strip()
+        operator = getattr(manifest, "operator", {})
+        operator = operator if isinstance(operator, dict) else {}
+        template = str(operator.get("template_id_actual") or operator.get("template_id") or "").strip()
+        text_template = template.endswith("_text_v1") or template in {"messaging_text_v1", "whatsapp_text_v1", "whatsapp_text_behavior_v2"}
+        send_detected = False
+        if _is_messaging_package_or_category(str(package_name or "").strip().lower()) and not text_template:
+            send_detected = prompt_utils.prompt_yes_no(
+                "Did this scripted run send messages outside of the template steps? (protocol violation)", default=False
             )
-            observed_template = str(
-                operator_existing.get("template_id_actual")
-                or operator_existing.get("template_id")
-                or ""
-            ).strip()
-            is_text_template = observed_template.endswith("_text_v1") or observed_template in {
-                "messaging_text_v1",
-                "whatsapp_text_v1",
-                "whatsapp_text_behavior_v2",
-            }
-            if (
-                _is_messaging_package_or_category(str(package_name or "").strip().lower())
-                and not is_text_template
-            ):
-                send_detected = prompt_utils.prompt_yes_no(
-                    "Did this scripted run send messages outside of the template steps? (protocol violation)",
-                    default=False,
-                )
-            operator = payload.get("operator") if isinstance(payload.get("operator"), dict) else {}
-            operator["protocol_fit"] = fit_label
-            operator["protocol_fit_step_ref"] = step_ref or None
-            operator["protocol_fit_replacement_note"] = replacement_note or None
-            operator["script_protocol_send"] = bool(send_detected)
-            payload["operator"] = operator
-            manifest_path.write_text(
-                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
-            )
-    except Exception:
-        pass
-    print(status_messages.status("Protocol fit feedback saved.", level="info"))
+        if fit_label == "poor":
+            print(status_messages.status("Rerun recommended with the correct template/protocol before counting this app for paper cohort.", level="warn"))
+        return {
+            "protocol_fit": fit_label,
+            "protocol_fit_step_ref": step_ref or None,
+            "protocol_fit_replacement_note": replacement_note or None,
+            "script_protocol_send": bool(send_detected),
+        }
+
+    return _collect
 
 
 __all__ = ["run_guided_dataset_run"]

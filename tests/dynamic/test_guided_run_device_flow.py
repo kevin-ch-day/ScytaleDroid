@@ -154,7 +154,7 @@ def test_guided_run_reuses_selected_device_across_cohort_iterations(monkeypatch,
     monkeypatch.setattr(guided_run, "print_plan_selection_banner", lambda *_a, **_k: None)
     monkeypatch.setattr(guided_run, "print_run_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(guided_run, "_post_run_integrity_check", lambda *_a, **_k: None)
-    monkeypatch.setattr(guided_run, "_capture_protocol_fit_feedback", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_protocol_fit_metadata_collector", lambda **_k: None)
 
     guided_run.run_guided_dataset_run(
         select_package_from_groups=_select_package,
@@ -197,7 +197,7 @@ def test_guided_run_dataset_baseline_uses_recommended_duration(monkeypatch) -> N
     monkeypatch.setattr(guided_run, "print_plan_selection_banner", lambda *_a, **_k: None)
     monkeypatch.setattr(guided_run, "print_run_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(guided_run, "_post_run_integrity_check", lambda *_a, **_k: None)
-    monkeypatch.setattr(guided_run, "_capture_protocol_fit_feedback", lambda **_k: None)
+    monkeypatch.setattr(guided_run, "_protocol_fit_metadata_collector", lambda **_k: None)
 
     def _build_spec(**kwargs):
         captured["spec"] = kwargs

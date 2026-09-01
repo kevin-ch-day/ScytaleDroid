@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -58,6 +59,71 @@ def dynamic_evidence_roots(*, include_legacy: bool = True) -> tuple[Path, ...]:
     return tuple(roots)
 
 
+def resolve_contained_path(root: Path, relative_path: str | Path) -> Path | None:
+    """Resolve a relative path only when it remains beneath ``root``.
+
+    Resolving both sides also rejects symlink escapes through an existing path
+    component. Callers remain responsible for checking whether the target must
+    be a file or directory.
+    """
+
+    relative = Path(relative_path)
+    if relative.is_absolute():
+        return None
+    try:
+        resolved_root = root.resolve(strict=False)
+        candidate = (root / relative).resolve(strict=False)
+        candidate.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
+def normalize_run_id(value: object) -> str | None:
+    """Return a non-empty, single-component run ID without normalization ambiguity."""
+
+    if not isinstance(value, str) or not value or value != value.strip():
+        return None
+    component = Path(value)
+    if component.is_absolute() or component.name != value or value in {".", ".."}:
+        return None
+    return value
+
+
+def resolve_run_dir_under(root: Path, run_id: object) -> Path | None:
+    """Resolve one run directory beneath ``root`` with ID/path-name binding."""
+
+    normalized = normalize_run_id(run_id)
+    if normalized is None:
+        return None
+    candidate = resolve_contained_path(root, normalized)
+    if candidate is None or candidate.name != normalized:
+        return None
+    return candidate
+
+
+def bound_manifest_run_id(manifest: object, run_dir: Path) -> str | None:
+    """Return the manifest run ID only when it agrees with its directory name.
+
+    Older evidence packs may omit ``dynamic_run_id``; their unambiguous directory
+    name remains the compatibility fallback. An explicitly present value must be
+    a valid run ID and match the directory exactly.
+    """
+
+    if not isinstance(manifest, Mapping):
+        return None
+    directory_id = normalize_run_id(run_dir.name)
+    if directory_id is None:
+        return None
+    raw = manifest.get("dynamic_run_id")
+    if raw in (None, ""):
+        return directory_id
+    manifest_id = normalize_run_id(raw)
+    if manifest_id != directory_id:
+        return None
+    return manifest_id
+
+
 def _uuid_name(path: Path) -> str | None:
     for part in reversed(path.parts):
         try:
@@ -71,14 +137,14 @@ def _uuid_name(path: Path) -> str | None:
 def resolve_dynamic_run_dir(dynamic_run_id: str | None) -> Path | None:
     """Resolve a dynamic run directory across canonical and legacy roots."""
 
-    run_id = str(dynamic_run_id or "").strip()
-    if not run_id:
+    run_id = normalize_run_id(dynamic_run_id)
+    if run_id is None:
         return None
     for root in dynamic_evidence_roots():
-        candidate = root / run_id
-        if candidate.exists():
+        candidate = resolve_run_dir_under(root, run_id)
+        if candidate is not None and candidate.exists():
             return candidate
-    return dynamic_evidence_root() / run_id
+    return resolve_run_dir_under(dynamic_evidence_root(), run_id)
 
 
 def iter_dynamic_run_dirs(*, include_legacy: bool = True) -> tuple[Path, ...]:
@@ -256,6 +322,7 @@ def resolve_evidence_path(evidence_path: str | None) -> Path | None:
 
 
 __all__ = [
+    "bound_manifest_run_id",
     "dynamic_evidence_root",
     "dynamic_evidence_roots",
     "ensure_legacy_dynamic_symlink",
@@ -264,7 +331,10 @@ __all__ = [
     "LegacyDynamicAliasRepair",
     "LegacyDynamicAliasSummary",
     "legacy_dynamic_evidence_root",
+    "normalize_run_id",
     "rebuild_legacy_dynamic_aliases",
+    "resolve_contained_path",
     "resolve_dynamic_run_dir",
     "resolve_evidence_path",
+    "resolve_run_dir_under",
 ]

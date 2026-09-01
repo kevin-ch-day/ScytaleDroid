@@ -44,10 +44,18 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     resolve_dataset_plan_read_path,
     write_dataset_freeze_payload,
 )
-from scytaledroid.DynamicAnalysis.research_cohort_runtime import active_research_cohort_label
+from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
+    active_research_cohort_key,
+    active_research_cohort_label,
+)
 from scytaledroid.DynamicAnalysis.tools.evidence.freeze_lifecycle import (
     demote_noncanonical_canonical_freeze,
 )
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_verify import (
+    REQUIRED_FROZEN_INPUTS as _REQUIRED_RELATIVE_INPUTS,
+)
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -58,15 +66,6 @@ class FreezeConfig:
     min_pcap_bytes: int = int(paper_config.MIN_PCAP_BYTES)
     min_windows_baseline: int = int(paper_config.MIN_WINDOWS_BASELINE)
     max_age_days: int | None = None
-
-
-_REQUIRED_RELATIVE_INPUTS = (
-    "run_manifest.json",
-    "inputs/static_dynamic_plan.json",
-    "analysis/summary.json",
-    "analysis/pcap_report.json",
-    "analysis/pcap_features.json",
-)
 
 
 @dataclass(frozen=True)
@@ -137,6 +136,16 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _strict_nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _bucket_from_profile(profile: str) -> str:
@@ -227,8 +236,8 @@ def _resolve_pcap_size_bytes(run_dir: Path, manifest: dict[str, Any], ds: dict[s
             pcap_rel = a.get("relative_path")
             break
     if isinstance(pcap_rel, str) and pcap_rel:
-        p = run_dir / pcap_rel
-        if p.exists():
+        p = resolve_contained_path(run_dir, pcap_rel)
+        if p is not None and p.is_file():
             try:
                 return int(p.stat().st_size)
             except Exception:
@@ -246,6 +255,12 @@ def build_dataset_freeze_manifest(
     dataset_plan = _read_json(dataset_plan_path)
     if not isinstance(dataset_plan, dict):
         raise RuntimeError(f"Invalid dataset plan JSON: {dataset_plan_path}")
+    active_key = str(active_research_cohort_key() or "").strip().lower()
+    stored_key = str(dataset_plan.get("cohort_key") or "").strip().lower()
+    if active_key and stored_key and stored_key != active_key:
+        raise RuntimeError(
+            f"FREEZE_DATASET_PLAN_COHORT_MISMATCH: payload={stored_key}:active={active_key}"
+        )
 
     if not evidence_root.exists():
         raise RuntimeError(f"FREEZE_BLOCKED_NO_EVIDENCE_ROOT:{evidence_root}")
@@ -485,8 +500,12 @@ def build_dataset_freeze_manifest(
                 if isinstance(a, dict) and a.get("type") == "pcapdroid_capture":
                     pcap_rel = a.get("relative_path")
                     break
-            if isinstance(pcap_rel, str) and pcap_rel and not (run_dir / pcap_rel).exists():
-                miss.append(str(pcap_rel))
+            if isinstance(pcap_rel, str) and pcap_rel:
+                pcap_path = resolve_contained_path(run_dir, pcap_rel)
+                if pcap_path is None:
+                    raise RuntimeError(f"FREEZE_UNSAFE_ARTIFACT_PATH:{rid}:{pcap_rel}")
+                if not pcap_path.is_file():
+                    miss.append(str(pcap_rel))
             if miss:
                 missing_inputs[rid] = sorted(set(miss))
                 continue
@@ -498,18 +517,25 @@ def build_dataset_freeze_manifest(
 
             checks: dict[str, str] = {rel: _sha256_file(run_dir / rel) for rel in _REQUIRED_RELATIVE_INPUTS}
             rep = _read_json(run_dir / "analysis/pcap_report.json") or {}
-            pcap_sha256 = rep.get("pcap_sha256") or None
-            pcap_size_bytes = rep.get("pcap_size_bytes") or None
+            pcap_sha256 = None
+            pcap_size_bytes = None
             if isinstance(pcap_rel, str) and pcap_rel:
-                pcap_path = run_dir / pcap_rel
-                if pcap_path.exists():
-                    if not isinstance(pcap_sha256, str) or not pcap_sha256.strip():
-                        pcap_sha256 = _sha256_file(pcap_path)
-                    if pcap_size_bytes is None:
-                        try:
-                            pcap_size_bytes = int(pcap_path.stat().st_size)
-                        except Exception:
-                            pcap_size_bytes = None
+                pcap_path = resolve_contained_path(run_dir, pcap_rel)
+                if pcap_path is None:
+                    raise RuntimeError(f"FREEZE_UNSAFE_ARTIFACT_PATH:{rid}:{pcap_rel}")
+                if pcap_path.is_file():
+                    pcap_sha256 = _sha256_file(pcap_path)
+                    pcap_size_bytes = int(pcap_path.stat().st_size)
+                    reported_hash = str(rep.get("pcap_sha256") or "").strip().lower()
+                    if reported_hash and reported_hash != pcap_sha256:
+                        raise RuntimeError(f"FREEZE_PCAP_REPORT_HASH_MISMATCH:{rid}")
+                    reported_size = rep.get("pcap_size_bytes")
+                    if reported_size not in (None, ""):
+                        parsed_reported_size = _strict_nonnegative_int(reported_size)
+                        if parsed_reported_size is None:
+                            raise RuntimeError(f"FREEZE_PCAP_REPORT_SIZE_INVALID:{rid}") from None
+                        if parsed_reported_size != pcap_size_bytes:
+                            raise RuntimeError(f"FREEZE_PCAP_REPORT_SIZE_MISMATCH:{rid}")
 
             run_plan = _read_json(run_dir / "inputs/static_dynamic_plan.json") or {}
             if isinstance(run_plan, dict):
@@ -615,6 +641,7 @@ def build_dataset_freeze_manifest(
         "reason_taxonomy_version": int(paper_config.REASON_TAXONOMY_VERSION),
         "plan_schema_version_required": required_plan_schema_version,
         "plan_paper_contract_version_required": required_plan_paper_contract_version,
+        "cohort_key": active_key or None,
         "dataset_id": active_research_cohort_label(),
         "dataset_version": "paper2_v1",
         "created_at_utc": datetime.now(UTC).isoformat(),
@@ -690,7 +717,7 @@ def write_dataset_freeze_manifest(
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = out_dir / f"dataset_freeze-{ts}.json"
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(out_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     if also_write_canonical:
         demote_noncanonical_canonical_freeze(archive_dir=out_dir, evidence_root=evidence_root)
@@ -709,7 +736,7 @@ def write_dataset_freeze_manifest(
         "source_freeze_manifest": str(out_path),
     }
     contract_path = out_dir / "paper_contract_v1.json"
-    contract_path.write_text(json.dumps(contract_payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(contract_path, json.dumps(contract_payload, indent=2, sort_keys=True) + "\n")
 
     return out_path
 

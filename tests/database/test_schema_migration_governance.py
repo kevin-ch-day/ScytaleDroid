@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scytaledroid.Database.db_queries import canonical as canonical_queries
 from scytaledroid.Database.db_queries import dynamic as dynamic_queries
-from scytaledroid.Database.db_utils.dynamic_session_qfg_schema import SCHEMA_VERSION_AFTER
+from scytaledroid.Database.db_utils.dynamic_domain_normalization import SCHEMA_VERSION_AFTER
 from scytaledroid.Database.db_utils.phase_a_typed_replacements import (
     backfill_typed_replacement_columns,
 )

@@ -20,6 +20,7 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     write_dataset_plan_payload,
 )
 from scytaledroid.DynamicAnalysis.research_cohort_runtime import (
+    active_research_cohort_key,
     active_research_cohort_packages,
 )
 from scytaledroid.DynamicAnalysis.tracker_scope import (
@@ -137,7 +138,7 @@ def update_dataset_tracker(
         return None
     tracker_path = resolve_dataset_plan_read_path()
     tracker_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = _load(tracker_path)
+    payload = _load_tracker_payload(tracker_path)
     apps = payload.setdefault("apps", {})
     app_entry = apps.setdefault(package, {"runs": []})
     operator = manifest.operator if isinstance(manifest.operator, dict) else {}
@@ -386,18 +387,17 @@ def _explicit_noncountable_is_policy_override(row: dict[str, Any], profile_lc: s
 
 def load_dataset_tracker() -> dict[str, Any]:
     tracker_path = resolve_dataset_plan_read_path()
-    payload = _load(tracker_path)
+    payload = _load_tracker_payload(tracker_path)
+    active_key = str(active_research_cohort_key() or "").strip().lower()
+    stored_key = str(payload.get("cohort_key") or "").strip().lower() if isinstance(payload, dict) else ""
+    if active_key and stored_key and stored_key != active_key:
+        raise RuntimeError(
+            f"DATASET_PLAN_COHORT_MISMATCH: payload={stored_key} active={active_key}"
+        )
     dirty: list[bool] = [False]
     normalized = _normalize_tracker_payload(payload, DatasetTrackerConfig(), dirty=dirty)
-    # The tracker JSON is a derived index. If we can deterministically repair stale
-    # derived fields (e.g., eligibility), persist the fix so downstream tools that
-    # read the raw JSON (ad-hoc scripts) see consistent results.
-    if dirty[0] and tracker_path.exists():
-        try:
-            write_dataset_plan_payload(normalized)
-        except OSError:
-            # Best-effort; callers can still reindex explicitly.
-            pass
+    # `load_*` is a pure read path: callers may normalize in memory, but no
+    # tracker, mirror, mtime, or directory entry may be changed here.
     return normalized
 
 
@@ -737,6 +737,41 @@ def _load(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"apps": {}}
+
+
+def _load_tracker_payload(path: Path) -> dict[str, Any]:
+    """Load the tracker without converting corruption into an empty dataset."""
+
+    if not path.exists():
+        return {"apps": {}}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"DATASET_PLAN_READ_FAILED:{path}:{exc}") from exc
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"DATASET_PLAN_INVALID_JSON:{path}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"DATASET_PLAN_INVALID_ROOT:{path}")
+    apps = payload.get("apps")
+    if apps is None:
+        payload["apps"] = {}
+    elif not isinstance(apps, dict):
+        raise RuntimeError(f"DATASET_PLAN_INVALID_APPS:{path}")
+    else:
+        for package, app_entry in apps.items():
+            if not isinstance(app_entry, dict):
+                raise RuntimeError(f"DATASET_PLAN_INVALID_APP_ENTRY:{path}:{package}")
+            runs = app_entry.get("runs")
+            if runs is None:
+                app_entry["runs"] = []
+                continue
+            if not isinstance(runs, list):
+                raise RuntimeError(f"DATASET_PLAN_INVALID_RUNS:{path}:{package}")
+            if any(not isinstance(run, dict) for run in runs):
+                raise RuntimeError(f"DATASET_PLAN_INVALID_RUN_ENTRY:{path}:{package}")
+    return payload
 
 
 def _parse_dt(value: object) -> datetime | None:

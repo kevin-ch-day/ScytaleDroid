@@ -22,14 +22,16 @@ from scytaledroid.Config import app_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_operational as operational_config
 from scytaledroid.DynamicAnalysis.ml import ml_parameters_profile as paper_config
 from scytaledroid.DynamicAnalysis.plans import enrich_dynamic_plan
-
-_REQUIRED_RELATIVE_INPUTS = (
-    "run_manifest.json",
-    "inputs/static_dynamic_plan.json",
-    "analysis/summary.json",
-    "analysis/pcap_report.json",
-    "analysis/pcap_features.json",
+from scytaledroid.DynamicAnalysis.tools.evidence.freeze_verify import (
+    REQUIRED_FROZEN_INPUTS as _REQUIRED_RELATIVE_INPUTS,
 )
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    bound_manifest_run_id,
+    normalize_run_id,
+    resolve_contained_path,
+    resolve_run_dir_under,
+)
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 
 def _normalize_hex(value: object, *, n: int) -> str | None:
@@ -64,6 +66,16 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _strict_nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _git_commit_hash(repo_root: Path) -> str | None:
@@ -105,7 +117,7 @@ def build_snapshot_freeze_manifest(
     if not included:
         raise RuntimeError("selection_manifest missing inclusion.included_run_ids")
 
-    included_run_ids = [str(rid).strip() for rid in included if isinstance(rid, str) and rid.strip()]
+    included_run_ids = [rid for rid in included if isinstance(rid, str) and rid]
     included_run_ids = sorted(dict.fromkeys(included_run_ids))  # stable unique
 
     missing_inputs: dict[str, list[str]] = {}
@@ -120,21 +132,36 @@ def build_snapshot_freeze_manifest(
         run_dir = None
         ev_path = meta.get("evidence_pack_path")
         if isinstance(ev_path, str) and ev_path.strip():
-            candidate = Path(ev_path)
-            if candidate.exists():
+            candidate = Path(ev_path).resolve(strict=False)
+            try:
+                candidate.relative_to(evidence_root.resolve(strict=False))
+            except (OSError, RuntimeError, ValueError):
+                raise RuntimeError(f"SNAPSHOT_FREEZE_UNSAFE_EVIDENCE_PATH:{rid}:{ev_path}") from None
+            if candidate.name != rid:
+                raise RuntimeError(f"SNAPSHOT_FREEZE_EVIDENCE_PATH_ID_MISMATCH:{rid}:{ev_path}")
+            if candidate.is_dir():
                 run_dir = candidate
         if run_dir is None:
-            run_dir = evidence_root / rid
-        miss = [rel for rel in _REQUIRED_RELATIVE_INPUTS if not (run_dir / rel).exists()]
+            if normalize_run_id(rid) is None:
+                raise RuntimeError(f"SNAPSHOT_FREEZE_UNSAFE_RUN_ID:{rid}")
+            run_dir = resolve_run_dir_under(evidence_root, rid)
+            if run_dir is None:
+                raise RuntimeError(f"SNAPSHOT_FREEZE_UNSAFE_RUN_ID:{rid}")
+        miss = [rel for rel in _REQUIRED_RELATIVE_INPUTS if not (run_dir / rel).is_file()]
 
         mf = _read_json(run_dir / "run_manifest.json") or {}
+        if bound_manifest_run_id(mf, run_dir) != rid:
+            raise RuntimeError(f"SNAPSHOT_FREEZE_MANIFEST_RUN_ID_MISMATCH:{rid}")
         pcap_rel = None
         for a in (mf.get("artifacts") or []):
             if isinstance(a, dict) and a.get("type") == "pcapdroid_capture":
                 pcap_rel = a.get("relative_path")
                 break
         if isinstance(pcap_rel, str) and pcap_rel:
-            if not (run_dir / pcap_rel).exists():
+            pcap_path = resolve_contained_path(run_dir, pcap_rel)
+            if pcap_path is None:
+                raise RuntimeError(f"SNAPSHOT_FREEZE_UNSAFE_ARTIFACT_PATH:{rid}:{pcap_rel}")
+            if not pcap_path.is_file():
                 miss.append(str(pcap_rel))
 
         if miss:
@@ -148,18 +175,23 @@ def build_snapshot_freeze_manifest(
         pcap_sha256 = None
         pcap_size_bytes = None
         rep = _read_json(run_dir / "analysis/pcap_report.json") or {}
-        pcap_sha256 = rep.get("pcap_sha256") or None
-        pcap_size_bytes = rep.get("pcap_size_bytes") or None
         if isinstance(pcap_rel, str) and pcap_rel:
-            pcap_path = run_dir / pcap_rel
-            if pcap_path.exists():
-                if not isinstance(pcap_sha256, str) or not pcap_sha256.strip():
-                    pcap_sha256 = _sha256_file(pcap_path)
-                if pcap_size_bytes is None:
-                    try:
-                        pcap_size_bytes = int(pcap_path.stat().st_size)
-                    except Exception:
-                        pcap_size_bytes = None
+            pcap_path = resolve_contained_path(run_dir, pcap_rel)
+            if pcap_path is None:
+                raise RuntimeError(f"SNAPSHOT_FREEZE_UNSAFE_ARTIFACT_PATH:{rid}:{pcap_rel}")
+            if pcap_path.is_file():
+                pcap_sha256 = _sha256_file(pcap_path)
+                pcap_size_bytes = int(pcap_path.stat().st_size)
+                reported_hash = str(rep.get("pcap_sha256") or "").strip().lower()
+                if reported_hash and reported_hash != pcap_sha256:
+                    raise RuntimeError(f"SNAPSHOT_FREEZE_PCAP_REPORT_HASH_MISMATCH:{rid}")
+                reported_size = rep.get("pcap_size_bytes")
+                if reported_size not in (None, ""):
+                    parsed_reported_size = _strict_nonnegative_int(reported_size)
+                    if parsed_reported_size is None:
+                        raise RuntimeError(f"SNAPSHOT_FREEZE_PCAP_REPORT_SIZE_INVALID:{rid}")
+                    if parsed_reported_size != pcap_size_bytes:
+                        raise RuntimeError(f"SNAPSHOT_FREEZE_PCAP_REPORT_SIZE_MISMATCH:{rid}")
 
         run_checksums[rid] = {
             "package_name": meta.get("package_name"),
@@ -293,7 +325,7 @@ def write_snapshot_freeze_manifest(
         return SnapshotFreezeResult(freeze_path=freeze_path, included_run_ids=[str(x) for x in ids], missing_inputs={})
 
     payload = build_snapshot_freeze_manifest(selection_manifest_path=selection_manifest_path, evidence_root=evidence_root)
-    freeze_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(freeze_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     ids = payload.get("included_run_ids") if isinstance(payload.get("included_run_ids"), list) else []
     return SnapshotFreezeResult(freeze_path=freeze_path, included_run_ids=[str(x) for x in ids], missing_inputs={})
 

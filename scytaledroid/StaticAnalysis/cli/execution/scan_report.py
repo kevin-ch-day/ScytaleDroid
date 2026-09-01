@@ -202,6 +202,9 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
     detector_skipped = 0
     total_duration_sec = 0.0
     skipped_detector_rows_collect: list[Mapping[str, object]] = []
+    placeholder_detector_rows_collect: list[Mapping[str, object]] = []
+    placeholder_stage_opportunities = 0
+    non_placeholder_skip_class_counts: Counter[str] = Counter()
     policy_fail_keys: set[tuple[str, str]] = set()
     finding_fail_keys: set[tuple[str, str]] = set()
 
@@ -256,6 +259,18 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
             skips = summary.get("skipped_detectors")
             if isinstance(skips, list):
                 skipped_detector_rows_collect.extend(row for row in skips if isinstance(row, Mapping))
+            placeholders = summary.get("placeholder_detectors")
+            if isinstance(placeholders, list):
+                placeholder_detector_rows_collect.extend(
+                    row for row in placeholders if isinstance(row, Mapping)
+                )
+            placeholder_stage_opportunities += int(
+                summary.get("placeholder_detector_count", 0) or 0
+            )
+            skip_classes = summary.get("non_placeholder_skip_class_counts")
+            if isinstance(skip_classes, Mapping):
+                for key, value in skip_classes.items():
+                    non_placeholder_skip_class_counts[str(key)] += int(value or 0)
 
     rolled = _rollup_status_counts_per_detector(app_result)
     if rolled is not None:
@@ -280,6 +295,21 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
     finding_fail_count = len(finding_fail_detectors)
 
     skipped_detectors_merged = merge_skipped_detectors(skipped_detector_rows_collect)
+    placeholder_detectors_merged = merge_skipped_detectors(
+        placeholder_detector_rows_collect
+    )
+    implemented_stage_opportunities = max(
+        0, detector_total - placeholder_stage_opportunities
+    )
+    executed_implemented_stage_opportunities = min(
+        detector_executed, implemented_stage_opportunities
+    )
+    design_deferred_stage_opportunities = int(
+        non_placeholder_skip_class_counts.get("design_deferred", 0)
+    )
+    non_deferred_implemented_stage_opportunities = max(
+        0, implemented_stage_opportunities - design_deferred_stage_opportunities
+    )
 
     fallback_meta = rollup_parse_fallback_signals(app_result)
 
@@ -325,6 +355,33 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
         "skipped_detectors": skipped_detectors_merged,
         "skipped_detectors_raw_events": len(skipped_detector_rows_collect),
         "skipped_detectors_unique_rows": len(skipped_detectors_merged),
+        "placeholder_detector_count": len(placeholder_detectors_merged),
+        "placeholder_detectors": placeholder_detectors_merged,
+        "placeholder_stage_opportunities": placeholder_stage_opportunities,
+        "implemented_stage_opportunities": implemented_stage_opportunities,
+        "executed_implemented_stage_opportunities": executed_implemented_stage_opportunities,
+        "implemented_stage_execution_rate": (
+            round(
+                executed_implemented_stage_opportunities
+                / implemented_stage_opportunities,
+                6,
+            )
+            if implemented_stage_opportunities
+            else None
+        ),
+        "non_placeholder_skip_class_counts": dict(
+            sorted(non_placeholder_skip_class_counts.items())
+        ),
+        "non_deferred_implemented_stage_opportunities": non_deferred_implemented_stage_opportunities,
+        "non_deferred_implemented_execution_rate": (
+            round(
+                executed_implemented_stage_opportunities
+                / non_deferred_implemented_stage_opportunities,
+                6,
+            )
+            if non_deferred_implemented_stage_opportunities
+            else None
+        ),
         "resource_fallback_used_artifacts": fallback_meta["resource_fallback_used_artifacts"],
         "resource_bounds_warning_artifacts": fallback_meta["resource_bounds_warning_artifacts"],
         "label_parse_signal_artifacts": fallback_meta["label_parse_signal_artifacts"],
@@ -454,6 +511,7 @@ def finish_report_after_analysis(
     params: RunParameters,
     base_dir: Path,
     *,
+    persist_report: bool = True,
     phase_timing_sink: MutableMapping[str, float] | None = None,
 ):
     """Persist (or skip) after ``analyze_apk`` — mirrors :func:`generate_report` post-analyze branches."""
@@ -474,6 +532,12 @@ def finish_report_after_analysis(
         except Exception:
             pass
 
+        return report, None, None, False
+
+    # Some post-processing consumers need a freshly generated in-memory report
+    # but must not publish it over the canonical report emitted by the scan.
+    # Permission parity uses this path when a saved report cannot be reloaded.
+    if not persist_report:
         return report, None, None, False
 
     try:
@@ -523,6 +587,7 @@ def generate_report(
     base_dir: Path,
     params: RunParameters,
     *,
+    persist_report: bool = True,
     extra_metadata: Mapping[str, object] | None = None,
     phase_timing_sink: MutableMapping[str, float] | None = None,
     runtime_state: MutableMapping[str, object] | None = None,
@@ -589,6 +654,7 @@ def generate_report(
         report,
         params,
         base_dir,
+        persist_report=persist_report,
         phase_timing_sink=phase_timing_sink,
     )
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+
 from .core import DynamicSessionConfig, DynamicSessionResult
 from .core.run_specs import DynamicRunSpec
 from .engine import run_dynamic_engine
@@ -32,6 +34,7 @@ def run_dynamic_analysis(
     require_dynamic_schema: bool = True,
     observer_prompts_enabled: bool = False,
     pcapdroid_api_key: str | None = None,
+    final_operator_metadata_collector: Callable[[object], Mapping[str, object] | None] | None = None,
 ) -> DynamicSessionResult:
     if not interactive or batch_id:
         raise RuntimeError(
@@ -66,6 +69,7 @@ def run_dynamic_analysis(
         require_dynamic_schema=require_dynamic_schema,
         observer_prompts_enabled=observer_prompts_enabled,
         pcapdroid_api_key=pcapdroid_api_key,
+        final_operator_metadata_collector=final_operator_metadata_collector,
     )
     engine_result = run_dynamic_engine(config)
     return engine_result.session
@@ -95,6 +99,7 @@ def execute_dynamic_run_spec(spec: DynamicRunSpec) -> DynamicSessionResult:
         require_dynamic_schema=getattr(spec, "require_dynamic_schema", True),
         observer_prompts_enabled=getattr(spec, "observer_prompts_enabled", False),
         pcapdroid_api_key=getattr(spec, "pcapdroid_api_key", None),
+        final_operator_metadata_collector=getattr(spec, "final_operator_metadata_collector", None),
     )
 
 

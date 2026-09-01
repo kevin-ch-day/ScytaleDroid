@@ -8,6 +8,8 @@ from scytaledroid.StaticAnalysis.modules.string_analysis.bucketing.classifier im
 )
 from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.host_normalizer import (
     normalize_host,
+    registrable_domain,
+    registrable_domain_resolver_metadata,
 )
 from scytaledroid.StaticAnalysis.modules.string_analysis.parsing.punctuation import (
     strip_wrap_punct,
@@ -26,9 +28,7 @@ from scytaledroid.StaticAnalysis.modules.string_analysis.policy.evaluator import
 def test_punctuation_strip():
     assert strip_wrap_punct("bouncycastle.org)") == "bouncycastle.org"
     assert strip_wrap_punct("(http://example.com,)") == "http://example.com"
-    assert (
-        strip_wrap_punct("http://[2001:db8::1])") == "http://[2001:db8::1]"
-    )
+    assert strip_wrap_punct("http://[2001:db8::1])") == "http://[2001:db8::1]"
     assert strip_wrap_punct("'(api.example.co.uk,)") == "api.example.co.uk"
     assert strip_wrap_punct("'h'") == "h"
     assert strip_wrap_punct("[2001:db8::1])") == "[2001:db8::1]"
@@ -62,6 +62,33 @@ def test_host_normalization_multilevel_suffix():
     normalized = normalize_host("api.service.co.uk")
     assert normalized.full_host == "api.service.co.uk"
     assert normalized.etld_plus_one == "service.co.uk"
+
+
+def test_host_normalization_honors_private_psl_boundaries():
+    assert registrable_domain("assets.foo.blogspot.com") == "foo.blogspot.com"
+    assert registrable_domain("api.project.github.io") == "project.github.io"
+
+
+def test_host_normalization_unknown_suffix_uses_deterministic_fallback():
+    assert registrable_domain("api.example.invalid") == "example.invalid"
+
+
+def test_host_normalization_reports_pinned_psl_provenance():
+    metadata = registrable_domain_resolver_metadata()
+
+    assert metadata["resolver"] == "publicsuffixlist"
+    assert metadata["resolver_version"] == "1.0.2.20260625"
+    assert metadata["public_suffix_list_file"] == "public_suffix_list.dat"
+    assert len(str(metadata["public_suffix_list_sha256"])) == 64
+    assert metadata["private_suffixes_included"] is True
+
+
+def test_host_normalization_uses_current_pinned_private_boundaries():
+    assert registrable_domain("api.vungle.akadns.net") == "vungle.akadns.net"
+    assert (
+        registrable_domain("bin5y4muil.execute-api.us-east-1.amazonaws.com")
+        == "bin5y4muil.execute-api.us-east-1.amazonaws.com"
+    )
 
 
 def test_host_normalization_ipv6_literal():

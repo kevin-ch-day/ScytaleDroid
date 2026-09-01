@@ -199,10 +199,14 @@ CREATE OR REPLACE VIEW v_masvs_matrix AS
 SELECT
   m.static_run_id AS run_id,
   m.package_name AS package,
-  CASE WHEN m.masvs_network_status = 'FAIL' THEN 1 ELSE 0 END AS network_fail,
-  CASE WHEN m.masvs_platform_status = 'FAIL' THEN 1 ELSE 0 END AS platform_fail,
-  CASE WHEN m.masvs_storage_status = 'FAIL' THEN 1 ELSE 0 END AS storage_fail,
-  CASE WHEN m.masvs_privacy_status = 'FAIL' THEN 1 ELSE 0 END AS privacy_fail,
+  CASE WHEN CONVERT(m.masvs_network_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END AS network_fail,
+  CASE WHEN CONVERT(m.masvs_platform_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END AS platform_fail,
+  CASE WHEN CONVERT(m.masvs_storage_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END AS storage_fail,
+  CASE WHEN CONVERT(m.masvs_privacy_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END AS privacy_fail,
   0 AS network_inconclusive,
   0 AS platform_inconclusive,
   0 AS storage_inconclusive,
@@ -800,14 +804,22 @@ SELECT
   SUM(m.findings_total) AS findings_total_all_runs,
   SUM(m.findings_masvs_mapped) AS findings_mapped_all_runs,
   SUM(m.findings_masvs_unmapped) AS findings_unmapped_all_runs,
-  SUM(CASE WHEN m.masvs_network_status = 'NO DATA' THEN 1 ELSE 0 END) AS runs_network_no_data,
-  SUM(CASE WHEN m.masvs_platform_status = 'NO DATA' THEN 1 ELSE 0 END) AS runs_platform_no_data,
-  SUM(CASE WHEN m.masvs_privacy_status = 'NO DATA' THEN 1 ELSE 0 END) AS runs_privacy_no_data,
-  SUM(CASE WHEN m.masvs_storage_status = 'NO DATA' THEN 1 ELSE 0 END) AS runs_storage_no_data,
-  SUM(CASE WHEN m.masvs_network_status = 'FAIL' THEN 1 ELSE 0 END) AS runs_network_fail,
-  SUM(CASE WHEN m.masvs_platform_status = 'FAIL' THEN 1 ELSE 0 END) AS runs_platform_fail,
-  SUM(CASE WHEN m.masvs_privacy_status = 'FAIL' THEN 1 ELSE 0 END) AS runs_privacy_fail,
-  SUM(CASE WHEN m.masvs_storage_status = 'FAIL' THEN 1 ELSE 0 END) AS runs_storage_fail
+  SUM(CASE WHEN CONVERT(m.masvs_network_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('NO DATA' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_network_no_data,
+  SUM(CASE WHEN CONVERT(m.masvs_platform_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('NO DATA' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_platform_no_data,
+  SUM(CASE WHEN CONVERT(m.masvs_privacy_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('NO DATA' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_privacy_no_data,
+  SUM(CASE WHEN CONVERT(m.masvs_storage_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('NO DATA' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_storage_no_data,
+  SUM(CASE WHEN CONVERT(m.masvs_network_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_network_fail,
+  SUM(CASE WHEN CONVERT(m.masvs_platform_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_platform_fail,
+  SUM(CASE WHEN CONVERT(m.masvs_privacy_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_privacy_fail,
+  SUM(CASE WHEN CONVERT(m.masvs_storage_status USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            = CONVERT('FAIL' USING utf8mb4) COLLATE utf8mb4_unicode_ci THEN 1 ELSE 0 END) AS runs_storage_fail
 FROM v_static_masvs_matrix_v1 m
 GROUP BY m.session_stamp;
 """

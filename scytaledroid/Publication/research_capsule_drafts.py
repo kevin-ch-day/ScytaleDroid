@@ -8,6 +8,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path
+
 from .research_capsule import sha256_file
 
 _EVIDENCE_ARTIFACT_TYPES = {
@@ -41,7 +43,14 @@ def _rel(path: Path, repo_root: Path) -> str:
 
 
 def _record_artifact(run_dir: Path, relative_path: str, role: str, repo_root: Path) -> dict[str, str]:
-    path = run_dir / relative_path
+    path = resolve_contained_path(run_dir, relative_path)
+    if path is None:
+        return {
+            "role": role,
+            "path": "",
+            "sha256": "",
+            "draft_status": "unsafe_manifest_path",
+        }
     return {
         "role": role,
         "path": _rel(path, repo_root),
@@ -55,7 +64,9 @@ def _pcap_record(manifest: Mapping[str, Any], run_dir: Path, repo_root: Path) ->
         if not isinstance(artifact, Mapping) or str(artifact.get("type") or "") != "pcapdroid_capture":
             continue
         relative_path = str(artifact.get("relative_path") or "")
-        pcap = run_dir / relative_path
+        pcap = resolve_contained_path(run_dir, relative_path)
+        if pcap is None:
+            return {"path": "", "sha256": "", "draft_status": "unsafe_manifest_path"}
         return {
             "path": _rel(pcap, repo_root),
             "sha256": str(artifact.get("sha256") or ""),
@@ -72,12 +83,23 @@ def _evidence_artifacts(manifest: Mapping[str, Any], run_dir: Path, repo_root: P
         if not isinstance(output, Mapping) or str(output.get("type") or "") not in _EVIDENCE_ARTIFACT_TYPES:
             continue
         relative_path = str(output.get("relative_path") or "")
+        path = resolve_contained_path(run_dir, relative_path)
+        if path is None:
+            artifacts.append(
+                {
+                    "role": str(output.get("type")),
+                    "path": "",
+                    "sha256": "",
+                    "draft_status": "unsafe_manifest_path",
+                }
+            )
+            continue
         artifacts.append(
             {
                 "role": str(output.get("type")),
-                "path": _rel(run_dir / relative_path, repo_root),
+                "path": _rel(path, repo_root),
                 "sha256": str(output.get("sha256") or ""),
-                "draft_status": "present" if (run_dir / relative_path).is_file() else "missing",
+                "draft_status": "present" if path.is_file() else "missing",
             }
         )
     return artifacts
@@ -113,7 +135,16 @@ def build_paper_freeze_ledger_drafts(
             continue
         for run_id in split_run_ids(app.get("selected_dynamic_run_ids")):
             selected_run_count += 1
-            run_dir = dynamic_root / run_id
+            run_dir = resolve_contained_path(dynamic_root, run_id)
+            if run_dir is None:
+                evidence_entries.append(
+                    {
+                        "dynamic_run_id": run_id,
+                        "package_name": str(app.get("package_name") or ""),
+                        "draft_status": "unsafe_run_id",
+                    }
+                )
+                continue
             manifest_path = run_dir / "run_manifest.json"
             if not manifest_path.is_file():
                 evidence_entries.append(

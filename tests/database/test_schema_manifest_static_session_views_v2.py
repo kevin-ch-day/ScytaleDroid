@@ -23,6 +23,18 @@ def test_schema_manifest_orders_session_v2_views_after_sessions_table():
     assert idxs == sorted(idxs)
 
 
+def test_schema_manifest_adds_static_session_completion_reconciliation_columns():
+    blob = "\n".join(schema_manifest.ordered_schema_statements()).lower()
+    for column in (
+        "expected_package_count",
+        "reconciled_package_count",
+        "completion_reconciliation_status",
+        "selection_artifact_manifest_sha256",
+        "completion_reconciled_at_utc",
+    ):
+        assert column in blob
+
+
 def test_schema_manifest_includes_static_session_v2_view_ddls():
     statements = schema_manifest.ordered_schema_statements()
     required = [

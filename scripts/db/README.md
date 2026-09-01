@@ -79,6 +79,46 @@ PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py counts
    Narrative: `docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md`;
    contract summary: `docs/database/permission_intel_contract.md`.
 
+## Dynamic root-domain normalization migration
+
+Dynamic domain observations retain their existing heuristic aggregation `root_domain`
+while a separate pinned-Public-Suffix-List registrant boundary and resolver
+provenance are added. Review the exact observation-ID worklist before applying:
+
+The distinction is intentional. RFC 8499 defines a public suffix in registry-control
+terms, and the PSL PRIVATE section also models boundaries between mutually
+untrusting tenants on privately operated platforms. Those boundaries are useful
+for security analysis but are not interchangeable with this repository's
+historical domain aggregation key. The migration therefore adds
+`registrable_domain_psl` without rewriting `root_domain`. The bundled PSL version
+and file SHA-256 are stored with each derived row; the PSL is not used as a DNS
+validity oracle.
+
+- DNS terminology: https://www.rfc-editor.org/rfc/rfc8499
+- PSL purpose and limitations: https://publicsuffix.org/learn/
+- PSL format and update guidance: https://publicsuffix.org/list/
+
+```bash
+PYTHONPATH=. python scripts/db/migrate_dynamic_domain_normalization.py --write-bundle
+```
+
+After a database backup and receipt review, apply the additive schema and the
+bounded `(observation_id, dynamic_run_id)` updates:
+
+```bash
+PYTHONPATH=. python scripts/db/migrate_dynamic_domain_normalization.py \
+  --apply --confirm --json
+```
+
+Apply mode always writes a preflight worklist and result receipt under
+`data/state/schema_migrations/dynamic_domain_normalization/`. Schema DDL is
+additive; observation updates run transactionally and roll back if exact-row
+verification fails. The tool hashes the ordered worklist, locks and reloads the
+target rows, and refuses to continue if the database changed after preflight.
+It also stops on partial columns, a missing expected index, or disagreement
+between the migration registry and physical schema. The tool never deletes
+observations or evidence files.
+
 ## Cohort static session audit
 
 After a profile/cohort static run, verify canonical row counts and Web/read views for one `session_stamp`:
@@ -213,9 +253,10 @@ Do not strip inline finding evidence until all of the following are true:
 | `report_dynamic_static_alignment.py` | Read-only exact dynamic/static hash alignment and worklist; optional exact-target readiness output. |
 | `report_dynamic_static_recovery_plan.py` | Read-only exact-gap artifact recovery planner; default old-root posture is historical identity only; `--write-report` emits CSV/JSON worklists, and `--write-receipt` writes a non-destructive JSON recovery receipt. |
 | `report_dynamic_static_pairing_eligibility.py` | Read-only dynamic-session dataset eligibility report for strict paired analysis, historical identity only, reharvest, and current-byte states; `--write-report` emits CSV/JSON session and package worklists. |
+| `report_dynamic_domain_context.py` | Filesystem-first, DB-optional dynamic domain-context report. Retains legacy `root_domain`, adds a pinned-PSL candidate and drift counts, and never rewrites historical evidence. |
 | `repair_dynamic_dataset_validity_from_db_issues.py` | Dry-run default DB-only repair for legacy dynamic rows whose latest `dynamic_session_issues.dataset_validity` payload already proves `valid_dataset_run=true`; `--apply` fills bounded `dynamic_sessions` columns by run ID only. |
 | `report_current_corpus_preflight.py` | Read-only current-corpus preflight after fresh inventory/harvest: repository rows, canonical store files, apk_sets, split metadata, and static target states. |
-| `refresh_external_sdk_tracker_intel.py` | Dry-run default refresh of repo-owned external tracker/SDK reference intel from the Exodus public API; `--apply` upserts additive rows and can write a receipt bundle. |
+| `refresh_external_sdk_tracker_intel.py` | Dry-run default refresh of repo-owned external tracker/SDK reference intel from the Exodus public API; receipt bundles include source/normalized hashes and ODbL/DbCL attribution. `--input-receipt` replays a hash-verified frozen snapshot without network access; `--apply` upserts additive rows. |
 | `report_external_tracker_context.py` | Read-only overlap audit between external tracker intel and selected static endpoint root domains; separates specific overlaps from generic-root/infrastructure-root overlap. |
 | `backfill_apk_sets_from_receipts.py` | Dry-run default install-set spine backfill from receipt-backed harvest artifacts; `--apply` writes additive rows. |
 | `backfill_apk_set_links.py` | Dry-run default `apk_set_id` link backfill for static/dynamic rows with unique artifact-set matches; `--apply` writes nullable links only and a timestamped receipt by default (`--receipt-dir` for explicit dry-run/apply receipts). |

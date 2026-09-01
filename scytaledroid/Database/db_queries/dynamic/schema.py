@@ -206,6 +206,9 @@ _DDL_STATEMENTS: list[str] = [
       indicator_type       VARCHAR(32)     NOT NULL,
       observed_domain      VARCHAR(255)    NOT NULL,
       root_domain          VARCHAR(255)    NOT NULL,
+      registrable_domain_psl VARCHAR(255) DEFAULT NULL,
+      registrable_domain_normalization VARCHAR(96) NOT NULL DEFAULT 'legacy_suffix_v1',
+      registrable_domain_reference_sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL,
       indicator_count      INT             DEFAULT NULL,
       indicator_source     VARCHAR(32)     DEFAULT NULL,
       owner_class          VARCHAR(32)     NOT NULL,
@@ -220,6 +223,7 @@ _DDL_STATEMENTS: list[str] = [
       UNIQUE KEY ux_dyn_domain_obs (dynamic_run_id, indicator_type, observed_domain, indicator_source),
       KEY ix_dyn_domain_obs_pkg (package_name, dynamic_run_id),
       KEY ix_dyn_domain_obs_root (root_domain),
+      KEY ix_dyn_domain_obs_registrable_psl (registrable_domain_psl),
       KEY ix_dyn_domain_obs_owner_role (owner_class, role_class)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     """,

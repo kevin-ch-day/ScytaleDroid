@@ -9,7 +9,7 @@ import platform
 import shutil
 import traceback
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -652,6 +652,23 @@ class DynamicRunOrchestrator:
                 )
                 event_logger.log("pcap_index_failed", {"error": str(exc)})
 
+            collector = getattr(self.config, "final_operator_metadata_collector", None)
+            if collector is not None:
+                try:
+                    final_operator_metadata = collector(manifest)
+                    if isinstance(final_operator_metadata, Mapping):
+                        manifest.operator.update(final_operator_metadata)
+                        event_logger.log(
+                            "final_operator_metadata",
+                            {"keys": sorted(str(key) for key in final_operator_metadata)},
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.warning(
+                        "Final operator metadata collection failed",
+                        extra={"dynamic_run_id": dynamic_run_id, "error": str(exc)},
+                    )
+                    event_logger.log("final_operator_metadata_failed", {"error": str(exc)})
+
             outputs: list[ArtifactRecord] = []
             report = write_pcap_report(manifest, run_dir, event_logger=event_logger)
             if report:
@@ -1255,10 +1272,14 @@ class DynamicRunOrchestrator:
             manifest.finalize()
         except Exception:
             pass
-        try:
-            writer.write_manifest(manifest, allow_overwrite=True)
-        except Exception:
-            pass
+        # A manifest may already have been sealed before a downstream failure.
+        # Preserve it verbatim; the error trace and event stream above are the
+        # append-only diagnostic record for this later failure.
+        if not (run_ctx.run_dir / "run_manifest.json").exists():
+            try:
+                writer.write_manifest(manifest)
+            except Exception:
+                pass
         try:
             in_progress_marker.unlink(missing_ok=True)
         except OSError:

@@ -13,6 +13,31 @@ def test_static_run_id_from_plan_accepts_legacy_and_run_identity_shapes() -> Non
     assert report._static_run_id_from_plan({}) is None
 
 
+def test_visibility_loss_uses_explicit_name_metadata_limitation() -> None:
+    pcap_report = {
+        "tls_quic_visibility": {
+            "tls_visible": True,
+            "quic_candidate_packets": 0,
+            "tls_name_metadata_limited": True,
+        }
+    }
+
+    assert report._visibility_loss_flag(pcap_report, domain_count=0) is True
+    assert report._visibility_loss_flag(pcap_report, domain_count=1) is False
+
+
+def test_visibility_loss_keeps_legacy_report_fallback() -> None:
+    legacy_report = {
+        "pcap_size_bytes": 12_345,
+        "tls_quic_visibility": {
+            "tls_visible": True,
+            "quic_candidate_packets": 0,
+        },
+    }
+
+    assert report._visibility_loss_flag(legacy_report, domain_count=0) is True
+
+
 def test_build_static_rows_uses_latest_static_run_fallback_when_plan_id_missing(monkeypatch) -> None:
     run = _make_run(
         package="com.example.fallback",

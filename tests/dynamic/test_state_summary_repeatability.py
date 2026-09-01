@@ -114,6 +114,11 @@ def test_build_repeatability_summary_counts_ready_and_blocked_runs(monkeypatch, 
 
     monkeypatch.setattr(state_summary.app_config, "OUTPUT_DIR", str(output_root))
     monkeypatch.setattr(state_summary.app_config, "DATA_DIR", str(data_root))
+    monkeypatch.setattr(
+        state_summary,
+        "resolve_dataset_freeze_read_path",
+        lambda: data_root / "archive" / "dataset_freeze.json",
+    )
 
     out = state_summary.build_repeatability_summary()
 

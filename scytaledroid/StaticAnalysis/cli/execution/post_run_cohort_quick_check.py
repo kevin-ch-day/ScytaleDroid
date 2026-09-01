@@ -20,6 +20,7 @@ from scytaledroid.Database.db_utils.static_session_grain_integrity import (
     reports_archive_dir,
 )
 from scytaledroid.Utils.DisplayUtils import status_messages
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from ..core.run_context import StaticRunContext
 
@@ -168,13 +169,10 @@ def maybe_emit_post_run_grain_summary(
 
 
 def _atomic_write_run_health_json(path: Path, doc: dict[str, object]) -> None:
-    """Write JSON via temp file + os.replace (same directory = atomic on POSIX)."""
+    """Atomically replace the derived run-health document."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(doc, indent=2, sort_keys=False, ensure_ascii=False) + "\n"
-    tmp = path.with_name(f"{path.name}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, text)
 
 
 def merge_post_run_grain_into_run_health_json(outcome: object) -> None:

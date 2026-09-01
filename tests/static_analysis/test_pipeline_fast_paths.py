@@ -80,6 +80,36 @@ def test_resolve_hashes_for_analysis_falls_back_when_metadata_provenance_breaks(
     assert meta["hash_recomputed"] is True
     assert meta["hash_provenance_ok"] is False
     assert meta["hash_provenance_reason"] == "file_size_mismatch"
+    assert meta["content_sha256_matches_provenance"] is False
+
+
+def test_resolve_hashes_accepts_sha256_provenance_without_legacy_digests(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    apk_path = tmp_path / "sha256-only.apk"
+    apk_path.write_bytes(b"sha256-only")
+    computed = {
+        "md5": "a" * 32,
+        "sha1": "b" * 40,
+        "sha256": "c" * 64,
+    }
+    metadata = {
+        "sha256": computed["sha256"],
+        "file_size": apk_path.stat().st_size,
+    }
+    monkeypatch.setattr(pipeline.artifact_store, "canonical_apk_path", lambda _digest: apk_path)
+    monkeypatch.setattr(pipeline, "compute_hashes", lambda _path: computed)
+
+    hashes, meta = pipeline._resolve_hashes_for_analysis(apk_path, metadata)
+
+    assert hashes == computed
+    assert meta["hash_source"] == "computed"
+    assert meta["hash_recomputed"] is True
+    assert meta["hash_metadata_digest_set_complete"] is False
+    assert meta["content_sha256_matches_provenance"] is True
+    assert meta["hash_provenance_ok"] is True
+    assert meta["hash_provenance_reason"] == "canonical_store_sha256_verified_after_recompute"
 
 
 def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split_and_base_artifacts(

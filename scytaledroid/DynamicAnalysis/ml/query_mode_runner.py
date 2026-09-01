@@ -21,7 +21,12 @@ from typing import Any
 
 import numpy as np
 from scytaledroid.Config import app_config
-from scytaledroid.DynamicAnalysis.utils.path_utils import dynamic_evidence_root
+from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_root,
+    resolve_contained_path,
+    resolve_run_dir_under,
+)
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from . import ml_parameters_operational as config
 from . import ml_parameters_profile as paper_config
@@ -142,7 +147,12 @@ def _apply_winsorization(
 
 def _run_output_dir(snapshot_dir: Path, run_id: str) -> Path:
     # Keep this entirely separate from evidence packs to avoid polluting archival inputs.
-    return snapshot_dir / "runs" / run_id / "ml" / config.ML_SCHEMA_LABEL
+    run_id = run_id if isinstance(run_id, str) else ""
+    runs_root = snapshot_dir / "runs"
+    run_dir = resolve_run_dir_under(runs_root, run_id)
+    if run_dir is None:
+        raise ValueError(f"Unsafe operational ML run_id: {run_id!r}")
+    return run_dir / "ml" / config.ML_SCHEMA_LABEL
 
 
 def _write_cohort_status(
@@ -195,7 +205,7 @@ def _write_cohort_status(
     }
     if details:
         payload["details"] = details
-    (out_dir / "cohort_status.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(out_dir / "cohort_status.json", json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 def _safe_float(v: object) -> float | None:
     try:
@@ -207,8 +217,7 @@ def _safe_float(v: object) -> float | None:
 def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> None:
     if path.exists():
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _write_model_manifest(
@@ -233,7 +242,10 @@ def _write_model_manifest(
                 rel = art.get("relative_path")
                 if isinstance(rel, str) and rel:
                     try:
-                        meta = json.loads((run_inputs.run_dir / rel).read_text(encoding="utf-8"))
+                        meta_path = resolve_contained_path(run_inputs.run_dir, rel)
+                        if meta_path is None or not meta_path.is_file():
+                            continue
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
                         if isinstance(meta, dict):
                             capture_mode = str(meta.get("capture_mode") or "unknown")
                             pcapdroid_version = str(meta.get("pcapdroid_version") or "unknown")

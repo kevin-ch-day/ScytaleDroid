@@ -283,7 +283,6 @@ def test_generate_report_resolves_meta_sdk_and_microsoft_ads_atlas_rows(
     summary = report.generate_report(output_dir=out_dir)
 
     assert summary["services_without_signal_mappings"] == 0
-    assert summary["unresolved_service_signal_rows"] == 0
     signal_rows = (out_dir / "package_signal_rows.csv").read_text(encoding="utf-8")
     assert "microsoft_ads_atlas" in signal_rows
     assert "meta_sdk" in signal_rows
@@ -348,7 +347,6 @@ def test_generate_report_overlays_missing_seed_signal_maps(tmp_path: Path, monke
     summary = report.generate_report(output_dir=out_dir)
 
     assert summary["services_without_signal_mappings"] == 0
-    assert summary["unresolved_service_signal_rows"] == 0
     signal_rows = (out_dir / "package_signal_rows.csv").read_text(encoding="utf-8")
     assert "third_party_advertising" in signal_rows
 
@@ -397,7 +395,6 @@ def test_generate_report_resolves_reddit_runtime_hosts_from_seed_overlay(
     summary = report.generate_report(output_dir=out_dir)
 
     assert summary["services_without_signal_mappings"] == 0
-    assert summary["unresolved_service_signal_rows"] == 0
     signal_rows = (out_dir / "package_signal_rows.csv").read_text(encoding="utf-8")
     assert "w3-reporting.reddit.com" in signal_rows
     assert "alb.reddit.com" in signal_rows
@@ -465,7 +462,6 @@ def test_generate_report_uses_clear_metric_name_for_services_without_signal_mapp
     summary = report.generate_report(output_dir=out_dir)
 
     assert summary["services_without_signal_mappings"] == 1
-    assert summary["unresolved_service_signal_rows"] == 1
     assert "services_without_signal_mappings_csv" in summary["output_files"]
     assert summary["output_files"]["services_without_signal_mappings_csv"].endswith(
         "services_without_signal_mappings.csv"

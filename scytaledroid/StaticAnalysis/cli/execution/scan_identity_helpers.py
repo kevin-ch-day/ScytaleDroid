@@ -32,14 +32,19 @@ def _artifact_sha256(artifact) -> str | None:
 
 
 def _artifact_sha256_with_reason(artifact) -> tuple[str | None, str | None]:
-    sha = getattr(artifact, "sha256", None)
-    if isinstance(sha, str) and sha.strip():
-        return sha.strip(), None
+    declared_sha = getattr(artifact, "sha256", None)
+    expected = declared_sha.strip().lower() if isinstance(declared_sha, str) else ""
     try:
         hashes = compute_hashes(Path(artifact.path))
         sha = hashes.get("sha256")
         if isinstance(sha, str) and sha.strip():
-            return sha.strip(), None
+            actual = sha.strip().lower()
+            if expected and expected != actual:
+                return None, (
+                    f"{_artifact_identity_label(artifact)}; sha256_mismatch; "
+                    f"expected={expected}; actual={actual}"
+                )
+            return actual, None
         return None, f"{_artifact_identity_label(artifact)}; missing sha256"
     except Exception as exc:
         reason = f"{exc.__class__.__name__}"
@@ -68,7 +73,14 @@ def _split_name_for_artifact_with_reason(artifact) -> tuple[str | None, str | No
 
 
 def _compute_run_identity(group) -> dict:
-    base = getattr(group, "base_artifact", None)
+    raw_artifacts = tuple(getattr(group, "artifacts", ()) or ())
+    base_candidates = [
+        artifact
+        for artifact in raw_artifacts
+        if not getattr(artifact, "is_split_member", True)
+    ]
+    artifacts = _dedupe_artifacts(raw_artifacts)
+    base = base_candidates[0] if len(base_candidates) == 1 else None
     identity = {
         "base_apk_sha256": None,
         "artifact_set_hash": None,
@@ -76,8 +88,11 @@ def _compute_run_identity(group) -> dict:
         "identity_valid": False,
         "identity_error_reason": None,
     }
-    if base is None:
+    if not base_candidates:
         identity["identity_error_reason"] = "missing_base_artifact"
+        return identity
+    if len(base_candidates) > 1:
+        identity["identity_error_reason"] = f"multiple_base_artifacts:{len(base_candidates)}"
         return identity
 
     base_sha, base_reason = _artifact_sha256_with_reason(base)
@@ -87,7 +102,7 @@ def _compute_run_identity(group) -> dict:
         return identity
 
     entries = []
-    for artifact in _dedupe_artifacts(group.artifacts):
+    for artifact in artifacts:
         sha, sha_reason = _artifact_sha256_with_reason(artifact)
         if not sha:
             reason = sha_reason or _artifact_identity_label(artifact)

@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from scytaledroid.Config import app_config
+from scytaledroid.DynamicAnalysis.utils.path_utils import resolve_contained_path
+from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from .manifest import RunManifest, manifest_to_dict
 
@@ -26,9 +29,9 @@ class EvidencePackWriter:
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
         self.notes_dir.mkdir(parents=True, exist_ok=True)
 
-    def write_manifest(self, manifest: RunManifest, *, allow_overwrite: bool = False) -> Path:
+    def write_manifest(self, manifest: RunManifest) -> Path:
         manifest_path = self.run_dir / "run_manifest.json"
-        if manifest_path.exists() and not allow_overwrite:
+        if manifest_path.exists():
             raise RuntimeError(f"Refusing to overwrite sealed manifest: {manifest_path}")
         if not manifest.sealed_at:
             # Sealing moment: the final manifest write.
@@ -39,11 +42,36 @@ class EvidencePackWriter:
         if not manifest.sealed_by:
             manifest.sealed_by = f"{app_config.APP_NAME} {app_config.APP_VERSION}"
         payload = manifest_to_dict(manifest)
-        # Write atomically: temp + replace. Use a per-process temp name to avoid
-        # rare collisions if a run directory is ever touched concurrently.
-        temp_path = self.run_dir / f"run_manifest.json.tmp.{os.getpid()}"
-        temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        temp_path.replace(manifest_path)
+        # Publish through a same-directory hard link. Unlike ``replace()``, the
+        # link fails atomically if another writer seals this run after the
+        # existence check above; an immutable manifest is never overwritten.
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                delete=False,
+                dir=self.run_dir,
+                prefix=".run_manifest.json.tmp.",
+            ) as handle:
+                temp_path = Path(handle.name)
+                handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(temp_path, manifest_path)
+            except FileExistsError as exc:
+                raise RuntimeError(
+                    f"Refusing to overwrite sealed manifest: {manifest_path}"
+                ) from exc
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    # The immutable target, once linked, remains authoritative.
+                    # A stale hidden temp file is cleanup debt, not a failed seal.
+                    pass
         return manifest_path
 
     def hash_file(self, path: Path) -> str:
@@ -53,16 +81,20 @@ class EvidencePackWriter:
                 digest.update(chunk)
         return digest.hexdigest()
 
+    def _output_path(self, relative_path: str) -> Path:
+        path = resolve_contained_path(self.run_dir, relative_path)
+        if path is None or path == self.run_dir.resolve(strict=False):
+            raise ValueError(f"Evidence artifact path must remain inside run directory: {relative_path!r}")
+        return path
+
     def write_text(self, relative_path: str, content: str) -> Path:
-        path = self.run_dir / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        path = self._output_path(relative_path)
+        atomic_write_text(path, content)
         return path
 
     def write_json(self, relative_path: str, payload: dict[str, Any]) -> Path:
-        path = self.run_dir / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        path = self._output_path(relative_path)
+        atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
         return path
 
 

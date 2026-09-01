@@ -63,7 +63,7 @@ def _harvest_plan_kv_lines(
 def _compact_selection_label(label: str) -> str:
     text = str(label or "").strip()
     if text == "All pullable packages (full inventory)":
-        return "Full inventory pullable"
+        return "Pull all available APKs"
     if text.endswith(" (full inventory)"):
         return text.removesuffix(" (full inventory)")
     return text
@@ -229,9 +229,9 @@ def prompt_plan_action(resolution: PlanResolution) -> str:
         print("──────────────")
         if selection_label:
             print(f"Scope: {selection_label}")
-        print(f"Ready: {scheduled_packages} pullable package(s) · ~{scheduled_files} APK path(s)")
+        print(f"Will pull: {scheduled_packages} package(s) · ~{scheduled_files} APK file(s), including splits")
         if blocked_total > 0:
-            print(f"Blocked before pull: {blocked_total} package(s)")
+            print(f"Not available: {blocked_total} system package(s) on this non-root device")
         print()
         if prompt_utils.prompt_yes_no("Start harvest now?", default=True):
             return "pull_snapshot"
@@ -252,17 +252,17 @@ def prompt_delta_filter_mode(summary: Mapping[str, object]) -> bool:
     total_changed = summary.get("total_changed")
     total_text = f"{int(total_changed)}" if isinstance(total_changed, int) else "some"
     print()
-    print("Harvest Mode")
-    print("────────────")
+    print("Refresh choice")
+    print("──────────────")
     print(
         status_messages.status(
             f"Recent package changes detected ({total_text}).",
             level="info",
         )
     )
-    print("1) Pull changed packages only (default)  - faster, avoids re-downloading unchanged APKs")
-    print("2) Pull all packages in selected scope   - rewrites the full-device APK snapshot on disk")
-    choice = prompt_utils.get_choice(["1", "2"], default="1", prompt="Select: ")
+    print("1) Quick update (default) — pull only packages changed since the prior snapshot")
+    print("2) Pull the whole collection — refresh every package in the selected collection")
+    choice = prompt_utils.get_choice(["1", "2"], default="1", prompt="Select refresh [1]: ")
     return choice == "1"
 
 
@@ -445,13 +445,11 @@ def report_full_refresh_scope_applied(
     *,
     pullable_count: int | None = None,
 ) -> None:
-    if pullable_count is not None and pullable_count >= 0:
-        detail = f"{selected_count} inventory package(s) selected · {pullable_count} pullable"
-    else:
-        detail = f"{selected_count} package(s) selected"
+    available_count = pullable_count if pullable_count is not None and pullable_count >= 0 else selected_count
     print(
         status_messages.status(
-            f"Full inventory scope: {detail} (changed-only mode disabled).",
+            f"Whole collection selected: {available_count} available package(s) "
+            "(changed-only mode disabled).",
             level="info",
         )
     )

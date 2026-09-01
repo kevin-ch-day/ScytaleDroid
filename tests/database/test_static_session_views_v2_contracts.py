@@ -22,6 +22,12 @@ def test_static_session_health_v2_eligibility_contract() -> None:
     assert "from static_analysis_sessions s" in sql
     assert "'in_progress'" in sql
     assert "'in_progress_unfinalized'" in sql
+    assert "completion_reconciliation_status" in sql
+    assert "'complete_reconciled'" in sql
+    assert "expected_package_count" in sql
+    assert "reconciled_package_count" in sql
+    assert "'completion_reconciliation_failed'" in sql
+    assert "selection_reconciliation_pct" in sql
 
 
 def test_web_static_session_index_v2_filters_default_eligible() -> None:

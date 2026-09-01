@@ -122,3 +122,50 @@ def test_drafts_preserve_but_do_not_include_explicitly_paper_ineligible_run(tmp_
             "version_code": "7",
         }
     ]
+
+
+def test_drafts_do_not_follow_run_or_artifact_paths_outside_evidence_root(
+    tmp_path: Path,
+) -> None:
+    evidence_root = tmp_path / "evidence"
+    run_dir = evidence_root / "safe-run"
+    run_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.pcap"
+    outside.write_bytes(b"outside")
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "target": {"package_name": "com.example.app"},
+                "artifacts": [
+                    {
+                        "type": "pcapdroid_capture",
+                        "relative_path": "../../outside.pcap",
+                        "sha256": sha256_file(outside),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    freeze = {
+        "apps": [
+            {
+                "package_name": "com.example.app",
+                "selected_dynamic_run_ids": ["safe-run", "../outside-run"],
+            }
+        ]
+    }
+
+    _, evidence_ledger = build_paper_freeze_ledger_drafts(
+        freeze_manifest=freeze,
+        repo_root=tmp_path,
+        evidence_root=evidence_root,
+    )
+
+    by_run = {entry["dynamic_run_id"]: entry for entry in evidence_ledger["entries"]}
+    assert by_run["safe-run"]["pcap"] == {
+        "path": "",
+        "sha256": "",
+        "draft_status": "unsafe_manifest_path",
+    }
+    assert by_run["../outside-run"]["draft_status"] == "unsafe_run_id"
