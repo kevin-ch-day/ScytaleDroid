@@ -9,6 +9,7 @@ Phase 5 posture:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
@@ -54,6 +55,9 @@ _SIGNAL_TABLES: tuple[str, ...] = (
 MANAGED_TABLES: tuple[str, ...] = _REFERENCE_TABLES + _GOVERNANCE_TABLES + _SIGNAL_TABLES
 
 SUPPORTED_V1_SCHEMA_CONTRACT = "org.android-permission-intel.schema-v1-draft"
+SUPPORTED_V1_SCHEMA_VERSION = "1.0.0-draft"
+SUPPORTED_V1_SCHEMA_RELEASE_STATUS = "DRAFT"
+_SCHEMA_VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$")
 _TRIAGE_STATUSES = frozenset(
     {
         "aosp_missing",
@@ -198,7 +202,9 @@ def run_sql(
         if base != "none":
             raise ValueError(f"Unsupported fetch mode: {fetch}")
         if return_lastrowid:
-            return db.execute_with_lastrowid(query, params, query_name=effective_name, context=context)
+            return db.execute_with_lastrowid(
+                query, params, query_name=effective_name, context=context
+            )
         db.execute(query, params, query_name=effective_name, context=context)
         return None
 
@@ -332,13 +338,30 @@ def fetch_aosp_permission_catalog_rows() -> list[tuple[object, object, object, o
     return list(rows or [])
 
 
+def _schema_version_key(value: object) -> tuple[int, int, int, int, str]:
+    text = str(value or "")
+    match = _SCHEMA_VERSION_RE.fullmatch(text)
+    if match is None:
+        raise RuntimeError("Permission Intel v1 schema version interval is malformed")
+    prerelease = match.group(4) or ""
+    return (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+        0 if prerelease else 1,
+        prerelease,
+    )
+
+
 def fetch_v1_catalog_gate() -> dict[str, Any]:
     """Return the one accepted v1 catalog or fail closed on compatibility drift."""
     rows = run_sql(
         """
         SELECT catalog_release_id, schema_contract_id, schema_contract_version,
+               compatibility_floor, schema_contract_release_status,
                catalog_digest, source_set_digest, exhaustive_scope,
-               catalog_release_status, catalog_import_status, import_receipt_count
+               catalog_release_status, catalog_import_status, import_receipt_count,
+               accepted_at_utc
           FROM android_permission_v1_catalog_release
         """,
         fetch="all",
@@ -351,12 +374,22 @@ def fetch_v1_catalog_gate() -> dict[str, Any]:
     row = dict(rows[0])
     if row.get("schema_contract_id") != SUPPORTED_V1_SCHEMA_CONTRACT:
         raise RuntimeError("Permission Intel v1 schema contract is incompatible")
+    actual_version = _schema_version_key(row.get("schema_contract_version"))
+    supported_version = _schema_version_key(SUPPORTED_V1_SCHEMA_VERSION)
+    compatibility_floor = _schema_version_key(row.get("compatibility_floor"))
+    if actual_version != supported_version or compatibility_floor > supported_version:
+        raise RuntimeError("Permission Intel v1 schema version interval is incompatible")
+    if row.get("schema_contract_release_status") != SUPPORTED_V1_SCHEMA_RELEASE_STATUS:
+        raise RuntimeError("Permission Intel v1 schema release status is incompatible")
     if row.get("catalog_release_status") != "ACCEPTED":
         raise RuntimeError("Permission Intel v1 catalog is not accepted")
-    if row.get("catalog_import_status") != "IMPORTED" or int(
-        row.get("import_receipt_count") or 0
-    ) < 1:
+    if (
+        row.get("catalog_import_status") != "IMPORTED"
+        or int(row.get("import_receipt_count") or 0) < 1
+    ):
         raise RuntimeError("Permission Intel v1 catalog receipt is incomplete")
+    if not row.get("accepted_at_utc"):
+        raise RuntimeError("Permission Intel v1 catalog acceptance timestamp is missing")
     return row
 
 
@@ -377,8 +410,10 @@ def fetch_v1_permission_rows(values: Sequence[str]) -> list[dict[str, Any]]:
          FROM android_permission_v1_scytaledroid_permission
          WHERE BINARY canonical_permission IN ({placeholders})
            AND authority_class IN ('AOSP_PUBLIC', 'AOSP_INTERNAL', 'AOSP_MODULE')
+           AND catalog_release_id = %s
+           AND catalog_digest = %s
         """,
-        items,
+        (*items, gate["catalog_release_id"], gate["catalog_digest"]),
         fetch="all",
         dictionary=True,
         query_name="permission_intel.fetch_v1_permission_rows",
@@ -404,10 +439,13 @@ def fetch_v1_permission_catalog_rows() -> list[dict[str, Any]]:
                lifecycle, accepted_platform_release, source_provenance_status,
                protection_base, protection_modifiers,
                compatibility_protection_expression
-          FROM android_permission_v1_scytaledroid_permission
+         FROM android_permission_v1_scytaledroid_permission
          WHERE authority_class IN ('AOSP_PUBLIC', 'AOSP_INTERNAL', 'AOSP_MODULE')
+           AND catalog_release_id = %s
+           AND catalog_digest = %s
          ORDER BY BINARY canonical_permission
         """,
+        (gate["catalog_release_id"], gate["catalog_digest"]),
         fetch="all",
         dictionary=True,
         query_name="permission_intel.fetch_v1_permission_catalog_rows",
@@ -669,6 +707,8 @@ __all__ = [
     "UNKNOWN_DICT_TABLE",
     "PermissionIntelSubmissionError",
     "SUPPORTED_V1_SCHEMA_CONTRACT",
+    "SUPPORTED_V1_SCHEMA_RELEASE_STATUS",
+    "SUPPORTED_V1_SCHEMA_VERSION",
     "describe_target",
     "fetch_database_definers",
     "fetch_aosp_permission_dict_rows",
