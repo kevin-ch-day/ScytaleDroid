@@ -11,7 +11,9 @@ from scytaledroid.Database.tools.permission_intel_phase1_common import (
 
 
 def test_permission_intel_resolve_config_requires_dedicated_namespace(monkeypatch):
-    monkeypatch.setattr(permission_intel.db_config, "resolve_db_config_from_root", lambda _root: (None, None))
+    monkeypatch.setattr(
+        permission_intel.db_config, "resolve_db_config_from_root", lambda _root: (None, None)
+    )
     try:
         permission_intel.resolve_config()
     except RuntimeError as exc:
@@ -21,7 +23,9 @@ def test_permission_intel_resolve_config_requires_dedicated_namespace(monkeypatc
 
 
 def test_permission_intel_db_available_reflects_resolve(monkeypatch):
-    monkeypatch.setattr(permission_intel.db_config, "resolve_db_config_from_root", lambda _root: (None, None))
+    monkeypatch.setattr(
+        permission_intel.db_config, "resolve_db_config_from_root", lambda _root: (None, None)
+    )
     assert permission_intel.is_permission_intel_configured() is False
     assert permission_intel.permission_intel_db_available() is False
 
@@ -125,6 +129,7 @@ def test_permission_intel_fetch_aosp_permission_catalog_rows(monkeypatch):
         ("android.permission.CAMERA", "dangerous", 1, None),
         ("android.permission.READ_CONTACTS", "dangerous", 1, None),
     ]
+    # Historical invalid-token rows remain stored but are not current permission truth.
 
 
 def test_permission_intel_fetch_aosp_permission_dict_rows_case_insensitive(monkeypatch):
@@ -143,8 +148,31 @@ def test_permission_intel_fetch_aosp_permission_dict_rows_case_insensitive(monke
     )
 
     assert "LOWER(constant_value)" in str(captured["query"])
+    assert "lifecycle_status" in str(captured["query"])
+    assert "invalid_token" in str(captured["query"])
     assert captured["params"] == ("android.permission.camera",)
     assert rows[0][0] == "android.permission.CAMERA"
+
+
+def test_current_interpretation_uses_deployed_evidence_surfaces(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_run_sql(query, params=None, **kwargs):
+        captured["query"] = query
+        captured["params"] = params
+        captured["kwargs"] = kwargs
+        return []
+
+    monkeypatch.setattr(permission_intel, "run_sql", _fake_run_sql)
+    rows = permission_intel.fetch_current_permission_interpretation_rows(
+        ["android.permission.CAMERA"]
+    )
+    sql = str(captured["query"])
+    assert rows == []
+    assert "android_permission_v1_current_permission" in sql
+    assert "api_permission_declaration_conflict" in sql
+    assert "android_permission_v1_1_" not in sql
+    assert captured["kwargs"]["read_only"] is True
 
 
 def test_permission_intel_intel_table_exists(monkeypatch):
@@ -196,7 +224,12 @@ def test_no_app_facing_direct_permission_intel_run_sql_calls() -> None:
 def test_write_phase1_artifact_writes_expected_payload(tmp_path: Path) -> None:
     out_path = tmp_path / "artifacts" / "phase1_validate.json"
     results = [
-        {"table": "android_permission_dict_aosp", "source_count": 1, "target_count": 1, "match": True}
+        {
+            "table": "android_permission_dict_aosp",
+            "source_count": 1,
+            "target_count": 1,
+            "match": True,
+        }
     ]
 
     written = write_phase1_artifact(

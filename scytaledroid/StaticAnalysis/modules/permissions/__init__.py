@@ -10,6 +10,7 @@ _LAZY_EXPORTS = {
     "build_catalog_from_permissions_xml": (".catalog", "build_catalog_from_permissions_xml"),
     "classify_permission": (".catalog", "classify_permission"),
     "load_permission_catalog": (".catalog", "load_permission_catalog"),
+    "load_permission_catalog_shadow": (".catalog", "load_permission_catalog_shadow"),
     "print_permissions_block": (".permission_console_rendering", "print_permissions_block"),
     "collect_permissions_and_sdk": (".permission_manifest_extract", "collect_permissions_and_sdk"),
     "PermissionAnalysis": (".profile", "PermissionAnalysis"),
@@ -36,5 +37,6 @@ __all__ = [
     "classify_permission",
     "collect_permissions_and_sdk",
     "load_permission_catalog",
+    "load_permission_catalog_shadow",
     "print_permissions_block",
 ]

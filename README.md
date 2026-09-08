@@ -309,6 +309,10 @@ Environment variables control CLI behaviour:
   `SCYTALEDROID_PERMISSION_INTEL_DB_*` variables) – optional separate
   permission-intel database target. If unset, ScytaleDroid stays in
   compatibility mode and reads permission reference data from the main DB.
+- `SCYTALEDROID_PERMISSION_INTEL_V1_SHADOW_MODE` – defaults to `LEGACY_ONLY`.
+  Set `COMPARE_ONLY` only for explicit diagnostics that call
+  `load_permission_catalog_shadow()`; the returned candidate catalog never
+  replaces normal static classification.
 
 Example TOML:
 

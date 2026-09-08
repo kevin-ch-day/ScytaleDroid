@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -13,16 +14,15 @@ import yaml
 
 def _normalise_tokens(raw: object) -> tuple[str, ...]:
     if isinstance(raw, str):
-        return tuple(
-            token.strip().lower()
-            for token in raw.split("|")
-            if token and token.strip()
-        )
+        return tuple(token.strip().lower() for token in raw.split("|") if token and token.strip())
     if isinstance(raw, Sequence):
         return tuple(str(token).strip().lower() for token in raw if token)
     return tuple()
 
+
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
+_SHADOW_MODE_ENV = "SCYTALEDROID_PERMISSION_INTEL_V1_SHADOW_MODE"
+_SHADOW_MODES = frozenset({"LEGACY_ONLY", "COMPARE_ONLY"})
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,9 @@ class PermissionDescriptor:
     source: str = "catalog"
     deprecated_api: int | None = None
     added_api: int | None = None
+    declaration_state: str = "UNSPECIFIED"
+    applicability_state: str = "UNSPECIFIED"
+    protection_state: str = "UNSPECIFIED"
 
     def base_level(self) -> str | None:
         for token in self.protection:
@@ -56,7 +59,13 @@ class PermissionDescriptor:
         level = self.base_level()
         if level is None:
             return "unknown"
-        if level in {"signature", "signatureorsystem", "signatureorinstaller", "privileged", "installer"}:
+        if level in {
+            "signature",
+            "signatureorsystem",
+            "signatureorinstaller",
+            "privileged",
+            "installer",
+        }:
             return "signature"
         if level == "dangerous":
             return "dangerous"
@@ -102,11 +111,16 @@ class PermissionCatalog:
                 "source": descriptor.source,
                 "added_api": descriptor.added_api,
                 "deprecated_api": descriptor.deprecated_api,
+                "declaration_state": descriptor.declaration_state,
+                "applicability_state": descriptor.applicability_state,
+                "protection_state": descriptor.protection_state,
             }
         return snapshot
 
 
-def _load_yaml_catalog(path: Path, *, origin: str | None = None) -> Mapping[str, PermissionDescriptor]:
+def _load_yaml_catalog(
+    path: Path, *, origin: str | None = None
+) -> Mapping[str, PermissionDescriptor]:
     data = yaml.safe_load(path.read_text())
     if not isinstance(data, list):
         raise ValueError("framework_permissions.yaml must be a list")
@@ -150,13 +164,21 @@ def _load_db_catalog() -> tuple[Mapping[str, PermissionDescriptor], str]:
         name = str(row.get("canonical_permission") or "").strip()
         if not name:
             continue
-        tokens = _normalise_tokens(row.get("compatibility_protection_expression") or "")
+        protection_state = str(row.get("protection_state") or "UNKNOWN_UNSPECIFIED")
+        tokens = (
+            tuple()
+            if protection_state.startswith("UNKNOWN_")
+            else _normalise_tokens(row.get("compatibility_protection_expression"))
+        )
         entries[name] = PermissionDescriptor(
             name=name,
             protection=tokens,
-            source="permission_intel_v1_shadow",
+            source="permission_intel_v1_1_shadow",
             added_api=_coerce_int(row.get("accepted_platform_release")),
             deprecated_api=None,
+            declaration_state=str(row.get("declaration_state") or "UNKNOWN"),
+            applicability_state=str(row.get("applicability_state") or "UNKNOWN"),
+            protection_state=protection_state,
         )
 
     version = str(len(entries))
@@ -202,13 +224,12 @@ def _default_catalog_paths() -> tuple[Path, ...]:
 
 @lru_cache(maxsize=1)
 def load_permission_catalog() -> PermissionCatalog:
-    """Load the framework permission catalog from DB or packaged YAML."""
+    """Load the authoritative legacy framework-permission catalog.
 
-    entries, version = _load_db_catalog()
-    if entries:
-        return PermissionCatalog(entries=entries, version=version, case_sensitive=True)
-    if version == "v1-unavailable":
-        return PermissionCatalog(entries={}, version=version)
+    Candidate Permission Intel v1 data is deliberately excluded from this path.
+    Call :func:`load_permission_catalog_shadow` for an isolated comparison.
+    """
+
     for path in _default_catalog_paths():
         try:
             origin = path.stem
@@ -220,6 +241,27 @@ def load_permission_catalog() -> PermissionCatalog:
             return PermissionCatalog(entries=entries, version=str(version))
     # Fallback to empty catalog so lookups still succeed deterministically.
     return PermissionCatalog(entries={}, version="0")
+
+
+def load_permission_catalog_shadow() -> PermissionCatalog | None:
+    """Return an isolated candidate catalog only in explicit comparison mode.
+
+    The returned object is never substituted into :func:`load_permission_catalog`.
+    Callers performing diagnostics must compare it explicitly with the legacy
+    result. Candidate absence or read failure is represented by ``None``.
+    """
+
+    mode = os.getenv(_SHADOW_MODE_ENV, "LEGACY_ONLY").strip().upper()
+    if mode not in _SHADOW_MODES:
+        allowed = ", ".join(sorted(_SHADOW_MODES))
+        raise ValueError(f"{_SHADOW_MODE_ENV} must be one of: {allowed}")
+    if mode == "LEGACY_ONLY":
+        return None
+
+    entries, version = _load_db_catalog()
+    if not entries:
+        return None
+    return PermissionCatalog(entries=entries, version=version, case_sensitive=True)
 
 
 def discover_catalog_paths() -> tuple[Path, ...]:
@@ -238,11 +280,7 @@ def build_catalog_from_permissions_xml(xml_path: Path) -> PermissionCatalog:
         if not name:
             continue
         raw_level = (element.get(f"{_ANDROID_NS}protectionLevel") or "").strip()
-        tokens = tuple(
-            token.strip().lower()
-            for token in raw_level.split("|")
-            if token.strip()
-        )
+        tokens = tuple(token.strip().lower() for token in raw_level.split("|") if token.strip())
         entries[name] = PermissionDescriptor(
             name=name,
             protection=tokens,
@@ -269,9 +307,7 @@ def classify_permission(
     lookup_name = name.strip()
     manifest_tokens: Sequence[str] = ()
     if manifest_levels and lookup_name in manifest_levels:
-        manifest_tokens = tuple(
-            token.lower() for token in manifest_levels[lookup_name] if token
-        )
+        manifest_tokens = tuple(token.lower() for token in manifest_levels[lookup_name] if token)
     if manifest_tokens:
         descriptor = PermissionDescriptor(name=lookup_name, protection=tuple(manifest_tokens))
     else:
@@ -283,6 +319,7 @@ def classify_permission(
     strength = descriptor.guard_strength()
     try:
         from .guard_policy import apply_guard_policy
+
         strength = apply_guard_policy(lookup_name, strength)
     except Exception:
         pass
@@ -295,5 +332,6 @@ __all__ = [
     "build_catalog_from_permissions_xml",
     "classify_permission",
     "load_permission_catalog",
+    "load_permission_catalog_shadow",
     "discover_catalog_paths",
 ]

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ...db_core import permission_intel as intel_db
+from .current_interpretation import fetch_current_interpretations
 
 
 @dataclass(frozen=True)
@@ -20,46 +21,64 @@ def _utc_now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def fetch_aosp_entries(values: Iterable[str], *, case_insensitive: bool = False) -> dict[str, Mapping[str, object]]:
+def fetch_aosp_entries(
+    values: Iterable[str], *, case_insensitive: bool = False
+) -> dict[str, Mapping[str, object]]:
     items = [v for v in set(values) if isinstance(v, str) and v]
     if not items:
         return {}
-    rows = intel_db.fetch_aosp_permission_dict_rows(items, case_insensitive=case_insensitive)
+    decisions = fetch_current_interpretations(items)
     out: dict[str, Mapping[str, object]] = {}
-    for row in rows:
-        if not row:
+    for _token, decision in decisions.items():
+        if (
+            not decision.platform_authority_accepted
+            or decision.identifier_recognition != "EXACT_ACCEPTED_CANONICAL"
+        ):
             continue
-        constant_value = str(row[0] or "").strip()
+        row = decision.source_row
+        constant_value = str(decision.canonical_permission or "").strip()
         if not constant_value:
             continue
         out[constant_value] = {
             "constant_value": constant_value,
-            "name": row[1],
-            "protection_level": row[2],
-            "hard_restricted": row[3],
-            "soft_restricted": row[4],
-            "not_for_third_party_apps": row[5],
-            "is_deprecated": row[6],
-            "added_in_api_level": row[7],
-            "deprecated_in_api_level": row[8],
+            "name": row.get("legacy_name"),
+            "protection_level": decision.protection_result,
+            "hard_restricted": row.get("hard_restricted"),
+            "soft_restricted": row.get("soft_restricted"),
+            "not_for_third_party_apps": row.get("not_for_third_party_apps"),
+            "is_deprecated": row.get("is_deprecated"),
+            "added_in_api_level": row.get("added_in_api_level"),
+            "deprecated_in_api_level": row.get("deprecated_in_api_level"),
+            "authority_scope": decision.authority_scope,
+            "declaration_state": decision.declaration_state,
+            "feature_dependency": decision.feature_dependency,
         }
     return out
 
 
-def fetch_aosp_protection_map(short_names: Iterable[str], target_sdk: int | None = None) -> dict[str, str | None]:
+def fetch_aosp_protection_map(
+    short_names: Iterable[str], target_sdk: int | None = None
+) -> dict[str, str | None]:
     names = [n for n in set(short_names) if isinstance(n, str) and n]
     if not names:
         return {}
-    rows = intel_db.fetch_aosp_permission_name_rows(names)
+    token_by_name = {name: name if "." in name else f"android.permission.{name}" for name in names}
+    decisions = fetch_current_interpretations(list(token_by_name.values()))
     out: dict[str, str | None] = {}
-    for row in rows:
-        if not row:
+    for name, token in token_by_name.items():
+        decision = decisions.get(token)
+        if decision is None or not decision.platform_authority_accepted:
             continue
-        name = str(row[0] or "").strip().upper()
-        if not name:
+        if decision.identifier_recognition != "EXACT_ACCEPTED_CANONICAL":
             continue
-        added = row[6]
-        deprecated = row[7]
+        # This legacy scalar API cannot carry a feature condition, alternatives,
+        # or historical availability. Withhold rather than erase those dimensions.
+        if decision.declaration_state != "UNCONDITIONAL":
+            out[name.upper()] = None
+            continue
+        row = decision.source_row
+        added = row.get("added_in_api_level")
+        deprecated = row.get("deprecated_in_api_level")
         if target_sdk is not None:
             try:
                 added_int = int(added) if added is not None else None
@@ -73,7 +92,7 @@ def fetch_aosp_protection_map(short_names: Iterable[str], target_sdk: int | None
                 continue
             if deprecated_int is not None and target_sdk >= deprecated_int:
                 pass
-        out[name] = str(row[1]) if row[1] is not None else None
+        out[name.upper()] = decision.protection_result
     return out
 
 
