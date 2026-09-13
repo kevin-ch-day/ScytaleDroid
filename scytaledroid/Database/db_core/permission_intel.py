@@ -396,7 +396,14 @@ def fetch_v1_catalog_gate() -> dict[str, Any]:
 
 def fetch_v1_permission_rows(values: Sequence[str]) -> list[dict[str, Any]]:
     """Return exact-case v1 platform references with structured protection fields."""
-    items = tuple(v.strip() for v in values if isinstance(v, str) and v.strip())
+    items_list: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if value != value.strip():
+            raise ValueError("canonical permission must not contain surrounding whitespace")
+        items_list.append(value)
+    items = tuple(items_list)
     if not items:
         return []
     gate = fetch_v1_catalog_gate()
@@ -577,14 +584,15 @@ def fetch_current_permission_interpretation_rows(
     not depend on the undeployed v1.1 candidate views.
     """
 
-    items = tuple(v.strip() for v in values if isinstance(v, str) and v.strip())
+    items = tuple(v for v in values if isinstance(v, str) and v.strip())
     if not items:
         return []
     lowered = tuple(sorted({item.lower() for item in items}))
-    placeholders = ",".join(["%s"] * len(lowered))
+    requested_sql = " UNION ALL ".join("SELECT %s AS lookup_token_norm" for _item in lowered)
     rows = run_sql(
         f"""
-        SELECT a.constant_value,
+        SELECT requested.lookup_token_norm,
+               a.constant_value,
                a.name AS legacy_name,
                a.protection_level AS legacy_protection,
                a.hard_restricted, a.soft_restricted,
@@ -597,20 +605,16 @@ def fetch_current_permission_interpretation_rows(
                p.lifecycle AS catalog_lifecycle, p.feature_dependency,
                sp.compatibility_protection_expression AS catalog_protection,
                COUNT(c.conflict_id) AS unresolved_conflict_count,
+               f.permission_string AS fact_permission_string,
                f.fact_scope, f.authority_source_type AS fact_source_type,
                f.lifecycle_status AS fact_lifecycle, f.defining_package,
                f.protection_level AS fact_protection,
                np.token_class AS non_permission_class,
-               ta.anomaly_class, co.concept_status
-          FROM (
-                SELECT constant_value_norm AS lookup_token_norm
-                  FROM android_permission_dict_aosp
-                 WHERE constant_value_norm IN ({placeholders})
-                UNION
-                SELECT LOWER(canonical_permission) AS lookup_token_norm
-                  FROM android_permission_v1_current_permission
-                 WHERE LOWER(canonical_permission) IN ({placeholders})
-               ) requested
+               ta.anomaly_class, co.concept_status,
+               o.permission_string AS oem_permission_string,
+               o.vendor_id AS oem_vendor_id,
+               ov.vendor_id AS resolved_oem_vendor_id
+          FROM ({requested_sql}) requested
           LEFT JOIN android_permission_dict_aosp a
             ON a.constant_value_norm = requested.lookup_token_norm
           LEFT JOIN android_permission_v1_current_permission p
@@ -629,21 +633,28 @@ def fetch_current_permission_interpretation_rows(
             ON np.token_value_norm = requested.lookup_token_norm AND np.is_active = 1
           LEFT JOIN android_permission_token_anomaly_fact ta
             ON ta.token_value_norm = requested.lookup_token_norm AND ta.is_active = 1
+          LEFT JOIN android_permission_dict_oem o
+            ON o.permission_string_norm = requested.lookup_token_norm
+          LEFT JOIN android_permission_meta_oem_vendor ov
+            ON ov.vendor_id = o.vendor_id
           LEFT JOIN android_permission_concept co
             ON BINARY co.canonical_token = BINARY a.constant_value
-         GROUP BY a.constant_value, a.name, a.protection_level,
+         GROUP BY requested.lookup_token_norm,
+                  a.constant_value, a.name, a.protection_level,
                   a.hard_restricted, a.soft_restricted,
                   a.not_for_third_party_apps, a.is_deprecated,
                   a.added_in_api_level, a.deprecated_in_api_level,
                   a.source_family_key, a.authority_source_type,
                   a.lifecycle_status, p.permission_id, p.canonical_permission,
                   p.authority_class, p.lifecycle, p.feature_dependency,
-                  sp.compatibility_protection_expression, f.fact_scope,
+                  sp.compatibility_protection_expression, f.permission_string,
+                  f.fact_scope,
                   f.authority_source_type, f.lifecycle_status,
                   f.defining_package, f.protection_level,
-                  np.token_class, ta.anomaly_class, co.concept_status
+                  np.token_class, ta.anomaly_class, co.concept_status,
+                  o.permission_string, o.vendor_id, ov.vendor_id
         """,
-        (*lowered, *lowered),
+        lowered,
         fetch="all",
         dictionary=True,
         query_name="permission_intel.fetch_current_permission_interpretation_rows",
@@ -659,14 +670,16 @@ def fetch_oem_permission_dict_rows(values: Sequence[str]) -> list[tuple[object, 
     placeholders = ",".join(["%s"] * len(items))
     rows = run_sql(
         f"""
-        SELECT permission_string,
-               vendor_id,
-               display_name,
-               protection_level,
-               confidence,
-               classification_source
-        FROM android_permission_dict_oem
-        WHERE permission_string IN ({placeholders})
+        SELECT o.permission_string,
+               o.vendor_id,
+               o.display_name,
+               o.protection_level,
+               o.confidence,
+               o.classification_source
+        FROM android_permission_dict_oem o
+        INNER JOIN android_permission_meta_oem_vendor v
+          ON v.vendor_id = o.vendor_id
+        WHERE BINARY o.permission_string IN ({placeholders})
         """,
         items,
         fetch="all",

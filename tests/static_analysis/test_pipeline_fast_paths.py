@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis.core import pipeline
-from scytaledroid.StaticAnalysis.core.models import ManifestFlags
+from scytaledroid.StaticAnalysis.core.manifest_utils import (
+    build_permission_occurrence_evidence,
+)
+from scytaledroid.StaticAnalysis.core.models import (
+    ManifestFlags,
+    PermissionSummary,
+    StaticAnalysisReport,
+)
 from scytaledroid.StaticAnalysis.modules.string_analysis.indexing.models import (
     IndexedString,
     StringIndex,
@@ -46,6 +54,190 @@ def test_resolve_hashes_for_analysis_reuses_trusted_canonical_metadata(
     assert meta["hash_recomputed"] is False
     assert meta["hash_provenance_ok"] is True
     assert meta["hash_provenance_reason"] == "canonical_store_verified"
+
+
+def test_manifest_permission_occurrence_export_separates_requests_and_definitions() -> None:
+    manifest = ElementTree.fromstring(
+        b"""<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <uses-permission android:name="android.permission.CAMERA"/>
+          <uses-permission-sdk-23 android:name="android.permission.POST_NOTIFICATIONS"/>
+          <permission android:name="com.example.permission.PRIVATE"
+                      android:protectionLevel="signature|privileged"/>
+        </manifest>"""
+    )
+    records = build_permission_occurrence_evidence(
+        manifest,
+        artifact_sha256="a" * 64,
+        package_name="com.example.app",
+        analysis_run_id="run-example",
+        producer_version="test",
+        observed_at_utc="2026-09-13T12:30:45Z",
+    )
+
+    assert [record["occurrence_role"] for record in records] == [
+        "MANIFEST_USES_PERMISSION",
+        "MANIFEST_USES_PERMISSION_SDK_23",
+        "MANIFEST_PERMISSION_DEFINITION",
+    ]
+    assert records[0]["semantic_claim"] == "PERMISSION_REQUEST"
+    assert records[2]["semantic_claim"] == "PERMISSION_DEFINITION"
+    assert records[2]["protection_evidence"] == {
+        "source_kind": "MANIFEST_PROTECTION_LEVEL_ATTRIBUTE",
+        "raw_value": "signature|privileged",
+    }
+    assert all(record["authority"]["database_mutation_authorized"] is False for record in records)
+    assert all(record["identity"]["projected_pi_token"] is None for record in records)
+    assert len({record["occurrence_evidence_digest"] for record in records}) == 3
+
+    report = StaticAnalysisReport(
+        file_path="/tmp/example.apk",
+        relative_path=None,
+        file_name="example.apk",
+        file_size=1,
+        hashes={"sha256": "a" * 64},
+        permissions=PermissionSummary(occurrence_evidence=records),
+    )
+    restored = StaticAnalysisReport.from_dict(report.to_dict())
+    assert restored.permissions.occurrence_evidence == records
+
+
+def test_static_report_loader_tolerates_invalid_permission_sections() -> None:
+    report = StaticAnalysisReport(
+        file_path="/tmp/example.apk",
+        relative_path=None,
+        file_name="example.apk",
+        file_size=1,
+        hashes={"sha256": "a" * 64},
+    )
+
+    for invalid_permissions in (None, "invalid", []):
+        payload = report.to_dict()
+        payload["permissions"] = invalid_permissions
+        restored = StaticAnalysisReport.from_dict(payload)
+        assert restored.permissions == PermissionSummary()
+
+    payload = report.to_dict()
+    payload["permissions"] = {
+        "declared": None,
+        "dangerous": "android.permission.CAMERA",
+        "custom": 42,
+    }
+    restored = StaticAnalysisReport.from_dict(payload)
+    assert restored.permissions == PermissionSummary()
+
+
+def test_static_report_loader_tolerates_invalid_optional_collections() -> None:
+    report = StaticAnalysisReport(
+        file_path="/tmp/example.apk",
+        relative_path=None,
+        file_name="example.apk",
+        file_size=1,
+        hashes={"sha256": "a" * 64},
+    )
+    payload = report.to_dict()
+    payload.update(
+        {
+            "hashes": None,
+            "components": None,
+            "exported_components": "invalid",
+            "features": None,
+            "libraries": "invalid",
+            "signatures": 42,
+        }
+    )
+
+    restored = StaticAnalysisReport.from_dict(payload)
+
+    assert restored.hashes == {}
+    assert restored.components.total() == 0
+    assert restored.exported_components.total() == 0
+    assert restored.features == ()
+    assert restored.libraries == ()
+    assert restored.signatures == ()
+
+
+def test_manifest_permission_occurrence_export_preserves_access_control_roles() -> None:
+    manifest = ElementTree.fromstring(
+        b"""<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <application android:permission="com.example.permission.APP_DEFAULT">
+            <service android:name=".SyncService"
+                     android:permission="com.example.permission.SERVICE"/>
+            <provider android:name=".DocumentsProvider"
+                      android:authorities="com.example.documents"
+                      android:permission="com.example.permission.PROVIDER"
+                      android:readPermission="com.example.permission.READ"
+                      android:writePermission="com.example.permission.WRITE">
+              <path-permission android:pathPrefix="/private"
+                               android:readPermission="com.example.permission.PATH_READ"
+                               android:writePermission="com.example.permission.PATH_WRITE"/>
+            </provider>
+          </application>
+        </manifest>"""
+    )
+
+    records = build_permission_occurrence_evidence(
+        manifest,
+        artifact_sha256="b" * 64,
+        package_name="com.example.app",
+        analysis_run_id="run-guards",
+        producer_version="test",
+        observed_at_utc="2026-09-13T12:30:45Z",
+    )
+
+    component_records = [
+        record for record in records if record["occurrence_role"] == "MANIFEST_COMPONENT_GUARD"
+    ]
+    path_records = [
+        record
+        for record in records
+        if record["occurrence_role"] == "MANIFEST_PATH_PERMISSION_GUARD"
+    ]
+    assert [record["identity"]["raw_token"] for record in component_records] == [
+        "com.example.permission.APP_DEFAULT",
+        "com.example.permission.SERVICE",
+        "com.example.permission.PROVIDER",
+        "com.example.permission.READ",
+        "com.example.permission.WRITE",
+    ]
+    assert [record["identity"]["raw_token"] for record in path_records] == [
+        "com.example.permission.PATH_READ",
+        "com.example.permission.PATH_WRITE",
+    ]
+    assert all(record["semantic_claim"] == "ACCESS_CONTROL_REFERENCE" for record in records)
+    assert len({record["provenance"]["evidence_locator"] for record in records}) == 7
+    assert len({record["occurrence_evidence_digest"] for record in records}) == 7
+
+
+def test_manifest_permission_occurrence_locators_distinguish_parent_components() -> None:
+    manifest = ElementTree.fromstring(
+        b"""<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <application>
+            <provider android:name=".FirstProvider">
+              <path-permission android:path="/first"
+                               android:readPermission="com.example.permission.SHARED"/>
+            </provider>
+            <provider android:name=".SecondProvider">
+              <path-permission android:path="/second"
+                               android:readPermission="com.example.permission.SHARED"/>
+            </provider>
+          </application>
+        </manifest>"""
+    )
+
+    records = build_permission_occurrence_evidence(
+        manifest,
+        artifact_sha256="c" * 64,
+        package_name="com.example.app",
+        analysis_run_id="run-repeated-guards",
+        producer_version="test",
+        observed_at_utc="2026-09-13T12:30:45Z",
+    )
+
+    assert [record["provenance"]["evidence_locator"] for record in records] == [
+        "/manifest/application[1]/provider[1]/path-permission[1]/@android:readPermission",
+        "/manifest/application[1]/provider[2]/path-permission[1]/@android:readPermission",
+    ]
+    assert len({record["occurrence_evidence_digest"] for record in records}) == 2
 
 
 def test_resolve_hashes_for_analysis_falls_back_when_metadata_provenance_breaks(
@@ -199,6 +391,7 @@ def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split
     monkeypatch.setattr(pipeline, "_safe_permission_details", lambda _apk, _meta: {})
     monkeypatch.setattr(pipeline, "collect_dangerous_permissions", lambda _details: ())
     monkeypatch.setattr(pipeline, "collect_custom_permission_definitions", lambda _root: {})
+    monkeypatch.setattr(pipeline, "build_permission_occurrence_evidence", lambda *_a, **_k: ())
     monkeypatch.setattr(pipeline, "collect_exported_components", lambda _root: SimpleNamespace())
     monkeypatch.setattr(pipeline, "load_permission_catalog", lambda: _FakePermissionCatalog())
     monkeypatch.setattr(pipeline, "_safe_tuple", lambda _callable, _meta, _key: ())

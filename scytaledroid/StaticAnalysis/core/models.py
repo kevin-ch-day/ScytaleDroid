@@ -11,6 +11,14 @@ from .findings import DetectorResult, Finding
 from .utils import coerce_optional_str, subset
 
 
+def _tuple_payload(value: object) -> tuple[object, ...]:
+    """Return sequence payloads without treating text as a collection."""
+
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return tuple(value)
+    return ()
+
+
 @dataclass(frozen=True)
 class ManifestSummary:
     """Key manifest attributes extracted from the APK."""
@@ -46,7 +54,7 @@ class ComponentSummary:
 
 @dataclass(frozen=True)
 class PermissionSummary:
-    """Permissions declared by the APK."""
+    """Permission requests, definitions, and source-aware manifest evidence."""
 
     declared: tuple[str, ...] = ()
     dangerous: tuple[str, ...] = ()
@@ -58,6 +66,7 @@ class PermissionSummary:
     catalog_snapshot: Mapping[str, Mapping[str, object]] = field(
         default_factory=dict
     )
+    occurrence_evidence: tuple[Mapping[str, object], ...] = ()
 
     def to_dict(self) -> MutableMapping[str, object]:
         return {
@@ -76,6 +85,7 @@ class PermissionSummary:
                 str(name): dict(metadata)
                 for name, metadata in self.catalog_snapshot.items()
             },
+            "occurrence_evidence": [dict(record) for record in self.occurrence_evidence],
         }
 
 
@@ -164,29 +174,21 @@ class StaticAnalysisReport:
 
         manifest = ManifestSummary(**subset(payload.get("manifest", {}), ManifestSummary))
         flags = ManifestFlags(**subset(payload.get("manifest_flags", {}), ManifestFlags))
-        permissions_payload = payload.get("permissions", {})
-        protection_levels_payload = (
-            permissions_payload.get("protection_levels")
-            if isinstance(permissions_payload, Mapping)
-            else {}
+        permissions_raw = payload.get("permissions")
+        permissions_payload = (
+            permissions_raw if isinstance(permissions_raw, Mapping) else {}
         )
-        custom_defs_payload = (
-            permissions_payload.get("custom_definitions")
-            if isinstance(permissions_payload, Mapping)
-            else {}
-        )
-        catalog_snapshot_payload = (
-            permissions_payload.get("catalog_snapshot")
-            if isinstance(permissions_payload, Mapping)
-            else {}
-        )
+        protection_levels_payload = permissions_payload.get("protection_levels")
+        custom_defs_payload = permissions_payload.get("custom_definitions")
+        catalog_snapshot_payload = permissions_payload.get("catalog_snapshot")
+        occurrence_evidence_payload = permissions_payload.get("occurrence_evidence")
         permissions = PermissionSummary(
             **{
-                "declared": tuple(permissions_payload.get("declared", ())),
-                "dangerous": tuple(permissions_payload.get("dangerous", ())),
-                "custom": tuple(permissions_payload.get("custom", ())),
+                "declared": _tuple_payload(permissions_payload.get("declared")),
+                "dangerous": _tuple_payload(permissions_payload.get("dangerous")),
+                "custom": _tuple_payload(permissions_payload.get("custom")),
                 "protection_levels": {
-                    str(name): tuple(levels)
+                    str(name): _tuple_payload(levels)
                     for name, levels in dict(protection_levels_payload).items()
                 }
                 if isinstance(protection_levels_payload, Mapping)
@@ -205,30 +207,38 @@ class StaticAnalysisReport:
                 }
                 if isinstance(catalog_snapshot_payload, Mapping)
                 else {},
+                "occurrence_evidence": tuple(
+                    dict(record)
+                    for record in occurrence_evidence_payload
+                    if isinstance(record, Mapping)
+                )
+                if isinstance(occurrence_evidence_payload, Sequence)
+                and not isinstance(occurrence_evidence_payload, (str, bytes))
+                else (),
             }
+        )
+        components_raw = payload.get("components")
+        components_payload = (
+            components_raw if isinstance(components_raw, Mapping) else {}
         )
         components = ComponentSummary(
             **{
-                "activities": tuple(payload.get("components", {}).get("activities", ())),
-                "services": tuple(payload.get("components", {}).get("services", ())),
-                "receivers": tuple(payload.get("components", {}).get("receivers", ())),
-                "providers": tuple(payload.get("components", {}).get("providers", ())),
+                "activities": _tuple_payload(components_payload.get("activities")),
+                "services": _tuple_payload(components_payload.get("services")),
+                "receivers": _tuple_payload(components_payload.get("receivers")),
+                "providers": _tuple_payload(components_payload.get("providers")),
             }
+        )
+        exported_raw = payload.get("exported_components")
+        exported_payload = (
+            exported_raw if isinstance(exported_raw, Mapping) else {}
         )
         exported = ComponentSummary(
             **{
-                "activities": tuple(
-                    payload.get("exported_components", {}).get("activities", ())
-                ),
-                "services": tuple(
-                    payload.get("exported_components", {}).get("services", ())
-                ),
-                "receivers": tuple(
-                    payload.get("exported_components", {}).get("receivers", ())
-                ),
-                "providers": tuple(
-                    payload.get("exported_components", {}).get("providers", ())
-                ),
+                "activities": _tuple_payload(exported_payload.get("activities")),
+                "services": _tuple_payload(exported_payload.get("services")),
+                "receivers": _tuple_payload(exported_payload.get("receivers")),
+                "providers": _tuple_payload(exported_payload.get("providers")),
             }
         )
 
@@ -292,20 +302,24 @@ class StaticAnalysisReport:
         else:
             workload_profile = {}
 
+        file_path = str(payload.get("file_path") or "")
+        hashes_raw = payload.get("hashes")
+        hashes_payload = hashes_raw if isinstance(hashes_raw, Mapping) else {}
+
         return cls(
-            file_path=str(payload.get("file_path") or ""),
+            file_path=file_path,
             relative_path=payload.get("relative_path") or None,
-            file_name=str(payload.get("file_name") or Path(payload.get("file_path") or "").name),
+            file_name=str(payload.get("file_name") or Path(file_path).name),
             file_size=int(payload.get("file_size") or 0),
-            hashes={str(k): str(v) for k, v in dict(payload.get("hashes", {})).items()},
+            hashes={str(k): str(v) for k, v in hashes_payload.items()},
             manifest=manifest,
             manifest_flags=flags,
             permissions=permissions,
             components=components,
             exported_components=exported,
-            features=tuple(payload.get("features", ())),
-            libraries=tuple(payload.get("libraries", ())),
-            signatures=tuple(payload.get("signatures", ())),
+            features=_tuple_payload(payload.get("features")),
+            libraries=_tuple_payload(payload.get("libraries")),
+            signatures=_tuple_payload(payload.get("signatures")),
             metadata=metadata,
             scan_profile=coerce_optional_str(payload.get("scan_profile")),
             analysis_version=str(payload.get("analysis_version") or "2.0.0-alpha"),

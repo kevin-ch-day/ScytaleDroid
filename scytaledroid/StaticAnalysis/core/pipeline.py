@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Mapping, MutableMapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Config import app_config
@@ -37,6 +38,7 @@ from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeli
 from .errors import StaticAnalysisError
 from .manifest_utils import (
     build_manifest_flags,
+    build_permission_occurrence_evidence,
     collect_custom_permission_definitions,
     collect_exported_components,
     extract_compile_sdk,
@@ -604,6 +606,16 @@ def analyze_apk(
     dangerous = collect_dangerous_permissions(permission_details)
     custom_permissions = tuple(sorted(apk.get_declared_permissions() or ()))
     custom_definitions = collect_custom_permission_definitions(manifest_root)
+    permission_occurrence_evidence = build_permission_occurrence_evidence(
+        manifest_root,
+        artifact_sha256=apk_sha256,
+        package_name=package_name,
+        analysis_run_id=run_id,
+        producer_version=analysis_config.analysis_version,
+        observed_at_utc=datetime.now(UTC).isoformat(timespec="microseconds").replace(
+            "+00:00", "Z"
+        ),
+    )
     permission_catalog = load_permission_catalog()
 
     protection_levels: dict[str, tuple[str, ...]] = {}
@@ -635,6 +647,7 @@ def analyze_apk(
         protection_levels=protection_levels,
         custom_definitions=custom_definitions,
         catalog_snapshot=catalog_snapshot,
+        occurrence_evidence=permission_occurrence_evidence,
     )
 
     # Components (resilient)

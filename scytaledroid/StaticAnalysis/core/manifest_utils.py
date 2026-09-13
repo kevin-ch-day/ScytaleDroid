@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from xml.etree import ElementTree
 
@@ -12,6 +14,7 @@ from .models import ComponentSummary, ManifestFlags
 from .utils import coerce_bool, coerce_optional_str
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
+_PERMISSION_OCCURRENCE_RECORD_FORMAT = "android-permission-intel-permission-occurrence-evidence-v1"
 
 
 def load_manifest_root(apk: APK) -> ElementTree.Element:
@@ -306,6 +309,189 @@ def collect_custom_permission_definitions(
     return {key: dict(value) for key, value in definitions.items()}
 
 
+def _semantic_sha256(value: Mapping[str, object]) -> str:
+    encoded = (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_permission_occurrence_evidence(
+    manifest_root: ElementTree.Element,
+    *,
+    artifact_sha256: str,
+    package_name: str | None,
+    analysis_run_id: str,
+    producer_version: str,
+    observed_at_utc: str,
+) -> tuple[Mapping[str, object], ...]:
+    """Build additive role-specific evidence without assigning PI authority.
+
+    Projection stays explicitly deferred. This exporter preserves the exact
+    manifest token and element role; a Permission Intel consumer can later
+    apply its versioned projection policy without losing source identity.
+    """
+
+    role_by_tag = {
+        "uses-permission": ("MANIFEST_USES_PERMISSION", "PERMISSION_REQUEST"),
+        "uses-permission-sdk-23": (
+            "MANIFEST_USES_PERMISSION_SDK_23",
+            "PERMISSION_REQUEST",
+        ),
+        "permission": ("MANIFEST_PERMISSION_DEFINITION", "PERMISSION_DEFINITION"),
+    }
+    component_tags = {
+        "application",
+        "activity",
+        "activity-alias",
+        "service",
+        "receiver",
+        "provider",
+    }
+    guard_attributes = ("permission", "readPermission", "writePermission")
+    records: list[Mapping[str, object]] = []
+
+    def attribute_value(
+        element: ElementTree.Element,
+        attribute: str,
+    ) -> tuple[str | None, str]:
+        """Return an attribute value and an honest source-locator name."""
+
+        namespaced = element.get(f"{_ANDROID_NS}{attribute}")
+        if namespaced is not None:
+            return namespaced, f"android:{attribute}"
+        return element.get(attribute), attribute
+
+    def append_record(
+        *,
+        raw_token: str,
+        role: str,
+        claim: str,
+        evidence_locator: str,
+        raw_protection: str | None = None,
+    ) -> None:
+        """Append one direct manifest fact without projecting its identity."""
+
+        core: dict[str, object] = {
+            "record_format": _PERMISSION_OCCURRENCE_RECORD_FORMAT,
+            "occurrence_role": role,
+            "evidence_layer": "DIRECT_MANIFEST",
+            "semantic_claim": claim,
+            "subject": {
+                "artifact_sha256": artifact_sha256,
+                "package_name": package_name,
+                "producer_local_sample_ref": None,
+            },
+            "identity": {
+                "raw_token": raw_token,
+                "raw_token_utf8_sha256": hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+                "projected_pi_token": None,
+                "projected_token_utf8_sha256": None,
+                "projection_policy_version": "projection-deferred-to-permission-intel-v1",
+                "compatibility_key": None,
+                "compatibility_profile": "ascii-casefold-no-trim-v1",
+                "transformation_steps": [],
+                "supported_for_projection": False,
+                "unsupported_reason": "PROJECTION_DEFERRED_TO_PERMISSION_INTEL",
+            },
+            "provenance": {
+                "producer": "ScytaleDroid",
+                "producer_version": producer_version,
+                "analysis_run_id": analysis_run_id,
+                "extractor_surface": "scytaledroid.android_manifest",
+                "evidence_locator": evidence_locator,
+                "source_artifact_sha256": artifact_sha256,
+                "source_event_ref": None,
+                "observed_at_utc": observed_at_utc,
+            },
+            "lineage": {
+                "derivation_rule_id": None,
+                "upstream_evidence_digests": [],
+            },
+            "protection_evidence": (
+                {
+                    "source_kind": "MANIFEST_PROTECTION_LEVEL_ATTRIBUTE",
+                    "raw_value": raw_protection,
+                }
+                if raw_protection
+                else None
+            ),
+            "authority": {
+                "alias_authorized": False,
+                "canonical_identity_authorized": False,
+                "database_mutation_authorized": False,
+            },
+        }
+        records.append({**core, "occurrence_evidence_digest": _semantic_sha256(core)})
+
+    def visit(element: ElementTree.Element, element_path: str) -> None:
+        """Visit manifest elements with unambiguous sibling-qualified paths."""
+
+        tag = element.tag.rsplit("}", 1)[-1]
+        role_claim = role_by_tag.get(tag)
+        if role_claim is not None:
+            raw_token, name_attribute = attribute_value(element, "name")
+            if raw_token:
+                role, claim = role_claim
+                raw_protection = None
+                if role == "MANIFEST_PERMISSION_DEFINITION":
+                    raw_protection, _protection_attribute = attribute_value(
+                        element,
+                        "protectionLevel",
+                    )
+                append_record(
+                    raw_token=raw_token,
+                    role=role,
+                    claim=claim,
+                    evidence_locator=f"{element_path}/@{name_attribute}",
+                    raw_protection=raw_protection,
+                )
+
+        if tag in component_tags:
+            attributes = ("permission",)
+            if tag == "provider":
+                attributes = guard_attributes
+            for attribute in attributes:
+                raw_token, source_attribute = attribute_value(element, attribute)
+                if raw_token:
+                    append_record(
+                        raw_token=raw_token,
+                        role="MANIFEST_COMPONENT_GUARD",
+                        claim="ACCESS_CONTROL_REFERENCE",
+                        evidence_locator=f"{element_path}/@{source_attribute}",
+                    )
+
+        if tag == "path-permission":
+            for attribute in guard_attributes:
+                raw_token, source_attribute = attribute_value(element, attribute)
+                if raw_token:
+                    append_record(
+                        raw_token=raw_token,
+                        role="MANIFEST_PATH_PERMISSION_GUARD",
+                        claim="ACCESS_CONTROL_REFERENCE",
+                        evidence_locator=f"{element_path}/@{source_attribute}",
+                    )
+
+        child_ordinals: dict[str, int] = {}
+        for child in element:
+            child_tag = child.tag.rsplit("}", 1)[-1]
+            child_ordinals[child_tag] = child_ordinals.get(child_tag, 0) + 1
+            visit(
+                child,
+                f"{element_path}/{child_tag}[{child_ordinals[child_tag]}]",
+            )
+
+    root_tag = manifest_root.tag.rsplit("}", 1)[-1]
+    visit(manifest_root, f"/{root_tag}")
+    return tuple(records)
+
+
 __all__ = [
     "load_manifest_root",
     "build_manifest_flags",
@@ -313,4 +499,5 @@ __all__ = [
     "collect_exported_components",
     "build_manifest_evidence",
     "collect_custom_permission_definitions",
+    "build_permission_occurrence_evidence",
 ]

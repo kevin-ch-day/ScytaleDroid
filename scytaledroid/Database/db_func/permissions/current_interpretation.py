@@ -52,16 +52,17 @@ def interpret_permission_row(token: str, row: dict[str, object]) -> PermissionIn
     authority = _text(row.get("authority_class")).upper()
     fact_scope = _text(row.get("fact_scope")).lower()
     fact_source = _text(row.get("fact_source_type")).lower()
+    fact_permission = _text(row.get("fact_permission_string"))
+    fact_exact = bool(fact_permission and token == fact_permission)
     fact_lifecycle = _text(row.get("fact_lifecycle")).lower()
     catalog_lifecycle = _text(row.get("catalog_lifecycle")).lower()
     legacy_lifecycle = _text(row.get("legacy_lifecycle")).lower()
     feature = _text(row.get("feature_dependency")) or None
     conflicts = int(row.get("unresolved_conflict_count") or 0)
     protection = _text(row.get("catalog_protection") or row.get("fact_protection")) or None
-    historical = (
-        fact_scope == "removed_api"
-        or fact_lifecycle in _HISTORICAL
-        or catalog_lifecycle in _HISTORICAL
+    historical = catalog_lifecycle in _HISTORICAL or (
+        fact_exact
+        and (fact_scope == "removed_api" or fact_lifecycle in _HISTORICAL)
     )
     recognition = (
         "EXACT_ACCEPTED_CANONICAL"
@@ -128,19 +129,36 @@ def interpret_permission_row(token: str, row: dict[str, object]) -> PermissionIn
             row,
         )
 
-    if fact_scope == "removed_api" or (
-        fact_lifecycle in _HISTORICAL and fact_source.startswith("aosp_")
+    if fact_exact and (
+        fact_scope == "removed_api"
+        or (fact_lifecycle in _HISTORICAL and fact_source.startswith("aosp_"))
     ):
         scope, kind = "HISTORICAL_PLATFORM", "PERMISSION"
-    elif fact_scope == "provider_permission" and fact_source.startswith("aosp_"):
+    elif fact_exact and fact_scope == "provider_permission" and fact_source.startswith("aosp_"):
         scope, kind = "AOSP_PROVIDER_ACL", "PROVIDER_PERMISSION"
-    elif fact_scope == "permission_definition" and fact_source == "aosp_package_manifest":
+    elif (
+        fact_exact
+        and fact_scope == "permission_definition"
+        and fact_source == "aosp_package_manifest"
+    ):
         scope, kind = "AOSP_PACKAGE_DEFINED", "PERMISSION"
-    elif fact_source in {"sdk_vendor_docs", "sdk_inventory"}:
+    elif (
+        fact_exact
+        and fact_scope == "permission_definition"
+        and token == _text(row.get("oem_permission_string"))
+        and row.get("resolved_oem_vendor_id") is not None
+    ):
+        scope, kind = "OEM_OR_VENDOR", "PERMISSION"
+    elif (
+        fact_exact
+        and fact_scope == "permission_definition"
+        and fact_source in {"sdk_vendor_docs", "sdk_inventory"}
+    ):
         scope, kind = "SDK_INTEGRATION_CUSTOM_PERMISSION", "PERMISSION"
     elif (
-        fact_source in {"chromium_source", "androidx_manifest"}
-        or fact_scope == "custom_permission_pattern"
+        fact_exact
+        and fact_scope == "permission_definition"
+        and fact_source in {"chromium_source", "androidx_manifest"}
     ):
         scope, kind = "THIRD_PARTY_APPLICATION_DEFINED", "PERMISSION"
     else:
@@ -181,12 +199,22 @@ def interpret_permission_row(token: str, row: dict[str, object]) -> PermissionIn
 
 
 def fetch_current_interpretations(values: list[str]) -> dict[str, PermissionInterpretation]:
-    tokens = tuple(dict.fromkeys(_text(value) for value in values if _text(value)))
+    tokens = tuple(
+        dict.fromkeys(value for value in values if isinstance(value, str) and value.strip())
+    )
     rows = permission_intel.fetch_current_permission_interpretation_rows(tokens)
-    by_norm = {
-        _text(row.get("constant_value") or row.get("canonical_permission")).lower(): dict(row)
-        for row in rows
-    }
+    by_norm: dict[str, dict[str, object]] = {}
+    for row in rows:
+        requested_key = row.get("lookup_token_norm")
+        key = (
+            str(requested_key).lower()
+            if requested_key is not None
+            else _text(row.get("constant_value") or row.get("canonical_permission")).lower()
+        )
+        materialized = dict(row)
+        if key in by_norm and by_norm[key] != materialized:
+            raise RuntimeError(f"conflicting Permission Intel evidence for requested token: {key}")
+        by_norm[key] = materialized
     return {
         token: interpret_permission_row(token, by_norm.get(token.lower(), {})) for token in tokens
     }

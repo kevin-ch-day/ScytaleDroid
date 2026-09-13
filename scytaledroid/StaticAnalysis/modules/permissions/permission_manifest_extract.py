@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from xml.etree import ElementTree as ET
 
 from scytaledroid.StaticAnalysis._androguard import APK, open_apk_safely
@@ -12,6 +13,14 @@ from scytaledroid.StaticAnalysis.engine.strings_capture import _run_with_fd_capt
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
+
+
+def _valid_permission_names(values: object) -> list[str]:
+    """Return unique exact string tokens without letting bad entries poison a scan."""
+
+    if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+        return []
+    return sorted({value for value in values if isinstance(value, str) and value})
 
 
 def _silent_apk_call(callable_obj, default):
@@ -23,7 +32,7 @@ def _silent_apk_call(callable_obj, default):
 
 
 def _extract_declared_permissions(apk: APK) -> list[tuple[str, str]]:
-    """Return manifest declared permissions with their element type."""
+    """Return manifest permission requests with their element type."""
 
     try:
         axml = _silent_apk_call(apk.get_android_manifest_axml, None)
@@ -32,7 +41,7 @@ def _extract_declared_permissions(apk: APK) -> list[tuple[str, str]]:
         xml_data = axml.get_xml()
         root = ET.fromstring(xml_data)
     except Exception:
-        names = sorted(set(_silent_apk_call(apk.get_permissions, []) or []))
+        names = _valid_permission_names(_silent_apk_call(apk.get_permissions, []))
         return [(name, "uses-permission") for name in names]
 
     declared: list[tuple[str, str]] = []
@@ -54,6 +63,45 @@ def _extract_declared_permissions(apk: APK) -> list[tuple[str, str]]:
     return ordered
 
 
+def _extract_defined_permissions(apk: APK) -> list[dict[str, str | None]]:
+    """Return app-defined ``<permission>`` identities and protection text.
+
+    Androguard 4 separates definition names from definition details:
+    ``get_declared_permissions()`` returns strings, while
+    ``get_declared_permissions_details()`` returns the metadata mapping.  Keep
+    the name-only fallback, but never reinterpret requested permissions as
+    definitions.
+    """
+
+    details_getter = getattr(apk, "get_declared_permissions_details", None)
+    details = (
+        _silent_apk_call(details_getter, {}) if callable(details_getter) else {}
+    )
+    definitions: dict[str, str | None] = {}
+    if isinstance(details, Mapping):
+        for raw_name, raw_metadata in details.items():
+            name = raw_name if isinstance(raw_name, str) else ""
+            if not name.strip():
+                continue
+            protection = None
+            if isinstance(raw_metadata, Mapping):
+                protection = raw_metadata.get("protectionLevel") or raw_metadata.get(
+                    "android:protectionLevel"
+                )
+            definitions[name] = str(protection) if protection is not None else None
+
+    names = _valid_permission_names(
+        _silent_apk_call(apk.get_declared_permissions, [])
+    )
+    for name in names:
+        definitions.setdefault(name, None)
+
+    return [
+        {"name": name, "protection": definitions[name]}
+        for name in sorted(definitions)
+    ]
+
+
 def collect_permissions_and_sdk(
     apk_path: str,
 ) -> tuple[list[tuple[str, str]], list[dict[str, str | None]], dict[str, str | None]]:
@@ -65,7 +113,10 @@ def collect_permissions_and_sdk(
         apk, warnings = open_apk_safely(apk_path)
     except Exception:
         if fallback_meta:
-            declared = [(name, "uses-permission") for name in fallback_meta.get("permissions") or []]
+            declared = [
+                (name, "uses-permission")
+                for name in _valid_permission_names(fallback_meta.get("permissions"))
+            ]
             sdk_info = {
                 "min": fallback_meta.get("min_sdk"),
                 "target": fallback_meta.get("target_sdk"),
@@ -102,15 +153,7 @@ def collect_permissions_and_sdk(
     except Exception:
         declared = []
 
-    defined: list[dict[str, str | None]] = []
-    try:
-        for entry in _silent_apk_call(apk.get_declared_permissions, ()) or ():
-            name = entry.get("name") or entry.get("android:name")
-            protection = entry.get("protectionLevel") or entry.get("android:protectionLevel")
-            if name:
-                defined.append({"name": name, "protection": protection})
-    except Exception:
-        pass
+    defined = _extract_defined_permissions(apk)
 
     min_sdk = _silent_apk_call(apk.get_min_sdk_version, None)
     target_sdk = _silent_apk_call(apk.get_target_sdk_version, None)
@@ -137,7 +180,10 @@ def collect_permissions_and_sdk(
     if (not declared or min_sdk is None or target_sdk is None) and fallback_meta:
         fallback_used = True
         if not declared:
-            declared = [(name, "uses-permission") for name in fallback_meta.get("permissions") or []]
+            declared = [
+                (name, "uses-permission")
+                for name in _valid_permission_names(fallback_meta.get("permissions"))
+            ]
         if min_sdk is None:
             min_sdk = fallback_meta.get("min_sdk")
         if target_sdk is None:

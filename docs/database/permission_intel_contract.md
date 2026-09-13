@@ -32,8 +32,9 @@ ScytaleDroid static may emit these `dict_unknown.triage_status` values:
 - `aosp_missing`
 - `new`
 
-Static AOSP promotion queue rows use `queue_action = 'aosp'`. Legacy
-`aosp_promote` callers are normalized before insert.
+Unresolved AOSP candidates are written as review-only `queue_action = 'defer'`.
+Legacy `aosp` and `aosp_promote` inputs are normalized to `defer`; neither is a
+direct platform-promotion authority.
 
 ## Read Surface
 

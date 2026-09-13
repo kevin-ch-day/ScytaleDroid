@@ -8,6 +8,10 @@ from scytaledroid.StaticAnalysis.cli.execution import analytics, permission_flow
 from scytaledroid.StaticAnalysis.cli.persistence import metrics_writer
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
 from scytaledroid.StaticAnalysis.modules.permissions import permission_console_rendering
+from scytaledroid.StaticAnalysis.modules.permissions.permission_manifest_extract import (
+    _extract_declared_permissions,
+    _extract_defined_permissions,
+)
 from scytaledroid.Utils.ops.operation_result import OperationResult
 
 
@@ -315,3 +319,51 @@ def test_permission_profiles_and_metrics_prefer_manifest_extraction(monkeypatch)
 
     assert profile["D"] == 4
     assert int(bundle.permission_detail["dangerous_count"]) == 4
+
+
+def test_manifest_definition_details_are_not_lost_or_mixed_with_requests():
+    class _Apk:
+        def get_declared_permissions_details(self):
+            return {
+                "com.example.permission.SIGNATURE": {
+                    "protectionLevel": "signature|privileged"
+                }
+            }
+
+        def get_declared_permissions(self):
+            return [
+                "com.example.permission.SIGNATURE",
+                "com.example.permission.NAME_ONLY",
+            ]
+
+        def get_permissions(self):
+            raise AssertionError("permission requests are not definition evidence")
+
+    assert _extract_defined_permissions(_Apk()) == [
+        {"name": "com.example.permission.NAME_ONLY", "protection": None},
+        {
+            "name": "com.example.permission.SIGNATURE",
+            "protection": "signature|privileged",
+        },
+    ]
+
+
+def test_manifest_permission_fallback_preserves_valid_tokens_among_bad_entries():
+    class _Apk:
+        def get_android_manifest_axml(self):
+            raise ValueError("manifest unavailable")
+
+        def get_permissions(self):
+            return [
+                "android.permission.CAMERA",
+                None,
+                7,
+                "",
+                "android.permission.INTERNET",
+                "android.permission.CAMERA",
+            ]
+
+    assert _extract_declared_permissions(_Apk()) == [
+        ("android.permission.CAMERA", "uses-permission"),
+        ("android.permission.INTERNET", "uses-permission"),
+    ]

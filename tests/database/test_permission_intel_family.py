@@ -172,7 +172,28 @@ def test_current_interpretation_uses_deployed_evidence_surfaces(monkeypatch):
     assert "android_permission_v1_current_permission" in sql
     assert "api_permission_declaration_conflict" in sql
     assert "android_permission_v1_1_" not in sql
+    assert "SELECT %s AS lookup_token_norm" in sql
+    assert "FROM android_permission_dict_aosp\n                 WHERE" not in sql
+    assert "android_permission_dict_oem" in sql
+    assert "android_permission_meta_oem_vendor" in sql
+    assert captured["params"] == ("android.permission.camera",)
     assert captured["kwargs"]["read_only"] is True
+
+
+def test_oem_lookup_requires_resolved_vendor_and_exact_token(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_run_sql(query, params=None, **kwargs):
+        captured["query"] = query
+        captured["params"] = params
+        return []
+
+    monkeypatch.setattr(permission_intel, "run_sql", _fake_run_sql)
+    permission_intel.fetch_oem_permission_dict_rows(["vendor.example.permission.ACCESS"])
+    sql = str(captured["query"])
+    assert "INNER JOIN android_permission_meta_oem_vendor" in sql
+    assert "BINARY o.permission_string IN" in sql
+    assert captured["params"] == ("vendor.example.permission.ACCESS",)
 
 
 def test_permission_intel_intel_table_exists(monkeypatch):

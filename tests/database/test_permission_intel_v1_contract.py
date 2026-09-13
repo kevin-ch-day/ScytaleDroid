@@ -78,6 +78,16 @@ def test_v1_lookup_is_binary_and_shadow_only(monkeypatch) -> None:
     )
 
 
+def test_v1_lookup_rejects_surrounding_whitespace_before_gate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        permission_intel,
+        "fetch_v1_catalog_gate",
+        lambda: pytest.fail("invalid exact token must fail before catalog lookup"),
+    )
+    with pytest.raises(ValueError, match="surrounding whitespace"):
+        permission_intel.fetch_v1_permission_rows([" android.permission.INTERNET"])
+
+
 def test_v1_full_catalog_is_limited_to_accepted_aosp_authorities(monkeypatch) -> None:
     calls: list[str] = []
     params_seen: list[object] = []
