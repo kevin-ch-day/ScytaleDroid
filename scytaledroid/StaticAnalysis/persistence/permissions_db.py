@@ -33,9 +33,7 @@ _GHOSTAOSP_BROADCAST_PERMS = {
     "android.permission.BROADCAST_PACKAGE_CHANGED",
 }
 
-_MALFORMED_PREFIXES = (
-    "android.premission.",
-)
+_MALFORMED_PREFIXES = ("android.premission.",)
 
 
 def persist_declared_permissions(
@@ -51,20 +49,39 @@ def persist_declared_permissions(
 ) -> dict:
     """Persist OEM/unknown permissions observed in a StaticAnalysisReport.
 
-    - OEM/custom: non-framework permissions in declared uses.
+    ``declared`` is the legacy name for manifest permission requests.  Exact
+    ``<permission>`` definitions arrive separately in ``custom_declared`` and
+    must remain visible even when the defining APK does not also request them.
+
+    - OEM/custom: non-framework permissions in requests or exact definitions.
     - Unknown: malformed/odd permissions (no namespace dot) observed in uses.
     """
     try:
         from scytaledroid.Database.db_func.permissions import permission_dicts as _pd
     except Exception as exc:  # pragma: no cover - DB not configured
-        log.warning(f"DB modules unavailable for permission persistence: {exc}", category="static_analysis")
+        log.warning(
+            f"DB modules unavailable for permission persistence: {exc}", category="static_analysis"
+        )
         return {"aosp": 0, "oem": 0, "app_defined": 0, "unknown": 0}
 
-    # Deduplicate permission names to avoid double-counting (e.g., sdk-23 tag)
-    declared_names: Iterable[str] = tuple(sorted(set(declared or ())))
-    custom_set: set[str] = set(custom_declared or ())
+    # Deduplicate requests (including sdk-23 repeats) and definitions without
+    # collapsing case. A definition is durable evidence even when the same APK
+    # does not contain a matching uses-permission element.
+    requested_names = {
+        str(name).strip()
+        for name in (declared or ())
+        if isinstance(name, str) and str(name).strip()
+    }
+    custom_set = {
+        str(name).strip()
+        for name in (custom_declared or ())
+        if isinstance(name, str) and str(name).strip()
+    }
+    declared_names: Iterable[str] = tuple(sorted(requested_names | custom_set))
     aosp_candidates = [
-        str(n) for n in declared_names if isinstance(n, str) and n.lower().startswith("android.permission.")
+        str(n)
+        for n in declared_names
+        if isinstance(n, str) and n.lower().startswith("android.permission.")
     ]
     try:
         aosp_entries = _pd.fetch_aosp_entries(aosp_candidates, case_insensitive=True)
@@ -109,7 +126,10 @@ def persist_declared_permissions(
                     }
                 )
             except Exception as exc:
-                log.warning(f"Malformed permission persist failed for {name}: {exc}", category="static_analysis")
+                log.warning(
+                    f"Malformed permission persist failed for {name}: {exc}",
+                    category="static_analysis",
+                )
             counts["unknown"] += 1
             continue
 
@@ -139,7 +159,10 @@ def persist_declared_permissions(
                     }
                 )
             except Exception as exc:
-                log.warning(f"App-defined permission persist failed for {name}: {exc}", category="static_analysis")
+                log.warning(
+                    f"App-defined permission persist failed for {name}: {exc}",
+                    category="static_analysis",
+                )
             counts["app_defined"] += 1
             continue
 
@@ -162,7 +185,9 @@ def persist_declared_permissions(
                         vendor_hint_prefix = pattern
                         break
 
-        triage_status = "oem_candidate" if vendor_hint_prefix else ("aosp_missing" if is_android else "new")
+        triage_status = (
+            "oem_candidate" if vendor_hint_prefix else ("aosp_missing" if is_android else "new")
+        )
         note_parts = []
         if raw.strip() != norm:
             note_parts.append(f"[auto] normalized from {raw.strip()} to {norm}")

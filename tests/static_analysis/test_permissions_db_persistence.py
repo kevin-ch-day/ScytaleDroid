@@ -25,7 +25,9 @@ def test_insert_queue_defaults_optional_placeholders(monkeypatch) -> None:
         captured.update(dict(params))
         return None
 
-    monkeypatch.setattr(permission_dicts_db.intel_db, "insert_permission_queue", _fake_insert_permission_queue)
+    monkeypatch.setattr(
+        permission_dicts_db.intel_db, "insert_permission_queue", _fake_insert_permission_queue
+    )
 
     permission_dicts_db.insert_queue(
         {
@@ -48,8 +50,12 @@ def test_persist_declared_permissions_enqueues_aosp_missing_without_bucket(monke
     monkeypatch.setattr(permission_dicts_db, "fetch_aosp_entries", lambda *_a, **_k: {})
     monkeypatch.setattr(permission_dicts_db, "fetch_oem_entries", lambda *_a, **_k: {})
     monkeypatch.setattr(permission_dicts_db, "fetch_vendor_prefix_rules", lambda *_a, **_k: [])
-    monkeypatch.setattr(permission_dicts_db, "upsert_unknown", lambda payload: unknown_calls.append(dict(payload)))
-    monkeypatch.setattr(permission_dicts_db, "insert_queue", lambda payload: queue_calls.append(dict(payload)))
+    monkeypatch.setattr(
+        permission_dicts_db, "upsert_unknown", lambda payload: unknown_calls.append(dict(payload))
+    )
+    monkeypatch.setattr(
+        permission_dicts_db, "insert_queue", lambda payload: queue_calls.append(dict(payload))
+    )
 
     counts = permissions_db.persist_declared_permissions(
         package_name="pkg.example",
@@ -68,4 +74,87 @@ def test_persist_declared_permissions_enqueues_aosp_missing_without_bucket(monke
     assert queue_calls[0]["permission_string"] == "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION"
     assert queue_calls[0].get("queue_action") == "defer"
     assert "proposed_bucket" in queue_calls[0] and queue_calls[0]["proposed_bucket"] is None
-    assert "proposed_classification" in queue_calls[0] and queue_calls[0]["proposed_classification"] is None
+    assert (
+        "proposed_classification" in queue_calls[0]
+        and queue_calls[0]["proposed_classification"] is None
+    )
+
+
+def test_persist_declared_permissions_keeps_definition_without_matching_request(
+    monkeypatch,
+) -> None:
+    unknown_calls: list[dict[str, object]] = []
+    queue_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(permission_dicts_db, "fetch_aosp_entries", lambda *_a, **_k: {})
+    monkeypatch.setattr(permission_dicts_db, "fetch_oem_entries", lambda *_a, **_k: {})
+    monkeypatch.setattr(permission_dicts_db, "fetch_vendor_prefix_rules", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        permission_dicts_db,
+        "upsert_unknown",
+        lambda payload: unknown_calls.append(dict(payload)),
+    )
+    monkeypatch.setattr(
+        permission_dicts_db,
+        "insert_queue",
+        lambda payload: queue_calls.append(dict(payload)),
+    )
+
+    counts = permissions_db.persist_declared_permissions(
+        package_name="com.example.owner",
+        version_name="1.0",
+        version_code="1",
+        target_sdk=35,
+        sha256="a" * 64,
+        artifact_label="base.apk",
+        declared=(),
+        custom_declared=("com.example.owner.permission.SYNC",),
+    )
+
+    assert counts == {"aosp": 0, "oem": 0, "app_defined": 1, "unknown": 0}
+    assert unknown_calls == [
+        {
+            "permission_string": "com.example.owner.permission.SYNC",
+            "triage_status": "app_defined",
+            "notes": None,
+            "example_package_name": "com.example.owner",
+            "example_sample_id": None,
+        }
+    ]
+    assert queue_calls == []
+
+    contract = (
+        Path(__file__).resolve().parents[2] / "docs" / "database" / "permission_intel_contract.md"
+    ).read_text(encoding="utf-8")
+    normalized_contract = " ".join(contract.split())
+    assert "`permissions.declared` is the legacy report field" in normalized_contract
+    assert "`permissions.custom` contains exact `<permission>` definitions" in normalized_contract
+    assert "`REQUESTED` or `DEFINED`" in normalized_contract
+
+
+def test_permission_both_defined_and_requested_is_counted_once(monkeypatch) -> None:
+    permission = "com.example.owner.permission.SYNC"
+    unknown_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(permission_dicts_db, "fetch_aosp_entries", lambda *_a, **_k: {})
+    monkeypatch.setattr(permission_dicts_db, "fetch_oem_entries", lambda *_a, **_k: {})
+    monkeypatch.setattr(permission_dicts_db, "fetch_vendor_prefix_rules", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        permission_dicts_db,
+        "upsert_unknown",
+        lambda payload: unknown_calls.append(dict(payload)),
+    )
+    monkeypatch.setattr(permission_dicts_db, "insert_queue", lambda _payload: None)
+
+    counts = permissions_db.persist_declared_permissions(
+        package_name="com.example.owner",
+        version_name="1.0",
+        version_code="1",
+        target_sdk=35,
+        sha256="a" * 64,
+        artifact_label="base.apk",
+        declared=(permission, permission),
+        custom_declared=(permission,),
+    )
+
+    assert counts == {"aosp": 0, "oem": 0, "app_defined": 1, "unknown": 0}
+    assert len(unknown_calls) == 1

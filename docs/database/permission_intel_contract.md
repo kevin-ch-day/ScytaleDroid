@@ -18,7 +18,19 @@ surface. Older S1/S2 design notes are archived under
 ## Static Writer Surface
 
 ScytaleDroid may write shared Permission Intel intake rows for static manifest
-permissions:
+permission tokens. The static report preserves two distinct roles:
+
+- `permissions.declared` is the legacy report field for `<uses-permission>`
+  requests, including SDK-specific request variants.
+- `permissions.custom` contains exact `<permission>` definitions owned by the
+  analyzed APK.
+
+Both roles feed dictionary intake, and a definition must remain visible even
+when the same APK does not request it. They are not collapsed into shared
+`android_permission_obs_sample` facts: that table has no agreed source-aware
+identity capable of preserving requested-versus-defined evidence.
+
+The current intake tables are:
 
 - `android_permission_dict_unknown`
 - `android_permission_dict_queue`
@@ -58,8 +70,8 @@ apply path exists:
 - include `permission_string`, `artifact_sha256`, `static_run_id`, and
   `package_name`
 - preserve static lineage back to `static_analysis_runs`
-- use source semantics compatible with Erebus (`apk_manifest` for manifest
-  observations)
+- preserve an occurrence role such as `REQUESTED` or `DEFINED`; a generic
+  `apk_manifest` source label alone is insufficient
 - account for brownfield PI catalogs where Erebus migrations may add optional
   columns such as `run_id`, `bucket`, `rule_fired`, or `sha256`
 
