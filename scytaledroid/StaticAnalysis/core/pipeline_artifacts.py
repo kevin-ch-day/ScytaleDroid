@@ -303,6 +303,20 @@ def build_reproducibility_bundle(
         safe_meta: dict[str, object] = {}
         for key, value in context.metadata.items():
             label = str(key)
+            if label == "post_run_string_payload":
+                # This payload already lives at report.metadata and can be tens
+                # of MiB. Embedding its string representation here duplicated
+                # nearly the entire string corpus. Bind it by digest instead.
+                encoded = json.dumps(
+                    value,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    default=str,
+                ).encode("utf-8")
+                safe_meta["post_run_string_payload_embedded"] = False
+                safe_meta["post_run_string_payload_sha256"] = sha256(encoded).hexdigest()
+                continue
             if value is None or isinstance(value, (str, int, float, bool)):
                 safe_meta[label] = value
             else:

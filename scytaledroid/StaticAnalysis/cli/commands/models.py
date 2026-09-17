@@ -33,7 +33,6 @@ class Command:
     force_app_scope: bool = False
     selection_mode: SelectionMode = SelectionMode.SCOPE
     force_verbose: bool = False
-    workers_override: str | None = None
 
 
 __all__ = ["Command", "CommandHandler", "SelectionMode"]

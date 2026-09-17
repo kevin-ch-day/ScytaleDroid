@@ -38,7 +38,7 @@ from .detector_runner import PIPELINE_STAGES, PipelineStage, run_detector_pipeli
 from .errors import StaticAnalysisError
 from .manifest_utils import (
     build_manifest_flags,
-    build_permission_occurrence_evidence,
+    build_permission_occurrence_product,
     collect_custom_permission_definitions,
     collect_exported_components,
     extract_compile_sdk,
@@ -606,15 +606,25 @@ def analyze_apk(
     dangerous = collect_dangerous_permissions(permission_details)
     custom_permissions = tuple(sorted(apk.get_declared_permissions() or ()))
     custom_definitions = collect_custom_permission_definitions(manifest_root)
-    permission_occurrence_evidence = build_permission_occurrence_evidence(
+    if report_metadata.get("is_split_member") is True:
+        permission_artifact_scope = "SPLIT"
+    elif report_metadata.get("is_split_member") is False:
+        permission_artifact_scope = "BASE"
+    else:
+        permission_artifact_scope = "UNKNOWN"
+    permission_occurrence_product = build_permission_occurrence_product(
         manifest_root,
         artifact_sha256=apk_sha256,
+        artifact_scope=permission_artifact_scope,
         package_name=package_name,
         analysis_run_id=run_id,
         producer_version=analysis_config.analysis_version,
         observed_at_utc=datetime.now(UTC).isoformat(timespec="microseconds").replace(
             "+00:00", "Z"
         ),
+    )
+    permission_occurrence_evidence = tuple(
+        permission_occurrence_product["occurrences"]
     )
     permission_catalog = load_permission_catalog()
 
@@ -648,6 +658,7 @@ def analyze_apk(
         custom_definitions=custom_definitions,
         catalog_snapshot=catalog_snapshot,
         occurrence_evidence=permission_occurrence_evidence,
+        occurrence_evidence_product=permission_occurrence_product,
     )
 
     # Components (resilient)

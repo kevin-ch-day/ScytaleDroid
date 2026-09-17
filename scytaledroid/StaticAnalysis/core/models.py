@@ -67,6 +67,7 @@ class PermissionSummary:
         default_factory=dict
     )
     occurrence_evidence: tuple[Mapping[str, object], ...] = ()
+    occurrence_evidence_product: Mapping[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> MutableMapping[str, object]:
         return {
@@ -86,6 +87,7 @@ class PermissionSummary:
                 for name, metadata in self.catalog_snapshot.items()
             },
             "occurrence_evidence": [dict(record) for record in self.occurrence_evidence],
+            "occurrence_evidence_product": dict(self.occurrence_evidence_product),
         }
 
 
@@ -182,6 +184,9 @@ class StaticAnalysisReport:
         custom_defs_payload = permissions_payload.get("custom_definitions")
         catalog_snapshot_payload = permissions_payload.get("catalog_snapshot")
         occurrence_evidence_payload = permissions_payload.get("occurrence_evidence")
+        occurrence_product_payload = permissions_payload.get(
+            "occurrence_evidence_product"
+        )
         permissions = PermissionSummary(
             **{
                 "declared": _tuple_payload(permissions_payload.get("declared")),
@@ -215,6 +220,11 @@ class StaticAnalysisReport:
                 if isinstance(occurrence_evidence_payload, Sequence)
                 and not isinstance(occurrence_evidence_payload, (str, bytes))
                 else (),
+                "occurrence_evidence_product": (
+                    dict(occurrence_product_payload)
+                    if isinstance(occurrence_product_payload, Mapping)
+                    else {}
+                ),
             }
         )
         components_raw = payload.get("components")

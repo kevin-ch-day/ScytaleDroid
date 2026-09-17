@@ -6,7 +6,9 @@ from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis.core import pipeline
 from scytaledroid.StaticAnalysis.core.manifest_utils import (
+    PermissionOccurrenceExtractionInterrupted,
     build_permission_occurrence_evidence,
+    build_permission_occurrence_product,
 )
 from scytaledroid.StaticAnalysis.core.models import (
     ManifestFlags,
@@ -240,6 +242,128 @@ def test_manifest_permission_occurrence_locators_distinguish_parent_components()
     assert len({record["occurrence_evidence_digest"] for record in records}) == 2
 
 
+def _permission_product_manifest() -> ElementTree.Element:
+    return ElementTree.fromstring(
+        b"""<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <uses-permission android:name="android.permission.CAMERA"/>
+          <uses-permission-sdk-23 android:name="android.permission.POST_NOTIFICATIONS"/>
+          <provider android:name=".Provider"
+                    android:readPermission="com.example.permission.READ"
+                    android:writePermission="com.example.permission.WRITE"/>
+        </manifest>"""
+    )
+
+
+def _build_permission_product(**overrides: object) -> dict[str, object]:
+    arguments: dict[str, object] = {
+        "artifact_sha256": "d" * 64,
+        "artifact_scope": "BASE",
+        "package_name": "com.example.product",
+        "analysis_run_id": "stable-run",
+        "producer_version": "test-v1",
+        "observed_at_utc": "2026-09-15T12:00:00Z",
+    }
+    arguments.update(overrides)
+    return dict(build_permission_occurrence_product(_permission_product_manifest(), **arguments))
+
+
+def test_permission_occurrence_product_has_complete_digest_bound_scope() -> None:
+    product = _build_permission_product()
+
+    assert product["terminal"]["state"] == "SUCCEEDED"
+    assert product["terminal"]["emitted_occurrence_count"] == 4
+    assert product["scope"]["role_families_attempted"] == [
+        "PERMISSION_REQUEST",
+        "PERMISSION_DEFINITION",
+        "COMPONENT_GUARD",
+        "PATH_PERMISSION_GUARD",
+    ]
+    assert (
+        product["scope"]["role_families_completed"] == product["scope"]["role_families_attempted"]
+    )
+    assert product["subject"]["captured_install_set"]["completeness"] == ("NOT_ESTABLISHED")
+    assert len(product["terminal"]["output_set_digest"]) == 64
+    assert len(product["product_digest"]) == 64
+
+
+def test_permission_occurrence_product_preserves_failed_and_partial_terminals() -> None:
+    def fail_before(_family: str) -> None:
+        raise RuntimeError("decoder boundary failed")
+
+    failed = _build_permission_product(family_observer=fail_before)
+    assert failed["terminal"]["state"] == "FAILED"
+    assert failed["terminal"]["emitted_occurrence_count"] == 0
+    assert failed["scope"]["role_families_attempted"] == ["PERMISSION_REQUEST"]
+    assert failed["scope"]["role_families_completed"] == []
+    assert "decoder boundary failed" in failed["terminal"]["reason"]
+
+    def interrupt_after_two(_record: object, count: int) -> None:
+        if count == 2:
+            raise PermissionOccurrenceExtractionInterrupted("operator interruption")
+
+    partial = _build_permission_product(emission_observer=interrupt_after_two)
+    assert partial["terminal"]["state"] == "PARTIAL"
+    assert partial["terminal"]["emitted_occurrence_count"] == 2
+    assert len(partial["occurrences"]) == 2
+    assert partial["scope"]["role_families_completed"] == []
+    assert "operator interruption" in partial["terminal"]["reason"]
+
+
+def test_permission_occurrence_product_tracks_completed_role_family_before_failure() -> None:
+    def fail_on_guards(family: str) -> None:
+        if family == "COMPONENT_GUARD":
+            raise RuntimeError("guard extraction unavailable")
+
+    product = _build_permission_product(
+        role_families=("PERMISSION_REQUEST", "COMPONENT_GUARD"),
+        family_observer=fail_on_guards,
+    )
+    assert product["terminal"]["state"] == "PARTIAL"
+    assert product["scope"]["role_families_completed"] == ["PERMISSION_REQUEST"]
+    assert product["scope"]["role_families_attempted"] == [
+        "PERMISSION_REQUEST",
+        "COMPONENT_GUARD",
+    ]
+    assert [row["occurrence_role"] for row in product["occurrences"]] == [
+        "MANIFEST_USES_PERMISSION",
+        "MANIFEST_USES_PERMISSION_SDK_23",
+    ]
+
+
+def test_permission_occurrence_product_replay_has_stable_logical_output() -> None:
+    first = _build_permission_product(observed_at_utc="2026-09-15T12:00:00Z")
+    retry = _build_permission_product(observed_at_utc="2026-09-15T12:01:00Z")
+
+    assert first["terminal"]["output_set_digest"] == retry["terminal"]["output_set_digest"]
+    assert [row["logical_occurrence_digest"] for row in first["occurrences"]] == [
+        row["logical_occurrence_digest"] for row in retry["occurrences"]
+    ]
+    assert first["product_digest"] != retry["product_digest"]
+
+
+def test_permission_occurrence_product_roundtrips_without_upgrading_legacy_scope() -> None:
+    product = _build_permission_product(artifact_scope="SPLIT")
+    report = StaticAnalysisReport(
+        file_path="/tmp/split.apk",
+        relative_path=None,
+        file_name="split.apk",
+        file_size=1,
+        hashes={"sha256": "d" * 64},
+        permissions=PermissionSummary(
+            occurrence_evidence=tuple(product["occurrences"]),
+            occurrence_evidence_product=product,
+        ),
+    )
+    restored = StaticAnalysisReport.from_dict(report.to_dict())
+    assert restored.permissions.occurrence_evidence_product == product
+
+    legacy_payload = report.to_dict()
+    legacy_payload["permissions"].pop("occurrence_evidence_product")
+    legacy = StaticAnalysisReport.from_dict(legacy_payload)
+    assert legacy.permissions.occurrence_evidence
+    assert legacy.permissions.occurrence_evidence_product == {}
+
+
 def test_resolve_hashes_for_analysis_falls_back_when_metadata_provenance_breaks(
     monkeypatch,
     tmp_path: Path,
@@ -391,7 +515,14 @@ def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split
     monkeypatch.setattr(pipeline, "_safe_permission_details", lambda _apk, _meta: {})
     monkeypatch.setattr(pipeline, "collect_dangerous_permissions", lambda _details: ())
     monkeypatch.setattr(pipeline, "collect_custom_permission_definitions", lambda _root: {})
-    monkeypatch.setattr(pipeline, "build_permission_occurrence_evidence", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "build_permission_occurrence_product",
+        lambda *_a, **_k: {
+            "occurrences": (),
+            "terminal": {"state": "SUCCEEDED"},
+        },
+    )
     monkeypatch.setattr(pipeline, "collect_exported_components", lambda _root: SimpleNamespace())
     monkeypatch.setattr(pipeline, "load_permission_catalog", lambda: _FakePermissionCatalog())
     monkeypatch.setattr(pipeline, "_safe_tuple", lambda _callable, _meta, _key: ())
@@ -399,7 +530,9 @@ def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split
     fake_index = StringIndex(
         strings=(
             IndexedString(value="const token", origin="classes.dex", origin_type="code"),
-            IndexedString(value="https://example.com", origin="res/values/strings.xml", origin_type="resource"),
+            IndexedString(
+                value="https://example.com", origin="res/values/strings.xml", origin_type="resource"
+            ),
             IndexedString(value="libfoo", origin="lib/arm64-v8a/libfoo.so", origin_type="native"),
             IndexedString(value="config-value", origin="assets/config.json", origin_type="asset"),
         ),

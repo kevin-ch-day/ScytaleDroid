@@ -21,7 +21,10 @@ from scytaledroid.Database.db_queries.sql_typed_reads import resolved_static_run
 from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows.headless_run import _artifact_group_from_path
-from scytaledroid.StaticAnalysis.persistence import list_reports
+from scytaledroid.StaticAnalysis.persistence import (
+    find_report_path_by_sha256,
+    find_report_path_for_session,
+)
 from scytaledroid.StaticAnalysis.services import static_service
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
@@ -177,21 +180,11 @@ def _serialize_job(job: JobRecord) -> dict[str, Any]:
 
 
 def _find_report_for_session(session_stamp: str) -> Path | None:
-    for stored in list_reports():
-        meta = stored.report.metadata
-        if str(meta.get("session_stamp", "")).strip() == session_stamp:
-            return stored.path
-    return None
+    return find_report_path_for_session(session_stamp)
 
 
 def _find_report_by_hash(report_hash: str) -> Path | None:
-    report_hash = report_hash.strip()
-    if not report_hash:
-        return None
-    for stored in list_reports():
-        if stored.path.stem == report_hash:
-            return stored.path
-    return None
+    return find_report_path_by_sha256(report_hash)
 
 
 def _run_static_scan(

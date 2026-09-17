@@ -400,6 +400,8 @@ def test_main_generates_expected_output_bundle_for_incomplete_session(
     assert summary["correlation_runtime_cache"]["total_hits"] == 9
     assert summary["correlation_runtime_cache"]["total_misses"] == 2
     assert summary["worker_model"]["package_loop_serial"] is True
+    assert summary["worker_model"]["artifact_execution"] == "serial_one_at_a_time"
+    assert summary["worker_model"]["artifact_concurrency_cap"] == 1
     assert summary["no_db_writes"] is True
     assert "risk" not in (out_dir / "summary.json").read_text(encoding="utf-8").lower()
 

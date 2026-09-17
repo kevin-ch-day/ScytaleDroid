@@ -1,13 +1,13 @@
-# Phase 5C Task List
+# Legacy Bridge Cleanup Backlog
 
 Date: 2026-04-29
 
 ## Purpose
 
-Phase 5C is the cleanup and trust-stability lane that must finish before Phase 6
-becomes the main execution lane.
+This is the active cleanup and trust-stability backlog for reducing database
+and read-model debt before new research surfaces are expanded.
 
-This phase is not about adding more research surfaces yet. It is about reducing
+This work is not about adding more research surfaces yet. It is about reducing
 database/read-model complexity so new research pages do not inherit old bridge
 and mixed-contract behavior.
 
@@ -19,17 +19,17 @@ Locked product decisions:
 - Detail pages own findings, permissions, components, strings, dynamic, and run
   health.
 - Run Health is the default explanation target for missing or partial data.
-- Provider-first component coverage is acceptable in Phase 5C if clearly
+- Provider-first component coverage is acceptable during this cleanup if clearly
   labeled.
-- Permission Intelligence remains fleet/pattern-oriented in Phase 5C.
-- Score work in Phase 5C is audit/explanation first, not aggressive
+- Permission Intelligence remains fleet/pattern-oriented during this cleanup.
+- Score work is audit/explanation first, not aggressive
   recalibration.
-- Bridge tables remain available for audit/comparison during Phase 5C, but no
+- Bridge tables remain available for audit/comparison during cleanup, but no
   new dependency growth is allowed.
 
 ## Acceptance Bar
 
-Phase 5C is complete when:
+This cleanup milestone is complete when:
 
 - remaining direct-table Web reads are inventoried and classified
 - `app_report.php` is strictly summary-only
@@ -112,7 +112,7 @@ Current direct-read inventory from `database/db_lib/db_queries.php`:
 - dynamic surfaces currently rely on runtime tables directly
   - classification: `needs_view_decision`
   - note: acceptable if `dynamic.php` and `dynamic_run.php` stay older-style
-    operational pages during Phase 5C
+    operational pages during this cleanup
 
 ### 2. Bridge Freeze / Deprecation
 
@@ -227,12 +227,12 @@ Tasks:
 5. improve Run Health explanations and filtering
 6. keep narrowing `static_reconcile.py` and enforce bridge freeze posture
 
-## Operator hygiene backlog (parallel — **P1 / P2**, not Phase 5C gate)
+## Operator hygiene backlog (parallel — **P1 / P2**, not a core acceptance gate)
 
-These items improve operator clarity and workspace hygiene **without** blocking Phase 5C acceptance.
+These items improve operator clarity and workspace hygiene **without** blocking
+the core cleanup acceptance criteria.
 
 | Priority | Item | Notes |
 | --- | --- | --- |
 | **P1** | Logs doc ↔ code parity | `housekeeping.md` aligned to `LOG_CONFIGS`; full mismatch list and evidence taxonomy in `logs_operator_hygiene_plan.md` |
 | **P2** | Read-only `logs health` report | Spec only in `logs_operator_hygiene_plan.md` §6 — total size, by subdir/category, `.gz` stats, stale file flags; **no auto-delete** |
-

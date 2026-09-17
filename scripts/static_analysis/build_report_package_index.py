@@ -18,11 +18,6 @@ from pathlib import Path
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--clear-warm-cache",
-        action="store_true",
-        help="Clear the in-process warm report cache before rebuilding.",
-    )
-    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit machine-readable JSON instead of human-readable text.",
@@ -40,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from scytaledroid.StaticAnalysis.persistence.reports import rebuild_report_package_index
 
-    stats = rebuild_report_package_index(clear_warm_cache=bool(args.clear_warm_cache))
+    stats = rebuild_report_package_index()
     payload = {
         "index_path": str(stats["index_path"]),
         "row_count": int(stats["row_count"]),

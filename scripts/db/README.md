@@ -72,13 +72,13 @@ PYTHONPATH=. python scripts/db/recreate_web_consumer_views.py counts
    `PYTHONPATH=. python scripts/db/check_permission_intel.py`  
    Use **`SCYTALEDROID_PERMISSION_INTEL_DB_PASSWD`** (or `…_URL`), not `…_PASS` — see script header.
 
-11. **S2-P1A readiness (read-only, optional):**  
+11. **Permission observation readiness (read-only, optional):**
    `PYTHONPATH=. python scripts/db/audit_permission_intel_queue_compatibility.py --json --output /absolute/private/path/queue-compatibility.json`
    The optional report is atomically written mode `0600`, binds the live v1
    catalog release and digests, and records a semantic digest for review.
    `PYTHONPATH=. python scripts/db/audit_static_permission_observation_linkage.py`  
    Or bundle: `./scripts/db/run_permission_intel_scytale_s2_readiness_audit.sh`  
-   Narrative: `docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md`;
+   Narrative: `docs/database/permission_intel_observation_readiness.md`;
    contract summary: `docs/database/permission_intel_contract.md`.
 
 ## Dynamic root-domain normalization migration

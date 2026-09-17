@@ -142,7 +142,7 @@ def _compute_config_hash(params: RunParameters) -> str:
         "secrets_entropy": params.secrets_entropy,
         "secrets_hits_per_bucket": params.secrets_hits_per_bucket,
         "secrets_scope": params.secrets_scope_canonical,
-        "workers": params.workers,
+        "artifact_execution": "serial_one_at_a_time",
         "reuse_cache": params.reuse_cache,
         "log_level": params.log_level,
         "trace_detectors": list(params.trace_detectors),

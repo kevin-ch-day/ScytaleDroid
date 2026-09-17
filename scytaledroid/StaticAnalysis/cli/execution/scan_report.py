@@ -161,7 +161,7 @@ def _rollup_status_counts_per_detector(app_result: AppRunResult) -> Counter[str]
     worst_by_detector: dict[str, Badge] = {}
     saw_any = False
     for artifact in app_result.artifacts:
-        report = getattr(artifact, "report", None)
+        report = artifact.load_report()
         if report is None:
             continue
         for result in getattr(report, "detector_results", ()) or ():
@@ -209,7 +209,9 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
     finding_fail_keys: set[tuple[str, str]] = set()
 
     for artifact in app_result.artifacts:
-        report = artifact.report
+        report = artifact.load_report()
+        if report is None:
+            continue
         metadata = report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
         summary = metadata.get("pipeline_summary") if isinstance(metadata.get("pipeline_summary"), Mapping) else None
 
@@ -277,7 +279,9 @@ def _summarize_app_pipeline(app_result: AppRunResult) -> dict[str, object]:
         status_counts = rolled
     else:
         for artifact in app_result.artifacts:
-            report = artifact.report
+            report = artifact.load_report()
+            if report is None:
+                continue
             metadata = report.metadata if isinstance(getattr(report, "metadata", None), Mapping) else {}
             summary = metadata.get("pipeline_summary") if isinstance(metadata.get("pipeline_summary"), Mapping) else None
             if not isinstance(summary, Mapping):
@@ -397,27 +401,18 @@ def _execute_single_artifact(
     *,
     extra_metadata: Mapping[str, object] | None = None,
     phase_timing_sink: MutableMapping[str, float] | None = None,
-    precomputed_report: StaticAnalysisReport | None = None,
     runtime_state: MutableMapping[str, object] | None = None,
 ):
     """Run analysis for a single APK artifact and return report plus scan summary."""
 
-    if precomputed_report is not None:
-        report, json_path, error, skipped = finish_report_after_analysis(
-            precomputed_report,
-            params,
-            base_dir,
-            phase_timing_sink=phase_timing_sink,
-        )
-    else:
-        report, json_path, error, skipped = generate_report(
-            artifact,
-            base_dir,
-            params,
-            extra_metadata=extra_metadata,
-            phase_timing_sink=phase_timing_sink,
-            runtime_state=runtime_state,
-        )
+    report, json_path, error, skipped = generate_report(
+        artifact,
+        base_dir,
+        params,
+        extra_metadata=extra_metadata,
+        phase_timing_sink=phase_timing_sink,
+        runtime_state=runtime_state,
+    )
 
     if skipped:
         return None, None, tuple(), error, True
@@ -464,6 +459,7 @@ def _summarize_artifact(
         started_at=datetime.now(UTC),
         finished_at=datetime.now(UTC),
         metadata=artifact.metadata,
+        is_base=not bool(getattr(artifact, "is_split_member", False)),
     )
 
 
@@ -473,7 +469,7 @@ def build_scan_report_metadata_payload(
     *,
     extra_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Merge artifact + run metadata used by ``analyze_apk`` (shared with pool workers)."""
+    """Merge artifact and run metadata used by the serial ``analyze_apk`` path."""
 
     metadata_payload: dict[str, object] = dict(artifact.metadata)
 
@@ -548,17 +544,10 @@ def finish_report_after_analysis(
 
         t1 = time.monotonic()
         execution_id = getattr(params, "execution_id", None)
-        try:
-            saved_paths = save_report(
-                report,
-                execution_id=execution_id,
-            )
-        except TypeError as exc:
-            # Compatibility bridge for older test doubles / wrappers that still expose
-            # the legacy save_report(report) signature.
-            if "unexpected keyword argument 'execution_id'" not in str(exc):
-                raise
-            saved_paths = save_report(report)
+        saved_paths = save_report(
+            report,
+            execution_id=execution_id,
+        )
         if phase_timing_sink is not None:
             phase_timing_sink["persist_wall_s"] = phase_timing_sink.get("persist_wall_s", 0.0) + (
                 time.monotonic() - t1

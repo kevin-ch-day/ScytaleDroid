@@ -174,7 +174,6 @@ def emit_static_run_start_log(
     frozen_ctx: StaticRunContext,
     params: RunParameters,
     modules: list[str],
-    workers_label: str,
     scope_target: str | None,
 ) -> None:
     """Structured RUN_START log with frozen CLI context payload."""
@@ -212,7 +211,7 @@ def emit_static_run_start_log(
                 "scope_label": params.scope_label,
                 "analysis_version": params.analysis_version,
                 "modules": modules,
-                "workers": workers_label,
+                "artifact_execution": "serial_one_at_a_time",
                 "cache": "purge" if not params.reuse_cache else "reuse",
                 "perm_cache": "refresh" if params.permission_snapshot_refresh else "skip",
                 "dry_run": params.dry_run,

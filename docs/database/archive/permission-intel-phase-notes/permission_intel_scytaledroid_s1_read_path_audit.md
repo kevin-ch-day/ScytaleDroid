@@ -17,7 +17,7 @@ ScytaleDroid already routes **shared PI dictionary/metadata reads and dict/queue
 **S1.5 follow-up:** vocabulary contract + routing guard tests — see [permission_intel_scytaledroid_s1_5_classifier_contract.md](permission_intel_scytaledroid_s1_5_classifier_contract.md).  
 **S2 design (observations, no implementation):** [permission_intel_scytaledroid_s2_observation_design.md](permission_intel_scytaledroid_s2_observation_design.md).  
 **Erebus↔Scytale PI drift (migrations, queue, obs columns):** [permission_intel_schema_drift_erebus_vs_scytaledroid.md](../../permission_intel_schema_drift_erebus_vs_scytaledroid.md).  
-**S2-P1A operational readiness (queue audit, static linkage):** [permission_intel_scytaledroid_s2_p1a_operational_readiness.md](../../permission_intel_scytaledroid_s2_p1a_operational_readiness.md).
+**Current operational readiness (queue audit, static linkage):** [permission_intel_observation_readiness.md](../../permission_intel_observation_readiness.md).
 
 ---
 

@@ -37,7 +37,7 @@ These views keep **stable names** for existing SQL and tooling; definitions no l
 - `scytaledroid/Database/db_utils/health_checks/analysis_integrity.py`
 - `tests/database/test_runs_dashboard_cross_view.py`, `tests/unit/test_analysis_integrity_summary.py`
 - `scripts/db/check_schema_posture.sql`
-- Docs: `docs/risk_scoring_contract.md`, `docs/database/view_contract_v_web_static_dynamic_app_summary.md`, `docs/maintenance/phase5c_task_list.md`, `docs/maintenance/cli_web_db_filesystem_boundary.md`
+- Docs: `docs/risk_scoring_contract.md`, `docs/database/view_contract_v_web_static_dynamic_app_summary.md`, `docs/maintenance/legacy_bridge_cleanup_backlog.md`, `docs/maintenance/cli_web_db_filesystem_boundary.md`
 
 ### `masvs_control_coverage` table
 

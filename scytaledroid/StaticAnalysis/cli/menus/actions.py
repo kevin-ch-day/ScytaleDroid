@@ -213,8 +213,6 @@ def apply_command_overrides(params: RunParameters, command: Command) -> RunParam
         effective = replace(effective, dry_run=True)
     if command.force_app_scope or command.force_verbose:
         effective = replace(effective, verbose_output=True)
-    if command.workers_override:
-        effective = replace(effective, workers=command.workers_override)
     return effective
 
 
@@ -235,9 +233,6 @@ def render_run_preflight(
     menu_utils.print_section("Run preflight")
     _run_setup_kv("Scope", str(target))
     preset = _compact_preset_summary_for_run_setup(params, command)
-    workers = str(params.workers or "auto")
-    if workers != "auto":
-        preset = f"{preset} | workers={workers}"
     _run_setup_kv("Preset", preset)
     _run_setup_kv("Packages", str(package_count))
     _run_setup_kv(

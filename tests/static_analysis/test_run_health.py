@@ -79,7 +79,7 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
         Path("/tmp"),
         [],
         [],
-        session_metrics={"resolved_worker_budget": 16, "artifact_concurrency_cap": 1},
+        session_metrics={"artifact_concurrency_cap": 1},
     )
     from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
 
@@ -92,7 +92,6 @@ def test_build_run_health_document_finding_persistence_rollups() -> None:
     roll = doc["run_rollups"]
     assert isinstance(roll, dict)
     assert roll.get("scan_execution_complete") is True
-    assert roll["resolved_worker_budget"] == 16
     assert roll["artifact_concurrency_cap"] == 1
     assert doc["final_run_status"] == "complete"
     assert doc["workflow_completion_status"] == "complete"
@@ -251,7 +250,6 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
             "scan_execution_complete": True,
             "artifacts_scan_completed_counter": 5,
             "artifact_total_discovered_estimate": 5,
-            "resolved_worker_budget": 16,
             "artifact_concurrency_cap": 1,
         },
         "outputs": {},
@@ -286,7 +284,7 @@ def test_format_run_health_stdout_lines_partial_app_hints() -> None:
         ],
     }
     lines = format_run_health_stdout_lines(doc)
-    assert "Artifact workers : observed_peak=1 | resolved_budget=16" in lines
+    assert "Artifact execution: serial_one_at_a_time | observed_peak=1" in lines
     assert (
         "Measurement cov. : partial_declared_placeholders | "
         "implemented_executed=17/17 | placeholder_stages=3 | "

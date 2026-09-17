@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis._androguard import APK
@@ -15,6 +15,25 @@ from .utils import coerce_bool, coerce_optional_str
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _PERMISSION_OCCURRENCE_RECORD_FORMAT = "android-permission-intel-permission-occurrence-evidence-v1"
+_PERMISSION_OCCURRENCE_PRODUCT_FORMAT = "scytaledroid-permission-occurrence-extraction-product-v1"
+_PERMISSION_ROLE_FAMILIES = (
+    "PERMISSION_REQUEST",
+    "PERMISSION_DEFINITION",
+    "COMPONENT_GUARD",
+    "PATH_PERMISSION_GUARD",
+)
+_PERMISSION_OCCURRENCE_PRODUCT_SCHEMA = {
+    "format": _PERMISSION_OCCURRENCE_PRODUCT_FORMAT,
+    "terminal_states": ["SUCCEEDED", "PARTIAL", "FAILED"],
+    "artifact_scopes": ["BASE", "SPLIT", "OTHER", "UNKNOWN"],
+    "role_families": list(_PERMISSION_ROLE_FAMILIES),
+    "absence_rule": "only-succeeded-and-explicitly-complete-scope-may-refute",
+    "install_set_rule": "artifact-completeness-does-not-imply-install-set-completeness",
+}
+
+
+class PermissionOccurrenceExtractionInterrupted(RuntimeError):
+    """Signal an intentional interruption after already-emitted evidence."""
 
 
 def load_manifest_root(apk: APK) -> ElementTree.Element:
@@ -57,9 +76,7 @@ def build_manifest_flags(root: ElementTree.Element) -> ManifestFlags:
         request_legacy_external_storage=coerce_bool(
             application.get(f"{_ANDROID_NS}requestLegacyExternalStorage")
         ),
-        full_backup_content=coerce_optional_str(
-            application.get(f"{_ANDROID_NS}fullBackupContent")
-        ),
+        full_backup_content=coerce_optional_str(application.get(f"{_ANDROID_NS}fullBackupContent")),
         network_security_config=coerce_optional_str(
             application.get(f"{_ANDROID_NS}networkSecurityConfig")
         ),
@@ -190,9 +207,7 @@ def build_manifest_evidence(
         if exported_effective and not component_enabled:
             exported_effective = False
             export_reason = (
-                "application_disabled"
-                if not application_enabled
-                else "component_disabled"
+                "application_disabled" if not application_enabled else "component_disabled"
             )
 
         record: dict[str, object] = {
@@ -214,11 +229,7 @@ def build_manifest_evidence(
 
         if tag == "provider":
             authorities = element.get(f"{_ANDROID_NS}authorities") or ""
-            authority_list = [
-                token.strip()
-                for token in authorities.split(",")
-                if token.strip()
-            ]
+            authority_list = [token.strip() for token in authorities.split(",") if token.strip()]
             grant_uri = (
                 element.get(f"{_ANDROID_NS}grantUriPermissions") or ""
             ).strip().lower() in {"true", "1"}
@@ -291,11 +302,7 @@ def collect_custom_permission_definitions(
         if not name:
             continue
         raw_level = (element.get(f"{_ANDROID_NS}protectionLevel") or "").strip()
-        level_parts = tuple(
-            part.strip().lower()
-            for part in raw_level.split("|")
-            if part.strip()
-        )
+        level_parts = tuple(part.strip().lower() for part in raw_level.split("|") if part.strip())
         description = element.get(f"{_ANDROID_NS}description")
         permission_group = element.get(f"{_ANDROID_NS}permissionGroup")
         definitions[name] = {
@@ -322,6 +329,311 @@ def _semantic_sha256(value: Mapping[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _permission_occurrence_record(
+    *,
+    artifact_sha256: str,
+    package_name: str | None,
+    analysis_run_id: str,
+    producer_version: str,
+    observed_at_utc: str,
+    raw_token: str,
+    role: str,
+    claim: str,
+    evidence_locator: str,
+    raw_protection: str | None = None,
+) -> Mapping[str, object]:
+    """Build one direct manifest fact without projecting its identity."""
+
+    raw_token_digest = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    logical_identity = {
+        "artifact_sha256": artifact_sha256,
+        "occurrence_role": role,
+        "raw_token_utf8_sha256": raw_token_digest,
+        "extractor_surface": "scytaledroid.android_manifest",
+        "evidence_locator": evidence_locator,
+    }
+    core: dict[str, object] = {
+        "record_format": _PERMISSION_OCCURRENCE_RECORD_FORMAT,
+        "occurrence_role": role,
+        "evidence_layer": "DIRECT_MANIFEST",
+        "semantic_claim": claim,
+        "subject": {
+            "artifact_sha256": artifact_sha256,
+            "package_name": package_name,
+            "producer_local_sample_ref": None,
+        },
+        "identity": {
+            "raw_token": raw_token,
+            "raw_token_utf8_sha256": raw_token_digest,
+            "projected_pi_token": None,
+            "projected_token_utf8_sha256": None,
+            "projection_policy_version": "projection-deferred-to-permission-intel-v1",
+            "compatibility_key": None,
+            "compatibility_profile": "ascii-casefold-no-trim-v1",
+            "transformation_steps": [],
+            "supported_for_projection": False,
+            "unsupported_reason": "PROJECTION_DEFERRED_TO_PERMISSION_INTEL",
+        },
+        "provenance": {
+            "producer": "ScytaleDroid",
+            "producer_version": producer_version,
+            "analysis_run_id": analysis_run_id,
+            "extractor_surface": "scytaledroid.android_manifest",
+            "evidence_locator": evidence_locator,
+            "source_artifact_sha256": artifact_sha256,
+            "source_event_ref": None,
+            "observed_at_utc": observed_at_utc,
+        },
+        "lineage": {
+            "derivation_rule_id": None,
+            "upstream_evidence_digests": [],
+        },
+        "protection_evidence": (
+            {
+                "source_kind": "MANIFEST_PROTECTION_LEVEL_ATTRIBUTE",
+                "raw_value": raw_protection,
+            }
+            if raw_protection
+            else None
+        ),
+        "authority": {
+            "alias_authorized": False,
+            "canonical_identity_authorized": False,
+            "database_mutation_authorized": False,
+        },
+        "logical_occurrence_digest": _semantic_sha256(logical_identity),
+    }
+    return {**core, "occurrence_evidence_digest": _semantic_sha256(core)}
+
+
+def _permission_occurrences_for_family(
+    manifest_root: ElementTree.Element,
+    *,
+    role_family: str,
+    artifact_sha256: str,
+    package_name: str | None,
+    analysis_run_id: str,
+    producer_version: str,
+    observed_at_utc: str,
+) -> tuple[Mapping[str, object], ...]:
+    """Extract one role family so completion can be stated precisely."""
+
+    records: list[Mapping[str, object]] = []
+
+    def attribute_value(
+        element: ElementTree.Element,
+        attribute: str,
+    ) -> tuple[str | None, str]:
+        namespaced = element.get(f"{_ANDROID_NS}{attribute}")
+        if namespaced is not None:
+            return namespaced, f"android:{attribute}"
+        return element.get(attribute), attribute
+
+    def append_record(
+        *,
+        element: ElementTree.Element,
+        element_path: str,
+        attribute: str,
+        role: str,
+        claim: str,
+        include_protection: bool = False,
+    ) -> None:
+        raw_token, source_attribute = attribute_value(element, attribute)
+        if not raw_token:
+            return
+        raw_protection = None
+        if include_protection:
+            raw_protection, _ = attribute_value(element, "protectionLevel")
+        records.append(
+            _permission_occurrence_record(
+                artifact_sha256=artifact_sha256,
+                package_name=package_name,
+                analysis_run_id=analysis_run_id,
+                producer_version=producer_version,
+                observed_at_utc=observed_at_utc,
+                raw_token=raw_token,
+                role=role,
+                claim=claim,
+                evidence_locator=f"{element_path}/@{source_attribute}",
+                raw_protection=raw_protection,
+            )
+        )
+
+    def visit(element: ElementTree.Element, element_path: str) -> None:
+        tag = element.tag.rsplit("}", 1)[-1]
+        if role_family == "PERMISSION_REQUEST" and tag in {
+            "uses-permission",
+            "uses-permission-sdk-23",
+        }:
+            append_record(
+                element=element,
+                element_path=element_path,
+                attribute="name",
+                role=(
+                    "MANIFEST_USES_PERMISSION_SDK_23"
+                    if tag == "uses-permission-sdk-23"
+                    else "MANIFEST_USES_PERMISSION"
+                ),
+                claim="PERMISSION_REQUEST",
+            )
+        elif role_family == "PERMISSION_DEFINITION" and tag == "permission":
+            append_record(
+                element=element,
+                element_path=element_path,
+                attribute="name",
+                role="MANIFEST_PERMISSION_DEFINITION",
+                claim="PERMISSION_DEFINITION",
+                include_protection=True,
+            )
+        elif role_family == "COMPONENT_GUARD" and tag in {
+            "application",
+            "activity",
+            "activity-alias",
+            "service",
+            "receiver",
+            "provider",
+        }:
+            attributes = (
+                ("permission", "readPermission", "writePermission")
+                if tag == "provider"
+                else ("permission",)
+            )
+            for attribute in attributes:
+                append_record(
+                    element=element,
+                    element_path=element_path,
+                    attribute=attribute,
+                    role="MANIFEST_COMPONENT_GUARD",
+                    claim="ACCESS_CONTROL_REFERENCE",
+                )
+        elif role_family == "PATH_PERMISSION_GUARD" and tag == "path-permission":
+            for attribute in ("permission", "readPermission", "writePermission"):
+                append_record(
+                    element=element,
+                    element_path=element_path,
+                    attribute=attribute,
+                    role="MANIFEST_PATH_PERMISSION_GUARD",
+                    claim="ACCESS_CONTROL_REFERENCE",
+                )
+
+        child_ordinals: dict[str, int] = {}
+        for child in element:
+            child_tag = child.tag.rsplit("}", 1)[-1]
+            child_ordinals[child_tag] = child_ordinals.get(child_tag, 0) + 1
+            visit(child, f"{element_path}/{child_tag}[{child_ordinals[child_tag]}]")
+
+    root_tag = manifest_root.tag.rsplit("}", 1)[-1]
+    visit(manifest_root, f"/{root_tag}")
+    return tuple(records)
+
+
+def build_permission_occurrence_product(
+    manifest_root: ElementTree.Element,
+    *,
+    artifact_sha256: str,
+    artifact_scope: str,
+    package_name: str | None,
+    analysis_run_id: str,
+    producer_version: str,
+    observed_at_utc: str,
+    role_families: Sequence[str] = _PERMISSION_ROLE_FAMILIES,
+    family_observer: Callable[[str], None] | None = None,
+    emission_observer: Callable[[Mapping[str, object], int], None] | None = None,
+) -> Mapping[str, object]:
+    """Return a digest-bound extraction product with explicit terminal scope.
+
+    ``emission_observer`` is an optional streaming/checkpoint seam. Raising
+    :class:`PermissionOccurrenceExtractionInterrupted` from it produces a
+    PARTIAL terminal product while retaining every record already emitted.
+    Other extraction failures produce FAILED before output or PARTIAL after it.
+    """
+
+    if artifact_scope not in {"BASE", "SPLIT", "OTHER", "UNKNOWN"}:
+        raise ValueError("unsupported permission occurrence artifact scope")
+    requested_families = tuple(dict.fromkeys(role_families))
+    if not requested_families or any(
+        family not in _PERMISSION_ROLE_FAMILIES for family in requested_families
+    ):
+        raise ValueError("unsupported permission occurrence role family")
+
+    schema_digest = _semantic_sha256(_PERMISSION_OCCURRENCE_PRODUCT_SCHEMA)
+    extraction_contract = {
+        "product_schema_digest": schema_digest,
+        "role_families": list(requested_families),
+    }
+    extractor_contract_digest = _semantic_sha256(extraction_contract)
+    records: list[Mapping[str, object]] = []
+    attempted: list[str] = []
+    completed: list[str] = []
+    terminal_state = "SUCCEEDED"
+    reason: str | None = None
+    try:
+        for family in requested_families:
+            attempted.append(family)
+            if family_observer is not None:
+                family_observer(family)
+            for record in _permission_occurrences_for_family(
+                manifest_root,
+                role_family=family,
+                artifact_sha256=artifact_sha256,
+                package_name=package_name,
+                analysis_run_id=analysis_run_id,
+                producer_version=producer_version,
+                observed_at_utc=observed_at_utc,
+            ):
+                records.append(record)
+                if emission_observer is not None:
+                    emission_observer(record, len(records))
+            completed.append(family)
+    except Exception as exc:
+        terminal_state = "PARTIAL" if records else "FAILED"
+        reason = f"{type(exc).__name__}: {exc}"
+
+    occurrence_digests = sorted(str(record["logical_occurrence_digest"]) for record in records)
+    output_set_digest = _semantic_sha256({"logical_occurrence_digests": occurrence_digests})
+    decoded_tree_digest = hashlib.sha256(
+        ElementTree.tostring(manifest_root, encoding="utf-8")
+    ).hexdigest()
+    core: dict[str, object] = {
+        "product_format": _PERMISSION_OCCURRENCE_PRODUCT_FORMAT,
+        "product_schema_digest": schema_digest,
+        "subject": {
+            "artifact_sha256": artifact_sha256,
+            "artifact_scope": artifact_scope,
+            "package_name": package_name,
+            "captured_install_set": {
+                "completeness": "NOT_ESTABLISHED",
+                "set_digest": None,
+                "member_artifact_sha256": [],
+                "role_complete_member_artifact_sha256": [],
+            },
+        },
+        "source_document": {
+            "kind": "DECODED_ANDROID_MANIFEST_XML_TREE",
+            "opened": True,
+            "decoded": True,
+            "decoded_tree_sha256": decoded_tree_digest,
+        },
+        "extractor": {
+            "id": "scytaledroid.android_manifest.permission_occurrences",
+            "version": producer_version,
+            "contract_digest": extractor_contract_digest,
+        },
+        "scope": {
+            "role_families_attempted": attempted,
+            "role_families_completed": completed,
+        },
+        "terminal": {
+            "state": terminal_state,
+            "reason": reason,
+            "emitted_occurrence_count": len(records),
+            "output_set_digest": output_set_digest,
+        },
+        "occurrences": records,
+    }
+    return {**core, "product_digest": _semantic_sha256(core)}
+
+
 def build_permission_occurrence_evidence(
     manifest_root: ElementTree.Element,
     *,
@@ -338,158 +650,18 @@ def build_permission_occurrence_evidence(
     apply its versioned projection policy without losing source identity.
     """
 
-    role_by_tag = {
-        "uses-permission": ("MANIFEST_USES_PERMISSION", "PERMISSION_REQUEST"),
-        "uses-permission-sdk-23": (
-            "MANIFEST_USES_PERMISSION_SDK_23",
-            "PERMISSION_REQUEST",
-        ),
-        "permission": ("MANIFEST_PERMISSION_DEFINITION", "PERMISSION_DEFINITION"),
-    }
-    component_tags = {
-        "application",
-        "activity",
-        "activity-alias",
-        "service",
-        "receiver",
-        "provider",
-    }
-    guard_attributes = ("permission", "readPermission", "writePermission")
-    records: list[Mapping[str, object]] = []
-
-    def attribute_value(
-        element: ElementTree.Element,
-        attribute: str,
-    ) -> tuple[str | None, str]:
-        """Return an attribute value and an honest source-locator name."""
-
-        namespaced = element.get(f"{_ANDROID_NS}{attribute}")
-        if namespaced is not None:
-            return namespaced, f"android:{attribute}"
-        return element.get(attribute), attribute
-
-    def append_record(
-        *,
-        raw_token: str,
-        role: str,
-        claim: str,
-        evidence_locator: str,
-        raw_protection: str | None = None,
-    ) -> None:
-        """Append one direct manifest fact without projecting its identity."""
-
-        core: dict[str, object] = {
-            "record_format": _PERMISSION_OCCURRENCE_RECORD_FORMAT,
-            "occurrence_role": role,
-            "evidence_layer": "DIRECT_MANIFEST",
-            "semantic_claim": claim,
-            "subject": {
-                "artifact_sha256": artifact_sha256,
-                "package_name": package_name,
-                "producer_local_sample_ref": None,
-            },
-            "identity": {
-                "raw_token": raw_token,
-                "raw_token_utf8_sha256": hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
-                "projected_pi_token": None,
-                "projected_token_utf8_sha256": None,
-                "projection_policy_version": "projection-deferred-to-permission-intel-v1",
-                "compatibility_key": None,
-                "compatibility_profile": "ascii-casefold-no-trim-v1",
-                "transformation_steps": [],
-                "supported_for_projection": False,
-                "unsupported_reason": "PROJECTION_DEFERRED_TO_PERMISSION_INTEL",
-            },
-            "provenance": {
-                "producer": "ScytaleDroid",
-                "producer_version": producer_version,
-                "analysis_run_id": analysis_run_id,
-                "extractor_surface": "scytaledroid.android_manifest",
-                "evidence_locator": evidence_locator,
-                "source_artifact_sha256": artifact_sha256,
-                "source_event_ref": None,
-                "observed_at_utc": observed_at_utc,
-            },
-            "lineage": {
-                "derivation_rule_id": None,
-                "upstream_evidence_digests": [],
-            },
-            "protection_evidence": (
-                {
-                    "source_kind": "MANIFEST_PROTECTION_LEVEL_ATTRIBUTE",
-                    "raw_value": raw_protection,
-                }
-                if raw_protection
-                else None
-            ),
-            "authority": {
-                "alias_authorized": False,
-                "canonical_identity_authorized": False,
-                "database_mutation_authorized": False,
-            },
-        }
-        records.append({**core, "occurrence_evidence_digest": _semantic_sha256(core)})
-
-    def visit(element: ElementTree.Element, element_path: str) -> None:
-        """Visit manifest elements with unambiguous sibling-qualified paths."""
-
-        tag = element.tag.rsplit("}", 1)[-1]
-        role_claim = role_by_tag.get(tag)
-        if role_claim is not None:
-            raw_token, name_attribute = attribute_value(element, "name")
-            if raw_token:
-                role, claim = role_claim
-                raw_protection = None
-                if role == "MANIFEST_PERMISSION_DEFINITION":
-                    raw_protection, _protection_attribute = attribute_value(
-                        element,
-                        "protectionLevel",
-                    )
-                append_record(
-                    raw_token=raw_token,
-                    role=role,
-                    claim=claim,
-                    evidence_locator=f"{element_path}/@{name_attribute}",
-                    raw_protection=raw_protection,
-                )
-
-        if tag in component_tags:
-            attributes = ("permission",)
-            if tag == "provider":
-                attributes = guard_attributes
-            for attribute in attributes:
-                raw_token, source_attribute = attribute_value(element, attribute)
-                if raw_token:
-                    append_record(
-                        raw_token=raw_token,
-                        role="MANIFEST_COMPONENT_GUARD",
-                        claim="ACCESS_CONTROL_REFERENCE",
-                        evidence_locator=f"{element_path}/@{source_attribute}",
-                    )
-
-        if tag == "path-permission":
-            for attribute in guard_attributes:
-                raw_token, source_attribute = attribute_value(element, attribute)
-                if raw_token:
-                    append_record(
-                        raw_token=raw_token,
-                        role="MANIFEST_PATH_PERMISSION_GUARD",
-                        claim="ACCESS_CONTROL_REFERENCE",
-                        evidence_locator=f"{element_path}/@{source_attribute}",
-                    )
-
-        child_ordinals: dict[str, int] = {}
-        for child in element:
-            child_tag = child.tag.rsplit("}", 1)[-1]
-            child_ordinals[child_tag] = child_ordinals.get(child_tag, 0) + 1
-            visit(
-                child,
-                f"{element_path}/{child_tag}[{child_ordinals[child_tag]}]",
-            )
-
-    root_tag = manifest_root.tag.rsplit("}", 1)[-1]
-    visit(manifest_root, f"/{root_tag}")
-    return tuple(records)
+    product = build_permission_occurrence_product(
+        manifest_root,
+        artifact_sha256=artifact_sha256,
+        artifact_scope="UNKNOWN",
+        package_name=package_name,
+        analysis_run_id=analysis_run_id,
+        producer_version=producer_version,
+        observed_at_utc=observed_at_utc,
+    )
+    if product["terminal"]["state"] != "SUCCEEDED":
+        raise StaticAnalysisError("permission occurrence extraction did not complete")
+    return tuple(product["occurrences"])
 
 
 __all__ = [
@@ -500,4 +672,6 @@ __all__ = [
     "build_manifest_evidence",
     "collect_custom_permission_definitions",
     "build_permission_occurrence_evidence",
+    "build_permission_occurrence_product",
+    "PermissionOccurrenceExtractionInterrupted",
 ]

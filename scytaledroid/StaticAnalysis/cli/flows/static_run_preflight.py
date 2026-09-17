@@ -209,8 +209,7 @@ def _emit_run_context_preflight(params: RunParameters, selection: Any | None) ->
     _preflight_plain(f"Scope: {scope}")
     preset = str(getattr(params, "profile_label", None) or getattr(params, "profile", "") or "—").strip()
     _preflight_plain(f"Preset: {preset}")
-    workers = str(getattr(params, "workers", None) or "auto").strip()
-    _preflight_plain(f"Workers: {workers}")
+    _preflight_plain("Artifact execution: serial (one APK at a time)")
     groups = tuple(getattr(selection, "groups", ()) or ()) if selection is not None else ()
     if groups:
         n_pkg = len(groups)

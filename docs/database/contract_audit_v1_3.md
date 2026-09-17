@@ -13,7 +13,7 @@ current project direction and points to the new v1.3 artifacts.
 Related artifacts:
 
 - [`ownership_matrix_v1_3.csv`](./ownership_matrix_v1_3.csv)
-- [`permission_split_execution_phases.md`](./permission_split_execution_phases.md)
+- [`permission_split_migration_history.md`](./permission_split_migration_history.md) — historical split execution record
 - [`../static_analysis/static_analysis_data_model.md`](../static_analysis/static_analysis_data_model.md)
 - [`schema_domain_inventory.md`](./schema_domain_inventory.md)
 - [`../risk_scoring_contract.md`](../risk_scoring_contract.md)

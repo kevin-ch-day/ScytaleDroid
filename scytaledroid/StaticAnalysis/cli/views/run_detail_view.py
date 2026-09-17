@@ -191,7 +191,10 @@ def collect_findings(app_result: AppRunResult, evidence_lines: int) -> dict[str,
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     seen: set[tuple[str, str, str]] = set()
     for artifact in app_result.artifacts:
-        for result in artifact.report.detector_results:
+        report = artifact.load_report()
+        if report is None:
+            continue
+        for result in report.detector_results:
             section = result.section_key
             for finding in result.findings:
                 pointer = finding.evidence[0].location if finding.evidence else finding.because or ""

@@ -115,7 +115,9 @@ def summarize_stage_levels(
         except Exception:
             artifact_set = "base"
 
-        for result in getattr(getattr(artifact, "report", None), "detector_results", []) or []:
+        loader = getattr(artifact, "load_report", None)
+        report = loader() if callable(loader) else getattr(artifact, "report", None)
+        for result in getattr(report, "detector_results", []) or []:
             section = str(getattr(result, "section_key", "") or "").strip() or "unknown"
             level = BatchStageLevel.from_detector_result(result)
             if level == BatchStageLevel.OK:

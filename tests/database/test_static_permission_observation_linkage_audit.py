@@ -225,11 +225,11 @@ def test_active_readiness_document_matches_fail_closed_contract() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     text = (
         repo_root
-        / "docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md"
+        / "docs/database/permission_intel_observation_readiness.md"
     ).read_text(encoding="utf-8")
     assert "android_apk_repository.id" not in text
     assert "Erebus alias (option 2)" not in text
-    assert "blocked_legacy_alias" in text
+    assert "queue promotion cannot create accepted" in text
     assert "android_apk_repository.apk_id" in text
     assert "has not been applied" in text
 

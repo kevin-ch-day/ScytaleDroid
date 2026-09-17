@@ -62,12 +62,6 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
             default=string_include_https_risk,
         )
 
-    workers = prompt_utils.prompt_text(
-        "Workers",
-        default=params.workers,
-        required=False,
-        hint="Use 'auto' to match CPU count.",
-    )
     reuse_cache = prompt_utils.prompt_yes_no("Reuse disk cache", default=params.reuse_cache)
     log_level = prompt_choice("Log level", {"1": "INFO", "2": "DEBUG"}, default="1")
     traces_raw = prompt_utils.prompt_text(
@@ -104,7 +98,6 @@ def prompt_advanced_options(base_params: RunParameters) -> RunParameters:
         string_min_entropy=string_min_entropy,
         string_cleartext_only=string_cleartext_only,
         string_include_https_risk=string_include_https_risk,
-        workers=workers or "auto",
         reuse_cache=reuse_cache,
         log_level="debug" if log_level == "2" else "info",
         trace_detectors=trace_detectors,
@@ -143,7 +136,7 @@ def _summarise_params(params: RunParameters) -> tuple[tuple[str, object], ...]:
 
     pairs.extend(
         (
-            ("Workers", params.workers),
+            ("Artifact execution", "serial (one APK at a time)"),
             ("Reuse cache", _format_bool(params.reuse_cache)),
             ("Log level", params.log_level.upper()),
             ("Verbose output", _format_bool(params.verbose_output)),

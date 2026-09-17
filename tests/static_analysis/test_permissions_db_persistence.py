@@ -133,7 +133,8 @@ def test_persist_declared_permissions_keeps_definition_without_matching_request(
 
 
 def test_permission_both_defined_and_requested_is_counted_once(monkeypatch) -> None:
-    permission = "com.example.owner.permission.SYNC"
+    requested_permission = "COM.EXAMPLE.OWNER.PERMISSION.SYNC"
+    defined_permission = "com.example.owner.permission.sync"
     unknown_calls: list[dict[str, object]] = []
     monkeypatch.setattr(permission_dicts_db, "fetch_aosp_entries", lambda *_a, **_k: {})
     monkeypatch.setattr(permission_dicts_db, "fetch_oem_entries", lambda *_a, **_k: {})
@@ -152,9 +153,11 @@ def test_permission_both_defined_and_requested_is_counted_once(monkeypatch) -> N
         target_sdk=35,
         sha256="a" * 64,
         artifact_label="base.apk",
-        declared=(permission, permission),
-        custom_declared=(permission,),
+        declared=(requested_permission, requested_permission),
+        custom_declared=(defined_permission,),
     )
 
     assert counts == {"aosp": 0, "oem": 0, "app_defined": 1, "unknown": 0}
     assert len(unknown_calls) == 1
+    assert unknown_calls[0]["permission_string"] == defined_permission
+    assert unknown_calls[0]["triage_status"] == "app_defined"

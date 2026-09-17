@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, EvidencePointer, Finding, MasvsCategory, SeverityLevel
-from ...persistence.reports import StoredReport, reports_for_package
+from ...persistence.reports import (
+    ReportStorageError,
+    StoredReport,
+    load_report,
+    reports_for_package,
+)
 from .models import NetworkSnapshot
 from .network import cached_previous_network_snapshot
 from .runtime_state import cache_lookup, cache_store
@@ -41,11 +47,21 @@ def _runtime_related_reports(
     reports = split_reports.get(split_key)
     if not isinstance(reports, list):
         return []
-    return [
-        stored
-        for stored in reports
-        if isinstance(stored, StoredReport) and stored.report.hashes.get("sha256") != current_sha
-    ]
+    loaded: list[StoredReport] = []
+    for item in reports:
+        if isinstance(item, StoredReport):
+            stored = item
+        elif isinstance(item, (str, Path)):
+            path = Path(item)
+            try:
+                stored = StoredReport(path=path, report=load_report(path))
+            except (OSError, ReportStorageError):
+                continue
+        else:
+            continue
+        if stored.report.hashes.get("sha256") != current_sha:
+            loaded.append(stored)
+    return loaded
 
 
 def _split_cache_key(*, package_name: str | None, capture_id: str | None, split_id: str) -> tuple[str, str, str] | None:

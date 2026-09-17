@@ -12,7 +12,6 @@ def render_run_start(
     profile_label: str,
     target: str,
     modules: Sequence[str],
-    workers_desc: str,
     run_ctx: StaticRunContext | None = None,
 ) -> None:
     if run_ctx is not None and run_ctx.quiet and run_ctx.batch:
@@ -23,7 +22,7 @@ def render_run_start(
         target_value = target.split(":", 1)[1].strip() or target
     print("Static Analysis")
     print("───────────────")
-    print(f"{profile_label} | workers={workers_desc} | profile_modules={detector_count}")
+    print(f"{profile_label} | artifact_execution=serial | profile_modules={detector_count}")
     if target_value and target_value != "All apps":
         print(f"Scope: {target_value}")
     print()

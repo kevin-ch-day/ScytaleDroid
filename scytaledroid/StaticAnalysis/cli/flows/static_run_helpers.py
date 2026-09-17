@@ -1,8 +1,7 @@
-"""Small static-run utilities (worker count, cache purge, module list) used by scan dispatch."""
+"""Small static-run utilities (cache purge and module list) used by scan dispatch."""
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -14,21 +13,6 @@ from ..core.models import RunParameters
 
 def modules_for_run(params: RunParameters) -> tuple[str, ...]:
     return run_modules_for_profile(params.profile)
-
-
-def resolve_workers(value: str | int) -> int:
-    """Resolve worker count for operator display and future parallel hooks.
-
-    Today the static APK pipeline runs detectors sequentially inside each artifact;
-    this value is **not** yet threaded into ``analyze_apk`` / ``run_detector_pipeline``.
-    """
-
-    if isinstance(value, int):
-        return max(1, value)
-    text = (value or "").strip().lower()
-    if text.isdigit():
-        return max(1, int(text))
-    return max(1, os.cpu_count() or 1)
 
 
 def purge_run_cache() -> None:

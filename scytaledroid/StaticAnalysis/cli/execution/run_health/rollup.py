@@ -38,7 +38,8 @@ def rollup_parse_fallback_signals(app_result: AppRunResult) -> dict[str, int]:
     resource_reparse_candidate_art = 0
     label_or_resource_parse_signals = 0
     for artifact in getattr(app_result, "artifacts", []) or []:
-        report = getattr(artifact, "report", None)
+        loader = getattr(artifact, "load_report", None)
+        report = loader() if callable(loader) else getattr(artifact, "report", None)
         meta = getattr(report, "metadata", None)
         if not isinstance(meta, Mapping):
             continue

@@ -310,7 +310,7 @@ Scytale **must** be able to populate the following **logical** payload for each 
 
 Before scheduling S2 **implementation**, run the read-only bundle and fill the evidence template:
 
-- **[permission_intel_scytaledroid_s2_p1a_operational_readiness.md](../../permission_intel_scytaledroid_s2_p1a_operational_readiness.md)** — PI routing commands, queue audit, static→SHA256 linkage, legacy `aosp_promote` options, readiness checklist.  
+- **[permission_intel_observation_readiness.md](../../permission_intel_observation_readiness.md)** — current PI routing commands, queue audit, static→SHA256 linkage, legacy `aosp_promote` options, and readiness checklist.
 - **Scripts:** `scripts/db/audit_permission_intel_queue_compatibility.py`, `scripts/db/audit_static_permission_observation_linkage.py`, `scripts/db/run_permission_intel_scytale_s2_readiness_audit.sh`.
 
 ---

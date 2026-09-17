@@ -1,10 +1,51 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from xml.etree import ElementTree
+
 from scytaledroid.StaticAnalysis.core.findings import Badge, DetectorResult
 from scytaledroid.StaticAnalysis.core.pipeline_artifacts import (
     build_pipeline_summary,
     build_pipeline_trace,
+    build_reproducibility_bundle,
 )
+
+
+def test_reproducibility_bundle_binds_string_payload_without_duplicate_embedding() -> None:
+    payload = {"samples": {"urls": ["https://example.test/a"] * 100}}
+    context = SimpleNamespace(
+        metadata={"post_run_string_payload": payload, "session_stamp": "session-1"},
+        manifest_summary=SimpleNamespace(
+            to_dict=lambda: {},
+            version_name=None,
+            version_code=None,
+            min_sdk=None,
+            target_sdk=None,
+            compile_sdk=None,
+        ),
+        manifest_flags=SimpleNamespace(to_dict=lambda: {}),
+        permissions=SimpleNamespace(
+            to_dict=lambda: {}, declared=(), dangerous=(), custom=(), custom_definitions={}
+        ),
+        components=SimpleNamespace(to_dict=lambda: {}),
+        exported_components=SimpleNamespace(to_dict=lambda: {}),
+        manifest_root=ElementTree.Element("manifest"),
+        hashes={},
+        features=(),
+        libraries=(),
+        signatures=(),
+        network_security_policy=None,
+        string_index=None,
+        intermediate_results=(),
+    )
+
+    bundle = build_reproducibility_bundle(context)
+    metadata = bundle["metadata"]
+
+    assert metadata["session_stamp"] == "session-1"
+    assert metadata["post_run_string_payload_embedded"] is False
+    assert len(metadata["post_run_string_payload_sha256"]) == 64
+    assert "post_run_string_payload" not in metadata
 
 
 def test_build_pipeline_summary_skipped_uses_metrics_summary_when_no_skip_reason() -> None:

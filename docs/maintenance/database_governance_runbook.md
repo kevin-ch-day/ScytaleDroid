@@ -95,7 +95,7 @@ Avoid sharing one super-user across app + analyst + migration.
 | **Migrator / DBA repair** | Account with DDL rights; used **only** for bootstrap/repair/automation—not Web runtime. |
 | **Web PDO read user** | `SELECT`-bounded on operational DB views + minimal base tables **only if unavoidable**; ideally views-only. |
 | **CLI persistence** | Service account scoped to **`static_analysis_*`**, **`apps`/`app_versions`**, etc., per operational policy. |
-| **Permission-intel isolated DB** | Follow **`docs/database/permission_split_execution_phases.md`**—different namespace from core operational reads. |
+| **Permission-intel isolated DB** | Follow the active **`docs/database/permission_intel_contract.md`**; the split sequence is retained in **`docs/database/permission_split_migration_history.md`**. The PI namespace remains separate from core operational reads. |
 
 ---
 
@@ -222,4 +222,3 @@ Tracked next implementation waves (beyond this doc):
 2. Richer **`sd_web_db_smoke`** semantic checks (“zeros vs underlying counts”).
 3. Centralized **`run_health`** database persistence surfaced identically CLI/Web.
 4. Artifact identity redesign (orthogonal but sequenced separately).
-

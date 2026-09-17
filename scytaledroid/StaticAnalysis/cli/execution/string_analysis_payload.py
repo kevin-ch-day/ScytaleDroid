@@ -472,6 +472,11 @@ def merge_string_analysis_payloads(
         }
     )
 
+    artifact_payload_count = sum(
+        max(1, int(payload.get("artifact_payload_count", 1) or 1))
+        for payload in valid_payloads
+    )
+
     return {
         "counts": dict(counts),
         "samples": merged_samples,
@@ -486,7 +491,10 @@ def merge_string_analysis_payloads(
         "resource_strings_skipped": resource_strings_skipped,
         "options": merged_options,
         "aggregation_scope": "artifact_merged",
-        "artifact_payload_count": len(valid_payloads),
+        # A previously merged payload may be merged again as artifacts are
+        # consumed incrementally. Preserve its represented-artifact count
+        # instead of counting that aggregate as one artifact.
+        "artifact_payload_count": artifact_payload_count,
         "artifact_bucket_coverage": {
             bucket: len(merged_samples.get(bucket, ()))
             for bucket in BUCKET_ORDER

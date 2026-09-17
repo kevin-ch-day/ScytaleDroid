@@ -248,7 +248,6 @@ def test_choose_run_profile_exposes_persistence_test_preset(monkeypatch) -> None
     assert command.title == "Persistence test"
     assert command.prompt_reset is True
     assert command.auto_verify is True
-    assert command.workers_override == "2"
 
 
 def test_choose_run_profile_can_back_out_from_advanced_profiles(monkeypatch) -> None:
@@ -325,9 +324,6 @@ def _stored_report(*, package_name: str, version_code: str, version_name: str, s
 def test_diff_last_available_uses_package_scoped_report_lookup(monkeypatch) -> None:
     monkeypatch.setattr(helpers, "_get_last_static_package", lambda: "com.example.app")
 
-    def _unexpected_list_reports():
-        raise AssertionError("full report scan should not be used for single-package lookup")
-
     scoped_reports = [
         _stored_report(
             package_name="com.example.app",
@@ -347,7 +343,6 @@ def test_diff_last_available_uses_package_scoped_report_lookup(monkeypatch) -> N
 
     from scytaledroid.StaticAnalysis.persistence import reports as reports_store
 
-    monkeypatch.setattr(reports_store, "list_reports", _unexpected_list_reports)
     monkeypatch.setattr(reports_store, "reports_for_package", lambda package_name: scoped_reports if package_name == "com.example.app" else [])
 
     available, package_name = helpers.diff_last_available(tuple())
@@ -374,11 +369,6 @@ def test_render_version_diff_uses_package_scoped_report_lookup(monkeypatch, caps
 
     from scytaledroid.StaticAnalysis.persistence import reports as reports_store
 
-    monkeypatch.setattr(
-        reports_store,
-        "list_reports",
-        lambda: (_ for _ in ()).throw(AssertionError("full report scan should not be used for version diff")),
-    )
     monkeypatch.setattr(
         reports_store,
         "reports_for_package",

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -22,9 +24,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-_REPORT_CACHE_TOKEN: tuple[str, ...] | None = None
-_REPORT_CACHE_ENTRIES: list[StoredReport] | None = None
-_REPORT_CACHE_PACKAGE_INDEX: dict[str, list[StoredReport]] | None = None
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _REPORT_PACKAGE_INDEX_VERSION = 1
 
 
@@ -49,17 +49,6 @@ class SavedReportPaths:
     view: dict[str, object]
 
 
-def _report_cache_token() -> tuple[str, ...]:
-    return tuple(str(root.resolve(strict=False)) for root in _report_search_roots())
-
-
-def _clear_report_cache() -> None:
-    global _REPORT_CACHE_TOKEN, _REPORT_CACHE_ENTRIES, _REPORT_CACHE_PACKAGE_INDEX
-    _REPORT_CACHE_TOKEN = None
-    _REPORT_CACHE_ENTRIES = None
-    _REPORT_CACHE_PACKAGE_INDEX = None
-
-
 def _sort_key(entry: StoredReport) -> tuple:
     report = entry.report
     # Deterministic ordering: avoid filesystem mtimes (easy to disturb via copy/unzip/rsync).
@@ -81,32 +70,6 @@ def _sort_key(entry: StoredReport) -> tuple:
         version_code_i,
         entry.path.name,
     )
-
-
-def _set_report_cache(entries: list[StoredReport]) -> None:
-    global _REPORT_CACHE_TOKEN, _REPORT_CACHE_ENTRIES, _REPORT_CACHE_PACKAGE_INDEX
-    entries.sort(key=_sort_key, reverse=True)
-    _REPORT_CACHE_TOKEN = _report_cache_token()
-    _REPORT_CACHE_ENTRIES = list(entries)
-    package_index: dict[str, list[StoredReport]] = {}
-    for entry in entries:
-        package_name = str(getattr(getattr(entry.report, "manifest", None), "package_name", "") or "").strip().lower()
-        if not package_name:
-            continue
-        package_index.setdefault(package_name, []).append(entry)
-    _REPORT_CACHE_PACKAGE_INDEX = package_index
-    _write_report_package_index(entries)
-
-
-def _cache_saved_report(path: Path, report: StaticAnalysisReport) -> None:
-    global _REPORT_CACHE_TOKEN, _REPORT_CACHE_ENTRIES
-    token = _report_cache_token()
-    if _REPORT_CACHE_TOKEN != token or _REPORT_CACHE_ENTRIES is None:
-        return
-    identity = _report_identity(report)
-    updated = [entry for entry in _REPORT_CACHE_ENTRIES if _report_identity(entry.report) != identity]
-    updated.append(StoredReport(path=path, report=report))
-    _set_report_cache(updated)
 
 
 def _report_package_index_path() -> Path:
@@ -137,8 +100,7 @@ def _write_report_package_index_rows(rows: list[dict[str, object]]) -> None:
         "schema_version": _REPORT_PACKAGE_INDEX_VERSION,
         "entries": rows,
     }
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _atomic_write_json(index_path, payload, trailing_newline=True)
 
 
 def _read_report_package_index() -> list[dict[str, object]] | None:
@@ -210,8 +172,7 @@ def _upsert_report_package_index_entry(path: Path, report: StaticAnalysisReport)
         "schema_version": _REPORT_PACKAGE_INDEX_VERSION,
         "entries": updated,
     }
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _atomic_write_json(index_path, payload, trailing_newline=True)
 
 
 def _stored_reports_from_index(package_name: str) -> list[StoredReport] | None:
@@ -299,11 +260,9 @@ def _build_report_package_index_from_corpus() -> list[dict[str, object]]:
     return rows
 
 
-def rebuild_report_package_index(*, clear_warm_cache: bool = False) -> dict[str, object]:
+def rebuild_report_package_index() -> dict[str, object]:
     """Rebuild the persistent package index from the on-disk report corpus."""
 
-    if clear_warm_cache:
-        _clear_report_cache()
     started = perf_counter()
     rows = _build_report_package_index_from_corpus()
     elapsed = perf_counter() - started
@@ -322,6 +281,45 @@ def report_package_index_path() -> Path:
     """Return the persistent package-index path."""
 
     return _report_package_index_path()
+
+
+def find_report_path_by_sha256(report_sha256: str | None) -> Path | None:
+    """Find one report by exact SHA-256 without decoding the report corpus."""
+
+    digest = str(report_sha256 or "").strip().lower()
+    if not _SHA256_RE.fullmatch(digest):
+        return None
+    latest = _reports_root() / "latest" / f"{digest}.json"
+    if latest.is_file():
+        return latest
+    archive_root = _reports_root() / "archive"
+    if not archive_root.is_dir():
+        return None
+    return next((path for path in sorted(archive_root.glob(f"*/{digest}.json"), reverse=True) if path.is_file()), None)
+
+
+def find_report_path_for_session(session_stamp: str | None) -> Path | None:
+    """Find one report for a session using paths/index metadata only."""
+
+    session = str(session_stamp or "").strip()
+    if not session:
+        return None
+    archive_dir = _reports_root() / "archive" / _safe_filename(session)
+    if archive_dir.is_dir():
+        direct = next((path for path in sorted(archive_dir.glob("*.json")) if path.is_file()), None)
+        if direct is not None:
+            return direct
+
+    indexed = _read_report_package_index()
+    if indexed is None:
+        indexed = _build_report_package_index_from_corpus()
+    for row in indexed:
+        if str(row.get("session_stamp") or "").strip() != session:
+            continue
+        path = Path(str(row.get("path") or ""))
+        if path.is_file():
+            return path
+    return None
 
 
 def save_report(
@@ -387,12 +385,11 @@ def save_report(
             "generated_at": report.generated_at,
         },
     )
-    try:
-        cached_report = StaticAnalysisReport.from_dict(payload)
-    except Exception:
-        cached_report = report
-    _cache_saved_report(path, cached_report)
-    _upsert_report_package_index_entry(path, cached_report)
+    # The package index needs only the small identity fields already present on
+    # ``report``. Reconstructing a second report from ``payload`` briefly
+    # duplicated the complete detector/string object graph (tens of MiB for
+    # large APKs) after the JSON write had completed.
+    _upsert_report_package_index_entry(path, report)
     return SavedReportPaths(json_path=path, html_path=html_path, view=view_payload)
 
 
@@ -417,12 +414,7 @@ def refresh_saved_report_json(report: StaticAnalysisReport) -> SavedReportPaths:
         raise ReportStorageError(f"Unable to refresh report JSON at {target}: {exc}") from exc
 
     path = latest_path if mode in {"latest", "both"} else archive_path or latest_path
-    try:
-        cached_report = StaticAnalysisReport.from_dict(payload)
-    except Exception:
-        cached_report = report
-    _cache_saved_report(path, cached_report)
-    _upsert_report_package_index_entry(path, cached_report)
+    _upsert_report_package_index_entry(path, report)
     return SavedReportPaths(json_path=path, html_path=None, view=view_payload)
 
 
@@ -444,13 +436,47 @@ def _write_report_payload(
     mode: str,
 ) -> None:
     if mode in {"latest", "both"}:
-        latest_path.parent.mkdir(parents=True, exist_ok=True)
-        with latest_path.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+        _atomic_write_json(latest_path, payload, default=str)
     if mode in {"archive", "both"} and archive_path is not None:
-        archive_path.parent.mkdir(parents=True, exist_ok=True)
-        with archive_path.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+        _atomic_write_json(archive_path, payload, default=str)
+
+
+def _atomic_write_json(
+    path: Path,
+    payload: object,
+    *,
+    default=None,
+    trailing_newline: bool = False,
+) -> None:
+    """Publish JSON by atomic same-filesystem replacement.
+
+    A process kill while streaming a large report must leave either the prior
+    complete file or no final file, never a truncated JSON document that looks
+    like a completed checkpoint.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(payload, handle, indent=2, sort_keys=True, default=default)
+            if trailing_newline:
+                handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _enrich_report_metadata(
@@ -489,62 +515,17 @@ def _read_report(path: Path) -> StaticAnalysisReport | None:
         return None
 
 
-def list_reports() -> list[StoredReport]:
-    """Return all stored reports ordered by newest first."""
-
-    roots = _report_search_roots()
-    if not any(root.exists() for root in roots):
-        _clear_report_cache()
-        return []
-
-    token = _report_cache_token()
-    if _REPORT_CACHE_TOKEN == token and _REPORT_CACHE_ENTRIES is not None:
-        if all(entry.path.exists() for entry in _REPORT_CACHE_ENTRIES):
-            return list(_REPORT_CACHE_ENTRIES)
-        _clear_report_cache()
-
-    entries: list[StoredReport] = []
-    seen_identities: set[tuple[str, str, str, str, str]] = set()
-    for path in _iter_report_paths():
-        report = _read_report(path)
-        if report:
-            identity = _report_identity(report)
-            if identity in seen_identities:
-                continue
-            seen_identities.add(identity)
-            entries.append(StoredReport(path=path, report=report))
-    _set_report_cache(entries)
-    return list(entries)
-
-
 def reports_for_package(package_name: str | None) -> list[StoredReport]:
-    """Return cached stored reports for one package, newest first."""
+    """Return indexed stored reports for one package, newest first."""
 
     package_norm = str(package_name or "").strip().lower()
     if not package_norm:
         return []
-    token = _report_cache_token()
-    if (
-        _REPORT_CACHE_TOKEN == token
-        and _REPORT_CACHE_PACKAGE_INDEX is not None
-        and _REPORT_CACHE_ENTRIES is not None
-        and all(entry.path.exists() for entry in _REPORT_CACHE_ENTRIES)
-    ):
-        return list(_REPORT_CACHE_PACKAGE_INDEX.get(package_norm, ()))
     indexed_entries = _stored_reports_from_index(package_norm)
     if indexed_entries is not None:
         return indexed_entries
-    if _build_report_package_index_from_corpus():
-        indexed_entries = _stored_reports_from_index(package_norm)
-        if indexed_entries is not None:
-            return indexed_entries
-    entries = list_reports()
-    return [
-        entry
-        for entry in entries
-        if str(getattr(getattr(entry.report, "manifest", None), "package_name", "") or "").strip().lower()
-        == package_norm
-    ]
+    _build_report_package_index_from_corpus()
+    return _stored_reports_from_index(package_norm) or []
 
 
 def load_report(path: Path) -> StaticAnalysisReport:
@@ -625,21 +606,11 @@ def _iter_report_paths() -> list[Path]:
     return ordered_paths
 
 
-def _report_identity(report: StaticAnalysisReport) -> tuple[str, str, str, str, str]:
-    metadata = report.metadata if isinstance(report.metadata, dict) else {}
-    return (
-        str(report.hashes.get("sha256") or ""),
-        str(metadata.get("session_stamp") or ""),
-        str(report.manifest.package_name or ""),
-        str(report.generated_at or ""),
-        str(report.file_name or ""),
-    )
-
-
 __all__ = [
+    "find_report_path_by_sha256",
+    "find_report_path_for_session",
     "save_report",
     "refresh_saved_report_json",
-    "list_reports",
     "reports_for_package",
     "rebuild_report_package_index",
     "report_package_index_path",

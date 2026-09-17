@@ -4,13 +4,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from scytaledroid.Config import app_config
 from scytaledroid.StaticAnalysis.cli.core.models import AppRunResult, RunParameters
 from scytaledroid.StaticAnalysis.cli.execution.results_persistence import merge_persistence_metadata
 from scytaledroid.StaticAnalysis.core import ManifestSummary, StaticAnalysisReport
 from scytaledroid.StaticAnalysis.persistence import reports as reports_store
 from scytaledroid.StaticAnalysis.persistence.reports import (
-    list_reports,
+    find_report_path_by_sha256,
+    find_report_path_for_session,
+    load_report,
     rebuild_report_package_index,
     refresh_saved_report_json,
     report_package_index_path,
@@ -97,28 +100,72 @@ def test_save_report_archive_mode_writes_session_archive_json(tmp_path: Path, mo
     assert not (tmp_path / "data" / "static_analysis" / "reports" / "latest").exists()
 
 
-def test_list_reports_prefers_latest_and_dedupes_archive_copy(tmp_path: Path, monkeypatch) -> None:
+def test_report_path_lookup_does_not_decode_report_corpus(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(app_config, "DATA_DIR", "data")
     monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
     monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "both")
     monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
+    digest = "7" * 64
+    saved = save_report(_sample_report(sha256=digest, session_stamp="session-safe"))
 
-    save_report(_sample_report())
-
-    reports = list_reports()
-
-    assert len(reports) == 1
-    assert reports[0].path == (
-        Path("data")
-        / "static_analysis"
-        / "reports"
-        / "latest"
-        / ("a" * 64 + ".json")
+    monkeypatch.setattr(
+        reports_store,
+        "_read_report",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("lookup decoded a report")),
     )
 
+    assert find_report_path_by_sha256(digest) == saved.json_path
+    assert find_report_path_for_session("session-safe") == (
+        Path("data") / "static_analysis" / "reports" / "archive" / "session-safe" / f"{digest}.json"
+    )
+    assert find_report_path_by_sha256("../not-a-digest") is None
 
-def test_list_reports_reuses_warm_cache_without_rescan(tmp_path: Path, monkeypatch) -> None:
+
+def test_report_writes_do_not_reconstruct_large_report_for_package_index(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
+    monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "archive")
+    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
+
+    def _unexpected_from_dict(*_args, **_kwargs):
+        raise AssertionError("report index update must not reconstruct the full report")
+
+    monkeypatch.setattr(StaticAnalysisReport, "from_dict", _unexpected_from_dict)
+    report = _sample_report(sha256="9" * 64)
+
+    saved = save_report(report)
+    refreshed = refresh_saved_report_json(report)
+
+    assert saved.json_path.exists()
+    assert refreshed.json_path.exists()
+    assert report_package_index_path().exists()
+
+
+def test_atomic_json_publication_preserves_existing_file_on_serialization_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    target = tmp_path / "report.json"
+    target.write_text('{"state":"complete"}\n', encoding="utf-8")
+
+    def _fail_dump(*_args, **_kwargs):
+        raise RuntimeError("simulated serialization failure")
+
+    monkeypatch.setattr(reports_store.json, "dump", _fail_dump)
+
+    with pytest.raises(RuntimeError, match="simulated serialization failure"):
+        reports_store._atomic_write_json(target, {"state": "replacement"})
+
+    assert target.read_text(encoding="utf-8") == '{"state":"complete"}\n'
+    assert list(tmp_path.glob(".report.json.*.tmp")) == []
+
+
+def test_save_report_updates_persistent_index_for_later_reads(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(app_config, "DATA_DIR", "data")
     monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
@@ -126,35 +173,12 @@ def test_list_reports_reuses_warm_cache_without_rescan(tmp_path: Path, monkeypat
     monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
 
     save_report(_sample_report())
-    first = list_reports()
+    assert len(reports_for_package("com.example.app")) == 1
 
     monkeypatch.setattr(
         reports_store,
         "_iter_report_paths",
-        lambda: (_ for _ in ()).throw(AssertionError("cache should avoid archive rescan")),
-    )
-
-    second = list_reports()
-
-    assert len(first) == 1
-    assert [entry.path for entry in second] == [entry.path for entry in first]
-
-
-def test_save_report_updates_warm_cache_for_later_reads(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(app_config, "DATA_DIR", "data")
-    monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
-    monkeypatch.setattr(app_config, "STATIC_REPORT_JSON_MODE", "both")
-    monkeypatch.setattr(app_config, "STATIC_HTML_MODE", "latest")
-
-    save_report(_sample_report())
-    warm = list_reports()
-    assert len(warm) == 1
-
-    monkeypatch.setattr(
-        reports_store,
-        "_iter_report_paths",
-        lambda: (_ for _ in ()).throw(AssertionError("warm cache should be updated incrementally")),
+        lambda: (_ for _ in ()).throw(AssertionError("persistent index should be updated incrementally")),
     )
 
     save_report(
@@ -165,7 +189,7 @@ def test_save_report_updates_warm_cache_for_later_reads(tmp_path: Path, monkeypa
             generated_at="2026-03-29T15:58:13+00:00",
         )
     )
-    reports = list_reports()
+    reports = reports_for_package("com.example.app")
 
     assert len(reports) == 2
     assert reports[0].report.hashes["sha256"] == "b" * 64
@@ -197,14 +221,6 @@ def test_reports_for_package_uses_cached_package_index(tmp_path: Path, monkeypat
             generated_at="2026-03-30T15:58:13+00:00",
         )
     )
-    list_reports()
-
-    monkeypatch.setattr(
-        reports_store,
-        "list_reports",
-        lambda: (_ for _ in ()).throw(AssertionError("package index should satisfy lookup from warm cache")),
-    )
-
     reports = reports_for_package("com.example.app")
 
     assert len(reports) == 1
@@ -236,14 +252,6 @@ def test_reports_for_package_uses_persistent_index_after_cold_start(tmp_path: Pa
             generated_at="2026-03-30T15:58:13+00:00",
         )
     )
-    reports_store._clear_report_cache()
-
-    monkeypatch.setattr(
-        reports_store,
-        "list_reports",
-        lambda: (_ for _ in ()).throw(AssertionError("persistent package index should satisfy cold lookup")),
-    )
-
     reports = reports_for_package("com.example.app")
 
     assert len(reports) == 1
@@ -278,14 +286,6 @@ def test_reports_for_package_bootstraps_persistent_index_without_full_report_sca
 
     index_path = Path("data") / "static_analysis" / "reports" / "_cache" / "package_index_v1.json"
     index_path.unlink()
-    reports_store._clear_report_cache()
-
-    monkeypatch.setattr(
-        reports_store,
-        "list_reports",
-        lambda: (_ for _ in ()).throw(AssertionError("cold package lookup should bootstrap the persistent index before a full report-object scan")),
-    )
-
     reports = reports_for_package("com.example.app")
 
     assert len(reports) == 1
@@ -341,7 +341,7 @@ def test_rebuild_report_package_index_returns_stats_and_writes_cache(tmp_path: P
     if index_path.exists():
         index_path.unlink()
 
-    stats = rebuild_report_package_index(clear_warm_cache=True)
+    stats = rebuild_report_package_index()
 
     assert stats["row_count"] == 2
     assert stats["package_count"] == 2
@@ -387,7 +387,7 @@ def test_save_report_enriches_metadata_with_normalized_and_manifest_package_name
     assert '"package_case_mismatch": true' in payload
 
 
-def test_save_report_warm_cache_uses_enriched_metadata_shape(tmp_path: Path, monkeypatch) -> None:
+def test_save_report_package_index_uses_enriched_metadata_shape(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(app_config, "DATA_DIR", "data")
     monkeypatch.setattr(app_config, "OUTPUT_DIR", "output")
@@ -414,8 +414,8 @@ def test_save_report_warm_cache_uses_enriched_metadata_shape(tmp_path: Path, mon
         generated_at="2026-03-28T15:58:13+00:00",
     )
 
-    save_report(report)
-    stored = list_reports()[0].report
+    saved = save_report(report)
+    stored = load_report(saved.json_path)
 
     assert stored.metadata["normalized_package_name"] == "mnn.android"
     assert stored.metadata["manifest_package_name"] == "mnn.Android"
@@ -488,7 +488,7 @@ def test_refresh_saved_report_json_persists_findings_fidelity_metadata(tmp_path:
     assert '"cap_metadata_grain": "package"' in latest_payload
     assert '"findings_fidelity"' in archive_payload
 
-    stored = list_reports()[0].report
+    stored = load_report(refreshed.json_path)
     assert stored.metadata["findings_fidelity"]["persisted_db_findings"] == 6
     assert stored.metadata["findings_fidelity"]["per_finding_persistence_status_available"] is False
 

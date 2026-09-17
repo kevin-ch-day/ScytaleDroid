@@ -61,7 +61,7 @@ Reference snapshot columns: `obs_id`, `sample_id`, `sha256`, `package_name`, `pe
 - **`sha256` / `bucket` / `rule_fired`:** feature-detected; some deployments use **NOT NULL** `sha256` (Erebus `obs_sample_schema_contract` warns).
 
 **Scytale:** No writer yet — see `permission_intel_contract.md` and the
-S2-P1A readiness doc for the active pre-write contract.
+observation-readiness doc for the active pre-write contract.
 
 ---
 
@@ -101,11 +101,15 @@ Scytale `insert_permission_queue` INSERT list:
 
 ### 5.1 Queue action compatibility (fixed in Scytale)
 
-Erebus `permission_queue_apply.class_action_map` keys include **`aosp`** (maps to promotion/`apply` semantics). It does **not** include **`aosp_promote`**, which would surface as `unknown_action` in `evaluate_queue_row`.
+Erebus recognizes both **`aosp`** and legacy **`aosp_promote`** as AOSP
+promotion intent. Both remain fail-closed because queue promotion cannot create
+accepted AOSP platform truth.
 
-**Scytale fix:** emit **`aosp`** for `aosp_missing` promotion rows and **`insert_queue`** normalizes legacy **`aosp_promote` → `aosp`** so older queued rows / callers remain safe.
+**Scytale posture:** `insert_queue` normalizes both **`aosp`** and legacy
+**`aosp_promote`** input to review-only **`defer`**, so new rows cannot become a
+platform-promotion request.
 
-**Operator evidence:** run `PYTHONPATH=. python scripts/db/audit_permission_intel_queue_compatibility.py` (read-only) against live PI — see [permission_intel_scytaledroid_s2_p1a_operational_readiness.md](permission_intel_scytaledroid_s2_p1a_operational_readiness.md).
+**Operator evidence:** run `PYTHONPATH=. python scripts/db/audit_permission_intel_queue_compatibility.py` (read-only) against live PI — see [permission_intel_observation_readiness.md](permission_intel_observation_readiness.md).
 
 ---
 
@@ -133,5 +137,5 @@ Erebus `permission_queue_apply.class_action_map` keys include **`aosp`** (maps t
 ## 8. Related ScytaleDroid docs
 
 - [permission_intel_contract.md](permission_intel_contract.md)
-- [permission_intel_scytaledroid_s2_p1a_operational_readiness.md](permission_intel_scytaledroid_s2_p1a_operational_readiness.md)
+- [permission_intel_observation_readiness.md](permission_intel_observation_readiness.md)
 - [archive/permission-intel-phase-notes/](archive/permission-intel-phase-notes/) — historical S1/S2 phase notes

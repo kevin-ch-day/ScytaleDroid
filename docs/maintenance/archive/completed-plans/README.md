@@ -8,7 +8,7 @@ Use current docs first:
 - `docs/maintenance/legacy_static_reader_dependency_map.md`
 - `docs/maintenance/legacy_static_deprecation_playbook.md`
 - `docs/maintenance/legacy_static_tables_consumer_audit.md`
-- `docs/maintenance/phase5c_task_list.md`
+- `docs/maintenance/legacy_bridge_cleanup_backlog.md` (current successor backlog)
 - `docs/maintenance/documentation_authority_index.md`
 
 Archived here:

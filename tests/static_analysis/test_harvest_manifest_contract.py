@@ -370,6 +370,7 @@ def test_execute_scan_merges_split_artifact_string_payloads(monkeypatch, tmp_pat
     merged = outcome.results[0].base_string_data
     assert isinstance(merged, dict)
     assert merged["aggregation_scope"] == "artifact_merged"
+    assert merged["artifact_payload_count"] == 3
     assert merged["counts"]["endpoints"] == 3
     roots = merged["aggregates"]["endpoint_roots"]
     assert isinstance(roots, list) and len(roots) == 3
@@ -800,7 +801,6 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
         session_display="20260510-all-full",
         profile_display="Full",
         scope_display="all - All apps",
-        workers_display="8",
         include_legend=False,
         concise=False,
         include_recent_apps=True,
@@ -808,7 +808,7 @@ def test_format_compact_progress_text_aggregates_top_fail_detectors() -> None:
 
     assert "Run context" in text
     assert "Session: 20260510-all-full" in text
-    assert "Workers: 8" in text
+    assert "Artifact execution: serial (one APK at a time)" in text
     assert "Preset: Full" in text
     assert "Display name: Switch Access" in text
     assert "com.google.android.accessibility.switchaccess" in text

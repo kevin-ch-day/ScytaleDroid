@@ -30,6 +30,11 @@ when the same APK does not request it. They are not collapsed into shared
 `android_permission_obs_sample` facts: that table has no agreed source-aware
 identity capable of preserving requested-versus-defined evidence.
 
+Dictionary intake deduplicates permission identity case-insensitively to match
+the shared catalog collation. If request and definition spellings differ only
+by case, the exact `<permission>` definition spelling and `app_defined` role
+win, and the ledger is updated once for that analyzed artifact.
+
 The current intake tables are:
 
 - `android_permission_dict_unknown`
@@ -64,8 +69,8 @@ Current reads include:
 ## Observation Writes
 
 ScytaleDroid does not currently write `android_permission_obs_sample` rows.
-Future observation writes must satisfy the S2-P1A readiness checks before any
-apply path exists:
+Future observation writes must satisfy the observation-readiness checks before
+any apply path exists:
 
 - include `permission_string`, `artifact_sha256`, `static_run_id`, and
   `package_name`
@@ -96,6 +101,6 @@ Related active docs:
 
 - `docs/maintenance/permission_intelligence_pipeline.md`
 - `docs/maintenance/pi_erebus_operational_boundary.md`
-- `docs/database/permission_split_execution_phases.md`
+- `docs/database/permission_split_migration_history.md` (historical execution record)
 - `docs/database/permission_intel_schema_drift_erebus_vs_scytaledroid.md`
-- `docs/database/permission_intel_scytaledroid_s2_p1a_operational_readiness.md`
+- `docs/database/permission_intel_observation_readiness.md`

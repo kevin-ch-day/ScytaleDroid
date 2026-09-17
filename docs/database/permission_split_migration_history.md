@@ -1,16 +1,23 @@
-# Permission Split Execution Phases
+# Permission Intel Split Migration History
 
 Date: 2026-04-27
 
-This document breaks the permission-intelligence split into explicit execution
-phases with CLI, DB, and Web checkpoints.
+> Historical migration record. This page preserves the executed sequence and
+> its contemporary evidence; it is not the current project roadmap. Use
+> [permission_intel_contract.md](permission_intel_contract.md) for the active
+> boundary and
+> [legacy_bridge_cleanup_backlog.md](../maintenance/legacy_bridge_cleanup_backlog.md)
+> for remaining cleanup work.
+
+This document records how the permission-intelligence split was divided into
+execution stages with CLI, DB, and Web checkpoints.
 
 It is intentionally operational. This file answers: in what order should we do the work without breaking the CLI
 or `/var/www/html/ScytaleDroid-Web`?
 
-## Current phase status
+## Recorded status
 
-Status as of 2026-04-29:
+Snapshot as of 2026-04-29:
 
 - `Phase 0`: completed
 - `Phase 1`: completed
@@ -37,8 +44,8 @@ Interpretation:
   cycle
 - the shared permission DB has been provisioned and validated for the current project environment
 - the full Phase 4 lane is now closed on current code
-- the active implementation lane is now Phase 5C database/table cleanup and
-  read-model hardening work
+- database/table cleanup and read-model hardening remained in progress at the
+  time of this snapshot
 
 ## Phase 4 roadmap
 

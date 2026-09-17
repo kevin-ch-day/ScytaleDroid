@@ -296,21 +296,21 @@ Included pages:
 ## Current notable large / high-risk files
 
 CLI repo:
-- [scytaledroid/DynamicAnalysis/ml/evidence_pack_ml_orchestrator.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/DynamicAnalysis/ml/evidence_pack_ml_orchestrator.py)
-- [scytaledroid/StaticAnalysis/cli/execution/results.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/StaticAnalysis/cli/execution/results.py)
-- [scytaledroid/StaticAnalysis/cli/persistence/run_summary.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/StaticAnalysis/cli/persistence/run_summary.py)
-- [scytaledroid/DynamicAnalysis/menus/dynamic_menu.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/DynamicAnalysis/menus/dynamic_menu.py)
-- [scytaledroid/Database/db_queries/views.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/Database/db_queries/views.py)
-- [scytaledroid/Database/db_utils/menus/health_checks.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/Database/db_utils/menus/health_checks.py)
-- [scytaledroid/Database/db_utils/menu_actions.py](/home/secadmin/Laughlin/GitHub/ScytaleDroid/scytaledroid/Database/db_utils/menu_actions.py)
+- [scytaledroid/DynamicAnalysis/ml/evidence_pack_ml_orchestrator.py](../../scytaledroid/DynamicAnalysis/ml/evidence_pack_ml_orchestrator.py)
+- [scytaledroid/StaticAnalysis/cli/execution/results.py](../../scytaledroid/StaticAnalysis/cli/execution/results.py)
+- [scytaledroid/StaticAnalysis/cli/persistence/run_summary.py](../../scytaledroid/StaticAnalysis/cli/persistence/run_summary.py)
+- [scytaledroid/DynamicAnalysis/menus/dynamic_menu.py](../../scytaledroid/DynamicAnalysis/menus/dynamic_menu.py)
+- [scytaledroid/Database/db_queries/views.py](../../scytaledroid/Database/db_queries/views.py)
+- [scytaledroid/Database/db_utils/menus/health_checks.py](../../scytaledroid/Database/db_utils/menus/health_checks.py)
+- [scytaledroid/Database/db_utils/menu_actions.py](../../scytaledroid/Database/db_utils/menu_actions.py)
 
 Web repo:
-- [database/db_lib/db_func.php](/var/www/html/ScytaleDroid-Web/database/db_lib/db_func.php)
-- [database/db_lib/db_queries.php](/var/www/html/ScytaleDroid-Web/database/db_lib/db_queries.php)
-- [assets/css/components.css](/var/www/html/ScytaleDroid-Web/assets/css/components.css)
-- [pages/app_report.php](/var/www/html/ScytaleDroid-Web/pages/app_report.php)
-- [lib/render.php](/var/www/html/ScytaleDroid-Web/lib/render.php)
-- [pages/findings.php](/var/www/html/ScytaleDroid-Web/pages/findings.php)
-- [pages/permissions.php](/var/www/html/ScytaleDroid-Web/pages/permissions.php)
+- [database/db_lib/db_func.php](../../../ScytaleDroid-Web/database/db_lib/db_func.php)
+- [database/db_lib/db_queries.php](../../../ScytaleDroid-Web/database/db_lib/db_queries.php)
+- [assets/css/components.css](../../../ScytaleDroid-Web/assets/css/components.css)
+- [pages/app_report.php](../../../ScytaleDroid-Web/pages/app_report.php)
+- [lib/render.php](../../../ScytaleDroid-Web/lib/render.php)
+- [pages/findings.php](../../../ScytaleDroid-Web/pages/findings.php)
+- [pages/permissions.php](../../../ScytaleDroid-Web/pages/permissions.php)
 
 These are the first files to inspect for cross-cutting regressions before making broad changes.

@@ -18,7 +18,6 @@ def _run_ctx() -> StaticRunContext:
         session_stamp="session-1",
         persistence_ready=True,
         paper_grade_requested=True,
-        resolved_worker_count=1,
     )
 
 

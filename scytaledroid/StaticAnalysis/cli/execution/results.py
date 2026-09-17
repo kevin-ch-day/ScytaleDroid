@@ -783,13 +783,16 @@ def _render_run_results_impl(
                     )
                 for artifact in app_result.artifacts:
                     try:
+                        artifact_report = artifact.load_report()
+                        if artifact_report is None:
+                            continue
                         merge_persistence_metadata(
-                            base_report=artifact.report,
+                            base_report=artifact_report,
                             app_result=app_result,
                             params=params,
                         )
                         if artifact.saved_path:
-                            refresh_saved_report_json(artifact.report)
+                            refresh_saved_report_json(artifact_report)
                     except Exception as exc:
                         print(
                             status_messages.status(

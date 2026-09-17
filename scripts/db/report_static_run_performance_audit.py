@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import re
 import sys
 from collections import Counter
@@ -1209,10 +1208,6 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
     from scytaledroid.Config import app_config
-    from scytaledroid.StaticAnalysis.cli.execution.static_parallel_workers import (
-        effective_parallel_artifact_worker_count,
-    )
-
     data_dir = Path(app_config.DATA_DIR)
     output_dir_root = Path(app_config.OUTPUT_DIR)
     session_stamp = _resolve_session_stamp(data_dir, args.session_stamp)
@@ -1316,10 +1311,6 @@ def main(argv: list[str] | None = None) -> int:
     total_detector_duration = sum(float(row.get("total_duration_sec") or 0.0) for row in detector_rows)
     split_artifact_count = sum(1 for row in report_rows if bool(row.get("is_split")))
     base_artifact_count = archive_reports - split_artifact_count
-    default_parallel_workers = effective_parallel_artifact_worker_count(
-        resolved_worker_budget=None,
-        artifact_count=max(1, split_artifact_count or archive_reports or 1),
-    )
     summary = {
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "repo_root": str(_REPO_ROOT),
@@ -1398,10 +1389,9 @@ def main(argv: list[str] | None = None) -> int:
         },
         "worker_model": {
             "package_loop_serial": True,
-            "artifact_process_pool_optional": True,
-            "artifact_parallel_worker_env": os.getenv("SCYTALEDROID_STATIC_ARTIFACT_WORKERS", "1"),
-            "artifact_parallel_worker_default_effective": default_parallel_workers,
-            "note": "workers=auto does not by itself enable per-package artifact process parallelism; split artifacts stay inside a serial package loop unless SCYTALEDROID_STATIC_ARTIFACT_WORKERS > 1.",
+            "artifact_execution": "serial_one_at_a_time",
+            "artifact_concurrency_cap": 1,
+            "note": "Each APK is analyzed and durably published before the next APK begins.",
         },
         "timing_contract": {
             "artifact_duration_field": "metadata.pipeline_summary.total_duration_sec",

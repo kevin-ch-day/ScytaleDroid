@@ -692,6 +692,25 @@ def test_merge_payloads_preserves_posture_and_pair_fields() -> None:
     assert merged["aggregates"]["pair_matches"][0]["pair_group"] == "google:token_endpoint_family"
 
 
+def test_incremental_payload_merge_preserves_represented_artifact_count() -> None:
+    params = RunParameters(profile="full", scope="profile", scope_label="Research Dataset Beta")
+    first_pair = merge_string_analysis_payloads(
+        [
+            {"counts": {"endpoints": 1}, "samples": {}, "aggregates": {}},
+            {"counts": {"endpoints": 2}, "samples": {}, "aggregates": {}},
+        ],
+        params=params,
+    )
+
+    merged = merge_string_analysis_payloads(
+        [first_pair, {"counts": {"endpoints": 3}, "samples": {}, "aggregates": {}}],
+        params=params,
+    )
+
+    assert merged["artifact_payload_count"] == 3
+    assert merged["counts"]["endpoints"] == 6
+
+
 def test_dynamic_correlation_helpers_match_static_and_dynamic_domains() -> None:
     report = {
         "top_dns": [{"value": "api.example.com", "count": 3}],

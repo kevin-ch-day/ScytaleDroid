@@ -1,4 +1,4 @@
-# ScytaleDroid S2-P1A — Operational readiness (PI routing, queue, static → obs)
+# Permission Intel Observation Readiness
 
 **Intent:** Evidence-driven validation before any `android_permission_obs_sample` writes.  
 **Constraints:** Read-only on shared PI; no schema/migrations/obs inserts; no Erebus code import; no queue apply.
@@ -25,7 +25,6 @@
 ### 1.3 Operator commands
 
 ```bash
-cd /home/secadmin/Laughlin/GitHub/ScytaleDroid
 export PYTHONPATH=.
 
 # PI DSN resolution + table existence + governance row signal
@@ -54,7 +53,6 @@ python scripts/db/check_permission_intel.py
 ### 2.1 Read-only report (recommended)
 
 ```bash
-cd /home/secadmin/Laughlin/GitHub/ScytaleDroid
 export PYTHONPATH=.
 python scripts/db/audit_permission_intel_queue_compatibility.py
 # Optional digest-bound machine evidence (path must be outside this repo):
@@ -69,9 +67,15 @@ release, schema/catalog digests, exhaustive-scope flag, and a semantic digest.
 ### 2.2 What the script reports
 
 1. **Grouped counts** by `queue_action`, `status`, `source_system`, `requested_by` (+ min/max `created_at_utc`).
-2. **Legacy `aosp_promote` row count** + sample (up to 25). These rows would yield **`unknown_action`** under current Erebus `evaluate_queue_row` (no alias for `aosp_promote`).
+2. **Legacy `aosp_promote` row count** + sample (up to 25). Current Erebus
+   recognizes the alias as AOSP promotion intent, then blocks it because a queue
+   row cannot create accepted platform truth.
 3. **Recent Scytale/static rows** (`source_system` / `requested_by` in `static-analysis`, `scytaledroid`, `scytaledroid_static`).
-4. **Active rows** (`status` in `queued`, `pending`, same as Erebus `QUEUE_ACTIVE_STATUSES`): dry **apply outcome** via `queue_row_apply_outcome` in `queue_apply_compat_check.py` (mirrors default **`aosp` → apply** map). Counts NULL/empty `proposed_*` for context (nulls are OK when `queue_action` is `aosp`).
+4. **Active rows** (`status` in `queued`, `pending`, same as Erebus
+   `QUEUE_ACTIVE_STATUSES`): dry **apply outcome** via
+   `queue_row_apply_outcome` in `queue_apply_compat_check.py`. It mirrors
+   Erebus action recognition and the fail-closed AOSP-promotion rule. Counts
+   NULL/empty `proposed_*` for context.
 
 ### 2.3 Ad-hoc SQL (optional)
 
@@ -95,11 +99,13 @@ Paste operator output here when filing tickets:
 
 ## 3. Legacy `aosp_promote` rows — fail-closed posture
 
-New Scytale submissions use `aosp`. The compatibility layer recognizes the
-legacy spelling `aosp_promote` only so it can return the explicit
-`blocked_legacy_alias` outcome. It does not convert that value into an apply
-action. Existing legacy rows require an independently reviewed, exact-row
-maintenance plan; namespace resemblance and an alias are not source authority.
+New Scytale submissions normalize both `aosp` and `aosp_promote` intent to
+`defer`. The read-only compatibility check still recognizes stored legacy
+`aosp_promote` rows as AOSP promotion intent, but returns the same fail-closed
+authority error as canonical `aosp`: queue promotion cannot create accepted
+AOSP platform truth. Existing legacy rows require an independently reviewed,
+exact-row maintenance plan; namespace resemblance and an alias are not source
+authority.
 
 The 2026-08-31 read-only production audit found zero `aosp_promote` rows. That
 snapshot does not authorize adding an alias, rewriting historical queue rows,
@@ -176,7 +182,8 @@ LIMIT 20;
 Ready for **S2 implementation design review** (not blind production obs writes) only when:
 
 - [ ] **Queue compatibility verified** — `audit_permission_intel_queue_compatibility.py` run on **production PI**; outcomes documented.  
-- [ ] **Legacy `aosp_promote`** — count **zero** or an independently reviewed exact-row maintenance plan exists; the runtime alias remains blocked.
+- [ ] **Legacy `aosp_promote`** — count **zero** or an independently reviewed
+  exact-row maintenance plan exists; queue-based AOSP promotion remains blocked.
 - [ ] **Observation identity** — option **A** or **C** (or E→A/C) selected with owner (see S2 doc §11).  
 - [ ] **Transform** — static rows can build validated payloads (`validate_proposed_static_observation_row`); **SHA-256** available at transform time (`base_apk_sha256` join).  
 - [ ] **Source/provenance** — `source` ENUM + `source_system` story agreed.  

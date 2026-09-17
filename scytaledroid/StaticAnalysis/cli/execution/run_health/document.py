@@ -441,7 +441,6 @@ def build_run_health_document(
     )
     string_session_status = "warnings" if string_warn_apps > 0 else "ok"
     governance_snapshot = infer_session_governance_snapshot(params)
-    resolved_worker_budget = outcome.session_metrics.get("resolved_worker_budget")
     artifact_concurrency_cap = outcome.session_metrics.get("artifact_concurrency_cap")
     implemented_execution_rate = (
         round(
@@ -554,10 +553,6 @@ def build_run_health_document(
             "app_total": len(outcome.results),
             "artifact_total_discovered_estimate": artifact_rows_total,
             "artifacts_scan_completed_counter": scanned_success,
-            # Requested/available budget and observed peak are distinct. A
-            # nominal auto worker budget does not prove artifact-level
-            # parallel execution occurred.
-            "resolved_worker_budget": resolved_worker_budget,
             "artifact_concurrency_cap": artifact_concurrency_cap,
             "measurement_coverage_status": measurement_coverage_status,
             "implemented_stage_opportunities": implemented_stage_opportunities_total,

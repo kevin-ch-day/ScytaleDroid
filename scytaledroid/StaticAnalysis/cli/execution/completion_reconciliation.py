@@ -41,7 +41,8 @@ def _selected_artifact_path(artifact: object) -> str:
 
 
 def _artifact_path(artifact: object) -> str:
-    report = getattr(artifact, "report", None)
+    loader = getattr(artifact, "load_report", None)
+    report = loader() if callable(loader) else getattr(artifact, "report", None)
     return _canonical_path(getattr(report, "file_path", None))
 
 
@@ -54,7 +55,8 @@ def _selected_artifact_sha256(artifact: object) -> str:
 
 
 def _terminal_artifact_sha256(artifact: object) -> str:
-    report = getattr(artifact, "report", None)
+    loader = getattr(artifact, "load_report", None)
+    report = loader() if callable(loader) else getattr(artifact, "report", None)
     hashes = getattr(report, "hashes", None)
     if not isinstance(hashes, Mapping):
         return ""

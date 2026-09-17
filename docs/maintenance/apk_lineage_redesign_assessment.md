@@ -578,7 +578,9 @@ explicit_reharvest_needed = 1 hash / 1 dynamic session
 analyze_exact_static_available = 0
 ```
 
-The old-root restore bucket points at:
+In that historical snapshot, the old-root restore bucket pointed at the
+following machine-local evidence location. It is provenance context, not a
+portable operator path or a current restore instruction:
 
 ```text
 /home/secadmin/Documents/CARS2025/Dev/ScytaleDroid/data/device_apks

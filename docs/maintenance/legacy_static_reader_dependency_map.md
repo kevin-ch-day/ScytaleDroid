@@ -307,7 +307,7 @@ Legacy table **`metrics`** uses column name **`run_id`**, but **two different se
 
 ## 8. Follow-up audit — gaps, edge cases, and doc drift
 
-Second-pass checks against greps, `static_database_schema_audit_plan.md`, `legacy_static_deprecation_playbook.md`, `phase5c_task_list.md`, and `ownership_matrix_v1_3.csv`. Use this section when **hardening** the map or before mechanical refactors.
+Second-pass checks against greps, `static_database_schema_audit_plan.md`, `legacy_static_deprecation_playbook.md`, `legacy_bridge_cleanup_backlog.md`, and `ownership_matrix_v1_3.csv`. Use this section when **hardening** the map or before mechanical refactors.
 
 ### 8.1 Missed or easy-to-miss readers (corrected / added)
 

@@ -588,7 +588,6 @@ def _format_compact_progress_text(
     session_display: str | None = None,
     profile_display: str | None = None,
     scope_display: str | None = None,
-    workers_display: str | None = None,
     dry_run: bool = False,
     include_legend: bool = True,
     include_run_context: bool = True,
@@ -613,7 +612,7 @@ def _format_compact_progress_text(
         lines.append(f"Session: {str(session_display or '').strip() or '-'}")
         lines.append(f"Preset: {str(profile_display or '').strip() or '-'}")
         lines.append(f"Scope: {str(scope_display or '').strip() or '-'}")
-        lines.append(f"Workers: {str(workers_display or '').strip() or '-'}")
+        lines.append("Artifact execution: serial (one APK at a time)")
         if dry_run:
             lines.append("Mode: DRY-RUN (reports not persisted to DB/evidence paths as configured)")
         lines.append(f"Packages in run: {total_apps}")

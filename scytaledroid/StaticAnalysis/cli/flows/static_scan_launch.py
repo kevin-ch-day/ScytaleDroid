@@ -32,9 +32,6 @@ from .static_run_helpers import (
 from .static_run_helpers import (
     purge_run_cache as _purge_run_cache,
 )
-from .static_run_helpers import (
-    resolve_workers as _resolve_workers,
-)
 from .static_scan_constants import (
     PHASE_COMPLETED,
     PHASE_FAILED,
@@ -69,7 +66,6 @@ def launch_scan_flow_resolved(
 
     # Freeze run context once. Deep execution/render paths must not read env vars or
     # mutable output prefs after this point.
-    workers = _resolve_workers(params.workers)
     frozen_ctx = StaticRunContext(
         run_mode=output_prefs.effective_run_mode(),
         quiet=output_prefs.effective_quiet(),
@@ -80,7 +76,6 @@ def launch_scan_flow_resolved(
         session_stamp=params.session_stamp,
         persistence_ready=bool(getattr(params, "persistence_ready", True)),
         paper_grade_requested=bool(getattr(params, "paper_grade_requested", True)),
-        resolved_worker_count=int(workers),
     )
     run_persistence_enabled = _dispatch.persistence_runtime.persistence_enabled(
         dry_run=params.dry_run,
@@ -110,13 +105,11 @@ def launch_scan_flow_resolved(
     if not (frozen_ctx.quiet and frozen_ctx.batch):
         print()
 
-    workers_label = f"auto ({workers})" if isinstance(params.workers, str) else str(workers)
     if not (frozen_ctx.quiet and frozen_ctx.batch):
         render_run_start(
             profile_label=params.profile_label,
             target=scope_target,
             modules=modules,
-            workers_desc=workers_label,
             run_ctx=frozen_ctx,
         )
 
@@ -134,7 +127,6 @@ def launch_scan_flow_resolved(
         frozen_ctx=frozen_ctx,
         params=params,
         modules=modules,
-        workers_label=workers_label,
         scope_target=scope_target,
     )
 

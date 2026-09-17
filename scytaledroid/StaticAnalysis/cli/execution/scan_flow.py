@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pickle
+import gc
 import time
 from collections import Counter, deque
 from collections.abc import Mapping
@@ -14,7 +14,6 @@ from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...core import StaticAnalysisReport
 from ...core.repository import load_display_name_map
-from ...persistence.reports import StoredReport
 from ..core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
 from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
@@ -142,9 +141,9 @@ def _remember_runtime_saved_report(
     split_reports = runtime_state.setdefault("saved_reports_by_split", {})
     if not isinstance(split_reports, dict):
         return
-    split_reports.setdefault(split_key, []).append(
-        StoredReport(path=Path(saved_path), report=report)
-    )
+    # Keep only durable paths in runtime correlation state. Retaining each
+    # decoded split report here defeats artifact-at-a-time memory bounds.
+    split_reports.setdefault(split_key, []).append(Path(saved_path))
 
 
 def execute_scan(
@@ -189,7 +188,6 @@ def execute_scan(
         for group in selection.groups
     )
     artifact_phase_timings: dict[str, float] = {}
-    session_parallel_peak_workers = 0
     show_splits = _show_split_breakdown(run_ctx)
     show_artifacts = (not params.dry_run) or bool(params.artifact_detail)
     if run_ctx.quiet and run_ctx.batch:
@@ -308,7 +306,6 @@ def execute_scan(
             session_display=compact_session_display,
             profile_display=params.profile_label,
             scope_display=compact_scope_display,
-            workers_display=str(params.workers),
             dry_run=bool(params.dry_run),
             include_legend=bool(getattr(params, "verbose_output", False)),
             include_run_context=False,
@@ -493,55 +490,6 @@ def execute_scan(
             "group_artifact_total": len(planned_artifacts),
             "group_has_base_artifact": bool(getattr(group, "base_artifact", None)),
         }
-        parallel_precomputed: dict[str, StaticAnalysisReport] = {}
-        try:
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-
-            from .static_parallel_workers import (
-                build_parallel_analyze_blob,
-                effective_parallel_artifact_worker_count,
-                parallel_static_analyze_worker,
-            )
-
-            pw_pkg = effective_parallel_artifact_worker_count(
-                resolved_worker_budget=getattr(run_ctx, "resolved_worker_count", None),
-                artifact_count=len(artifacts),
-            )
-            if pw_pkg > 1 and len(artifacts) > 1 and not (run_ctx.quiet and run_ctx.batch):
-                jobs: list[tuple[str, bytes]] = []
-                for art in artifacts:
-                    jobs.append(
-                        (
-                            str(Path(art.path).resolve()),
-                            build_parallel_analyze_blob(
-                                art,
-                                params,
-                                base_dir,
-                                extra_metadata=artifact_extra_meta,
-                            ),
-                        )
-                    )
-                with ProcessPoolExecutor(max_workers=pw_pkg) as pool:
-                    futures = {
-                        pool.submit(parallel_static_analyze_worker, blob): rpath
-                        for rpath, blob in jobs
-                    }
-                    for fut in as_completed(futures):
-                        rpath = futures[fut]
-                        raw = pickle.loads(fut.result())
-                        if not raw.get("ok"):
-                            raise RuntimeError(str(raw.get("error") or "parallel analyze failed"))
-                        parallel_precomputed[rpath] = raw["report"]
-                        artifact_phase_timings["analyze_apk_wall_s"] = artifact_phase_timings.get(
-                            "analyze_apk_wall_s", 0.0
-                        ) + float(raw.get("analyze_wall_s") or 0.0)
-                session_parallel_peak_workers = max(session_parallel_peak_workers, pw_pkg)
-        except Exception as exc:
-            parallel_precomputed.clear()
-            log.warning(
-                f"Parallel artifact analyze disabled for this package; serial fallback. reason={exc}",
-                category="static",
-            )
         for artifact_index, artifact in enumerate(artifacts, start=1):
             abort_requested, _, _ = _abort_state()
             if abort_requested:
@@ -553,8 +501,6 @@ def execute_scan(
             except Exception:
                 pass
             try:
-                rp_resolved = str(Path(artifact.path).resolve())
-                pre_report = parallel_precomputed.get(rp_resolved)
                 artifact_size = None
                 try:
                     artifact_size = Path(artifact.path).stat().st_size
@@ -576,7 +522,7 @@ def execute_scan(
                         "artifact_path": str(artifact.path),
                         "artifact_display_path": artifact.display_path,
                         "artifact_size_bytes": artifact_size,
-                        "precomputed_report": isinstance(pre_report, StaticAnalysisReport),
+                        "artifact_execution": "serial_one_at_a_time",
                     },
                 )
                 report, summary, timings, error_message, skipped = _execute_single_artifact(
@@ -587,7 +533,6 @@ def execute_scan(
                     extra_metadata=artifact_extra_meta,
                     phase_timing_sink=artifact_phase_timings,
                     runtime_state=app_runtime_state,
-                    precomputed_report=pre_report if isinstance(pre_report, StaticAnalysisReport) else None,
                 )
             except Exception as exc:
                 message = f"Artifact scan failed for {artifact.display_path}: {exc}"
@@ -714,6 +659,13 @@ def execute_scan(
             if warning_lines:
                 progress.flush_line()
                 render_resource_warnings(warning_lines, run_ctx=run_ctx)
+            # The artifact report is durable now and all immediate rendering is
+            # complete. Release it before advancing to the next APK; package
+            # rollups reload reports transiently from their saved paths.
+            if summary.release_persisted_report():
+                report = None
+                last_report_for_app = None
+                gc.collect()
             if _abort_state()[0]:
                 progress.end(last_elapsed_for_progress)
                 break
@@ -721,9 +673,9 @@ def execute_scan(
         last_elapsed_for_progress = app_result.duration_seconds
         base_report_for_app = app_result.base_report()
         if base_report_for_app is not None and app_result.base_string_data is None:
-            payloads: list[Mapping[str, object]] = []
+            merged_payload: Mapping[str, object] | None = None
             for artifact in app_result.artifacts:
-                report = getattr(artifact, "report", None)
+                report = artifact.load_report()
                 if report is None:
                     continue
                 report_metadata = getattr(report, "metadata", None)
@@ -733,23 +685,26 @@ def execute_scan(
                     else None
                 )
                 if isinstance(cached_payload, Mapping):
-                    payloads.append(cached_payload)
-                    continue
-                payloads.append(
-                    analyse_string_payload(
+                    artifact_payload = cached_payload
+                else:
+                    artifact_payload = analyse_string_payload(
                         report.file_path,
                         params=params,
                         package_name=app_result.package_name,
                         warning_sink=warnings,
                     )
-                )
-            if len(payloads) == 1:
-                app_result.base_string_data = payloads[0]
-            elif payloads:
-                app_result.base_string_data = merge_string_analysis_payloads(
-                    payloads,
-                    params=params,
-                )
+                if merged_payload is None:
+                    merged_payload = artifact_payload
+                else:
+                    merged_payload = merge_string_analysis_payloads(
+                        (merged_payload, artifact_payload),
+                        params=params,
+                    )
+                # Do not retain the complete decoded report while loading the
+                # next split. ``merged_payload`` is the incremental package rollup.
+                report = None
+                cached_payload = None
+            app_result.base_string_data = merged_payload
         if not _abort_state()[0]:
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts
@@ -870,6 +825,17 @@ def execute_scan(
                 print()
                 banner_last_emit = now
                 last_activity_pulse = now
+        # Reports are already durable JSON at this point. Holding every decoded
+        # report until session finalization makes memory grow with cohort size
+        # (the 601-artifact production cohort exceeded RAM + swap). Post-scan
+        # consumers reload one report at a time through ArtifactOutcome.
+        released_reports = app_result.release_persisted_reports()
+        app_runtime_state.clear()
+        last_report_for_app = None
+        base_report_for_app = None
+        report = None
+        if released_reports:
+            gc.collect()
         if _abort_state()[0]:
             break
 
@@ -904,8 +870,7 @@ def execute_scan(
         dry_run_skipped=dry_run_skipped,
     )
     outcome.session_metrics["artifact_phase_timings_s"] = dict(artifact_phase_timings)
-    outcome.session_metrics["resolved_worker_budget"] = getattr(run_ctx, "resolved_worker_count", None)
-    outcome.session_metrics["artifact_concurrency_cap"] = max(1, int(session_parallel_peak_workers))
+    outcome.session_metrics["artifact_concurrency_cap"] = 1
     outcome.run_aggregate_status = compute_run_aggregate_status(outcome)
     emit_post_scan_cohort_notes(outcome, params, run_ctx=run_ctx)
     if all_apps_compact_mode and not (run_ctx.quiet and run_ctx.batch):

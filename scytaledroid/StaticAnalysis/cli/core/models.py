@@ -159,7 +159,6 @@ class RunParameters:
     string_low_entropy_threshold: float = field(default_factory=_default_low_entropy_threshold)
     string_debug: bool = field(default_factory=_default_string_debug)
     string_skip_resources_on_warn: bool = field(default_factory=_default_skip_resources_on_warn)
-    workers: str = "auto"
     reuse_cache: bool = False
     log_level: str = "info"
     trace_detectors: tuple[str, ...] = tuple()
@@ -213,13 +212,38 @@ class RunParameters:
 @dataclass
 class ArtifactOutcome:
     label: str
-    report: StaticAnalysisReport
+    report: StaticAnalysisReport | None
     severity: Counter[str]
     duration_seconds: float
     saved_path: str | None
     started_at: datetime
     finished_at: datetime
     metadata: Mapping[str, object] | None = None
+    is_base: bool = False
+
+    def load_report(self) -> StaticAnalysisReport | None:
+        """Return the live report or reload its persisted JSON without retaining it.
+
+        Large cohort runs release completed in-memory reports after each package.
+        Keeping the reload transient bounds memory while preserving the existing
+        post-scan rendering and persistence behavior.
+        """
+
+        if self.report is not None:
+            return self.report
+        if not self.saved_path:
+            return None
+        from ...persistence.reports import load_report
+
+        return load_report(Path(self.saved_path))
+
+    def release_persisted_report(self) -> bool:
+        """Release a report only after its durable JSON path exists."""
+
+        if self.report is None or not self.saved_path or not Path(self.saved_path).is_file():
+            return False
+        self.report = None
+        return True
 
 
 @dataclass
@@ -291,7 +315,13 @@ class AppRunResult:
         from ..views.view_sections import extract_integrity_profiles  # localized import
 
         for artifact in self.artifacts:
-            _, _, artifact_profile, _ = extract_integrity_profiles(artifact.report)
+            if artifact.is_base:
+                return artifact
+        for artifact in self.artifacts:
+            report = artifact.load_report()
+            if report is None:
+                continue
+            _, _, artifact_profile, _ = extract_integrity_profiles(report)
             role = str((artifact_profile or {}).get("role") or "").lower()
             if role == "base":
                 return artifact
@@ -299,7 +329,12 @@ class AppRunResult:
 
     def base_report(self) -> StaticAnalysisReport | None:
         base_artifact = self.base_artifact_outcome()
-        return base_artifact.report if base_artifact else None
+        return base_artifact.load_report() if base_artifact else None
+
+    def release_persisted_reports(self) -> int:
+        """Drop durable report object graphs and return the number released."""
+
+        return sum(1 for artifact in self.artifacts if artifact.release_persisted_report())
 
 
 @dataclass
@@ -328,9 +363,9 @@ class RunOutcome:
     run_aggregate_status: str | None = None
     #: Absolute or relative path to ``run_health.json`` when emitted by the CLI finalize path.
     run_health_json_path: str | None = None
-    #: Session-level diagnostics (e.g. artifact phase wall times, worker budget) for tooling / logs.
+    #: Session-level diagnostics (e.g. artifact phase wall times) for tooling / logs.
     #: Typical keys: ``artifact_phase_timings_s`` (``analyze_apk_wall_s``, ``persist_wall_s``),
-    #: ``resolved_worker_budget``, ``artifact_concurrency_cap`` (peak parallel ``analyze_apk`` workers in the session; 1 when fully serial),
+    #: ``artifact_concurrency_cap`` (peak concurrent ``analyze_apk`` calls; 1 by contract),
     #: ``post_run_grain`` (compact DB + archive counters when the post-run grain summary runs).
     session_metrics: dict[str, object] = field(default_factory=dict)
 

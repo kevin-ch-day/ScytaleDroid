@@ -396,7 +396,6 @@ def choose_run_profile() -> Command | None:
             section="workflow",
             auto_verify=True,
             prompt_reset=True,
-            workers_override="2",
         )
         emit_selected_preset_summary(persisted)
         return persisted

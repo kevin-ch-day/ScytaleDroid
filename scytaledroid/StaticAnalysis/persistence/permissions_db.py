@@ -64,20 +64,30 @@ def persist_declared_permissions(
         )
         return {"aosp": 0, "oem": 0, "app_defined": 0, "unknown": 0}
 
-    # Deduplicate requests (including sdk-23 repeats) and definitions without
-    # collapsing case. A definition is durable evidence even when the same APK
-    # does not contain a matching uses-permission element.
-    requested_names = {
-        str(name).strip()
-        for name in (declared or ())
-        if isinstance(name, str) and str(name).strip()
-    }
-    custom_set = {
-        str(name).strip()
-        for name in (custom_declared or ())
-        if isinstance(name, str) and str(name).strip()
-    }
-    declared_names: Iterable[str] = tuple(sorted(requested_names | custom_set))
+    # Permission Intel string identities are case-insensitive. Collapse case
+    # variants before writing so one manifest cannot increment the same ledger
+    # row twice. Definition spelling wins over request spelling because the
+    # exact <permission> element is the stronger source for an app-defined name.
+    def _display_names_by_identity(values: Iterable[str]) -> dict[str, str]:
+        names = sorted(
+            {
+                str(name).strip()
+                for name in values
+                if isinstance(name, str) and str(name).strip()
+            },
+            key=lambda value: (value.casefold(), value),
+        )
+        indexed: dict[str, str] = {}
+        for name in names:
+            indexed.setdefault(name.casefold(), name)
+        return indexed
+
+    requested_by_identity = _display_names_by_identity(declared or ())
+    custom_by_identity = _display_names_by_identity(custom_declared or ())
+    combined_by_identity = {**requested_by_identity, **custom_by_identity}
+    declared_names: Iterable[str] = tuple(
+        combined_by_identity[key] for key in sorted(combined_by_identity)
+    )
     aosp_candidates = [
         str(n)
         for n in declared_names
@@ -147,7 +157,7 @@ def persist_declared_permissions(
             counts["oem"] += 1
             continue
 
-        if norm in custom_set:
+        if norm.casefold() in custom_by_identity:
             try:
                 _pd.upsert_unknown(
                     {

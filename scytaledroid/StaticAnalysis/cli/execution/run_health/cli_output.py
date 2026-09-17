@@ -264,13 +264,11 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
             ),
         ]
     )
-    worker_budget = roll.get("resolved_worker_budget")
     concurrency_cap = roll.get("artifact_concurrency_cap")
-    if worker_budget is not None or concurrency_cap is not None:
+    if concurrency_cap is not None:
         lines.append(
-            "Artifact workers : "
-            f"observed_peak={concurrency_cap if concurrency_cap is not None else '—'} "
-            f"| resolved_budget={worker_budget if worker_budget is not None else '—'}"
+            "Artifact execution: serial_one_at_a_time "
+            f"| observed_peak={concurrency_cap}"
         )
     coverage = (
         doc.get("measurement_coverage")
