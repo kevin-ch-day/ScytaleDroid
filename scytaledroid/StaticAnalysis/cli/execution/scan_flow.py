@@ -16,7 +16,7 @@ from ...core import StaticAnalysisReport
 from ...core.repository import load_display_name_map
 from ..core.models import AppRunResult, RunOutcome, RunParameters, ScopeSelection
 from ..core.run_context import StaticRunContext
-from ..persistence.run_summary import create_static_run_ledger, finalize_open_static_runs
+from ..persistence.run_summary import create_static_run_ledger, inspect_open_static_runs
 from ..persistence.run_writers import resolve_apk_set_id_for_artifact_set_hash
 from ..persistence.static_session_summary import ensure_static_session_shell
 from .cohort_scan_notes import emit_post_scan_cohort_notes
@@ -152,6 +152,7 @@ def execute_scan(
     base_dir: Path,
     *,
     run_ctx: StaticRunContext | None = None,
+    open_run_preflight_checked: bool = False,
 ) -> RunOutcome:
     """Execute static analysis across all scoped artifacts."""
 
@@ -176,6 +177,26 @@ def execute_scan(
     _abort_signal = None
     reset_split_heavy_session_notice()
     scan_splits_enabled = bool(getattr(params, "scan_splits", True))
+
+    # API/server callers can invoke this function without the CLI launch flow.
+    # Keep the same fail-closed guard here before a session header or STARTED
+    # ledger could be created.
+    if not params.dry_run and bool(getattr(params, "persistence_ready", True)) and not open_run_preflight_checked:
+        try:
+            inspection = inspect_open_static_runs()
+        except Exception as exc:
+            raise RuntimeError(
+                "Static open-run preflight failed; refusing persistent execution "
+                f"({exc.__class__.__name__})."
+            ) from exc
+        if inspection.count:
+            sessions = ", ".join(inspection.session_stamps) or "unknown session"
+            oldest = inspection.oldest_started_at_utc or "unknown"
+            raise RuntimeError(
+                "Persistent static execution blocked: unresolved STARTED static runs exist "
+                f"(count={inspection.count}; sessions={sessions}; oldest={oldest}). "
+                "Explicit reconciliation is required."
+            )
 
     started_at = datetime.now(UTC)
     results: list[AppRunResult] = []
@@ -239,28 +260,6 @@ def execute_scan(
             "Static persistence gate failed; running in exploratory mode (no static_run_id, no evidence writes).",
             category="static_analysis",
         )
-
-    # Crash safety: older runs can be left in STARTED state if the process died mid-run.
-    # This creates persistent DB noise and breaks canonical-grade audit expectations. We do not
-    # support concurrent static scans, so it is safe to finalize any open STARTED rows here.
-    if persistence_ready and not params.dry_run:
-        try:
-            closed = finalize_open_static_runs(
-                None,
-                status="FAILED",
-                abort_reason="stale_open_run_cleanup",
-                abort_signal="cleanup",
-            )
-            if int(closed or 0) > 0:
-                print(
-                    status_messages.status(
-                        f"Static run cleanup: finalized {closed} stale STARTED row(s) as FAILED.",
-                        level="warn",
-                    )
-                )
-        except Exception:
-            # Cleanup is best-effort; it must not block the scan.
-            pass
 
     last_elapsed_for_progress: float | None = None
 

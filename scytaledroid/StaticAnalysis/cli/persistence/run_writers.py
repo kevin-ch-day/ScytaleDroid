@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,6 +19,134 @@ from .static_session_summary import (
     ensure_static_session_shell,
     maybe_refresh_static_analysis_session_summary,
 )
+
+
+@dataclass(frozen=True)
+class OpenStaticRun:
+    """Read-only operator detail for an unresolved canonical static run."""
+
+    static_run_id: int
+    session_stamp: str | None
+    static_session_id: int | None
+    started_at_utc: str | None
+    status: str | None
+    package_name: str | None
+    build_identity: str | None
+
+
+@dataclass(frozen=True)
+class OpenStaticRunsInspection:
+    """Read-only snapshot used to block a new persistent static invocation."""
+
+    runs: tuple[OpenStaticRun, ...]
+
+    @property
+    def count(self) -> int:
+        return len(self.runs)
+
+    @property
+    def run_ids(self) -> tuple[int, ...]:
+        return tuple(run.static_run_id for run in self.runs)
+
+    @property
+    def session_stamps(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    stamp
+                    for run in self.runs
+                    for stamp in (run.session_stamp,)
+                    if stamp
+                }
+            )
+        )
+
+    @property
+    def oldest_started_at_utc(self) -> str | None:
+        starts = [run.started_at_utc for run in self.runs if run.started_at_utc]
+        return min(starts) if starts else None
+
+    @property
+    def newest_started_at_utc(self) -> str | None:
+        starts = [run.started_at_utc for run in self.runs if run.started_at_utc]
+        return max(starts) if starts else None
+
+
+def _open_static_run_value(row: object, index: int, key: str) -> object:
+    if isinstance(row, dict):
+        return row.get(key)
+    if isinstance(row, (tuple, list)) and len(row) > index:
+        return row[index]
+    return None
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def inspect_open_static_runs() -> OpenStaticRunsInspection:
+    """Return unresolved static runs without changing database or session state.
+
+    This is deliberately separate from ``finalize_open_static_runs``.  Startup
+    callers must use this inspection to fail closed; reconciliation remains an
+    explicit maintenance action.
+    """
+
+    rows = core_q.run_sql(
+        """
+        SELECT
+            sar.id,
+            COALESCE(sas.session_stamp, sar.session_stamp) AS session_stamp,
+            sar.static_session_id,
+            COALESCE(
+                CAST(sar.run_started_at_utc AS CHAR),
+                sar.run_started_utc,
+                CAST(sar.created_at AS CHAR)
+            ) AS started_at_utc,
+            sar.status,
+            apps.package_name,
+            COALESCE(sar.artifact_set_hash, sar.base_apk_sha256, sar.sha256) AS build_identity
+        FROM static_analysis_runs AS sar
+        LEFT JOIN static_analysis_sessions AS sas
+          ON sas.static_session_id = sar.static_session_id
+        LEFT JOIN app_versions AS av
+          ON av.id = sar.app_version_id
+        LEFT JOIN apps
+          ON apps.id = av.app_id
+        WHERE sar.status='STARTED'
+          AND sar.ended_at_utc IS NULL
+        ORDER BY started_at_utc ASC, sar.id ASC
+        """,
+        (),
+        fetch="all",
+    )
+    runs: list[OpenStaticRun] = []
+    for row in rows or []:
+        raw_id = _open_static_run_value(row, 0, "id")
+        try:
+            static_run_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Open static-run inspection returned a row without a valid run ID.") from exc
+        raw_session_id = _open_static_run_value(row, 2, "static_session_id")
+        try:
+            static_session_id = int(raw_session_id) if raw_session_id is not None else None
+        except (TypeError, ValueError):
+            static_session_id = None
+        runs.append(
+            OpenStaticRun(
+                static_run_id=static_run_id,
+                session_stamp=_optional_text(_open_static_run_value(row, 1, "session_stamp")),
+                static_session_id=static_session_id,
+                started_at_utc=_optional_text(_open_static_run_value(row, 3, "started_at_utc")),
+                status=_optional_text(_open_static_run_value(row, 4, "status")),
+                package_name=_optional_text(_open_static_run_value(row, 5, "package_name")),
+                build_identity=_optional_text(_open_static_run_value(row, 6, "build_identity")),
+            )
+        )
+    return OpenStaticRunsInspection(runs=tuple(runs))
 
 
 def _is_transient_db_exc(exc: Exception) -> bool:
@@ -832,8 +961,11 @@ def export_dep_snapshot(static_run_id: int | None) -> None:
 
 
 __all__ = [
+    "OpenStaticRun",
+    "OpenStaticRunsInspection",
     "create_static_run_ledger",
     "update_static_run_status",
+    "inspect_open_static_runs",
     "finalize_open_static_runs",
     "update_static_run_metadata",
     "maybe_set_canonical_static_run",

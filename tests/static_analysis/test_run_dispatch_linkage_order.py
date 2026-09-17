@@ -173,7 +173,7 @@ def test_resolve_unique_session_stamp_first_run_when_db_and_local_absent(monkeyp
     assert action == "first_run"
 
 
-def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypatch) -> None:
+def test_launch_scan_flow_does_not_finalize_lingering_started_rows_for_session(monkeypatch) -> None:
     outcome = make_outcome(
         results=[AppRunResult(package_name="com.example.app", category="Test", static_run_id=None)]
     )
@@ -186,23 +186,12 @@ def test_launch_scan_flow_finalizes_lingering_started_rows_for_session(monkeypat
 
     monkeypatch.setattr(run_dispatch, "finalize_open_runs", _capture_finalize)
 
-    from scytaledroid.Database.db_core import db_queries as core_q
-
-    def _fake_run_sql(query, params=(), fetch="none", **_kwargs):
-        if "SELECT id" in query and "status='STARTED'" in query:
-            return [(101,), (102,)]
-        if "SELECT COUNT(*)" in query:
-            return (0,)
-        return []
-
-    monkeypatch.setattr(core_q, "run_sql", _fake_run_sql)
-
     params = make_params(scope="all", scope_label="All apps", session_stamp="sess-1")
     selection = make_selection(scope="all", label="All apps")
 
     run_dispatch.launch_scan_flow(selection, params, Path("."))
 
-    assert sorted(set(captured_ids)) == [101, 102]
+    assert captured_ids == []
 
 
 def test_launch_scan_flow_skips_run_map_and_permission_refresh_when_no_results(monkeypatch) -> None:

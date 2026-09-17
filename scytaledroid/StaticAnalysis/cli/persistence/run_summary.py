@@ -1488,6 +1488,12 @@ def finalize_open_static_runs(
         or 0
     )
 
+
+def inspect_open_static_runs() -> _run_writers.OpenStaticRunsInspection:
+    """Read unresolved STARTED rows for the startup safety interlock."""
+
+    return _run_writers.inspect_open_static_runs()
+
 def persist_run_summary(
     base_report,
     string_data: Mapping[str, object],
@@ -1904,6 +1910,7 @@ __all__ = [
     "create_static_run_ledger",
     "update_static_run_status",
     "finalize_open_static_runs",
+    "inspect_open_static_runs",
     "refresh_static_run_manifest",
     "PersistenceOutcome",
 ]

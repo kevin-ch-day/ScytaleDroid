@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.execution import scan_flow
@@ -81,7 +82,11 @@ def _configure_scan_flow(
     report_metadata: dict[str, object] | None = None,
 ) -> None:
     monkeypatch.setattr(scan_flow, "load_display_name_map", lambda _groups: {})
-    monkeypatch.setattr(scan_flow, "finalize_open_static_runs", lambda *_a, **_k: 0)
+    monkeypatch.setattr(
+        scan_flow,
+        "inspect_open_static_runs",
+        lambda: SimpleNamespace(count=0),
+    )
     monkeypatch.setattr(scan_flow, "create_static_run_ledger", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_app_start", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_app_completion", lambda **_kwargs: None)
@@ -323,7 +328,7 @@ def test_execute_scan_merges_split_artifact_string_payloads(monkeypatch, tmp_pat
         return _FakeReport(metadata=merged_metadata), None, None, False
 
     monkeypatch.setattr(scan_flow, "load_display_name_map", lambda _groups: {})
-    monkeypatch.setattr(scan_flow, "finalize_open_static_runs", lambda *_a, **_k: 0)
+    monkeypatch.setattr(scan_flow, "inspect_open_static_runs", lambda: SimpleNamespace(count=0))
     monkeypatch.setattr(scan_flow, "create_static_run_ledger", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_app_start", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_app_completion", lambda **_kwargs: None)

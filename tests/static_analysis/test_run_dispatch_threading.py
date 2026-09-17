@@ -7,6 +7,7 @@ from pathlib import Path
 from scytaledroid.StaticAnalysis.cli.core.models import RunOutcome, RunParameters, ScopeSelection
 from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
 from scytaledroid.StaticAnalysis.cli.flows import run_dispatch
+from scytaledroid.StaticAnalysis.cli.persistence.run_writers import OpenStaticRunsInspection
 
 
 def test_execute_run_spec_detailed_skips_sigint_handler_in_worker_thread(monkeypatch) -> None:
@@ -28,6 +29,7 @@ def test_execute_run_spec_detailed_skips_sigint_handler_in_worker_thread(monkeyp
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: True)
+    monkeypatch.setattr(run_dispatch, "inspect_open_static_runs", lambda: OpenStaticRunsInspection(runs=tuple()))
     monkeypatch.setattr(run_dispatch, "execute_scan", lambda *_a, **_k: outcome)
     monkeypatch.setattr(run_dispatch, "render_run_results", lambda *_a, **_k: None)
     monkeypatch.setattr(run_dispatch, "_emit_selection_manifest", lambda *_a, **_k: None)

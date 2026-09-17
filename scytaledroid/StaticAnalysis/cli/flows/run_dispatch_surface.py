@@ -21,6 +21,7 @@ from ..execution.heartbeat_state import set_run as _hb_set_run
 from ..execution.results import _emit_static_persistence_event, prompt_deferred_post_run_diagnostics
 from ..execution.results_persist import _persist_cohort_rollup
 from ..execution.static_run_map import REQUIRED_FIELDS, validate_run_map
+from ..persistence.run_summary import inspect_open_static_runs
 from . import persistence_runtime
 from .postprocessing import run_post_summary_postprocessing
 from .run_events import _emit_db_preflight_lock_warning, _emit_postprocessing_step
@@ -63,6 +64,7 @@ __all__ = [
     "app_config",
     "db_diagnostics",
     "finalize_open_runs",
+    "inspect_open_static_runs",
     "get_run_logger",
     "logging_engine",
     "log_events",

@@ -245,36 +245,19 @@ def collect_static_run_ids_for_finalize(
     outcome: RunOutcome,
     session_stamp: str | None,
 ) -> list[int]:
-    """Merge result static_run_ids with lingering STARTED DB rows for this session."""
+    """Return only STARTED ledgers created by this invocation.
 
+    ``outcome.results`` is the invocation-owned ledger record.  Looking up all
+    STARTED rows by session stamp can sweep rows from an interrupted historical
+    process, so cleanup must not expand this set from the database.
+    """
+
+    del session_stamp
     static_run_ids: list[int] = [
         int(result.static_run_id)
         for result in outcome.results
         if result.static_run_id
     ]
-    if session_stamp:
-        try:
-            from scytaledroid.Database.db_core import db_queries as core_q
-
-            rows = core_q.run_sql(
-                """
-                SELECT id
-                FROM static_analysis_runs
-                WHERE session_stamp=%s
-                  AND status='STARTED'
-                  AND ended_at_utc IS NULL
-                """,
-                (session_stamp,),
-                fetch="all",
-            )
-            for row in rows or []:
-                try:
-                    sid = int(row[0])
-                except Exception:
-                    continue
-                static_run_ids.append(sid)
-        except Exception:
-            pass
     if not static_run_ids:
         return []
     return sorted({int(sid) for sid in static_run_ids if sid})

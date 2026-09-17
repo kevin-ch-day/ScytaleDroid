@@ -52,6 +52,49 @@ from .static_scan_lifecycle import (
 from .static_scan_signals import build_static_scan_sigint_handler
 
 
+def _format_open_run_blocker(inspection) -> str:
+    sessions = ", ".join(inspection.session_stamps) or "unknown session"
+    oldest = inspection.oldest_started_at_utc or "unknown"
+    run_ids = ", ".join(str(run_id) for run_id in inspection.run_ids)
+    return (
+        "Persistent static execution blocked: unresolved STARTED static runs exist "
+        f"(count={inspection.count}; run_ids={run_ids}; sessions={sessions}; oldest={oldest}). "
+        "Explicit reconciliation is required before another persistent static scan."
+    )
+
+
+def _open_run_preflight_allows_execution(*, params: RunParameters) -> bool:
+    """Inspect unresolved runs before any write-capable startup action.
+
+    Persistent scans fail closed on either existing rows or an inspection error.
+    Normal static dry runs do not write database state, so they remain available
+    for diagnosis and warn when the same condition is present.  The separate
+    permission-profile dry-run entry point is blocked before this preflight
+    because its current workflow has write-capable persistence.
+    """
+
+    from scytaledroid.StaticAnalysis.cli.flows import run_dispatch as _dispatch
+
+    try:
+        inspection = _dispatch.inspect_open_static_runs()
+    except Exception as exc:
+        message = (
+            "Static open-run preflight failed; persistent execution is blocked "
+            f"until the database can be inspected ({exc.__class__.__name__})."
+        )
+        print(status_messages.status(message, level="warn" if params.dry_run else "error"))
+        return bool(params.dry_run)
+
+    if inspection.count == 0:
+        return True
+    message = _format_open_run_blocker(inspection)
+    if params.dry_run:
+        print(status_messages.status(f"Dry run continues database-write-free. {message}", level="warn"))
+        return True
+    print(status_messages.status(message, level="error"))
+    return False
+
+
 def launch_scan_flow_resolved(
     selection: ScopeSelection,
     params: RunParameters,
@@ -81,6 +124,26 @@ def launch_scan_flow_resolved(
         dry_run=params.dry_run,
         persistence_ready=bool(params.persistence_ready),
     )
+
+    # Permission-only execution currently persists a permission-audit snapshot
+    # through its default `persist_detections=True` path.  Do not let the CLI
+    # represent that path as a no-persistence dry run until it has a dedicated
+    # write-free implementation.
+    if params.profile == "permissions" and params.dry_run:
+        print(
+            status_messages.status(
+                "Permission-profile dry run is blocked: its current workflow has "
+                "write-capable persistence and is not database-write-free.",
+                level="error",
+            )
+        )
+        return None
+
+    # This must precede persistence bootstrap, selection artifacts, session
+    # headers, and STARTED ledgers.  It replaces the former global stale-row
+    # finalization at ordinary startup.
+    if not _open_run_preflight_allows_execution(params=params):
+        return None
 
     if run_persistence_enabled:
         _dispatch.persistence_runtime.bootstrap_runtime_persistence(
@@ -183,7 +246,13 @@ def launch_scan_flow_resolved(
         status="running",
     )
     try:
-        outcome = _dispatch.execute_scan(selection, params, base_dir, run_ctx=frozen_ctx)
+        outcome = _dispatch.execute_scan(
+            selection,
+            params,
+            base_dir,
+            run_ctx=frozen_ctx,
+            open_run_preflight_checked=True,
+        )
     finally:
         if sigint_installed and previous_handler is not None:
             _dispatch.signal.signal(_dispatch.signal.SIGINT, previous_handler)
