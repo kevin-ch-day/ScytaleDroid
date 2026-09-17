@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
 from typing import Any
 
+from scytaledroid.Utils.install_set_identity import compute_artifact_set_hash
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
@@ -55,8 +54,7 @@ def ensure_tables() -> None:
 def artifact_set_hash_v1(members: Sequence[InstallSetMember]) -> str:
     """Return the current static identity v1 hash for install-set members."""
 
-    ordered = _ordered_members(members)
-    return sha256(json.dumps([member.sha256 for member in ordered]).encode("utf-8")).hexdigest()
+    return compute_artifact_set_hash(members, version="v1")
 
 
 def upsert_install_set(record: InstallSetRecord) -> int | None:

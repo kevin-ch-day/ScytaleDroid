@@ -65,7 +65,8 @@ def test_worklist_sql_distinct_and_limits() -> None:
     sql = m.sql_worklist(17).lower()
     assert "group by ds.package_name" in sql
     assert "limit 17" in sql
-    assert "analyze_exact_dynamic_apk_hash" in sql
+    assert "review_base_only_or_explicit_install_set" in sql
+    assert "ambiguous_sibling_install_sets" in sql
     assert "harvest_artifact_paths" in sql
     assert "harvest_source_paths" in sql
     assert "static_run_id_u" in sql or "cast(ds.static_run_id as unsigned)" in sql

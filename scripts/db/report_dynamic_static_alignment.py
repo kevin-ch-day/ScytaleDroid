@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Read-only report: dynamic session vs canonical static alignment (analyst core DB).
 
-Summarizes how ``dynamic_sessions`` relate to ``static_analysis_runs`` (hash-level),
-``android_apk_repository``, and harvest path tables. Produces a compact worklist of
-``(package_name, base_apk_sha256)`` pairs that need a **completed canonical** static run
-for the **exact** dynamic base APK hash — not package-level guessing.
+Summarizes dynamic/static alignment and produces a base-SHA diagnostic worklist.
+Those rows are not exact install-set identities: sibling install sets are emitted
+as an explicit ambiguity for later exact-target resolution.
 
 **Do not** backfill ``dynamic_sessions.static_run_id`` by package name when hashes differ.
 
@@ -239,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
           f"{index_posture['static_runs_base_hash_contract_index_present']}")
     print("  static_runs_base_apk_sha256_index_covered: "
           f"{index_posture['static_runs_base_apk_sha256_index_covered']}")
-    print("\n=== Top worklist (exact APK hash needs static analysis) ===")
+    print("\n=== Top worklist (base-only / exact-set review required) ===")
     if not rows:
         print("  (empty)")
     else:

@@ -228,6 +228,13 @@ SELECT
   {apk_sub} AS apk_id,
   {path_hap} AS local_rel_path,
   {path_hsp} AS source_path,
+  CASE
+    WHEN (SELECT COUNT(*) FROM apk_sets aset WHERE {_hash_eq('aset.base_apk_sha256', 'ds.base_apk_sha256')}) = 1
+      THEN 'single_local_install_set'
+    WHEN (SELECT COUNT(*) FROM apk_sets aset WHERE {_hash_eq('aset.base_apk_sha256', 'ds.base_apk_sha256')}) > 1
+      THEN 'ambiguous_sibling_install_sets'
+    ELSE 'base_only_legacy'
+  END AS install_set_identity_state,
   COUNT(*) AS dynamic_runs,
   SUM(CASE WHEN UPPER(TRIM(COALESCE(ds.status, ''))) = 'SUCCESS' THEN 1 ELSE 0 END)
     AS success_dynamic_runs,
@@ -235,7 +242,7 @@ SELECT
     AS degraded_dynamic_runs,
   MIN(ds.started_at_utc) AS first_dynamic_started,
   MAX(ds.started_at_utc) AS last_dynamic_started,
-  'analyze_exact_dynamic_apk_hash' AS recommended_action
+  'review_base_only_or_explicit_install_set' AS recommended_action
 FROM dynamic_sessions ds
 WHERE {DS_RESOLVED_STATIC_RUN_ID} IS NULL
   AND {_ds_base_valid()}

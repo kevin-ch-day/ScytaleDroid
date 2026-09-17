@@ -211,6 +211,20 @@ def test_split_reconstruction_path_selected_for_receipt_backed_group(monkeypatch
     assert len(target.selection.groups[0].artifacts) == 2
 
 
+def test_receipt_backed_sibling_sets_are_ambiguous(monkeypatch, tmp_path):
+    base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
+    one_path, one_sha = _apk(tmp_path, "one.apk", b"one")
+    two_path, two_sha = _apk(tmp_path, "two.apk", b"two")
+    _patch_db(monkeypatch, _row(apk_id=55, sha=base_sha, path=base_path))
+    base = _artifact(base_path, apk_id=55, package="com.example.app", sha=base_sha, split=False)
+    one = _artifact(one_path, apk_id=56, package="com.example.app", sha=one_sha, split=True)
+    two = _artifact(two_path, apk_id=57, package="com.example.app", sha=two_sha, split=True)
+    monkeypatch.setattr(exact_target, "group_artifacts", lambda: [_group(base, one), _group(base, two)])
+
+    with pytest.raises(exact_target.ExactTargetResolutionError, match="multiple receipt-backed install sets"):
+        exact_target.resolve_exact_static_target(apk_id=55, base_apk_sha256=base_sha, include_splits="auto")
+
+
 def test_readiness_missing_base_bytes_recommends_restore_artifacts(monkeypatch, tmp_path):
     expected = _sha(b"base")
     split_sha_1 = _sha(b"split-1")

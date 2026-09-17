@@ -587,13 +587,18 @@ def _find_receipt_group(
     package_name: str,
     groups: tuple[ArtifactGroup, ...] | None = None,
 ) -> ArtifactGroup | None:
+    matches: list[ArtifactGroup] = []
     for group in groups if groups is not None else group_artifacts():
         if _normalize_package(group.package_name) != package_name:
             continue
         if _matching_base_artifact(group, apk_id, base_apk_sha256) is not None:
             if _is_receipt_backed(group):
-                return group
-    return None
+                matches.append(group)
+    if len(matches) > 1:
+        raise ExactTargetResolutionError(
+            "base APK maps to multiple receipt-backed install sets; provide an explicit install-set identity."
+        )
+    return matches[0] if matches else None
 
 
 def _lookup_same_capture_split_rows(base_row: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:

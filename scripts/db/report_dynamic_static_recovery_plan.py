@@ -152,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
                 "apk_id": row.get("apk_id"),
                 "apk_set_id": set_info.get("apk_set_id"),
                 "artifact_set_hash": set_info.get("artifact_set_hash"),
+                "artifact_set_hash_version": set_info.get("artifact_set_hash_version"),
                 "exact_install_set_candidates": [
                     {
                         "apk_set_id": candidate.get("apk_set_id"),

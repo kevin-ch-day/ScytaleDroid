@@ -8,6 +8,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
+from scytaledroid.Utils.install_set_identity import compute_artifact_set_hash
 
 from ..core.models import RunParameters
 
@@ -118,8 +119,13 @@ def _compute_run_identity(group) -> dict:
 
     ordered = [e for e in entries if e["is_base"]]
     ordered.extend(sorted((e for e in entries if not e["is_base"]), key=lambda item: item["split_name"]))
-    split_hashes = [e["sha256"] for e in ordered]
-    artifact_set_hash = sha256(json.dumps(split_hashes).encode("utf-8")).hexdigest()
+    artifact_set_hash = compute_artifact_set_hash(
+        [
+            {"role": "base" if entry["is_base"] else "split", "split_name": entry["split_name"], "sha256": entry["sha256"]}
+            for entry in ordered
+        ],
+        version="v1",
+    )
 
     identity["base_apk_sha256"] = base_sha
     identity["artifact_set_hash"] = artifact_set_hash

@@ -13,13 +13,14 @@ import json
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+from scytaledroid.Utils.install_set_identity import compute_artifact_set_hash
 
 
 @dataclass(frozen=True)
@@ -228,8 +229,10 @@ def _parse_receipt(path: Path, payload: dict[str, Any]) -> ReceiptSet | None:
 
 def artifact_set_hash_v1(ordered_hashes: list[str]) -> str:
     """Return the current static identity v1 hash for ordered APK members."""
-
-    return sha256(json.dumps(ordered_hashes).encode("utf-8")).hexdigest()
+    return compute_artifact_set_hash(
+        [{"role": "base" if index == 0 else "split", "split_name": str(index), "sha256": value} for index, value in enumerate(ordered_hashes)],
+        version="v1",
+    )
 
 
 def _ordered_members_for_hash(members: list[ReceiptMember]) -> list[ReceiptMember]:

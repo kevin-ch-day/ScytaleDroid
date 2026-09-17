@@ -166,6 +166,15 @@ def build_workbench_payload(
                 "identity_kind": row.get("identity_kind"),
                 "apk_set_id": row.get("apk_set_id"),
                 "artifact_set_hash": row.get("artifact_set_hash"),
+                "artifact_set_hash_version": row.get("artifact_set_hash_version"),
+                "portable_set_identity": (
+                    {
+                        "artifact_set_hash_version": row.get("artifact_set_hash_version"),
+                        "artifact_set_hash": row.get("artifact_set_hash"),
+                    }
+                    if row.get("artifact_set_hash_version") and row.get("artifact_set_hash")
+                    else None
+                ),
                 "split_members": int(row.get("member_count") or 0),
                 "split_count": int(row.get("split_count") or 0),
                 "member_manifest": list(row.get("member_manifest") or ()),

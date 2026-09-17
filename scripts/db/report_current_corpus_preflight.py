@@ -200,6 +200,15 @@ def _build_rows(
                 "recorded_root_exists": recorded_root_exists,
                 "apk_set_id": row.get("apk_set_id"),
                 "artifact_set_hash": row.get("artifact_set_hash"),
+                "artifact_set_hash_version": row.get("artifact_set_hash_version"),
+                "portable_set_identity": (
+                    {
+                        "artifact_set_hash_version": row.get("artifact_set_hash_version"),
+                        "artifact_set_hash": row.get("artifact_set_hash"),
+                    }
+                    if row.get("artifact_set_hash_version") and row.get("artifact_set_hash")
+                    else None
+                ),
                 "apk_set_present": row.get("identity_kind") == "exact_install_set",
                 "apk_set_member_count": int(row.get("member_count") or 0),
                 "apk_set_split_count": int(row.get("split_count") or 0),
