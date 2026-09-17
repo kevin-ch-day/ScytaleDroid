@@ -110,20 +110,29 @@ def _build_rows(
     groups: tuple[Any, ...],
 ) -> list[dict[str, Any]]:
     base_rows = lineage.fetch_base_rows(core_q, package_name=package_name)
-    static = lineage.fetch_static_coverage(core_q)
-    dynamic = lineage.fetch_dynamic_coverage(core_q)
-    apk_sets = lineage.fetch_apk_sets_by_hash(core_q)
+    apk_sets = lineage.attach_install_set_members(core_q, lineage.fetch_apk_sets_by_hash(core_q))
+    identity_rows = lineage.expand_identity_rows(base_rows, apk_sets)
+    static_by_set = lineage.fetch_exact_static_coverage(core_q)
+    dynamic_by_set = lineage.fetch_exact_dynamic_coverage(core_q)
+    legacy_static = lineage.fetch_legacy_base_static_coverage(core_q)
+    legacy_dynamic = lineage.fetch_legacy_base_dynamic_coverage(core_q)
     same_version_drift = lineage.fetch_same_version_hash_drift_keys(core_q)
     canonical_paths = _canonical_store_paths(groups)
 
     result: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-    for row in base_rows:
+    seen: set[tuple[str, str, str, int, str]] = set()
+    for row in identity_rows:
         sha = lineage.norm_sha(row.get("base_apk_sha256"))
         package = str(row.get("package_name") or "").strip().lower()
         if not sha or not package:
             continue
-        key = (package, str(row.get("version_code") or ""), sha)
+        key = (
+            package,
+            str(row.get("version_code") or ""),
+            sha,
+            int(row.get("apk_set_id") or 0),
+            str(row.get("artifact_set_hash") or ""),
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -139,12 +148,21 @@ def _build_rows(
             recorded_root_exists=recorded_root_exists,
             recorded_location_known=bool(recorded_path),
         )
-        set_info = apk_sets.get(sha, {})
-        split_state = lineage.split_status(set_info=set_info, byte_status=byte_state)
-        static_count = int(
-            (static.get(sha) or {}).get("canonical_completed_identity_valid") or 0
+        split_state = lineage.split_status(
+            set_info=row if row.get("identity_kind") == "exact_install_set" else {},
+            byte_status=byte_state,
         )
-        dynamic_info = dynamic.get(sha) or {}
+        static_info = lineage.coverage_for_identity(
+            row,
+            exact_coverage=static_by_set,
+            legacy_base_coverage=legacy_static,
+        )
+        dynamic_info = lineage.coverage_for_identity(
+            row,
+            exact_coverage=dynamic_by_set,
+            legacy_base_coverage=legacy_dynamic,
+        )
+        static_count = int(static_info.get("canonical_completed_identity_valid") or 0)
         dynamic_sessions = int(dynamic_info.get("dynamic_sessions") or 0)
         dynamic_unlinked = int(dynamic_info.get("dynamic_unlinked_sessions") or 0)
         drift = (
@@ -174,18 +192,19 @@ def _build_rows(
                 "version_name": row.get("version_name"),
                 "base_apk_sha256": sha,
                 "apk_id": row.get("apk_id"),
+                "identity_kind": row.get("identity_kind"),
                 "bytes_available": byte_state.startswith("available"),
                 "byte_status": byte_state,
                 "canonical_store_file_available": canonical_exists,
                 "recorded_file_available": recorded_exists,
                 "recorded_root_exists": recorded_root_exists,
-                "apk_set_id": set_info.get("apk_set_id"),
-                "artifact_set_hash": set_info.get("artifact_set_hash"),
-                "apk_set_present": bool(set_info),
-                "apk_set_member_count": int(set_info.get("member_count") or 0),
-                "apk_set_split_count": int(set_info.get("split_count") or 0),
-                "members": int(set_info.get("member_count") or 0),
-                "splits": int(set_info.get("split_count") or 0),
+                "apk_set_id": row.get("apk_set_id"),
+                "artifact_set_hash": row.get("artifact_set_hash"),
+                "apk_set_present": row.get("identity_kind") == "exact_install_set",
+                "apk_set_member_count": int(row.get("member_count") or 0),
+                "apk_set_split_count": int(row.get("split_count") or 0),
+                "members": int(row.get("member_count") or 0),
+                "splits": int(row.get("split_count") or 0),
                 "split_status": split_state,
                 "static_exact_coverage": static_count,
                 "static_run_count": static_count,
@@ -206,6 +225,9 @@ def _build_rows(
             not bool(item["apk_set_present"]),
             str(item["package_name"]),
             str(item.get("version_code") or ""),
+            str(item.get("base_apk_sha256") or ""),
+            int(item.get("apk_set_id") or 0),
+            str(item.get("artifact_set_hash") or ""),
         )
     )
     return result

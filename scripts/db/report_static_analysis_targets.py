@@ -30,6 +30,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Hide fully covered rows with no review/action signal.",
     )
     parser.add_argument(
+        "--status",
+        action="append",
+        choices=("ready", "review", "blocked_missing_bytes", "blocked_split_context", "covered"),
+        default=[],
+        help="Limit output to one target status; repeatable (for example: --status ready).",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=100,
@@ -50,10 +57,16 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("Database is disabled in db_config.\n")
         return 2
 
-    rows = lineage.fetch_base_rows(core_q, package_name=args.package_name)
-    static_by_hash = lineage.fetch_static_coverage(core_q)
-    dynamic_by_hash = lineage.fetch_dynamic_coverage(core_q)
-    apk_sets_by_hash = lineage.fetch_apk_sets_by_hash(core_q)
+    base_rows = lineage.fetch_base_rows(core_q, package_name=args.package_name)
+    apk_sets_by_hash = lineage.attach_install_set_members(
+        core_q,
+        lineage.fetch_apk_sets_by_hash(core_q),
+    )
+    rows = lineage.expand_identity_rows(base_rows, apk_sets_by_hash)
+    static_by_set = lineage.fetch_exact_static_coverage(core_q)
+    dynamic_by_set = lineage.fetch_exact_dynamic_coverage(core_q)
+    legacy_static_by_hash = lineage.fetch_legacy_base_static_coverage(core_q)
+    legacy_dynamic_by_hash = lineage.fetch_legacy_base_dynamic_coverage(core_q)
     drift_keys = lineage.fetch_same_version_hash_drift_keys(core_q)
 
     targets: list[dict[str, Any]] = []
@@ -72,14 +85,24 @@ def main(argv: list[str] | None = None) -> int:
             recorded_root_exists=lineage.path_exists(row.get("data_root")),
             recorded_location_known=bool(row.get("local_rel_path")),
         )
-        static_cov = static_by_hash.get(sha, {})
-        dynamic_cov = dynamic_by_hash.get(sha, {})
-        set_info = apk_sets_by_hash.get(sha, {})
+        static_cov = lineage.coverage_for_identity(
+            row,
+            exact_coverage=static_by_set,
+            legacy_base_coverage=legacy_static_by_hash,
+        )
+        dynamic_cov = lineage.coverage_for_identity(
+            row,
+            exact_coverage=dynamic_by_set,
+            legacy_base_coverage=legacy_dynamic_by_hash,
+        )
         exact_static = int(static_cov.get("canonical_completed_identity_valid") or 0)
         dynamic_sessions = int(dynamic_cov.get("dynamic_sessions") or 0)
         dynamic_linked = int(dynamic_cov.get("dynamic_linked_sessions") or 0)
         dynamic_unlinked = int(dynamic_cov.get("dynamic_unlinked_sessions") or 0)
-        split_status = lineage.split_status(set_info=set_info, byte_status=byte_status)
+        split_status = lineage.split_status(
+            set_info=row if row.get("identity_kind") == "exact_install_set" else {},
+            byte_status=byte_status,
+        )
         review = (
             pkg,
             str(row.get("version_code") or ""),
@@ -112,10 +135,16 @@ def main(argv: list[str] | None = None) -> int:
             "version_name": row.get("version_name"),
             "base_apk_sha256": sha,
             "apk_id": row.get("apk_id"),
-            "apk_set_id": set_info.get("apk_set_id"),
-            "artifact_set_hash": set_info.get("artifact_set_hash"),
-            "member_count": int(set_info.get("member_count") or 0),
-            "split_count": int(set_info.get("split_count") or 0),
+            "identity_kind": row.get("identity_kind"),
+            "coverage_identity_kind": row.get("identity_kind"),
+            "apk_set_id": row.get("apk_set_id"),
+            "artifact_set_hash": row.get("artifact_set_hash"),
+            "artifact_set_hash_version": row.get("artifact_set_hash_version"),
+            "member_count": int(row.get("member_count") or 0),
+            "split_count": int(row.get("split_count") or 0),
+            "member_manifest": list(row.get("member_manifest") or ()),
+            "completeness_state": row.get("completeness_state"),
+            "source_kind": row.get("source_kind"),
             "reason": reason,
             "review_flags": ["same_version_hash_drift_review"] if review else [],
             "byte_status": byte_status,
@@ -134,7 +163,9 @@ def main(argv: list[str] | None = None) -> int:
             "recorded_root": row.get("data_root"),
             "recorded_root_exists": lineage.path_exists(row.get("data_root")),
         }
-        if not args.only_actionable or _is_actionable(target):
+        if _status_selected(target_status, args.status) and (
+            not args.only_actionable or _is_actionable(target)
+        ):
             targets.append(target)
 
     targets.sort(
@@ -144,13 +175,16 @@ def main(argv: list[str] | None = None) -> int:
             str(item["package_name"]),
             str(item.get("version_code") or ""),
             str(item["base_apk_sha256"]),
+            int(item.get("apk_set_id") or 0),
+            str(item.get("artifact_set_hash") or ""),
         )
     )
     payload = {
         "summary": _summary(targets),
         "targets": targets,
         "notes": [
-            "apk_set_id is preferred when present; base_apk_sha256 remains the historical fallback.",
+            "Exact install-set rows are keyed by apk_set_id plus artifact_set_hash and retain their own member manifest.",
+            "base_only_legacy rows use only evidence that lacks a complete install-set identity; they do not inherit sibling-set coverage.",
             "ready targets may still need exact-target preflight before execution.",
             "This is a read-only target queue model; it does not enqueue or run static analysis.",
         ],
@@ -165,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def _is_actionable(target: dict[str, Any]) -> bool:
     return str(target.get("target_status")) not in {"covered"}
+
+
+def _status_selected(target_status: str, selected_statuses: list[str] | tuple[str, ...]) -> bool:
+    return not selected_statuses or target_status in selected_statuses
 
 
 def _summary(targets: list[dict[str, Any]]) -> dict[str, Any]:

@@ -91,10 +91,16 @@ def build_workbench_payload(
     from scytaledroid.DeviceAnalysis.services import artifact_store
 
     pkg_lc = str(package_name or "").strip().lower()
-    rows = lineage.fetch_base_rows(core_q, package_name=pkg_lc)
-    static_by_hash = lineage.fetch_static_coverage(core_q)
-    dynamic_by_hash = lineage.fetch_dynamic_coverage(core_q)
-    apk_sets_by_hash = lineage.fetch_apk_sets_by_hash(core_q)
+    base_rows = lineage.fetch_base_rows(core_q, package_name=pkg_lc)
+    apk_sets_by_hash = lineage.attach_install_set_members(
+        core_q,
+        lineage.fetch_apk_sets_by_hash(core_q),
+    )
+    rows = lineage.expand_identity_rows(base_rows, apk_sets_by_hash)
+    static_by_set = lineage.fetch_exact_static_coverage(core_q)
+    dynamic_by_set = lineage.fetch_exact_dynamic_coverage(core_q)
+    legacy_static_by_hash = lineage.fetch_legacy_base_static_coverage(core_q)
+    legacy_dynamic_by_hash = lineage.fetch_legacy_base_dynamic_coverage(core_q)
     drift_keys = lineage.fetch_same_version_hash_drift_keys(core_q)
 
     hash_rows: list[dict[str, Any]] = []
@@ -113,14 +119,24 @@ def build_workbench_payload(
             recorded_root_exists=lineage.path_exists(row.get("data_root")),
             recorded_location_known=bool(row.get("local_rel_path")),
         )
-        static_cov = static_by_hash.get(sha, {})
-        dynamic_cov = dynamic_by_hash.get(sha, {})
-        set_info = apk_sets_by_hash.get(sha, {})
+        static_cov = lineage.coverage_for_identity(
+            row,
+            exact_coverage=static_by_set,
+            legacy_base_coverage=legacy_static_by_hash,
+        )
+        dynamic_cov = lineage.coverage_for_identity(
+            row,
+            exact_coverage=dynamic_by_set,
+            legacy_base_coverage=legacy_dynamic_by_hash,
+        )
         exact_static = int(static_cov.get("canonical_completed_identity_valid") or 0)
         dynamic_sessions = int(dynamic_cov.get("dynamic_sessions") or 0)
         dynamic_linked = int(dynamic_cov.get("dynamic_linked_sessions") or 0)
         dynamic_unlinked = int(dynamic_cov.get("dynamic_unlinked_sessions") or 0)
-        split_status = lineage.split_status(set_info=set_info, byte_status=byte_status)
+        split_status = lineage.split_status(
+            set_info=row if row.get("identity_kind") == "exact_install_set" else {},
+            byte_status=byte_status,
+        )
         drift = (
             pkg,
             str(row.get("version_code") or ""),
@@ -147,10 +163,12 @@ def build_workbench_payload(
                 "version_name": row.get("version_name"),
                 "base_apk_sha256": sha,
                 "apk_id": row.get("apk_id"),
-                "apk_set_id": set_info.get("apk_set_id"),
-                "artifact_set_hash": set_info.get("artifact_set_hash"),
-                "split_members": int(set_info.get("member_count") or 0),
-                "split_count": int(set_info.get("split_count") or 0),
+                "identity_kind": row.get("identity_kind"),
+                "apk_set_id": row.get("apk_set_id"),
+                "artifact_set_hash": row.get("artifact_set_hash"),
+                "split_members": int(row.get("member_count") or 0),
+                "split_count": int(row.get("split_count") or 0),
+                "member_manifest": list(row.get("member_manifest") or ()),
                 "bytes_available": byte_status.startswith("available"),
                 "availability_state": byte_status,
                 "static_run_count": int(static_cov.get("static_runs") or 0),
@@ -182,6 +200,8 @@ def build_workbench_payload(
             -int(item["dynamic_sessions"]),
             str(item.get("version_code") or ""),
             str(item["base_apk_sha256"]),
+            int(item.get("apk_set_id") or 0),
+            str(item.get("artifact_set_hash") or ""),
         )
     )
     view_summary = _summary(hash_rows, package_name=pkg_lc)
@@ -244,18 +264,35 @@ def _summary(rows: list[dict[str, Any]], *, package_name: str) -> dict[str, Any]
 def _package_choices(core_q: Any, *, limit: int) -> dict[str, Any]:
     from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
 
-    rows = lineage.fetch_base_rows(core_q, package_name=None)
-    static_by_hash = lineage.fetch_static_coverage(core_q)
-    dynamic_by_hash = lineage.fetch_dynamic_coverage(core_q)
+    base_rows = lineage.fetch_base_rows(core_q, package_name=None)
     apk_sets_by_hash = lineage.fetch_apk_sets_by_hash(core_q)
+    rows = lineage.expand_identity_rows(base_rows, apk_sets_by_hash)
+    static_by_set = lineage.fetch_exact_static_coverage(core_q)
+    dynamic_by_set = lineage.fetch_exact_dynamic_coverage(core_q)
+    legacy_static_by_hash = lineage.fetch_legacy_base_static_coverage(core_q)
+    legacy_dynamic_by_hash = lineage.fetch_legacy_base_dynamic_coverage(core_q)
     buckets: dict[str, dict[str, Any]] = {}
     for row in rows:
         pkg = str(row.get("package_name") or "").strip().lower()
         sha = str(row.get("base_apk_sha256") or "").strip().lower()
         if not pkg or not sha:
             continue
-        static_count = int(static_by_hash.get(sha, {}).get("canonical_completed_identity_valid") or 0)
-        dynamic_count = int(dynamic_by_hash.get(sha, {}).get("dynamic_sessions") or 0)
+        static_count = int(
+            lineage.coverage_for_identity(
+                row,
+                exact_coverage=static_by_set,
+                legacy_base_coverage=legacy_static_by_hash,
+            ).get("canonical_completed_identity_valid")
+            or 0
+        )
+        dynamic_count = int(
+            lineage.coverage_for_identity(
+                row,
+                exact_coverage=dynamic_by_set,
+                legacy_base_coverage=legacy_dynamic_by_hash,
+            ).get("dynamic_sessions")
+            or 0
+        )
         bucket = buckets.setdefault(
             pkg,
             {
@@ -269,7 +306,7 @@ def _package_choices(core_q: Any, *, limit: int) -> dict[str, Any]:
             },
         )
         bucket["base_hashes_seen"] += 1
-        bucket["install_sets_seen"] += int(sha in apk_sets_by_hash)
+        bucket["install_sets_seen"] += int(row.get("identity_kind") == "exact_install_set")
         bucket["static_covered"] += int(static_count > 0)
         bucket["dynamic_sessions"] += dynamic_count
         bucket["exact_static_dynamic_gaps"] += int(dynamic_count > 0 and static_count == 0)

@@ -140,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
             static_exact_coverage=static_count,
             old_root_policy=args.old_root_policy,
         )
-        set_info = apk_sets.get(sha, {})
+        set_candidates = apk_sets.get(sha, tuple())
+        set_info = set_candidates[0] if len(set_candidates) == 1 else {}
         gap_rows.append(
             {
                 "package_name": pkg,
@@ -151,6 +152,20 @@ def main(argv: list[str] | None = None) -> int:
                 "apk_id": row.get("apk_id"),
                 "apk_set_id": set_info.get("apk_set_id"),
                 "artifact_set_hash": set_info.get("artifact_set_hash"),
+                "exact_install_set_candidates": [
+                    {
+                        "apk_set_id": candidate.get("apk_set_id"),
+                        "artifact_set_hash": candidate.get("artifact_set_hash"),
+                    }
+                    for candidate in set_candidates
+                ],
+                "install_set_identity_state": (
+                    "single_exact_install_set"
+                    if len(set_candidates) == 1
+                    else "multiple_sets_share_base_hash"
+                    if len(set_candidates) > 1
+                    else "base_only_legacy"
+                ),
                 "dynamic_sessions": _safe_int(row.get("dynamic_runs")) or 0,
                 "first_dynamic_started": _stringify(row.get("first_dynamic_started")),
                 "last_dynamic_started": _stringify(row.get("last_dynamic_started")),

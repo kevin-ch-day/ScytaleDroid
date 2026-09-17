@@ -14,7 +14,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-_DEFAULT_EXTERNAL_APK_STORE_MOUNT_ROOTS = (Path("/mnt/MERCURY_DATA_V2"), Path("/mnt/MERCURY_DATA_USB"))
+_DEFAULT_EXTERNAL_APK_STORE_MOUNT_ROOTS = (Path("/mnt/MERCURY_DATA_V2"),)
 
 
 def _configured_external_apk_store_mount_roots() -> tuple[Path, ...]:

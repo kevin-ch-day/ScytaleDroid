@@ -186,3 +186,11 @@ def test_external_apk_mount_roots_accept_new_host_configuration(monkeypatch) -> 
     roots = artifact_store._configured_external_apk_store_mount_roots()  # noqa: SLF001 - config contract
 
     assert roots == (Path("/mnt/new-cold"), Path("/mnt/secondary-cold"))
+
+
+def test_external_apk_mount_roots_default_to_active_mercury_hdd(monkeypatch) -> None:
+    monkeypatch.delenv("SCYTALEDROID_EXTERNAL_APK_STORE_MOUNT_ROOTS", raising=False)
+
+    roots = artifact_store._configured_external_apk_store_mount_roots()  # noqa: SLF001 - config contract
+
+    assert roots == (Path("/mnt/MERCURY_DATA_V2"),)

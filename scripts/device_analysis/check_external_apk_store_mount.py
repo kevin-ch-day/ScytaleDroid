@@ -28,7 +28,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mount-root",
         action="append",
         default=[],
-        help="External mount root to accept; repeatable. Defaults to Mercury V2/USB roots.",
+        help="External mount root to accept; repeatable. Defaults to the Mercury V2 HDD root.",
     )
     parser.add_argument("--skip-sha256", action="store_true", help="Skip byte hashing of canonical APK blobs.")
     parser.add_argument(

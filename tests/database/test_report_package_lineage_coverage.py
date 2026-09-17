@@ -583,6 +583,14 @@ def test_static_target_static_covered_missing_current_root_is_artifact_lifecycle
     assert targets.operator_action(status) == "Restore or reharvest bytes"
 
 
+def test_static_target_status_filter_supports_ready_only_queue() -> None:
+    from scripts.db import report_static_analysis_targets as targets
+
+    assert targets._status_selected("ready", ["ready"]) is True
+    assert targets._status_selected("review", ["ready"]) is False
+    assert targets._status_selected("review", []) is True
+
+
 def test_workbench_action_mapping_keeps_states_distinct() -> None:
     from scripts.db import report_package_lineage_workbench as workbench
 

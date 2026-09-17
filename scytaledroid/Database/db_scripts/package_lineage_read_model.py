@@ -8,6 +8,7 @@ one place while preserving stable script entrypoint paths.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -112,27 +113,357 @@ def fetch_dynamic_coverage(core_q: Any) -> dict[str, dict[str, Any]]:
     return {str(row.get("base_apk_sha256") or "").lower(): dict(row) for row in rows}
 
 
-def fetch_apk_sets_by_hash(core_q: Any) -> dict[str, dict[str, Any]]:
+def fetch_apk_sets_by_hash(core_q: Any) -> dict[str, tuple[dict[str, Any], ...]]:
+    """Return every coherent install set grouped by base hash.
+
+    A base APK hash can occur in more than one install set.  The returned
+    sequence preserves each set's own ID, artifact digest, counts, and
+    provenance; callers must never choose independent aggregate fields from
+    sibling sets.
+    """
+
     if not table_exists(core_q, "apk_sets"):
         return {}
     rows = core_q.run_sql(
         """
         SELECT
+          apk_set_id,
           LOWER(TRIM(base_apk_sha256)) AS base_apk_sha256,
-          COUNT(*) AS install_sets_seen,
-          MIN(apk_set_id) AS apk_set_id,
-          MIN(artifact_set_hash) AS artifact_set_hash,
-          MAX(member_count) AS member_count,
-          MAX(split_count) AS split_count
+          LOWER(TRIM(artifact_set_hash)) AS artifact_set_hash,
+          artifact_set_hash_version,
+          LOWER(TRIM(package_name)) AS package_name,
+          version_code,
+          version_name,
+          base_apk_id,
+          member_count,
+          split_count,
+          completeness_state,
+          source_kind
         FROM apk_sets
         WHERE base_apk_sha256 IS NOT NULL
-        GROUP BY LOWER(TRIM(base_apk_sha256))
+        ORDER BY LOWER(TRIM(base_apk_sha256)), apk_set_id
         """,
         fetch="all",
         dictionary=True,
         query_name="package_lineage_read_model.apk_sets",
     ) or []
-    return {str(row.get("base_apk_sha256") or "").lower(): dict(row) for row in rows}
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for raw_row in rows:
+        row = dict(raw_row)
+        base_hash = norm_sha(row.get("base_apk_sha256"))
+        artifact_hash = norm_sha(row.get("artifact_set_hash"))
+        try:
+            apk_set_id = int(row.get("apk_set_id"))
+        except (TypeError, ValueError):
+            continue
+        if not base_hash or not artifact_hash:
+            continue
+        row["apk_set_id"] = apk_set_id
+        row["base_apk_sha256"] = base_hash
+        row["artifact_set_hash"] = artifact_hash
+        row["member_manifest"] = tuple()
+        grouped[base_hash].append(row)
+    return {
+        base_hash: tuple(sorted(items, key=lambda item: int(item["apk_set_id"])))
+        for base_hash, items in grouped.items()
+    }
+
+
+def attach_install_set_members(
+    core_q: Any,
+    install_sets_by_hash: dict[str, tuple[dict[str, Any], ...]],
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    """Attach ordered member metadata without changing install-set identity.
+
+    The set row's artifact digest remains the membership identity.  Member
+    records are returned for diagnostics and target receipts, not inferred from
+    a base hash.
+    """
+
+    set_ids = sorted(
+        {
+            int(item["apk_set_id"])
+            for items in install_sets_by_hash.values()
+            for item in items
+        }
+    )
+    if not set_ids or not table_exists(core_q, "apk_set_members"):
+        return install_sets_by_hash
+    placeholders = ", ".join(["%s"] * len(set_ids))
+    rows = core_q.run_sql(
+        f"""
+        SELECT apk_set_id, role, split_name, LOWER(TRIM(sha256)) AS sha256,
+               ordinal, member_status
+        FROM apk_set_members
+        WHERE apk_set_id IN ({placeholders})
+        ORDER BY apk_set_id, ordinal, role, split_name, sha256
+        """,
+        tuple(set_ids),
+        fetch="all",
+        dictionary=True,
+        query_name="package_lineage_read_model.apk_set_members",
+    ) or []
+    members_by_set: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for raw_row in rows:
+        row = dict(raw_row)
+        try:
+            set_id = int(row.get("apk_set_id"))
+        except (TypeError, ValueError):
+            continue
+        members_by_set[set_id].append(
+            {
+                "role": str(row.get("role") or ""),
+                "split_name": str(row.get("split_name") or ""),
+                "sha256": norm_sha(row.get("sha256")),
+                "ordinal": int(row.get("ordinal") or 0),
+                "member_status": str(row.get("member_status") or ""),
+            }
+        )
+    return {
+        base_hash: tuple(
+            {
+                **item,
+                "member_manifest": tuple(members_by_set.get(int(item["apk_set_id"]), [])),
+            }
+            for item in items
+        )
+        for base_hash, items in install_sets_by_hash.items()
+    }
+
+
+def exact_identity_key(apk_set_id: Any, artifact_set_hash: Any) -> tuple[int, str] | None:
+    """Return the only key that authorizes split-aware evidence attachment."""
+
+    try:
+        set_id = int(apk_set_id)
+    except (TypeError, ValueError):
+        return None
+    digest = norm_sha(artifact_set_hash)
+    return (set_id, digest) if set_id > 0 and digest else None
+
+
+def expand_identity_rows(
+    base_rows: list[dict[str, Any]],
+    install_sets_by_hash: dict[str, tuple[dict[str, Any], ...]],
+) -> list[dict[str, Any]]:
+    """Expand repository bases into exact-set rows or explicit base-only rows.
+
+    Known install sets are emitted one per set.  A repository base that has no
+    known set remains a base-only historical identity and does not acquire a
+    guessed split configuration.
+    """
+
+    result: list[dict[str, Any]] = []
+    seen_exact: set[tuple[int, str]] = set()
+    seen_base_only: set[tuple[str, str, str, str]] = set()
+    for base_row in base_rows:
+        base = norm_sha(base_row.get("base_apk_sha256"))
+        package = str(base_row.get("package_name") or "").strip().lower()
+        if not base or not package:
+            continue
+        install_sets = install_sets_by_hash.get(base, tuple())
+        if install_sets:
+            for set_row in install_sets:
+                key = exact_identity_key(set_row.get("apk_set_id"), set_row.get("artifact_set_hash"))
+                if key is None or key in seen_exact:
+                    continue
+                seen_exact.add(key)
+                result.append(
+                    {
+                        **base_row,
+                        **set_row,
+                        "package_name": str(set_row.get("package_name") or package).strip().lower(),
+                        "version_code": set_row.get("version_code") if set_row.get("version_code") is not None else base_row.get("version_code"),
+                        "version_name": set_row.get("version_name") if set_row.get("version_name") is not None else base_row.get("version_name"),
+                        "identity_kind": "exact_install_set",
+                        "identity_key": key,
+                    }
+                )
+            continue
+        base_key = (
+            package,
+            str(base_row.get("version_code") or ""),
+            str(base_row.get("version_name") or ""),
+            base,
+        )
+        if base_key in seen_base_only:
+            continue
+        seen_base_only.add(base_key)
+        result.append(
+            {
+                **base_row,
+                "apk_set_id": None,
+                "artifact_set_hash": None,
+                "member_count": 0,
+                "split_count": 0,
+                "member_manifest": tuple(),
+                "identity_kind": "base_only_legacy",
+                "identity_key": None,
+            }
+        )
+    return sorted(
+        result,
+        key=lambda item: (
+            str(item.get("package_name") or ""),
+            str(item.get("version_code") or ""),
+            str(item.get("base_apk_sha256") or ""),
+            int(item.get("apk_set_id") or 0),
+        ),
+    )
+
+
+def fetch_exact_static_coverage(core_q: Any) -> dict[tuple[int, str], dict[str, Any]]:
+    """Read canonical static coverage keyed by the complete install-set identity."""
+
+    rows = core_q.run_sql(
+        """
+        SELECT apk_set_id, LOWER(TRIM(artifact_set_hash)) AS artifact_set_hash,
+               COUNT(*) AS static_runs,
+               SUM(CASE WHEN status='COMPLETED' AND run_class='CANONICAL'
+                         AND COALESCE(identity_valid, 0)=1 THEN 1 ELSE 0 END)
+                 AS canonical_completed_identity_valid,
+               MAX(static_session_id) AS latest_static_session
+        FROM static_analysis_runs
+        WHERE apk_set_id IS NOT NULL AND artifact_set_hash IS NOT NULL
+        GROUP BY apk_set_id, LOWER(TRIM(artifact_set_hash))
+        """,
+        fetch="all",
+        dictionary=True,
+        query_name="package_lineage_read_model.exact_static_coverage",
+    ) or []
+    return {
+        key: dict(row)
+        for row in rows
+        if (key := exact_identity_key(row.get("apk_set_id"), row.get("artifact_set_hash"))) is not None
+    }
+
+
+def fetch_exact_dynamic_coverage(core_q: Any) -> dict[tuple[int, str], dict[str, Any]]:
+    """Read dynamic coverage keyed by the complete install-set identity.
+
+    A dynamic row may omit ``apk_set_id`` while retaining an artifact digest and
+    an immutable link to a static run that carries the complete matching set
+    identity.  That linked pair is sufficient evidence to recover the exact
+    key.  A base hash alone remains legacy-only and conflicting dynamic/static
+    identity fields are excluded from exact coverage.
+    """
+
+    resolved_static_run_id = resolved_dynamic_session_static_run_id("ds")
+    rows = core_q.run_sql(
+        f"""
+        SELECT identity_rows.apk_set_id, identity_rows.artifact_set_hash,
+               COUNT(*) AS dynamic_sessions,
+               SUM(CASE WHEN identity_rows.resolved_static_run_id IS NULL THEN 1 ELSE 0 END)
+                 AS dynamic_unlinked_sessions,
+               SUM(CASE WHEN identity_rows.static_identity_is_canonical = 1
+                        THEN 1 ELSE 0 END) AS dynamic_linked_sessions
+        FROM (
+          SELECT
+            {resolved_static_run_id} AS resolved_static_run_id,
+            COALESCE(ds.apk_set_id, sar.apk_set_id) AS apk_set_id,
+            LOWER(TRIM(COALESCE(NULLIF(ds.artifact_set_hash, ''), sar.artifact_set_hash)))
+              AS artifact_set_hash,
+            CASE WHEN sar.id IS NOT NULL
+                       AND sar.status='COMPLETED' AND sar.run_class='CANONICAL'
+                       AND COALESCE(sar.identity_valid, 0)=1
+                       AND sar.apk_set_id = COALESCE(ds.apk_set_id, sar.apk_set_id)
+                       AND LOWER(TRIM(sar.artifact_set_hash)) =
+                           LOWER(TRIM(COALESCE(NULLIF(ds.artifact_set_hash, ''), sar.artifact_set_hash)))
+                 THEN 1 ELSE 0 END AS static_identity_is_canonical
+          FROM dynamic_sessions ds
+          LEFT JOIN static_analysis_runs sar ON sar.id = {resolved_static_run_id}
+          WHERE (ds.apk_set_id IS NULL OR sar.apk_set_id IS NULL OR ds.apk_set_id = sar.apk_set_id)
+            AND (ds.artifact_set_hash IS NULL OR ds.artifact_set_hash = ''
+                 OR sar.artifact_set_hash IS NULL OR sar.artifact_set_hash = ''
+                 OR LOWER(TRIM(ds.artifact_set_hash)) = LOWER(TRIM(sar.artifact_set_hash)))
+        ) AS identity_rows
+        WHERE identity_rows.apk_set_id IS NOT NULL
+          AND identity_rows.artifact_set_hash IS NOT NULL
+          AND identity_rows.artifact_set_hash <> ''
+        GROUP BY identity_rows.apk_set_id, identity_rows.artifact_set_hash
+        """,
+        fetch="all",
+        dictionary=True,
+        query_name="package_lineage_read_model.exact_dynamic_coverage",
+    ) or []
+    return {
+        key: dict(row)
+        for row in rows
+        if (key := exact_identity_key(row.get("apk_set_id"), row.get("artifact_set_hash"))) is not None
+    }
+
+
+def fetch_legacy_base_static_coverage(core_q: Any) -> dict[str, dict[str, Any]]:
+    """Read coverage that cannot establish a complete install-set identity."""
+
+    rows = core_q.run_sql(
+        """
+        SELECT LOWER(TRIM(base_apk_sha256)) AS base_apk_sha256,
+               COUNT(*) AS static_runs,
+               SUM(CASE WHEN status='COMPLETED' AND run_class='CANONICAL'
+                         AND COALESCE(identity_valid, 0)=1 THEN 1 ELSE 0 END)
+                 AS canonical_completed_identity_valid,
+               MAX(static_session_id) AS latest_static_session
+        FROM static_analysis_runs
+        WHERE base_apk_sha256 IS NOT NULL
+          AND (apk_set_id IS NULL OR artifact_set_hash IS NULL)
+        GROUP BY LOWER(TRIM(base_apk_sha256))
+        """,
+        fetch="all",
+        dictionary=True,
+        query_name="package_lineage_read_model.legacy_base_static_coverage",
+    ) or []
+    return {norm_sha(row.get("base_apk_sha256")): dict(row) for row in rows}
+
+
+def fetch_legacy_base_dynamic_coverage(core_q: Any) -> dict[str, dict[str, Any]]:
+    """Read dynamic evidence that lacks a complete install-set identity."""
+
+    resolved_static_run_id = resolved_dynamic_session_static_run_id("ds")
+    rows = core_q.run_sql(
+        f"""
+        SELECT LOWER(TRIM(ds.base_apk_sha256)) AS base_apk_sha256,
+               COUNT(*) AS dynamic_sessions,
+               SUM(CASE WHEN {resolved_static_run_id} IS NULL THEN 1 ELSE 0 END)
+                 AS dynamic_unlinked_sessions,
+               SUM(CASE WHEN sar.id IS NOT NULL
+                          AND LOWER(TRIM(sar.base_apk_sha256)) = LOWER(TRIM(ds.base_apk_sha256))
+                          AND sar.status='COMPLETED' AND sar.run_class='CANONICAL'
+                          AND COALESCE(sar.identity_valid, 0)=1
+                        THEN 1 ELSE 0 END) AS dynamic_linked_sessions
+        FROM dynamic_sessions ds
+        LEFT JOIN static_analysis_runs sar ON sar.id = {resolved_static_run_id}
+        WHERE ds.base_apk_sha256 IS NOT NULL
+          AND (
+            COALESCE(ds.apk_set_id, sar.apk_set_id) IS NULL
+            OR COALESCE(NULLIF(ds.artifact_set_hash, ''), sar.artifact_set_hash) IS NULL
+            OR COALESCE(NULLIF(ds.artifact_set_hash, ''), sar.artifact_set_hash) = ''
+            OR (ds.apk_set_id IS NOT NULL AND sar.apk_set_id IS NOT NULL AND ds.apk_set_id <> sar.apk_set_id)
+            OR (ds.artifact_set_hash IS NOT NULL AND ds.artifact_set_hash <> ''
+                AND sar.artifact_set_hash IS NOT NULL AND sar.artifact_set_hash <> ''
+                AND LOWER(TRIM(ds.artifact_set_hash)) <> LOWER(TRIM(sar.artifact_set_hash)))
+          )
+        GROUP BY LOWER(TRIM(ds.base_apk_sha256))
+        """,
+        fetch="all",
+        dictionary=True,
+        query_name="package_lineage_read_model.legacy_base_dynamic_coverage",
+    ) or []
+    return {norm_sha(row.get("base_apk_sha256")): dict(row) for row in rows}
+
+
+def coverage_for_identity(
+    row: dict[str, Any],
+    *,
+    exact_coverage: dict[tuple[int, str], dict[str, Any]],
+    legacy_base_coverage: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Select exact coverage for exact rows and labeled fallback coverage otherwise."""
+
+    key = exact_identity_key(row.get("apk_set_id"), row.get("artifact_set_hash"))
+    if row.get("identity_kind") == "exact_install_set" and key is not None:
+        return dict(exact_coverage.get(key) or {})
+    return dict(legacy_base_coverage.get(norm_sha(row.get("base_apk_sha256"))) or {})
 
 
 def fetch_same_version_hash_drift_keys(core_q: Any) -> set[tuple[str, str, str]]:
