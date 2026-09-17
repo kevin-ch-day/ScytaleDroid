@@ -6,7 +6,6 @@ Extracted from ``run_dispatch`` so parameter resolution stays readable and testa
 from __future__ import annotations
 
 import re
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,16 +23,19 @@ def _existing_db_session_labels(base_stamp: str) -> list[str]:
             """
             SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
             FROM static_analysis_runs
-            WHERE session_label=%s
-               OR session_label LIKE %s
-               OR session_stamp=%s
-               OR session_stamp LIKE %s
+            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
+            UNION
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
+            FROM static_analysis_sessions
+            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
             """,
-            (base_stamp, f"{base_stamp}-%", base_stamp, f"{base_stamp}-%"),
+            (base_stamp, f"{base_stamp}-%", base_stamp, f"{base_stamp}-%") * 2,
             fetch="all",
         ) or []
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RuntimeError(
+            "persistent session state cannot be inspected; refusing normal static execution"
+        ) from exc
 
     labels: list[str] = []
     for row in rows:
@@ -84,9 +86,8 @@ def resolve_unique_session_stamp(
     base_stamp = session_stamp
     session_dir = Path(app_config.DATA_DIR) / "sessions"
     final_path = session_dir / base_stamp / "run_map.json"
+    archive_dir = Path(app_config.DATA_DIR) / "static_analysis" / "reports" / "archive" / base_stamp
     attempts = None
-    canonical_id = None
-    existing_labels = _existing_db_session_labels(base_stamp)
     try:
         from scytaledroid.Database.db_core import db_queries as core_q
 
@@ -100,28 +101,26 @@ def resolve_unique_session_stamp(
             fetch="one",
         )
         attempts = int(row[0]) if row and row[0] is not None else 0
-        row = core_q.run_sql(
-            """
-            SELECT id
-            FROM static_analysis_runs
-            WHERE (session_label=%s OR session_stamp=%s) AND is_canonical=1
-            ORDER BY canonical_set_at_utc DESC
-            LIMIT 1
-            """,
+        header_row = core_q.run_sql(
+            "SELECT COUNT(*) FROM static_analysis_sessions WHERE session_stamp=%s OR session_label=%s",
             (base_stamp, base_stamp),
             fetch="one",
         )
-        if row and row[0] is not None:
-            canonical_id = int(row[0])
-    except Exception:
-        attempts = None
-        canonical_id = None
+        has_persistent_header = bool(header_row and header_row[0] is not None and int(header_row[0]) > 0)
+    except Exception as exc:
+        raise RuntimeError(
+            "persistent session state cannot be inspected; refusing normal static execution"
+        ) from exc
     # A local run_map may be missing after reset/cleanup while DB attempts still exist.
     # Treat either source as "session already used".
-    has_local_session = final_path.exists()
-    has_db_attempts = bool(existing_labels) or (isinstance(attempts, int) and attempts > 0)
-    if not has_local_session and not has_db_attempts:
+    has_local_session = final_path.exists() or any(archive_dir.glob("*.json"))
+    has_db_attempts = isinstance(attempts, int) and attempts > 0
+    if not has_local_session and not has_db_attempts and not has_persistent_header:
         return base_stamp, base_stamp, "first_run"
+    # Only query the historical label set after the authoritative exact-label
+    # check establishes that the session already exists.  A failure here must
+    # still block reuse because a collision-safe append cannot be computed.
+    existing_labels = _existing_db_session_labels(base_stamp)
     next_suffix = _next_session_suffix(base_stamp, existing_labels)
     batch_mode = run_mode == "batch"
     if batch_mode or noninteractive:
@@ -154,34 +153,12 @@ def resolve_unique_session_stamp(
             )
         return new_stamp, new_stamp, "auto_suffix"
     if action in {"replace", "overwrite"}:
-        try:
-            archive_dir = session_dir / "_archive"
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            if final_path.exists():
-                timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-                archive_path = archive_dir / f"{base_stamp}-{timestamp}.run_map.json"
-                shutil.copy2(final_path, archive_path)
-            if not quiet:
-                print(
-                    status_messages.status(
-                        "Replace mode: deleting local session folder only (DB history preserved).",
-                        level="info",
-                    )
-                )
-                if canonical_id:
-                    print(
-                        status_messages.status(
-                            f"Previous canonical attempt: static_run_id={canonical_id}",
-                            level="info",
-                        )
-                    )
-            shutil.rmtree(session_dir / base_stamp)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to replace existing session metadata: {exc}") from exc
-        return base_stamp, base_stamp, "replace"
+        raise RuntimeError(
+            f"Session label already used: {base_stamp}. Normal static execution cannot replace persistent session history; use a new session label."
+        )
     if action in {"cancel", "abort"}:
         raise RuntimeError(f"Session label already used: {base_stamp}. Cancelled by caller.")
     raise RuntimeError(
         f"Session label already used: {base_stamp}. "
-        "Resolve this in the menu layer (replace or append) before execution."
+        "Resolve this in the menu layer by appending a new session label before execution."
     )

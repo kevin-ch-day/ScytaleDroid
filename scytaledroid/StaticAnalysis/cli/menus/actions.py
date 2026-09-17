@@ -34,22 +34,25 @@ _RUN_SETUP_LABEL_W = 18
 
 def _existing_db_session_labels(session_stamp: str) -> list[str]:
     if core_q is None:
-        return []
+        raise RuntimeError("persistent session state cannot be inspected (database query helper unavailable)")
     try:
         rows = core_q.run_sql(
             """
             SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
             FROM static_analysis_runs
-            WHERE session_label=%s
-               OR session_label LIKE %s
-               OR session_stamp=%s
-               OR session_stamp LIKE %s
+            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
+            UNION
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(session_label), ''), NULLIF(TRIM(session_stamp), ''))
+            FROM static_analysis_sessions
+            WHERE session_label=%s OR session_label LIKE %s OR session_stamp=%s OR session_stamp LIKE %s
             """,
-            (session_stamp, f"{session_stamp}-%", session_stamp, f"{session_stamp}-%"),
+            (session_stamp, f"{session_stamp}-%", session_stamp, f"{session_stamp}-%") * 2,
             fetch="all",
         ) or []
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RuntimeError(
+            "persistent session state cannot be inspected; refusing normal static execution"
+        ) from exc
 
     labels: list[str] = []
     for row in rows:
@@ -346,31 +349,41 @@ def render_artifact_purge_outcome(outcome: Any, *, session_label: str | None = N
 def _lookup_existing_session_state(session_stamp: str) -> tuple[bool, int | None, int | None]:
     sessions_dir = Path(app_config.DATA_DIR) / "sessions"
     run_map_path = sessions_dir / session_stamp / "run_map.json"
-    has_local_session = run_map_path.exists()
+    archive_dir = Path(app_config.DATA_DIR) / "static_analysis" / "reports" / "archive" / session_stamp
+    has_local_session = run_map_path.exists() or any(archive_dir.glob("*.json"))
     attempts = None
     canonical_id = None
-    if core_q is not None:
-        try:
-            row = core_q.run_sql(
-                "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s OR session_stamp=%s",
-                (session_stamp, session_stamp),
-                fetch="one",
-            )
-            attempts = int(row[0]) if row and row[0] is not None else 0
-            row = core_q.run_sql(
-                """
-                SELECT id FROM static_analysis_runs
-                WHERE (session_label=%s OR session_stamp=%s) AND is_canonical=1
-                ORDER BY canonical_set_at_utc DESC
-                LIMIT 1
-                """,
-                (session_stamp, session_stamp),
-                fetch="one",
-            )
-            canonical_id = int(row[0]) if row and row[0] is not None else None
-        except Exception:
-            attempts = None
-            canonical_id = None
+    if core_q is None:
+        raise RuntimeError("persistent session state cannot be inspected (database query helper unavailable)")
+    try:
+        row = core_q.run_sql(
+            "SELECT COUNT(*) FROM static_analysis_runs WHERE session_label=%s OR session_stamp=%s",
+            (session_stamp, session_stamp),
+            fetch="one",
+        )
+        attempts = int(row[0]) if row and row[0] is not None else 0
+        header_row = core_q.run_sql(
+            "SELECT COUNT(*) FROM static_analysis_sessions WHERE session_stamp=%s OR session_label=%s",
+            (session_stamp, session_stamp),
+            fetch="one",
+        )
+        if header_row and header_row[0] is not None and int(header_row[0]) > 0:
+            has_local_session = True
+        row = core_q.run_sql(
+            """
+            SELECT id FROM static_analysis_runs
+            WHERE (session_label=%s OR session_stamp=%s) AND is_canonical=1
+            ORDER BY canonical_set_at_utc DESC
+            LIMIT 1
+            """,
+            (session_stamp, session_stamp),
+            fetch="one",
+        )
+        canonical_id = int(row[0]) if row and row[0] is not None else None
+    except Exception as exc:
+        raise RuntimeError(
+            "persistent session state cannot be inspected; refusing normal static execution"
+        ) from exc
     return has_local_session, attempts, canonical_id
 
 
@@ -392,7 +405,11 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
 
     # Collision handling must live in the menu (UI) layer. Execution paths are
     # prompt-free and require a resolved stamp/action for reproducibility.
-    has_local_session, attempts, canonical_id = _lookup_existing_session_state(session_stamp)
+    try:
+        has_local_session, attempts, canonical_id = _lookup_existing_session_state(session_stamp)
+    except RuntimeError as exc:
+        print(status_messages.status(str(exc), level="error"))
+        return params
     has_db_attempts = isinstance(attempts, int) and attempts > 0
     if has_local_session or has_db_attempts:
         print(status_messages.status(f"Session label already exists: {session_stamp}", level="warn"))
@@ -402,16 +419,13 @@ def prompt_session_label(params: RunParameters) -> RunParameters:
                 summary += f" | canonical static_run_id={canonical_id}"
             print(status_messages.status(summary, level="info"))
         print()
+        print("This session already has persistent history/evidence.")
         print("Choose strategy")
-        print("  [1] Replace session")
-        print("  [2] Append new label")
+        print("  [1] Append new label")
         print("  [0] Cancel")
-        default_choice = "2" if "smoke batch" in (params.scope_label or "").lower() or "persistence test" in (params.scope_label or "").lower() else "1"
-        choice = prompt_utils.get_choice(["1", "2", "0"], default=default_choice, prompt=f"Choice [{default_choice}]: ")
+        choice = prompt_utils.get_choice(["1", "0"], default="1", prompt="Choice [1]: ")
         if choice == "0":
             return params
-        if choice == "1":
-            return replace(params, session_stamp=session_stamp, canonical_action="replace")
         # Append: generate a new, collision-free stamp now so execution is deterministic.
         session_stamp = _append_session_label(session_stamp, attempts)
         print(status_messages.status(f"Append target: {session_stamp}", level="info"))
@@ -458,7 +472,11 @@ def prompt_run_setup(
         if package_name and package_name not in label:
             target = f"{label or package_name} | {package_name}"
 
-    has_local_session, attempts, canonical_id = _lookup_existing_session_state(session_stamp)
+    try:
+        has_local_session, attempts, canonical_id = _lookup_existing_session_state(session_stamp)
+    except RuntimeError as exc:
+        print(status_messages.status(str(exc), level="error"))
+        return "cancel", effective, None
     has_existing = has_local_session or (isinstance(attempts, int) and attempts > 0)
 
     print()
@@ -500,13 +518,24 @@ def prompt_run_setup(
     )
     print()
     if has_existing:
-        print("1) Replace this session and rerun")
-        print("2) Use new session label")
+        print("This session already has persistent history/evidence.")
+        print("1) Use new session label")
+        print("2) View/audit existing session")
+        print("0) Cancel")
+        choice = prompt_utils.get_choice(["1", "2", "0"], default="1", prompt="Choice [1]: ")
+        if choice == "0":
+            return "cancel", effective, None
+        if choice == "2":
+            print(status_messages.status("Use the Audit and Grain triage commands above to review this session.", level="info"))
+            return "cancel", effective, None
+        appended = _append_session_label(session_stamp, attempts)
+        print(status_messages.status(f"Session label: {appended}", level="info"))
+        return "run", replace(effective, session_stamp=appended, canonical_action="append"), None
     else:
         print("1) Run now")
         print("2) Use new session label")
-    print("3) Advanced / edit run options")
-    print("0) Cancel")
+        print("3) Advanced / edit run options")
+        print("0) Cancel")
     choice = prompt_utils.get_choice(["1", "2", "3", "0"], default="1", prompt="Choice [1]: ")
     if choice == "0":
         return "cancel", effective, None
@@ -516,8 +545,6 @@ def prompt_run_setup(
         appended = _append_session_label(session_stamp, attempts)
         print(status_messages.status(f"Session label: {appended}", level="info"))
         return "run", replace(effective, session_stamp=appended, canonical_action="append"), None
-    if has_existing:
-        return "run", replace(effective, canonical_action="replace"), "session"
     return "run", effective, None
 
 

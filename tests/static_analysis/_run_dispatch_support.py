@@ -96,6 +96,7 @@ def patch_launch_scan_flow_defaults(
     persistence_enabled: bool = True,
 ) -> None:
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
+    monkeypatch.setattr(run_dispatch, "_resolve_unique_session_stamp", lambda stamp, **_k: (stamp, stamp, "first_run"))
     monkeypatch.setattr(run_dispatch.persistence_runtime, "bootstrap_runtime_persistence", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "refresh_session_views", lambda **_k: None)
     monkeypatch.setattr(run_dispatch.persistence_runtime, "persistence_enabled", lambda **_k: persistence_enabled)

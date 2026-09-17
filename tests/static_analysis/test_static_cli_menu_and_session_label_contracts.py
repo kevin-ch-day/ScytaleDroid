@@ -214,6 +214,7 @@ def test_prompt_session_label_uses_suggested_default(monkeypatch):
         return ""
 
     monkeypatch.setattr(actions.prompt_utils, "prompt_text", _prompt)
+    monkeypatch.setattr(actions, "_lookup_existing_session_state", lambda _stamp: (False, 0, None))
     updated = actions.prompt_session_label(params)
     assert seen["default"] == "20260221-all-full"
     assert updated.session_stamp == "20260221-all-full"
@@ -239,6 +240,8 @@ def test_prompt_session_label_detects_existing_db_session_on_default(monkeypatch
             return [("20260428-all-full",)]
         if "count(*) from static_analysis_runs where session_label=%s or session_stamp=%s" in sql:
             return (120,)
+        if "count(*) from static_analysis_sessions where session_stamp=%s or session_label=%s" in sql:
+            return (1,)
         if "where (session_label=%s or session_stamp=%s) and is_canonical=1" in sql:
             return (582,)
         raise AssertionError(f"unexpected sql: {sql}")
@@ -275,13 +278,15 @@ def test_prompt_session_label_defaults_to_append_for_smoke_batch(monkeypatch, tm
             return [("20260428-all-smoke10-full",), ("20260428-all-smoke10-full-2",)]
         if "count(*) from static_analysis_runs where session_label=%s or session_stamp=%s" in sql:
             return (10,)
+        if "count(*) from static_analysis_sessions where session_stamp=%s or session_label=%s" in sql:
+            return (1,)
         if "where (session_label=%s or session_stamp=%s) and is_canonical=1" in sql:
             return (1076,)
         raise AssertionError(f"unexpected sql: {sql}")
 
     def _get_choice(_choices, default=None, prompt=None, **_kwargs):
         seen["strategy_default"] = str(default or "")
-        return "2"
+        return "1"
 
     monkeypatch.setattr(actions.prompt_utils, "prompt_text", _prompt)
     monkeypatch.setattr(actions.prompt_utils, "get_choice", _get_choice)
@@ -290,7 +295,7 @@ def test_prompt_session_label_defaults_to_append_for_smoke_batch(monkeypatch, tm
     updated = actions.prompt_session_label(params)
 
     assert seen["default"] == "20260428-all-smoke10-full"
-    assert seen["strategy_default"] == "2"
+    assert seen["strategy_default"] == "1"
     assert updated.canonical_action == "append"
     assert updated.session_stamp == "20260428-all-smoke10-full-3"
 

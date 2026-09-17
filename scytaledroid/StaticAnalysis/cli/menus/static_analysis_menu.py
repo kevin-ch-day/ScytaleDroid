@@ -22,8 +22,6 @@ from .static_analysis_menu_helpers import (
     ask_run_controls,
     collect_view_options,
     prompt_run_setup,
-    render_artifact_purge_outcome,
-    render_reset_outcome,
     render_version_diff,
 )
 from .static_analysis_menu_ops import (
@@ -61,8 +59,6 @@ def _run_command_for_selection(
     persistence_gate_status,
     query_runner,
     prompt_advanced_options,
-    reset_static_analysis_data,
-    purge_static_session_artifacts,
     build_static_run_spec,
     execute_run_spec,
     static_service,
@@ -127,41 +123,6 @@ def _run_command_for_selection(
                 params = prompt_advanced_options(params)
                 continue
 
-        if reset_mode == "session":
-            target_session = effective_params.session_stamp
-            reset_outcome = reset_static_analysis_data(
-                include_harvest=False,
-                session_label=target_session,
-                truncate_all=(reset_mode == "truncate_all"),
-            )
-            render_reset_outcome(
-                reset_outcome,
-                session_label=target_session,
-            )
-            if getattr(reset_outcome, "failed", None):
-                print(
-                    status_messages.status(
-                        "Static analysis cancelled: prior session reset did not complete cleanly.",
-                        level="error",
-                    )
-                )
-                prompt_utils.press_enter_to_continue()
-                return
-            artifact_outcome = purge_static_session_artifacts(
-                target_session,
-                static_run_ids=getattr(reset_outcome, "static_run_ids", ()),
-            )
-            render_artifact_purge_outcome(artifact_outcome, session_label=target_session)
-            if getattr(artifact_outcome, "failed", None):
-                print(
-                    status_messages.status(
-                        "Static analysis cancelled: prior local artifacts could not be cleared.",
-                        level="error",
-                    )
-                )
-                prompt_utils.press_enter_to_continue()
-                return
-
         try:
             spec = build_static_run_spec(
                 selection=selection,
@@ -191,10 +152,6 @@ def _run_command_for_selection(
 def static_analysis_menu() -> None:
     from scytaledroid.Database.db_utils import schema_gate
     from scytaledroid.Database.db_utils.menus import query_runner
-    from scytaledroid.Database.db_utils.reset_static import (
-        purge_static_session_artifacts,
-        reset_static_analysis_data,
-    )
     from scytaledroid.DeviceAnalysis.apk_library_menu import apk_library_menu
     from scytaledroid.StaticAnalysis.cli.core.run_specs import build_static_run_spec
     from scytaledroid.StaticAnalysis.cli.flows.run_dispatch import execute_run_spec
@@ -232,8 +189,6 @@ def static_analysis_menu() -> None:
             persistence_gate_status=_persistence_gate_status,
             query_runner=query_runner,
             prompt_advanced_options=prompt_advanced_options,
-            reset_static_analysis_data=reset_static_analysis_data,
-            purge_static_session_artifacts=purge_static_session_artifacts,
             build_static_run_spec=build_static_run_spec,
             execute_run_spec=execute_run_spec,
             static_service=static_service,

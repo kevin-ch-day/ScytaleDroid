@@ -538,3 +538,78 @@ def test_execute_run_spec_detailed_ignores_summary_cache_refresh_failure(monkeyp
 
     assert result.completed is True
     assert any("summary cache refresh failed" in message for message in warnings)
+
+
+def test_resolve_unique_session_stamp_treats_archive_report_as_persistent_history(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(run_dispatch.app_config, "DATA_DIR", str(tmp_path))
+    report_dir = tmp_path / "static_analysis" / "reports" / "archive" / "20260917-all-full"
+    report_dir.mkdir(parents=True)
+    (report_dir / "com.example.app.json").write_text("{}", encoding="utf-8")
+
+    from scytaledroid.Database.db_core import db_queries as core_q
+
+    def _fake_run_sql(query, params=(), **_kwargs):
+        if "SELECT DISTINCT COALESCE" in query:
+            return []
+        if "SELECT COUNT(*)" in query:
+            return (0,)
+        if "SELECT id" in query:
+            return None
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(core_q, "run_sql", _fake_run_sql)
+
+    stamp, label, action = run_dispatch._resolve_unique_session_stamp(
+        "20260917-all-full",
+        run_mode="interactive",
+        noninteractive=False,
+        quiet=True,
+        canonical_action="append",
+    )
+
+    assert stamp.startswith("20260917-all-full-")
+    assert label == stamp
+    assert action == "append"
+
+
+def test_resolve_unique_session_stamp_rejects_replace_of_persistent_history(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(run_dispatch.app_config, "DATA_DIR", str(tmp_path))
+
+    from scytaledroid.Database.db_core import db_queries as core_q
+
+    def _fake_run_sql(query, params=(), **_kwargs):
+        if "SELECT COUNT(*)" in query:
+            return (1,)
+        if "SELECT id" in query:
+            return None
+        if "SELECT DISTINCT COALESCE" in query:
+            return [("20260917-all-full",)]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(core_q, "run_sql", _fake_run_sql)
+
+    with pytest.raises(RuntimeError, match="cannot replace persistent session history"):
+        run_dispatch._resolve_unique_session_stamp(
+            "20260917-all-full",
+            run_mode="interactive",
+            noninteractive=False,
+            quiet=True,
+            canonical_action="replace",
+        )
+
+
+def test_resolve_unique_session_stamp_fails_closed_when_session_lookup_fails(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(run_dispatch.app_config, "DATA_DIR", str(tmp_path))
+
+    from scytaledroid.Database.db_core import db_queries as core_q
+
+    monkeypatch.setattr(core_q, "run_sql", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("db unavailable")))
+
+    with pytest.raises(RuntimeError, match="persistent session state cannot be inspected"):
+        run_dispatch._resolve_unique_session_stamp(
+            "20260917-all-full",
+            run_mode="interactive",
+            noninteractive=False,
+            quiet=True,
+            canonical_action=None,
+        )

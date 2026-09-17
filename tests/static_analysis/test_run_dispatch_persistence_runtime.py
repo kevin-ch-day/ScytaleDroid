@@ -120,6 +120,7 @@ def test_launch_scan_flow_emits_phase_logs(monkeypatch) -> None:
 
 def test_launch_scan_flow_blocks_when_another_static_run_is_active(monkeypatch, capsys) -> None:
     monkeypatch.setattr(run_dispatch, "_check_static_persistence_readiness", lambda *_a, **_k: (True, "ok", ""))
+    monkeypatch.setattr(run_dispatch, "_resolve_unique_session_stamp", lambda stamp, **_k: (stamp, stamp, "first_run"))
     monkeypatch.setattr(
         run_dispatch,
         "_acquire_static_run_lock",

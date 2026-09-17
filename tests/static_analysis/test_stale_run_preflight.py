@@ -22,6 +22,11 @@ from tests.static_analysis._run_dispatch_support import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _bypass_session_collision_resolution(monkeypatch):
+    monkeypatch.setattr(run_dispatch, "_resolve_unique_session_stamp", lambda stamp, **_k: (stamp, stamp, "first_run"))
+
+
 def _open_runs() -> OpenStaticRunsInspection:
     return OpenStaticRunsInspection(
         runs=(

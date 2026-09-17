@@ -261,7 +261,7 @@ def test_choose_run_profile_can_back_out_from_advanced_profiles(monkeypatch) -> 
     assert command is None
 
 
-def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) -> None:
+def test_run_setup_existing_session_requires_a_new_label(monkeypatch, capsys) -> None:
     actions = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.actions")
     selection = ScopeSelection("app", "Facebook | com.facebook.katana", (_dummy_group("com.facebook.katana"),))
     params = RunParameters(
@@ -279,6 +279,7 @@ def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) 
     )
 
     monkeypatch.setattr(actions, "_lookup_existing_session_state", lambda _stamp: (True, 1, 1832))
+    monkeypatch.setattr(actions, "_append_session_label", lambda stamp, _attempts: f"{stamp}-2")
     monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *_a, **_k: "1")
 
     action, effective, reset_mode = actions.prompt_run_setup(params, selection, command)
@@ -293,11 +294,48 @@ def test_run_setup_replace_existing_is_single_confirmation(monkeypatch, capsys) 
     assert "Existing session" in out
     assert "Canonical run" in out
     assert "static_run_id=1832" in out
-    assert "Replace this session and rerun" in out
+    assert "persistent history/evidence" in out
+    assert "Replace this session and rerun" not in out
     assert "Session reset" not in out
     assert action == "run"
-    assert effective.canonical_action == "replace"
-    assert reset_mode == "session"
+    assert effective.canonical_action == "append"
+    assert effective.session_stamp == "20260429-fcfk-full-2"
+    assert reset_mode is None
+
+
+def test_run_setup_existing_session_audit_never_launches_or_resets(monkeypatch, capsys) -> None:
+    actions = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.actions")
+    selection = ScopeSelection("app", "Example", (_dummy_group("com.example.app"),))
+    params = RunParameters(profile="full", scope="app", scope_label="Example", session_stamp="existing")
+    command = Command(id="1", title="Full", description="Full", kind="scan", profile="full")
+
+    monkeypatch.setattr(actions, "_lookup_existing_session_state", lambda _stamp: (True, 4, 99))
+    monkeypatch.setattr(actions.prompt_utils, "get_choice", lambda *_a, **_k: "2")
+
+    action, _effective, reset_mode = actions.prompt_run_setup(params, selection, command)
+
+    assert action == "cancel"
+    assert reset_mode is None
+    assert "Use the Audit and Grain triage commands above" in capsys.readouterr().out
+
+
+def test_run_setup_session_lookup_failure_fails_closed(monkeypatch, capsys) -> None:
+    actions = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.actions")
+    selection = ScopeSelection("app", "Example", (_dummy_group("com.example.app"),))
+    params = RunParameters(profile="full", scope="app", scope_label="Example", session_stamp="unknown")
+    command = Command(id="1", title="Full", description="Full", kind="scan", profile="full")
+
+    monkeypatch.setattr(
+        actions,
+        "_lookup_existing_session_state",
+        lambda _stamp: (_ for _ in ()).throw(RuntimeError("inspection unavailable")),
+    )
+
+    action, _effective, reset_mode = actions.prompt_run_setup(params, selection, command)
+
+    assert action == "cancel"
+    assert reset_mode is None
+    assert "inspection unavailable" in capsys.readouterr().out
 
 
 def _stored_report(*, package_name: str, version_code: str, version_name: str, sha256: str, generated_at: str):
@@ -554,3 +592,13 @@ def test_static_menu_renders_library_size_not_internal_state(monkeypatch, capsys
     assert "Primary Actions" not in out
     assert "Review" in out
     assert "Tools" not in out
+
+
+def test_normal_static_menu_has_no_reset_or_artifact_purge_path() -> None:
+    import inspect
+
+    menu_module = importlib.import_module("scytaledroid.StaticAnalysis.cli.menus.static_analysis_menu")
+    source = inspect.getsource(menu_module._run_command_for_selection)
+
+    assert "reset_static_analysis_data" not in source
+    assert "purge_static_session_artifacts" not in source
