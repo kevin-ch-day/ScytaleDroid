@@ -31,6 +31,51 @@ def _row(
     )
 
 
+def test_singleton_system_apk_is_planned_as_base():
+    row = _row(
+        "com.android.egg",
+        "Easter Egg",
+        primary_path="/system/app/EasterEgg/EasterEgg.apk",
+    )
+
+    plan = planner.build_harvest_plan([row], include_system_partitions=True)
+    pkg = plan.packages[0]
+
+    assert pkg.skip_reason is None
+    assert len(pkg.artifacts) == 1
+    artifact = pkg.artifacts[0]
+    assert artifact.artifact == "base"
+    assert artifact.is_split_member is False
+    assert artifact.file_name.endswith("__base.apk")
+
+
+def test_split_install_keeps_named_base_and_splits():
+    row = InventoryRow(
+        raw={},
+        package_name="com.example.split",
+        app_label="Split App",
+        installer="com.android.vending",
+        category=None,
+        primary_path="/data/app/com.example.split/base.apk",
+        profile_key=None,
+        profile=None,
+        version_name="1.0",
+        version_code="1",
+        apk_paths=[
+            "/data/app/com.example.split/base.apk",
+            "/data/app/com.example.split/split_config.en.apk",
+        ],
+        split_count=2,
+    )
+
+    plan = planner.build_harvest_plan([row], include_system_partitions=False)
+    artifacts = plan.packages[0].artifacts
+    assert [(a.artifact, a.is_split_member) for a in artifacts] == [
+        ("base", False),
+        ("split_config.en", True),
+    ]
+
+
 def test_non_root_policy_blocks_system_paths():
     rows = [
         _row(
