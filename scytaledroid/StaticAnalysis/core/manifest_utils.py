@@ -14,6 +14,46 @@ from .models import ComponentSummary, ManifestFlags
 from .utils import coerce_bool, coerce_optional_str
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
+
+
+def _android_attr(element: ElementTree.Element, name: str) -> str | None:
+    value = (element.get(f"{_ANDROID_NS}{name}") or "").strip()
+    return value or None
+
+
+def application_default_permission(application: ElementTree.Element | None) -> str | None:
+    """Return ``<application android:permission>`` when present."""
+
+    if application is None:
+        return None
+    return _android_attr(application, "permission")
+
+
+def effective_component_permission(
+    element: ElementTree.Element,
+    application_permission: str | None,
+) -> str | None:
+    """Return the component permission, inheriting the application default."""
+
+    explicit = _android_attr(element, "permission")
+    return explicit if explicit else application_permission
+
+
+def effective_provider_permissions(
+    element: ElementTree.Element,
+    application_permission: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(general, read, write)`` using Android provider defaults.
+
+    ``android:permission`` (component, else application) is the default for both
+    directions. Explicit ``readPermission`` / ``writePermission`` override one
+    direction without implying the other is protected.
+    """
+
+    general = effective_component_permission(element, application_permission)
+    read = _android_attr(element, "readPermission") or general
+    write = _android_attr(element, "writePermission") or general
+    return general, read, write
 _PERMISSION_OCCURRENCE_RECORD_FORMAT = "android-permission-intel-permission-occurrence-evidence-v1"
 _PERMISSION_OCCURRENCE_PRODUCT_FORMAT = "scytaledroid-permission-occurrence-extraction-product-v1"
 _PERMISSION_ROLE_FAMILIES = (
@@ -152,6 +192,7 @@ def build_manifest_evidence(
         return []
 
     target_sdk = _extract_target_sdk_int(manifest_root)
+    application_permission = application_default_permission(application)
     application_enabled = _manifest_bool(
         application.get(f"{_ANDROID_NS}enabled"),
         default=True,
@@ -222,7 +263,9 @@ def build_manifest_evidence(
             "export_reason": export_reason,
             "source_manifest": source_manifest,
             "source_semantics": source_semantics,
-            "permission": coerce_optional_str(element.get(f"{_ANDROID_NS}permission")),
+            "permission": effective_component_permission(element, application_permission),
+            "permission_explicit": _android_attr(element, "permission"),
+            "application_permission": application_permission,
             "process": coerce_optional_str(element.get(f"{_ANDROID_NS}process")),
             "target_sdk": target_sdk,
         }
@@ -233,15 +276,15 @@ def build_manifest_evidence(
             grant_uri = (
                 element.get(f"{_ANDROID_NS}grantUriPermissions") or ""
             ).strip().lower() in {"true", "1"}
+            general, read_perm, write_perm = effective_provider_permissions(
+                element, application_permission
+            )
             record.update(
                 {
                     "authorities": authority_list,
-                    "read_permission": coerce_optional_str(
-                        element.get(f"{_ANDROID_NS}readPermission")
-                    ),
-                    "write_permission": coerce_optional_str(
-                        element.get(f"{_ANDROID_NS}writePermission")
-                    ),
+                    "permission": general,
+                    "read_permission": read_perm,
+                    "write_permission": write_perm,
                     "grant_uri_permissions": grant_uri,
                 }
             )
@@ -668,6 +711,9 @@ __all__ = [
     "load_manifest_root",
     "build_manifest_flags",
     "extract_compile_sdk",
+    "application_default_permission",
+    "effective_component_permission",
+    "effective_provider_permissions",
     "collect_exported_components",
     "build_manifest_evidence",
     "collect_custom_permission_definitions",

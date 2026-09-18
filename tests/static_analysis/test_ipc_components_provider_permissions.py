@@ -227,6 +227,150 @@ def test_provider_acl_parser_uses_legacy_exported_default_and_enabled_state() ->
     assert providers["com.example.DisabledProvider"].export_reason == "component_disabled"
 
 
+def test_application_permission_is_inherited_by_components_without_explicit_guard() -> None:
+    manifest = ElementTree.fromstring(
+        """
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+            package="com.example">
+            <permission android:name="com.example.APP" android:protectionLevel="signature" />
+            <application android:permission="com.example.APP">
+                <activity android:name="com.example.InheritedActivity" android:exported="true" />
+                <service android:name="com.example.InheritedService" android:exported="true" />
+                <receiver android:name="com.example.InheritedReceiver" android:exported="true" />
+                <provider
+                    android:name="com.example.InheritedProvider"
+                    android:authorities="com.example.inherited"
+                    android:exported="true" />
+                <activity
+                    android:name="com.example.OverrideActivity"
+                    android:exported="true"
+                    android:permission="com.example.OVERRIDE" />
+            </application>
+        </manifest>
+        """
+    )
+    components = {component.name: component for component in iter_manifest_components(manifest)}
+    levels = {"com.example.APP": ("signature",), "com.example.OVERRIDE": ("signature",)}
+
+    inherited = _classify_component(
+        components["com.example.InheritedActivity"],
+        protection_levels=levels,
+        catalog={},
+    )
+    override = _classify_component(
+        components["com.example.OverrideActivity"],
+        protection_levels=levels,
+        catalog={},
+    )
+    provider = _classify_component(
+        components["com.example.InheritedProvider"],
+        protection_levels=levels,
+        catalog={},
+    )
+
+    assert components["com.example.InheritedActivity"].permission == "com.example.APP"
+    assert components["com.example.InheritedService"].permission == "com.example.APP"
+    assert components["com.example.InheritedReceiver"].permission == "com.example.APP"
+    assert components["com.example.InheritedProvider"].permission == "com.example.APP"
+    assert components["com.example.OverrideActivity"].permission == "com.example.OVERRIDE"
+    assert inherited is not None and inherited.status is Badge.INFO
+    assert override is not None and "com.example.OVERRIDE" in override.title
+    assert provider is not None and provider.status is Badge.INFO
+
+
+def test_provider_unprotected_write_is_exposed_when_only_read_is_guarded() -> None:
+    components = tuple(
+        iter_manifest_components(
+            _manifest(
+                """
+                <provider
+                    android:name="com.example.ReadOnlyGuard"
+                    android:authorities="com.example.readonly"
+                    android:exported="true"
+                    android:readPermission="com.example.READ" />
+                """
+            )
+        )
+    )
+    finding = _classify_component(
+        components[0],
+        protection_levels={"com.example.READ": ("signature",)},
+        catalog={},
+    )
+    acl = {provider.name: provider for provider in collect_acl_providers(_manifest(
+        """
+        <provider
+            android:name="com.example.ReadOnlyGuard"
+            android:authorities="com.example.readonly"
+            android:exported="true"
+            android:readPermission="com.example.READ" />
+        """
+    ))}
+    from scytaledroid.StaticAnalysis.detectors.provider_acl import _classify_provider
+
+    acl_finding = _classify_provider(
+        acl["com.example.ReadOnlyGuard"],
+        protection_levels={"com.example.READ": ("signature",)},
+        catalog={},
+    )
+    assert finding is not None
+    assert finding.status is Badge.FAIL
+    assert "unprotected write" in finding.title
+    assert acl["com.example.ReadOnlyGuard"].read_permission == "com.example.READ"
+    assert acl["com.example.ReadOnlyGuard"].write_permission is None
+    assert acl_finding is not None
+    assert "unprotected write" in acl_finding.title
+
+
+def test_provider_unprotected_read_is_exposed_when_only_write_is_guarded() -> None:
+    components = tuple(
+        iter_manifest_components(
+            _manifest(
+                """
+                <provider
+                    android:name="com.example.WriteOnlyGuard"
+                    android:authorities="com.example.writeonly"
+                    android:exported="true"
+                    android:writePermission="com.example.WRITE" />
+                """
+            )
+        )
+    )
+    finding = _classify_component(
+        components[0],
+        protection_levels={"com.example.WRITE": ("signature",)},
+        catalog={},
+    )
+    assert finding is not None
+    assert finding.status is Badge.FAIL
+    assert "unprotected read" in finding.title
+
+
+def test_provider_general_permission_protects_both_directions() -> None:
+    components = tuple(
+        iter_manifest_components(
+            _manifest(
+                """
+                <provider
+                    android:name="com.example.GeneralGuard"
+                    android:authorities="com.example.general"
+                    android:exported="true"
+                    android:permission="com.example.READ" />
+                """
+            )
+        )
+    )
+    finding = _classify_component(
+        components[0],
+        protection_levels={"com.example.READ": ("signature",)},
+        catalog={},
+    )
+    assert components[0].read_permission == "com.example.READ"
+    assert components[0].write_permission == "com.example.READ"
+    assert finding is not None
+    assert finding.status is Badge.INFO
+
+
 def test_storage_surface_provider_parser_uses_effective_exported_state() -> None:
     manifest = _manifest_with_target(
         """

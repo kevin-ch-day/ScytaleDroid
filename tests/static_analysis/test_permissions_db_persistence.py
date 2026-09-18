@@ -293,3 +293,51 @@ def test_env_opt_in_authorizes_permission_intel_mutation(monkeypatch) -> None:
     assert any(call["triage_status"] == "aosp_missing" for call in unknown_calls)
     assert queue_calls[0]["permission_string"] == "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION"
     assert oem_calls == ["vendor.example.permission.FOO"]
+
+
+def test_ordinary_scan_does_not_mutate_oem_or_malformed_intel(monkeypatch) -> None:
+    unknown_calls: list[dict[str, object]] = []
+    oem_calls: list[str] = []
+    monkeypatch.delenv("SCYTALEDROID_PERMISSION_INTEL_MUTATION_AUTHORIZED", raising=False)
+    monkeypatch.setattr(permission_dicts_db, "fetch_aosp_entries", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        permission_dicts_db,
+        "fetch_oem_entries",
+        lambda *_a, **_k: {"vendor.oem.permission.FOO": {"permission_string": "vendor.oem.permission.FOO"}},
+    )
+    monkeypatch.setattr(permission_dicts_db, "fetch_vendor_prefix_rules", lambda *_a, **_k: [])
+    monkeypatch.setattr(permission_dicts_db, "upsert_unknown", lambda payload: unknown_calls.append(dict(payload)))
+    monkeypatch.setattr(permission_dicts_db, "insert_queue", lambda _payload: unknown_calls.append({"queue": True}))
+    monkeypatch.setattr(permission_dicts_db, "update_oem_seen", lambda name: oem_calls.append(name))
+
+    report = type(
+        "Report",
+        (),
+        {
+            "manifest": type(
+                "Manifest",
+                (),
+                {"package_name": "com.example.app", "version_name": "1", "version_code": "1", "target_sdk": 35},
+            )(),
+            "hashes": {"sha256": "a" * 64},
+            "file_name": "base.apk",
+            "permissions": type(
+                "Perms",
+                (),
+                {
+                    "declared": (
+                        "android.permission.INTERNET",
+                        "android.permission.NOT_IN_AOSP_CATALOG",
+                        "vendor.oem.permission.FOO",
+                        "not a token",
+                    ),
+                    "custom": (),
+                },
+            )(),
+        },
+    )()
+    counts = permissions_db.persist_permissions_to_db(report)
+    assert counts["oem"] == 1
+    assert counts["unknown"] >= 1
+    assert unknown_calls == []
+    assert oem_calls == []

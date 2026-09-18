@@ -17,6 +17,10 @@ from ..core.findings import (
     MasvsCategory,
     SeverityLevel,
 )
+from ..core.manifest_utils import (
+    application_default_permission,
+    effective_provider_permissions,
+)
 from ..core.results_builder import make_detector_result
 from ..modules.permissions import classify_permission, load_permission_catalog
 from .base import BaseDetector, register_detector
@@ -93,6 +97,7 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
         return tuple()
 
     target_sdk = _extract_target_sdk_int(manifest_root)
+    application_permission = application_default_permission(application)
     application_enabled = _manifest_bool(
         application.get(f"{_ANDROID_NS}enabled"),
         default=True,
@@ -132,9 +137,9 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
                 else "component_disabled"
             )
 
-        read_perm = (element.get(f"{_ANDROID_NS}readPermission") or "").strip() or None
-        write_perm = (element.get(f"{_ANDROID_NS}writePermission") or "").strip() or None
-        permission = (element.get(f"{_ANDROID_NS}permission") or "").strip() or None
+        permission, read_perm, write_perm = effective_provider_permissions(
+            element, application_permission
+        )
         grant_uri = (
             element.get(f"{_ANDROID_NS}grantUriPermissions") or ""
         ).strip().lower() in {"true", "1"}
@@ -174,8 +179,8 @@ def _collect_providers(manifest_root: ElementTree.Element) -> Sequence[ProviderR
                 enabled=provider_enabled,
                 enabled_explicit=enabled_explicit,
                 application_enabled=application_enabled,
-                read_permission=read_perm or permission,
-                write_permission=write_perm or permission,
+                read_permission=read_perm,
+                write_permission=write_perm,
                 general_permission=permission,
                 grant_uri_permissions=grant_uri,
                 authorities=tuple(authorities),
@@ -230,6 +235,36 @@ def _classify_provider(
                 "Set readPermission/writePermission or mark the provider private."
             ),
             metrics={"risk": risk},
+        )
+
+    if not provider.read_permission:
+        return Finding(
+            finding_id=f"provider_unprotected_read_{provider.name}",
+            title=f"Exported provider with unprotected read — {provider.name}",
+            severity_gate=SeverityLevel.P0,
+            category_masvs=MasvsCategory.PLATFORM,
+            status=Badge.FAIL,
+            because=(
+                "Provider write ACL is present but the read direction is unprotected;"
+                " other apps can query content."
+            ),
+            remediate="Set android:readPermission or a general android:permission.",
+            metrics={"risk": "Unprotected read"},
+        )
+
+    if not provider.write_permission:
+        return Finding(
+            finding_id=f"provider_unprotected_write_{provider.name}",
+            title=f"Exported provider with unprotected write — {provider.name}",
+            severity_gate=SeverityLevel.P0,
+            category_masvs=MasvsCategory.PLATFORM,
+            status=Badge.FAIL,
+            because=(
+                "Provider read ACL is present but the write direction is unprotected;"
+                " other apps can modify content."
+            ),
+            remediate="Set android:writePermission or a general android:permission.",
+            metrics={"risk": "Unprotected write"},
         )
 
     if provider.grant_uri_permissions and not provider.general_permission:
@@ -360,7 +395,7 @@ def _build_metrics(
     insecure = [
         provider
         for provider in exported
-        if not provider.read_permission and not provider.write_permission
+        if not provider.read_permission or not provider.write_permission
     ]
 
     guard_histogram: Counter[str] = Counter()

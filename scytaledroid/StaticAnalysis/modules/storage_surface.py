@@ -12,6 +12,10 @@ from xml.etree import ElementTree
 from scytaledroid.StaticAnalysis._androguard import merge_bounds_warnings, open_apk_safely
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
+from ..core.manifest_utils import (
+    application_default_permission,
+    effective_provider_permissions,
+)
 from .module_api import AppModuleContext, ModuleResult, StaticModule
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
@@ -172,6 +176,7 @@ def _collect_providers(manifest_root) -> Sequence[_ProviderRecord]:
         return tuple()
 
     target_sdk = _extract_target_sdk_int(manifest_root)
+    application_permission = application_default_permission(application)
     application_enabled = _manifest_bool(
         application.get(f"{_ANDROID_NS}enabled"),
         default=True,
@@ -191,9 +196,9 @@ def _collect_providers(manifest_root) -> Sequence[_ProviderRecord]:
         if exported and not provider_enabled:
             exported = False
         grant_uri = (element.get(f"{_ANDROID_NS}grantUriPermissions") or "").strip().lower() in {"true", "1"}
-        read_perm = (element.get(f"{_ANDROID_NS}readPermission") or "").strip() or None
-        write_perm = (element.get(f"{_ANDROID_NS}writePermission") or "").strip() or None
-        base_perm = (element.get(f"{_ANDROID_NS}permission") or "").strip() or None
+        base_perm, read_perm, write_perm = effective_provider_permissions(
+            element, application_permission
+        )
         authorities_raw = (element.get(f"{_ANDROID_NS}authorities") or "").split(",")
         authorities = tuple(sorted({token.strip() for token in authorities_raw if token.strip()}))
 
@@ -233,8 +238,8 @@ def _collect_providers(manifest_root) -> Sequence[_ProviderRecord]:
                 authorities=authorities,
                 exported=exported,
                 enabled=provider_enabled,
-                read_permission=read_perm or base_perm,
-                write_permission=write_perm or base_perm,
+                read_permission=read_perm,
+                write_permission=write_perm,
                 base_permission=base_perm,
                 grant_uri_permissions=grant_uri,
                 path_permissions=tuple(path_perms),

@@ -17,6 +17,11 @@ from ..core.findings import (
     MasvsCategory,
     SeverityLevel,
 )
+from ..core.manifest_utils import (
+    application_default_permission,
+    effective_component_permission,
+    effective_provider_permissions,
+)
 from ..core.results_builder import make_detector_result
 from ..modules.permissions import classify_permission, load_permission_catalog
 from .base import BaseDetector, register_detector
@@ -59,6 +64,7 @@ def iter_manifest_components(
         return tuple()
 
     target_sdk = _extract_target_sdk_int(manifest_root)
+    application_permission = application_default_permission(application)
     application_enabled = _manifest_bool(
         application.get(f"{_ANDROID_NS}enabled"),
         default=True,
@@ -115,9 +121,14 @@ def iter_manifest_components(
                 else "component_disabled"
             )
 
-        permission = element.get(f"{_ANDROID_NS}permission")
-        read_permission = element.get(f"{_ANDROID_NS}readPermission")
-        write_permission = element.get(f"{_ANDROID_NS}writePermission")
+        if tag == "provider":
+            permission, read_permission, write_permission = effective_provider_permissions(
+                element, application_permission
+            )
+        else:
+            permission = effective_component_permission(element, application_permission)
+            read_permission = None
+            write_permission = None
         authorities: list[str] = []
         if tag == "provider":
             auth_value = element.get(f"{_ANDROID_NS}authorities") or ""
@@ -285,16 +296,9 @@ def _classify_component(
     component_label = component.component_type.replace("-", " ")
 
     if component.component_type == "provider":
-        provider_permissions = tuple(
-            perm
-            for perm in (
-                (component.read_permission or "").strip(),
-                (component.write_permission or "").strip(),
-                permission,
-            )
-            if perm
-        )
-        if not provider_permissions:
+        read_perm = (component.read_permission or permission or "").strip()
+        write_perm = (component.write_permission or permission or "").strip()
+        if not read_perm and not write_perm:
             return Finding(
                 finding_id=f"ipc_provider_world_{base_id}",
                 title=f"Exported provider without permission — {component.name}",
@@ -310,7 +314,42 @@ def _classify_component(
                     " as private (exported=false)."
                 ),
             )
+        if not read_perm:
+            return Finding(
+                finding_id=f"ipc_provider_unprotected_read_{base_id}",
+                title=f"Exported provider with unprotected read — {component.name}",
+                severity_gate=SeverityLevel.P0,
+                category_masvs=MasvsCategory.PLATFORM,
+                status=Badge.FAIL,
+                because=(
+                    f"Provider {component.name} protects writes but leaves the read"
+                    " direction unprotected, allowing other apps to query content."
+                ),
+                remediate=(
+                    "Set android:readPermission (or a general android:permission) for the"
+                    " read direction, or mark the provider private."
+                ),
+            )
+        if not write_perm:
+            return Finding(
+                finding_id=f"ipc_provider_unprotected_write_{base_id}",
+                title=f"Exported provider with unprotected write — {component.name}",
+                severity_gate=SeverityLevel.P0,
+                category_masvs=MasvsCategory.PLATFORM,
+                status=Badge.FAIL,
+                because=(
+                    f"Provider {component.name} protects reads but leaves the write"
+                    " direction unprotected, allowing other apps to modify content."
+                ),
+                remediate=(
+                    "Set android:writePermission (or a general android:permission) for the"
+                    " write direction, or mark the provider private."
+                ),
+            )
 
+        provider_permissions = tuple(
+            perm for perm in (read_perm, write_perm, permission) if perm
+        )
         provider_guard, permission_display = _provider_permission_guard(
             provider_permissions,
             protection_levels=protection_levels,
