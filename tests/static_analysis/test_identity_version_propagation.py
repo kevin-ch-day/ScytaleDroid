@@ -164,5 +164,5 @@ def test_static_run_lookup_reads_version_from_apk_sets(monkeypatch) -> None:
     query = str(captured["query"])
     assert "apk_sets" in query
     assert "artifact_set_hash_version" in query
-    assert "sar.artifact_set_hash_version" not in query
+    assert "sar.artifact_set_hash_version" in query
     assert row["artifact_set_hash_version"] == "v1"

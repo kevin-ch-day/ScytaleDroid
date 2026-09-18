@@ -78,6 +78,41 @@ def test_build_dynamic_plan_uses_canonical_signer_set_hash() -> None:
     assert identity["package_name_lc"] == "com.example.app"
     assert identity["artifact_set_hash_version"] == "v1"
     assert plan["package_name"] == "com.example.app"
+
+
+def test_build_dynamic_plan_preserves_v2_identity() -> None:
+    report = StaticAnalysisReport(
+        file_path="/tmp/example.apk",
+        relative_path="example.apk",
+        file_name="example.apk",
+        file_size=123,
+        hashes={"sha256": "f" * 64},
+        manifest=ManifestSummary(
+            package_name="com.example.app", version_name="1.0", version_code="123"
+        ),
+        manifest_flags=ManifestFlags(),
+        permissions=PermissionSummary(),
+        components=ComponentSummary(),
+        exported_components=ComponentSummary(),
+        signatures=("aa" * 32,),
+        metadata={
+            "package": "com.example.app",
+            "version_name": "1.0",
+            "version_code": "123",
+            "base_apk_sha256": "a" * 64,
+            "artifact_set_hash": "e" * 64,
+            "artifact_set_hash_version": "v2",
+            "apk_set_id": 9001,
+            "run_signature": "c" * 64,
+            "run_signature_version": "v1",
+            "static_handoff_hash": "d" * 64,
+            "identity_valid": True,
+            "identity_error_reason": None,
+        },
+    )
+    plan = build_dynamic_plan(report, {"baseline": {}})
+    assert plan["run_identity"]["artifact_set_hash_version"] == "v2"
+    assert plan["run_identity"]["artifact_set_hash"] == "e" * 64
     assert plan["version_name"] == "1.0"
     assert plan["version_code"] == "123"
     assert plan["network_targets"]["cleartext_domains"] == []

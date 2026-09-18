@@ -222,6 +222,7 @@ SELECT
   sar.apk_set_id,
   sar.base_apk_sha256,
   sar.artifact_set_hash,
+  sar.artifact_set_hash_version,
   sar.identity_mode,
   sar.identity_conflict_flag,
   sar.run_class,

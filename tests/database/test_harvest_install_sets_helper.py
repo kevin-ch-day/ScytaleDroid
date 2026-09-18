@@ -146,3 +146,34 @@ def test_upsert_install_set_reuses_stored_v1_identity(monkeypatch) -> None:
     assert captured["set_params"][7] == stored_v1
     assert captured["set_params"][8] == V1
     assert stored_v1 != compute_artifact_set_hash(_members(), version=V2)
+
+
+def test_upsert_install_set_reuses_stored_v2_identity(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    stored_v2 = compute_artifact_set_hash(_members(), version=V2)
+
+    def _run_sql(_sql, params=(), **kwargs):
+        query_name = str(kwargs.get("query_name") or "")
+        if "lookup_existing_identity" in query_name:
+            return {
+                "apk_set_id": 9001,
+                "artifact_set_hash": stored_v2,
+                "artifact_set_hash_version": V2,
+            }
+        if "lookup_app_version" in query_name:
+            return {}
+        if "upsert_session" in query_name:
+            return 1
+        if "upsert_set" in query_name:
+            captured["set_params"] = params
+            return 9001
+        return None
+
+    monkeypatch.setattr(install_sets, "ensure_tables", lambda: None)
+    monkeypatch.setattr(install_sets, "run_sql", _run_sql)
+
+    apk_set_id = install_sets.upsert_install_set(_record())
+
+    assert apk_set_id == 9001
+    assert captured["set_params"][7] == stored_v2
+    assert captured["set_params"][8] == V2

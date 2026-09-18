@@ -29,6 +29,7 @@ def test_v_static_handoff_manifest_sql_matches_contract_predicates():
     low = handoff.lower()
     assert "upper(trim(coalesce(sar.run_class, ''))) = 'canonical'" in low
     assert "coalesce(sar.identity_valid, 0) = 1" in low
+    assert "sar.artifact_set_hash_version" in low
 
 
 def test_manifest_orders_web_consumer_masvs_and_handoff_after_canonical_prereqs():

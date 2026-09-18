@@ -5,10 +5,13 @@ from __future__ import annotations
 from scytaledroid.Database.db_core import DatabaseError
 from scytaledroid.Database.db_core import db_queries as core_q
 
-_APK_SET_HASH_VERSION_SQL = """(SELECT s.artifact_set_hash_version
-                 FROM apk_sets s
-                WHERE s.apk_set_id = sar.apk_set_id
-                LIMIT 1) AS artifact_set_hash_version"""
+_APK_SET_HASH_VERSION_SQL = """COALESCE(
+                 NULLIF(TRIM(sar.artifact_set_hash_version), ''),
+                 (SELECT s.artifact_set_hash_version
+                    FROM apk_sets s
+                   WHERE s.apk_set_id = sar.apk_set_id
+                   LIMIT 1)
+               ) AS artifact_set_hash_version"""
 
 
 def missing_db_fields(row: dict[str, object]) -> list[str]:

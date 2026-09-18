@@ -82,6 +82,35 @@ def test_compute_run_identity_reuses_stored_v1_set(tmp_path: Path, monkeypatch) 
     assert identity["artifact_set_hash"] != compute_artifact_set_hash(members, version=V2)
 
 
+def test_compute_run_identity_reuses_stored_v2_set(tmp_path: Path, monkeypatch) -> None:
+    base = _artifact(tmp_path, "base", "base", is_split_member=False)
+    split = _artifact(tmp_path, "split", "split_v2")
+    members = [
+        {"role": "base", "split_name": "base", "sha256": base.sha256},
+        {"role": "split", "split_name": "split_v2", "sha256": split.sha256},
+    ]
+    stored_v2 = compute_artifact_set_hash(members, version=V2)
+    captured: dict[str, object] = {}
+
+    def _lookup(*, v1_hash: str, v2_hash: str) -> dict[str, object] | None:
+        captured["v1_hash"] = v1_hash
+        captured["v2_hash"] = v2_hash
+        return {
+            "apk_set_id": "9001",
+            "artifact_set_hash": stored_v2,
+            "artifact_set_hash_version": V2,
+        }
+
+    monkeypatch.setattr(scan_identity_helpers, "lookup_stored_install_set_identity", _lookup)
+    identity = scan_flow._compute_run_identity(FakeGroup(base, [split, base]))
+
+    assert identity["identity_valid"] is True
+    assert identity["artifact_set_hash"] == stored_v2
+    assert identity["artifact_set_hash_version"] == V2
+    assert captured["v1_hash"] == compute_artifact_set_hash(members, version=V1)
+    assert captured["v2_hash"] == stored_v2
+
+
 def test_compute_run_identity_missing_base():
     group = FakeGroup(None, [])
     identity = scan_flow._compute_run_identity(group)
