@@ -8,6 +8,7 @@ import pytest
 from scytaledroid.Database.db_utils.external_sdk_tracker_intel import (
     EXODUS_SOURCE_KEY,
     EXODUS_TRACKERS_URL,
+    _assert_exodus_tracker_url,
     build_refresh_summary,
     ensure_external_tracker_intel_schema,
     load_verified_refresh_receipt,
@@ -50,6 +51,20 @@ def test_normalize_exodus_trackers_maps_expected_fields() -> None:
     assert json.loads(row["documentation_json"]) == ["https://docs.example.test"]
     assert row["creation_date"] == "2024-01-15"
     assert row["source_url"] == EXODUS_TRACKERS_URL
+
+
+def test_assert_exodus_tracker_url_rejects_ssrf_targets() -> None:
+    assert _assert_exodus_tracker_url(EXODUS_TRACKERS_URL) == EXODUS_TRACKERS_URL
+    for url in (
+        "http://reports.exodus-privacy.eu.org/api/trackers",
+        "https://evil.example/api/trackers",
+        "https://127.0.0.1/latest/meta-data/",
+        "https://reports.exodus-privacy.eu.org:8443/api/trackers",
+        "https://user:pass@reports.exodus-privacy.eu.org/api/trackers",
+        "file:///etc/passwd",
+    ):
+        with pytest.raises(ValueError, match="refusing tracker URL"):
+            _assert_exodus_tracker_url(url)
 
 
 def test_ensure_schema_and_upsert_use_expected_query_names() -> None:

@@ -30,6 +30,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident  # noqa: E402
+
 # Session-wide cohort scans: counts aggregate every package; one static_run_id is only a drill-down anchor.
 GROUP_SCOPE_VERIFICATION_GUIDANCE = (
     "Group/cohort scope: table counts are session-wide aggregates; the static_run_id in the "
@@ -56,7 +58,10 @@ def _imports():  # noqa: ANN202 - small script helper
 
 
 def _fetch_columns(cursor, table: str) -> set[str]:
-    cursor.execute(f"SHOW COLUMNS FROM {table}")
+    quoted = quote_sql_ident(table)
+    if quoted is None:
+        return set()
+    cursor.execute(f"SHOW COLUMNS FROM {quoted}")
     return {row[0] for row in cursor.fetchall()}
 
 
@@ -381,7 +386,10 @@ def _count_for_table(
         return table, None, "SKIP (no run_id/session_stamp column)"
 
     try:
-        cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", params)
+        quoted = quote_sql_ident(table)
+        if quoted is None:
+            return table, None, "SKIP (unsafe identifier)"
+        cursor.execute(f"SELECT COUNT(*) FROM {quoted} WHERE {where}", params)
         (count,) = cursor.fetchone()
         return table, int(count), "OK"
     except Exception as exc:  # pragma: no cover - defensive diagnostics

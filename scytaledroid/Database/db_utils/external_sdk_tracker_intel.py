@@ -9,13 +9,15 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from scytaledroid.Database.db_queries.canonical.schema import CREATE_EXTERNAL_SDK_TRACKER_INTEL
 
 RunSql = Callable[..., Any]
 
 EXODUS_TRACKERS_URL = "https://reports.exodus-privacy.eu.org/api/trackers"
+_ALLOWED_EXODUS_HOSTS = frozenset({"reports.exodus-privacy.eu.org"})
 EXODUS_SOURCE_KEY = "exodus_privacy"
 EXODUS_SOURCE_TERMS_NOTE = (
     "Exodus Privacy API database results: ODbL 1.0; individual contents: "
@@ -88,17 +90,38 @@ def load_verified_refresh_receipt(
     return rows, provenance
 
 
+class _RejectRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise ValueError("refusing HTTP redirect from tracker URL")
+
+
+def _assert_exodus_tracker_url(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme != "https"
+        or host not in _ALLOWED_EXODUS_HOSTS
+        or parsed.username
+        or parsed.password
+        or parsed.port not in {None, 443}
+    ):
+        raise ValueError("refusing tracker URL that is not the Exodus HTTPS API")
+    return str(url).strip()
+
+
 def fetch_exodus_trackers(url: str = EXODUS_TRACKERS_URL, *, timeout: int = 30) -> dict[str, Any]:
     """Fetch the current Exodus tracker dictionary."""
 
+    safe_url = _assert_exodus_tracker_url(url)
     request = Request(
-        url,
+        safe_url,
         headers={
             "User-Agent": "ScytaleDroid external-sdk-tracker-intel/1.0",
             "Accept": "application/json",
         },
     )
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed HTTPS source
+    opener = build_opener(_RejectRedirect)
+    with opener.open(request, timeout=timeout) as response:  # noqa: S310 - pinned HTTPS source
         return json.load(response)
 
 

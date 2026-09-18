@@ -1,50 +1,79 @@
-# Python bytecode and caches
+# Local and generated files. Tracked contracts such as .env.example stay in Git.
+# Machine-local trees (data/, output/, logs/, evidence/) are not architecture truth.
+
+# --- Python bytecode and caches ---
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
 
-# Distribution / packaging
+# --- Distribution / packaging ---
 build/
 dist/
+wheels/
+*.egg
 *.egg-info/
+pip-wheel-metadata/
 
-# Virtual environments
+# --- Virtual environments ---
 .venv/
 venv/
 env/
-.venv
 
-# Test / coverage artifacts
-htmlcov/
-.coverage*
-pytest_cache/
-.pytest_cache/
+# --- Tooling caches ---
+.ruff_cache/
 .mypy_cache/
+.pytest_cache/
+pytest_cache/
+.hypothesis/
+.tox/
+.nox/
+.benchmarks/
+.cache/
+.ipynb_checkpoints/
 
-# IDE settings
+# --- Test / coverage ---
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+nosetests.xml
+pytestdebug.log
+
+# --- IDE / editor / OS ---
 .idea/
 .vscode/
 *.swp
 *.swo
+*.orig
+*~
+.DS_Store
+Thumbs.db
 
-# Local runtime artifacts
+# --- Secrets and local environment ---
+.env
+.env.*
+!.env.example
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# --- Runtime / evidence trees ---
 logs/
 output/
-.env
-.setup/
-data/state/
-data/watchlists/
-data/apks/
-data/device_apks/
-data/static_analysis/reports/
-data/static_analysis/baseline/
-data/static_analysis/dynamic_plan/
-data/audit/
-data/sessions/
 data/
-data/db/scytaledroid.sqlite
 /evidence/
-# Operational DB tooling (posture checks, view recreation helpers). Exclude ad-hoc local dumps only.
+.setup/
+migration-checks/
+
+# --- Local SQL and database dumps (do not ignore tracked scripts/db/*.sql) ---
 scripts/db/local_*.sql
 scripts/db/*.local.sql
 /backups/
@@ -56,18 +85,25 @@ scripts/db/*.local.sql
 *.sql.xz
 *.dump
 *.dmp
+*.sqlite
 *.sqlite3
-*.log
-*.tmp
-*.bak
 
-# Generated permission catalog snapshots
+# --- Harvested / captured research payloads ---
+*.apk
+*.aab
+*.apks
+*.xapk
+*.pcap
+*.pcapng
+*.cap
+
+# --- Permission catalog download cache ---
 scytaledroid/Utils/AndroidPermCatalog/cache/*.json
 scytaledroid/Utils/AndroidPermCatalog/cache/*.csv
 
-# Misc
-.DS_Store
-
-# Prevent accidental large binaries
+# --- Scratch / logs / packages ---
+*.log
+*.tmp
+*.bak
 *.rpm
 teamviewer*.rpm

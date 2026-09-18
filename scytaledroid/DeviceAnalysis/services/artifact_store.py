@@ -96,7 +96,8 @@ def compose_harvest_run_destination(*, serial: str, run_id: str) -> tuple[Path, 
     """
 
     label = filesystem_harvest_run_label(run_id)
-    dest_root = device_apks_root() / serial.strip() / "runs" / label
+    serial_part = _safe_name(serial.strip())
+    dest_root = device_apks_root() / serial_part / "runs" / label
     return dest_root, label
 
 

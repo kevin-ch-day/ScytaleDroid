@@ -5,15 +5,19 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 
 from .static_run_map import extract_static_run_ids, load_run_map
 
 
 def table_has_column(table: str, column: str) -> bool:
     """Return True when a DB table contains a column."""
+    quoted = quote_sql_ident(table)
+    if quoted is None:
+        return False
     try:
         row = core_q.run_sql(
-            f"SHOW COLUMNS FROM {table} LIKE %s",
+            f"SHOW COLUMNS FROM {quoted} LIKE %s",
             (column,),
             fetch="one",
         )

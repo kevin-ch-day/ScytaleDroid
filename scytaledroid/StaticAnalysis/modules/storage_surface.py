@@ -10,6 +10,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from scytaledroid.StaticAnalysis._androguard import merge_bounds_warnings, open_apk_safely
+from scytaledroid.Utils.IO.zip_safety import is_unsafe_zip_member_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.manifest_utils import (
@@ -295,6 +296,8 @@ def _load_resource_cache(apk_path: Path) -> Mapping[str, list[str]]:
     cache: dict[str, list[str]] = {}
     with zipfile.ZipFile(apk_path, "r") as archive:
         for name in archive.namelist():
+            if is_unsafe_zip_member_name(name):
+                continue
             if not name.startswith("res/xml") or not name.endswith(".xml"):
                 continue
             key = Path(name).stem

@@ -333,6 +333,9 @@ def test_remote_api_bind_allows_explicit_tls_terminating_proxy(monkeypatch) -> N
 
     assert app.state.scytaledroid_transport_mode == "reverse_proxy_tls"
     assert client.get("/jobs", headers={"X-API-Key": "unit-test-secret"}).status_code == 200
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+    assert client.get("/redoc").status_code == 404
 
 
 def test_upload_rejects_wrong_extension(monkeypatch, tmp_path: Path) -> None:
@@ -571,3 +574,54 @@ def test_auth_bypass_decision_is_bound_at_app_creation(monkeypatch) -> None:
     response = client.get("/jobs")
 
     assert response.status_code == 200
+
+
+def _zip_slip_apk_bytes() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("AndroidManifest.xml", b"<manifest package='com.example.upload' />")
+        archive.writestr("../evil.txt", b"pwn")
+    return buf.getvalue()
+
+
+def test_upload_rejects_zip_slip_member_names(monkeypatch, tmp_path: Path) -> None:
+    testclient = require_fastapi_testclient()
+    _enable_api_test_bypass(monkeypatch)
+    monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
+    client = testclient.TestClient(api_service.build_api_app())
+
+    response = client.post(
+        "/upload",
+        files={"file": ("example.apk", _zip_slip_apk_bytes(), "application/vnd.android.package-archive")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["reason_code"] == api_service.UPLOAD_REJECT_ZIP_SLIP
+    assert not list((tmp_path / "store").glob("**/*"))
+
+
+def test_evidence_zip_sanitizes_content_disposition_filename(monkeypatch, tmp_path: Path) -> None:
+    assert api_service._safe_download_filename("evil\r\nX-Injected: yes") == "evil-X-Injected-yes_evidence.zip"
+
+    testclient = require_fastapi_testclient()
+    _enable_api_test_bypass(monkeypatch)
+    monkeypatch.setattr(api_service.app_config, "DATA_DIR", str(tmp_path))
+    report_dir = tmp_path / "static_analysis" / "reports" / "archive" / "safe-session"
+    report_dir.mkdir(parents=True)
+    report_path = report_dir / "report.json"
+    report_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(api_service, "_find_report_for_session", lambda _stamp: report_path)
+
+    client = testclient.TestClient(api_service.build_api_app())
+    response = client.get('/run/foo%22bar/evidence.zip')
+
+    assert response.status_code == 200
+    disposition = response.headers.get("content-disposition", "")
+    assert "\r" not in disposition
+    assert "\n" not in disposition
+    assert '"' not in disposition.replace('attachment; filename="', "", 1).removesuffix('"')
+    assert disposition == 'attachment; filename="foo-bar_evidence.zip"'
+    assert response.headers.get("x-content-type-options") == "nosniff"
+    assert response.headers.get("x-frame-options") == "DENY"
+    assert response.headers.get("referrer-policy") == "no-referrer"
+    assert "no-store" in (response.headers.get("cache-control") or "")

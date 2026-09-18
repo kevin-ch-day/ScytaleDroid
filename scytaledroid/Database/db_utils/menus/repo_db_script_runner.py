@@ -17,9 +17,11 @@ def repo_root() -> Path:
 def run_scripts_db_py(script_name: str, extra: list[str] | None = None) -> int:
     """Execute ``python scripts/db/<script_name>`` from repo root; return process exit code."""
 
+    script_name = Path(str(script_name or "")).name
     root = repo_root()
-    script = root / "scripts" / "db" / script_name
-    if not script.is_file():
+    scripts_dir = (root / "scripts" / "db").resolve()
+    script = (scripts_dir / script_name).resolve()
+    if not script.is_file() or not script.is_relative_to(scripts_dir):
         print(status_messages.status(f"Missing script: {script}", level="error"))
         return 1
     cmd = [sys.executable, str(script), *(extra or [])]

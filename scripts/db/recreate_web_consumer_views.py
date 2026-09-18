@@ -35,6 +35,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scytaledroid.Database.db_core import db_config  # noqa: E402
+from scytaledroid.Database.db_core.sql_ident import quote_viewlike_ident  # noqa: E402
 
 from scripts.db.view_repair_support import (  # noqa: E402
     EXPECTED_VIEW_OBJECTS,
@@ -395,10 +396,14 @@ def cmd_recreate(
                             "use --allow-drop-nonempty-tables --confirm after backup review"
                         )
                         continue
+                    quoted = quote_viewlike_ident(name)
+                    if quoted is None:
+                        print(f"REFUSE_DROP {name}: identifier is not a plain v_/vw_ name")
+                        continue
                     if approx_rows > 0:
                         print(f"DROP_NONEMPTY_TABLE {name} approx_rows={approx_rows}")
                     print("DROP TABLE", name)
-                    cur.execute(f"DROP TABLE IF EXISTS `{name}`")
+                    cur.execute(f"DROP TABLE IF EXISTS {quoted}")
                 cur.execute("SET FOREIGN_KEY_CHECKS = 1")
 
             for label, ddl in chain:

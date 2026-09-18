@@ -175,3 +175,21 @@ def test_replay_package_manifest_fails_when_artifact_is_missing(tmp_path: Path, 
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert payload["status"]["persistence_status"] == "mirror_failed"
     assert payload["repairs"][-1]["status"] == "failed"
+
+
+def test_replay_package_manifest_rejects_path_escape(tmp_path: Path, monkeypatch) -> None:
+    secret = tmp_path / "secret.apk"
+    secret.write_bytes(b"apk\n")
+    manifest_path = _write_manifest(
+        tmp_path / "device_apks",
+        local_artifact_path=str(secret),
+    )
+    fake_repo = _FakeRepo()
+    monkeypatch.setattr(replay.common, "resolve_storage_root", lambda: ("test-host", str(tmp_path / "device_apks")))
+    monkeypatch.setattr(replay.artifact_store, "data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(replay.app_config, "DATA_DIR", str(tmp_path / "data"))
+
+    outcome = replay.replay_package_manifest(manifest_path, repo_module=fake_repo)
+
+    assert outcome.status == "failed"
+    assert "unsafe_artifact_path" in outcome.failure_reasons

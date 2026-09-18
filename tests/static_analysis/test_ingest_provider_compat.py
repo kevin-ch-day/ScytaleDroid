@@ -4,12 +4,12 @@ from scytaledroid.StaticAnalysis.persistence import ingest
 
 
 def _columns_sql(table: str) -> str:
-    return f"SHOW COLUMNS FROM {table}"
+    return f"SHOW COLUMNS FROM `{table}`"
 
 
 def _insert_columns(sql: str) -> list[str]:
     prefix = sql.split("(", 1)[1]
-    return [token.strip() for token in prefix.split(")", 1)[0].split(",")]
+    return [token.strip().strip("`") for token in prefix.split(")", 1)[0].split(",")]
 
 
 def test_create_provider_row_includes_package_fields_when_available(monkeypatch):
@@ -39,7 +39,7 @@ def test_create_provider_row_includes_package_fields_when_available(monkeypatch)
                 ("grant_uri_permissions",),
                 ("metrics",),
             ]
-        if sql.startswith("INSERT INTO static_fileproviders"):
+        if sql.startswith("INSERT INTO `static_fileproviders`"):
             return 77
         return None
 
@@ -59,7 +59,7 @@ def test_create_provider_row_includes_package_fields_when_available(monkeypatch)
 
     assert provider_id == 77
     insert_sql, insert_params = next(
-        (sql, params) for sql, params in calls if sql.startswith("INSERT INTO static_fileproviders")
+        (sql, params) for sql, params in calls if sql.startswith("INSERT INTO `static_fileproviders`")
     )
     columns = _insert_columns(insert_sql)
     row = dict(zip(columns, insert_params or (), strict=False))
@@ -89,7 +89,7 @@ def test_create_provider_row_skips_insert_when_legacy_package_required_but_missi
     )
 
     assert provider_id is None
-    assert not any(sql.startswith("INSERT INTO static_fileproviders") for sql in calls)
+    assert not any(sql.startswith("INSERT INTO `static_fileproviders`") for sql in calls)
 
 
 def test_create_provider_acl_row_propagates_parent_package_fields(monkeypatch):
@@ -121,7 +121,7 @@ def test_create_provider_acl_row_propagates_parent_package_fields(monkeypatch):
                 ("base_perm",),
                 ("exported",),
             ]
-        if sql.startswith("INSERT INTO static_provider_acl"):
+        if sql.startswith("INSERT INTO `static_provider_acl`"):
             captured["sql"] = sql
             captured["params"] = params
         return None

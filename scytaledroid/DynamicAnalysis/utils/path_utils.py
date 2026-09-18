@@ -302,7 +302,7 @@ def resolve_evidence_path(evidence_path: str | None) -> Path | None:
             canonical = dynamic_evidence_root() / run_id
             if canonical.exists():
                 return canonical
-        return path
+        return _confine_to_allowed_roots(path)
     run_id = _uuid_name(path)
     if run_id:
         canonical = dynamic_evidence_root() / run_id
@@ -313,12 +313,32 @@ def resolve_evidence_path(evidence_path: str | None) -> Path | None:
             return legacy
     candidate = Path.cwd() / path
     if candidate.exists():
-        return candidate
+        return _confine_to_allowed_roots(candidate)
     output_root = Path(app_config.OUTPUT_DIR)
     output_candidate = output_root / path
     if output_candidate.exists():
-        return output_candidate
-    return candidate
+        return _confine_to_allowed_roots(output_candidate)
+    return _confine_to_allowed_roots(candidate)
+
+
+def _confine_to_allowed_roots(path: Path) -> Path | None:
+    try:
+        resolved = path.expanduser().resolve(strict=False)
+    except OSError:
+        return None
+    for root in (
+        dynamic_evidence_root(),
+        legacy_dynamic_evidence_root(),
+        Path(app_config.DATA_DIR),
+        Path(app_config.OUTPUT_DIR),
+    ):
+        try:
+            root_resolved = Path(root).expanduser().resolve(strict=False)
+            if resolved == root_resolved or resolved.is_relative_to(root_resolved):
+                return resolved
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 __all__ = [

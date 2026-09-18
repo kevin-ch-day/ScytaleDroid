@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 
 from scytaledroid.Config import app_config
@@ -132,12 +133,23 @@ def is_google_user_app(package_name: str) -> bool:
     return package_name in GOOGLE_USER_APPS
 
 
+_FILENAME_PART_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_filename_part(value: str, fallback: str) -> str:
+    cleaned = _FILENAME_PART_RE.sub("_", str(value or "").strip()).strip("._-")
+    if not cleaned or cleaned in {".", ".."}:
+        return fallback
+    return cleaned
+
+
 def canonical_filename(package_name: str, version_code: str, artifact: str) -> str:
     """Return deterministic ``package_version__artifact.apk`` filenames."""
 
-    safe_package = package_name.replace(".", "_") or "package"
-    safe_version = version_code or "unknown"
-    return f"{safe_package}_{safe_version}__{artifact}.apk"
+    safe_package = _safe_filename_part(package_name.replace(".", "_"), "package")
+    safe_version = _safe_filename_part(version_code, "unknown")
+    safe_artifact = _safe_filename_part(artifact, "base")
+    return f"{safe_package}_{safe_version}__{safe_artifact}.apk"
 
 
 def family(package_name: str) -> str | None:

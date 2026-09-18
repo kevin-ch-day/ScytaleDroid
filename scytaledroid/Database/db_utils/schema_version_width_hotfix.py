@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
+
 from .phase_b1_join_key_normalization import (
     _column_index_metadata,
     _column_value_stats,
@@ -91,10 +93,14 @@ def planned_alter_sql() -> str:
         "",
     ]
     for spec in TARGET_COLUMNS:
+        quoted_table = quote_sql_ident(str(spec["table"]))
+        quoted_column = quote_sql_ident(str(spec["column"]))
+        if quoted_table is None or quoted_column is None:
+            continue
         lines.append(f"-- {spec['table']}.{spec['column']}")
         lines.append(
-            f"ALTER TABLE `{spec['table']}` "
-            f"MODIFY COLUMN `{spec['column']}` varchar({int(spec['target_width'])});"
+            f"ALTER TABLE {quoted_table} "
+            f"MODIFY COLUMN {quoted_column} varchar({int(spec['target_width'])});"
         )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -118,11 +124,15 @@ def _build_required_alter_statements(run_sql: RunSql) -> list[dict[str, str]]:
             "target_collation": str(current.get("collation_name") or "utf8mb4_general_ci"),
         }
         definition = _current_definition_clause(current, live_spec)
+        quoted_table = quote_sql_ident(table_name)
+        quoted_column = quote_sql_ident(column_name)
+        if quoted_table is None or quoted_column is None:
+            continue
         statements.append(
             {
                 "table": table_name,
                 "column": column_name,
-                "sql": f"ALTER TABLE `{table_name}` MODIFY COLUMN `{column_name}` {definition}",
+                "sql": f"ALTER TABLE {quoted_table} MODIFY COLUMN {quoted_column} {definition}",
             }
         )
     return statements

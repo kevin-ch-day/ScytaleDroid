@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
@@ -63,7 +64,10 @@ def _drop_stale_dep_object() -> None:
             ),
             category="static_analysis",
         )
-        core_q.run_sql(f"DROP TABLE IF EXISTS {_DEP_VIEW_NAME}")
+        quoted = quote_sql_ident(_DEP_VIEW_NAME)
+        if quoted is None:
+            raise RuntimeError(f"refusing unsafe DEP object name {_DEP_VIEW_NAME!r}")
+        core_q.run_sql(f"DROP TABLE IF EXISTS {quoted}")
         return
 
     log.warning(
@@ -73,7 +77,10 @@ def _drop_stale_dep_object() -> None:
         ),
         category="static_analysis",
     )
-    core_q.run_sql(f"DROP VIEW IF EXISTS {_DEP_VIEW_NAME}")
+    quoted = quote_sql_ident(_DEP_VIEW_NAME)
+    if quoted is None:
+        raise RuntimeError(f"refusing unsafe DEP object name {_DEP_VIEW_NAME!r}")
+    core_q.run_sql(f"DROP VIEW IF EXISTS {quoted}")
 
 
 def _metrics_join(presence: Mapping[str, bool]) -> str:

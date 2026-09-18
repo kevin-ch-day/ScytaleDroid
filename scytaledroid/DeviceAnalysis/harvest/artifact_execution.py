@@ -13,6 +13,22 @@ from .models import ArtifactError, ArtifactPlan, ArtifactResult, PackagePlan
 EmitFn = Callable[[str, str, Mapping[str, object | None], str | None], None]
 
 
+def confined_harvest_dest(package_dir: Path, file_name: str) -> Path | None:
+    """Return *package_dir/file_name* only when it stays inside *package_dir*."""
+
+    raw = str(file_name or "")
+    if not raw or raw in {".", ".."} or Path(raw).name != raw:
+        return None
+    try:
+        package_root = package_dir.expanduser().resolve()
+        dest = (package_root / raw).resolve()
+    except OSError:
+        return None
+    if dest == package_root or not dest.is_relative_to(package_root):
+        return None
+    return dest
+
+
 @dataclass(frozen=True)
 class ArtifactExecutionRequest:
     serial: str
@@ -63,7 +79,12 @@ def pull_and_record(
     request: ArtifactExecutionRequest,
     deps: ArtifactExecutionDeps,
 ) -> tuple[ArtifactResult | ArtifactError | None, str | None]:
-    dest_path = request.package_dir / request.artifact.file_name
+    dest_path = confined_harvest_dest(request.package_dir, request.artifact.file_name)
+    if dest_path is None:
+        return (
+            ArtifactError(source_path=request.artifact.source_path, reason="unsafe_dest_filename"),
+            None,
+        )
     pull_result = deps.adb_pull(
         adb_path=request.adb_path,
         serial=request.serial,

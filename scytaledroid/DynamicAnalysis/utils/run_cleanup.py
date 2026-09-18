@@ -19,6 +19,7 @@ from scytaledroid.DynamicAnalysis.research_cohort_archive import (
     write_dataset_plan_payload,
 )
 from scytaledroid.DynamicAnalysis.utils.path_utils import (
+    dynamic_evidence_roots,
     iter_dynamic_run_dirs,
     resolve_dynamic_run_dir,
 )
@@ -283,13 +284,35 @@ def summarize_incomplete_dynamic_run_dirs() -> IncompleteDynamicRunSummary:
     )
 
 
+def _rmtree_confined_run_dir(run_dir: Path) -> bool:
+    try:
+        resolved = run_dir.expanduser().resolve()
+    except OSError:
+        return False
+    if resolved.is_symlink():
+        return False
+    allowed = False
+    for root in dynamic_evidence_roots():
+        try:
+            root_resolved = root.expanduser().resolve()
+        except OSError:
+            continue
+        if resolved == root_resolved or resolved.is_relative_to(root_resolved):
+            allowed = True
+            break
+    if not allowed:
+        return False
+    shutil.rmtree(resolved)
+    return True
+
+
 def prune_incomplete_dynamic_run_dirs() -> int:
     """Delete orphan/incomplete dynamic run dirs and return count removed."""
     deleted = 0
     for run_dir in find_incomplete_dynamic_run_dirs():
         try:
-            shutil.rmtree(run_dir)
-            deleted += 1
+            if _rmtree_confined_run_dir(run_dir):
+                deleted += 1
         except OSError:
             continue
     return deleted
@@ -317,8 +340,8 @@ def delete_dynamic_evidence_packs(package_name: str) -> int:
     deleted = 0
     for run_dir in run_dirs:
         try:
-            shutil.rmtree(run_dir)
-            deleted += 1
+            if _rmtree_confined_run_dir(run_dir):
+                deleted += 1
         except OSError:
             # Best-effort; caller will report remaining.
             continue

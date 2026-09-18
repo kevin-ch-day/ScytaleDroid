@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from collections.abc import Sequence
 
-from scytaledroid.DeviceAnalysis.adb.errors import AdbBinaryNotFoundError
+from scytaledroid.DeviceAnalysis.adb.errors import AdbBinaryNotFoundError, AdbDeviceSelectionError
+
+_SAFE_ADB_SERIAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+def _require_safe_adb_serial(serial: str) -> str:
+    """Reject serials that adb would parse as flags or extra options."""
+
+    text = str(serial or "").strip()
+    if not _SAFE_ADB_SERIAL_RE.fullmatch(text):
+        raise AdbDeviceSelectionError(f"unsafe adb serial: {serial!r}")
+    return text
+
+
+def _validate_adb_args(args: Sequence[str]) -> None:
+    parts = [str(part) for part in args]
+    for index, part in enumerate(parts):
+        if part != "-s":
+            continue
+        if index + 1 >= len(parts):
+            raise AdbDeviceSelectionError("missing adb serial after -s")
+        _require_safe_adb_serial(parts[index + 1])
 
 
 def _resolve_adb() -> str | None:
@@ -31,6 +53,7 @@ def run_shell_command(
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute an arbitrary ``adb shell`` command for the selected device."""
+    serial = _require_safe_adb_serial(serial)
     adb_bin = _resolve_adb()
     if adb_bin is None:
         raise AdbBinaryNotFoundError("adb binary not found on PATH")
@@ -59,6 +82,7 @@ def run_adb_command(
     check: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a raw adb command (non-shell)."""
+    _validate_adb_args(args)
     adb_bin = _resolve_adb()
     if adb_bin is None:
         raise AdbBinaryNotFoundError("adb binary not found on PATH")
@@ -79,6 +103,7 @@ def run_adb_command(
 
 def run_adb_interactive_shell(serial: str) -> int:
     """Launch an interactive adb shell for the provided serial."""
+    serial = _require_safe_adb_serial(serial)
     adb_bin = _resolve_adb()
     if adb_bin is None:
         raise AdbBinaryNotFoundError("adb binary not found on PATH")
@@ -93,6 +118,7 @@ def run_adb_popen(
     text: bool = True,
 ) -> subprocess.Popen[str]:
     """Launch a long-running adb process."""
+    _validate_adb_args(args)
     adb_bin = _resolve_adb()
     if adb_bin is None:
         raise AdbBinaryNotFoundError("adb binary not found on PATH")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from pathlib import Path
 from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import database_session
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident as _quote_sql_ident
 
 PROTECTED_TABLES: Sequence[str] = (
     "android_app_categories",
@@ -67,6 +69,32 @@ HARVEST_TABLES: Sequence[str] = (
     "apk_split_groups",
     "harvest_storage_roots",
 )
+
+_SAFE_SESSION_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
+
+
+def _is_safe_session_segment(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text or text in {".", ".."}:
+        return False
+    if "/" in text or "\\" in text or "\x00" in text:
+        return False
+    return bool(_SAFE_SESSION_SEGMENT_RE.fullmatch(text))
+
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return path.resolve() != parent.resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def _confined_child(parent: Path, *parts: str) -> Path | None:
+    candidate = parent.joinpath(*[str(part) for part in parts])
+    if not _path_is_within(candidate, parent):
+        return None
+    return candidate
 
 
 @dataclass(slots=True)
@@ -225,14 +253,18 @@ def reset_static_analysis_data(
             if not _table_exists(engine, table):
                 skipped_missing.append(table)
                 continue
+            quoted = _quote_sql_ident(table)
+            if quoted is None:
+                failed.append((table, "refusing unsafe SQL identifier"))
+                continue
             try:
-                engine.execute(f"TRUNCATE TABLE `{table}`")
+                engine.execute(f"TRUNCATE TABLE {quoted}")
                 truncated.append(table)
             except RuntimeError as exc:  # pragma: no cover - requires specific DB state
                 error_text = str(exc)
                 if "command denied" in error_text.lower():
                     try:
-                        engine.execute(f"DELETE FROM `{table}`")
+                        engine.execute(f"DELETE FROM {quoted}")
                         cleared.append(table)
                         continue
                     except RuntimeError as delete_exc:  # pragma: no cover - requires specific DB state
@@ -337,6 +369,10 @@ def _reset_static_analysis_session_scoped(
                 skipped_missing.append(table)
                 continue
             try:
+                quoted = _quote_sql_ident(table)
+                if quoted is None:
+                    failed.append((table, "refusing unsafe SQL identifier"))
+                    continue
                 if table == "static_analysis_runs":
                     engine.execute(
                         "DELETE FROM static_analysis_runs WHERE session_label=%s",
@@ -345,17 +381,17 @@ def _reset_static_analysis_session_scoped(
                     cleared.append(table)
                     continue
                 if _column_exists(engine, table, "session_stamp"):
-                    engine.execute(f"DELETE FROM `{table}` WHERE session_stamp=%s", (target_session,))
+                    engine.execute(f"DELETE FROM {quoted} WHERE session_stamp=%s", (target_session,))
                     cleared.append(table)
                     continue
                 if _column_exists(engine, table, "session_label"):
-                    engine.execute(f"DELETE FROM `{table}` WHERE session_label=%s", (target_session,))
+                    engine.execute(f"DELETE FROM {quoted} WHERE session_label=%s", (target_session,))
                     cleared.append(table)
                     continue
                 if static_ids and _column_exists(engine, table, "static_run_id"):
                     placeholders = ",".join(["%s"] * len(static_ids))
                     engine.execute(
-                        f"DELETE FROM `{table}` WHERE static_run_id IN ({placeholders})",
+                        f"DELETE FROM {quoted} WHERE static_run_id IN ({placeholders})",
                         tuple(static_ids),
                     )
                     cleared.append(table)
@@ -363,7 +399,7 @@ def _reset_static_analysis_session_scoped(
                 if static_ids and _column_exists(engine, table, "run_id"):
                     placeholders = ",".join(["%s"] * len(static_ids))
                     engine.execute(
-                        f"DELETE FROM `{table}` WHERE run_id IN ({placeholders})",
+                        f"DELETE FROM {quoted} WHERE run_id IN ({placeholders})",
                         tuple(static_ids),
                     )
                     cleared.append(table)
@@ -455,14 +491,18 @@ def reset_all_analysis_data(*, extra_exclusions: Iterable[str] | None = None) ->
             if not _table_exists(engine, table):
                 skipped_missing.append(table)
                 continue
+            quoted = _quote_sql_ident(table)
+            if quoted is None:
+                failed.append((table, "refusing unsafe SQL identifier"))
+                continue
             try:
-                engine.execute(f"TRUNCATE TABLE `{table}`")
+                engine.execute(f"TRUNCATE TABLE {quoted}")
                 truncated.append(table)
             except RuntimeError as exc:  # pragma: no cover - requires specific DB state
                 error_text = str(exc)
                 if "command denied" in error_text.lower():
                     try:
-                        engine.execute(f"DELETE FROM `{table}`")
+                        engine.execute(f"DELETE FROM {quoted}")
                         cleared.append(table)
                         continue
                     except RuntimeError as delete_exc:  # pragma: no cover - requires specific DB state
@@ -497,8 +537,12 @@ def _table_exists(engine: DatabaseEngine, table: str) -> bool:
 
 
 def _clear_local_session_metadata(session_label: str) -> None:
-    session_dir = Path(app_config.DATA_DIR) / "sessions" / str(session_label).strip()
-    if not session_dir.exists():
+    target_session = str(session_label or "").strip()
+    if not _is_safe_session_segment(target_session):
+        return
+    sessions_root = Path(app_config.DATA_DIR) / "sessions"
+    session_dir = _confined_child(sessions_root, target_session)
+    if session_dir is None or not session_dir.exists():
         return
     if session_dir.is_file():
         session_dir.unlink()
@@ -520,6 +564,12 @@ def purge_static_session_artifacts(
             missing=[],
             failed=[("artifact_purge", "session_label required")],
         )
+    if not _is_safe_session_segment(target_session):
+        return ArtifactPurgeOutcome(
+            removed=[],
+            missing=[],
+            failed=[("artifact_purge", "refusing unsafe session_label path segment")],
+        )
 
     static_ids = [int(value) for value in (static_run_ids or ()) if value is not None]
     if not static_ids:
@@ -533,22 +583,42 @@ def purge_static_session_artifacts(
         except RuntimeError:
             static_ids = []
 
-    candidates: list[Path] = [
-        Path(app_config.DATA_DIR) / "sessions" / target_session,
-        Path(app_config.DATA_DIR) / "static_analysis" / "reports" / "archive" / target_session,
-        Path(app_config.OUTPUT_DIR) / "audit" / "persistence" / f"{target_session}_persistence_audit.json",
-        Path(app_config.OUTPUT_DIR) / "audit" / "persistence" / f"{target_session}_reconcile_audit.json",
-        Path(app_config.OUTPUT_DIR) / "audit" / "selection" / f"{target_session}_selected_artifacts.json",
-    ]
+    data_dir = Path(app_config.DATA_DIR)
+    output_dir = Path(app_config.OUTPUT_DIR)
+    sessions_root = data_dir / "sessions"
+    archive_root = data_dir / "static_analysis" / "reports" / "archive"
+    persistence_audit_root = output_dir / "audit" / "persistence"
+    selection_audit_root = output_dir / "audit" / "selection"
+    evidence_root = Path("evidence") / "static_runs"
+    output_evidence_root = output_dir / "evidence" / "static_runs"
+
+    confined: list[Path] = []
+    failed: list[tuple[str, str]] = []
+    for parent, parts in (
+        (sessions_root, (target_session,)),
+        (archive_root, (target_session,)),
+        (persistence_audit_root, (f"{target_session}_persistence_audit.json",)),
+        (persistence_audit_root, (f"{target_session}_reconcile_audit.json",)),
+        (selection_audit_root, (f"{target_session}_selected_artifacts.json",)),
+    ):
+        candidate = _confined_child(parent, *parts)
+        if candidate is None:
+            failed.append((str(parent.joinpath(*parts)), "refusing path outside allowed root"))
+            continue
+        confined.append(candidate)
     for static_run_id in static_ids:
-        candidates.append(Path("evidence") / "static_runs" / str(static_run_id))
-        candidates.append(Path(app_config.OUTPUT_DIR) / "evidence" / "static_runs" / str(static_run_id))
+        run_id = str(int(static_run_id))
+        for parent in (evidence_root, output_evidence_root):
+            candidate = _confined_child(parent, run_id)
+            if candidate is None:
+                failed.append((str(parent / run_id), "refusing path outside allowed root"))
+                continue
+            confined.append(candidate)
 
     removed: list[str] = []
     missing: list[str] = []
-    failed: list[tuple[str, str]] = []
     seen: set[Path] = set()
-    for path in candidates:
+    for path in confined:
         if path in seen:
             continue
         seen.add(path)

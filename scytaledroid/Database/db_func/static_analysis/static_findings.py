@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import database_session, db_config, run_sql
+from ...db_core.sql_ident import quote_sql_ident
 from ...db_queries.static_analysis import static_findings as queries
 
 _ENGINE = str(db_config.DB_CONFIG.get("engine", "")).strip().lower()
@@ -70,19 +71,25 @@ CREATE TABLE IF NOT EXISTS static_findings (
 """
 
 def _table_has_column(table: str, column: str) -> bool:
+    quoted = quote_sql_ident(table)
+    if quoted is None:
+        return False
     try:
         if _IS_SQLITE:
-            rows = run_sql(f"PRAGMA table_info({table})", fetch="all")
+            rows = run_sql(f'PRAGMA table_info("{table}")', fetch="all")
             return any(row[1] == column for row in rows or ())
-        rows = run_sql(f"SHOW COLUMNS FROM {table}", fetch="all")
+        rows = run_sql(f"SHOW COLUMNS FROM {quoted}", fetch="all")
         return any(row[0] == column for row in rows)
     except Exception:
         return False
 
 
 def _table_has_index(table: str, index: str) -> bool:
+    quoted = quote_sql_ident(table)
+    if quoted is None:
+        return False
     try:
-        rows = run_sql(f"SHOW INDEX FROM {table}", fetch="all")
+        rows = run_sql(f"SHOW INDEX FROM {quoted}", fetch="all")
         return any(row[2] == index for row in rows)
     except Exception:
         return False

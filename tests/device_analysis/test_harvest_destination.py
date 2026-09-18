@@ -21,6 +21,16 @@ def test_compose_harvest_run_destination_layout(tmp_path: Path, monkeypatch: pyt
     assert dest == tmp_path / "data" / "device_apks" / "ABC12" / "runs" / stamp
 
 
+def test_canonical_filename_strips_path_parts() -> None:
+    from scytaledroid.DeviceAnalysis.harvest.rules import canonical_filename
+
+    name = canonical_filename("com.example.app", "42", "../../evil")
+    assert "/" not in name
+    assert "\\" not in name
+    assert name.endswith(".apk")
+    assert ".." not in name
+
+
 def test_normalise_local_path_preserves_session_tree_for_symlinks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -104,3 +114,53 @@ def test_package_evidence_dir_includes_app_and_version(monkeypatch: pytest.Monke
     root = tmp_path / "session"
     d = package_evidence_dir(root, inv)
     assert d == root / "com.example.app" / leaf
+
+
+def test_package_evidence_dir_rejects_path_escape(tmp_path: Path) -> None:
+    from scytaledroid.DeviceAnalysis.harvest.common import package_evidence_dir
+    from scytaledroid.DeviceAnalysis.harvest.models import InventoryRow
+
+    inv = InventoryRow(
+        raw={},
+        package_name="../etc/passwd",
+        app_label="Evil",
+        installer=None,
+        category=None,
+        primary_path="/data/app/evil/base.apk",
+        profile_key=None,
+        profile=None,
+        version_name="1",
+        version_code="1",
+        apk_paths=["/data/app/evil/base.apk"],
+        split_count=1,
+    )
+    dest = package_evidence_dir(tmp_path, inv)
+    assert dest.resolve().is_relative_to(tmp_path.resolve())
+    assert ".." not in dest.parts
+
+
+def test_compose_harvest_run_destination_sanitizes_serial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
+
+    from scytaledroid.DeviceAnalysis.services import artifact_store
+
+    dest, _stamp = artifact_store.compose_harvest_run_destination(
+        serial="../etc",
+        run_id="ABC12-20300416-123456-789012",
+    )
+    assert dest.is_relative_to((tmp_path / "data" / "device_apks").resolve())
+    assert ".." not in dest.parts
+
+
+def test_confined_harvest_dest_rejects_traversal(tmp_path: Path) -> None:
+    from scytaledroid.DeviceAnalysis.harvest.artifact_execution import confined_harvest_dest
+
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    assert confined_harvest_dest(package_dir, "base.apk") == (package_dir / "base.apk").resolve()
+    assert confined_harvest_dest(package_dir, "../escape.apk") is None
+    assert confined_harvest_dest(package_dir, "sub/dir.apk") is None
+    assert confined_harvest_dest(package_dir, "..") is None

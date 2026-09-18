@@ -53,7 +53,14 @@ def package_evidence_leaf_name(inventory: InventoryRow) -> str:
 def package_evidence_dir(dest_root: Path, inventory: InventoryRow) -> Path:
     """Per-package directory: ``<dest_root>/<package>/<app>_v<code>_<versionName>/``."""
 
-    return dest_root / inventory.package_name / package_evidence_leaf_name(inventory)
+    return dest_root / _safe_package_dir_name(inventory.package_name) / package_evidence_leaf_name(inventory)
+
+
+def _safe_package_dir_name(package_name: str) -> str:
+    raw = str(package_name or "").strip()
+    if not raw or raw in {".", ".."} or "/" in raw or "\\" in raw or "\x00" in raw or ".." in raw:
+        return _harvest_evidence_slug(raw, default="unknown-package", max_len=191)
+    return raw[:191]
 
 
 def iter_harvest_package_manifest_paths(root: Path) -> list[Path]:
@@ -318,6 +325,14 @@ def write_json_manifest(path: Path, payload: Mapping[str, object]) -> Path:
     return path
 
 
+def _is_safe_remote_source_path(source_path: str) -> bool:
+    text = str(source_path or "")
+    if not text.startswith("/") or text.startswith("//") or "\x00" in text:
+        return False
+    parts = [part for part in text.split("/") if part]
+    return bool(parts) and ".." not in parts
+
+
 def adb_pull(
     *,
     adb_path: str,
@@ -330,6 +345,8 @@ def adb_pull(
 ):
     """Ensure *dest_path* exists locally by issuing ``adb pull``."""
 
+    if not _is_safe_remote_source_path(source_path):
+        return ArtifactError(source_path=source_path, reason="unsafe_source_path")
     if dest_path.exists() and not overwrite_existing:
         return True
     if dest_path.exists() and overwrite_existing:

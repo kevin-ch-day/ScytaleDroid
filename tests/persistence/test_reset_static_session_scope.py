@@ -185,6 +185,21 @@ def test_purge_static_session_artifacts_removes_session_archive_and_audits(
     assert any("sess-1_reconcile_audit.json" in path for path in outcome.removed)
 
 
+def test_purge_static_session_artifacts_rejects_path_traversal(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(reset_mod.app_config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(reset_mod.app_config, "OUTPUT_DIR", str(tmp_path / "output"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    outcome = purge_static_session_artifacts("../outside")
+
+    assert outcome.failed
+    assert marker.exists()
+    assert any("unsafe session_label" in reason for _name, reason in outcome.failed)
+
+
 def test_purge_static_session_artifacts_uses_provided_static_run_ids_after_db_delete(
     monkeypatch, tmp_path: Path
 ):

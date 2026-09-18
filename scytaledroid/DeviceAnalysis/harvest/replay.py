@@ -9,6 +9,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from scytaledroid.Config import app_config
+
 from ..services import artifact_store
 from . import common
 
@@ -245,8 +247,9 @@ def _replay_artifact(
         local_artifact_path=local_artifact_path,
         canonical_store_path=canonical_store_path,
     )
-    if not absolute_path.exists():
-        return ReplayArtifactOutcome(file_name=file_name, status="failed", reason="artifact_file_missing")
+    if not absolute_path.exists() or not _artifact_path_is_allowed(absolute_path):
+        reason = "unsafe_artifact_path" if absolute_path.exists() else "artifact_file_missing"
+        return ReplayArtifactOutcome(file_name=file_name, status="failed", reason=reason)
 
     local_rel_path = _manifest_local_rel_path(
         local_artifact_path=local_artifact_path,
@@ -337,6 +340,26 @@ def _ensure_storage_root_id(repo: ModuleType | object) -> int:
             },
         )
     )
+
+
+def _artifact_path_is_allowed(path: Path) -> bool:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    _, data_root = common.resolve_storage_root()
+    roots: list[Path] = []
+    for candidate in (
+        Path(data_root),
+        artifact_store.data_root(),
+        artifact_store.apk_store_root(),
+        Path(app_config.DATA_DIR),
+    ):
+        try:
+            roots.append(candidate.expanduser().resolve())
+        except OSError:
+            continue
+    return any(resolved == root or resolved.is_relative_to(root) for root in roots)
 
 
 def _resolve_absolute_artifact_path(*, local_artifact_path: str, canonical_store_path: str) -> Path:

@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from scytaledroid.Database.db_core import DatabaseEngine, database_session
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 
 from .table_snapshot import ColumnInfo, IndexInfo, TableSnapshot
 
@@ -190,8 +191,13 @@ def table_counts(table_names: list[str]) -> dict[str, int | None]:
     try:
         with _connected_engine() as engine:
             for table in table_names:
+                quoted = quote_sql_ident(table)
+                if quoted is None:
+                    print(f"[DB_UTILS] Refusing unsafe SQL identifier for count: {table!r}")
+                    counts[table] = None
+                    continue
                 try:
-                    row = engine.fetch_one(f"SELECT COUNT(*) FROM `{table}`;")
+                    row = engine.fetch_one(f"SELECT COUNT(*) FROM {quoted};")
                     counts[table] = int(row[0]) if row else 0
                 except Exception as inner_error:
                     print(f"[DB_UTILS] Failed to count rows for {table}: {inner_error}")
@@ -478,8 +484,10 @@ def _fetch_example_rows(
 
 
 def _quote_identifier(identifier: str) -> str:
-    safe = identifier.replace("`", "``")
-    return f"`{safe}`"
+    quoted = quote_sql_ident(identifier)
+    if quoted is None:
+        raise ValueError(f"refusing unsafe SQL identifier: {identifier!r}")
+    return quoted
 
 
 __all__ = [

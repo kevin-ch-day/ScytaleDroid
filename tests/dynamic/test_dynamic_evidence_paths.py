@@ -53,6 +53,20 @@ def test_resolve_evidence_path_falls_back_to_legacy(monkeypatch, tmp_path: Path)
     assert resolve_dynamic_run_dir(RUN_ID) == legacy
 
 
+def test_resolve_evidence_path_rejects_paths_outside_allowed_roots(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(app_config, "DYNAMIC_EVIDENCE_ROOT", str(tmp_path / "data" / "evidence" / "dynamic"))
+    monkeypatch.setattr(app_config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(app_config, "OUTPUT_DIR", str(tmp_path / "output"))
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+
+    assert resolve_evidence_path(str(outside)) is None
+    assert resolve_evidence_path("../../etc/passwd") is None
+
+
 def test_contained_path_and_run_resolution_reject_escape_paths(
     monkeypatch,
     tmp_path: Path,

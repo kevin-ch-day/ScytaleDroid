@@ -12,6 +12,7 @@ from typing import Any
 
 from scytaledroid.Database.db_core.db_config import DB_CONFIG
 from scytaledroid.Database.db_core.db_engine import DatabaseEngine, DatabaseError
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 
 from .permission_intel_phase1_common import (
     DEFAULT_TARGET_DB,
@@ -19,9 +20,14 @@ from .permission_intel_phase1_common import (
     write_phase1_artifact,
 )
 
+_FORBIDDEN_TARGET_DBS = frozenset({"mysql", "information_schema", "performance_schema", "sys"})
+
 
 def _qident(name: str) -> str:
-    return f"`{str(name).replace('`', '``')}`"
+    quoted = quote_sql_ident(name)
+    if quoted is None:
+        raise ValueError(f"refusing unsafe SQL identifier: {name!r}")
+    return quoted
 
 
 def _source_db_name() -> str:
@@ -50,6 +56,13 @@ def copy_phase1_tables(*, target_db: str, truncate: bool = True) -> list[dict[st
     source_db = _source_db_name()
     if source_db == target_db:
         raise RuntimeError("Target DB must differ from the operational source DB.")
+    if str(target_db or "").strip().lower() in _FORBIDDEN_TARGET_DBS:
+        raise RuntimeError(f"Refusing permission-intel copy into system schema {target_db!r}.")
+    try:
+        _qident(target_db)
+        _qident(source_db)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
 
     db = DatabaseEngine()
     results: list[dict[str, Any]] = []

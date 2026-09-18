@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from scytaledroid.DeviceAnalysis.adb import devices as adb_devices
 from scytaledroid.DeviceAnalysis.adb import shell as adb_shell
+from scytaledroid.DeviceAnalysis.adb.client import _require_safe_adb_serial, run_shell_command
 from scytaledroid.DeviceAnalysis.adb.errors import (
     AdbBinaryNotFoundError,
     AdbCommandError,
@@ -80,3 +81,20 @@ def test_run_shell_check_raises_on_nonzero(monkeypatch):
     monkeypatch.setattr(adb_shell, "run_shell_command", fake_run)
     with pytest.raises(AdbCommandError):
         adb_shell.run_shell("serial", ["foo"], check=True)
+
+
+@pytest.mark.parametrize(
+    "serial",
+    ["-Hattacker", "--", "../device", "serial;id", "serial with space", ""],
+)
+def test_unsafe_adb_serial_is_rejected_before_subprocess(serial: str) -> None:
+    with pytest.raises(AdbDeviceSelectionError, match="unsafe adb serial"):
+        _require_safe_adb_serial(serial)
+    with pytest.raises(AdbDeviceSelectionError, match="unsafe adb serial"):
+        run_shell_command(serial, ["echo", "hi"])
+
+
+def test_safe_adb_serials_are_accepted() -> None:
+    assert _require_safe_adb_serial("ZY22JK89DR") == "ZY22JK89DR"
+    assert _require_safe_adb_serial("emulator-5554") == "emulator-5554"
+    assert _require_safe_adb_serial("127.0.0.1:5555") == "127.0.0.1:5555"

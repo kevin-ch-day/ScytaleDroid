@@ -224,3 +224,40 @@ def test_iter_harvest_package_manifest_paths_sorted_and_skips_missing(tmp_path: 
     assert len(paths) == 2
     assert paths[0].name == "harvest_package_manifest.json"
     assert paths[0].as_posix() < paths[1].as_posix()
+
+
+def test_adb_pull_rejects_unsafe_remote_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scytaledroid.DeviceAnalysis.harvest import common
+    from scytaledroid.DeviceAnalysis.harvest.models import ArtifactError
+
+    called = {"count": 0}
+
+    def _fake_run(*args, **kwargs):
+        called["count"] += 1
+        return _Completed(returncode=0)
+
+    monkeypatch.setattr(common.adb_client, "run_adb_command", _fake_run)
+    dest = tmp_path / "base.apk"
+    result = common.adb_pull(
+        adb_path="adb",
+        serial="SERIAL",
+        source_path="-Hattacker",
+        dest_path=dest,
+        package_name="pkg",
+        verbose=False,
+    )
+    assert isinstance(result, ArtifactError)
+    assert result.reason == "unsafe_source_path"
+    assert called["count"] == 0
+
+    result = common.adb_pull(
+        adb_path="adb",
+        serial="SERIAL",
+        source_path="/data/app/../base.apk",
+        dest_path=dest,
+        package_name="pkg",
+        verbose=False,
+    )
+    assert isinstance(result, ArtifactError)
+    assert result.reason == "unsafe_source_path"
+    assert called["count"] == 0

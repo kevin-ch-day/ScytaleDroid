@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from scytaledroid.Database.db_core import permission_intel as intel_db
 from scytaledroid.Database.db_core.session import database_session
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 
 
 @dataclass(slots=True)
@@ -68,6 +70,16 @@ def _archive_name(table: str, stamp: str) -> str:
     overflow = len(candidate) - 64
     trimmed = table[:-overflow] if overflow < len(table) else table[:8]
     return f"{trimmed}__legacy_{stamp}"
+
+
+_SAFE_ARCHIVE_STAMP_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def _require_archive_stamp(stamp: str | None) -> str:
+    suffix = str(stamp or "").strip()
+    if not _SAFE_ARCHIVE_STAMP_RE.fullmatch(suffix):
+        raise RuntimeError("Archive stamp must be a plain [A-Za-z0-9_-] token (1-32 chars).")
+    return suffix
 
 
 def list_operational_managed_tables() -> list[dict[str, object]]:
@@ -199,8 +211,13 @@ def detach_legacy_governance_snapshot_dependencies() -> GovernanceLegacyDetachOu
             if not exists_row or int(exists_row[0] or 0) == 0:
                 missing.append(f"{table}.{constraint}")
                 continue
+            quoted_table = quote_sql_ident(table)
+            quoted_constraint = quote_sql_ident(constraint)
+            if quoted_table is None or quoted_constraint is None:
+                missing.append(f"{table}.{constraint}")
+                continue
             engine.execute(
-                f"ALTER TABLE `{table}` DROP FOREIGN KEY `{constraint}`",
+                f"ALTER TABLE {quoted_table} DROP FOREIGN KEY {quoted_constraint}",
                 query_name="permission_intel.detach_legacy_fk.drop",
                 context={"table": table, "constraint": constraint},
             )
@@ -229,7 +246,7 @@ def freeze_operational_managed_tables(*, stamp: str | None = None) -> Permission
             + ", ".join(missing_in_target)
         )
 
-    suffix = (stamp or datetime.now(UTC).strftime("%Y%m%d")).strip()
+    suffix = _require_archive_stamp(stamp or datetime.now(UTC).strftime("%Y%m%d"))
     frozen: list[FrozenManagedTable] = []
     missing: list[str] = []
     skipped: list[str] = []
@@ -259,8 +276,13 @@ def freeze_operational_managed_tables(*, stamp: str | None = None) -> Permission
                 continue
 
             row_count = int(info["row_count"] or 0)
+            quoted_table = quote_sql_ident(table)
+            quoted_archive = quote_sql_ident(archived_as)
+            if quoted_table is None or quoted_archive is None:
+                skipped.append(table)
+                continue
             engine.execute(
-                f"RENAME TABLE `{table}` TO `{archived_as}`",
+                f"RENAME TABLE {quoted_table} TO {quoted_archive}",
                 query_name="permission_intel.freeze.rename",
                 context={"table": table, "archived_as": archived_as},
             )
@@ -278,9 +300,7 @@ def freeze_operational_managed_tables(*, stamp: str | None = None) -> Permission
 def drop_archived_operational_managed_tables(*, stamp: str) -> PermissionIntelDropOutcome:
     """Drop previously archived operational copies of managed permission-intel tables."""
 
-    suffix = stamp.strip()
-    if not suffix:
-        raise RuntimeError("Archive stamp is required.")
+    suffix = _require_archive_stamp(stamp)
 
     dropped: list[str] = []
     missing: list[str] = []
@@ -308,8 +328,12 @@ def drop_archived_operational_managed_tables(*, stamp: str) -> PermissionIntelDr
             if archived_as in blocked:
                 skipped.append(archived_as)
                 continue
+            quoted_archive = quote_sql_ident(archived_as)
+            if quoted_archive is None:
+                skipped.append(archived_as)
+                continue
             engine.execute(
-                f"DROP TABLE `{archived_as}`",
+                f"DROP TABLE {quoted_archive}",
                 query_name="permission_intel.drop_archive.drop",
                 context={"archived_as": archived_as},
             )

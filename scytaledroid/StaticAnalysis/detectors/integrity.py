@@ -12,6 +12,7 @@ from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from scytaledroid.StaticAnalysis._androguard import APK, merge_bounds_warnings, open_apk_safely
+from scytaledroid.Utils.IO.zip_safety import is_unsafe_zip_member_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ..core.context import DetectorContext
@@ -900,7 +901,7 @@ def _detect_payloads(apk_path: Path) -> tuple[PayloadIndicator, ...]:
     payloads: list[PayloadIndicator] = []
     with archive:
         for info in archive.infolist():
-            if info.is_dir():
+            if info.is_dir() or is_unsafe_zip_member_name(info.filename):
                 continue
             entry = info.filename
             lower_entry = entry.lower()
@@ -950,6 +951,8 @@ def _count_multidex(apk_path: Path) -> int:
     with archive:
         for info in archive.infolist():
             name = info.filename
+            if is_unsafe_zip_member_name(name):
+                continue
             if name.startswith("classes") and name.endswith(".dex"):
                 count += 1
     return count

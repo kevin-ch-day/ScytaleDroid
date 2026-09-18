@@ -317,8 +317,14 @@ def find_report_path_for_session(session_stamp: str | None) -> Path | None:
         if str(row.get("session_stamp") or "").strip() != session:
             continue
         path = Path(str(row.get("path") or ""))
-        if path.is_file():
-            return path
+        if not path.is_file():
+            continue
+        try:
+            if not path.resolve().is_relative_to(_reports_root().resolve()):
+                continue
+        except (OSError, ValueError):
+            continue
+        return path
     return None
 
 

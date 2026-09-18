@@ -56,7 +56,16 @@ def test_drop_archived_operational_managed_tables_requires_stamp():
     try:
         permission_intel_freeze.drop_archived_operational_managed_tables(stamp="")
     except RuntimeError as exc:
-        assert "Archive stamp is required" in str(exc)
+        assert "plain" in str(exc) or "required" in str(exc).lower()
+    else:  # pragma: no cover
+        raise AssertionError("expected RuntimeError")
+
+
+def test_drop_archived_operational_managed_tables_rejects_sql_stamp():
+    try:
+        permission_intel_freeze.drop_archived_operational_managed_tables(stamp="x`; DROP TABLE apps; --")
+    except RuntimeError as exc:
+        assert "plain" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected RuntimeError")
 

@@ -11,6 +11,7 @@ from scytaledroid.Config import app_config
 from scytaledroid.Database.db_core import db_config
 from scytaledroid.Database.db_core import db_queries as core_q
 from scytaledroid.Database.db_core.session import database_session
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 from scytaledroid.Database.db_utils import diagnostics
 from scytaledroid.Database.db_utils.permission_intel_freeze import (
     freeze_operational_managed_tables,
@@ -353,6 +354,9 @@ def _drop_legacy_string_run_id_columns() -> None:
             if getattr(engine, "_dialect", "sqlite") != "mysql":
                 return
             for table in tables:
+                quoted_table = quote_sql_ident(table)
+                if quoted_table is None:
+                    continue
                 columns = diagnostics.get_table_columns(table) or []
                 if "run_id" not in columns:
                     continue
@@ -369,26 +373,28 @@ def _drop_legacy_string_run_id_columns() -> None:
                     (table,),
                 )
                 for row in rows or []:
-                    fk_name = str(row[0])
+                    quoted_fk = quote_sql_ident(str(row[0]))
+                    if quoted_fk is None:
+                        continue
                     try:
-                        engine.execute(f"ALTER TABLE `{table}` DROP FOREIGN KEY `{fk_name}`;")
+                        engine.execute(f"ALTER TABLE {quoted_table} DROP FOREIGN KEY {quoted_fk};")
                     except Exception:
                         continue
                 # Drop indexes on run_id.
-                idx_rows = engine.fetch_all(f"SHOW INDEX FROM `{table}`;")
+                idx_rows = engine.fetch_all(f"SHOW INDEX FROM {quoted_table};")
                 for row in idx_rows or []:
                     if len(row) < 5:
                         continue
-                    index_name = str(row[2])
+                    quoted_index = quote_sql_ident(str(row[2]))
                     column_name = str(row[4])
-                    if column_name == "run_id" and index_name != "PRIMARY":
+                    if column_name == "run_id" and str(row[2]) != "PRIMARY" and quoted_index is not None:
                         try:
-                            engine.execute(f"ALTER TABLE `{table}` DROP INDEX `{index_name}`;")
+                            engine.execute(f"ALTER TABLE {quoted_table} DROP INDEX {quoted_index};")
                         except Exception:
                             continue
                 # Drop the legacy column.
                 try:
-                    engine.execute(f"ALTER TABLE `{table}` DROP COLUMN run_id;")
+                    engine.execute(f"ALTER TABLE {quoted_table} DROP COLUMN run_id;")
                 except Exception:
                     continue
     except Exception:
@@ -401,8 +407,11 @@ def _ensure_canonical_triggers() -> None:
             if getattr(engine, "_dialect", "sqlite") != "mysql":
                 return
             for name in ("trg_static_runs_canonical_insert", "trg_static_runs_canonical_update"):
+                quoted_trigger = quote_sql_ident(name)
+                if quoted_trigger is None:
+                    continue
                 try:
-                    engine.execute(f"DROP TRIGGER IF EXISTS `{name}`;")
+                    engine.execute(f"DROP TRIGGER IF EXISTS {quoted_trigger};")
                 except Exception:
                     pass
             engine.execute(
@@ -452,9 +461,12 @@ def _ensure_canonical_triggers() -> None:
 
 def _fetch_index_signatures(table: str) -> set[str]:
     signatures: set[str] = set()
+    quoted = quote_sql_ident(table)
+    if quoted is None:
+        return signatures
     try:
         with database_session(reuse_connection=False) as engine:
-            rows = engine.fetch_all(f"SHOW INDEX FROM `{table}`;")
+            rows = engine.fetch_all(f"SHOW INDEX FROM {quoted};")
     except Exception:
         return signatures
     if not rows:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -27,6 +28,7 @@ from scytaledroid.StaticAnalysis.persistence import (
 )
 from scytaledroid.StaticAnalysis.services import static_service
 from scytaledroid.StaticAnalysis.session import make_session_stamp, normalize_session_stamp
+from scytaledroid.Utils.IO.zip_safety import is_unsafe_zip_member_name
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 try:  # optional API dependency
@@ -69,6 +71,7 @@ UPLOAD_REJECT_MANIFEST_MISSING = "android_manifest_missing"
 UPLOAD_REJECT_CORRUPT_ZIP = "corrupt_apk_zip"
 UPLOAD_REJECT_OVERSIZE = "upload_too_large"
 UPLOAD_REJECT_ARCHIVE_LIMIT = "apk_archive_policy_limit"
+UPLOAD_REJECT_ZIP_SLIP = "apk_zip_path_traversal"
 UPLOAD_REJECT_METADATA = "metadata_extraction_failed"
 SCAN_REJECT_CAPACITY = "scan_capacity_reached"
 
@@ -336,6 +339,11 @@ def _validate_apk_container(path: Path) -> None:
                     "APK ZIP structure is corrupt.",
                 )
             names = {name.lstrip("/") for name in archive.namelist()}
+            if any(is_unsafe_zip_member_name(name) for name in archive.namelist()):
+                raise UploadValidationError(
+                    UPLOAD_REJECT_ZIP_SLIP,
+                    "APK archive contains path-traversal member names.",
+                )
     except zipfile.BadZipFile as exc:
         raise UploadValidationError(
             UPLOAD_REJECT_NOT_ZIP,
@@ -560,6 +568,26 @@ def _is_relative_to(path: Path, base: Path) -> bool:
         return False
 
 
+def _safe_download_filename(session_stamp: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(session_stamp or "")).strip("-.")
+    return f"{cleaned or 'session'}_evidence.zip"
+
+
+def _require_confined_report_file(report_path: Path | None) -> Path:
+    from fastapi import HTTPException
+
+    if report_path is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    reports_root = (Path(app_config.DATA_DIR) / "static_analysis" / "reports").resolve()
+    try:
+        resolved = report_path.expanduser().resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="Report not found") from exc
+    if not resolved.is_file() or not _is_relative_to(resolved, reports_root):
+        raise HTTPException(status_code=404, detail="Report not found")
+    return resolved
+
+
 def _collect_run_status(session_stamp: str) -> dict[str, Any]:
     if core_q is None:
         return {"session_stamp": session_stamp, "status": "db_unavailable"}
@@ -584,8 +612,24 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
         raise RuntimeError("FastAPI dependencies are unavailable. Install API extras to use the server.")
     auth_disabled = validate_api_auth_config(bind_host=bind_host)
     transport_mode = validate_api_transport_config(bind_host=bind_host)
+    enable_docs = _is_loopback_host(bind_host)
 
-    app = FastAPI(title="ScytaleDroid API", version=app_config.APP_VERSION)
+    app = FastAPI(
+        title="ScytaleDroid API",
+        version=app_config.APP_VERSION,
+        docs_url="/docs" if enable_docs else None,
+        redoc_url="/redoc" if enable_docs else None,
+        openapi_url="/openapi.json" if enable_docs else None,
+    )
+
+    @app.middleware("http")
+    async def add_security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     upload_file = File(...)
 
@@ -961,9 +1005,7 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
 
     @app.get("/report/{report_hash}.json")
     def report_by_hash(report_hash: str, _: None = Depends(require_api_key)) -> FileResponse:
-        report_path = _find_report_by_hash(report_hash)
-        if report_path is None:
-            raise HTTPException(status_code=404, detail="Report not found")
+        report_path = _require_confined_report_file(_find_report_by_hash(report_hash))
         return FileResponse(report_path, media_type="application/json")
 
     @app.get("/health/summary")
@@ -1016,9 +1058,7 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
 
     @app.get("/run/{session_stamp}/report.json")
     def report_json(session_stamp: str, _: None = Depends(require_api_key)) -> FileResponse:
-        report_path = _find_report_for_session(session_stamp)
-        if report_path is None:
-            raise HTTPException(status_code=404, detail="Report not found")
+        report_path = _require_confined_report_file(_find_report_for_session(session_stamp))
         return FileResponse(report_path, media_type="application/json")
 
     @app.get("/run/{session_stamp}/evidence.zip")
@@ -1027,9 +1067,7 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
         background_tasks: BackgroundTasks,
         _: None = Depends(require_api_key),
     ) -> FileResponse:
-        report_path = _find_report_for_session(session_stamp)
-        if report_path is None:
-            raise HTTPException(status_code=404, detail="Report not found")
+        report_path = _require_confined_report_file(_find_report_for_session(session_stamp))
 
         manifest = {
             "session_stamp": session_stamp,
@@ -1051,7 +1089,8 @@ def build_api_app(*, bind_host: str | None = None) -> FastAPI:
             path.unlink(missing_ok=True)
 
         background_tasks.add_task(_cleanup_temp, temp_path)
-        headers = {"Content-Disposition": f"attachment; filename={session_stamp}_evidence.zip"}
+        filename = _safe_download_filename(session_stamp)
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
         return FileResponse(temp_path, media_type="application/zip", headers=headers)
 
     return app

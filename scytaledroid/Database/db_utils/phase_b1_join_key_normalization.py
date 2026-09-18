@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
+
 from .artifact_registry_typed_linkage import collect_artifact_registry_typed_linkage_audit
 from .phase_a_read_parity import collect_phase_a_read_parity
 from .schema_migration_registry import (
@@ -543,12 +545,18 @@ def _planned_alter_sql_for_targets(
         target_type = str(spec["target_type"]).lower()
         target_charset = str(spec["target_charset"])
         target_collation = str(spec["target_collation"])
+        quoted_table = quote_sql_ident(table_name)
+        quoted_column = quote_sql_ident(column_name)
+        quoted_charset = quote_sql_ident(target_charset)
+        quoted_collation = quote_sql_ident(target_collation)
+        if None in {quoted_table, quoted_column, quoted_charset, quoted_collation}:
+            continue
         target_decl = f"{target_type}({target_width})"
         lines.append(f"-- {table_name}.{column_name}")
         lines.append(
-            f"ALTER TABLE `{table_name}` "
-            f"MODIFY COLUMN `{column_name}` {target_decl} "
-            f"CHARACTER SET {target_charset} COLLATE {target_collation};"
+            f"ALTER TABLE {quoted_table} "
+            f"MODIFY COLUMN {quoted_column} {target_decl} "
+            f"CHARACTER SET {quoted_charset} COLLATE {quoted_collation};"
         )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -587,11 +595,15 @@ def _build_required_alter_statements(run_sql: RunSql, targets: Sequence[Mapping[
         if not needs_change:
             continue
         definition = _current_definition_clause(current, spec)
+        quoted_table = quote_sql_ident(table_name)
+        quoted_column = quote_sql_ident(column_name)
+        if quoted_table is None or quoted_column is None:
+            continue
         statements.append(
             {
                 "table": table_name,
                 "column": column_name,
-                "sql": f"ALTER TABLE `{table_name}` MODIFY COLUMN `{column_name}` {definition}",
+                "sql": f"ALTER TABLE {quoted_table} MODIFY COLUMN {quoted_column} {definition}",
             }
         )
     return statements

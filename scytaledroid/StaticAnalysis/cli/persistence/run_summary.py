@@ -24,6 +24,7 @@ from scytaledroid.Database.db_func.static_analysis.persistence_failures import (
 )
 from scytaledroid.Database.db_utils import diagnostics as db_diagnostics
 from scytaledroid.Database.db_utils.package_utils import normalize_package_name
+from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 from scytaledroid.Utils.version_utils import get_git_commit
 
@@ -1082,10 +1083,22 @@ def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
                         artifact_token = str(sha_row[0])
                 except Exception:
                     pass
-            rel_path = Path("evidence") / "static_runs" / str(static_run_id) / str(package_name) / artifact_token
-            rel_path.mkdir(parents=True, exist_ok=True)
-            corr_key = payload.get("correlation_key") or "correlation"
-            corr_file = rel_path / f"correlation_{corr_key}.json"
+            evidence_root = (Path("evidence") / "static_runs").resolve()
+            dest_dir = (
+                evidence_root
+                / artifact_store.safe_filesystem_slug(str(static_run_id))
+                / artifact_store.safe_filesystem_slug(str(package_name))
+                / artifact_store.safe_filesystem_slug(str(artifact_token))
+            ).resolve()
+            if not dest_dir.is_relative_to(evidence_root):
+                continue
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            corr_key = artifact_store.safe_filesystem_slug(
+                str(payload.get("correlation_key") or "correlation")
+            )
+            corr_file = (dest_dir / f"correlation_{corr_key}.json").resolve()
+            if not corr_file.is_relative_to(evidence_root):
+                continue
             wrote_evidence = False
             try:
                 corr_payload = {
@@ -1112,12 +1125,7 @@ def _persist_correlation_results(rows: Sequence[Mapping[str, object]]) -> bool:
             if not wrote_evidence:
                 continue
             payload["evidence_path"] = str(
-                Path("evidence")
-                / "static_runs"
-                / str(static_run_id)
-                / str(package_name)
-                / artifact_token
-                / corr_file.name
+                Path("evidence") / "static_runs" / dest_dir.relative_to(evidence_root) / corr_file.name
             )
             payload["governance_version"] = gov_version
             payload["governance_sha256"] = gov_sha

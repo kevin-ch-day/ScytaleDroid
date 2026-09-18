@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping
 
 from scytaledroid.StaticAnalysis._androguard import APK, FileNotPresent
 from scytaledroid.StaticAnalysis.engine import aapt2_fallback
+from scytaledroid.Utils.IO.zip_safety import is_unsafe_zip_member_name
 
 from ..origins import canonical_origin_type
 from .models import IndexedString
@@ -209,6 +210,8 @@ def collect_file_strings(apk: APK, *, mode: str = "full") -> tuple[IndexedString
     split_id = _infer_split_id(apk)
 
     for name in file_names:
+        if is_unsafe_zip_member_name(name):
+            continue
         origin_type = classify_origin_type(name)
         if origin_type is None:
             continue

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -27,6 +28,15 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 RETIREMENT_CLASS = "missing_evidence_db_only_retirement_candidate"
+_SAFE_SQL_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _quote_sql_ident(name: str) -> str:
+    """Quote a plain SQL identifier; refuse anything that cannot be parameterized."""
+
+    if not _SAFE_SQL_IDENT_RE.fullmatch(str(name or "")):
+        raise ValueError(f"refusing unsafe SQL identifier: {name!r}")
+    return f"`{name}`"
 
 
 @dataclass(frozen=True)
@@ -107,12 +117,14 @@ def _table_columns(run_sql: Any) -> dict[str, tuple[str, ...]]:
 def _count_table(run_sql: Any, table: str, columns: Sequence[str], run_ids: Sequence[str]) -> int:
     if not run_ids:
         return 0
+    quoted_table = _quote_sql_ident(table)
+    quoted_columns = [_quote_sql_ident(column) for column in columns]
     placeholders = ",".join(["%s"] * len(run_ids))
-    where = " OR ".join([f"{column} IN ({placeholders})" for column in columns])
+    where = " OR ".join([f"{column} IN ({placeholders})" for column in quoted_columns])
     params: list[str] = []
-    for _column in columns:
+    for _column in quoted_columns:
         params.extend(run_ids)
-    row = run_sql(f"SELECT COUNT(*) AS n FROM {table} WHERE {where}", tuple(params), fetch="one_dict") or {}
+    row = run_sql(f"SELECT COUNT(*) AS n FROM {quoted_table} WHERE {where}", tuple(params), fetch="one_dict") or {}
     return int(row.get("n") or 0)
 
 
@@ -165,7 +177,10 @@ def _count_cache_references(run_sql: Any, run_ids: Sequence[str]) -> dict[str, i
             out[column] = 0
             continue
         count = run_sql(
-            f"SELECT COUNT(*) AS n FROM web_static_dynamic_app_summary_cache WHERE {column} IN ({placeholders})",
+            (
+                "SELECT COUNT(*) AS n FROM web_static_dynamic_app_summary_cache "
+                f"WHERE {_quote_sql_ident(column)} IN ({placeholders})"
+            ),
             tuple(run_ids),
             fetch="one_dict",
         ) or {}
@@ -176,16 +191,18 @@ def _count_cache_references(run_sql: Any, run_ids: Sequence[str]) -> dict[str, i
 def _delete_target(run_sql_rowcount: Any, target: DeleteTarget, run_ids: Sequence[str], *, chunk_size: int = 100) -> int:
     total = 0
     ids = list(run_ids)
+    quoted_table = _quote_sql_ident(target.table_name)
+    quoted_columns = [_quote_sql_ident(column) for column in target.columns]
     for i in range(0, len(ids), chunk_size):
         batch = ids[i : i + chunk_size]
         placeholders = ",".join(["%s"] * len(batch))
-        where = " OR ".join([f"{column} IN ({placeholders})" for column in target.columns])
+        where = " OR ".join([f"{column} IN ({placeholders})" for column in quoted_columns])
         params: list[str] = []
-        for _column in target.columns:
+        for _column in quoted_columns:
             params.extend(batch)
         total += int(
             run_sql_rowcount(
-                f"DELETE FROM {target.table_name} WHERE {where}",
+                f"DELETE FROM {quoted_table} WHERE {where}",
                 tuple(params),
                 query_name="missing_dynamic_evidence_retirement.delete",
             )

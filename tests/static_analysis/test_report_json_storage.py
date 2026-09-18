@@ -122,6 +122,22 @@ def test_report_path_lookup_does_not_decode_report_corpus(tmp_path: Path, monkey
     assert find_report_path_by_sha256("../not-a-digest") is None
 
 
+def test_find_report_path_for_session_ignores_index_paths_outside_reports_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app_config, "DATA_DIR", "data")
+    outside = tmp_path / "secret.json"
+    outside.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        reports_store,
+        "_read_report_package_index",
+        lambda: [{"session_stamp": "poisoned", "path": str(outside)}],
+    )
+
+    assert find_report_path_for_session("poisoned") is None
+
+
 def test_report_writes_do_not_reconstruct_large_report_for_package_index(
     tmp_path: Path,
     monkeypatch,

@@ -13,6 +13,7 @@ from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from typing import Any
 
 from scytaledroid.Database.db_core import db_queries as core_q
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 from scytaledroid.Database.db_queries.canonical import schema as canonical_schema
 from scytaledroid.StaticAnalysis.cli.persistence.session_header_linkage import (
     resolve_static_session_id_for_run,
@@ -575,12 +576,15 @@ def _clamp_authority(value: str | None, limit: int = 191) -> str | None:
 
 
 def _table_columns(table_name: str) -> set[str]:
+    quoted = quote_sql_ident(table_name)
+    if quoted is None:
+        return set()
     cached = _TABLE_COLUMNS_CACHE.get(table_name)
     if cached is not None:
         return cached
     try:
         rows = core_q.run_sql(
-            f"SHOW COLUMNS FROM {table_name}",
+            f"SHOW COLUMNS FROM {quoted}",
             fetch="all",
         )
     except Exception:
@@ -611,7 +615,16 @@ def _insert_table_row(
     if not selected:
         return None
     placeholders = ", ".join(["%s"] * len(selected))
-    sql = f"INSERT INTO {table_name} ({', '.join(selected)}) VALUES ({placeholders})"
+    quoted_table = quote_sql_ident(table_name)
+    if quoted_table is None:
+        return None
+    quoted_columns: list[str] = []
+    for column in selected:
+        quoted = quote_sql_ident(column)
+        if quoted is None:
+            return None
+        quoted_columns.append(quoted)
+    sql = f"INSERT INTO {quoted_table} ({', '.join(quoted_columns)}) VALUES ({placeholders})"
     return core_q.run_sql(
         sql,
         tuple(row_data[column] for column in selected),

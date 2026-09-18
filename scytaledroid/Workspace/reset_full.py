@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scytaledroid.Database.db_core import database_session
+from scytaledroid.Database.db_core.sql_ident import quote_sql_ident
 from scytaledroid.Database.db_utils.reset_static import PROTECTED_TABLES, ResetOutcome
 
 
@@ -126,14 +127,18 @@ def _reset_analysis_tables() -> ResetOutcome:
 
         for table in candidate_tables:
             # Table list comes from SHOW TABLES; existence should be stable, but keep defensive.
+            quoted = quote_sql_ident(table)
+            if quoted is None:
+                failed.append((table, "refusing unsafe SQL identifier"))
+                continue
             try:
-                engine.execute(f"TRUNCATE TABLE `{table}`")
+                engine.execute(f"TRUNCATE TABLE {quoted}")
                 truncated.append(table)
             except RuntimeError as exc:  # pragma: no cover - requires specific DB permissions/state
                 error_text = str(exc)
                 if "command denied" in error_text.lower():
                     try:
-                        engine.execute(f"DELETE FROM `{table}`")
+                        engine.execute(f"DELETE FROM {quoted}")
                         cleared.append(table)
                         continue
                     except RuntimeError as delete_exc:  # pragma: no cover

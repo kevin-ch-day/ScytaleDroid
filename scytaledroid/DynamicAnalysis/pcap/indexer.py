@@ -14,6 +14,7 @@ from scytaledroid.DynamicAnalysis.core.event_logger import RunEventLogger
 from scytaledroid.DynamicAnalysis.core.manifest import RunManifest
 
 _SCENARIO_SAFE = re.compile(r"[^a-z0-9_-]+")
+_PACKAGE_DIR_SAFE = re.compile(r"[^A-Za-z0-9._]+")
 
 
 @dataclass(frozen=True)
@@ -44,8 +45,16 @@ def index_pcap_by_app(
     if not rel_path:
         _log(event_logger, "pcap_index_skip_missing", {"reason": "pcap_relative_path_missing"})
         return None
-    src_path = run_dir / rel_path
-    if not src_path.exists():
+    run_root = run_dir.expanduser().resolve()
+    src_path = (run_dir / rel_path).resolve()
+    if not src_path.is_relative_to(run_root):
+        _log(
+            event_logger,
+            "pcap_index_skip_missing",
+            {"reason": "pcap_path_unconfined", "path": str(src_path)},
+        )
+        return None
+    if not src_path.is_file():
         _log(
             event_logger,
             "pcap_index_skip_missing",
@@ -60,24 +69,30 @@ def index_pcap_by_app(
             {"reason": "pcap_too_small", "size_bytes": size_bytes},
         )
         return None
-    package = (manifest.target.get("package_name") or "_unknown").strip()
-    if not package:
-        package = "_unknown"
+    package = _safe_package_dir_name(manifest.target.get("package_name") or "_unknown")
     scenario_id = manifest.scenario.get("id") or "scenario"
     scenario_slug = _slugify(str(scenario_id), cfg.max_scenario_len)
     capture_scope = _capture_scope(manifest, run_dir) or "app_only"
     timestamp = _format_timestamp(manifest.scenario.get("started_at") or manifest.started_at)
-    run_short = (manifest.dynamic_run_id or "run")[:6]
+    run_short = _slugify(str(manifest.dynamic_run_id or "run"), 12)
     filename = f"{timestamp}__{scenario_slug}__pcap-{capture_scope}__run-{run_short}.pcap"
-    dest_dir = Path(app_config.DATA_DIR) / "archive" / "pcap" / "by_app" / package
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / filename
+    by_app_root = (Path(app_config.DATA_DIR) / "archive" / "pcap" / "by_app").resolve()
+    dest_dir = by_app_root / package
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = (dest_dir / filename).resolve()
+    except OSError:
+        _log(event_logger, "pcap_index_skip_invalid", {"reason": "pcap_dest_unusable"})
+        return None
+    if not dest_path.is_relative_to(by_app_root):
+        _log(event_logger, "pcap_index_skip_invalid", {"reason": "pcap_dest_unconfined"})
+        return None
     final_path = _copy_atomic(src_path, dest_path, size_bytes)
     _log(
         event_logger,
         "pcap_index_written",
         {
-            "source": str(src_path.relative_to(run_dir)),
+            "source": str(src_path.relative_to(run_root)),
             "destination": str(final_path),
             "size_bytes": size_bytes,
         },
@@ -107,6 +122,14 @@ def _capture_scope(manifest: RunManifest, run_dir: Path) -> str | None:
         if isinstance(capture_mode, str) and capture_mode:
             return _slugify(capture_mode, 16)
     return None
+
+
+def _safe_package_dir_name(package: str) -> str:
+    raw = str(package or "").strip() or "_unknown"
+    if raw in {".", ".."} or "/" in raw or "\\" in raw or "\x00" in raw or ".." in raw:
+        slug = _PACKAGE_DIR_SAFE.sub("_", raw).replace("..", "_").strip("._")
+        return slug[:191] or "_unknown"
+    return raw[:191]
 
 
 def _slugify(value: str, max_len: int) -> str:
