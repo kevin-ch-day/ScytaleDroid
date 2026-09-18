@@ -399,6 +399,36 @@ def _ensure_app_version(
         raise
 
 
+def _static_analysis_runs_has_artifact_set_hash_version() -> bool:
+    """Return True when the live static_analysis_runs table has the 0.3.17 column."""
+    try:
+        row = core_q.run_sql(
+            "SHOW COLUMNS FROM static_analysis_runs LIKE %s",
+            ("artifact_set_hash_version",),
+            fetch="one",
+        )
+    except Exception:
+        return False
+    return bool(row)
+
+
+def _filter_static_run_insert_columns(
+    columns: list[str],
+    values: list[object],
+    *,
+    include_hash_version: bool,
+) -> tuple[list[str], list[object]]:
+    """Drop artifact_set_hash_version when the physical schema is still 0.3.16."""
+    if include_hash_version:
+        return list(columns), list(values)
+    filtered = [
+        (column, value)
+        for column, value in zip(columns, values, strict=True)
+        if column != "artifact_set_hash_version"
+    ]
+    return [column for column, _ in filtered], [value for _, value in filtered]
+
+
 def _create_static_run(
     *,
     app_version_id: int,
@@ -524,8 +554,13 @@ def _create_static_run(
         _normalize_datetime_value(canonical_set_at_utc) if canonical_set_at_utc else None,
         canonical_reason,
     ]
+    columns, values = _filter_static_run_insert_columns(
+        full_columns,
+        full_values,
+        include_hash_version=_static_analysis_runs_has_artifact_set_hash_version(),
+    )
     try:
-        run_id = _insert_run(full_columns, full_values)
+        run_id = _insert_run(columns, values)
     except Exception as exc:
         log.warning(
             f"Failed to create static run row for {session_stamp}: {exc}",

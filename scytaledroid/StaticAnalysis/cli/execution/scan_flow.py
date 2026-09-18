@@ -441,6 +441,10 @@ def execute_scan(
                     run_started_utc=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     dry_run=False,
                 )
+            except TypeError:
+                # Contract mismatches (missing wrapper kwargs) must not look like a
+                # successful scan that simply lacked a STARTED run row.
+                raise
             except Exception:
                 log.warning(
                     f"Failed to create STARTED static_run ledger for {group.package_name}",

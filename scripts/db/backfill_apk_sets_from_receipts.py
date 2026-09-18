@@ -20,7 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scytaledroid.Utils.install_set_identity import compute_artifact_set_hash
+from scytaledroid.Utils.install_set_identity import hash_v1_ordered_digests
 
 
 @dataclass(frozen=True)
@@ -228,11 +228,8 @@ def _parse_receipt(path: Path, payload: dict[str, Any]) -> ReceiptSet | None:
 
 
 def artifact_set_hash_v1(ordered_hashes: list[str]) -> str:
-    """Return the current static identity v1 hash for ordered APK members."""
-    return compute_artifact_set_hash(
-        [{"role": "base" if index == 0 else "split", "split_name": str(index), "sha256": value} for index, value in enumerate(ordered_hashes)],
-        version="v1",
-    )
+    """Return the historical v1 digest for an already ordered member SHA-256 list."""
+    return hash_v1_ordered_digests(ordered_hashes)
 
 
 def _ordered_members_for_hash(members: list[ReceiptMember]) -> list[ReceiptMember]:

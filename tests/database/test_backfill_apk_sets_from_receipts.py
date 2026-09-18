@@ -7,12 +7,19 @@ from scripts.db.backfill_apk_sets_from_receipts import (
     artifact_set_hash_v1,
     collect_receipt_sets,
 )
+from scytaledroid.Utils.install_set_identity import hash_v1_ordered_digests
 
 
 def test_artifact_set_hash_v1_matches_static_identity_list_payload() -> None:
     assert artifact_set_hash_v1(["b" * 64, "a" * 64]) == (
         "f5e608884dc64246cb6411c2d00a2726de7ce9cbdd32903d546a0df3f806dd00"
     )
+
+
+def test_artifact_set_hash_v1_preserves_historical_order_for_eleven_members() -> None:
+    digests = [f"{index:064x}" for index in range(11)]
+    assert artifact_set_hash_v1(digests) == hash_v1_ordered_digests(digests)
+
 
 
 def test_collect_receipt_sets_requires_observed_hashes_and_base(tmp_path: Path) -> None:

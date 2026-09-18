@@ -43,11 +43,23 @@ def canonical_member_manifest(members: Sequence[Any]) -> list[dict[str, str]]:
     return sorted(manifest, key=lambda item: (item["role"], item["split_name"], item["sha256"]))
 
 
+def hash_v1_ordered_digests(ordered_hashes: Sequence[str]) -> str:
+    """Return the historical v1 digest for an already ordered SHA-256 list.
+
+    The original writer hashed ``json.dumps(ordered_member_sha256_list)`` and did
+    not invent split names. Receipt backfill must call this helper rather than
+    synthesizing positional ``split_name`` values: those are sorted alphabetically
+    by ``_v1_ordered`` and diverge from history once index ``10`` appears.
+    """
+
+    return sha256(json.dumps(list(ordered_hashes)).encode("utf-8")).hexdigest()
+
+
 def compute_artifact_set_hash(members: Sequence[Any], *, version: str = V1) -> str:
     """Compute the requested versioned digest; no paths, IDs, or timestamps enter it."""
     if version == V1:
         # Deliberately retain default json.dumps separators and ensure_ascii behavior.
-        return sha256(json.dumps([_value(member, "sha256") for member in _v1_ordered(members)]).encode("utf-8")).hexdigest()
+        return hash_v1_ordered_digests([_value(member, "sha256") for member in _v1_ordered(members)])
     if version == V2:
         payload = json.dumps(canonical_member_manifest(members), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return sha256(payload.encode("utf-8")).hexdigest()

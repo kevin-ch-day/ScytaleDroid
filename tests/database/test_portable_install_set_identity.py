@@ -1,8 +1,12 @@
 """Portable install-set digest contract tests."""
 
+import json
+from hashlib import sha256
+
 from scytaledroid.Utils.install_set_identity import (
     canonical_member_manifest,
     compute_artifact_set_hash,
+    hash_v1_ordered_digests,
     portable_set_identity,
 )
 
@@ -43,3 +47,28 @@ def test_canonical_manifest_has_only_portable_member_evidence():
         {"role": "base", "split_name": "base", "sha256": "a" * 64},
         {"role": "split", "split_name": "config.en", "sha256": "b" * 64},
     ]
+
+
+def _hex_digest(index: int) -> str:
+    return f"{index:064x}"
+
+
+def test_v1_ordered_digest_list_stays_byte_compatible_for_large_sets():
+    for count in (2, 10, 11, 12, 61):
+        digests = [_hex_digest(index) for index in range(count)]
+        historical = sha256(json.dumps(digests).encode("utf-8")).hexdigest()
+        assert hash_v1_ordered_digests(digests) == historical
+        fake_members = [
+            {
+                "role": "base" if index == 0 else "split",
+                "split_name": str(index),
+                "sha256": digest,
+            }
+            for index, digest in enumerate(digests)
+        ]
+        resorted = compute_artifact_set_hash(fake_members, version="v1")
+        if count >= 11:
+            assert resorted != historical
+        else:
+            assert resorted == historical
+

@@ -70,6 +70,43 @@ def test_worklist_sql_distinct_and_limits() -> None:
     assert "harvest_artifact_paths" in sql
     assert "harvest_source_paths" in sql
     assert "static_run_id_u" in sql or "cast(ds.static_run_id as unsigned)" in sql
+    assert "ds.artifact_set_hash" in sql
+    assert "ds.apk_set_id" in sql
+
+
+def test_worklist_exclusion_does_not_treat_sibling_install_sets_as_covered() -> None:
+    base = "a" * 64
+    sar_a = {
+        "base_apk_sha256": base,
+        "artifact_set_hash": "b" * 64,
+        "apk_set_id": 1204,
+    }
+    ds_b = {
+        "base_apk_sha256": base,
+        "artifact_set_hash": "c" * 64,
+        "apk_set_id": 1812,
+    }
+    assert m.static_run_covers_dynamic_install_set(ds_b, sar_a) is False
+    sql = m.sql_worklist(10)
+    assert "ds.artifact_set_hash" in sql
+    assert "sar2.artifact_set_hash" in sql
+    assert "ds.apk_set_id = sar2.apk_set_id" in sql
+
+
+def test_legacy_dynamic_row_without_install_set_identity_still_uses_base_sha() -> None:
+    base = "a" * 64
+    sar = {
+        "base_apk_sha256": base,
+        "artifact_set_hash": None,
+        "apk_set_id": None,
+    }
+    ds = {
+        "base_apk_sha256": base,
+        "artifact_set_hash": None,
+        "apk_set_id": None,
+    }
+    assert m.static_run_covers_dynamic_install_set(ds, sar) is True
+
 
 
 def test_worklist_distinct_count_subquery() -> None:

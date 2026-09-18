@@ -26,6 +26,7 @@ __all__ = [
     "sql_schema_collation_sample",
     "sql_worklist",
     "sql_worklist_distinct_hash_count",
+    "static_run_covers_dynamic_install_set",
     "run_scalar",
     "run_all_bucket_counts",
 ]
@@ -84,6 +85,64 @@ EXISTS (
   SELECT 1 FROM static_analysis_runs sar
   WHERE {HASH_EQ_DS_SAR}
     AND {SAR_QUALIFYING_SQL}
+)
+""".strip()
+
+
+def static_run_covers_dynamic_install_set(ds: dict[str, Any], sar: dict[str, Any]) -> bool:
+    """Return True when a qualifying static run covers this dynamic row's install set.
+
+    A completed canonical run for sibling install set A (same base SHA, different
+    ``artifact_set_hash`` / ``apk_set_id``) must not cover set B. Base-SHA matching
+    remains only for unlabeled legacy dynamic rows.
+    """
+    ds_hash = str(ds.get("artifact_set_hash") or "").strip().lower()
+    sar_hash = str(sar.get("artifact_set_hash") or "").strip().lower()
+    if ds_hash and sar_hash:
+        return ds_hash == sar_hash
+    ds_set_id = ds.get("apk_set_id")
+    sar_set_id = sar.get("apk_set_id")
+    if ds_set_id is not None and sar_set_id is not None:
+        try:
+            return int(ds_set_id) == int(sar_set_id)
+        except (TypeError, ValueError):
+            return False
+    if ds_hash or ds_set_id is not None:
+        return False
+    return str(ds.get("base_apk_sha256") or "").strip().lower() == str(
+        sar.get("base_apk_sha256") or ""
+    ).strip().lower()
+
+
+def _sql_no_covering_install_set_sar(*, alias: str = "sar2") -> str:
+    """Worklist exclusion: cover by install-set identity, not shared base SHA."""
+    hash_match = (
+        f"{alias}.artifact_set_hash IS NOT NULL AND TRIM({alias}.artifact_set_hash) <> '' "
+        "AND ds.artifact_set_hash IS NOT NULL AND TRIM(ds.artifact_set_hash) <> '' "
+        f"AND {_hash_eq('ds.artifact_set_hash', f'{alias}.artifact_set_hash')}"
+    )
+    set_id_match = (
+        f"ds.apk_set_id IS NOT NULL AND {alias}.apk_set_id IS NOT NULL "
+        f"AND ds.apk_set_id = {alias}.apk_set_id"
+    )
+    legacy_base = (
+        "(ds.artifact_set_hash IS NULL OR TRIM(ds.artifact_set_hash) = '') "
+        "AND ds.apk_set_id IS NULL "
+        f"AND {_hash_eq('ds.base_apk_sha256', f'{alias}.base_apk_sha256')}"
+    )
+    return f"""
+NOT EXISTS (
+  SELECT 1 FROM static_analysis_runs {alias}
+  WHERE UPPER(TRIM(COALESCE({alias}.status, ''))) = 'COMPLETED'
+    AND UPPER(TRIM(COALESCE({alias}.run_class, ''))) = 'CANONICAL'
+    AND COALESCE({alias}.identity_valid, 0) = 1
+    AND {alias}.base_apk_sha256 IS NOT NULL
+    AND TRIM({alias}.base_apk_sha256) <> ''
+    AND (
+      ({hash_match})
+      OR ({set_id_match})
+      OR ({legacy_base})
+    )
 )
 """.strip()
 
@@ -196,17 +255,7 @@ EXISTS (
 )
 """.strip()
 
-    no_exact = f"""
-NOT EXISTS (
-  SELECT 1 FROM static_analysis_runs sar2
-  WHERE {_hash_eq('ds.base_apk_sha256', 'sar2.base_apk_sha256')}
-    AND UPPER(TRIM(COALESCE(sar2.status, ''))) = 'COMPLETED'
-    AND UPPER(TRIM(COALESCE(sar2.run_class, ''))) = 'CANONICAL'
-    AND COALESCE(sar2.identity_valid, 0) = 1
-    AND sar2.base_apk_sha256 IS NOT NULL
-    AND TRIM(sar2.base_apk_sha256) <> ''
-)
-""".strip()
+    no_exact = _sql_no_covering_install_set_sar()
 
     apk_sub = f"""(SELECT MIN(r.apk_id) FROM android_apk_repository r
   WHERE {_hash_eq('ds.base_apk_sha256', 'r.sha256')} AND {_pkg_match_ds('r')})"""
@@ -267,17 +316,7 @@ EXISTS (
     )
 )
 """.strip()
-    no_exact = f"""
-NOT EXISTS (
-  SELECT 1 FROM static_analysis_runs sar2
-  WHERE {_hash_eq('ds.base_apk_sha256', 'sar2.base_apk_sha256')}
-    AND UPPER(TRIM(COALESCE(sar2.status, ''))) = 'COMPLETED'
-    AND UPPER(TRIM(COALESCE(sar2.run_class, ''))) = 'CANONICAL'
-    AND COALESCE(sar2.identity_valid, 0) = 1
-    AND sar2.base_apk_sha256 IS NOT NULL
-    AND TRIM(sar2.base_apk_sha256) <> ''
-)
-""".strip()
+    no_exact = _sql_no_covering_install_set_sar()
     return f"""
 SELECT COUNT(*) AS c
 FROM (

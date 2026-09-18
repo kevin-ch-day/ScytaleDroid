@@ -155,6 +155,7 @@ def static_schema_gate() -> tuple[bool, str, str]:
             "scope_label",
             "status",
             "base_apk_sha256",
+            "artifact_set_hash",
             "identity_mode",
             "identity_conflict_flag",
             "static_handoff_hash",

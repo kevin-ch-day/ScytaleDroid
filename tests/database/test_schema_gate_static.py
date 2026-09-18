@@ -38,6 +38,8 @@ def test_static_schema_gate_requires_vnext_table(monkeypatch):
     assert "masvs_mapping_hash" in static_columns
     assert "run_class" in static_columns
     assert "non_canonical_reasons" in static_columns
+    assert "artifact_set_hash" in static_columns
+    assert "artifact_set_hash_version" not in static_columns
     findings_cols = list(required_columns.get("static_analysis_findings") or ())
     assert "evidence_hash" in findings_cols
     assert list(required_columns.get("static_string_summary") or ()) == [
