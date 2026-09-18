@@ -54,6 +54,7 @@ def test_compute_run_identity_orders_splits_by_name(tmp_path: Path, monkeypatch)
     assert identity["base_apk_sha256"] == base.sha256
     assert identity["artifact_set_hash"] == expected_hash
     assert identity["artifact_set_hash_version"] == V2
+    assert identity["apk_set_id"] is None
 
 
 def test_compute_run_identity_reuses_stored_v1_set(tmp_path: Path, monkeypatch) -> None:
@@ -79,6 +80,7 @@ def test_compute_run_identity_reuses_stored_v1_set(tmp_path: Path, monkeypatch) 
     assert identity["identity_valid"] is True
     assert identity["artifact_set_hash"] == stored_v1
     assert identity["artifact_set_hash_version"] == V1
+    assert identity["apk_set_id"] == "843"
     assert identity["artifact_set_hash"] != compute_artifact_set_hash(members, version=V2)
 
 
@@ -107,6 +109,7 @@ def test_compute_run_identity_reuses_stored_v2_set(tmp_path: Path, monkeypatch) 
     assert identity["identity_valid"] is True
     assert identity["artifact_set_hash"] == stored_v2
     assert identity["artifact_set_hash_version"] == V2
+    assert identity["apk_set_id"] == "9001"
     assert captured["v1_hash"] == compute_artifact_set_hash(members, version=V1)
     assert captured["v2_hash"] == stored_v2
 

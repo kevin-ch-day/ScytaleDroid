@@ -100,6 +100,7 @@ def _compute_run_identity(group) -> dict:
         "base_apk_sha256": None,
         "artifact_set_hash": None,
         "artifact_set_hash_version": None,
+        "apk_set_id": None,
         "run_signature_version": "v1",
         "identity_valid": False,
         "identity_error_reason": None,
@@ -149,13 +150,17 @@ def _compute_run_identity(group) -> dict:
     if stored and stored.get("artifact_set_hash") and stored.get("artifact_set_hash_version"):
         artifact_set_hash = str(stored["artifact_set_hash"])
         hash_version = str(stored["artifact_set_hash_version"])
+        raw_set_id = stored.get("apk_set_id")
+        stored_set_id = str(raw_set_id).strip() if raw_set_id is not None else ""
     else:
         artifact_set_hash = v2_hash
         hash_version = NEW_INSTALL_SET_HASH_VERSION
+        stored_set_id = ""
 
     identity["base_apk_sha256"] = base_sha
     identity["artifact_set_hash"] = artifact_set_hash
     identity["artifact_set_hash_version"] = hash_version
+    identity["apk_set_id"] = stored_set_id or None
     identity["identity_valid"] = True
     return identity
 

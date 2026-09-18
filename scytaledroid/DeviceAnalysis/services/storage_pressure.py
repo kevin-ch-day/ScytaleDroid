@@ -624,26 +624,9 @@ def _load_storage_roots(core_q: Any) -> list[dict[str, Any]]:
 def _load_install_set_summary_by_hash(core_q: Any, lineage: Any) -> dict[str, dict[str, Any]]:
     if not lineage.table_exists(core_q, "apk_sets"):
         return {}
-    rows = core_q.run_sql(
-        """
-        SELECT
-          LOWER(TRIM(base_apk_sha256)) AS base_apk_sha256,
-          COUNT(*) AS install_sets_seen,
-          SUM(CASE WHEN COALESCE(completeness_state, 'unknown') = 'complete' THEN 1 ELSE 0 END) AS complete_sets,
-          MIN(apk_set_id) AS apk_set_id,
-          MIN(artifact_set_hash) AS artifact_set_hash,
-          MAX(member_count) AS member_count,
-          MAX(split_count) AS split_count,
-          MIN(COALESCE(completeness_state, 'unknown')) AS completeness_state
-        FROM apk_sets
-        WHERE base_apk_sha256 IS NOT NULL
-        GROUP BY LOWER(TRIM(base_apk_sha256))
-        """,
-        fetch="all",
-        dictionary=True,
-        query_name="storage_pressure.install_sets_by_hash",
-    ) or []
-    return {str(row.get("base_apk_sha256") or "").lower(): dict(row) for row in rows}
+    return lineage.summarize_install_set_presence_by_base_hash(
+        lineage.fetch_apk_sets_by_hash(core_q)
+    )
 
 
 def _scan_canonical_store(canonical_root: Path) -> dict[str, int]:

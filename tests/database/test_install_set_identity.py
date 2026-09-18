@@ -62,6 +62,41 @@ def test_two_sets_sharing_a_base_hash_remain_two_coherent_rows() -> None:
     assert legacy_row["artifact_set_hash"] is None
 
 
+def test_presence_summary_does_not_hybridize_sibling_set_identity() -> None:
+    unique_base = "e" * 64
+    summary = lineage.summarize_install_set_presence_by_base_hash(
+        {
+            BASE_X: (
+                {**_set(set_id=1204, artifact_hash=SET_1204_HASH, members=57, splits=56), "completeness_state": "complete"},
+                {**_set(set_id=1812, artifact_hash=SET_1812_HASH, members=59, splits=58), "completeness_state": "unknown"},
+            ),
+            unique_base: (
+                {
+                    "apk_set_id": 9,
+                    "base_apk_sha256": unique_base,
+                    "artifact_set_hash": "f" * 64,
+                    "member_count": 1,
+                    "split_count": 0,
+                    "completeness_state": "complete",
+                },
+            ),
+        }
+    )
+
+    sibling = summary[BASE_X]
+    assert sibling["install_sets_seen"] == 2
+    assert sibling["apk_set_id"] is None
+    assert sibling["artifact_set_hash"] is None
+    assert sibling["member_count"] == 59
+    assert sibling["split_count"] == 58
+    assert sibling["complete_sets"] == 1
+    assert sibling["completeness_state"] == "mixed"
+    unique = summary[unique_base]
+    assert unique["apk_set_id"] == 9
+    assert unique["artifact_set_hash"] == "f" * 64
+    assert unique["completeness_state"] == "complete"
+
+
 def test_exact_static_and_dynamic_coverage_do_not_leak_to_sibling_set() -> None:
     set_1204 = {
         **_set(set_id=1204, artifact_hash=SET_1204_HASH, members=57, splits=56),

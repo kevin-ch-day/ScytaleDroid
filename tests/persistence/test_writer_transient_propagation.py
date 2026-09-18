@@ -41,6 +41,21 @@ def test_resolve_apk_set_id_for_artifact_set_hash_requires_unique_match(
 
     assert run_writers.resolve_apk_set_id_for_artifact_set_hash("ABC") == 144
 
+    captured: dict[str, object] = {}
+
+    def _versioned(*_args, **_kwargs):
+        captured["sql"] = _args[0] if _args else _kwargs.get("sql")
+        captured["params"] = _args[1] if len(_args) > 1 else _kwargs.get("params")
+        return {"apk_set_id": 6485, "match_count": 1}
+
+    monkeypatch.setattr(run_writers.core_q, "run_sql", _versioned)
+    assert (
+        run_writers.resolve_apk_set_id_for_artifact_set_hash("ABC", artifact_set_hash_version="v2")
+        == 6485
+    )
+    assert "artifact_set_hash_version" in str(captured["sql"])
+    assert captured["params"] == ("abc", "v2")
+
     def _ambiguous(*_args, **_kwargs):
         return {"apk_set_id": 144, "match_count": 2}
 

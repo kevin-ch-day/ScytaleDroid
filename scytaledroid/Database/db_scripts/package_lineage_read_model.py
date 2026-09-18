@@ -9,6 +9,7 @@ one place while preserving stable script entrypoint paths.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +168,54 @@ def fetch_apk_sets_by_hash(core_q: Any) -> dict[str, tuple[dict[str, Any], ...]]
         base_hash: tuple(sorted(items, key=lambda item: int(item["apk_set_id"])))
         for base_hash, items in grouped.items()
     }
+
+
+def summarize_install_set_presence_by_base_hash(
+    install_sets_by_hash: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """Collapse sibling sets to presence/counts without hybrid identity.
+
+    A unique base keeps its ``apk_set_id`` and artifact digest. Bases with
+    more than one coherent set keep counts only; identity fields stay unset so
+    callers cannot treat MIN(id)/MAX(member_count) as one install set.
+    """
+
+    result: dict[str, dict[str, Any]] = {}
+    for raw_base, items in install_sets_by_hash.items():
+        base_hash = norm_sha(raw_base)
+        if not base_hash:
+            continue
+        rows = [dict(item) for item in items]
+        if not rows:
+            continue
+        complete = sum(
+            1 for item in rows if str(item.get("completeness_state") or "unknown") == "complete"
+        )
+        member_counts = [int(item.get("member_count") or 0) for item in rows]
+        split_counts = [int(item.get("split_count") or 0) for item in rows]
+        summary: dict[str, Any] = {
+            "base_apk_sha256": base_hash,
+            "install_sets_seen": len(rows),
+            "complete_sets": complete,
+            "member_count": max(member_counts) if member_counts else 0,
+            "split_count": max(split_counts) if split_counts else 0,
+        }
+        if len(rows) == 1:
+            item = rows[0]
+            summary["apk_set_id"] = item.get("apk_set_id")
+            summary["artifact_set_hash"] = item.get("artifact_set_hash")
+            summary["completeness_state"] = str(item.get("completeness_state") or "unknown")
+        else:
+            summary["apk_set_id"] = None
+            summary["artifact_set_hash"] = None
+            if complete == len(rows):
+                summary["completeness_state"] = "complete"
+            elif complete == 0:
+                summary["completeness_state"] = "none_complete"
+            else:
+                summary["completeness_state"] = "mixed"
+        result[base_hash] = summary
+    return result
 
 
 def attach_install_set_members(

@@ -348,31 +348,21 @@ def _fetch_install_sets_by_hash(
 ) -> dict[str, dict[str, Any]]:
     if not _table_exists(core_q, "apk_sets"):
         return {}
-    params: list[Any] = []
-    package_filter = ""
+    from scytaledroid.Database.db_scripts import package_lineage_read_model as lineage
+
+    sets_by_hash = lineage.fetch_apk_sets_by_hash(core_q)
     if package_name:
-        package_filter = "AND LOWER(TRIM(package_name)) = %s"
-        params.append(str(package_name).strip().lower())
-    rows = core_q.run_sql(
-        f"""
-        SELECT
-          LOWER(TRIM(base_apk_sha256)) AS base_apk_sha256,
-          COUNT(*) AS install_sets_seen,
-          MIN(apk_set_id) AS apk_set_id,
-          MIN(artifact_set_hash) AS artifact_set_hash,
-          MAX(member_count) AS member_count,
-          MAX(split_count) AS split_count
-        FROM apk_sets
-        WHERE base_apk_sha256 IS NOT NULL
-          {package_filter}
-        GROUP BY LOWER(TRIM(base_apk_sha256))
-        """,
-        tuple(params),
-        fetch="all",
-        dictionary=True,
-        query_name="report_apk_lineage.install_sets_by_hash",
-    ) or []
-    return {str(row.get("base_apk_sha256") or "").lower(): dict(row) for row in rows}
+        package = str(package_name).strip().lower()
+        sets_by_hash = {
+            base_hash: tuple(
+                item
+                for item in items
+                if str(item.get("package_name") or "").strip().lower() == package
+            )
+            for base_hash, items in sets_by_hash.items()
+        }
+        sets_by_hash = {base_hash: items for base_hash, items in sets_by_hash.items() if items}
+    return lineage.summarize_install_set_presence_by_base_hash(sets_by_hash)
 
 
 def _fetch_app_version_pairs(core_q: Any) -> set[tuple[str, str, str]]:

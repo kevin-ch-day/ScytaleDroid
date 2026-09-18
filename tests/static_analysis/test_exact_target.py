@@ -338,6 +338,131 @@ def test_apk_set_id_selects_matching_v2_set_without_v1_digest_compare(monkeypatc
     assert target.artifact_set_hash == v2_hash
 
 
+def test_apk_set_id_uses_stored_members_without_harvest_walk(monkeypatch, tmp_path):
+    base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
+    split_path, split_sha = _apk(tmp_path, "one.apk", b"one")
+    base_row = _row(apk_id=55, sha=base_sha, path=base_path)
+    members = [
+        {"role": "base", "split_name": "base", "sha256": base_sha},
+        {"role": "split", "split_name": "one", "sha256": split_sha},
+    ]
+    chosen_hash = compute_artifact_set_hash(members, version="v1")
+
+    def _run_sql(*_a, **kwargs):
+        name = kwargs.get("query_name")
+        if name == "static.exact_target.lookup_apk_set":
+            return {
+                "apk_set_id": 843,
+                "package_name": "com.example.app",
+                "base_apk_sha256": base_sha,
+                "artifact_set_hash": chosen_hash,
+                "artifact_set_hash_version": "v1",
+            }
+        if name == "static.exact_target.lookup_apk_set_members":
+            return [
+                {
+                    "apk_id": 55,
+                    "role": "base",
+                    "split_name": "base",
+                    "sha256": base_sha,
+                    "local_rel_path": str(base_path),
+                    "package_name": "com.example.app",
+                    "version_name": "1.0",
+                    "version_code": "1",
+                },
+                {
+                    "apk_id": 56,
+                    "role": "split",
+                    "split_name": "one",
+                    "sha256": split_sha,
+                    "local_rel_path": str(split_path),
+                    "package_name": "com.example.app",
+                    "version_name": "1.0",
+                    "version_code": "1",
+                },
+            ]
+        return [base_row]
+
+    monkeypatch.setattr(exact_target, "core_q", SimpleNamespace(run_sql=_run_sql))
+    monkeypatch.setattr(
+        exact_target,
+        "group_artifacts",
+        lambda: (_ for _ in ()).throw(AssertionError("harvest tree walk should be skipped")),
+    )
+
+    target = exact_target.resolve_exact_static_target(
+        apk_id=55,
+        base_apk_sha256=base_sha,
+        include_splits="auto",
+        apk_set_id=843,
+    )
+
+    assert target.apk_set_id == "843"
+    assert target.artifact_set_hash == chosen_hash
+    assert target.artifact_set_hash_version == "v1"
+    assert target.split_count == 1
+    assert target.receipt_backed is True
+    assert target.selection.groups[0].grouping_reason == "stored_install_set"
+
+
+def test_stored_members_missing_bytes_fall_back_to_receipts(monkeypatch, tmp_path):
+    base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
+    split_path, split_sha = _apk(tmp_path, "one.apk", b"one")
+    base_row = _row(apk_id=55, sha=base_sha, path=base_path)
+    members = [
+        {"role": "base", "split_name": "base", "sha256": base_sha},
+        {"role": "split", "split_name": "one", "sha256": split_sha},
+    ]
+    chosen_hash = compute_artifact_set_hash(members, version="v1")
+
+    def _run_sql(*_a, **kwargs):
+        name = kwargs.get("query_name")
+        if name == "static.exact_target.lookup_apk_set":
+            return {
+                "apk_set_id": 843,
+                "package_name": "com.example.app",
+                "base_apk_sha256": base_sha,
+                "artifact_set_hash": chosen_hash,
+                "artifact_set_hash_version": "v1",
+            }
+        if name == "static.exact_target.lookup_apk_set_members":
+            return [
+                {
+                    "apk_id": 55,
+                    "role": "base",
+                    "split_name": "base",
+                    "sha256": base_sha,
+                    "local_rel_path": str(tmp_path / "missing-base.apk"),
+                    "package_name": "com.example.app",
+                },
+                {
+                    "apk_id": 56,
+                    "role": "split",
+                    "split_name": "one",
+                    "sha256": split_sha,
+                    "local_rel_path": str(tmp_path / "missing-split.apk"),
+                    "package_name": "com.example.app",
+                },
+            ]
+        return [base_row]
+
+    monkeypatch.setattr(exact_target, "core_q", SimpleNamespace(run_sql=_run_sql))
+    base = _artifact(base_path, apk_id=55, package="com.example.app", sha=base_sha, split=False)
+    split = _artifact(split_path, apk_id=56, package="com.example.app", sha=split_sha, split=True)
+    monkeypatch.setattr(exact_target, "group_artifacts", lambda: [_group(base, split)])
+
+    target = exact_target.resolve_exact_static_target(
+        apk_id=55,
+        base_apk_sha256=base_sha,
+        include_splits="auto",
+        apk_set_id=843,
+    )
+
+    assert target.apk_set_id == "843"
+    assert target.artifact_set_hash == chosen_hash
+    assert target.capture_id == "capture-1"
+
+
 def test_requested_set_hash_mismatch_fails_closed(monkeypatch, tmp_path):
     base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
     split_path, split_sha = _apk(tmp_path, "split.apk", b"split")

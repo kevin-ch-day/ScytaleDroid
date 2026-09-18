@@ -231,20 +231,30 @@ def _detect_identity_conflict(
         return False
 
 
-def resolve_apk_set_id_for_artifact_set_hash(artifact_set_hash: str | None) -> int | None:
-    """Resolve the unique apk_sets row for an artifact_set_hash, if one exists."""
+def resolve_apk_set_id_for_artifact_set_hash(
+    artifact_set_hash: str | None,
+    *,
+    artifact_set_hash_version: str | None = None,
+) -> int | None:
+    """Resolve the unique apk_sets row for a portable install-set identity."""
 
     value = str(artifact_set_hash or "").strip().lower()
     if not value:
         return None
+    clauses = ["LOWER(TRIM(artifact_set_hash)) = %s"]
+    params: list[object] = [value]
+    version = str(artifact_set_hash_version or "").strip()
+    if version:
+        clauses.append("LOWER(TRIM(artifact_set_hash_version)) = %s")
+        params.append(version.lower())
     try:
         row = core_q.run_sql(
-            """
+            f"""
             SELECT MIN(apk_set_id) AS apk_set_id, COUNT(*) AS match_count
             FROM apk_sets
-            WHERE LOWER(TRIM(artifact_set_hash)) = %s
+            WHERE {' AND '.join(clauses)}
             """,
-            (value,),
+            tuple(params),
             fetch="one_dict",
             query_name="static.run_writers.resolve_apk_set_id",
         )
@@ -658,7 +668,10 @@ def create_static_run_ledger(
         is_canonical = False
         canonical_set_at_utc = None
         canonical_reason = "identity_conflict"
-    resolved_apk_set_id = apk_set_id or resolve_apk_set_id_for_artifact_set_hash(artifact_set_hash)
+    resolved_apk_set_id = apk_set_id or resolve_apk_set_id_for_artifact_set_hash(
+        artifact_set_hash,
+        artifact_set_hash_version=artifact_set_hash_version,
+    )
     resolved_header = static_session_id
     if resolved_header is None:
         resolved_header = ensure_static_session_shell(

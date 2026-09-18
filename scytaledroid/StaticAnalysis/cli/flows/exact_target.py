@@ -179,14 +179,24 @@ def resolve_exact_static_target(
         package_name=package,
         base_apk_sha256=expected_hash,
     )
-    receipt_group = _find_receipt_group(
-        apk_id=row_apk_id,
-        base_apk_sha256=expected_hash,
-        package_name=package,
-        expected_artifact_set_hash=set_identity.get("artifact_set_hash") if set_identity else None,
-        expected_artifact_set_hash_version=set_identity.get("artifact_set_hash_version") if set_identity else None,
-        require_explicit_identity=bool(requested_set_id or requested_set_hash),
-    )
+    receipt_group = None
+    if set_identity and set_identity.get("apk_set_id"):
+        receipt_group = _group_from_stored_install_set(
+            apk_set_id=str(set_identity["apk_set_id"]),
+            package_name=package,
+            expected_base_sha256=expected_hash,
+            artifact_set_hash=set_identity.get("artifact_set_hash"),
+            artifact_set_hash_version=set_identity.get("artifact_set_hash_version"),
+        )
+    if receipt_group is None:
+        receipt_group = _find_receipt_group(
+            apk_id=row_apk_id,
+            base_apk_sha256=expected_hash,
+            package_name=package,
+            expected_artifact_set_hash=set_identity.get("artifact_set_hash") if set_identity else None,
+            expected_artifact_set_hash_version=set_identity.get("artifact_set_hash_version") if set_identity else None,
+            require_explicit_identity=bool(requested_set_id or requested_set_hash),
+        )
     if mode in {"auto", "require"}:
         if receipt_group is None:
             raise ExactTargetResolutionError(
@@ -735,6 +745,8 @@ def _matching_base_artifact(
 
 
 def _is_receipt_backed(group: ArtifactGroup) -> bool:
+    if group.grouping_reason == "stored_install_set":
+        return True
     if group.harvest_manifest_path:
         return True
     for artifact in group.artifacts:
@@ -1069,6 +1081,149 @@ def _lookup_apk_set_row(apk_set_id: str) -> Mapping[str, object] | None:
         query_name="static.exact_target.lookup_apk_set",
     )
     return row if isinstance(row, Mapping) else None
+
+
+def _group_from_stored_install_set(
+    *,
+    apk_set_id: str,
+    package_name: str,
+    expected_base_sha256: str,
+    artifact_set_hash: str | None,
+    artifact_set_hash_version: str | None,
+) -> ArtifactGroup | None:
+    """Build a split group from apk_set_members without walking harvest receipts."""
+
+    members = _lookup_apk_set_member_rows(apk_set_id)
+    if not members:
+        return None
+    artifacts: list[RepositoryArtifact] = []
+    for member in members:
+        artifact = _artifact_from_stored_member(member, package_name=package_name)
+        if artifact is None:
+            return None
+        artifacts.append(artifact)
+    bases = [item for item in artifacts if not item.is_split_member]
+    if len(bases) != 1:
+        return None
+    base = bases[0]
+    base_sha = _normalize_sha256(base.sha256) if base.sha256 else None
+    if base_sha != expected_base_sha256:
+        return None
+    requested_version = str(artifact_set_hash_version or V1).strip() or V1
+    group = ArtifactGroup(
+        group_key=f"stored-install-set-{apk_set_id}",
+        package_name=package_name,
+        version_display=base.version_display,
+        session_stamp=f"apk-set-{apk_set_id}",
+        capture_id=f"apk-set-{apk_set_id}",
+        artifacts=tuple(artifacts),
+        grouping_reason="stored_install_set",
+        grouping_confidence="high",
+    )
+    computed_hash, _computed_version = _group_portable_identity(group, version=requested_version)
+    requested_hash = _normalize_sha256(artifact_set_hash) if artifact_set_hash else None
+    if requested_hash and computed_hash and requested_hash != computed_hash:
+        return None
+    return group
+
+
+def _lookup_apk_set_member_rows(apk_set_id: str) -> tuple[Mapping[str, object], ...]:
+    if core_q is None:
+        return ()
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT
+              m.apk_id,
+              m.role,
+              m.split_name,
+              LOWER(TRIM(m.sha256)) AS sha256,
+              m.local_relpath,
+              m.canonical_relpath,
+              m.ordinal,
+              r.package_name,
+              r.version_name,
+              r.version_code,
+              r.split_group_id,
+              h.local_rel_path,
+              sr.data_root
+            FROM apk_set_members m
+            LEFT JOIN android_apk_repository r ON r.apk_id = m.apk_id
+            LEFT JOIN harvest_artifact_paths h ON h.apk_id = m.apk_id
+            LEFT JOIN harvest_storage_roots sr ON sr.root_id = h.storage_root_id
+            WHERE m.apk_set_id = %s
+            ORDER BY m.ordinal, m.apk_set_member_id, h.updated_at DESC
+            """,
+            (int(apk_set_id),),
+            fetch="all_dict",
+            query_name="static.exact_target.lookup_apk_set_members",
+        )
+    except Exception:
+        return ()
+    seen: set[tuple[str, str, str]] = set()
+    selected: list[Mapping[str, object]] = []
+    for row in rows or []:
+        if not isinstance(row, Mapping):
+            continue
+        role = str(row.get("role") or "").strip().lower()
+        split_name = str(row.get("split_name") or "").strip().lower()
+        sha = str(row.get("sha256") or "").strip().lower()
+        key = (role, split_name, sha)
+        if role not in {"base", "split"} or not split_name or len(sha) != 64 or key in seen:
+            continue
+        seen.add(key)
+        selected.append(row)
+    return tuple(selected)
+
+
+def _artifact_from_stored_member(
+    member: Mapping[str, object],
+    *,
+    package_name: str,
+) -> RepositoryArtifact | None:
+    role = str(member.get("role") or "").strip().lower()
+    if role not in {"base", "split"}:
+        return None
+    try:
+        sha = _normalize_sha256(member.get("sha256"))
+    except ExactTargetResolutionError:
+        return None
+    if not sha:
+        return None
+    split_name = str(member.get("split_name") or "").strip()
+    if not split_name:
+        return None
+    row = {
+        "apk_id": member.get("apk_id"),
+        "package_name": member.get("package_name") or package_name,
+        "version_name": member.get("version_name"),
+        "version_code": member.get("version_code"),
+        "sha256": sha,
+        "is_split_member": role != "base",
+        "split_group_id": member.get("split_group_id") or member.get("apk_id"),
+        "local_rel_path": member.get("local_rel_path") or member.get("local_relpath"),
+        "data_root": member.get("data_root"),
+    }
+    path = _resolve_local_path(row)
+    if path is None:
+        return None
+    metadata = {
+        "apk_id": member.get("apk_id"),
+        "package_name": row["package_name"],
+        "version_name": member.get("version_name"),
+        "version_code": member.get("version_code"),
+        "sha256": sha,
+        "is_split_member": role != "base",
+        "split_group_id": row["split_group_id"],
+        "split_name": split_name.lower(),
+        "artifact": split_name.lower(),
+        "local_artifact_path": row.get("local_rel_path"),
+    }
+    return RepositoryArtifact(
+        path=path,
+        display_path=artifact_store.repo_relative_path(path),
+        metadata=metadata,
+    )
 
 
 __all__ = [
