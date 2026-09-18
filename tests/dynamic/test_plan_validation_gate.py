@@ -105,6 +105,24 @@ def test_plan_validation_artifact_set_hash_mismatch(monkeypatch):
     assert any(mismatch["field"] == "artifact_set_hash" for mismatch in outcome.mismatches)
 
 
+def test_plan_validation_hash_version_mismatch(monkeypatch):
+    db_row = _db_row()
+    db_row["artifact_set_hash_version"] = "v1"
+    plan = _base_plan()
+    plan["run_identity"]["artifact_set_hash_version"] = "v2"
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(db_row))
+    outcome = loader.validate_dynamic_plan(plan, package_name="com.example.app")
+    assert outcome.status == "FAIL"
+    assert any(mismatch["field"] == "artifact_set_hash_version" for mismatch in outcome.mismatches)
+
+
+def test_plan_validation_missing_hash_version_is_not_required(monkeypatch):
+    monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(_db_row()))
+    outcome = loader.validate_dynamic_plan(_base_plan(), package_name="com.example.app")
+    assert outcome.status == "PASS"
+    assert not any(mismatch["field"] == "artifact_set_hash_version" for mismatch in outcome.mismatches)
+
+
 def test_plan_validation_static_run_id_mismatch(monkeypatch):
     monkeypatch.setattr(loader.core_q, "run_sql", _fake_run_sql_factory(_db_row()))
     outcome = loader.validate_dynamic_plan(

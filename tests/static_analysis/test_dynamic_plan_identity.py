@@ -40,6 +40,7 @@ def test_build_dynamic_plan_uses_canonical_signer_set_hash() -> None:
             "version_code": "123",
             "base_apk_sha256": "a" * 64,
             "artifact_set_hash": "b" * 64,
+            "artifact_set_hash_version": "v1",
             "apk_set_id": 44,
             "run_signature": "c" * 64,
             "run_signature_version": "v1",
@@ -75,6 +76,7 @@ def test_build_dynamic_plan_uses_canonical_signer_set_hash() -> None:
     assert identity["signer_set_hash"] == expected_hash
     assert identity["signer_digest"] == expected_hash
     assert identity["package_name_lc"] == "com.example.app"
+    assert identity["artifact_set_hash_version"] == "v1"
     assert plan["package_name"] == "com.example.app"
     assert plan["version_name"] == "1.0"
     assert plan["version_code"] == "123"
@@ -103,6 +105,7 @@ def test_build_dynamic_plan_uses_merged_split_domain_payload() -> None:
             "version_code": "123",
             "base_apk_sha256": "a" * 64,
             "artifact_set_hash": "b" * 64,
+            "artifact_set_hash_version": "v1",
             "apk_set_id": 44,
             "run_signature": "c" * 64,
             "run_signature_version": "v1",
@@ -204,6 +207,7 @@ def test_build_dynamic_plan_falls_back_to_selected_samples_when_samples_empty() 
             "version_code": "123",
             "base_apk_sha256": "a" * 64,
             "artifact_set_hash": "b" * 64,
+            "artifact_set_hash_version": "v1",
             "apk_set_id": 44,
             "run_signature": "c" * 64,
             "run_signature_version": "v1",
@@ -266,6 +270,7 @@ def test_build_dynamic_plan_domain_sources_do_not_emit_raw_string_values() -> No
             "version_code": "123",
             "base_apk_sha256": "a" * 64,
             "artifact_set_hash": "b" * 64,
+            "artifact_set_hash_version": "v1",
             "apk_set_id": 44,
             "run_signature": "c" * 64,
             "run_signature_version": "v1",
@@ -330,6 +335,7 @@ def test_build_dynamic_plan_falls_back_to_network_surface_urls_when_string_endpo
             "version_code": "123",
             "base_apk_sha256": "a" * 64,
             "artifact_set_hash": "b" * 64,
+            "artifact_set_hash_version": "v1",
             "apk_set_id": 44,
             "run_signature": "c" * 64,
             "run_signature_version": "v1",

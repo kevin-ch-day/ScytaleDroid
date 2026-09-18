@@ -87,6 +87,16 @@ def validate_dynamic_plan(
             required_fields=("run_signature", "run_signature_version", "artifact_set_hash", "static_handoff_hash"),
         )
     )
+    plan_version = str(normalized_plan.get("artifact_set_hash_version") or "").strip()
+    db_version = str(db_row.get("artifact_set_hash_version") or "").strip()
+    if plan_version and db_version and plan_version != db_version:
+        mismatches.append(
+            mismatch(
+                "artifact_set_hash_version",
+                expected=db_version,
+                actual=plan_version,
+            )
+        )
 
     base_plan = normalized_plan.get("base_apk_sha256")
     base_db = db_row.get("base_apk_sha256")

@@ -144,6 +144,7 @@ def build_static_handoff_plan_summary() -> dict[str, Any]:
                         "apk_set_id": identity.get("apk_set_id"),
                         "base_apk_sha256": identity.get("base_apk_sha256"),
                         "artifact_set_hash": identity.get("artifact_set_hash"),
+                        "artifact_set_hash_version": identity.get("artifact_set_hash_version"),
                         "generated_at": payload.get("generated_at"),
                     }
                 )

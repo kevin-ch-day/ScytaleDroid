@@ -298,6 +298,7 @@ class DynamicRunOrchestrator:
                     "version_code": str(plan_identity.get("version_code") or plan_payload.get("version_code") or "").strip() if isinstance(plan_payload, dict) else None,
                     "base_apk_sha256": plan_identity.get("base_apk_sha256"),
                     "artifact_set_hash": plan_identity.get("artifact_set_hash"),
+                    "artifact_set_hash_version": plan_identity.get("artifact_set_hash_version"),
                     "signer_set_hash": plan_identity.get("signer_set_hash") or plan_identity.get("signer_digest"),
                     "observed_signer_set_hash": (target_snapshot.metadata or {}).get("signer_set_hash"),
                     "observed_signer_primary_digest": (target_snapshot.metadata or {}).get("signer_primary_digest"),

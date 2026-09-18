@@ -478,6 +478,7 @@ def execute_scan(
             "pipeline_version": pipeline_version,
             "base_apk_sha256": identity["base_apk_sha256"],
             "artifact_set_hash": identity["artifact_set_hash"],
+            "artifact_set_hash_version": identity.get("artifact_set_hash_version") or app_result.artifact_set_hash_version,
             "apk_set_id": app_result.apk_set_id,
             "run_signature": run_signature,
             "run_signature_version": identity["run_signature_version"],

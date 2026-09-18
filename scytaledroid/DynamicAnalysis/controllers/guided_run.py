@@ -1385,6 +1385,7 @@ def _load_plan_identity(plan_path: str) -> dict[str, str]:
         ).strip(),
         "base_apk_sha256": str(run_identity.get("base_apk_sha256") or "").strip().lower(),
         "artifact_set_hash": str(run_identity.get("artifact_set_hash") or "").strip().lower(),
+        "artifact_set_hash_version": str(run_identity.get("artifact_set_hash_version") or "").strip(),
         "signer_set_hash": str(
             run_identity.get("signer_set_hash") or run_identity.get("signer_digest") or ""
         )

@@ -162,6 +162,7 @@ def _build_selection(candidate: dict[str, object]) -> dict[str, object]:
         "base_apk_sha256": identity.get("base_apk_sha256"),
         "static_handoff_hash": identity.get("static_handoff_hash"),
         "artifact_set_hash": identity.get("artifact_set_hash"),
+        "artifact_set_hash_version": identity.get("artifact_set_hash_version"),
         "run_signature": identity.get("run_signature"),
         "run_signature_version": identity.get("run_signature_version"),
         "generated_at": candidate.get("generated_at"),

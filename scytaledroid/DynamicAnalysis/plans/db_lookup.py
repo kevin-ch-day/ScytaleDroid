@@ -6,6 +6,12 @@ from scytaledroid.Database.db_core import DatabaseError
 from scytaledroid.Database.db_core import db_queries as core_q
 
 
+_APK_SET_HASH_VERSION_SQL = """(SELECT s.artifact_set_hash_version
+                 FROM apk_sets s
+                WHERE s.apk_set_id = sar.apk_set_id
+                LIMIT 1) AS artifact_set_hash_version"""
+
+
 def missing_db_fields(row: dict[str, object]) -> list[str]:
     required = ("run_signature", "run_signature_version", "artifact_set_hash", "static_handoff_hash")
     return [req_field for req_field in required if not row.get(req_field)]
@@ -14,12 +20,13 @@ def missing_db_fields(row: dict[str, object]) -> list[str]:
 def fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
     if static_run_id is None:
         return {}
-    query = """
+    query = f"""
         SELECT sar.id AS static_run_id,
                sar.run_signature,
                sar.run_signature_version,
                sar.apk_set_id,
                sar.artifact_set_hash,
+               {_APK_SET_HASH_VERSION_SQL},
                sar.static_handoff_hash,
                sar.base_apk_sha256,
                sar.pipeline_version,
@@ -39,12 +46,13 @@ def fetch_static_run_row(static_run_id: object | None) -> dict[str, object]:
         if not is_missing_static_handoff_hash_error(exc):
             raise
         row = core_q.run_sql(
-            """
+            f"""
             SELECT sar.id AS static_run_id,
                    sar.run_signature,
                    sar.run_signature_version,
                    sar.apk_set_id,
                    sar.artifact_set_hash,
+                   {_APK_SET_HASH_VERSION_SQL},
                    sar.base_apk_sha256,
                    sar.pipeline_version,
                    a.package_name

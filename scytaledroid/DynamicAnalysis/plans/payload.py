@@ -65,7 +65,6 @@ def plan_schema_issues(plan: dict[str, Any]) -> list[str]:
         for field in (
             "base_apk_sha256",
             "artifact_set_hash",
-            "artifact_set_hash_version",
             "run_signature",
             "run_signature_version",
             "identity_valid",

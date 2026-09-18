@@ -81,6 +81,7 @@ class _PersistenceRunContext:
     harvest_observed_hashes_complete: object
     harvest_non_canonical_reason_list: list[str]
     research_usable: object
+    artifact_set_hash_version: str | None = None
 
 
 @dataclass(slots=True)

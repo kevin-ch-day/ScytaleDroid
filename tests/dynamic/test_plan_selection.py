@@ -25,6 +25,7 @@ def _write_plan(
             "run_signature": signature,
             "run_signature_version": version,
             "artifact_set_hash": artifact_set_hash,
+            "artifact_set_hash_version": "v1",
             "base_apk_sha256": base_apk_sha256,
         },
     }
@@ -48,6 +49,7 @@ def test_resolve_plan_selection_unique_identity(monkeypatch, tmp_path: Path) -> 
     assert selection
     assert selection["plan_path"] == str(plan_path)
     assert selection["static_run_id"] == 42
+    assert selection["artifact_set_hash_version"] == "v1"
 
 
 def test_resolve_plan_selection_requires_choice(monkeypatch, tmp_path: Path) -> None:

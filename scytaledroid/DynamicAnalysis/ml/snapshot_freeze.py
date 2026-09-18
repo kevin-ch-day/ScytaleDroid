@@ -246,6 +246,7 @@ def build_snapshot_freeze_manifest(
             "version_code": version_code,
             "base_apk_sha256": base_sha,
             "artifact_set_hash": artifact_set_hash,
+            "artifact_set_hash_version": run_identity.get("artifact_set_hash_version"),
             "signer_set_hash": signer_set_hash,
         }
 

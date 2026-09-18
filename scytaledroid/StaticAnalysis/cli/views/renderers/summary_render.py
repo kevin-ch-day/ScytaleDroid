@@ -467,6 +467,7 @@ def _app_metadata(report: StaticAnalysisReport, *, signer: str | None, split_cou
         "hashes": ordered_hashes,
         "base_apk_sha256": extra_meta.get("base_apk_sha256"),
         "artifact_set_hash": extra_meta.get("artifact_set_hash"),
+        "artifact_set_hash_version": extra_meta.get("artifact_set_hash_version"),
         "run_signature": extra_meta.get("run_signature"),
         "run_signature_version": extra_meta.get("run_signature_version"),
         "identity_valid": extra_meta.get("identity_valid"),

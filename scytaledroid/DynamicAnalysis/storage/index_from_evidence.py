@@ -421,6 +421,7 @@ def build_dynamic_session_row_from_evidence_pack(run_dir: Path) -> dict[str, Any
         "run_signature_version": ident.get("run_signature_version"),
         "base_apk_sha256": ident.get("base_apk_sha256"),
         "artifact_set_hash": ident.get("artifact_set_hash"),
+        "artifact_set_hash_version": ident.get("artifact_set_hash_version"),
         "version_name": plan.get("version_name"),
         "version_code": int(plan.get("version_code") or 0) or None,
         "netstats_available": 1

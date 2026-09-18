@@ -139,6 +139,7 @@ def export_dep_json(static_run_id: int) -> str | None:
         "sha256": payload.get("sha256"),
         "base_apk_sha256": payload.get("base_apk_sha256"),
         "artifact_set_hash": payload.get("artifact_set_hash"),
+        "artifact_set_hash_version": payload.get("artifact_set_hash_version"),
         "run_signature": payload.get("run_signature"),
         "run_signature_version": payload.get("run_signature_version"),
         "identity_valid": payload.get("identity_valid"),

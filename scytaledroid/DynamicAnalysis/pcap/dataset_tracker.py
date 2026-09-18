@@ -171,6 +171,7 @@ def update_dataset_tracker(
         ),
         "base_apk_sha256": target_identity.get("base_apk_sha256"),
         "artifact_set_hash": target_identity.get("artifact_set_hash"),
+        "artifact_set_hash_version": target_identity.get("artifact_set_hash_version"),
         "signer_set_hash": _known_identity_value(
             target_identity.get("signer_set_hash"),
             target_identity.get("signer_digest"),

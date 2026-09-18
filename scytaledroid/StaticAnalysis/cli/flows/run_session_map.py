@@ -121,6 +121,7 @@ def _build_session_run_map(
             "pipeline_version": meta.get("pipeline_version"),
             "base_apk_sha256": meta.get("base_apk_sha256"),
             "artifact_set_hash": meta.get("artifact_set_hash"),
+            "artifact_set_hash_version": meta.get("artifact_set_hash_version"),
             "run_signature": meta.get("run_signature"),
             "run_signature_version": meta.get("run_signature_version"),
             "identity_valid": meta.get("identity_valid"),
@@ -191,6 +192,10 @@ def _rebuild_session_run_map_from_db(session_stamp: str | None) -> dict | None:
                sar.pipeline_version,
                sar.base_apk_sha256,
                sar.artifact_set_hash,
+               (SELECT s.artifact_set_hash_version
+                  FROM apk_sets s
+                 WHERE s.apk_set_id = sar.apk_set_id
+                 LIMIT 1) AS artifact_set_hash_version,
                sar.run_signature,
                sar.run_signature_version,
                sar.identity_valid,
@@ -230,6 +235,7 @@ def _rebuild_session_run_map_from_db(session_stamp: str | None) -> dict | None:
             "pipeline_version": row.get("pipeline_version"),
             "base_apk_sha256": row.get("base_apk_sha256"),
             "artifact_set_hash": row.get("artifact_set_hash"),
+            "artifact_set_hash_version": row.get("artifact_set_hash_version"),
             "run_signature": row.get("run_signature"),
             "run_signature_version": row.get("run_signature_version"),
             "identity_valid": row.get("identity_valid"),

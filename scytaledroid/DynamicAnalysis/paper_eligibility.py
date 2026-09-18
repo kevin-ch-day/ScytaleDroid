@@ -340,6 +340,12 @@ def derive_paper_eligibility(
             reasons.append("EXCLUDED_IDENTITY_MISMATCH")
         if plan_artifact_set_hash and target_artifact_set_hash and plan_artifact_set_hash != target_artifact_set_hash:
             reasons.append("EXCLUDED_IDENTITY_MISMATCH")
+        plan_hash_version = _norm_str(plan_identity.get("artifact_set_hash_version"))
+        target_hash_version = _norm_str(
+            target_identity.get("artifact_set_hash_version") or target.get("artifact_set_hash_version")
+        )
+        if plan_hash_version and target_hash_version and plan_hash_version != target_hash_version:
+            reasons.append("EXCLUDED_IDENTITY_MISMATCH")
         if plan_signer_set_hash and target_signer_set_hash and plan_signer_set_hash != target_signer_set_hash:
             reasons.append("EXCLUDED_IDENTITY_MISMATCH")
 

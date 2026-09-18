@@ -248,6 +248,7 @@ def write_cohort_status(
         "version_code": run_identity.get("version_code") or run.plan.get("version_code"),
         "base_apk_sha256": run_identity.get("base_apk_sha256"),
         "artifact_set_hash": run_identity.get("artifact_set_hash"),
+        "artifact_set_hash_version": run_identity.get("artifact_set_hash_version"),
         "signer_set_hash": run_identity.get("signer_set_hash") or run_identity.get("signer_digest"),
         "static_handoff_hash": run_identity.get("static_handoff_hash"),
         "identity_checked_at_start_utc": target.get("identity_checked_at_start_utc"),

@@ -93,6 +93,9 @@ def merge_persistence_metadata(*, base_report: object, app_result: object, param
             metadata_map["base_apk_sha256"] = app_result.base_apk_sha256
         if app_result.artifact_set_hash and not metadata_map.get("artifact_set_hash"):
             metadata_map["artifact_set_hash"] = app_result.artifact_set_hash
+        version = getattr(app_result, "artifact_set_hash_version", None)
+        if version and not metadata_map.get("artifact_set_hash_version"):
+            metadata_map["artifact_set_hash_version"] = version
         if getattr(app_result, "apk_set_id", None) and not metadata_map.get("apk_set_id"):
             metadata_map["apk_set_id"] = app_result.apk_set_id
         if app_result.run_signature and not metadata_map.get("run_signature"):

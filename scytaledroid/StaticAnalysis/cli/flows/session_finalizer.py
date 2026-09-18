@@ -100,6 +100,8 @@ def persist_static_session_links(
         insert_columns.append("base_apk_sha256")
     if "artifact_set_hash" in columns:
         insert_columns.append("artifact_set_hash")
+    if "artifact_set_hash_version" in columns:
+        insert_columns.append("artifact_set_hash_version")
     if "run_signature" in columns:
         insert_columns.append("run_signature")
     if "run_signature_version" in columns:
@@ -143,6 +145,7 @@ def persist_static_session_links(
         pipeline_version = app.get("pipeline_version")
         base_apk_sha256 = app.get("base_apk_sha256")
         artifact_set_hash = app.get("artifact_set_hash")
+        artifact_set_hash_version = app.get("artifact_set_hash_version")
         run_signature = app.get("run_signature")
         run_signature_version = app.get("run_signature_version")
         identity_valid = app.get("identity_valid")
@@ -158,6 +161,8 @@ def persist_static_session_links(
             values.append(base_apk_sha256)
         if "artifact_set_hash" in columns:
             values.append(artifact_set_hash)
+        if "artifact_set_hash_version" in columns:
+            values.append(artifact_set_hash_version)
         if "run_signature" in columns:
             values.append(run_signature)
         if "run_signature_version" in columns:

@@ -84,3 +84,19 @@ def test_unrelated_template_mismatch_still_excluded() -> None:
 
     assert result.paper_eligible is False
     assert result.reason_code == "EXCLUDED_SCRIPT_TEMPLATE_MISMATCH"
+
+
+def test_install_set_hash_version_mismatch_is_identity_mismatch() -> None:
+    package = "bbc.mobile.news.ww"
+    manifest = _manifest(package=package, template_id="news_reader_basic_v1")
+    manifest["target"]["run_identity"]["artifact_set_hash_version"] = "v2"
+    plan = _plan(package=package)
+    plan["run_identity"]["artifact_set_hash_version"] = "v1"
+    result = derive_paper_eligibility(
+        manifest=manifest,
+        plan=plan,
+        min_windows=20,
+        required_capture_policy_version=2,
+    )
+    assert result.paper_eligible is False
+    assert "EXCLUDED_IDENTITY_MISMATCH" in result.all_reason_codes

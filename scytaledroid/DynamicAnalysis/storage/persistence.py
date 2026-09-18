@@ -884,7 +884,7 @@ def _extract_plan_identity(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
     identity = extract_plan_identity(dict(plan_payload))
     run_identity = plan_payload.get("run_identity") or {}
     if isinstance(run_identity, dict):
-        for key in ("base_apk_sha256", "artifact_set_hash", "apk_set_id", "run_signature", "run_signature_version", "static_handoff_hash"):
+        for key in ("base_apk_sha256", "artifact_set_hash", "artifact_set_hash_version", "apk_set_id", "run_signature", "run_signature_version", "static_handoff_hash"):
             if run_identity.get(key) and not identity.get(key):
                 identity[key] = run_identity[key]
     for key in ("version_name", "version_code"):

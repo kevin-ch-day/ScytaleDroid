@@ -221,6 +221,7 @@ def _build_persistence_run_context(
     manifest_sha = None
     base_apk_sha256 = None
     artifact_set_hash = None
+    artifact_set_hash_version = None
     apk_set_id = None
     run_signature = None
     run_signature_version = None
@@ -233,6 +234,7 @@ def _build_persistence_run_context(
         )
         base_apk_sha256 = first_text(metadata_map.get("base_apk_sha256"))
         artifact_set_hash = first_text(metadata_map.get("artifact_set_hash"))
+        artifact_set_hash_version = first_text(metadata_map.get("artifact_set_hash_version"))
         try:
             apk_set_id_raw = metadata_map.get("apk_set_id")
             apk_set_id = int(apk_set_id_raw) if apk_set_id_raw not in {None, ""} else None
@@ -308,6 +310,7 @@ def _build_persistence_run_context(
         manifest_sha=manifest_sha,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
+        artifact_set_hash_version=artifact_set_hash_version,
         apk_set_id=apk_set_id,
         run_signature=run_signature,
         run_signature_version=run_signature_version,
@@ -1386,6 +1389,7 @@ def _update_static_run_metadata(
     sha256_value: str | None = None,
     base_apk_sha256: str | None = None,
     artifact_set_hash: str | None = None,
+    artifact_set_hash_version: str | None = None,
     apk_set_id: int | None = None,
     run_signature: str | None = None,
     run_signature_version: str | None = None,
@@ -1410,6 +1414,7 @@ def _update_static_run_metadata(
         sha256=sha256_value,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,
+        artifact_set_hash_version=artifact_set_hash_version,
         apk_set_id=apk_set_id,
         run_signature=run_signature,
         run_signature_version=run_signature_version,

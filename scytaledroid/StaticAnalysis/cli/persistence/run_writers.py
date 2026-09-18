@@ -715,6 +715,7 @@ def create_static_run_ledger(
         identity_valid=identity_valid,
         identity_error_reason=identity_error_reason,
         artifact_set_hash=artifact_set_hash,
+        artifact_set_hash_version=artifact_set_hash_version,
         base_apk_sha256=base_apk_sha256,
         sha256=sha256,
         config_hash=config_hash,
@@ -745,6 +746,7 @@ def _update_static_run_metadata(
     identity_valid: bool | None,
     identity_error_reason: str | None,
     artifact_set_hash: str | None,
+    artifact_set_hash_version: str | None = None,
     base_apk_sha256: str | None,
     sha256: str | None,
     config_hash: str | None,
@@ -813,6 +815,15 @@ def _update_static_run_metadata(
             static_run_id,
         ),
     )
+    if artifact_set_hash_version and _static_analysis_runs_has_artifact_set_hash_version():
+        run_sql_write(
+            """
+            UPDATE static_analysis_runs
+            SET artifact_set_hash_version=COALESCE(%s, artifact_set_hash_version)
+            WHERE id=%s
+            """,
+            (artifact_set_hash_version, static_run_id),
+        )
 
 
 def _maybe_set_canonical_static_run(

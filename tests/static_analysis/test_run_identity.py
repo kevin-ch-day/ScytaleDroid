@@ -47,6 +47,7 @@ def test_compute_run_identity_orders_splits_by_name(tmp_path: Path):
     assert identity["identity_valid"] is True
     assert identity["base_apk_sha256"] == base.sha256
     assert identity["artifact_set_hash"] == expected_hash
+    assert identity["artifact_set_hash_version"] == "v1"
 
 
 def test_compute_run_identity_missing_base():
