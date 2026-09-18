@@ -3,6 +3,11 @@ from __future__ import annotations
 from scytaledroid.StaticAnalysis.cli.persistence import run_writers as rw
 
 
+def test_normalize_datetime_strips_offset_plus_z() -> None:
+    assert rw._normalize_datetime_value("2026-09-18T04:44:18+00:00Z") == "2026-09-18 04:44:18"
+    assert rw._normalize_datetime_value("2026-09-18T04:44:18Z") == "2026-09-18 04:44:18"
+
+
 def test_update_static_run_status_sets_default_abort_for_failed(monkeypatch) -> None:
     batches: list[tuple[object, ...]] = []
 

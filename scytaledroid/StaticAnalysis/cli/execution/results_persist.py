@@ -208,7 +208,7 @@ def persist_analyzed_package(
         params=params,
     )
     if not ended_at_utc:
-        ended_at_utc = datetime.now(UTC).isoformat(timespec="seconds") + "Z"
+        ended_at_utc = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     outcome_status = persist_run_summary(
         base_report,
         string_data,

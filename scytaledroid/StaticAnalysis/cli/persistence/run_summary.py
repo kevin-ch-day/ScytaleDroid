@@ -1520,6 +1520,7 @@ def persist_run_summary(
     dry_run: bool = False,
 ) -> PersistenceOutcome:
     outcome = PersistenceOutcome()
+    ended_at_utc = _normalize_datetime_value(ended_at_utc) or _run_writers._utc_now_dbstr()
     br = base_report
     failure_stage: str | None = None
     try:
