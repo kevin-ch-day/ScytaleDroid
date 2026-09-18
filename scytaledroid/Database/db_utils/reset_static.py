@@ -43,6 +43,9 @@ STATIC_ANALYSIS_TABLES: Sequence[str] = (
     "static_analysis_runs",
     "static_session_disposition_history",
     "static_analysis_sessions",
+    # Durable persist-error ledger (keyed by static_run_id; omit here and
+    # session reset leaves orphan rows after SAR delete).
+    "static_persistence_failures",
     # Run-level persistence
     "metrics",
     "buckets",

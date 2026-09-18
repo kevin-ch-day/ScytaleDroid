@@ -107,3 +107,44 @@ def test_select_candidates_can_be_scoped_to_explicit_sessions() -> None:
         only_sessions={"20260614-all-full"},
     )
     assert filtered_out == []
+
+
+def test_select_candidates_keeps_superseded_broken_persist_error_sessions() -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC).replace(tzinfo=None)
+    rows = [
+        {
+            "session_stamp": "20260918-bounded-persistence-v2-validation",
+            "scope_label": "bounded-persistence-v2-validation",
+            "session_disposition": "broken_persist_error_session",
+            "cleanup_status": "review",
+            "total_run_count": 4,
+            "completed_run_count": 0,
+            "failed_run_count": 4,
+            "first_created_at": datetime(2026, 9, 18, 4, 40, 0),
+            "last_ended_at": datetime(2026, 9, 18, 4, 44, 0),
+            "superseding_session_stamp": "20260918-bounded-persistence-v2-validation-3",
+            "superseding_disposition": "completed_full_session",
+            "superseding_last_ended_at": datetime(2026, 9, 18, 5, 10, 0),
+        },
+        {
+            "session_stamp": "20260918-bounded-persistence-v2-validation-2",
+            "scope_label": "bounded-persistence-v2-validation",
+            "session_disposition": "mixed_completed_failed_session",
+            "cleanup_status": "review",
+            "total_run_count": 4,
+            "completed_run_count": 3,
+            "failed_run_count": 1,
+            "first_created_at": datetime(2026, 9, 18, 14, 20, 0),
+            "last_ended_at": datetime(2026, 9, 18, 14, 21, 0),
+            "superseding_session_stamp": "20260918-bounded-persistence-v2-validation-3",
+            "superseding_disposition": "completed_full_session",
+            "superseding_last_ended_at": datetime(2026, 9, 18, 14, 40, 0),
+        },
+    ]
+
+    candidates = _select_candidates(rows, older_than_days=0, now=now)
+
+    assert [item.session_stamp for item in candidates] == [
+        "20260918-bounded-persistence-v2-validation"
+    ]
+    assert candidates[0].session_disposition == "broken_persist_error_session"

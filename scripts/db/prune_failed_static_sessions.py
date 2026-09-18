@@ -2,7 +2,7 @@
 """Prune superseded failed static-analysis sessions (dry-run by default).
 
 Policy:
-- only ``interrupted_partial_session`` sessions
+- only ``interrupted_partial_session`` or ``broken_persist_error_session``
 - only sessions with zero completed runs and one or more failed runs
 - only sessions older than the age gate
 - only sessions already superseded by a later completed full session
@@ -115,7 +115,10 @@ def _select_candidates(
         superseding_disposition = str(row.get("superseding_disposition") or "").strip()
         ended_at = _parse_db_dt(row.get("last_ended_at"))
 
-        if disposition != "interrupted_partial_session":
+        if disposition not in {
+            "interrupted_partial_session",
+            "broken_persist_error_session",
+        }:
             continue
         if completed_runs != 0 or failed_runs <= 0 or total_runs != failed_runs:
             continue
@@ -183,7 +186,10 @@ def main() -> int:
 
     try:
         from scytaledroid.Database.db_core import run_sql
-        from scytaledroid.Database.db_utils.reset_static import reset_static_analysis_data
+        from scytaledroid.Database.db_utils.reset_static import (
+            purge_static_session_artifacts,
+            reset_static_analysis_data,
+        )
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
         return 1
@@ -284,6 +290,10 @@ def main() -> int:
             fetch="one_dict",
         ) or {"c": 0}
         outcome = reset_static_analysis_data(session_label=item.session_stamp)
+        artifact_outcome = purge_static_session_artifacts(
+            item.session_stamp,
+            static_run_ids=outcome.static_run_ids,
+        )
         after = run_sql(
             "SELECT COUNT(*) AS c FROM static_analysis_runs WHERE session_stamp=%s",
             (item.session_stamp,),
@@ -301,6 +311,11 @@ def main() -> int:
                     "skipped_missing": list(outcome.skipped_missing),
                     "failed": list(outcome.failed),
                     "static_run_ids": list(outcome.static_run_ids),
+                },
+                "artifact_purge": {
+                    "removed": list(artifact_outcome.removed),
+                    "missing": list(artifact_outcome.missing),
+                    "failed": list(artifact_outcome.failed),
                 },
             }
         )

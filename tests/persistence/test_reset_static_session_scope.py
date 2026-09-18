@@ -25,6 +25,7 @@ def test_reset_static_tables_include_scientific_run_scoped_permission_and_correl
         "static_correlation_results",
         "masvs_control_coverage",
         "doc_hosts",
+        "static_persistence_failures",
     }
     assert expected.issubset(set(STATIC_ANALYSIS_TABLES))
 
@@ -85,6 +86,8 @@ def test_reset_static_session_scoped_unlinks_dynamic_sessions_before_static_dele
                 table, column = params
                 if table == "dynamic_sessions" and column == "static_run_id":
                     return (1,)
+                if table == "static_persistence_failures":
+                    return (1,) if column == "static_run_id" else (0,)
                 if column in {"session_stamp", "session_label", "static_run_id", "run_id"}:
                     return (1,)
                 return (0,)
@@ -101,7 +104,13 @@ def test_reset_static_session_scoped_unlinks_dynamic_sessions_before_static_dele
         yield _FakeEngine()
 
     def _table_exists(_engine, table: str) -> bool:
-        return table in {"dynamic_sessions", "static_analysis_runs", "runs", "findings"}
+        return table in {
+            "dynamic_sessions",
+            "static_analysis_runs",
+            "static_persistence_failures",
+            "runs",
+            "findings",
+        }
 
     monkeypatch.setattr(reset_mod, "database_session", _fake_session)
     monkeypatch.setattr(reset_mod, "_table_exists", _table_exists)
@@ -123,6 +132,11 @@ def test_reset_static_session_scoped_unlinks_dynamic_sessions_before_static_dele
         "DELETE FROM static_analysis_runs WHERE session_label=%s",
         ("sess-57",),
     ) in executed
+    assert any(
+        "DELETE FROM `static_persistence_failures` WHERE static_run_id IN" in sql
+        and params == (57, 58)
+        for sql, params in executed
+    )
 
 
 def test_purge_static_session_artifacts_removes_session_archive_and_audits(
