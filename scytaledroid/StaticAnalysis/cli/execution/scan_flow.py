@@ -23,6 +23,7 @@ from .cohort_scan_notes import emit_post_scan_cohort_notes
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .operator_display_label import resolve_operator_app_label
+from .results_persist import persist_analyzed_package
 from .run_health import compute_app_final_status, compute_run_aggregate_status
 from .scan_formatters import (
     _HEARTBEAT_CONTINUATION_INDENT,
@@ -711,6 +712,19 @@ def execute_scan(
                 report = None
                 cached_payload = None
             app_result.base_string_data = merged_payload
+        pe_gate = bool(persistence_ready) and not params.dry_run
+        if pe_gate and not _abort_state()[0]:
+            persist_outcome = persist_analyzed_package(
+                app_result=app_result,
+                params=params,
+            )
+            if persist_outcome is not None and not persist_outcome.success:
+                message = (
+                    "Canonical package persist failed for "
+                    f"{group.package_name}; later packages will still be attempted."
+                )
+                failures.append(message)
+                log.warning(message, category="static")
         if not _abort_state()[0]:
             progress.flush_line()
             artifact_count = app_result.discovered_artifacts

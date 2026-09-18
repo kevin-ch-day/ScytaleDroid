@@ -1616,6 +1616,27 @@ def persist_run_summary(
             static_run_id = None
 
     outcome.static_run_id = static_run_id
+    if static_run_id is not None and not dry_run:
+        try:
+            status_row = core_q.run_sql(
+                "SELECT status FROM static_analysis_runs WHERE id=%s LIMIT 1",
+                (int(static_run_id),),
+                fetch="one",
+            )
+        except Exception:
+            status_row = None
+        existing_status = None
+        if isinstance(status_row, dict):
+            existing_status = status_row.get("status")
+        elif status_row:
+            existing_status = status_row[0]
+        if str(existing_status or "").strip().upper() == "COMPLETED":
+            message = (
+                f"immutable_completed_run: static_run_id={static_run_id} is already COMPLETED; "
+                "refusing destructive replace."
+            )
+            outcome.add_error(message)
+            return outcome
     run_status = normalize_run_status(run_status)
     metrics_bundle = compute_metrics_bundle(br, string_data)
     stage_context = _PersistenceStageContext(

@@ -305,6 +305,9 @@ class AppRunResult:
     base_string_data: Mapping[str, object] | None = None
     #: ``complete`` | ``partial`` | ``failed`` | ``skipped`` (set after per-app scan).
     final_status: str | None = None
+    #: True after this package's canonical DB transaction committed COMPLETED.
+    canonical_persist_committed: bool = False
+    canonical_persist_committed_at_monotonic: float | None = None
 
     def severity_totals(self) -> Counter[str]:
         totals: Counter[str] = Counter()

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, MutableMapping
+from datetime import UTC, datetime
 
 from scytaledroid.StaticAnalysis.cli.persistence.static_session_summary import (
     fetch_static_session_run_rollups,
@@ -12,7 +14,10 @@ from scytaledroid.Utils.DisplayUtils import status_messages
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...core import StaticAnalysisReport
-from ..core.models import RunParameters
+from ..core.models import AppRunResult, RunParameters
+from ..persistence.run_summary import persist_run_summary
+from ..views.renderers.summary_render import render_app_result
+from .results_persistence import apply_persistence_outcome, merge_persistence_metadata
 
 
 def _persist_cohort_rollup(session_stamp: str | None, scope_label: str | None) -> None:
@@ -159,4 +164,83 @@ def _build_ingest_payload(
     return ingest_payload
 
 
-__all__ = ["_build_ingest_payload", "_persist_cohort_rollup"]
+def persist_analyzed_package(
+    *,
+    app_result: AppRunResult,
+    params: RunParameters,
+    ended_at_utc: str | None = None,
+    abort_reason: str | None = None,
+    abort_signal: str | None = None,
+):
+    """Persist one package's canonical evidence before the next package starts.
+
+    Session rollup is derived after commit. A rollup failure must not invalidate
+    a package that already committed COMPLETED.
+    """
+
+    if getattr(app_result, "canonical_persist_committed", False):
+        return None
+    if bool(getattr(params, "dry_run", False)):
+        return None
+    if not bool(getattr(params, "persistence_ready", True)):
+        return None
+    if not getattr(app_result, "static_run_id", None):
+        return None
+    base_report = app_result.base_report()
+    if base_report is None:
+        return None
+
+    string_data = (
+        app_result.base_string_data if isinstance(app_result.base_string_data, Mapping) else {}
+    )
+    total_duration = sum(float(artifact.duration_seconds or 0.0) for artifact in app_result.artifacts)
+    _lines, payload, finding_totals = render_app_result(
+        base_report,
+        signer=app_result.signer,
+        split_count=len(app_result.artifacts),
+        string_data=string_data,
+        duration_seconds=total_duration,
+        verbose_output=False,
+    )
+    merge_persistence_metadata(
+        base_report=base_report,
+        app_result=app_result,
+        params=params,
+    )
+    if not ended_at_utc:
+        ended_at_utc = datetime.now(UTC).isoformat(timespec="seconds") + "Z"
+    outcome_status = persist_run_summary(
+        base_report,
+        string_data,
+        app_result.package_name,
+        session_stamp=params.session_stamp,
+        scope_label=params.scope_label or "",
+        finding_totals=finding_totals,
+        baseline_payload=payload,
+        static_run_id=app_result.static_run_id,
+        run_status="COMPLETED",
+        ended_at_utc=ended_at_utc,
+        abort_reason=abort_reason,
+        abort_signal=abort_signal,
+        paper_grade_requested=params.paper_grade_requested,
+        canonical_action=params.canonical_action,
+        dry_run=False,
+    )
+    apply_persistence_outcome(app_result=app_result, outcome_status=outcome_status)
+    if outcome_status and outcome_status.success and not getattr(outcome_status, "persistence_failed", False):
+        app_result.canonical_persist_committed = True
+        app_result.canonical_persist_committed_at_monotonic = time.monotonic()
+        try:
+            _persist_cohort_rollup(params.session_stamp, params.scope_label)
+        except Exception as exc:
+            log.warning(
+                (
+                    "Session rollup failed after durable package persist "
+                    f"for {app_result.package_name}: {exc}"
+                ),
+                category="static_analysis",
+            )
+    return outcome_status
+
+
+__all__ = ["_build_ingest_payload", "_persist_cohort_rollup", "persist_analyzed_package"]

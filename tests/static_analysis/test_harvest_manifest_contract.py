@@ -114,6 +114,7 @@ def _configure_scan_flow(
         "analyse_string_payload",
         lambda *_a, **_k: calls.append("string_payload") or {"counts": {}, "samples": {}, "selected_samples": {}, "aggregates": {}},
     )
+    monkeypatch.setattr(scan_flow, "persist_analyzed_package", lambda **_k: None)
 
 
 def test_execute_scan_marks_harvest_ineligible_group_exploratory(monkeypatch, tmp_path: Path) -> None:
@@ -334,6 +335,7 @@ def test_execute_scan_merges_split_artifact_string_payloads(monkeypatch, tmp_pat
     monkeypatch.setattr(scan_flow, "render_app_completion", lambda **_kwargs: None)
     monkeypatch.setattr(scan_flow, "render_resource_warnings", lambda *_a, **_k: None)
     monkeypatch.setattr(scan_flow, "is_compact_card_mode", lambda *_a, **_k: False)
+    monkeypatch.setattr(scan_flow, "persist_analyzed_package", lambda **_k: None)
     monkeypatch.setattr(scan_report_mod, "generate_report", _fake_generate_report)
     monkeypatch.setattr(
         scan_flow,

@@ -255,6 +255,13 @@ def test_persist_run_summary_applies_mysql_lock_wait_timeout(monkeypatch):
         "SET SESSION innodb_lock_wait_timeout" in sql and params == (17,)
         for sql, params in executed
     )
+    assert any(
+        isinstance(params, tuple)
+        and params
+        and params[0] == "COMPLETED"
+        and "UPDATE static_analysis_runs" in str(sql)
+        for sql, params in executed
+    )
 
 
 def test_persist_run_summary_marks_started_row_failed_on_rollback(monkeypatch):

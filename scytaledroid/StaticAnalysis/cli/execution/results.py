@@ -736,7 +736,7 @@ def _render_run_results_impl(
             for line in compact_block:
                 _emit_detail(line)
 
-        if persist_enabled:
+        if persist_enabled and not getattr(app_result, "canonical_persist_committed", False):
             try:
                 merge_persistence_metadata(
                     base_report=base_report,

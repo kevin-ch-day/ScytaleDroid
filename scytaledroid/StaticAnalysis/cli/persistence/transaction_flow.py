@@ -138,6 +138,32 @@ def execute_persistence_transaction(
 
                     if db_errors:
                         raise RuntimeError(db_errors[-1])
+
+                    # Parent COMPLETED is part of the same transaction as canonical
+                    # children so a crash cannot claim success without evidence, and
+                    # evidence cannot commit without a terminal parent status.
+                    persisted_findings = int(getattr(outcome, "persisted_findings", 0) or 0)
+                    runtime_findings = int(getattr(outcome, "runtime_findings", persisted_findings) or 0)
+                    capped_total = int(getattr(outcome, "findings_capped_total", 0) or 0)
+                    db.execute(
+                        """
+                        UPDATE static_analysis_runs
+                        SET status=%s,
+                            ended_at_utc=%s,
+                            findings_total=%s,
+                            findings_runtime_total=%s,
+                            findings_capped_total=%s
+                        WHERE id=%s
+                        """,
+                        (
+                            "COMPLETED",
+                            ended_at_utc,
+                            persisted_findings,
+                            runtime_findings,
+                            capped_total,
+                            static_run_id,
+                        ),
+                    )
             handoff_failed = callbacks.finalize_static_handoff_stage(
                 static_run_id=static_run_id,
                 stage_context=stage_context,
