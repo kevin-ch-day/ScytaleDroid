@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable
 
 from scytaledroid.Database.db_core import permission_intel
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
+
+
+def permission_intel_mutation_authorized(explicit: bool | None = None) -> bool:
+    """Ordinary static analysis is Permission Intel read-only unless explicitly opted in."""
+
+    if explicit is not None:
+        return bool(explicit)
+    value = str(os.environ.get("SCYTALEDROID_PERMISSION_INTEL_MUTATION_AUTHORIZED") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _normalize_permission_token(raw_value: str) -> tuple[str, str, bool]:
@@ -46,8 +56,14 @@ def persist_declared_permissions(
     artifact_label: str | None,
     declared: Iterable[str],
     custom_declared: Iterable[str] | None = None,
+    database_mutation_authorized: bool | None = None,
 ) -> dict:
-    """Persist OEM/unknown permissions observed in a StaticAnalysisReport.
+    """Classify declared permissions; mutate Permission Intel only when authorized.
+
+    Ordinary static analysis is Permission Intel read-only. Unknown-dictionary,
+    queue, and OEM ``seen_count`` writes require ``database_mutation_authorized=True``
+    or ``SCYTALEDROID_PERMISSION_INTEL_MUTATION_AUTHORIZED``. Classification counts
+    and local report evidence still emit when mutation is disabled.
 
     ``declared`` is the legacy name for manifest permission requests.  Exact
     ``<permission>`` definitions arrive separately in ``custom_declared`` and
@@ -110,6 +126,7 @@ def persist_declared_permissions(
         vendor_prefix_rules = []
 
     counts = {"aosp": 0, "oem": 0, "app_defined": 0, "unknown": 0}
+    mutation_authorized = permission_intel_mutation_authorized(database_mutation_authorized)
     for name in declared_names:
         if not isinstance(name, str) or not name.strip():
             continue
@@ -126,15 +143,16 @@ def persist_declared_permissions(
                 if malformed_prefix:
                     note_parts.append("[auto] malformed android permission prefix")
                 notes = "; ".join(note_parts) if note_parts else None
-                _pd.upsert_unknown(
-                    {
-                        "permission_string": norm,
-                        "triage_status": "malformed",
-                        "notes": notes,
-                        "example_package_name": package_name,
-                        "example_sample_id": None,
-                    }
-                )
+                if mutation_authorized:
+                    _pd.upsert_unknown(
+                        {
+                            "permission_string": norm,
+                            "triage_status": "malformed",
+                            "notes": notes,
+                            "example_package_name": package_name,
+                            "example_sample_id": None,
+                        }
+                    )
             except Exception as exc:
                 log.warning(
                     f"Malformed permission persist failed for {name}: {exc}",
@@ -151,7 +169,8 @@ def persist_declared_permissions(
 
         if norm in oem_entries:
             try:
-                _pd.update_oem_seen(norm)
+                if mutation_authorized:
+                    _pd.update_oem_seen(norm)
             except Exception:
                 pass
             counts["oem"] += 1
@@ -159,15 +178,16 @@ def persist_declared_permissions(
 
         if norm.casefold() in custom_by_identity:
             try:
-                _pd.upsert_unknown(
-                    {
-                        "permission_string": norm,
-                        "triage_status": "app_defined",
-                        "notes": None,
-                        "example_package_name": package_name,
-                        "example_sample_id": None,
-                    }
-                )
+                if mutation_authorized:
+                    _pd.upsert_unknown(
+                        {
+                            "permission_string": norm,
+                            "triage_status": "app_defined",
+                            "notes": None,
+                            "example_package_name": package_name,
+                            "example_sample_id": None,
+                        }
+                    )
             except Exception as exc:
                 log.warning(
                     f"App-defined permission persist failed for {name}: {exc}",
@@ -210,15 +230,16 @@ def persist_declared_permissions(
         notes = "; ".join(note_parts) if note_parts else None
 
         try:
-            _pd.upsert_unknown(
-                {
-                    "permission_string": norm,
-                    "triage_status": triage_status,
-                    "notes": notes,
-                    "example_package_name": package_name,
-                    "example_sample_id": None,
-                }
-            )
+            if mutation_authorized:
+                _pd.upsert_unknown(
+                    {
+                        "permission_string": norm,
+                        "triage_status": triage_status,
+                        "notes": notes,
+                        "example_package_name": package_name,
+                        "example_sample_id": None,
+                    }
+                )
         except Exception as exc:
             log.warning(
                 f"Unknown permission upsert failed for {name}: {exc}",
@@ -236,18 +257,19 @@ def persist_declared_permissions(
             continue
         if triage_status == "aosp_missing":
             try:
-                _pd.insert_queue(
-                    {
-                        "permission_string": norm,
-                        "queue_action": "defer",
-                        "proposed_bucket": None,
-                        "proposed_classification": None,
-                        "triage_status": triage_status,
-                        "notes": notes,
-                        "requested_by": "static-analysis",
-                        "source_system": "static-analysis",
-                    }
-                )
+                if mutation_authorized:
+                    _pd.insert_queue(
+                        {
+                            "permission_string": norm,
+                            "queue_action": "defer",
+                            "proposed_bucket": None,
+                            "proposed_classification": None,
+                            "triage_status": triage_status,
+                            "notes": notes,
+                            "requested_by": "static-analysis",
+                            "source_system": "static-analysis",
+                        }
+                    )
             except Exception as exc:
                 log.warning(
                     f"Permission queue insert failed for {name}: {exc}",
@@ -267,7 +289,12 @@ def persist_declared_permissions(
 
 
 def persist_permissions_to_db(report) -> dict:
-    """Wrapper to persist declared permissions using a full report object."""
+    """Classify declared permissions from a full report.
+
+    This ordinary static path does not authorize Permission Intel mutation.
+    Unknown evidence stays in the report/provenance; dictionary/queue/OEM writes
+    remain behind the explicit opt-in on ``persist_declared_permissions``.
+    """
     try:
         package_name = getattr(report.manifest, "package_name", None)
         version_name = getattr(report.manifest, "version_name", None)
@@ -295,4 +322,4 @@ def persist_permissions_to_db(report) -> dict:
     return counts
 
 
-__all__ = ["persist_permissions_to_db"]
+__all__ = ["persist_permissions_to_db", "permission_intel_mutation_authorized"]
