@@ -19,7 +19,7 @@ def finalize_static_run(
         return
     ended_at = ended_at_utc
     if not ended_at:
-        ended_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        ended_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     update_static_run_status(
         static_run_id=static_run_id,
         status=status,

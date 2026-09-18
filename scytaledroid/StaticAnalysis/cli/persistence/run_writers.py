@@ -898,26 +898,52 @@ def update_static_run_status(
         abort_reason=abort_reason,
     )
     try:
-        affected = run_sql_rowcount(
-            """
+        sql = """
             UPDATE static_analysis_runs
             SET status=%s,
                 ended_at_utc=%s,
                 abort_reason=%s,
                 abort_signal=%s
             WHERE id=%s
-            """,
+        """
+        if canonical_status.upper() == "FAILED":
+            # Incremental package persist commits COMPLETED before later packages
+            # finish. Cohort-end cleanup must not demote that durable parent.
+            sql += " AND UPPER(COALESCE(status, '')) <> 'COMPLETED'"
+        affected = run_sql_rowcount(
+            sql,
             (canonical_status, ended_at, persisted_abort, abort_signal, static_run_id),
             query_name="static_run.update_terminal_status",
         )
-        if affected != 1:
-            log.warning(
-                "Failed to verify static run terminal status update "
-                f"for {static_run_id}: affected_rows={affected}",
-                category="static_analysis",
-            )
-            return False
-        return True
+        if affected == 1:
+            return True
+        if canonical_status.upper() == "FAILED":
+            try:
+                row = core_q.run_sql(
+                    "SELECT status FROM static_analysis_runs WHERE id=%s LIMIT 1",
+                    (int(static_run_id),),
+                    fetch="one",
+                )
+            except Exception:
+                row = None
+            current = None
+            if isinstance(row, dict):
+                current = row.get("status")
+            elif row:
+                current = row[0]
+            if str(current or "").strip().upper() == "COMPLETED":
+                log.warning(
+                    "Refusing to demote COMPLETED static run "
+                    f"{static_run_id} to FAILED",
+                    category="static_analysis",
+                )
+                return True
+        log.warning(
+            "Failed to verify static run terminal status update "
+            f"for {static_run_id}: affected_rows={affected}",
+            category="static_analysis",
+        )
+        return False
     except Exception as exc:
         log.warning(
             f"Failed to update static run status for {static_run_id}: {exc}",

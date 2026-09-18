@@ -79,7 +79,11 @@ from .pipeline import REQUIRED_PAPER_ARTIFACTS, governance_ready
 from .plan import build_dynamic_plan_artifact
 from .results_dedupe import dedupe_profile_entries
 from .results_formatters import _format_highlight_tokens
-from .results_persist import _build_ingest_payload, _persist_cohort_rollup
+from .results_persist import (
+    _build_ingest_payload,
+    _persist_cohort_rollup,
+    persist_outcome_is_durable,
+)
 from .results_persistence import (
     apply_persistence_outcome,
     collect_persistence_errors,
@@ -854,56 +858,59 @@ def _render_run_results_impl(
                     },
                 )
                 if outcome_status and not outcome_status.success:
-                    canon_errs, persist_errs, compat_errs = collect_persistence_errors(
-                        outcome_status=outcome_status
-                    )
-                    canonical_failures.extend(canon_errs)
-                    persistence_errors.extend(persist_errs)
-                    compat_export_errors.extend(compat_errs)
-                    if app_result.static_run_id and persist_enabled:
-                        finalize_static_run(
+                    if persist_outcome_is_durable(outcome_status, app_result.static_run_id):
+                        app_result.canonical_persist_committed = True
+                    else:
+                        canon_errs, persist_errs, compat_errs = collect_persistence_errors(
+                            outcome_status=outcome_status
+                        )
+                        canonical_failures.extend(canon_errs)
+                        persistence_errors.extend(persist_errs)
+                        compat_export_errors.extend(compat_errs)
+                        if app_result.static_run_id and persist_enabled:
+                            finalize_static_run(
+                                static_run_id=app_result.static_run_id,
+                                status="FAILED",
+                                ended_at_utc=ended_at_utc,
+                                abort_reason="persist_error",
+                                abort_signal=abort_signal,
+                            )
+                        issue_label = (
+                            "compat export issue"
+                            if compat_errs and not persist_errs and not canon_errs
+                            else "persistence error"
+                        )
+                        detail = format_persistence_failure_detail(
+                            package_name=app_result.package_name,
+                            session_stamp=params.session_stamp,
                             static_run_id=app_result.static_run_id,
-                            status="FAILED",
-                            ended_at_utc=ended_at_utc,
-                            abort_reason="persist_error",
-                            abort_signal=abort_signal,
+                            outcome_status=outcome_status,
+                            issue_label=issue_label,
                         )
-                    issue_label = (
-                        "compat export issue"
-                        if compat_errs and not persist_errs and not canon_errs
-                        else "persistence error"
-                    )
-                    detail = format_persistence_failure_detail(
-                        package_name=app_result.package_name,
-                        session_stamp=params.session_stamp,
-                        static_run_id=app_result.static_run_id,
-                        outcome_status=outcome_status,
-                        issue_label=issue_label,
-                    )
-                    print(
-                        status_messages.status(
-                            f"Aborting post-processing: {issue_label} "
-                            f"(package={app_result.package_name}).",
-                            level="error",
+                        print(
+                            status_messages.status(
+                                f"Aborting post-processing: {issue_label} "
+                                f"(package={app_result.package_name}).",
+                                level="error",
+                            )
                         )
-                    )
-                    for line in detail.splitlines():
-                        print(status_messages.status(line, level="error"))
-                    logging_engine.get_error_logger().error(
-                        "Static persistence aborted",
-                        extra=logging_engine.ensure_trace(
-                            {
-                                "event": "static.persistence_abort",
-                                "detail": detail,
-                                "package": app_result.package_name,
-                                "session_stamp": params.session_stamp,
-                                "static_run_id": app_result.static_run_id,
-                            }
-                        ),
-                    )
-                    if "PERSISTENCE_ERROR" not in outcome.failures:
-                        outcome.failures.append("PERSISTENCE_ERROR")
-                    break
+                        for line in detail.splitlines():
+                            print(status_messages.status(line, level="error"))
+                        logging_engine.get_error_logger().error(
+                            "Static persistence aborted",
+                            extra=logging_engine.ensure_trace(
+                                {
+                                    "event": "static.persistence_abort",
+                                    "detail": detail,
+                                    "package": app_result.package_name,
+                                    "session_stamp": params.session_stamp,
+                                    "static_run_id": app_result.static_run_id,
+                                }
+                            ),
+                        )
+                        if "PERSISTENCE_ERROR" not in outcome.failures:
+                            outcome.failures.append("PERSISTENCE_ERROR")
+                        break
             except Exception as exc:
                 warning = f"Failed to persist run summary for {app_result.package_name}: {exc}"
                 print(status_messages.status(warning, level="warn"))

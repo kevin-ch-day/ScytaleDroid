@@ -67,3 +67,19 @@ def test_update_static_run_status_rejects_missing_row(monkeypatch) -> None:
     monkeypatch.setattr(rw, "run_sql_rowcount", lambda *_args, **_kwargs: 0)
 
     assert rw.update_static_run_status(static_run_id=404, status="COMPLETED") is False
+
+
+def test_update_static_run_status_refuses_completed_demotion(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _capture(sql: object, _params: tuple[object, ...], **_kwargs: object) -> int:
+        captured.append(str(sql))
+        return 0
+
+    monkeypatch.setattr(rw, "run_sql_rowcount", _capture)
+    monkeypatch.setattr(rw.core_q, "run_sql", lambda *_a, **_k: ("COMPLETED",))
+
+    assert rw.update_static_run_status(
+        static_run_id=7348, status="FAILED", abort_reason="persist_error"
+    ) is True
+    assert any("<> 'COMPLETED'" in sql for sql in captured)

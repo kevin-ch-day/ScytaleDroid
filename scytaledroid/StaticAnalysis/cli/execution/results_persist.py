@@ -164,6 +164,53 @@ def _build_ingest_payload(
     return ingest_payload
 
 
+def persist_outcome_is_durable(
+    outcome_status: object | None,
+    static_run_id: int | None = None,
+) -> bool:
+    """True when canonical package evidence is already durable in DB.
+
+    ``persist_run_summary`` may return ``success=False`` for non-fatal envelope
+    notes or for an idempotent ``immutable_completed_run`` refusal. Those must
+    not look like a failed persist that later demotes a COMPLETED parent.
+    """
+
+    if outcome_status is None:
+        return False
+    errors = [str(err) for err in (getattr(outcome_status, "errors", None) or [])]
+    if any("immutable_completed_run" in err for err in errors):
+        return True
+    if bool(getattr(outcome_status, "persistence_failed", False)):
+        return False
+    if bool(getattr(outcome_status, "success", False)):
+        return True
+    rid = static_run_id if static_run_id is not None else getattr(outcome_status, "static_run_id", None)
+    return _static_run_is_completed(rid)
+
+
+def _static_run_is_completed(static_run_id: object) -> bool:
+    try:
+        rid = int(static_run_id)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    try:
+        from scytaledroid.Database.db_core import db_queries as core_q
+
+        row = core_q.run_sql(
+            "SELECT status FROM static_analysis_runs WHERE id=%s LIMIT 1",
+            (rid,),
+            fetch="one",
+        )
+    except Exception:
+        return False
+    current = None
+    if isinstance(row, dict):
+        current = row.get("status")
+    elif row:
+        current = row[0]
+    return str(current or "").strip().upper() == "COMPLETED"
+
+
 def persist_analyzed_package(
     *,
     app_result: AppRunResult,
@@ -227,7 +274,7 @@ def persist_analyzed_package(
         dry_run=False,
     )
     apply_persistence_outcome(app_result=app_result, outcome_status=outcome_status)
-    if outcome_status and outcome_status.success and not getattr(outcome_status, "persistence_failed", False):
+    if persist_outcome_is_durable(outcome_status, getattr(app_result, "static_run_id", None)):
         app_result.canonical_persist_committed = True
         app_result.canonical_persist_committed_at_monotonic = time.monotonic()
         try:
@@ -243,4 +290,9 @@ def persist_analyzed_package(
     return outcome_status
 
 
-__all__ = ["_build_ingest_payload", "_persist_cohort_rollup", "persist_analyzed_package"]
+__all__ = [
+    "_build_ingest_payload",
+    "_persist_cohort_rollup",
+    "persist_analyzed_package",
+    "persist_outcome_is_durable",
+]

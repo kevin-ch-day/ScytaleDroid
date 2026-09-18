@@ -216,3 +216,97 @@ def test_persist_run_summary_refuses_completed_replace(monkeypatch) -> None:
     )
     assert outcome.success is False
     assert any("immutable_completed_run" in err for err in outcome.errors)
+
+
+def test_persist_outcome_is_durable_for_immutable_completed_and_envelope_notes(monkeypatch) -> None:
+    from scytaledroid.StaticAnalysis.cli.execution.results_persist import persist_outcome_is_durable
+
+    immutable = SimpleNamespace(
+        success=False,
+        persistence_failed=False,
+        errors=["immutable_completed_run: static_run_id=101 is already COMPLETED; refusing destructive replace."],
+        static_run_id=101,
+    )
+    assert persist_outcome_is_durable(immutable, 101) is True
+
+    envelope = SimpleNamespace(
+        success=False,
+        persistence_failed=False,
+        errors=["envelope: optional metadata missing"],
+        static_run_id=44,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist._static_run_is_completed",
+        lambda _rid: True,
+    )
+    assert persist_outcome_is_durable(envelope, 44) is True
+
+    failed = SimpleNamespace(
+        success=False,
+        persistence_failed=True,
+        errors=["Static persistence transaction failed"],
+        static_run_id=9,
+    )
+    assert persist_outcome_is_durable(failed, 9) is False
+
+
+def test_persist_analyzed_package_marks_committed_when_outcome_has_envelope_errors(monkeypatch) -> None:
+    app = AppRunResult("com.example.app", "Uncategorized")
+    app.static_run_id = 44
+    report = SimpleNamespace(
+        metadata={},
+        manifest=SimpleNamespace(package_name="com.example.app"),
+        detector_results=[],
+        hashes={},
+        analysis_version="test",
+        exported_components=None,
+        file_path="/tmp/base.apk",
+        signatures=(),
+        permissions=SimpleNamespace(declared=(), custom=()),
+        components=SimpleNamespace(activities=(), services=(), receivers=(), providers=()),
+        manifest_flags=SimpleNamespace(),
+    )
+    monkeypatch.setattr(app, "base_report", lambda: report)
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.render_app_result",
+        lambda *_a, **_k: ([], {"baseline": {}}, Counter()),
+    )
+
+    class _EnvelopeOutcome:
+        success = False
+        persistence_failed = False
+        static_run_id = 44
+        persisted_findings = 1
+        errors = ["envelope: optional metadata missing"]
+        persistence_warnings: list = []
+
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.persist_run_summary",
+        lambda *_a, **_k: _EnvelopeOutcome(),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.apply_persistence_outcome",
+        lambda **_k: (1, 0),
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist.merge_persistence_metadata",
+        lambda **_k: None,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist._persist_cohort_rollup",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.results_persist._static_run_is_completed",
+        lambda _rid: True,
+    )
+    params = RunParameters(
+        profile="full",
+        scope="app",
+        scope_label="Example",
+        session_stamp="sess-inc-envelope",
+        dry_run=False,
+        persistence_ready=True,
+    )
+    persist_analyzed_package(app_result=app, params=params)
+    assert app.canonical_persist_committed is True
