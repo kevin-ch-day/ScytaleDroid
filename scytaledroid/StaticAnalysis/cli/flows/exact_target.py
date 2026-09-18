@@ -530,7 +530,11 @@ def _target_from_group(
         f"Exact dynamic base hash + harvested split set | "
         f"{group.package_name} | {expected_base_sha256[:12]}..."
     )
-    computed_hash, computed_version = _group_portable_identity(group)
+    requested_version = str(artifact_set_hash_version or "").strip() or None
+    computed_hash, computed_version = _group_portable_identity(
+        group,
+        version=requested_version or V1,
+    )
     requested_hash = _normalize_sha256(artifact_set_hash) if artifact_set_hash else None
     if requested_hash and computed_hash and requested_hash != computed_hash:
         raise ExactTargetResolutionError(
