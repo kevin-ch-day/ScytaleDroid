@@ -32,25 +32,11 @@ def _historical_package_reports(
     package: str,
     current_session_stamp: str | None,
 ) -> list[StoredReport]:
-    runtime_state = getattr(context, "runtime_state", None)
-    cache_key = ("correlation_history_reports", package, current_session_stamp or "")
-    found, cached = cache_lookup(
-        runtime_state,
-        "correlation_history_reports_cache",
-        cache_key,
-        hit_counter="historical_package_reports_cache_hits",
-        miss_counter="historical_package_reports_cache_misses",
-    )
-    if found and isinstance(cached, list):
-        return cached
-
-    historical_reports = [
+    return [
         stored
         for stored in reports_for_package(package)
         if _session_stamp_from_metadata(getattr(stored.report, "metadata", None)) != current_session_stamp
     ]
-    cache_store(runtime_state, "correlation_history_reports_cache", cache_key, historical_reports)
-    return historical_reports
 
 
 def load_previous_report(context: DetectorContext) -> StoredReport | None:
@@ -60,6 +46,18 @@ def load_previous_report(context: DetectorContext) -> StoredReport | None:
 
     current_sha = context.hashes.get("sha256")
     current_session_stamp = _session_stamp_from_metadata(context.metadata)
+    runtime_state = getattr(context, "runtime_state", None)
+    selection_key = (package, current_session_stamp or "", current_sha or "")
+    found, cached = cache_lookup(
+        runtime_state,
+        "correlation_selected_previous_report",
+        selection_key,
+        hit_counter="selected_previous_report_cache_hits",
+        miss_counter="selected_previous_report_cache_misses",
+    )
+    if found:
+        return cached if isinstance(cached, StoredReport) else None
+
     target_version_name = context.manifest_summary.version_name or ""
     try:
         target_version_code = int(context.manifest_summary.version_code)
@@ -101,14 +99,16 @@ def load_previous_report(context: DetectorContext) -> StoredReport | None:
             continue
         candidates.append(stored)
 
+    selected: StoredReport | None = None
     if same_version:
-        return same_version[0]
-    if older_versions:
+        selected = same_version[0]
+    elif older_versions:
         older_versions.sort(key=lambda item: item[0], reverse=True)
-        return older_versions[0][1]
-    if candidates:
-        return candidates[0]
-    return None
+        selected = older_versions[0][1]
+    elif candidates:
+        selected = candidates[0]
+    cache_store(runtime_state, "correlation_selected_previous_report", selection_key, selected)
+    return selected
 
 
 def compare_components(

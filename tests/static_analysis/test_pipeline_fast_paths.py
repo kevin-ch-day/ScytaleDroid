@@ -589,3 +589,21 @@ def test_analyze_apk_records_timing_metadata_and_cached_string_payload_for_split
         assert string_payload_calls[-1]["warnings"] == (
             "We are out of bound with this complex entry. Count: 65536",
         )
+
+
+def test_release_opened_apk_closes_zip_and_drops_resource_caches() -> None:
+    class _Zip:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    apk = SimpleNamespace(zip=_Zip(), axml={"decoded": True}, arsc={"table": True}, xml=None, _raw=b"raw")
+
+    pipeline._release_opened_apk(apk)
+
+    assert apk.zip is None
+    assert apk.axml is None
+    assert apk.arsc is None
+    assert apk._raw is None

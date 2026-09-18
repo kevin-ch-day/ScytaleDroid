@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 from ...core.context import DetectorContext
 from ...core.findings import Badge, EvidencePointer, Finding, MasvsCategory, SeverityLevel
@@ -29,6 +30,46 @@ def _capture_id_from_metadata(metadata: Mapping[str, object] | None) -> str | No
     return None
 
 
+def _compact_related_report(report: object) -> object:
+    """Keep split-correlation fields only so sibling JSON graphs can be released."""
+
+    hashes = getattr(report, "hashes", {}) or {}
+    metadata = getattr(report, "metadata", {})
+    compact_meta: dict[str, object] = {}
+    if isinstance(metadata, Mapping):
+        for key in ("artifact", "split_group_id", "session_stamp", "capture_id"):
+            if key in metadata:
+                compact_meta[key] = metadata.get(key)
+    return SimpleNamespace(
+        hashes={"sha256": str(hashes.get("sha256") or "")},
+        metadata=compact_meta,
+        exported_components=getattr(report, "exported_components", None),
+        file_name=getattr(report, "file_name", None),
+    )
+
+
+def _coerce_related_stored_report(
+    item: object,
+    *,
+    runtime_state: object,
+) -> StoredReport | None:
+    if isinstance(item, StoredReport):
+        return item
+    if not isinstance(item, (str, Path)):
+        return None
+    path = Path(item)
+    try:
+        full = load_report(path)
+    except (OSError, ReportStorageError):
+        return None
+    cached_previous_network_snapshot(
+        runtime_state if isinstance(runtime_state, Mapping) else None,
+        report_key=path.as_posix(),
+        report=full,
+    )
+    return StoredReport(path=path, report=_compact_related_report(full))  # type: ignore[arg-type]
+
+
 def _runtime_related_reports(
     context: DetectorContext,
     *,
@@ -49,15 +90,8 @@ def _runtime_related_reports(
         return []
     loaded: list[StoredReport] = []
     for item in reports:
-        if isinstance(item, StoredReport):
-            stored = item
-        elif isinstance(item, (str, Path)):
-            path = Path(item)
-            try:
-                stored = StoredReport(path=path, report=load_report(path))
-            except (OSError, ReportStorageError):
-                continue
-        else:
+        stored = _coerce_related_stored_report(item, runtime_state=runtime_state)
+        if stored is None:
             continue
         if stored.report.hashes.get("sha256") != current_sha:
             loaded.append(stored)
@@ -83,22 +117,6 @@ def _collect_related_reports(
     if not capture_id:
         # Strict default: no historical or cross-session joins without an active capture boundary.
         return []
-    cache_key = _split_cache_key(package_name=package_name, capture_id=capture_id, split_id=split_id)
-    runtime_state = getattr(context, "runtime_state", None)
-    if cache_key is not None:
-        found, cached = cache_lookup(
-            runtime_state,
-            "split_related_reports",
-            cache_key,
-            hit_counter="split_related_reports_cache_hits",
-            miss_counter="split_related_reports_cache_misses",
-        )
-        if found and isinstance(cached, list):
-            return [
-                stored
-                for stored in cached
-                if isinstance(stored, StoredReport) and stored.report.hashes.get("sha256") != current_sha
-            ]
     runtime_reports = _runtime_related_reports(
         context,
         package_name=package_name,
@@ -122,9 +140,9 @@ def _collect_related_reports(
             continue
         if report.hashes.get("sha256") == current_sha:
             continue
-        related_reports.append(stored)
-    if cache_key is not None:
-        cache_store(runtime_state, "split_related_reports", cache_key, list(related_reports))
+        related_reports.append(
+            StoredReport(path=stored.path, report=_compact_related_report(report))  # type: ignore[arg-type]
+        )
     return related_reports
 
 
@@ -137,7 +155,11 @@ def _build_related_group_cache(
     related_reports: Sequence[StoredReport],
 ) -> dict[str, object]:
     runtime_state = getattr(context, "runtime_state", None)
-    cache_key = _split_cache_key(package_name=package_name, capture_id=capture_id, split_id=split_id)
+    member_token = tuple(sorted(str(getattr(stored, "path", "")) for stored in related_reports))
+    cache_key = None
+    split_key = _split_cache_key(package_name=package_name, capture_id=capture_id, split_id=split_id)
+    if split_key is not None:
+        cache_key = (*split_key, member_token)
     if cache_key is not None:
         found, cached = cache_lookup(
             runtime_state,

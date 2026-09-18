@@ -188,6 +188,21 @@ def resolve_exact_static_target(
             artifact_set_hash=set_identity.get("artifact_set_hash"),
             artifact_set_hash_version=set_identity.get("artifact_set_hash_version"),
         )
+    if receipt_group is None and set_identity is None:
+        unique_identity = _lookup_unique_apk_set_identity(
+            package_name=package,
+            base_apk_sha256=expected_hash,
+        )
+        if unique_identity:
+            receipt_group = _group_from_stored_install_set(
+                apk_set_id=str(unique_identity["apk_set_id"]),
+                package_name=package,
+                expected_base_sha256=expected_hash,
+                artifact_set_hash=unique_identity.get("artifact_set_hash"),
+                artifact_set_hash_version=unique_identity.get("artifact_set_hash_version"),
+            )
+            if receipt_group is not None:
+                set_identity = unique_identity
     if receipt_group is None:
         receipt_group = _find_receipt_group(
             apk_id=row_apk_id,
@@ -1081,6 +1096,55 @@ def _lookup_apk_set_row(apk_set_id: str) -> Mapping[str, object] | None:
         query_name="static.exact_target.lookup_apk_set",
     )
     return row if isinstance(row, Mapping) else None
+
+
+def _lookup_unique_apk_set_identity(
+    *,
+    package_name: str,
+    base_apk_sha256: str,
+) -> dict[str, str] | None:
+    if core_q is None:
+        return None
+    try:
+        rows = core_q.run_sql(
+            """
+            SELECT apk_set_id, package_name, base_apk_sha256,
+                   artifact_set_hash, artifact_set_hash_version
+            FROM apk_sets
+            WHERE LOWER(TRIM(base_apk_sha256)) = %s
+              AND LOWER(TRIM(package_name)) = %s
+            """,
+            (base_apk_sha256, package_name),
+            fetch="all_dict",
+            query_name="static.exact_target.lookup_apk_sets_for_base",
+        )
+    except Exception:
+        return None
+    valid: list[Mapping[str, object]] = []
+    for row in rows or []:
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            int(row.get("apk_set_id"))
+        except (TypeError, ValueError):
+            continue
+        if not row.get("artifact_set_hash"):
+            continue
+        valid.append(row)
+        if len(valid) > 1:
+            return None
+    if len(valid) != 1:
+        return None
+    row = valid[0]
+    digest = _normalize_sha256(row.get("artifact_set_hash")) if row.get("artifact_set_hash") else None
+    if not digest:
+        return None
+    version = str(row.get("artifact_set_hash_version") or V1).strip() or V1
+    return {
+        "apk_set_id": str(int(row.get("apk_set_id"))),
+        "artifact_set_hash": digest,
+        "artifact_set_hash_version": version,
+    }
 
 
 def _group_from_stored_install_set(

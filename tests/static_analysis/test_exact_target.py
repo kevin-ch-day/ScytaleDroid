@@ -405,6 +405,73 @@ def test_apk_set_id_uses_stored_members_without_harvest_walk(monkeypatch, tmp_pa
     assert target.selection.groups[0].grouping_reason == "stored_install_set"
 
 
+def test_unique_stored_set_skips_harvest_walk_without_apk_set_id(monkeypatch, tmp_path):
+    base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
+    split_path, split_sha = _apk(tmp_path, "one.apk", b"one")
+    base_row = _row(apk_id=55, sha=base_sha, path=base_path)
+    members = [
+        {"role": "base", "split_name": "base", "sha256": base_sha},
+        {"role": "split", "split_name": "one", "sha256": split_sha},
+    ]
+    chosen_hash = compute_artifact_set_hash(members, version="v2")
+
+    def _run_sql(*_a, **kwargs):
+        name = kwargs.get("query_name")
+        if name == "static.exact_target.lookup_apk_sets_for_base":
+            return [
+                {
+                    "apk_set_id": 9001,
+                    "package_name": "com.example.app",
+                    "base_apk_sha256": base_sha,
+                    "artifact_set_hash": chosen_hash,
+                    "artifact_set_hash_version": "v2",
+                }
+            ]
+        if name == "static.exact_target.lookup_apk_set_members":
+            return [
+                {
+                    "apk_id": 55,
+                    "role": "base",
+                    "split_name": "base",
+                    "sha256": base_sha,
+                    "local_rel_path": str(base_path),
+                    "package_name": "com.example.app",
+                    "version_name": "1.0",
+                    "version_code": "1",
+                },
+                {
+                    "apk_id": 56,
+                    "role": "split",
+                    "split_name": "one",
+                    "sha256": split_sha,
+                    "local_rel_path": str(split_path),
+                    "package_name": "com.example.app",
+                    "version_name": "1.0",
+                    "version_code": "1",
+                },
+            ]
+        return [base_row]
+
+    monkeypatch.setattr(exact_target, "core_q", SimpleNamespace(run_sql=_run_sql))
+    monkeypatch.setattr(
+        exact_target,
+        "group_artifacts",
+        lambda: (_ for _ in ()).throw(AssertionError("harvest tree walk should be skipped")),
+    )
+
+    target = exact_target.resolve_exact_static_target(
+        apk_id=55,
+        base_apk_sha256=base_sha,
+        include_splits="auto",
+    )
+
+    assert target.apk_set_id == "9001"
+    assert target.artifact_set_hash == chosen_hash
+    assert target.artifact_set_hash_version == "v2"
+    assert target.split_count == 1
+    assert target.selection.groups[0].grouping_reason == "stored_install_set"
+
+
 def test_stored_members_missing_bytes_fall_back_to_receipts(monkeypatch, tmp_path):
     base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
     split_path, split_sha = _apk(tmp_path, "one.apk", b"one")

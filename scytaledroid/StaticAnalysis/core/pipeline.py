@@ -198,6 +198,23 @@ def _load_apk_safely(apk_path: Path, meta: dict) -> APK:
     return fallback.apk
 
 
+def _release_opened_apk(apk: object) -> None:
+    """Drop decoded Androguard zip/resource caches after detectors finish."""
+
+    for name in ("zip", "axml", "arsc", "xml", "_raw"):
+        value = getattr(apk, name, None)
+        closer = getattr(value, "close", None)
+        if callable(closer):
+            try:
+                closer()
+            except Exception:
+                pass
+        try:
+            setattr(apk, name, None)
+        except Exception:
+            pass
+
+
 @functools.lru_cache(maxsize=1)
 def _frozen_toolchain_versions() -> tuple[tuple[str, str], ...]:
     """Cached toolchain probe (immutable tuple for ``lru_cache`` safety)."""
@@ -795,6 +812,7 @@ def analyze_apk(
         report_metadata["correlation_runtime_stats"] = correlation_runtime_stats
     report_metadata["parser_provenance"] = _build_parser_provenance(report_metadata)
     report_metadata["artifact_total_wall_s"] = time.monotonic() - analysis_started
+    _release_opened_apk(apk)
 
     return StaticAnalysisReport(
         file_path=str(apk_path.resolve()),

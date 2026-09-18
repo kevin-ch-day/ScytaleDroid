@@ -261,6 +261,43 @@ def test_collect_related_reports_prefers_runtime_saved_split_cache(monkeypatch, 
     assert related == [cached]
 
 
+def test_runtime_related_path_loads_drop_full_report_payload(monkeypatch, tmp_path: Path) -> None:
+    fat_report = SimpleNamespace(
+        hashes={"sha256": "ab" * 32},
+        metadata={
+            "artifact": "split_config.en",
+            "split_group_id": "72",
+            "session_stamp": "cap-1",
+            "post_run_string_payload": {"huge": "x" * 1000},
+        },
+        exported_components=SimpleNamespace(activities=(), services=(), receivers=(), providers=()),
+        file_name="split.apk",
+        detector_metrics={"network_surface": {"http_hosts": ["example.com"]}},
+    )
+    monkeypatch.setattr(splits, "load_report", lambda _path: fat_report)
+    monkeypatch.setattr(splits, "cached_previous_network_snapshot", lambda *_a, **_k: None)
+    context = SimpleNamespace(
+        runtime_state={
+            "saved_reports_by_split": {
+                ("com.example.app", "cap-1", "72"): [tmp_path / "split.json"],
+            }
+        }
+    )
+
+    related = splits._runtime_related_reports(  # noqa: SLF001 - memory-contract test
+        context,  # type: ignore[arg-type]
+        package_name="com.example.app",
+        capture_id="cap-1",
+        split_id="72",
+        current_sha="other-sha",
+    )
+
+    assert len(related) == 1
+    assert related[0].report.hashes["sha256"] == "ab" * 32
+    assert related[0].report.metadata["artifact"] == "split_config.en"
+    assert "post_run_string_payload" not in related[0].report.metadata
+
+
 def test_split_findings_reuse_cached_group_union_and_snapshots(monkeypatch) -> None:
     related = [
         StoredReport(
