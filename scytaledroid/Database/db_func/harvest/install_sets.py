@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from scytaledroid.Utils.install_set_identity import compute_artifact_set_hash
+from scytaledroid.Utils.install_set_identity import (
+    NEW_INSTALL_SET_HASH_VERSION,
+    V1,
+    V2,
+    compute_artifact_set_hash,
+)
 from scytaledroid.Utils.LoggingUtils import logging_utils as log
 
 from ...db_core import run_sql
@@ -52,9 +57,46 @@ def ensure_tables() -> None:
 
 
 def artifact_set_hash_v1(members: Sequence[InstallSetMember]) -> str:
-    """Return the current static identity v1 hash for install-set members."""
+    """Return the historical v1 digest for install-set members."""
 
-    return compute_artifact_set_hash(members, version="v1")
+    return compute_artifact_set_hash(members, version=V1)
+
+
+def artifact_set_hash_v2(members: Sequence[InstallSetMember]) -> str:
+    """Return the current new-set v2 digest for install-set members."""
+
+    return compute_artifact_set_hash(members, version=V2)
+
+
+def lookup_stored_install_set_identity(
+    *,
+    v1_hash: str | None,
+    v2_hash: str | None,
+) -> dict[str, str] | None:
+    """Return an existing apk_sets identity, preferring stored v1 over a parallel v2."""
+
+    first = str(v1_hash or "").strip().lower()
+    second = str(v2_hash or "").strip().lower()
+    if not first and not second:
+        return None
+    row = run_sql(
+        q.SELECT_EXISTING_APK_SET_IDENTITY,
+        (first or second, second or first),
+        fetch="one_dict",
+        query_name="harvest.install_sets.lookup_existing_identity",
+    )
+    if not isinstance(row, Mapping):
+        return None
+    digest = str(row.get("artifact_set_hash") or "").strip().lower()
+    version = str(row.get("artifact_set_hash_version") or "").strip()
+    apk_set_id = row.get("apk_set_id")
+    if not digest or not version or apk_set_id is None:
+        return None
+    return {
+        "apk_set_id": str(int(apk_set_id)),
+        "artifact_set_hash": digest,
+        "artifact_set_hash_version": version,
+    }
 
 
 def upsert_install_set(record: InstallSetRecord) -> int | None:
@@ -76,11 +118,20 @@ def upsert_install_set(record: InstallSetRecord) -> int | None:
     ensure_tables()
     app = _lookup_app_version(record)
     session_id = _upsert_harvest_session(record)
-    artifact_hash = artifact_set_hash_v1(record.members)
+    v1_hash = artifact_set_hash_v1(record.members)
+    v2_hash = artifact_set_hash_v2(record.members)
+    stored = lookup_stored_install_set_identity(v1_hash=v1_hash, v2_hash=v2_hash)
+    if stored:
+        artifact_hash = stored["artifact_set_hash"]
+        hash_version = stored["artifact_set_hash_version"]
+    else:
+        artifact_hash = v2_hash
+        hash_version = NEW_INSTALL_SET_HASH_VERSION
     apk_set_id = _upsert_apk_set(
         record,
         app=app,
         artifact_set_hash=artifact_hash,
+        artifact_set_hash_version=hash_version,
         base_member=base_members[0],
     )
     for member in record.members:
@@ -117,6 +168,7 @@ def _upsert_apk_set(
     *,
     app: Mapping[str, Any],
     artifact_set_hash: str,
+    artifact_set_hash_version: str,
     base_member: InstallSetMember,
 ) -> int:
     return int(
@@ -131,7 +183,7 @@ def _upsert_apk_set(
                 base_member.apk_id,
                 base_member.sha256,
                 artifact_set_hash,
-                "v1",
+                artifact_set_hash_version,
                 len(record.members),
                 len([member for member in record.members if member.role == "split"]),
                 _completeness_state(record),
@@ -241,7 +293,9 @@ __all__ = [
     "InstallSetMember",
     "InstallSetRecord",
     "artifact_set_hash_v1",
+    "artifact_set_hash_v2",
     "ensure_tables",
     "log_mirror_failure",
+    "lookup_stored_install_set_identity",
     "upsert_install_set",
 ]

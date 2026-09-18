@@ -13,6 +13,9 @@ from typing import Any
 
 V1 = "v1"
 V2 = "v2"
+# New install sets after the governed writer switch default to v2. Existing
+# stored rows keep their version; callers must look up before inserting.
+NEW_INSTALL_SET_HASH_VERSION = V2
 
 
 def _value(member: Any, name: str, default: str = "") -> str:

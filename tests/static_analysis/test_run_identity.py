@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 from hashlib import sha256
 from pathlib import Path
 
 from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
-from scytaledroid.StaticAnalysis.cli.execution import scan_flow
+from scytaledroid.StaticAnalysis.cli.execution import scan_flow, scan_identity_helpers
 from scytaledroid.StaticAnalysis.cli.execution.scan_identity_helpers import (
     _split_name_for_artifact_with_reason,
 )
+from scytaledroid.Utils.install_set_identity import V1, V2, compute_artifact_set_hash
 
 
 class FakeArtifact:
@@ -33,7 +33,8 @@ def _artifact(tmp_path: Path, name: str, split_name: str | None, *, is_split_mem
     return FakeArtifact(path, digest, split_name, is_split_member=is_split_member)
 
 
-def test_compute_run_identity_orders_splits_by_name(tmp_path: Path):
+def test_compute_run_identity_orders_splits_by_name(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(scan_identity_helpers, "lookup_stored_install_set_identity", lambda **_k: None)
     base = _artifact(tmp_path, "base", "base", is_split_member=False)
     a = _artifact(tmp_path, "aaa", "split_config.en")
     b = _artifact(tmp_path, "bbb", "split_config.arm64_v8a")
@@ -41,13 +42,44 @@ def test_compute_run_identity_orders_splits_by_name(tmp_path: Path):
     group = FakeGroup(base, [c, b, a, base])
     identity = scan_flow._compute_run_identity(group)
 
-    hashes = [base.sha256, b.sha256, a.sha256, c.sha256]
-    expected_hash = sha256(json.dumps(hashes).encode("utf-8")).hexdigest()
+    members = [
+        {"role": "base", "split_name": "base", "sha256": base.sha256},
+        {"role": "split", "split_name": "split_config.arm64_v8a", "sha256": b.sha256},
+        {"role": "split", "split_name": "split_config.en", "sha256": a.sha256},
+        {"role": "split", "split_name": "split_df_vmsdk", "sha256": c.sha256},
+    ]
+    expected_hash = compute_artifact_set_hash(members, version=V2)
 
     assert identity["identity_valid"] is True
     assert identity["base_apk_sha256"] == base.sha256
     assert identity["artifact_set_hash"] == expected_hash
-    assert identity["artifact_set_hash_version"] == "v1"
+    assert identity["artifact_set_hash_version"] == V2
+
+
+def test_compute_run_identity_reuses_stored_v1_set(tmp_path: Path, monkeypatch) -> None:
+    base = _artifact(tmp_path, "base", "base", is_split_member=False)
+    split = _artifact(tmp_path, "split", "split_chrome")
+    members = [
+        {"role": "base", "split_name": "base", "sha256": base.sha256},
+        {"role": "split", "split_name": "split_chrome", "sha256": split.sha256},
+    ]
+    stored_v1 = compute_artifact_set_hash(members, version=V1)
+    monkeypatch.setattr(
+        scan_identity_helpers,
+        "lookup_stored_install_set_identity",
+        lambda **_k: {
+            "apk_set_id": "843",
+            "artifact_set_hash": stored_v1,
+            "artifact_set_hash_version": V1,
+        },
+    )
+
+    identity = scan_flow._compute_run_identity(FakeGroup(base, [split, base]))
+
+    assert identity["identity_valid"] is True
+    assert identity["artifact_set_hash"] == stored_v1
+    assert identity["artifact_set_hash_version"] == V1
+    assert identity["artifact_set_hash"] != compute_artifact_set_hash(members, version=V2)
 
 
 def test_compute_run_identity_missing_base():

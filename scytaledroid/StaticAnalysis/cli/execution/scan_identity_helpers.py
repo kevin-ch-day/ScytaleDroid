@@ -8,9 +8,23 @@ from hashlib import sha256
 from pathlib import Path
 
 from scytaledroid.DeviceAnalysis.harvest.common import compute_hashes
-from scytaledroid.Utils.install_set_identity import compute_artifact_set_hash
+from scytaledroid.Utils.install_set_identity import (
+    NEW_INSTALL_SET_HASH_VERSION,
+    V1,
+    V2,
+    compute_artifact_set_hash,
+)
 
 from ..core.models import RunParameters
+
+try:
+    from scytaledroid.Database.db_func.harvest.install_sets import (
+        lookup_stored_install_set_identity,
+    )
+except Exception:  # pragma: no cover - optional DB
+
+    def lookup_stored_install_set_identity(**_kwargs):  # type: ignore[no-redef]
+        return None
 
 
 def _artifact_identity_label(artifact) -> str:
@@ -120,18 +134,28 @@ def _compute_run_identity(group) -> dict:
 
     ordered = [e for e in entries if e["is_base"]]
     ordered.extend(sorted((e for e in entries if not e["is_base"]), key=lambda item: item["split_name"]))
-    artifact_set_hash = compute_artifact_set_hash(
-        [
-            {"role": "base" if entry["is_base"] else "split", "split_name": entry["split_name"], "sha256": entry["sha256"]}
-            for entry in ordered
-        ],
-        version="v1",
-    )
+    member_payload = [
+        {"role": "base" if entry["is_base"] else "split", "split_name": entry["split_name"], "sha256": entry["sha256"]}
+        for entry in ordered
+    ]
+    v1_hash = compute_artifact_set_hash(member_payload, version=V1)
+    v2_hash = compute_artifact_set_hash(member_payload, version=V2)
+    stored = None
+    try:
+        stored = lookup_stored_install_set_identity(v1_hash=v1_hash, v2_hash=v2_hash)
+    except Exception as exc:
+        identity["identity_error_reason"] = f"install_set_lookup_failed:{exc.__class__.__name__}"
+        return identity
+    if stored and stored.get("artifact_set_hash") and stored.get("artifact_set_hash_version"):
+        artifact_set_hash = str(stored["artifact_set_hash"])
+        hash_version = str(stored["artifact_set_hash_version"])
+    else:
+        artifact_set_hash = v2_hash
+        hash_version = NEW_INSTALL_SET_HASH_VERSION
 
     identity["base_apk_sha256"] = base_sha
     identity["artifact_set_hash"] = artifact_set_hash
-    # v1 remains the writer contract until the separate governed switchover.
-    identity["artifact_set_hash_version"] = "v1"
+    identity["artifact_set_hash_version"] = hash_version
     identity["identity_valid"] = True
     return identity
 

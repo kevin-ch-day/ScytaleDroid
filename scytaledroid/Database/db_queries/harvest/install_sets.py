@@ -289,6 +289,16 @@ ORDER BY av.id DESC
 LIMIT 1
 """
 
+SELECT_EXISTING_APK_SET_IDENTITY = """
+SELECT apk_set_id, artifact_set_hash, artifact_set_hash_version
+FROM apk_sets
+WHERE LOWER(TRIM(artifact_set_hash)) IN (%s, %s)
+ORDER BY
+  CASE WHEN artifact_set_hash_version = 'v1' THEN 0 ELSE 1 END,
+  apk_set_id
+LIMIT 1
+"""
+
 __all__ = [
     "CREATE_APK_SETS",
     "CREATE_APK_SET_MEMBERS",
@@ -300,5 +310,6 @@ __all__ = [
     "UPSERT_APK_SET_MEMBER",
     "UPSERT_HARVEST_OBSERVATION",
     "SELECT_APP_VERSION_FOR_PACKAGE",
+    "SELECT_EXISTING_APK_SET_IDENTITY",
     "_DDL_STATEMENTS",
 ]

@@ -4,6 +4,7 @@ import json
 from hashlib import sha256
 
 from scytaledroid.Utils.install_set_identity import (
+    NEW_INSTALL_SET_HASH_VERSION,
     canonical_member_manifest,
     compute_artifact_set_hash,
     hash_v1_ordered_digests,
@@ -71,4 +72,8 @@ def test_v1_ordered_digest_list_stays_byte_compatible_for_large_sets():
             assert resorted != historical
         else:
             assert resorted == historical
+
+
+def test_new_install_set_hash_version_defaults_to_v2() -> None:
+    assert NEW_INSTALL_SET_HASH_VERSION == "v2"
 
