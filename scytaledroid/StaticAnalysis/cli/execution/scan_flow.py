@@ -365,6 +365,7 @@ def execute_scan(
         app_result.identity_error_reason = identity.get("identity_error_reason")
         app_result.base_apk_sha256 = identity.get("base_apk_sha256")
         app_result.artifact_set_hash = identity.get("artifact_set_hash")
+        app_result.artifact_set_hash_version = identity.get("artifact_set_hash_version")
         app_result.apk_set_id = resolve_apk_set_id_for_artifact_set_hash(app_result.artifact_set_hash)
         app_result.run_signature = run_signature
         app_result.run_signature_version = identity.get("run_signature_version")
@@ -425,6 +426,7 @@ def execute_scan(
                     sha256=app_result.base_apk_sha256,
                     base_apk_sha256=app_result.base_apk_sha256,
                     artifact_set_hash=app_result.artifact_set_hash,
+                    artifact_set_hash_version=app_result.artifact_set_hash_version,
                     apk_set_id=app_result.apk_set_id,
                     run_signature=app_result.run_signature,
                     run_signature_version=app_result.run_signature_version,

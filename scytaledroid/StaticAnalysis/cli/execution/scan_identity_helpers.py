@@ -85,6 +85,7 @@ def _compute_run_identity(group) -> dict:
     identity = {
         "base_apk_sha256": None,
         "artifact_set_hash": None,
+        "artifact_set_hash_version": None,
         "run_signature_version": "v1",
         "identity_valid": False,
         "identity_error_reason": None,
@@ -129,6 +130,8 @@ def _compute_run_identity(group) -> dict:
 
     identity["base_apk_sha256"] = base_sha
     identity["artifact_set_hash"] = artifact_set_hash
+    # v1 remains the writer contract until the separate governed switchover.
+    identity["artifact_set_hash_version"] = "v1"
     identity["identity_valid"] = True
     return identity
 

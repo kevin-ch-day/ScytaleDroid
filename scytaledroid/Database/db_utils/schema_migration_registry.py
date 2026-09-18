@@ -264,6 +264,23 @@ DYNAMIC_SESSION_QFG_MIGRATIONS: tuple[MigrationSpec, ...] = (
     ),
 )
 
+INSTALL_SET_HASH_VERSION_PROPAGATION_MIGRATIONS: tuple[MigrationSpec, ...] = (
+    MigrationSpec(
+        migration_id="20260918_install_set_hash_version_propagation_v1",
+        migration_name="Propagate versioned portable install-set identity",
+        schema_version_before="0.3.16-dynamic-domain-normalization-v2",
+        schema_version_after="0.3.17-install-set-hash-version-propagation-v1",
+        statements=(
+            "ALTER TABLE static_analysis_runs ADD COLUMN IF NOT EXISTS artifact_set_hash_version VARCHAR(16) NULL",
+            "ALTER TABLE dynamic_sessions ADD COLUMN IF NOT EXISTS artifact_set_hash_version VARCHAR(16) NULL",
+            "CREATE INDEX IF NOT EXISTS ix_static_runs_artifact_set_identity ON static_analysis_runs (artifact_set_hash_version, artifact_set_hash)",
+            "CREATE INDEX IF NOT EXISTS ix_dynamic_sessions_artifact_set_identity ON dynamic_sessions (artifact_set_hash_version, artifact_set_hash)",
+        ),
+        description="Adds nullable identity-version provenance; historical dynamic rows remain unknown.",
+        apply_mode="manual_script", stage="identity",
+    ),
+)
+
 DYNAMIC_DOMAIN_NORMALIZATION_MIGRATIONS: tuple[MigrationSpec, ...] = (
     MigrationSpec(
         migration_id="20260816_dynamic_domain_normalization_v2",
@@ -301,6 +318,7 @@ def registered_migrations() -> tuple[MigrationSpec, ...]:
         + STATIC_FINDING_EVIDENCE_PAYLOAD_MIGRATIONS
         + DYNAMIC_SESSION_QFG_MIGRATIONS
         + DYNAMIC_DOMAIN_NORMALIZATION_MIGRATIONS
+        + INSTALL_SET_HASH_VERSION_PROPAGATION_MIGRATIONS
     )
 
 

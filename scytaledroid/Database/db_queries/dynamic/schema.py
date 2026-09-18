@@ -47,6 +47,7 @@ _DDL_STATEMENTS: list[str] = [
       base_apk_sha256    CHAR(64)     DEFAULT NULL,
       apk_sha256         CHAR(64)     DEFAULT NULL,
       artifact_set_hash  CHAR(64)     DEFAULT NULL,
+      artifact_set_hash_version VARCHAR(16) DEFAULT NULL,
       version_name       VARCHAR(191) DEFAULT NULL,
       version_code       BIGINT       DEFAULT NULL,
       expected_samples   INT          DEFAULT NULL,

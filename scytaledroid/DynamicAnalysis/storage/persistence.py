@@ -124,6 +124,7 @@ def persist_dynamic_summary(
         "base_apk_sha256": plan_identity.get("base_apk_sha256"),
         "apk_sha256": plan_identity.get("base_apk_sha256"),
         "artifact_set_hash": plan_identity.get("artifact_set_hash"),
+        "artifact_set_hash_version": plan_identity.get("artifact_set_hash_version"),
         "version_name": plan_identity.get("version_name"),
         "version_code": _safe_int(plan_identity.get("version_code")),
         "expected_samples": qa_stats.get("expected_samples"),

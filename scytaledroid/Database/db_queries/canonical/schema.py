@@ -332,6 +332,7 @@ _DDL_STATEMENTS: list[str] = [
       sha256           CHAR(64)       DEFAULT NULL,
       base_apk_sha256  CHAR(64)       DEFAULT NULL,
       artifact_set_hash CHAR(64)      DEFAULT NULL,
+      artifact_set_hash_version VARCHAR(16) DEFAULT NULL,
       run_signature    CHAR(64)       DEFAULT NULL,
       run_signature_version VARCHAR(16) DEFAULT NULL,
       identity_valid   TINYINT(1)     DEFAULT NULL,
