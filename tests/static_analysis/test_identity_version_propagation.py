@@ -10,7 +10,12 @@ from scytaledroid.DynamicAnalysis.storage.persistence import _extract_plan_ident
 from scytaledroid.StaticAnalysis.cli.execution.results_persistence import merge_persistence_metadata
 from scytaledroid.StaticAnalysis.cli.persistence.run_summary import _build_persistence_run_context
 from scytaledroid.StaticAnalysis.cli.persistence.static_handoff import build_static_handoff
-from scytaledroid.StaticAnalysis.core import ManifestFlags, ManifestSummary, PermissionSummary, StaticAnalysisReport
+from scytaledroid.StaticAnalysis.core import (
+    ManifestFlags,
+    ManifestSummary,
+    PermissionSummary,
+    StaticAnalysisReport,
+)
 
 
 def _report() -> StaticAnalysisReport:

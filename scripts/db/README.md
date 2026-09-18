@@ -121,6 +121,29 @@ It also stops on partial columns, a missing expected index, or disagreement
 between the migration registry and physical schema. The tool never deletes
 observations or evidence files.
 
+## Install-set hash-version propagation (0.3.17)
+
+Adds nullable `artifact_set_hash_version` on `static_analysis_runs` and
+`dynamic_sessions`. Static backfill writes `v1`/`v2` only when the linked
+`apk_sets` digest agrees. Historical dynamic rows stay unknown; they are never
+inferred. DDL is implicit-commit and resume-safe. Default is dry-run:
+
+```bash
+PYTHONPATH=. python scripts/db/migrate_install_set_hash_version_propagation.py --json
+PYTHONPATH=. python scripts/db/migrate_install_set_hash_version_propagation.py --rehearse-offline --json
+```
+
+After a current governed Mercury backup, restore-check, and preflight review:
+
+```bash
+PYTHONPATH=. python scripts/db/migrate_install_set_hash_version_propagation.py \
+  --apply --confirm --json
+```
+
+`--rehearse --confirm` applies the same program only when the current DSN is
+not `scytaledroid_core_prod`. Receipts land under
+`data/state/schema_migrations/install_set_hash_version_propagation/`.
+
 ## Cohort static session audit
 
 After a profile/cohort static run, verify canonical row counts and Web/read views for one `session_stamp`:
