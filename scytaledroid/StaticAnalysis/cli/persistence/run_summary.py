@@ -1341,6 +1341,10 @@ def create_static_run_ledger(
     """Create a STARTED static_analysis_runs row before scanning begins."""
     canonical_actions = {"first_run", "replace", "auto_suffix", "append"}
     canonical_enabled = canonical_action in canonical_actions if canonical_action else False
+    # first_run/replace promote is_canonical on COMPLETED persist. Holding the
+    # flag on STARTED lets persist_error/SIGINT leave failed_canonical_runs>0.
+    promote_on_completed = canonical_action in {"first_run", "replace"}
+    started_is_canonical = bool(canonical_enabled and not promote_on_completed)
     return _run_writers.create_static_run_ledger(
         package_name=package_name,
         display_name=display_name or package_name,
@@ -1362,9 +1366,9 @@ def create_static_run_ledger(
         findings_total=0,
         run_started_utc=run_started_utc,
         status="STARTED",
-        is_canonical=True if canonical_enabled else False if canonical_action else None,
-        canonical_set_at_utc=run_started_utc if canonical_enabled else None,
-        canonical_reason=canonical_action if canonical_enabled else None,
+        is_canonical=True if started_is_canonical else False if canonical_action else None,
+        canonical_set_at_utc=run_started_utc if started_is_canonical else None,
+        canonical_reason=canonical_action if started_is_canonical else None,
         sha256=sha256,
         base_apk_sha256=base_apk_sha256,
         artifact_set_hash=artifact_set_hash,

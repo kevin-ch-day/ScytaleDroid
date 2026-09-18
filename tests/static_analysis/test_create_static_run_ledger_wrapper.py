@@ -71,3 +71,59 @@ def test_wrapper_forwards_artifact_set_hash_version_to_writer(monkeypatch) -> No
     assert captured["artifact_set_hash_version"] == "v1"
     assert captured["artifact_set_hash"] == "b" * 64
     assert captured["apk_set_id"] == 12
+
+
+def test_wrapper_first_run_does_not_mark_started_canonical(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(run_summary, "get_git_commit", lambda: "deadbeef")
+    monkeypatch.setattr(
+        run_summary,
+        "db_diagnostics",
+        SimpleNamespace(get_schema_version=lambda: "0.3.17"),
+    )
+    monkeypatch.setattr(run_summary._run_writers, "create_static_run_ledger", _capture)
+
+    create_static_run_ledger(
+        package_name="com.example.app",
+        session_stamp="20260918T000000Z",
+        session_label="lab",
+        scope_label="all",
+        profile="full",
+        canonical_action="first_run",
+    )
+    assert captured["status"] == "STARTED"
+    assert captured["is_canonical"] is False
+    assert captured["canonical_reason"] is None
+
+
+def test_wrapper_auto_suffix_still_marks_started_canonical(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(run_summary, "get_git_commit", lambda: "deadbeef")
+    monkeypatch.setattr(
+        run_summary,
+        "db_diagnostics",
+        SimpleNamespace(get_schema_version=lambda: "0.3.17"),
+    )
+    monkeypatch.setattr(run_summary._run_writers, "create_static_run_ledger", _capture)
+
+    create_static_run_ledger(
+        package_name="com.example.app",
+        session_stamp="20260918T000000Z",
+        session_label="lab",
+        scope_label="all",
+        profile="full",
+        canonical_action="auto_suffix",
+        run_started_utc="2026-09-18 00:00:00",
+    )
+    assert captured["is_canonical"] is True
+    assert captured["canonical_reason"] == "auto_suffix"

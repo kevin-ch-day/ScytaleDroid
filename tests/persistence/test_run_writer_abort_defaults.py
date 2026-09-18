@@ -28,6 +28,19 @@ def test_update_static_run_status_sets_default_abort_for_failed(monkeypatch) -> 
     assert sid == 42
 
 
+def test_update_static_run_status_failed_clears_is_canonical(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _capture(sql: object, _params: tuple[object, ...], **_kwargs: object) -> int:
+        captured.append(str(sql))
+        return 1
+
+    monkeypatch.setattr(rw, "run_sql_rowcount", _capture)
+    assert rw.update_static_run_status(static_run_id=42, status="FAILED", abort_reason="persist_error")
+    assert any("is_canonical=0" in sql for sql in captured)
+    assert any("<> 'COMPLETED'" in sql for sql in captured)
+
+
 def test_update_static_run_status_keeps_explicit_abort(monkeypatch) -> None:
     batches: list[tuple[object, ...]] = []
 
@@ -52,6 +65,19 @@ def test_update_static_run_status_completed_does_not_force_abort(monkeypatch) ->
 
     rw.update_static_run_status(static_run_id=7, status="COMPLETED", abort_reason=None)
     assert batches[0][2] is None
+
+
+def test_update_static_run_status_completed_does_not_clear_is_canonical(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _capture(sql: object, _params: tuple[object, ...], **_kwargs: object) -> int:
+        captured.append(str(sql))
+        return 1
+
+    monkeypatch.setattr(rw, "run_sql_rowcount", _capture)
+    rw.update_static_run_status(static_run_id=7, status="COMPLETED")
+    assert captured
+    assert all("is_canonical=0" not in sql for sql in captured)
 
 
 def test_update_static_run_status_reports_write_failure(monkeypatch) -> None:
@@ -83,3 +109,17 @@ def test_update_static_run_status_refuses_completed_demotion(monkeypatch) -> Non
         static_run_id=7348, status="FAILED", abort_reason="persist_error"
     ) is True
     assert any("<> 'COMPLETED'" in sql for sql in captured)
+    assert any("is_canonical=0" in sql for sql in captured)
+
+
+def test_finalize_open_static_runs_failed_clears_is_canonical(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _write(sql: object, _params: tuple[object, ...] = (), **_kwargs: object) -> None:
+        captured.append(str(sql))
+
+    monkeypatch.setattr(rw, "run_sql_write", _write)
+    monkeypatch.setattr(rw.core_q, "run_sql", lambda *_a, **_k: (1,))
+    rw.finalize_open_static_runs([9], status="FAILED", abort_reason="SIGINT")
+    assert any("is_canonical=0" in sql for sql in captured)
+    assert any("STARTED" in sql for sql in captured)

@@ -8,6 +8,8 @@ Runs three high-signal counts against ``static_analysis_runs`` and ``v_static_ha
 3. ``completed_session_invariant_violations`` — per ``session_stamp``, COMPLETED runs must
    align counts with handoff view rows, ``run_class = 'CANONICAL'``, and ``identity_valid = 1``.
 
+Non-zero checks print up to 10 sample rows. This script does not mutate data.
+
 Exit codes: **0** all checks zero, **1** any check non-zero, **2** DB unavailable / query error.
 
 Run from repo root::
@@ -35,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         from scytaledroid.Database.db_utils.static_run_governance_checks import (
             GOVERNANCE_POSTURE_CHECKS,
             fetch_static_run_governance_counts,
+            fetch_static_run_governance_details,
         )
     except ImportError as exc:
         sys.stderr.write(f"Import failed (run from repo root with PYTHONPATH=.): {exc}\n")
@@ -46,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     bad = 0
+    nonzero: list[str] = []
     try:
         counts = fetch_static_run_governance_counts(core_q.run_sql)
         for label, _sql in GOVERNANCE_POSTURE_CHECKS:
@@ -53,6 +57,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{label}={val}")
             if val != 0:
                 bad += 1
+                nonzero.append(label)
+        if nonzero:
+            details = fetch_static_run_governance_details(nonzero, core_q.run_sql)
+            for label in nonzero:
+                rows = details.get(label) or []
+                print(f"{label} sample_rows={len(rows)}")
+                for row in rows:
+                    print(f"  {row}")
     except Exception as exc:
         sys.stderr.write(f"Governance posture query failed: {exc}\n")
         return 2

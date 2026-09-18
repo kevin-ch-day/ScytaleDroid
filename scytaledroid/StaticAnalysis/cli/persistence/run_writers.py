@@ -922,7 +922,19 @@ def update_static_run_status(
         if canonical_status.upper() == "FAILED":
             # Incremental package persist commits COMPLETED before later packages
             # finish. Cohort-end cleanup must not demote that durable parent.
-            sql += " AND UPPER(COALESCE(status, '')) <> 'COMPLETED'"
+            # Non-COMPLETED rows must not keep is_canonical=1 (governance
+            # failed_canonical_runs): persist_error/SIGINT leftover flags
+            # otherwise survive on the STARTED insert.
+            sql = """
+            UPDATE static_analysis_runs
+            SET status=%s,
+                ended_at_utc=%s,
+                abort_reason=%s,
+                abort_signal=%s,
+                is_canonical=0
+            WHERE id=%s
+              AND UPPER(COALESCE(status, '')) <> 'COMPLETED'
+            """
         affected = run_sql_rowcount(
             sql,
             (canonical_status, ended_at, persisted_abort, abort_signal, static_run_id),
@@ -998,6 +1010,12 @@ def finalize_open_static_runs(
         SET status=%s, ended_at_utc=%s, abort_reason=%s, abort_signal=%s
         WHERE status='STARTED' AND ended_at_utc IS NULL
     """
+    if canonical_status.upper() == "FAILED":
+        sql = """
+        UPDATE static_analysis_runs
+        SET status=%s, ended_at_utc=%s, abort_reason=%s, abort_signal=%s, is_canonical=0
+        WHERE status='STARTED' AND ended_at_utc IS NULL
+        """
 
     if static_run_ids is not None:
         ids: list[int] = []
