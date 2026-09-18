@@ -9,6 +9,7 @@ from scytaledroid.DeviceAnalysis.services import artifact_store
 from scytaledroid.StaticAnalysis.cli.core.models import ScopeSelection
 from scytaledroid.StaticAnalysis.cli.flows import exact_target, headless_run
 from scytaledroid.StaticAnalysis.core.repository import ArtifactGroup, RepositoryArtifact
+from scytaledroid.Utils.install_set_identity import compute_artifact_set_hash
 
 
 def _sha(data: bytes) -> str:
@@ -71,13 +72,18 @@ def _artifact(path: Path, *, apk_id: int, package: str, sha: str, split: bool, g
     )
 
 
-def _group(base: RepositoryArtifact, *splits: RepositoryArtifact) -> ArtifactGroup:
+def _group(
+    base: RepositoryArtifact,
+    *splits: RepositoryArtifact,
+    capture_id: str = "capture-1",
+    group_key: str | None = None,
+) -> ArtifactGroup:
     return ArtifactGroup(
-        group_key="split-com.example.app-77-capture-1-1",
+        group_key=group_key or f"split-com.example.app-77-{capture_id}-1",
         package_name=base.package_name,
         version_display=base.version_display,
-        session_stamp="capture-1",
-        capture_id="capture-1",
+        session_stamp=capture_id,
+        capture_id=capture_id,
         artifacts=(base, *splits),
         grouping_reason="split_group_capture_id",
         grouping_confidence="high",
@@ -225,6 +231,92 @@ def test_receipt_backed_sibling_sets_are_ambiguous(monkeypatch, tmp_path):
         exact_target.resolve_exact_static_target(apk_id=55, base_apk_sha256=base_sha, include_splits="auto")
 
 
+def test_identical_receipt_duplicates_select_newest_capture(monkeypatch, tmp_path):
+    base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
+    split_path, split_sha = _apk(tmp_path, "split.apk", b"split")
+    _patch_db(monkeypatch, _row(apk_id=55, sha=base_sha, path=base_path))
+    base = _artifact(base_path, apk_id=55, package="com.example.app", sha=base_sha, split=False)
+    split = _artifact(split_path, apk_id=56, package="com.example.app", sha=split_sha, split=True)
+    older = _group(base, split, capture_id="capture-20260612")
+    newer = _group(base, split, capture_id="capture-20260613")
+    monkeypatch.setattr(exact_target, "group_artifacts", lambda: [older, newer])
+
+    target = exact_target.resolve_exact_static_target(
+        apk_id=55,
+        base_apk_sha256=base_sha,
+        include_splits="auto",
+    )
+
+    assert target.capture_id == "capture-20260613"
+    assert target.artifact_set_hash_version == "v1"
+    assert target.artifact_set_hash
+    assert target.split_count == 1
+
+
+def test_apk_set_id_selects_matching_sibling_set(monkeypatch, tmp_path):
+    base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
+    one_path, one_sha = _apk(tmp_path, "one.apk", b"one")
+    two_path, two_sha = _apk(tmp_path, "two.apk", b"two")
+    base_row = _row(apk_id=55, sha=base_sha, path=base_path)
+    chosen_hash = compute_artifact_set_hash(
+        [
+            {"role": "base", "split_name": "base", "sha256": base_sha},
+            {"role": "split", "split_name": "one", "sha256": one_sha},
+        ],
+        version="v1",
+    )
+
+    def _run_sql(*_a, **kwargs):
+        if kwargs.get("query_name") == "static.exact_target.lookup_apk_set":
+            return {
+                "apk_set_id": 843,
+                "package_name": "com.example.app",
+                "base_apk_sha256": base_sha,
+                "artifact_set_hash": chosen_hash,
+                "artifact_set_hash_version": "v1",
+            }
+        return [base_row]
+
+    monkeypatch.setattr(exact_target, "core_q", SimpleNamespace(run_sql=_run_sql))
+    base = _artifact(base_path, apk_id=55, package="com.example.app", sha=base_sha, split=False)
+    one = _artifact(one_path, apk_id=56, package="com.example.app", sha=one_sha, split=True)
+    two = _artifact(two_path, apk_id=57, package="com.example.app", sha=two_sha, split=True)
+    monkeypatch.setattr(
+        exact_target,
+        "group_artifacts",
+        lambda: [_group(base, one, capture_id="set-one"), _group(base, two, capture_id="set-two")],
+    )
+
+    target = exact_target.resolve_exact_static_target(
+        apk_id=55,
+        base_apk_sha256=base_sha,
+        include_splits="auto",
+        apk_set_id=843,
+    )
+
+    assert target.apk_set_id == "843"
+    assert target.artifact_set_hash == chosen_hash
+    assert target.capture_id == "set-one"
+    assert target.split_count == 1
+
+
+def test_requested_set_hash_mismatch_fails_closed(monkeypatch, tmp_path):
+    base_path, base_sha = _apk(tmp_path, "base.apk", b"base")
+    split_path, split_sha = _apk(tmp_path, "split.apk", b"split")
+    _patch_db(monkeypatch, _row(apk_id=55, sha=base_sha, path=base_path))
+    base = _artifact(base_path, apk_id=55, package="com.example.app", sha=base_sha, split=False)
+    split = _artifact(split_path, apk_id=56, package="com.example.app", sha=split_sha, split=True)
+    monkeypatch.setattr(exact_target, "group_artifacts", lambda: [_group(base, split)])
+
+    with pytest.raises(exact_target.ExactTargetResolutionError, match="did not match"):
+        exact_target.resolve_exact_static_target(
+            apk_id=55,
+            base_apk_sha256=base_sha,
+            include_splits="auto",
+            artifact_set_hash="c" * 64,
+        )
+
+
 def test_readiness_missing_base_bytes_recommends_restore_artifacts(monkeypatch, tmp_path):
     expected = _sha(b"base")
     split_sha_1 = _sha(b"split-1")
@@ -314,6 +406,10 @@ def test_headless_exact_mode_uses_exact_resolver(monkeypatch, tmp_path):
         split_mode="receipt-backed-group",
         split_count=0,
         artifacts=(SimpleNamespace(),),
+        apk_set_id="843",
+        artifact_set_hash="b" * 64,
+        artifact_set_hash_version="v1",
+        capture_id="capture-1",
         selection=ScopeSelection(
             "app",
             "Exact dynamic base hash + harvested split set | com.example.app",
@@ -341,6 +437,10 @@ def test_headless_exact_mode_uses_exact_resolver(monkeypatch, tmp_path):
             base_sha,
             "--include-splits",
             "require",
+            "--apk-set-id",
+            "843",
+            "--artifact-set-hash",
+            "b" * 64,
             "--profile",
             "lightweight",
             "--session",
@@ -352,6 +452,8 @@ def test_headless_exact_mode_uses_exact_resolver(monkeypatch, tmp_path):
     assert captured["resolve"]["apk_id"] == "55"
     assert captured["resolve"]["base_apk_sha256"] == base_sha
     assert captured["resolve"]["include_splits"] == "require"
+    assert captured["resolve"]["apk_set_id"] == "843"
+    assert captured["resolve"]["artifact_set_hash"] == "b" * 64
     spec = captured["spec"]
     assert spec.selection.groups == (group,)
     assert spec.params.profile == "lightweight"

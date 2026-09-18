@@ -19,3 +19,13 @@ def test_headless_parser_preserves_exact_hash_alias() -> None:
     args = build_parser().parse_args(["--exact-hash", "a" * 64])
 
     assert args.base_apk_sha256 == "a" * 64
+
+
+def test_headless_parser_accepts_install_set_identity() -> None:
+    args = build_parser().parse_args(
+        ["--apk-id", "15428", "--apk-set-id", "843", "--artifact-set-hash", "b" * 64]
+    )
+
+    assert args.apk_id == "15428"
+    assert args.apk_set_id == "843"
+    assert args.artifact_set_hash == "b" * 64

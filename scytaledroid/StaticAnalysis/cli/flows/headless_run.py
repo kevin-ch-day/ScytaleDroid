@@ -157,12 +157,16 @@ def _run_exact_target(
     include_splits: str,
     allow_session_reuse: bool,
     dry_run: bool,
+    apk_set_id: str | None = None,
+    artifact_set_hash: str | None = None,
 ) -> int:
     try:
         target = resolve_exact_static_target(
             apk_id=apk_id,
             base_apk_sha256=base_apk_sha256,
             include_splits=include_splits,  # type: ignore[arg-type]
+            apk_set_id=apk_set_id,
+            artifact_set_hash=artifact_set_hash,
         )
     except ExactTargetResolutionError as exc:
         raise SystemExit(f"Exact target resolution failed: {exc}") from exc
@@ -202,11 +206,15 @@ def _run_exact_target(
     print("Exact static target preflight")
     print(f"  package           : {target.package_name}")
     print(f"  apk_id            : {target.apk_id or 'unknown'}")
+    print(f"  apk_set_id        : {getattr(target, 'apk_set_id', None) or 'unspecified'}")
+    print(f"  set hash version  : {getattr(target, 'artifact_set_hash_version', None) or 'unknown'}")
+    print(f"  artifact_set_hash : {getattr(target, 'artifact_set_hash', None) or 'unknown'}")
     print(f"  expected hash     : {target.expected_base_sha256}")
     print(f"  actual hash       : {target.actual_base_sha256} (verified)")
     print(f"  split mode        : {target.split_mode}")
     print(f"  split members     : {target.split_count}")
     print(f"  artifacts verified: {len(target.artifacts)}")
+    print(f"  capture           : {target.capture_id or 'unknown'}")
     print(f"  receipt           : {receipt_path}")
 
     base_dir = artifact_store.analysis_apk_root()
@@ -365,6 +373,8 @@ def main(argv: list[str] | None = None) -> int:
             include_splits=args.include_splits,
             allow_session_reuse=args.allow_session_reuse,
             dry_run=args.dry_run,
+            apk_set_id=args.apk_set_id,
+            artifact_set_hash=args.artifact_set_hash,
         )
     apk_path = Path(str(args.apk)).expanduser().resolve()
     if not apk_path.exists():

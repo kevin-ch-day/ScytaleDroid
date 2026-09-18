@@ -23,6 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["auto", "base-only", "require"],
         help="Exact target split handling: auto uses receipt-backed group; base-only must be explicit.",
     )
+    parser.add_argument("--apk-set-id", help="Local apk_sets.apk_set_id used to select one install-set digest")
+    parser.add_argument(
+        "--artifact-set-hash",
+        help="Portable install-set digest used to disambiguate sibling receipt groups",
+    )
     parser.add_argument(
         "--research-cohort-key",
         help="Run a deterministic DB-backed research cohort headlessly.",

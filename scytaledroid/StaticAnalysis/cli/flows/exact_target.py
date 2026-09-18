@@ -17,6 +17,7 @@ from typing import Literal
 
 from scytaledroid.Database.db_queries.sql_typed_reads import resolved_dynamic_session_static_run_id
 from scytaledroid.DeviceAnalysis.services import artifact_store
+from scytaledroid.Utils.install_set_identity import V1, compute_artifact_set_hash
 from scytaledroid.Utils.IO.atomic_write import atomic_write_text
 
 from ...core.repository import ArtifactGroup, RepositoryArtifact, group_artifacts
@@ -59,6 +60,9 @@ class ExactStaticTarget:
     group_key: str
     artifacts: tuple[VerifiedArtifact, ...]
     selection: ScopeSelection
+    apk_set_id: str | None = None
+    artifact_set_hash: str | None = None
+    artifact_set_hash_version: str | None = None
 
     @property
     def split_count(self) -> int:
@@ -119,17 +123,26 @@ def resolve_exact_static_target(
     base_apk_sha256: str | None = None,
     package_name: str | None = None,
     include_splits: SplitMode = "auto",
+    apk_set_id: int | str | None = None,
+    artifact_set_hash: str | None = None,
 ) -> ExactStaticTarget:
     """Resolve and validate an exact static-analysis target.
 
     ``include_splits='auto'`` uses a receipt-backed group when available and
     aborts when the split set cannot be reconstructed.  ``base-only`` is the only
     mode that permits single-base analysis without receipt-backed split context.
+
+    Sibling harvest receipts that share a base APK but differ in member digest
+    require ``apk_set_id`` or ``artifact_set_hash``. Duplicate receipts of the
+    same portable digest are the same install set and resolve to the newest
+    capture without rewriting identity.
     """
 
     mode = _normalize_split_mode(include_splits)
     expected_hash = _normalize_sha256(base_apk_sha256)
     requested_apk_id = _normalize_apk_id(apk_id)
+    requested_set_id = _normalize_apk_set_id(apk_set_id)
+    requested_set_hash = _normalize_sha256(artifact_set_hash) if artifact_set_hash else None
     if not requested_apk_id and not expected_hash:
         raise ExactTargetResolutionError("Provide apk_id or base_apk_sha256 for exact target resolution.")
 
@@ -160,10 +173,19 @@ def resolve_exact_static_target(
     if not package:
         raise ExactTargetResolutionError("Repository row has no package_name for exact target validation.")
 
+    set_identity = _resolve_requested_set_identity(
+        apk_set_id=requested_set_id,
+        artifact_set_hash=requested_set_hash,
+        package_name=package,
+        base_apk_sha256=expected_hash,
+    )
     receipt_group = _find_receipt_group(
         apk_id=row_apk_id,
         base_apk_sha256=expected_hash,
         package_name=package,
+        expected_artifact_set_hash=set_identity.get("artifact_set_hash") if set_identity else None,
+        expected_artifact_set_hash_version=set_identity.get("artifact_set_hash_version") if set_identity else None,
+        require_explicit_identity=bool(requested_set_id or requested_set_hash),
     )
     if mode in {"auto", "require"}:
         if receipt_group is None:
@@ -176,6 +198,9 @@ def resolve_exact_static_target(
             expected_base_sha256=expected_hash,
             requested_apk_id=row_apk_id,
             split_mode="receipt-backed-group",
+            apk_set_id=set_identity.get("apk_set_id") if set_identity else None,
+            artifact_set_hash=set_identity.get("artifact_set_hash") if set_identity else None,
+            artifact_set_hash_version=set_identity.get("artifact_set_hash_version") if set_identity else None,
         )
 
     base_artifact = None
@@ -419,6 +444,9 @@ def write_exact_target_receipt(
         "session_stamp": target.session_stamp,
         "capture_id": target.capture_id,
         "group_key": target.group_key,
+        "apk_set_id": target.apk_set_id,
+        "artifact_set_hash": target.artifact_set_hash,
+        "artifact_set_hash_version": target.artifact_set_hash_version,
         "source_worklist_bucket": source_worklist_bucket,
         "hash_verification_status": "verified",
         "split_members": [
@@ -476,6 +504,9 @@ def _target_from_group(
     expected_base_sha256: str,
     requested_apk_id: str | None,
     split_mode: str,
+    apk_set_id: str | None = None,
+    artifact_set_hash: str | None = None,
+    artifact_set_hash_version: str | None = None,
 ) -> ExactStaticTarget:
     base = _matching_base_artifact(group, requested_apk_id, expected_base_sha256)
     if base is None:
@@ -499,6 +530,18 @@ def _target_from_group(
         f"Exact dynamic base hash + harvested split set | "
         f"{group.package_name} | {expected_base_sha256[:12]}..."
     )
+    computed_hash, computed_version = _group_portable_identity(group)
+    requested_hash = _normalize_sha256(artifact_set_hash) if artifact_set_hash else None
+    if requested_hash and computed_hash and requested_hash != computed_hash:
+        raise ExactTargetResolutionError(
+            "Receipt-backed group digest does not match the requested install-set identity."
+        )
+    resolved_hash = requested_hash or computed_hash
+    resolved_version = (
+        str(artifact_set_hash_version or "").strip()
+        or computed_version
+        or V1
+    )
     selection = ScopeSelection(
         "app",
         label,
@@ -518,6 +561,9 @@ def _target_from_group(
         group_key=group.group_key,
         artifacts=verified,
         selection=selection,
+        apk_set_id=apk_set_id,
+        artifact_set_hash=resolved_hash,
+        artifact_set_hash_version=resolved_version,
     )
 
 
@@ -586,6 +632,9 @@ def _find_receipt_group(
     base_apk_sha256: str,
     package_name: str,
     groups: tuple[ArtifactGroup, ...] | None = None,
+    expected_artifact_set_hash: str | None = None,
+    expected_artifact_set_hash_version: str | None = None,
+    require_explicit_identity: bool = False,
 ) -> ArtifactGroup | None:
     matches: list[ArtifactGroup] = []
     for group in groups if groups is not None else group_artifacts():
@@ -594,11 +643,14 @@ def _find_receipt_group(
         if _matching_base_artifact(group, apk_id, base_apk_sha256) is not None:
             if _is_receipt_backed(group):
                 matches.append(group)
-    if len(matches) > 1:
-        raise ExactTargetResolutionError(
-            "base APK maps to multiple receipt-backed install sets; provide an explicit install-set identity."
-        )
-    return matches[0] if matches else None
+    if not matches:
+        return None
+    return _select_receipt_group(
+        matches,
+        expected_artifact_set_hash=expected_artifact_set_hash,
+        expected_artifact_set_hash_version=expected_artifact_set_hash_version,
+        require_explicit_identity=require_explicit_identity,
+    )
 
 
 def _lookup_same_capture_split_rows(base_row: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
@@ -867,8 +919,152 @@ def _normalize_apk_id(value: object) -> str | None:
         raise ExactTargetResolutionError(f"Invalid apk_id value: {text!r}") from exc
 
 
+def _normalize_apk_set_id(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return str(int(text))
+    except ValueError as exc:
+        raise ExactTargetResolutionError(f"Invalid apk_set_id value: {text!r}") from exc
+
+
 def _normalize_package(value: object) -> str:
     return str(value or "").strip().lower()
+
+
+def _group_member_records(group: ArtifactGroup) -> list[dict[str, str]]:
+    members: list[dict[str, str]] = []
+    for artifact in group.artifacts:
+        sha = _normalize_sha256(artifact.sha256) if artifact.sha256 else None
+        if not sha:
+            return []
+        metadata = artifact.metadata if isinstance(artifact.metadata, Mapping) else {}
+        label = metadata.get("split_name") or metadata.get("split") or metadata.get("artifact")
+        if not (isinstance(label, str) and label.strip()):
+            try:
+                label = Path(artifact.path).stem
+            except Exception:
+                label = ""
+        if not str(label or "").strip():
+            return []
+        role = "base" if not artifact.is_split_member else "split"
+        members.append({"role": role, "split_name": str(label).strip().lower(), "sha256": sha})
+    return members
+
+
+def _group_portable_identity(group: ArtifactGroup, *, version: str | None = None) -> tuple[str | None, str]:
+    resolved_version = str(version or V1).strip() or V1
+    members = _group_member_records(group)
+    if not members:
+        return None, resolved_version
+    return compute_artifact_set_hash(members, version=resolved_version), resolved_version
+
+
+def _newest_receipt_group(groups: list[ArtifactGroup]) -> ArtifactGroup:
+    return max(groups, key=lambda group: (str(group.capture_id or ""), str(group.group_key or "")))
+
+
+def _select_receipt_group(
+    matches: list[ArtifactGroup],
+    *,
+    expected_artifact_set_hash: str | None,
+    expected_artifact_set_hash_version: str | None,
+    require_explicit_identity: bool,
+) -> ArtifactGroup:
+    version = str(expected_artifact_set_hash_version or V1).strip() or V1
+    hashed: list[tuple[ArtifactGroup, str | None]] = [
+        (group, _group_portable_identity(group, version=version)[0]) for group in matches
+    ]
+    expected = _normalize_sha256(expected_artifact_set_hash) if expected_artifact_set_hash else None
+    if expected:
+        hashed = [(group, digest) for group, digest in hashed if digest == expected]
+        if not hashed:
+            raise ExactTargetResolutionError(
+                "requested install-set identity did not match any receipt-backed group."
+            )
+    distinct = {digest for _group, digest in hashed if digest}
+    if len(hashed) == 1:
+        return hashed[0][0]
+    if len(distinct) > 1:
+        raise ExactTargetResolutionError(
+            "base APK maps to multiple receipt-backed install sets; provide an explicit install-set identity."
+        )
+    if not distinct and require_explicit_identity:
+        raise ExactTargetResolutionError(
+            "requested install-set identity could not be computed for receipt-backed groups."
+        )
+    if not distinct and len(hashed) > 1:
+        raise ExactTargetResolutionError(
+            "base APK maps to multiple receipt-backed install sets; provide an explicit install-set identity."
+        )
+    return _newest_receipt_group([group for group, _digest in hashed])
+
+
+def _resolve_requested_set_identity(
+    *,
+    apk_set_id: str | None,
+    artifact_set_hash: str | None,
+    package_name: str,
+    base_apk_sha256: str,
+) -> dict[str, str] | None:
+    if not apk_set_id and not artifact_set_hash:
+        return None
+    resolved_hash = artifact_set_hash
+    resolved_version = V1
+    resolved_set_id = apk_set_id
+    if apk_set_id:
+        row = _lookup_apk_set_row(apk_set_id)
+        if row is None:
+            raise ExactTargetResolutionError(f"No apk_sets row matched apk_set_id {apk_set_id}.")
+        row_package = _normalize_package(row.get("package_name"))
+        if row_package and row_package != package_name:
+            raise ExactTargetResolutionError(
+                f"Requested apk_set_id {apk_set_id} package {row_package} does not match {package_name}."
+            )
+        row_base = _normalize_sha256(row.get("base_apk_sha256")) if row.get("base_apk_sha256") else None
+        if row_base and row_base != base_apk_sha256:
+            raise ExactTargetResolutionError(
+                f"Requested apk_set_id {apk_set_id} base hash does not match the selected APK."
+            )
+        row_hash = _normalize_sha256(row.get("artifact_set_hash")) if row.get("artifact_set_hash") else None
+        if not row_hash:
+            raise ExactTargetResolutionError(f"apk_set_id {apk_set_id} has no artifact_set_hash.")
+        if resolved_hash and resolved_hash != row_hash:
+            raise ExactTargetResolutionError(
+                "Requested artifact_set_hash does not match apk_sets.artifact_set_hash."
+            )
+        resolved_hash = row_hash
+        resolved_version = str(row.get("artifact_set_hash_version") or V1).strip() or V1
+        resolved_set_id = str(int(row.get("apk_set_id") or apk_set_id))
+    if not resolved_hash:
+        return None
+    identity = {
+        "artifact_set_hash": resolved_hash,
+        "artifact_set_hash_version": resolved_version,
+    }
+    if resolved_set_id:
+        identity["apk_set_id"] = resolved_set_id
+    return identity
+
+
+def _lookup_apk_set_row(apk_set_id: str) -> Mapping[str, object] | None:
+    if core_q is None:
+        return None
+    row = core_q.run_sql(
+        """
+        SELECT apk_set_id, package_name, member_count, base_apk_sha256,
+               artifact_set_hash, artifact_set_hash_version
+        FROM apk_sets
+        WHERE apk_set_id = %s
+        """,
+        (int(apk_set_id),),
+        fetch="one_dict",
+        query_name="static.exact_target.lookup_apk_set",
+    )
+    return row if isinstance(row, Mapping) else None
 
 
 __all__ = [
