@@ -27,7 +27,13 @@ def _workflow_run_status(
     db_persistence_status: str,
     scan_execution_complete: bool,
 ) -> str:
-    """Workflow completion status, distinct from detector/gate posture."""
+    """Workflow completion status, distinct from detector/gate posture.
+
+    This is *not* ``Run completion`` on stdout. That token comes from
+    per-app ``final_status`` (``_workflow_completion_token``). This function
+    folds abort, ``outcome.failures``, static-persist failure, and failed
+    app counts. Detector findings and warnings do not fail the workflow.
+    """
 
     if outcome.aborted:
         if completed_ct > 0:
@@ -646,8 +652,9 @@ def build_run_health_document(
             "MySQL session_usability aggregates DB row presence (findings, permissions, strings"
             "; v_web_static_session_health also audits and run links per app-run). "
             "This document's ``workflow_completion_status`` / ``final_run_status`` describe workflow "
-            "completion, while ``detector_posture`` / app ``final_status`` preserve "
-            "scan/reconciliation posture without querying those auxiliary tables."
+            "completion (abort, static-persist failures, app execution failures), not detector "
+            "findings. ``detector_posture`` / app ``final_status`` preserve scan/reconciliation "
+            "posture without querying those auxiliary tables."
         ),
         "cli_can_approximate_mysql_columns": [
             "findings_ready",

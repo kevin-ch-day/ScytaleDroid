@@ -91,6 +91,7 @@ def test_update_static_run_status_reports_write_failure(monkeypatch) -> None:
 
 def test_update_static_run_status_rejects_missing_row(monkeypatch) -> None:
     monkeypatch.setattr(rw, "run_sql_rowcount", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(rw.core_q, "run_sql", lambda *_a, **_k: None)
 
     assert rw.update_static_run_status(static_run_id=404, status="COMPLETED") is False
 

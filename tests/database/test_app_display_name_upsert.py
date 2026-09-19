@@ -11,6 +11,9 @@ def test_usable_display_name_rejects_package_equal_and_empty() -> None:
     assert app_labels.usable_display_name("com.example.app", "com.example.app") is None
     assert app_labels.usable_display_name("com.example.app", "COM.EXAMPLE.APP") is None
     assert app_labels.usable_display_name("com.example.app", "  ") is None
+    assert app_labels.usable_display_name("com.android.egg", None) is None
+    assert app_labels.usable_display_name("com.android.egg", "") is None
+    assert app_labels.usable_display_name("com.android.egg", "com.android.egg") is None
 
 
 def test_upsert_app_definition_replaces_package_equal_display_name() -> None:

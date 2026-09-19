@@ -471,7 +471,7 @@ def _print_post_run_diagnostics_header(outcome: RunOutcome, params: RunParameter
     print(f"Session        : {stamp or 'n/a'}")
     print(f"Package        : {pkg_line}")
     print(f"Static run ID  : {rid}")
-    print(f"DB persistence : {db_line}")
+    print(f"Static persist : {db_line}")
     print(f"Governance     : {gov}")
     print(f"Run completion : {workflow}")
     print(f"Detector posture: {posture_h}")

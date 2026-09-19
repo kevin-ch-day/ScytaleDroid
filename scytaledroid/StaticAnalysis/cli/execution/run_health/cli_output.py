@@ -27,7 +27,7 @@ def _workflow_completion_stdout_label(exec_workflow: str) -> str:
     table = {
         "complete": "COMPLETE",
         "aborted": "ABORTED",
-        "persistence_failed": "FAILED (DB persistence)",
+        "persistence_failed": "FAILED (static persist)",
         "apps_failed": "FAILED (one or more apps)",
         "skipped_no_persistence": "SKIPPED (persistence not attempted)",
         "unknown": "UNKNOWN",
@@ -239,7 +239,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
                 + (" (none - not analyzer crashes)" if det_exec == 0 else "")
             ),
             (
-                "DB persistence   : "
+                "Static persist   : "
                 f"{sr.get('db_persistence_status')} | string_rollup={sr.get('string_status')}"
             ),
             (
@@ -248,8 +248,14 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
                 f"capped_not_persisted={findings_capped}"
             ),
             (f"Governance       : {sr.get('governance_grade')} - {gov_r}"),
-            f"Run completion   : {_workflow_completion_stdout_label(exec_workflow)}",
-            f"Workflow status  : {workflow_run_status.upper() if workflow_run_status else '—'}",
+            (
+                f"Run completion   : {_workflow_completion_stdout_label(exec_workflow)}"
+                " (per-app scan status)"
+            ),
+            (
+                f"Workflow status  : {workflow_run_status.upper() if workflow_run_status else '—'}"
+                " (execution + static persist)"
+            ),
             (
                 "Detector posture : "
                 f"{_detector_posture_readable(detector_posture_status or str(pipe or ''))}"
@@ -314,7 +320,7 @@ def format_run_health_stdout_lines(doc: Mapping[str, object]) -> list[str]:
         and str(sr.get("db_persistence_status") or "") in {"ok", "partial"}
     ):
         lines.append(
-            "Operator note    : Workflow completion and DB persistence finished successfully. "
+            "Operator note    : Workflow completion and static persistence finished successfully. "
             "Legacy compatibility counters may still record detector-warning/gate apps under 'partial'; "
             "prefer workflow_completion_status, detector_posture, and apps_with_caveats. "
             "execution_errors=0 means no analyzer/pipeline crashes."

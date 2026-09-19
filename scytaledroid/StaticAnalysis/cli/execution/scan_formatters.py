@@ -388,7 +388,12 @@ def _append_final_pipeline_digest(
 
 
 def _workflow_completion_token(outcome: RunOutcome) -> str:
-    """High-level scan/workflow completion (distinct from detector posture)."""
+    """Per-app scan completion token shown as ``Run completion`` on stdout.
+
+    Distinct from ``workflow_completion_status`` / ``Workflow status``, which
+    also include abort and static-persist failures. Findings do not fail this
+    token. It is COMPLETE unless every app is failed or skipped.
+    """
 
     if outcome.aborted:
         return "ABORTED"

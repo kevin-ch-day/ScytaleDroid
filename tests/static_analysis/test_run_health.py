@@ -656,3 +656,155 @@ def test_build_run_health_document_marks_split_string_summary_merged() -> None:
     app_note = doc["apps"][0]["string_summary"]
     assert app_note["string_summary_scope"] == "artifact_merged"
     assert "string_summary_warning" not in app_note
+
+
+def test_findings_and_warnings_do_not_fail_workflow_when_persist_ok(monkeypatch) -> None:
+    app = AppRunResult(
+        "p1",
+        "C",
+        discovered_artifacts=1,
+        persisted_artifacts=1,
+        final_status="complete",
+        persistence_runtime_findings=213,
+        persistence_persisted_findings=213,
+        persistence_findings_capped_total=0,
+    )
+    app.artifacts = [SimpleNamespace(report=None)]
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.scan_report._summarize_app_pipeline",
+        lambda _app: {
+            "error_count": 0,
+            "warn_count": 1113,
+            "policy_fail_count": 0,
+            "finding_fail_count": 213,
+            "fail_count": 213,
+            "parse_fallback_events_est": 96,
+            "detector_executed": 59,
+            "detector_skipped": 0,
+            "detector_total": 59,
+            "skipped_detectors": [],
+            "placeholder_stage_opportunities": 0,
+            "implemented_stage_opportunities": 59,
+            "executed_implemented_stage_opportunities": 59,
+            "implemented_stage_execution_rate": 1.0,
+            "placeholder_detectors": [],
+        },
+    )
+    outcome = RunOutcome(
+        [app],
+        datetime.now(UTC),
+        datetime.now(UTC),
+        ScopeSelection(scope="all", label="All", groups=()),
+        Path("/tmp"),
+        [],
+        [],
+        total_artifacts=1,
+        completed_artifacts=1,
+    )
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+
+    doc = build_run_health_document(
+        outcome,
+        RunParameters(profile="full", scope="all", scope_label="All", session_stamp="sess-ok"),
+        persistence_enabled=True,
+        persist_attempted=True,
+    )
+    assert doc["workflow_completion_status"] == "complete"
+    assert doc["workflow_run_status"] == "complete"
+    assert doc["status_reasons"]["db_persistence_status"] == "ok"
+    assert doc["detector_posture"] == "policy_or_finding_gates"
+    assert doc["status_reasons"]["finding_signals"] == 213
+    assert doc["status_reasons"]["detector_warnings"] == 1113
+    assert doc["status_reasons"]["detector_errors"] == 0
+    body = "\n".join(format_run_health_stdout_lines(doc))
+    assert "Static persist   : ok" in body
+    assert "Workflow status  : COMPLETE (execution + static persist)" in body
+    assert "Run completion   : COMPLETE (per-app scan status)" in body
+    assert "finding_signals=213" in body
+    assert "detector_warnings=1113" in body
+
+
+def test_workflow_fails_when_outcome_failures_are_real_persist_errors() -> None:
+    app = AppRunResult(
+        "p1", "C", discovered_artifacts=1, persisted_artifacts=1, final_status="complete"
+    )
+    outcome = RunOutcome(
+        [app],
+        datetime.now(UTC),
+        datetime.now(UTC),
+        ScopeSelection(scope="all", label="All", groups=()),
+        Path("/tmp"),
+        [],
+        ["Canonical static persistence failed for p1; later packages will still be attempted."],
+        total_artifacts=1,
+        completed_artifacts=1,
+        persistence_failed=True,
+    )
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+
+    doc = build_run_health_document(
+        outcome,
+        RunParameters(profile="full", scope="all", scope_label="All", session_stamp="sess-fail"),
+        persistence_enabled=True,
+        persist_attempted=True,
+    )
+    assert doc["workflow_completion_status"] == "failed"
+    assert doc["status_reasons"]["db_persistence_status"] == "failed"
+    body = "\n".join(format_run_health_stdout_lines(doc))
+    assert "Static persist   : failed" in body
+    assert "Workflow status  : FAILED" in body
+    assert "DB persistence   :" not in body
+
+
+def test_format_run_health_stdout_uses_static_persist_label() -> None:
+    doc = {
+        "workflow_completion_status": "complete",
+        "workflow_run_status": "complete",
+        "detector_posture": "clean",
+        "run_rollups": {"scan_execution_complete": True, "apps_failed_final": 0},
+        "status_reasons": {
+            "db_persistence_status": "ok",
+            "string_status": "ok",
+            "detector_warnings": 0,
+            "policy_gate_failures": 0,
+            "finding_signals": 0,
+            "detector_errors": 0,
+            "detector_pipeline_status": "ok",
+        },
+    }
+    body = "\n".join(format_run_health_stdout_lines(doc))
+    assert "Static persist   : ok" in body
+    assert "Canonical package persist failed" not in body
+
+
+def test_failed_app_execution_with_ok_persist_is_partial_not_findings_failure() -> None:
+    failed = AppRunResult(
+        "p-fail", "C", discovered_artifacts=1, persisted_artifacts=0, final_status="failed"
+    )
+    ok = AppRunResult(
+        "p-ok", "C", discovered_artifacts=1, persisted_artifacts=1, final_status="complete"
+    )
+    outcome = RunOutcome(
+        [failed, ok],
+        datetime.now(UTC),
+        datetime.now(UTC),
+        ScopeSelection(scope="all", label="All", groups=()),
+        Path("/tmp"),
+        [],
+        [],
+        total_artifacts=2,
+        completed_artifacts=1,
+    )
+    from scytaledroid.StaticAnalysis.cli.core.models import RunParameters
+
+    doc = build_run_health_document(
+        outcome,
+        RunParameters(profile="full", scope="all", scope_label="All", session_stamp="sess-mix"),
+        persistence_enabled=True,
+        persist_attempted=True,
+    )
+    assert doc["workflow_completion_status"] == "partial"
+    assert doc["run_rollups"]["apps_failed_final"] == 1
+    assert doc["run_rollups"]["apps_complete_final"] == 1
+    assert doc["status_reasons"]["db_persistence_status"] in {"ok", "partial"}
+

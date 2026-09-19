@@ -23,7 +23,7 @@ from .cohort_scan_notes import emit_post_scan_cohort_notes
 from .heartbeat_state import set_app as _hb_set_app
 from .heartbeat_state import set_stage as _hb_set_stage
 from .operator_display_label import resolve_operator_app_label
-from .results_persist import persist_analyzed_package
+from .results_persist import persist_analyzed_package, persist_outcome_is_durable
 from .run_health import compute_app_final_status, compute_run_aggregate_status
 from .scan_formatters import (
     _HEARTBEAT_CONTINUATION_INDENT,
@@ -723,9 +723,12 @@ def execute_scan(
                 app_result=app_result,
                 params=params,
             )
-            if persist_outcome is not None and not persist_outcome.success:
+            if persist_outcome is not None and not persist_outcome_is_durable(
+                persist_outcome,
+                getattr(app_result, "static_run_id", None),
+            ):
                 message = (
-                    "Canonical package persist failed for "
+                    "Canonical static persistence failed for "
                     f"{group.package_name}; later packages will still be attempted."
                 )
                 failures.append(message)

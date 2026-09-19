@@ -70,7 +70,7 @@ def _format_persistence_progress_text(
     if include_phase_banner:
         lines.extend(
             [
-                "DB persistence phase (scan finished; writing DB/evidence rows per package)",
+                "DB persistence phase (scan finished; writing static DB/evidence rows per package)",
                 "-" * 60,
             ]
         )

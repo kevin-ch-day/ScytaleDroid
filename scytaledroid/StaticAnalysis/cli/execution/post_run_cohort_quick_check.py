@@ -148,7 +148,7 @@ def maybe_emit_post_run_grain_summary(
         print(
             status_messages.status(
                 "Post-run cohort quick check: package rollup is partial (detector warnings/gates); "
-                "workflow and DB persistence still finished — counts above are the persisted cohort.",
+                "workflow and static persistence still finished — counts above are the persisted cohort.",
                 level="info",
             )
         )

@@ -310,3 +310,86 @@ def test_persist_analyzed_package_marks_committed_when_outcome_has_envelope_erro
     )
     persist_analyzed_package(app_result=app, params=params)
     assert app.canonical_persist_committed is True
+
+
+def _stub_scan_flow_for_persist_outcome(monkeypatch, tmp_path: Path, persist_fn):
+    def _generate_report(_artifact, _base_dir, _params, **_kwargs):
+        return (
+            SimpleNamespace(
+                metadata=dict(_kwargs.get("extra_metadata") or {}),
+                detector_results=[],
+                file_path=str(_artifact.path),
+            ),
+            None,
+            None,
+            False,
+        )
+
+    monkeypatch.setattr(scan_flow, "load_display_name_map", lambda _groups: {})
+    monkeypatch.setattr(scan_flow, "inspect_open_static_runs", lambda: SimpleNamespace(count=0))
+    monkeypatch.setattr(scan_flow, "create_static_run_ledger", lambda **_kwargs: 7)
+    monkeypatch.setattr(scan_flow, "render_app_start", lambda **_kwargs: None)
+    monkeypatch.setattr(scan_flow, "render_app_completion", lambda **_kwargs: None)
+    monkeypatch.setattr(scan_flow, "render_resource_warnings", lambda *_a, **_k: None)
+    monkeypatch.setattr(scan_flow, "is_compact_card_mode", lambda *_a, **_k: False)
+    monkeypatch.setattr(scan_flow, "ensure_static_session_shell", lambda **_kwargs: 1)
+    monkeypatch.setattr(scan_flow, "persist_analyzed_package", persist_fn)
+    monkeypatch.setattr(scan_report_mod, "generate_report", _generate_report)
+    monkeypatch.setattr(scan_flow, "analyse_string_payload", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        "scytaledroid.StaticAnalysis.cli.execution.scan_identity_helpers.lookup_stored_install_set_identity",
+        lambda **_k: None,
+    )
+    groups = (_group(tmp_path, "ai.x.grok"),)
+    params = RunParameters(
+        profile="full",
+        scope="profile",
+        scope_label="Example",
+        session_stamp="sess-status-truth",
+        dry_run=False,
+        persistence_ready=True,
+        paper_grade_requested=False,
+    )
+    return scan_flow.execute_scan(
+        ScopeSelection(scope="profile", label="Example", groups=groups),
+        params,
+        tmp_path,
+    )
+
+
+def test_scan_flow_ignores_idempotent_status_errors_when_persist_is_durable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class _IdempotentOutcome:
+        success = False
+        persistence_failed = False
+        static_run_id = 7356
+        errors = ["db_write_failed:static_run.status_update:static_run_id=7356"]
+
+    def _persist(*, app_result, params, **_kwargs):
+        app_result.canonical_persist_committed = True
+        app_result.static_run_id = 7356
+        return _IdempotentOutcome()
+
+    monkeypatch.setattr(scan_flow, "persist_outcome_is_durable", lambda *_a, **_k: True)
+    outcome = _stub_scan_flow_for_persist_outcome(monkeypatch, tmp_path, _persist)
+    assert outcome.failures == []
+    assert not any("Canonical package persist failed" in str(item) for item in outcome.failures)
+    assert not any("Canonical static persistence failed" in str(item) for item in outcome.failures)
+
+
+def test_scan_flow_records_real_static_persist_failure(monkeypatch, tmp_path: Path) -> None:
+    class _FailedOutcome:
+        success = False
+        persistence_failed = True
+        static_run_id = 9
+        errors = ["Static persistence transaction failed"]
+
+    def _persist(*, app_result, params, **_kwargs):
+        app_result.static_run_id = 9
+        return _FailedOutcome()
+
+    monkeypatch.setattr(scan_flow, "persist_outcome_is_durable", lambda *_a, **_k: False)
+    outcome = _stub_scan_flow_for_persist_outcome(monkeypatch, tmp_path, _persist)
+    assert any("Canonical static persistence failed for ai.x.grok" in str(item) for item in outcome.failures)
+    assert not any("Canonical package persist failed" in str(item) for item in outcome.failures)

@@ -892,6 +892,26 @@ def _abort_reason_for_terminal_status(*, canonical_status: str, abort_reason: st
     return "unspecified_failure"
 
 
+def _lookup_static_run_status(static_run_id: int) -> tuple[bool, str | None]:
+    """Return ``(row_exists, normalized_status)`` for a static run id."""
+
+    row = core_q.run_sql(
+        "SELECT status FROM static_analysis_runs WHERE id=%s LIMIT 1",
+        (int(static_run_id),),
+        fetch="one",
+    )
+    if not row:
+        return False, None
+    if isinstance(row, dict):
+        raw = row.get("status")
+    else:
+        raw = row[0]
+    text = str(raw or "").strip()
+    if not text:
+        return True, None
+    return True, normalize_run_status(text)
+
+
 def update_static_run_status(
     *,
     static_run_id: int,
@@ -900,6 +920,18 @@ def update_static_run_status(
     abort_reason: str | None = None,
     abort_signal: str | None = None,
 ) -> bool:
+    """Idempotent terminal-status assertion for ``static_analysis_runs``.
+
+    The persistence transaction already writes COMPLETED in-commit. This helper
+    is a post-commit assertion, not a second persist. ``affected_rows == 0`` is
+    therefore ambiguous and must be resolved by reading the current row:
+
+    * row exists and already has the desired status → success (idempotent)
+    * row missing → failure
+    * row exists with an unexpected status → failure (except refusing to
+      demote durable COMPLETED parents to FAILED)
+    * SQL exception → failure
+    """
     now = _utc_now_dbstr()
     ended_at = _normalize_datetime_value(ended_at_utc) or now
     canonical_status = normalize_run_status(status)
@@ -939,30 +971,34 @@ def update_static_run_status(
         )
         if affected == 1:
             return True
-        if canonical_status.upper() == "FAILED":
-            try:
-                row = core_q.run_sql(
-                    "SELECT status FROM static_analysis_runs WHERE id=%s LIMIT 1",
-                    (int(static_run_id),),
-                    fetch="one",
-                )
-            except Exception:
-                row = None
-            current = None
-            if isinstance(row, dict):
-                current = row.get("status")
-            elif row:
-                current = row[0]
-            if str(current or "").strip().upper() == "COMPLETED":
-                log.warning(
-                    "Refusing to demote COMPLETED static run "
-                    f"{static_run_id} to FAILED",
-                    category="static_analysis",
-                )
-                return True
+        exists, current = _lookup_static_run_status(static_run_id)
+        if not exists:
+            log.warning(
+                "Failed to verify static run terminal status update "
+                f"for {static_run_id}: affected_rows={affected} reason=ROW_NOT_FOUND",
+                category="static_analysis",
+            )
+            return False
+        current_norm = str(current or "").strip().upper()
+        desired = canonical_status.upper()
+        if current_norm == desired:
+            log.debug(
+                f"Static run {static_run_id} already {desired}; "
+                f"idempotent terminal status assertion (affected_rows={affected})",
+                category="static_analysis",
+            )
+            return True
+        if desired == "FAILED" and current_norm == "COMPLETED":
+            log.warning(
+                "Refusing to demote COMPLETED static run "
+                f"{static_run_id} to FAILED",
+                category="static_analysis",
+            )
+            return True
         log.warning(
             "Failed to verify static run terminal status update "
-            f"for {static_run_id}: affected_rows={affected}",
+            f"for {static_run_id}: affected_rows={affected} reason=STATE_MISMATCH "
+            f"current={current_norm or '<empty>'} desired={desired}",
             category="static_analysis",
         )
         return False

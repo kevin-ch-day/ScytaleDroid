@@ -209,6 +209,9 @@ def finalize_persisted_static_run(
                 f"db_write_failed:static_run.classification_update:{exc.__class__.__name__}:{exc}"
             )
 
+    # Post-commit assertion only: the persistence transaction already wrote
+    # COMPLETED in-commit. Do not treat an unchanged-row UPDATE as a write
+    # failure when the row is already in the desired terminal state.
     status_updated = callbacks.update_static_run_status(
         static_run_id=static_run_id,
         status=callbacks.normalize_run_status(run_status),
